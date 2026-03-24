@@ -21,7 +21,7 @@ export default function Login() {
   const { login } = useAuth();
   const isDark    = useDark();
 
-  /* ── Animated dots for "waking up" message ── */
+  /* ── Animated dots for waking up message ── */
   useEffect(() => {
     if (!serverWaking) return;
     const id = setInterval(() => {
@@ -30,11 +30,17 @@ export default function Login() {
     return () => clearInterval(id);
   }, [serverWaking]);
 
-  /* ── Send token to browser extension ── */
+  /* ── Send token to browser extension via postMessage ──
+     Works on any browser, any deployment, no Extension ID needed
+     GitHub + Render friendly                                    ── */
   const sendTokenToExtension = (token) => {
-    if (window.chrome && chrome.runtime?.sendMessage) {
-      try { chrome.runtime.sendMessage({ type: "SET_TOKEN", token }); }
-      catch { /* extension not installed */ }
+    try {
+      window.postMessage(
+        { type: "SET_TOKEN", token },
+        window.location.origin
+      );
+    } catch (err) {
+      // Silently ignore — extension may not be installed
     }
   };
 
@@ -60,11 +66,11 @@ export default function Login() {
     setLoading(true);
     setServerWaking(false);
 
-    // Show "waking up" UI after 3s if still loading
+    // Show waking up UI after 3s if still loading
     const wakingTimer = setTimeout(() => setServerWaking(true), 3000);
 
     try {
-      // Fire health-check in background — don't block on it
+      // Fire health check in background — dont block on it
       fetch("https://final-taskosphere-backend.onrender.com/health").catch(() => {});
 
       const response = await loginWithRetry();
@@ -74,7 +80,10 @@ export default function Login() {
 
       // Direct login — works on all browsers, no popup
       login(response.data, true);
+
+      // Send token to extension — works via content.js bridge
       sendTokenToExtension(response.data.access_token);
+
       toast.success('Welcome back!');
       navigate('/dashboard');
 
@@ -94,14 +103,17 @@ export default function Login() {
 
   /* ── Forgot password ── */
   const handleForgotPassword = () => {
-    if (!forgotEmail) { toast.error('Please enter your email address'); return; }
+    if (!forgotEmail) {
+      toast.error('Please enter your email address');
+      return;
+    }
     toast.info('Password reset functionality will be available soon.');
     setShowForgotPassword(false);
     setForgotEmail('');
   };
 
   /* ── Theme ── */
-  const pageBg  = isDark
+  const pageBg = isDark
     ? 'linear-gradient(135deg,#0f172a,#1e293b,#0f172a)'
     : 'linear-gradient(135deg,#f0f9ff,#f0fdf4,#ecfeff)';
   const cardBg  = isDark ? 'rgba(30,41,59,0.95)' : 'rgba(255,255,255,0.95)';
@@ -110,34 +122,51 @@ export default function Login() {
 
   /* ── Render ── */
   return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: pageBg }}>
+    <div
+      className="min-h-screen flex items-center justify-center"
+      style={{ background: pageBg }}
+    >
 
       {/* ── Card ── */}
-      <div className="w-full max-w-md p-8 rounded-2xl shadow-xl" style={{ background: cardBg }}>
+      <div
+        className="w-full max-w-md p-8 rounded-2xl shadow-xl"
+        style={{ background: cardBg }}
+      >
 
         {/* Logo */}
         <div className="text-center mb-6">
-          <img src="/logo.png" alt="TaskoSphere" className="h-16 mx-auto mb-2" />
+          <img
+            src="/logo.png"
+            alt="TaskoSphere"
+            className="h-16 mx-auto mb-2"
+          />
         </div>
 
-        {/* ── Forgot-password view ── */}
+        {/* ── Forgot password view ── */}
         {showForgotPassword ? (
           <div className="space-y-4">
-            <h2 className="text-xl font-bold text-center" style={{ color: headClr }}>
+
+            <h2
+              className="text-xl font-bold text-center"
+              style={{ color: headClr }}
+            >
               Reset Password
             </h2>
+
             <Input
               type="email"
               placeholder="Enter your email"
               value={forgotEmail}
               onChange={e => setForgotEmail(e.target.value)}
             />
+
             <button
               onClick={handleForgotPassword}
               className="w-full bg-blue-600 text-white p-2 rounded"
             >
               Send Reset Link
             </button>
+
             <button
               onClick={() => setShowForgotPassword(false)}
               className="text-sm w-full"
@@ -145,13 +174,18 @@ export default function Login() {
             >
               Back to Login
             </button>
+
           </div>
 
         ) : (
 
           /* ── Login view ── */
           <div className="space-y-4">
-            <h2 className="text-xl font-bold text-center" style={{ color: headClr }}>
+
+            <h2
+              className="text-xl font-bold text-center"
+              style={{ color: headClr }}
+            >
               Welcome Back
             </h2>
 
@@ -197,7 +231,8 @@ export default function Login() {
                     <circle
                       className="opacity-25"
                       cx="12" cy="12" r="10"
-                      stroke="currentColor" strokeWidth="4"
+                      stroke="currentColor"
+                      strokeWidth="4"
                     />
                     <path
                       className="opacity-75"
@@ -220,7 +255,6 @@ export default function Login() {
                   color: isDark ? '#fcd34d' : '#92400e',
                 }}
               >
-                {/* Pulsing dot */}
                 <span className="relative flex h-3 w-3 shrink-0">
                   <span
                     className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
@@ -233,7 +267,9 @@ export default function Login() {
                 </span>
                 <span>
                   Server is waking up{wakingDots}&nbsp;
-                  <span className="opacity-70 font-normal">This may take a few seconds.</span>
+                  <span className="opacity-70 font-normal">
+                    This may take a few seconds.
+                  </span>
                 </span>
               </div>
             )}
@@ -249,7 +285,10 @@ export default function Login() {
 
             <div className="text-center text-sm">
               <span style={{ color: subClr }}>Don't have an account? </span>
-              <Link to="/register" className="text-green-600 font-semibold hover:underline">
+              <Link
+                to="/register"
+                className="text-green-600 font-semibold hover:underline"
+              >
                 Sign Up
               </Link>
             </div>
