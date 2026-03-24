@@ -295,36 +295,76 @@ const DashboardLayout = ({ children }) => {
           boxShadow:   isDark ? '10px 0 30px rgba(0,0,0,0.2)' : '10px 0 30px rgba(0,0,0,0.03)',
         }}
       >
-        {/* Logo Section */}
-<div className={`h-20 flex items-center justify-center flex-shrink-0 transition-all duration-300 border-b ${isDark ? 'border-slate-700/50' : 'border-slate-100'}`}>
-  <div className={`flex items-center justify-center transition-all duration-300 ${collapsed ? 'w-12 px-2' : 'w-full px-6'}`}>
-    <img 
-      src="/logo.png" 
-      alt="TaskOsphere Logo" 
-      className="max-w-full h-auto object-contain"
-      style={{ 
-        // Ensures visibility on dark backgrounds
-        filter: isDark ? 'brightness(1.1) drop-shadow(0px 0px 1px rgba(255,255,255,0.2))' : 'none',
-        // Increased height slightly for the full logo look
-        maxHeight: collapsed ? '40px' : '48px'
-      }}
-    />
-  </div>
-</div>
+        {/* Logo Section - Full Logo with Notification Pulse */}
+        <div className={`h-20 flex items-center justify-center flex-shrink-0 transition-all duration-300 border-b ${isDark ? 'border-slate-700/60' : 'border-slate-100'}`}>
+          <motion.div 
+            className={`relative flex items-center justify-center transition-all duration-300 ${collapsed ? 'w-12 px-2' : 'w-full px-6'}`}
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            whileHover={{ scale: 1.03 }}
+            transition={springSnap}
+          >
+            <motion.img 
+              src="/logo.png" 
+              alt="TaskOsphere" 
+              className="max-w-full h-auto object-contain cursor-pointer z-10"
+              onClick={() => navigate('/dashboard')}
+              
+              // Notification Pulse & Emerald Glow Animation
+              animate={hasUnread ? {
+                scale: [1, 1.05, 1],
+                filter: isDark 
+                  ? [
+                      'brightness(1.1) drop-shadow(0px 0px 2px rgba(31, 175, 90, 0.2))',
+                      'brightness(1.2) drop-shadow(0px 0px 8px rgba(31, 175, 90, 0.5))',
+                      'brightness(1.1) drop-shadow(0px 0px 2px rgba(31, 175, 90, 0.2))'
+                    ]
+                  : [
+                      'drop-shadow(0px 0px 0px rgba(31, 175, 90, 0))',
+                      'drop-shadow(0px 0px 6px rgba(31, 175, 90, 0.3))',
+                      'drop-shadow(0px 0px 0px rgba(31, 175, 90, 0))'
+                    ]
+              } : {
+                scale: 1,
+                filter: isDark ? 'brightness(1.1) drop-shadow(0px 0px 2px rgba(255,255,255,0.1))' : 'none'
+              }}
+              transition={hasUnread ? {
+                duration: 2.5,
+                repeat: Infinity,
+                ease: "easeInOut"
+              } : { duration: 0.3 }}
 
-{/* Navigation Items */}
-<div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar py-4">
-  {NAV_GROUPS.map((group) => (
-    <div key={group.id} className="mb-2">
-      {group.dividerLabel && <NavDivider label={group.dividerLabel} />}
-      <div className={`space-y-1 ${collapsed ? 'px-2' : 'px-3'}`}>
-        {group.items.map((item) => (
-          <NavItem key={item.path} item={item} />
-        ))}
-      </div>
-    </div>
-  ))}
-</div>
+              style={{ 
+                maxHeight: collapsed ? '40px' : '52px' 
+              }}
+            />
+
+            {/* Notification Badge Dot */}
+            {hasUnread && (
+              <motion.span 
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#1FAF5A] rounded-full border-2 border-white dark:border-slate-800 shadow-sm z-20"
+              />
+            )}
+          </motion.div>
+        </div>
+
+        {/* Navigation Items - Logic for Core, Records, Admin, etc. */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar py-4">
+          {NAV_GROUPS.map((group) => (
+            <div key={group.id} className="mb-2">
+              {/* Renders the group header (e.g., "RECORDS") if it exists */}
+              {group.dividerLabel && <NavDivider label={group.dividerLabel} />}
+              
+              <div className={`space-y-1 ${collapsed ? 'px-2' : 'px-3'}`}>
+                {group.items.map((item) => (
+                  <NavItem key={item.path} item={item} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
         {/* Sidebar Footer (Collapse Toggle Only) */}
         <div className={`p-4 ${isDark ? 'border-t border-slate-700/60' : 'border-t border-slate-100'} hidden lg:block`}>
           <Button
