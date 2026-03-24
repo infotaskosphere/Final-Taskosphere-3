@@ -1,29 +1,3 @@
-"""
-backend/passwords.py
-────────────────────────────────────────────────────────────────────────────────
-Password Repository — Portal Credential Manager
-Stores encrypted credentials for MCA, DGFT, Trademark, GST, Income Tax, TDS,
-EPFO, ESIC, TRACES, MSME, RERA, and custom portals.
-
-Encryption:  Fernet symmetric (AES-128-CBC) via `cryptography` package.
-Key source:  .env  →  PASSWORD_REPO_KEY=<base64url-44-char Fernet key>
-             If not set a deterministic key is derived from MONGO_URI so
-             passwords survive restarts, but you should set your own key.
-
-Audit trail: Every "reveal" action (GET /{id}/reveal) is logged to db.password_access_logs.
-
-ACCESS RULES
-┌────────────┬────────────┬────────────────────────────────────────────────┐
-│ Role       │ Condition  │ Access                                         │
-├────────────┼────────────┼────────────────────────────────────────────────┤
-│ admin      │ always     │ full CRUD + reveal on every entry              │
-│ manager    │ department │ view (masked) own dept; reveal if permitted    │
-│ staff      │ permission │ view only if can_view_passwords=True           │
-│            │ + dept     │ reveal only for departments in                  │
-│            │            │ view_password_departments list                 │
-└────────────┴────────────┴────────────────────────────────────────────────┘
-"""
-
 from __future__ import annotations
 
 import os
@@ -34,8 +8,10 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional, List, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, ConfigDict
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Response
+from pydantic import BaseModel, Field, ConfigDict, ValidationError
+import pandas as pd
+import io
 
 from backend.dependencies import db, get_current_user, require_admin
 from backend.models import User
@@ -187,6 +163,13 @@ class PasswordRevealResponse(BaseModel):
     portal_name: str
 
 
+class BulkImportResult(BaseModel):
+    total_processed: int
+    successful_imports: int
+    failed_imports: int
+    errors: List[dict]
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _get_user_perms(user: User) -> dict:
@@ -307,7 +290,7 @@ async def create_password(
     current_user: User = Depends(get_current_user),
 ):
     if not _can_edit(current_user):
-        raise HTTPException(403, "You do not have permission to add passwords")
+        raise HTTPException(403, "You do not have permission to create passwords")
 
     now = datetime.now(timezone.utc).isoformat()
     entry_id = str(uuid.uuid4())
@@ -327,7 +310,7 @@ async def create_password(
         "created_by":         current_user.id,
         "created_at":         now,
         "updated_at":         now,
-        "last_accessed_at":   None,
+        "last_accessed_at":   now,
     }
     await db.passwords.insert_one(doc)
     doc.pop("_id", None)
@@ -486,6 +469,148 @@ async def delete_password_entry(
         "timestamp":   now,
     })
     return {"message": f"Entry '{existing.get('portal_name')}' deleted successfully"}
+
+
+# ── BULK IMPORT / TEMPLATE ────────────────────────────────────────────────────
+
+@router.get("/template", response_class=Response)
+async def download_template(current_user: User = Depends(get_current_user)):
+    if not _can_edit(current_user):
+        raise HTTPException(403, "You do not have permission to download templates")
+
+    # Define the columns for the template
+    template_columns = [
+        "portal_name", "portal_type", "url", "username", "password_plain",
+        "department", "client_name", "client_id", "notes", "tags"
+    ]
+    df = pd.DataFrame(columns=template_columns)
+
+    # Add some example data
+    example_data = {
+        "portal_name":    "Example GST Portal",
+        "portal_type":    "GST",
+        "url":            "https://www.gst.gov.in",
+        "username":       "example@gst.com",
+        "password_plain": "SecurePassword123",
+        "department":     "GST",
+        "client_name":    "Example Client Pvt Ltd",
+        "client_id":      "CL001",
+        "notes":          "GST login for quarterly filings",
+        "tags":           "GST,Client,Important"
+    }
+    df.loc[0] = example_data
+
+    output = io.BytesIO()
+    df.to_excel(output, index=False, engine='openpyxl')
+    output.seek(0)
+
+    headers = {
+        "Content-Disposition": "attachment; filename=password_template.xlsx",
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    }
+    return Response(content=output.getvalue(), headers=headers)
+
+
+@router.post("/bulk-import", response_model=BulkImportResult, status_code=200)
+async def bulk_import_passwords(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    if not _can_edit(current_user):
+        raise HTTPException(403, "You do not have permission to bulk import passwords")
+
+    contents = await file.read()
+    file_like_object = io.BytesIO(contents)
+
+    df = None
+    if file.filename.endswith(('.xlsx', '.xls')):
+        df = pd.read_excel(file_like_object, engine='openpyxl')
+    elif file.filename.endswith('.csv'):
+        df = pd.read_csv(file_like_object)
+    else:
+        raise HTTPException(400, "Unsupported file type. Please upload an Excel (.xlsx, .xls) or CSV (.csv) file.")
+
+    required_columns = [
+        "portal_name", "portal_type", "url", "username", "password_plain",
+        "department", "client_name", "client_id", "notes", "tags"
+    ]
+    # Check if all required columns are present (case-insensitive)
+    df.columns = df.columns.str.lower()
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        raise HTTPException(400, f"Missing required columns in the file: {', '.join(missing_columns)}")
+
+    total_processed = 0
+    successful_imports = 0
+    failed_imports = 0
+    errors = []
+
+    for index, row in df.iterrows():
+        total_processed += 1
+        try:
+            # Prepare data for Pydantic model
+            entry_data = {
+                "portal_name":    str(row.get("portal_name", "")).strip(),
+                "portal_type":    str(row.get("portal_type", "OTHER")).upper(),
+                "url":            str(row.get("url", "")).strip() or None,
+                "username":       str(row.get("username", "")).strip() or None,
+                "password_plain": str(row.get("password_plain", "")).strip() or None,
+                "department":     str(row.get("department", "OTHER")).upper(),
+                "client_name":    str(row.get("client_name", "")).strip() or None,
+                "client_id":      str(row.get("client_id", "")).strip() or None,
+                "notes":          str(row.get("notes", "")).strip() or None,
+                "tags":           [t.strip() for t in str(row.get("tags", "")).split(',') if t.strip()] if isinstance(row.get("tags"), str) else [],
+            }
+
+            # Validate with Pydantic model
+            new_entry = PasswordEntryCreate(**entry_data)
+
+            now = datetime.now(timezone.utc).isoformat()
+            entry_id = str(uuid.uuid4())
+            doc = {
+                "id":                 entry_id,
+                "portal_name":        new_entry.portal_name,
+                "portal_type":        new_entry.portal_type,
+                "url":                new_entry.url,
+                "username":           new_entry.username,
+                "password_encrypted": _encrypt(new_entry.password_plain or ""),
+                "_password_set":      bool(new_entry.password_plain),
+                "department":         new_entry.department,
+                "client_name":        new_entry.client_name,
+                "client_id":          new_entry.client_id,
+                "notes":              new_entry.notes,
+                "tags":               new_entry.tags,
+                "created_by":         current_user.id,
+                "created_at":         now,
+                "updated_at":         now,
+                "last_accessed_at":   now,
+            }
+            await db.passwords.insert_one(doc)
+
+            # Audit log
+            await db.password_access_logs.insert_one({
+                "id":          str(uuid.uuid4()),
+                "action":      "BULK_CREATE",
+                "entry_id":    entry_id,
+                "portal_name": new_entry.portal_name,
+                "user_id":     current_user.id,
+                "user_name":   current_user.full_name,
+                "timestamp":   now,
+            })
+            successful_imports += 1
+        except ValidationError as e:
+            failed_imports += 1
+            errors.append({"row": index + 2, "error": e.errors(), "data": row.to_dict()})
+        except Exception as e:
+            failed_imports += 1
+            errors.append({"row": index + 2, "error": str(e), "data": row.to_dict()})
+
+    return {
+        "total_processed": total_processed,
+        "successful_imports": successful_imports,
+        "failed_imports": failed_imports,
+        "errors": errors
+    }
 
 
 # ── ACCESS LOG (admin only) ───────────────────────────────────────────────────
