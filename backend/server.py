@@ -13,23 +13,26 @@ import requests
 import httpx
 import pandas as pd
 from datetime import datetime, date, timezone, timedelta
-from passwords import router as passwords_router
-from quotations import router as quotation_router
-from website_tracking import router as website_tracking_router
+
+from backend.passwords import router as passwords_router
+from backend.quotations import router as quotation_router
+from backend.website_tracking import router as website_tracking_router
+from backend.visits import router as visits_router
+
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from io import StringIO, BytesIO
 from typing import List, Optional, Dict, Any
 from dateutil import parser
 from contextlib import asynccontextmanager
-from visits import router as visits_router
 
 
-# Single logger definition
+# ================= LOGGER =================
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# FastAPI
+
+# ================= FASTAPI =================
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
 from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,14 +40,17 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.gzip import GZipMiddleware
 from passlib.context import CryptContext
 
-# Validation
+
+# ================= VALIDATION =================
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator, ValidationError
 from bson import ObjectId
 from dotenv import load_dotenv
 
-# Backend Modules
-import models
-from models import (
+
+# ================= BACKEND MODULES =================
+import backend.models as models
+
+from backend.models import (
     Token, User, UserCreate, UserLogin, UserPermissions,
     Todo, TodoCreate, Task, TaskCreate, BulkTaskCreate,
     Client, ClientCreate, MasterClientForm,
@@ -58,7 +64,7 @@ from models import (
     Reminder, ReminderCreate
 )
 
-from dependencies import (
+from backend.dependencies import (
     db,
     client,
     get_current_user,
@@ -71,17 +77,17 @@ from dependencies import (
     get_team_user_ids
 )
 
-from leads import router as leads_router
-from telegram import router as telegram_router
-from notifications import router as notification_router, create_notification
-from email_integration import router as email_router  # email integration
+from backend.leads import router as leads_router
+from backend.telegram import router as telegram_router
+from backend.notifications import router as notification_router, create_notification
+from backend.email_integration import router as email_router
 
-# External Services
+
+# ================= EXTERNAL SERVICES =================
 from fpdf import FPDF
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from apscheduler.schedulers.background import BackgroundScheduler
-
 # ====================== CONFIG ======================
 # Single IST definition
 IST = pytz.timezone('Asia/Kolkata')
