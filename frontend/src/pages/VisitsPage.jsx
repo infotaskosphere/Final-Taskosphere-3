@@ -357,10 +357,14 @@ function VisitCard({ v, onClick, onEdit, currentUser, selected, onSelectToggle, 
   const menuRef = useRef(null);
 
   // CRASH FIX: safe date parsing — never throws
-  const parsedDate = safeParseISO(v.visit_date);
-  const isOver     = parsedDate
+  const parsedDate    = safeParseISO(v.visit_date);
+  const isOver        = parsedDate
     ? isBefore(parsedDate, new Date()) && v.status === "scheduled"
     : false;
+
+  // True when this user created the visit for someone else
+  const isCreatedByMe = currentUser && v.created_by && String(v.created_by) === String(currentUser.id)
+    && v.assigned_to && String(v.assigned_to) !== String(currentUser.id);
 
   const showQuick = (v.status === "scheduled" || v.status === "rescheduled") && !selectionMode;
 
@@ -500,6 +504,14 @@ function VisitCard({ v, onClick, onEdit, currentUser, selected, onSelectToggle, 
                     : v.recurrence === "last_weekday"
                     ? `Last ${WEEKDAYS[v.recurrence_weekday] || ""}`
                     : v.recurrence}
+                </span>
+              )}
+              {isCreatedByMe && (
+                <span className="text-[9px] font-semibold text-sky-600 dark:text-sky-400
+                  bg-sky-50 dark:bg-sky-950/50 border border-sky-200 dark:border-sky-800
+                  px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
+                  <User className="h-2 w-2" />
+                  For: {v.assigned_to_name || "—"}
                 </span>
               )}
             </div>
@@ -1472,7 +1484,9 @@ export default function VisitsPage() {
   });
 
   const { data: clients = [] } = useQuery({ queryKey: ["clients"], queryFn: fetchClients });
-  const { data: users = []   } = useQuery({ queryKey: ["users"], queryFn: fetchUsers, enabled: isAdmin || isMgr });
+  // Fetch users for admins/managers AND staff who have cross-visibility (need names for filter)
+  const hasCrossVisibility = !!(user?.permissions?.view_other_visits?.length || user?.permissions?.can_view_all_visits);
+  const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: fetchUsers, enabled: isAdmin || isMgr || hasCrossVisibility });
   const { data: summary      } = useQuery({
     queryKey: ["visits-summary", filterUser !== "all" ? filterUser : user?.id, monthStr],
     queryFn:  () => fetchSummary(filterUser !== "all" ? filterUser : user?.id, monthStr),
@@ -1684,6 +1698,23 @@ export default function VisitsPage() {
             {users.filter(u => u.is_active).map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
           </select>
         )}
+
+        {/* Staff with cross-visibility: show permitted users filter */}
+        {!isAdmin && !isMgr && (() => {
+          const perms = user?.permissions || {};
+          const allowed = perms.view_other_visits || [];
+          if (!perms.can_view_all_visits && allowed.length === 0) return null;
+          const permittedUsers = users.filter(u => u.is_active && allowed.includes(u.id));
+          if (permittedUsers.length === 0) return null;
+          return (
+            <select value={filterUser} onChange={e => setFilterUser(e.target.value)}
+              className="px-3 py-2 rounded-xl border dark:border-slate-700 bg-white dark:bg-slate-800
+                text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-400 shadow-sm">
+              <option value="all">My Visits</option>
+              {permittedUsers.map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+            </select>
+          );
+        })()}
 
         <button onClick={() => setCurrentMonth(new Date())}
           className="px-3 py-2 rounded-xl border dark:border-slate-700 bg-white dark:bg-slate-800
