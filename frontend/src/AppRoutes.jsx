@@ -1,12 +1,11 @@
 import React, { Suspense, lazy } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import { useAuth } from "@/contexts/AuthContext";
-import DashboardLayout from "@/components/layout/DashboardLayout";
-import PasswordRepository from '@/pages/PasswordRepository';
+import { useAuth } from "@/contexts/AuthContext.jsx";
+import DashboardLayout from "@/components/layout/DashboardLayout.jsx";
+import PasswordRepository from "@/pages/PasswordRepository.jsx";
 
 /* ── Lazy Loaded Pages ────────────────────────────────────────────────────── */
-/** * NOTE: Vite handles the @/ alias automatically via your jsconfig.json.
- * If any of these fail to load, ensure the file physically exists as .jsx
+/** * NOTE: Explicit .jsx extensions are required for Vite/Rollup bundling.
  */
 const Login             = lazy(() => import("@/pages/Login.jsx"));
 const TaskAudit         = lazy(() => import("@/pages/TaskAudit.jsx"));
@@ -32,7 +31,6 @@ const GeneralSettings   = lazy(() => import("@/pages/GeneralSettings.jsx"));
 
 /**
  * Protected Route: Requires user to be logged in.
- * Wraps content in DashboardLayout.
  */
 const Protected = ({ children }) => {
   const { user, loading } = useAuth();
@@ -59,7 +57,6 @@ const Permission = ({ permission, children }) => {
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
   
-  // If user lacks the specific permission, kick them back to safety (Dashboard)
   if (permission && !hasPermission(permission)) {
     return <Navigate to="/dashboard" replace />;
   }
@@ -284,7 +281,7 @@ function AppRoutes() {
           element={<Navigate to="/settings/general" replace />}
         />
 
-        {/* Global Fallback: Redirect unknown routes to login */}
+        {/* Global Fallback */}
         <Route path="*" element={<Navigate to="/login" replace />} />
 
       </Routes>
