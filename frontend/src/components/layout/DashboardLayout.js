@@ -296,36 +296,43 @@ const DashboardLayout = ({ children }) => {
         }}
       >
         {/* Logo Section */}
-        <div className={`h-16 flex items-center ${collapsed ? 'justify-center' : 'px-6'} flex-shrink-0`}>
-          <div className="flex items-center gap-3">
-            <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center text-white shadow-lg"
-              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
-            >
-              <Target className="h-5 w-5" />
-            </div>
-            {!collapsed && (
-              <span className={`text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                Tasko<span style={{ color: COLORS.mediumBlue }}>Sphere</span>
-              </span>
-            )}
-          </div>
-        </div>
+<div className={`h-16 flex items-center ${collapsed ? 'justify-center' : 'px-6'} flex-shrink-0 transition-all duration-300`}>
+  <div className="flex items-center gap-3">
+    {/* Logo Image Container */}
+    <div className={`flex items-center justify-center transition-all ${collapsed ? 'w-10 h-10' : 'w-9 h-9'}`}>
+      <img 
+        src="/logo.png" 
+        alt="TaskOsphere Logo" 
+        className="w-full h-auto object-contain"
+        style={{ 
+          // Applies a slight brightness boost and shadow if the sidebar is dark
+          filter: isDark ? 'brightness(1.2) drop-shadow(0px 0px 1px rgba(255,255,255,0.3))' : 'none' 
+        }}
+      />
+    </div>
 
-        {/* Navigation Items */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar py-4">
-          {NAV_GROUPS.map((group, idx) => (
-            <div key={group.id} className="mb-2">
-              {group.dividerLabel && <NavDivider label={group.dividerLabel} />}
-              <div className={`space-y-1 ${collapsed ? 'px-2' : 'px-3'}`}>
-                {group.items.map((item) => (
-                  <NavItem key={item.path} item={item} />
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+    {/* Brand Text with Capital 'O' */}
+    {!collapsed && (
+      <span className={`text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-800'}`}>
+        Task<span style={{ color: COLORS.mediumBlue }}>Osphere</span>
+      </span>
+    )}
+  </div>
+</div>
 
+{/* Navigation Items */}
+<div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar py-4">
+  {NAV_GROUPS.map((group) => (
+    <div key={group.id} className="mb-2">
+      {group.dividerLabel && <NavDivider label={group.dividerLabel} />}
+      <div className={`space-y-1 ${collapsed ? 'px-2' : 'px-3'}`}>
+        {group.items.map((item) => (
+          <NavItem key={item.path} item={item} />
+        ))}
+      </div>
+    </div>
+  ))}
+</div>
         {/* Sidebar Footer (Collapse Toggle Only) */}
         <div className={`p-4 ${isDark ? 'border-t border-slate-700/60' : 'border-t border-slate-100'} hidden lg:block`}>
           <Button
