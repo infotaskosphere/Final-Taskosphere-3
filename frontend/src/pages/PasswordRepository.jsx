@@ -12,7 +12,7 @@ import {
   Globe, Shield, Lock, Unlock, AlertTriangle, ChevronRight,
   X, Check, RefreshCw, Clock, User as UserIcon, Tag,
   Building2, FileText, Activity, Filter, ExternalLink,
-  MessageCircle, Phone, Send,
+  MessageCircle, Phone, Send, Download, Upload, FileUp,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -107,6 +107,46 @@ function MaskedPassword() {
   return <span className="font-mono tracking-widest text-slate-400 text-sm select-none">••••••••••</span>;
 }
 
+// ── Reveal Password Component ─────────────────────────────────────────────────
+function RevealPassword({ entryId, isDark }) {
+  const [revealed, setRevealed] = useState(false);
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleReveal = useCallback(async () => {
+    if (revealed) { setRevealed(false); return; }
+    setLoading(true);
+    try {
+      const res = await api.get(`/passwords/${entryId}/reveal`);
+      setPassword(res.data.password || '');
+      setRevealed(true);
+    } catch {
+      toast.error('Could not retrieve password');
+    } finally {
+      setLoading(false);
+    }
+  }, [entryId, revealed]);
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className={`font-mono text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+        {revealed ? password : <MaskedPassword />}
+      </span>
+      <button onClick={handleReveal} disabled={loading}
+        className={`flex-shrink-0 p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
+        title={revealed ? 'Hide' : 'Reveal'}>
+        {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin text-slate-400" /> : revealed ? <EyeOff className="h-3.5 w-3.5 text-slate-400" /> : <Eye className="h-3.5 w-3.5 text-slate-400" />}
+      </button>
+      {revealed && (
+        <button onClick={() => navigator.clipboard.writeText(password).then(() => toast.success('Password copied'))}
+          className={`flex-shrink-0 p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Copy password">
+          <Copy className="h-3 w-3 text-slate-400" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── WhatsApp Share Modal ──────────────────────────────────────────────────────
 function WhatsAppShareModal({ open, onClose, entry, isDark }) {
   const [recipientType, setRecipientType] = useState('');
@@ -198,8 +238,6 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className={`max-w-md rounded-3xl p-0 border-none overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
-
-        {/* Header */}
         <div className="px-6 py-5" style={{ background: 'linear-gradient(135deg, #075E54 0%, #25D366 100%)' }}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -208,296 +246,220 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
               </div>
               <div>
                 <DialogTitle className="text-white font-bold text-base">Share via WhatsApp</DialogTitle>
-                <DialogDescription className="text-white/60 text-xs">
-                  {entry?.portal_name}{entry?.client_name ? ` · ${entry.client_name}` : ''}
-                </DialogDescription>
+                <DialogDescription className="text-white/60 text-xs">Send credentials securely to a contact</DialogDescription>
               </div>
             </div>
-            <button onClick={handleClose}
-              className="w-8 h-8 bg-white/20 hover:bg-white/30 rounded-xl flex items-center justify-center transition-all">
+            <button onClick={handleClose} className="w-8 h-8 bg-white/15 hover:bg-white/25 rounded-xl flex items-center justify-center transition-all">
               <X className="h-4 w-4 text-white" />
             </button>
           </div>
         </div>
-
-        <div className="p-6 space-y-5 max-h-[72vh] overflow-y-auto">
-
-          {/* ── Recipient selector ── */}
+        <div className="p-6 space-y-4">
           <div className="space-y-2">
-            <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Send To</Label>
-
-            {recipients.length > 0 && (
-              <div className="space-y-2">
-                {recipients.map(r => (
-                  <motion.button
-                    key={r.type}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => { setRecipientType(r.type); setCustomPhone(''); }}
-                    className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${
-                      recipientType === r.type
-                        ? 'border-green-400 bg-green-50 dark:bg-green-900/20'
-                        : isDark
-                          ? 'border-slate-700 bg-slate-700/50 hover:border-slate-600'
-                          : 'border-slate-200 bg-slate-50 hover:border-slate-300'
-                    }`}
-                  >
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                      recipientType === r.type ? 'bg-green-400' : isDark ? 'bg-slate-600' : 'bg-slate-200'
-                    }`}>
-                      {r.type === 'company'  && <Building2 className={`h-4 w-4 ${recipientType === r.type ? 'text-white' : 'text-slate-500'}`} />}
-                      {r.type === 'director' && <UserIcon   className={`h-4 w-4 ${recipientType === r.type ? 'text-white' : 'text-slate-500'}`} />}
-                      {r.type === 'contact'  && <Phone      className={`h-4 w-4 ${recipientType === r.type ? 'text-white' : 'text-slate-500'}`} />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{r.label}</p>
-                      <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{r.name}</p>
-                      <p className="text-xs text-green-600 font-mono">{r.phone}</p>
-                    </div>
-                    {recipientType === r.type && <Check className="h-4 w-4 text-green-500 flex-shrink-0" />}
-                  </motion.button>
-                ))}
-
-                {/* Divider */}
-                <div className="flex items-center gap-2 py-1">
-                  <div className={`flex-1 h-px ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
-                  <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>or enter manually</span>
-                  <div className={`flex-1 h-px ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
-                </div>
-              </div>
+            <Label className="text-xs font-bold uppercase text-slate-500">Recipient</Label>
+            {recipients.length > 0 ? (
+              <Select value={recipientType} onValueChange={setRecipientType}>
+                <SelectTrigger className={`rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
+                  <SelectValue placeholder="Select recipient" />
+                </SelectTrigger>
+                <SelectContent>
+                  {recipients.map(r => <SelectItem key={r.type} value={r.type}>{r.label} ({r.phone})</SelectItem>)}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input className={`rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+                placeholder="Enter phone number (with country code)" value={customPhone} onChange={e => setCustomPhone(e.target.value)} />
             )}
-
-            {recipients.length === 0 && (
-              <div className={`p-3 rounded-xl text-xs mb-2 ${isDark ? 'bg-slate-700/50 text-slate-400' : 'bg-slate-50 text-slate-500'}`}>
-                {entry?.client_id
-                  ? 'No phone contacts found for this client. Enter a number below.'
-                  : 'No client linked. Enter a WhatsApp number below.'}
-              </div>
-            )}
-
-            {/* Manual phone input */}
-            <div className="relative">
-              <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold select-none ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>+91</span>
-              <Input
-                className={`pl-10 rounded-xl h-10 font-mono ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white'} ${
-                  !recipientType && customPhone ? 'border-green-400 ring-1 ring-green-300' : ''
-                }`}
-                placeholder="10-digit mobile number"
-                value={customPhone}
-                onChange={e => { setCustomPhone(e.target.value); setRecipientType(''); }}
-              />
-            </div>
           </div>
-
-          {/* ── Include password toggle ── */}
-          <div className={`flex items-center justify-between p-3.5 rounded-xl border ${isDark ? 'bg-slate-700/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-            <div className="flex items-center gap-2.5">
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${includePass ? 'bg-amber-100' : isDark ? 'bg-slate-600' : 'bg-slate-200'}`}>
-                <KeyRound className={`h-4 w-4 ${includePass ? 'text-amber-600' : 'text-slate-400'}`} />
-              </div>
-              <div>
-                <p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Include Password</p>
-                <p className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Reveals & embeds actual password in message</p>
-              </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-bold uppercase text-slate-500">Include Password?</Label>
+              <input type="checkbox" checked={includePass} onChange={e => handleIncludeToggle(e.target.checked)}
+                className="w-4 h-4 rounded cursor-pointer" />
             </div>
-            <button
-              onClick={() => handleIncludeToggle(!includePass)}
-              disabled={loadingPw}
-              className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${includePass ? 'bg-amber-400' : isDark ? 'bg-slate-600' : 'bg-slate-300'}`}
-            >
-              <motion.div
-                animate={{ x: includePass ? 20 : 2 }}
-                transition={springSnap}
-                className="absolute top-1 w-4 h-4 rounded-full bg-white shadow"
-              />
-              {loadingPw && <RefreshCw className="absolute inset-0 m-auto h-3 w-3 text-white animate-spin" />}
-            </button>
+            {includePass && loadingPw && <p className="text-xs text-slate-400">Fetching password…</p>}
           </div>
-
-          {includePass && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-              className={`flex items-start gap-2 p-3 rounded-xl text-xs ${isDark ? 'bg-amber-900/20 border border-amber-800/40 text-amber-300' : 'bg-amber-50 border border-amber-200 text-amber-700'}`}
-            >
-              <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
-              Sending passwords over WhatsApp is not fully secure. Only share with trusted recipients on encrypted chats.
-            </motion.div>
-          )}
-
-          {/* ── Custom note ── */}
-          <div className="space-y-1.5">
-            <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Additional Note <span className="normal-case font-normal text-slate-400">(optional)</span>
-            </Label>
-            <Textarea
-              className={`rounded-xl resize-none text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : ''}`}
-              rows={2}
-              placeholder="e.g. Please change the password after first login."
-              value={customMsg}
-              onChange={e => setCustomMsg(e.target.value)}
-            />
-          </div>
-
-          {/* ── Message preview ── */}
-          <div className="space-y-1.5">
-            <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Message Preview</Label>
-            <div
-              className="rounded-2xl p-4 text-xs font-mono leading-relaxed whitespace-pre-wrap border"
-              style={{
-                background:  isDark ? '#0d1f0d' : '#e9fbe9',
-                borderColor: isDark ? '#25D36625' : '#25D36635',
-                color:       isDark ? '#86efac'  : '#14532d',
-              }}
-            >
-              {buildMessage()}
-            </div>
+          <div className="space-y-2">
+            <Label className="text-xs font-bold uppercase text-slate-500">Additional Message (optional)</Label>
+            <Textarea className={`rounded-xl resize-none text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+              rows={3} placeholder="Add any additional notes…" value={customMsg} onChange={e => setCustomMsg(e.target.value)} />
           </div>
         </div>
-
-        {/* Footer */}
-        <div className={`px-6 py-4 flex items-center gap-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+        <DialogFooter className={`px-6 py-4 flex items-center gap-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
           <Button variant="ghost" className="rounded-xl" onClick={handleClose}>Cancel</Button>
-          <Button
-            disabled={!phoneReady}
-            onClick={handleSend}
-            className="rounded-xl font-bold flex-1 text-white gap-2"
-            style={{ background: phoneReady ? 'linear-gradient(135deg, #075E54, #25D366)' : undefined }}
-          >
-            <WAIcon className="h-4 w-4 text-white" />
-            Open WhatsApp Web
+          <Button disabled={!phoneReady} onClick={handleSend}
+            className="rounded-xl font-bold text-white gap-2" style={{ background: COLORS.whatsapp }}>
+            <Send className="h-4 w-4" /> Send
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-// ── Reveal Password component ─────────────────────────────────────────────────
-function RevealPassword({ entryId, isDark }) {
-  const [revealed, setRevealed] = useState(false);
-  const [password, setPassword] = useState('');
-  const [loading,  setLoading]  = useState(false);
-  const [copied,   setCopied]   = useState(false);
+// ── Bulk Import Modal ─────────────────────────────────────────────────────────
+function BulkImportModal({ open, onClose, isDark, onSuccess }) {
+  const [file, setFile] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState(null);
+  const qc = useQueryClient();
 
-  const handleReveal = async () => {
-    if (revealed) { setRevealed(false); setPassword(''); return; }
-    setLoading(true);
+  const handleFileChange = (e) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) {
+      const ext = selectedFile.name.split('.').pop()?.toLowerCase();
+      if (!['xlsx', 'xls', 'csv'].includes(ext)) {
+        toast.error('Please upload an Excel (.xlsx, .xls) or CSV (.csv) file');
+        return;
+      }
+      setFile(selectedFile);
+    }
+  };
+
+  const handleImport = async () => {
+    if (!file) { toast.error('Please select a file'); return; }
+    setImporting(true);
     try {
-      const res = await api.get(`/passwords/${entryId}/reveal`);
-      setPassword(res.data.password || '');
-      setRevealed(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.post('/passwords/bulk-import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      setResult(res.data);
+      qc.invalidateQueries({ queryKey: ['passwords'] });
+      qc.invalidateQueries({ queryKey: ['passwords-stats'] });
+      toast.success(`✓ Imported ${res.data.successful_imports} credentials`);
+      if (onSuccess) onSuccess();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Cannot reveal password');
-    } finally { setLoading(false); }
+      toast.error(err.response?.data?.detail || 'Import failed');
+    } finally {
+      setImporting(false);
+    }
   };
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(password).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+  const handleClose = () => {
+    setFile(null);
+    setResult(null);
+    onClose();
   };
 
   return (
-    <div className="flex items-center gap-2">
-      <div className={`flex-1 font-mono text-sm px-2.5 py-1 rounded-lg ${
-        isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50 text-slate-800'
-      } border ${isDark ? 'border-slate-600' : 'border-slate-200'} min-w-0 overflow-hidden text-ellipsis whitespace-nowrap`}>
-        {revealed ? password : <MaskedPassword />}
-      </div>
-      <motion.button whileTap={{ scale: 0.9 }} onClick={handleReveal} disabled={loading}
-        className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
-        title={revealed ? 'Hide' : 'Reveal'}>
-        {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : revealed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-      </motion.button>
-      {revealed && (
-        <motion.button initial={{ scale: 0 }} animate={{ scale: 1 }} transition={springSnap}
-          whileTap={{ scale: 0.9 }} onClick={handleCopy}
-          className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
-            copied ? 'bg-emerald-100 text-emerald-600' : isDark ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
-          }`} title="Copy">
-          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-        </motion.button>
-      )}
-    </div>
-  );
-}
-
-// ── Password Entry Card ───────────────────────────────────────────────────────
-function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark }) {
-  const meta = PORTAL_META[entry.portal_type] || PORTAL_META.OTHER;
-  const [showActions, setShowActions] = useState(false);
-
-  return (
-    <motion.div
-      variants={itemVariants}
-      layout
-      whileHover={{ y: -4, transition: springMed }}
-      onMouseEnter={() => setShowActions(true)}
-      onMouseLeave={() => setShowActions(false)}
-      className={`relative rounded-2xl border overflow-hidden transition-all duration-300 hover:shadow-xl ${
-        isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'
-      }`}
-    >
-      {/* Colour accent bar */}
-      <div className="h-1" style={{ background: `linear-gradient(90deg, ${meta.color}, ${meta.color}88)` }} />
-
-      {/* Hover action buttons */}
-      <AnimatePresence>
-        {showActions && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="absolute top-3 right-3 flex items-center gap-1 z-10">
-            {/* WhatsApp share */}
-            <button onClick={() => onShare(entry)}
-              className={`p-1.5 rounded-lg transition-colors ${isDark ? 'bg-green-900/60 text-green-400 hover:bg-green-800' : 'bg-green-50 text-green-600 hover:bg-green-100'}`}
-              title="Share via WhatsApp">
-              <WAIcon className="h-3.5 w-3.5" />
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className={`max-w-lg rounded-3xl p-0 border-none overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+        <div className="px-6 py-5" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 bg-white/15 rounded-xl flex items-center justify-center">
+                <FileUp className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <DialogTitle className="text-white font-bold text-base">Bulk Import Credentials</DialogTitle>
+                <DialogDescription className="text-white/60 text-xs">Upload Excel or CSV file with password entries</DialogDescription>
+              </div>
+            </div>
+            <button onClick={handleClose} className="w-8 h-8 bg-white/15 hover:bg-white/25 rounded-xl flex items-center justify-center transition-all">
+              <X className="h-4 w-4 text-white" />
             </button>
-            {canEdit && (
-              <button onClick={() => onEdit(entry)}
-                className={`p-1.5 rounded-lg transition-colors ${isDark ? 'bg-blue-900/60 text-blue-400 hover:bg-blue-800' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}
-                title="Edit">
-                <Edit2 className="h-3.5 w-3.5" />
-              </button>
-            )}
-            {isAdmin && (
-              <button onClick={() => onDelete(entry)}
-                className={`p-1.5 rounded-lg transition-colors ${isDark ? 'bg-red-900/60 text-red-400 hover:bg-red-800' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}
-                title="Delete">
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <div className="p-4">
-        {/* Header */}
-        <div className="flex items-start gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0" style={{ background: meta.bg }}>
-            {meta.icon}
-          </div>
-          <div className="flex-1 min-w-0 pr-8">
-            <h3 className={`font-bold text-sm truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{entry.portal_name}</h3>
-            <p className={`text-xs truncate mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{meta.fullName}</p>
           </div>
         </div>
 
-        {/* Badges */}
-        <div className="flex flex-wrap gap-1.5 mb-4">
-          <PortalBadge type={entry.portal_type} />
-          <DeptBadge dept={entry.department} />
-          {entry.client_name && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
-              style={{ background: `${COLORS.emeraldGreen}12`, color: COLORS.emeraldGreen, border: `1px solid ${COLORS.emeraldGreen}30` }}>
-              <Building2 className="h-2.5 w-2.5" />{entry.client_name}
-            </span>
+        {!result ? (
+          <div className="p-6 space-y-4">
+            <div className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer hover:border-blue-400 transition-colors"
+              style={{ borderColor: isDark ? '#475569' : '#e2e8f0' }}>
+              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange}
+                className="hidden" id="bulk-import-file" />
+              <label htmlFor="bulk-import-file" className="cursor-pointer block">
+                <FileUp className="h-8 w-8 mx-auto mb-2 text-slate-400" />
+                <p className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                  {file ? file.name : 'Click to upload or drag & drop'}
+                </p>
+                <p className="text-xs text-slate-400 mt-1">Excel (.xlsx, .xls) or CSV (.csv)</p>
+              </label>
+            </div>
+
+            <div className={`p-3 rounded-xl text-xs ${isDark ? 'bg-blue-900/20 border border-blue-800/50' : 'bg-blue-50 border border-blue-200'}`}>
+              <p className={isDark ? 'text-blue-300' : 'text-blue-700'}>
+                <b>Required columns:</b> portal_name, portal_type, url, username, password_plain, department, client_name, client_id, notes, tags
+              </p>
+            </div>
+
+            <DialogFooter className={`flex items-center gap-3 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+              <Button variant="ghost" className="rounded-xl" onClick={handleClose}>Cancel</Button>
+              <Button disabled={!file || importing} onClick={handleImport}
+                className="rounded-xl font-bold text-white" style={{ background: COLORS.emeraldGreen }}>
+                {importing ? 'Importing…' : 'Import'}
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : (
+          <div className="p-6 space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div className={`p-3 rounded-xl text-center ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                <p className="text-2xl font-bold" style={{ color: COLORS.mediumBlue }}>{result.successful_imports}</p>
+                <p className="text-xs text-slate-500 mt-1">Imported</p>
+              </div>
+              <div className={`p-3 rounded-xl text-center ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                <p className="text-2xl font-bold text-amber-500">{result.total_processed}</p>
+                <p className="text-xs text-slate-500 mt-1">Total</p>
+              </div>
+              <div className={`p-3 rounded-xl text-center ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                <p className="text-2xl font-bold text-red-500">{result.failed_imports}</p>
+                <p className="text-xs text-slate-500 mt-1">Failed</p>
+              </div>
+            </div>
+
+            {result.errors.length > 0 && (
+              <div className={`p-3 rounded-xl text-xs max-h-40 overflow-y-auto ${isDark ? 'bg-red-900/20 border border-red-800/50' : 'bg-red-50 border border-red-200'}`}>
+                <p className={`font-bold mb-2 ${isDark ? 'text-red-300' : 'text-red-700'}`}>Errors:</p>
+                {result.errors.map((err, i) => (
+                  <p key={i} className={isDark ? 'text-red-200' : 'text-red-600'}>Row {err.row}: {typeof err.error === 'string' ? err.error : JSON.stringify(err.error).substring(0, 100)}</p>
+                ))}
+              </div>
+            )}
+
+            <DialogFooter className={`flex items-center gap-3 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+              <Button className="rounded-xl font-bold text-white" style={{ background: COLORS.emeraldGreen }}
+                onClick={handleClose}>Done</Button>
+            </DialogFooter>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Entry Card ────────────────────────────────────────────────────────────────
+function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark }) {
+  return (
+    <motion.div variants={itemVariants} whileHover={{ y: -4, transition: springMed }}>
+      <div className={`rounded-2xl border p-4 h-full flex flex-col ${isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
+        {/* Header */}
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex-1 min-w-0">
+            <h3 className={`font-bold text-sm truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{entry.portal_name}</h3>
+            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+              <PortalBadge type={entry.portal_type} size="sm" />
+              <DeptBadge dept={entry.department} />
+            </div>
+          </div>
+          {canEdit && (
+            <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+              <button onClick={() => onEdit(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Edit">
+                <Edit2 className="h-3.5 w-3.5 text-slate-400" />
+              </button>
+              {isAdmin && (
+                <button onClick={() => onDelete(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Delete">
+                  <Trash2 className="h-3.5 w-3.5 text-red-400" />
+                </button>
+              )}
+            </div>
           )}
         </div>
 
         {/* Username */}
         {entry.username && (
           <div className="mb-3">
-            <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Username / Login ID</p>
             <div className="flex items-center gap-2">
               <UserIcon className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
               <span className={`font-mono text-sm truncate ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{entry.username}</span>
@@ -703,7 +665,7 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading }) {
           <div className={`flex items-start gap-2.5 p-3 rounded-xl text-xs ${isDark ? 'bg-emerald-900/20 border border-emerald-800/50' : 'bg-emerald-50 border border-emerald-200'}`}>
             <Shield className="h-4 w-4 text-emerald-500 flex-shrink-0 mt-0.5" />
             <p className={isDark ? 'text-emerald-300' : 'text-emerald-700'}>
-              Passwords are encrypted using AES-128 before being stored. They are never returned in list views — only when explicitly revealed.
+              Passwords are encrypted using AES-128 before being stored. They are never revealed in logs or lists.
             </p>
           </div>
         </div>
@@ -738,7 +700,8 @@ export default function PasswordRepository() {
   const [modalOpen,    setModalOpen]    = useState(false);
   const [editEntry,    setEditEntry]    = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [shareTarget,  setShareTarget]  = useState(null);  // ← WhatsApp share target
+  const [shareTarget,  setShareTarget]  = useState(null);
+  const [importOpen,   setImportOpen]   = useState(false);
   const [saving,       setSaving]       = useState(false);
 
   // ── Data fetch ──────────────────────────────────────────────────────────────
@@ -798,12 +761,28 @@ export default function PasswordRepository() {
     finally { setSaving(false); }
   }, [editEntry, saveMutation]);
 
+  const handleDownloadTemplate = async () => {
+    try {
+      const res = await api.get('/passwords/template', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'password_template.xlsx');
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+      toast.success('Template downloaded');
+    } catch {
+      toast.error('Failed to download template');
+    }
+  };
+
   const handleEdit   = (entry) => { setEditEntry(entry); setModalOpen(true); };
   const handleDelete = (entry) => setDeleteTarget(entry);
   const handleShare  = (entry) => setShareTarget(entry);
   const handleAddNew = ()      => { setEditEntry(null); setModalOpen(true); };
 
-  // ── Counts — MUST stay above the !canView early return ─────────────────────
+  // ── Counts ──────────────────────────────────────────────────────────────────
   const deptCounts = useMemo(() => {
     const counts = { ALL: entries.length };
     entries.forEach(e => { counts[e.department] = (counts[e.department] || 0) + 1; });
@@ -858,9 +837,17 @@ export default function PasswordRepository() {
                 <div className="px-3 py-1.5 bg-white/15 rounded-xl text-white text-xs font-semibold">{stats.total} credentials</div>
               )}
               {canEdit && (
-                <Button onClick={handleAddNew} className="rounded-xl font-bold h-9 text-sm gap-2 text-white" style={{ background: COLORS.emeraldGreen }}>
-                  <Plus className="h-4 w-4" /> Add Credential
-                </Button>
+                <>
+                  <Button onClick={handleDownloadTemplate} className="rounded-xl font-bold h-9 text-sm gap-2 text-white" style={{ background: COLORS.amber }}>
+                    <Download className="h-4 w-4" /> Template
+                  </Button>
+                  <Button onClick={() => setImportOpen(true)} className="rounded-xl font-bold h-9 text-sm gap-2 text-white" style={{ background: COLORS.mediumBlue }}>
+                    <Upload className="h-4 w-4" /> Import
+                  </Button>
+                  <Button onClick={handleAddNew} className="rounded-xl font-bold h-9 text-sm gap-2 text-white" style={{ background: COLORS.emeraldGreen }}>
+                    <Plus className="h-4 w-4" /> Add Credential
+                  </Button>
+                </>
               )}
             </div>
           </div>
@@ -940,10 +927,8 @@ export default function PasswordRepository() {
         </div>
       ) : entries.length === 0 ? (
         <motion.div variants={itemVariants}
-          className={`text-center py-20 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700 border-dashed' : 'bg-white border-slate-200 border-dashed'}`}>
-          <div className="w-16 h-16 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <KeyRound className="h-8 w-8 text-slate-300 dark:text-slate-500" />
-          </div>
+          className={`text-center py-20 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <KeyRound className="h-12 w-12 text-slate-300 mx-auto mb-3" />
           <p className={`font-semibold text-lg ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>No credentials found</p>
           <p className="text-sm text-slate-400 mt-1 mb-4">
             {filterDept !== 'ALL' || filterType !== 'ALL' || search ? 'Try adjusting your filters.' : 'Start by adding your first portal credential.'}
@@ -981,6 +966,14 @@ export default function PasswordRepository() {
         isDark={isDark}
         onSave={handleSave}
         loading={saving}
+      />
+
+      {/* ── Bulk Import Modal ────────────────────────────────────────────────── */}
+      <BulkImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        isDark={isDark}
+        onSuccess={() => setImportOpen(false)}
       />
 
       {/* ── WhatsApp Share Modal ──────────────────────────────────────────────── */}
