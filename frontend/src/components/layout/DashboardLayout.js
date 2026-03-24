@@ -24,6 +24,7 @@ import {
   Mail,
   Receipt,
   X,
+  KeyRound,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -38,8 +39,8 @@ const COLORS = {
   lightGreen:   '#5CCB5F',
 };
 
-const SIDEBAR_EXPANDED  = 260;
-const SIDEBAR_COLLAPSED = 72;
+const SIDEBAR_EXPANDED  = 280; // Increased from 260
+const SIDEBAR_COLLAPSED = 80;  // Increased from 72
 
 // ── Nav sequence: Core → Records → Client Proposals → Admin → Settings ────────
 const NAV_GROUPS = [
@@ -61,7 +62,7 @@ const NAV_GROUPS = [
       { path: '/dsc',       icon: FileText, label: 'DSC Register',      permission: 'can_view_all_dsc'     },
       { path: '/documents', icon: FileText, label: 'Document Register', permission: 'can_view_documents'   },
       { path: '/clients',   icon: Users,    label: 'Clients',           permission: 'can_view_all_clients' },
-      { path: '/passwords', icon: KeyRound, label: 'Password Vault', permission: 'can_view_passwords' },
+      { path: '/passwords', icon: KeyRound, label: 'Password Vault',    permission: 'can_view_passwords'   },
     ],
   },
   {
@@ -291,214 +292,86 @@ const DashboardLayout = ({ children }) => {
           width:       sidebarPx,
           background:  isDark ? '#1e293b' : '#ffffff',
           borderRight: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
-          boxShadow:   '4px 0 24px rgba(0,0,0,0.06)',
+          boxShadow:   isDark ? '10px 0 30px rgba(0,0,0,0.2)' : '10px 0 30px rgba(0,0,0,0.03)',
         }}
       >
-        {/* ── Logo header — always centered, no wordmark ── */}
-        <div
-          className="relative flex items-center justify-center px-3 py-4 flex-shrink-0"
-          style={{ borderBottom: isDark ? '1px solid #334155' : '1px solid #f1f5f9' }}
-        >
-          {/* Logo — centered regardless of collapsed state */}
-          <img
-            src="/logo.png"
-            alt="Taskosphere"
-            className={`object-contain transition-all duration-300 ${
-              collapsed ? 'h-8 w-8' : 'h-11 w-auto'
-            }`}
-          />
-
-          {/* Collapse toggle — desktop only, absolute right */}
-          {isDesktop && (
-            <motion.button
-              onClick={() => setCollapsed(prev => !prev)}
-              className={`
-                absolute right-2.5 top-1/2 -translate-y-1/2
-                p-1.5 rounded-lg transition-colors
-                ${isDark
-                  ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'
-                  : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
-                }
-              `}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              transition={springMed}
-              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              aria-expanded={!collapsed}
+        {/* Logo Section */}
+        <div className={`h-16 flex items-center ${collapsed ? 'justify-center' : 'px-6'} flex-shrink-0`}>
+          <div className="flex items-center gap-3">
+            <div
+              className="w-9 h-9 rounded-xl flex items-center justify-center text-white shadow-lg"
+              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
             >
-              {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
-            </motion.button>
-          )}
-
-          {/* Close button — mobile only, absolute right */}
-          {!isDesktop && (
-            <motion.button
-              onClick={() => setSidebarOpen(false)}
-              className={`
-                absolute right-2.5 top-1/2 -translate-y-1/2
-                p-1.5 rounded-lg transition-colors
-                ${isDark
-                  ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'
-                  : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
-                }
-              `}
-              whileTap={{ scale: 0.9 }}
-            >
-              <X size={15} />
-            </motion.button>
-          )}
+              <Target className="h-5 w-5" />
+            </div>
+            {!collapsed && (
+              <span className={`text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                Tasko<span style={{ color: COLORS.mediumBlue }}>Sphere</span>
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* Nav */}
-        <nav className="flex-1 px-3 py-3 overflow-y-auto scrollbar-none space-y-0.5">
-          {NAV_GROUPS.map((group, gi) => (
-            <React.Fragment key={group.id}>
-              {gi > 0 && <NavDivider label={group.dividerLabel} />}
-              {group.items.map(item => (
-                <NavItem key={item.path} item={item} />
-              ))}
-            </React.Fragment>
+        {/* Navigation Items */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar py-4">
+          {NAV_GROUPS.map((group, idx) => (
+            <div key={group.id} className="mb-2">
+              {group.dividerLabel && <NavDivider label={group.dividerLabel} />}
+              <div className={`space-y-1 ${collapsed ? 'px-2' : 'px-3'}`}>
+                {group.items.map((item) => (
+                  <NavItem key={item.path} item={item} />
+                ))}
+              </div>
+            </div>
           ))}
-        </nav>
+        </div>
 
-        {/* Sidebar footer — user info + logout */}
-        <div
-          className="flex-shrink-0 px-3 py-3"
-          style={{ borderTop: isDark ? '1px solid #334155' : '1px solid #f1f5f9' }}
-        >
-          {!collapsed ? (
-            <div className={`rounded-xl ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
-              {/* User row */}
-              <div className="flex items-center gap-2 sm:gap-3 px-2 sm:px-3 py-2 sm:py-2.5">
-                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg overflow-hidden flex-shrink-0 ring-1 ring-slate-200 dark:ring-slate-600">
-                  {user?.profile_picture ? (
-                    <img src={user.profile_picture} alt={user.full_name} className="w-full h-full object-cover" />
-                  ) : (
-                    <div
-                      className="w-full h-full flex items-center justify-center text-white font-bold text-xs"
-                      style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
-                    >
-                      {user?.full_name?.[0]?.toUpperCase() || 'U'}
-                    </div>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className={`font-semibold text-[10px] sm:text-xs truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                    {user?.full_name}
-                  </p>
-                  <p className={`text-[10px] truncate capitalize ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                    {user?.role}
-                  </p>
-                </div>
-              </div>
-              {/* Divider */}
-              <div className={`mx-2 mb-1 border-t ${isDark ? 'border-slate-600/50' : 'border-slate-200/70'}`} />
-              {/* Logout */}
-              <motion.button
-                onClick={handleLogout}
-                whileHover={{ x: 2 }}
-                transition={springSnap}
-                className={`w-full flex items-center gap-2 px-3 py-1.5 mb-1 rounded-lg text-xs font-medium transition-colors ${
-                  isDark ? 'text-red-400 hover:bg-red-900/30' : 'text-red-500 hover:bg-red-50'
-                }`}
-              >
-                <LogOut className="h-3.5 w-3.5" />
-                Sign out
-              </motion.button>
-            </div>
-          ) : (
-            /* Collapsed: avatar + logout icon stacked */
-            <div className="flex flex-col items-center gap-2">
-              <div className="w-8 h-8 rounded-lg overflow-hidden ring-1 ring-slate-200 dark:ring-slate-600">
-                {user?.profile_picture ? (
-                  <img src={user.profile_picture} alt={user.full_name} className="w-full h-full object-cover" />
-                ) : (
-                  <div
-                    className="w-full h-full flex items-center justify-center text-white font-bold text-xs"
-                    style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
-                  >
-                    {user?.full_name?.[0]?.toUpperCase() || 'U'}
-                  </div>
-                )}
-              </div>
-              <motion.button
-                onClick={handleLogout}
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
-                className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-red-400 hover:bg-red-900/30' : 'text-red-400 hover:bg-red-50'}`}
-                title="Sign out"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-              </motion.button>
-            </div>
-          )}
+        {/* Sidebar Footer (Collapse Toggle Only) */}
+        <div className={`p-4 ${isDark ? 'border-t border-slate-700/60' : 'border-t border-slate-100'} hidden lg:block`}>
+          <Button
+            variant="ghost"
+            onClick={() => setCollapsed(!collapsed)}
+            className={`w-full flex items-center ${collapsed ? 'justify-center' : 'justify-start gap-3'} h-11 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700/60 transition-all`}
+          >
+            {collapsed ? <PanelLeftOpen className="h-5 w-5" /> : (
+              <>
+                <PanelLeftClose className="h-4 w-4" />
+                <span className="text-sm font-medium">Collapse Sidebar</span>
+              </>
+            )}
+          </Button>
         </div>
       </aside>
 
-      {/* ── HEADER ── */}
+      {/* ── Header ── */}
       <header
-        className="fixed top-0 right-0 z-40 transition-all duration-300 ease-in-out"
+        className="fixed top-0 right-0 z-30 flex items-center h-14 transition-all duration-300 ease-in-out backdrop-blur-md"
         style={{
-          left:                 offsetPx,
-          width:                `calc(100% - ${offsetPx}px)`,
-          background:           isDark ? 'rgba(15,23,42,0.97)' : 'rgba(255,255,255,0.98)',
-          borderBottom:         isDark ? '1px solid rgba(51,65,85,0.8)' : '1px solid rgba(0,0,0,0.07)',
-          boxShadow:            '0 1px 8px rgba(0,0,0,0.06)',
-          backdropFilter:       'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
+          left:       offsetPx,
+          background: isDark ? 'rgba(15,23,42,0.8)' : 'rgba(255,255,255,0.8)',
+          borderBottom: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
         }}
       >
-        <div className="flex items-center justify-between px-3 sm:px-5 md:px-7 h-12 sm:h-14">
-
-          {/* Mobile menu button */}
-          <motion.div whileTap={{ scale: 0.9 }}>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setSidebarOpen(prev => !prev)}
-              className={`lg:hidden h-8 w-8 sm:h-9 sm:w-9 rounded-lg ${isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600'}`}
+        <div className="flex-1 flex items-center justify-between px-4 sm:px-6">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="lg:hidden p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500"
             >
-              <Menu className="h-4 w-4" />
-            </Button>
-          </motion.div>
+              <Menu className="h-5 w-5" />
+            </button>
+            <h1 className={`text-sm sm:text-lg font-bold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+              {activeLabel}
+            </h1>
+          </div>
 
-          {/* Breadcrumb — animated on route change */}
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={location.pathname}
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 6 }}
-              transition={{ duration: 0.18 }}
-              className="hidden lg:flex items-center gap-2"
-            >
-              {(() => {
-                const active = visibleNavItems.find(i => i.path === location.pathname);
-                if (!active) return null;
-                const Icon = active.icon;
-                return (
-                  <>
-                    <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.deepBlue}12` }}>
-                      <Icon className="h-3 w-3 sm:h-3.5 sm:w-3.5" style={{ color: COLORS.deepBlue }} />
-                    </div>
-                    <span className={`text-xs sm:text-sm font-semibold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                      {activeLabel}
-                    </span>
-                  </>
-                );
-              })()}
-            </motion.div>
-          </AnimatePresence>
-
-          {/* Right cluster */}
-          <div className="flex items-center gap-1 sm:gap-2 ml-auto">
-
+          <div className="flex items-center gap-2 sm:gap-4">
             <NotificationBell />
 
-            {/* Theme toggle — pill slider */}
+            {/* Theme Toggle Switch */}
             <motion.button
-              onClick={() => setIsDark(prev => !prev)}
-              className={`relative h-8 w-14 sm:h-9 sm:w-16 rounded-full flex items-center border transition-all overflow-hidden ${
+              onClick={() => setIsDark(!isDark)}
+              className={`relative w-14 h-8 rounded-full p-1 flex items-center border transition-colors ${
                 isDark
                   ? 'bg-slate-800 border-slate-600'
                   : 'bg-slate-100 border-slate-200'
