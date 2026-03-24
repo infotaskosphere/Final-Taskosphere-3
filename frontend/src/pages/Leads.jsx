@@ -18,7 +18,7 @@ import {
   CheckCircle2, Loader2, Circle, X, ArrowRight, IndianRupee, FileText,
   UserCheck, Tag, MessageSquare, Target, ChevronRight, ShieldCheck,
   Timer, Layers, RefreshCw, Receipt, ClipboardCheck, FolderCheck,
-  Users, CalendarDays, Flag, ClipboardList, MapPin, Briefcase,
+  Users, CalendarDays, Flag, ClipboardList, MapPin, Briefcase, ListTodo,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -107,6 +107,31 @@ const CLIENT_TYPES = [
   { value: 'trust',       label: 'Trust'           },
   { value: 'other',       label: 'Other'           },
 ];
+
+const TASK_CATEGORIES = [
+  { value: 'gst',          label: 'GST'           },
+  { value: 'income_tax',   label: 'Income Tax'    },
+  { value: 'accounts',     label: 'Accounts'      },
+  { value: 'tds',          label: 'TDS'           },
+  { value: 'roc',          label: 'ROC'           },
+  { value: 'trademark',    label: 'Trademark'     },
+  { value: 'msme_smadhan', label: 'MSME Smadhan'  },
+  { value: 'fema',         label: 'FEMA'          },
+  { value: 'dsc',          label: 'DSC'           },
+  { value: 'other',        label: 'Other'         },
+];
+
+// Stage-based quick task suggestions
+const STAGE_TASK_SUGGESTIONS = {
+  new:         ['Initial follow-up call', 'Send introduction email', 'Research prospect', 'Schedule first meeting'],
+  contacted:   ['Follow up on response', 'Send company profile', 'Collect basic documents', 'Schedule discovery call'],
+  meeting:     ['Prepare meeting agenda', 'Send meeting confirmation', 'Follow up post-meeting', 'Share meeting notes'],
+  proposal:    ['Prepare proposal document', 'Send quotation', 'Follow up on proposal', 'Collect required documents for proposal'],
+  negotiation: ['Discuss terms & conditions', 'Send revised proposal', 'Follow up on decision', 'Collect pending documents'],
+  on_hold:     ['Check in with prospect', 'Re-engage follow-up', 'Send updated offering', 'Resolve blocking issue'],
+  won:         ['Collect KYC documents', 'Send onboarding checklist', 'Send welcome email', 'Schedule onboarding call', 'Set up client portal'],
+  lost:        ['Send feedback survey', 'Document loss reason', 'Re-engagement follow-up (future)', 'Update CRM notes'],
+};
 
 /* ─── tiny helpers ──────────────────────────────────────────────────────── */
 const svcStyle  = (val) => LEAD_SERVICES.find(s => s.value === val) || LEAD_SERVICES[LEAD_SERVICES.length - 1];
@@ -249,7 +274,7 @@ function LeadQuotationsPanel({ leadId, canCreateQuotation, onCreateQuotation }) 
   );
 }
 
-/* ─── Service selector (used in lead form + conversion dialog) ───────────── */
+/* ─── Service selector ───────────────────────────────────────────────────── */
 const ServiceSelector = ({ selected = [], onChange, extra = [] }) => {
   const extras = extra.filter(s => !LEAD_SERVICES.find(ls => ls.value.toLowerCase() === s.toLowerCase()))
     .map(s => ({ value: s, color: 'bg-slate-50 text-slate-600 border-slate-200', dot: 'bg-slate-400' }));
@@ -284,8 +309,265 @@ const ServiceSelector = ({ selected = [], onChange, extra = [] }) => {
   );
 };
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   LEAD TO TASK DIALOG
+   Creates a task from any lead at any stage. Task is linked to the lead
+   and appears in the Tasks section automatically.
+═══════════════════════════════════════════════════════════════════════════ */
+function LeadTaskDialog({ lead, open, onClose, allUsers, currentUser }) {
+  const [submitting, setSubmitting] = useState(false);
+  const suggestions = STAGE_TASK_SUGGESTIONS[lead?.status] || STAGE_TASK_SUGGESTIONS['new'];
+
+  const emptyTask = {
+    title: '',
+    description: '',
+    assigned_to: lead?.assigned_to || '',
+    priority: 'medium',
+    due_date: '',
+    category: 'other',
+    notes: '',
+  };
+  const [taskForm, setTaskForm] = useState(emptyTask);
+
+  useEffect(() => {
+    if (open && lead) {
+      setTaskForm({
+        title: '',
+        description: '',
+        assigned_to: lead.assigned_to || '',
+        priority: 'medium',
+        due_date: '',
+        category: 'other',
+        notes: '',
+      });
+    }
+  }, [open, lead]);
+
+  const setField = (k, v) => setTaskForm(p => ({ ...p, [k]: v }));
+
+  const handleSuggestionClick = (suggestion) => {
+    setField('title', suggestion);
+  };
+
+  const handleSubmit = async () => {
+    if (!taskForm.title?.trim()) {
+      toast.error('Task title is required');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const payload = {
+        title: taskForm.title.trim(),
+        description: [
+          taskForm.description?.trim(),
+          taskForm.notes?.trim() ? `Notes: ${taskForm.notes.trim()}` : '',
+          `Lead: ${lead.company_name}`,
+          lead.contact_name ? `Contact: ${lead.contact_name}` : '',
+          lead.phone ? `Phone: ${lead.phone}` : '',
+          lead.email ? `Email: ${lead.email}` : '',
+          `Lead Stage: ${stageOf(lead.status)?.label || lead.status}`,
+        ].filter(Boolean).join('\n'),
+        assigned_to: taskForm.assigned_to && taskForm.assigned_to !== 'unassigned'
+          ? taskForm.assigned_to : null,
+        priority: taskForm.priority,
+        due_date: taskForm.due_date ? new Date(taskForm.due_date).toISOString() : null,
+        category: taskForm.category,
+        status: 'pending',
+        sub_assignees: [],
+        is_recurring: false,
+        lead_id: lead.id,
+      };
+
+      await api.post('/tasks', payload);
+      toast.success(`Task created for ${lead.company_name}!`);
+      onClose();
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Failed to create task');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const stage = stageOf(lead?.status);
+  const labelCls = 'text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block';
+  const inputCls = 'h-9 rounded-xl text-sm border-slate-200 focus:border-blue-400';
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v && !submitting) onClose(); }}>
+      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="text-xl font-semibold flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+            <ListTodo className="h-5 w-5 text-blue-500" />
+            Create Task
+          </DialogTitle>
+          <DialogDescription className="text-sm text-slate-500 leading-relaxed">
+            Create a task linked to <strong>{lead?.company_name}</strong>
+            {' '}— will appear in the Tasks section automatically.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Lead context pill */}
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200">
+          <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold border', stage?.badge)}>
+            <span className={cn('h-1.5 w-1.5 rounded-full', stage?.stripe)} />
+            {stage?.label}
+          </span>
+          <span className="text-sm font-semibold text-slate-700">{lead?.company_name}</span>
+          {lead?.contact_name && (
+            <span className="text-xs text-slate-400 flex items-center gap-1 ml-auto">
+              <User className="h-3 w-3" />{lead.contact_name}
+            </span>
+          )}
+        </div>
+
+        {/* Quick suggestions */}
+        <div className="space-y-2">
+          <label className={labelCls}>Quick Suggestions for "{stage?.label}" stage</label>
+          <div className="flex flex-wrap gap-1.5">
+            {suggestions.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => handleSuggestionClick(s)}
+                className={cn(
+                  'text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all active:scale-95',
+                  taskForm.title === s
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                    : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50'
+                )}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {/* Title */}
+          <div>
+            <label className={labelCls}>Task Title <span className="text-red-500">*</span></label>
+            <Input
+              value={taskForm.title}
+              onChange={e => setField('title', e.target.value)}
+              placeholder="e.g. Follow up on proposal, Collect KYC documents…"
+              className={inputCls}
+            />
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className={labelCls}>Description</label>
+            <Textarea
+              value={taskForm.description}
+              onChange={e => setField('description', e.target.value)}
+              placeholder="Describe what needs to be done…"
+              rows={3}
+              className="resize-none rounded-xl text-sm border-slate-200"
+            />
+          </div>
+
+          {/* Additional Notes */}
+          <div>
+            <label className={labelCls}>Additional Notes</label>
+            <Textarea
+              value={taskForm.notes}
+              onChange={e => setField('notes', e.target.value)}
+              placeholder="Any extra context, document names, contacts to reach, etc…"
+              rows={2}
+              className="resize-none rounded-xl text-sm border-slate-200"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {/* Assigned to */}
+            <div>
+              <label className={labelCls}>Assign To</label>
+              <Select
+                value={taskForm.assigned_to || 'unassigned'}
+                onValueChange={v => setField('assigned_to', v === 'unassigned' ? '' : v)}
+              >
+                <SelectTrigger className={inputCls}><SelectValue placeholder="Select user…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unassigned">— Unassigned —</SelectItem>
+                  {allUsers.map(u => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.full_name}{u.id === currentUser?.id ? ' (you)' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Priority */}
+            <div>
+              <label className={labelCls}>Priority</label>
+              <Select value={taskForm.priority} onValueChange={v => setField('priority', v)}>
+                <SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {PRIORITY_OPTIONS.map(p => (
+                    <SelectItem key={p.value} value={p.value}>
+                      <span className={p.color}>{p.label}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Due Date */}
+            <div>
+              <label className={labelCls}>Due Date</label>
+              <Input
+                type="date"
+                value={taskForm.due_date}
+                onChange={e => setField('due_date', e.target.value)}
+                className={inputCls}
+              />
+            </div>
+
+            {/* Category */}
+            <div>
+              <label className={labelCls}>Category / Department</label>
+              <Select value={taskForm.category} onValueChange={v => setField('category', v)}>
+                <SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {TASK_CATEGORIES.map(c => (
+                    <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Info box */}
+          <div className="rounded-2xl bg-blue-50 border border-blue-200 p-3 text-xs text-blue-700 space-y-1">
+            <p className="font-semibold flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> What will happen:</p>
+            <p>• Task will be created and linked to lead <strong>{lead?.company_name}</strong></p>
+            <p>• Task will appear in the <strong>Tasks section</strong> immediately</p>
+            <p>• Lead stage remains <strong>{stage?.label}</strong> — unchanged</p>
+            {taskForm.assigned_to && taskForm.assigned_to !== 'unassigned' && (
+              <p>• Assigned user will receive a notification</p>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter className="pt-2 gap-2">
+          <Button variant="ghost" onClick={onClose} disabled={submitting} className="rounded-2xl h-9 text-slate-500">
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} disabled={submitting}
+            className="rounded-2xl h-9 bg-blue-700 hover:bg-blue-800 text-white min-w-[140px]">
+            {submitting
+              ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Creating Task…</>
+              : <><ListTodo className="h-4 w-4 mr-2" />Create Task</>}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /* ─── Client Conversion Dialog ───────────────────────────────────────────── */
-// Step 1: Choose action  |  Step 2: Full client profile form
 function ClientConversionDialog({
   lead, open, onClose, onConvertNow, onConvertLater, converting,
   allUsers, currentUser, availableServices,
@@ -325,27 +607,20 @@ function ClientConversionDialog({
 
   const setField = (key, val) => setClientForm(p => ({ ...p, [key]: val }));
 
-  /* contact helpers */
   const updateContact = (idx, field, val) =>
     setClientForm(p => ({ ...p, contact_persons: p.contact_persons.map((c, i) => i === idx ? { ...c, [field]: val } : c) }));
   const addContact    = () => setClientForm(p => ({ ...p, contact_persons: [...p.contact_persons, { ...emptyContact }] }));
   const removeContact = (idx) => setClientForm(p => ({ ...p, contact_persons: p.contact_persons.filter((_, i) => i !== idx) }));
 
-  /* assignment helpers */
   const updateAssignment = (idx, userId) =>
     setClientForm(p => ({ ...p, assignments: p.assignments.map((a, i) => i === idx ? { ...a, user_id: userId } : a) }));
   const addAssignment    = () => setClientForm(p => ({ ...p, assignments: [...p.assignments, { user_id: '', services: [] }] }));
   const removeAssignment = (idx) => setClientForm(p => ({ ...p, assignments: p.assignments.filter((_, i) => i !== idx) }));
 
-  const handleProceed = () => {
-    if (step === 1) { setStep(2); }
-  };
+  const handleProceed = () => { if (step === 1) { setStep(2); } };
 
   const handleSubmit = () => {
-    if (!clientForm.company_name?.trim()) {
-      toast.error('Company name is required');
-      return;
-    }
+    if (!clientForm.company_name?.trim()) { toast.error('Company name is required'); return; }
     onConvertNow(clientForm);
   };
 
@@ -362,13 +637,12 @@ function ClientConversionDialog({
           </DialogTitle>
           <DialogDescription className="text-sm text-slate-500 leading-relaxed">
             {step === 1
-              ? <><strong>{lead?.company_name}</strong> marked as <strong className="text-emerald-600">Won</strong>. Convert to a full client profile now, or just mark as won?</>
+              ? <><strong>{lead?.company_name}</strong> will be converted to a full client profile. Choose how to proceed.</>
               : <>Fill in the client details for <strong>{lead?.company_name}</strong>. All fields are pre-filled from the lead — review and complete before saving.</>
             }
           </DialogDescription>
         </DialogHeader>
 
-        {/* ── STEP 1: Choose action ── */}
         {step === 1 && (
           <div className="space-y-3 py-2">
             {[
@@ -415,11 +689,9 @@ function ClientConversionDialog({
           </div>
         )}
 
-        {/* ── STEP 2: Full Client Profile Form ── */}
         {step === 2 && (
           <div className="space-y-5 py-2">
-
-            {/* ── Company Info ── */}
+            {/* Company Info */}
             <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-5 space-y-4">
               <div className="flex items-center gap-2 mb-1">
                 <Building2 className="h-4 w-4 text-slate-400" />
@@ -428,10 +700,8 @@ function ClientConversionDialog({
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">
                   <label className={labelCls}>Company Name <span className="text-red-500">*</span></label>
-                  <Input value={clientForm.company_name}
-                    onChange={e => setField('company_name', e.target.value)}
-                    placeholder="e.g. Sharma & Associates"
-                    className={inputCls} />
+                  <Input value={clientForm.company_name} onChange={e => setField('company_name', e.target.value)}
+                    placeholder="e.g. Sharma & Associates" className={inputCls} />
                 </div>
                 <div>
                   <label className={labelCls}>Client Type</label>
@@ -442,52 +712,40 @@ function ClientConversionDialog({
                     </SelectContent>
                   </Select>
                   {clientForm.client_type === 'other' && (
-                    <Input className="mt-2 h-9 rounded-xl text-sm border-slate-200"
-                      placeholder="Specify type…"
-                      value={clientForm.client_type_other}
-                      onChange={e => setField('client_type_other', e.target.value)} />
+                    <Input className="mt-2 h-9 rounded-xl text-sm border-slate-200" placeholder="Specify type…"
+                      value={clientForm.client_type_other} onChange={e => setField('client_type_other', e.target.value)} />
                   )}
                 </div>
                 <div>
                   <label className={labelCls}>Date of Incorporation</label>
-                  <Input type="date" value={clientForm.birthday}
-                    onChange={e => setField('birthday', e.target.value)}
-                    className={inputCls} />
+                  <Input type="date" value={clientForm.birthday} onChange={e => setField('birthday', e.target.value)} className={inputCls} />
                 </div>
                 <div>
                   <label className={labelCls}>Email</label>
-                  <Input type="email" value={clientForm.email}
-                    onChange={e => setField('email', e.target.value)}
-                    placeholder="contact@company.com"
-                    className={inputCls} />
+                  <Input type="email" value={clientForm.email} onChange={e => setField('email', e.target.value)}
+                    placeholder="contact@company.com" className={inputCls} />
                 </div>
                 <div>
                   <label className={labelCls}>Phone</label>
-                  <Input value={clientForm.phone}
-                    onChange={e => setField('phone', e.target.value)}
-                    placeholder="10-digit number"
-                    className={inputCls} />
+                  <Input value={clientForm.phone} onChange={e => setField('phone', e.target.value)}
+                    placeholder="10-digit number" className={inputCls} />
                 </div>
                 <div>
                   <label className={labelCls}>Referred By</label>
-                  <Input value={clientForm.referred_by}
-                    onChange={e => setField('referred_by', e.target.value)}
-                    placeholder="Referral source"
-                    className={inputCls} />
+                  <Input value={clientForm.referred_by} onChange={e => setField('referred_by', e.target.value)}
+                    placeholder="Referral source" className={inputCls} />
                 </div>
               </div>
             </div>
 
-            {/* ── Address ── */}
+            {/* Address */}
             <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-5 space-y-3">
               <div className="flex items-center gap-2 mb-1">
                 <MapPin className="h-4 w-4 text-slate-400" />
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Address</p>
               </div>
-              <Input value={clientForm.address}
-                onChange={e => setField('address', e.target.value)}
-                placeholder="Street address"
-                className={inputCls} />
+              <Input value={clientForm.address} onChange={e => setField('address', e.target.value)}
+                placeholder="Street address" className={inputCls} />
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={labelCls}>City</label>
@@ -500,7 +758,7 @@ function ClientConversionDialog({
               </div>
             </div>
 
-            {/* ── Contact Persons ── */}
+            {/* Contact Persons */}
             <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-5 space-y-3">
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">
@@ -550,8 +808,7 @@ function ClientConversionDialog({
                       </div>
                       <div>
                         <label className={labelCls}>Date of Birth</label>
-                        <Input type="date" value={cp.birthday || ''}
-                          onChange={e => updateContact(idx, 'birthday', e.target.value)} className={inputCls} />
+                        <Input type="date" value={cp.birthday || ''} onChange={e => updateContact(idx, 'birthday', e.target.value)} className={inputCls} />
                       </div>
                       <div>
                         <label className={labelCls}>DIN (Director ID)</label>
@@ -564,20 +821,16 @@ function ClientConversionDialog({
               </div>
             </div>
 
-            {/* ── Services ── */}
+            {/* Services */}
             <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
               <div className="flex items-center gap-2 mb-3">
                 <Tag className="h-4 w-4 text-slate-400" />
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Services</p>
               </div>
-              <ServiceSelector
-                selected={clientForm.services}
-                onChange={v => setField('services', v)}
-                extra={availableServices || []}
-              />
+              <ServiceSelector selected={clientForm.services} onChange={v => setField('services', v)} extra={availableServices || []} />
             </div>
 
-            {/* ── Staff Assignment ── */}
+            {/* Staff Assignment */}
             <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-5 space-y-3">
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">
@@ -615,17 +868,14 @@ function ClientConversionDialog({
               </div>
             </div>
 
-            {/* ── Notes ── */}
+            {/* Notes */}
             <div>
               <label className={labelCls}>Internal Notes</label>
-              <Textarea value={clientForm.notes}
-                onChange={e => setField('notes', e.target.value)}
-                placeholder="Internal remarks, requirements…"
-                rows={3}
-                className="resize-none rounded-2xl text-sm border-slate-200" />
+              <Textarea value={clientForm.notes} onChange={e => setField('notes', e.target.value)}
+                placeholder="Internal remarks, requirements…" rows={3} className="resize-none rounded-2xl text-sm border-slate-200" />
             </div>
 
-            {/* ── Summary ── */}
+            {/* Summary */}
             <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-700 space-y-1">
               <p className="font-semibold flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> What will happen:</p>
               <p>• New client profile created for <strong>{clientForm.company_name || lead?.company_name}</strong></p>
@@ -685,6 +935,9 @@ export default function LeadsPage() {
   const [clientConverting,  setClientConverting]  = useState(false);
   const [errors,            setErrors]            = useState({});
   const [expandedQtn,       setExpandedQtn]       = useState({});
+
+  // ── NEW: Lead Task Dialog state ──────────────────────────────────────────
+  const [taskLead,          setTaskLead]          = useState(null); // lead for which task is being created
 
   const emptyForm = {
     company_name: '', contact_name: '', email: '', phone: '',
@@ -837,12 +1090,11 @@ export default function LeadsPage() {
     }
   };
 
-  /* ── Convert lead → full client profile (NO task auto-created) ── */
+  /* ── Convert lead → full client profile ── */
   const handleClientConvertNow = async (clientFormData) => {
     if (!clientConvLead) return;
     setClientConverting(true);
     try {
-      /* Clean contact persons */
       const cleanedContacts = (clientFormData.contact_persons || [])
         .filter(cp => cp.name?.trim())
         .map(cp => ({
@@ -854,12 +1106,10 @@ export default function LeadsPage() {
           din:         cp.din?.trim() || null,
         }));
 
-      /* Clean assignments */
       const cleanedAssignments = (clientFormData.assignments || [])
         .filter(a => a.user_id && a.user_id !== 'unassigned')
         .map(a => ({ user_id: a.user_id, services: a.services || [] }));
 
-      /* Build client payload */
       const clientPayload = {
         company_name:  clientFormData.company_name?.trim() || clientConvLead.company_name,
         client_type:   clientFormData.client_type || 'proprietor',
@@ -883,13 +1133,10 @@ export default function LeadsPage() {
         created_by:      user?.id,
       };
 
-      /* 1. Create client */
       const clientRes = await api.post('/clients', clientPayload);
       const clientId = clientRes.data?.id;
-
       if (!clientId) throw new Error('Client creation failed — no ID returned');
 
-      /* 2. Mark lead as Won + link client */
       await api.patch(`/leads/${clientConvLead.id}`, {
         status:              'won',
         converted_client_id: clientId,
@@ -906,7 +1153,6 @@ export default function LeadsPage() {
     }
   };
 
-  /* Mark won only — no client created */
   const handleClientConvertLater = async () => {
     if (!clientConvLead) return;
     setClientConverting(true);
@@ -939,6 +1185,76 @@ export default function LeadsPage() {
 
   const activeLeads = filteredLeads.filter(l => !['won', 'lost'].includes(l.status));
   const closedLeads = filteredLeads.filter(l => ['won', 'lost'].includes(l.status));
+
+  /* ── Shared action button row for any lead ── */
+  const renderLeadActionButtons = (lead, isClosedSection = false) => {
+    const editable = canEditLead(lead);
+    return (
+      <div className="flex flex-wrap gap-1.5">
+        {/* Edit */}
+        {editable && (
+          <button onClick={() => openEdit(lead)}
+            className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 transition-all active:scale-95">
+            <Edit className="h-3 w-3" />Edit Lead
+          </button>
+        )}
+
+        {/* ── CREATE TASK — available at ALL stages ── */}
+        {editable && (
+          <button
+            onClick={() => setTaskLead(lead)}
+            className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-all active:scale-95"
+          >
+            <ListTodo className="h-3 w-3" />Create Task
+          </button>
+        )}
+
+        {/* ── CONVERT TO CLIENT — available at ALL stages ── */}
+        {editable && !lead.converted_client_id && (
+          <button onClick={() => setClientConvLead(lead)}
+            className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all active:scale-95">
+            <Building2 className="h-3 w-3" />Convert to Client
+          </button>
+        )}
+
+        {/* Won-specific actions */}
+        {lead.status === 'won' && editable && (
+          <>
+            <button onClick={() => handleQuickStage(lead, 'negotiation')}
+              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-all active:scale-95">
+              <RefreshCw className="h-3 w-3" />Reopen
+            </button>
+            <button onClick={() => handleToggle(lead, 'checklist_sent')}
+              className={cn('inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all active:scale-95',
+                lead.checklist_sent ? 'bg-teal-500 text-white border-teal-600 shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:border-teal-300 hover:text-teal-600 hover:bg-teal-50')}>
+              <ClipboardCheck className="h-3 w-3" />{lead.checklist_sent ? 'Checklist Sent ✓' : 'Checklist Sent?'}
+            </button>
+            <button onClick={() => handleToggle(lead, 'documents_received')}
+              className={cn('inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all active:scale-95',
+                lead.documents_received ? 'bg-emerald-500 text-white border-emerald-600 shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:border-emerald-300 hover:text-emerald-600 hover:bg-emerald-50')}>
+              <FolderCheck className="h-3 w-3" />{lead.documents_received ? 'Docs Received ✓' : 'Docs Received?'}
+            </button>
+          </>
+        )}
+
+        {/* Lost-specific */}
+        {lead.status === 'lost' && editable && (
+          <button onClick={() => handleQuickStage(lead, 'negotiation')}
+            className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-all active:scale-95">
+            <RefreshCw className="h-3 w-3" />Reopen
+          </button>
+        )}
+
+        {/* Delete */}
+        {canDeleteLead && (
+          <button onClick={() => handleDelete(lead)}
+            className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-red-200 text-red-500 bg-white hover:bg-red-50 transition-all active:scale-95">
+            <Trash2 className="h-3 w-3" />Delete
+          </button>
+        )}
+      </div>
+    );
+  };
 
   return (
     <motion.div
@@ -1055,7 +1371,7 @@ export default function LeadsPage() {
               <motion.div key={lead.id} variants={itemVariants}>
                 <DashboardStripCard stripeColor={stage.stripe}>
                   <div className="flex flex-col gap-3">
-                    {/* Row 1 */}
+                    {/* Row 1 — title + badges + quick actions */}
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div className="flex items-center gap-2.5 flex-wrap min-w-0">
                         <span className="text-base font-semibold text-slate-900 dark:text-slate-100">{lead.company_name}</span>
@@ -1087,13 +1403,6 @@ export default function LeadsPage() {
                           </button>
                         )}
                         {canEditLead(lead) && (
-                          <Button size="sm" variant="outline"
-                            className="h-7 px-3 text-xs font-semibold rounded-xl border-emerald-300 text-emerald-700 hover:bg-emerald-50 gap-1 active:scale-95"
-                            onClick={() => setClientConvLead(lead)}>
-                            <Zap className="h-3.5 w-3.5" />Convert
-                          </Button>
-                        )}
-                        {canEditLead(lead) && (
                           <button onClick={() => openEdit(lead)}
                             className="p-1.5 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-900/30 text-slate-400 hover:text-blue-600 transition-all active:scale-90">
                             <Edit className="h-3.5 w-3.5" />
@@ -1108,7 +1417,7 @@ export default function LeadsPage() {
                       </div>
                     </div>
 
-                    {/* Row 2: Contact */}
+                    {/* Row 2: Contact info */}
                     <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 dark:text-slate-400">
                       {lead.contact_name  && <span className="flex items-center gap-1.5"><User className="h-3.5 w-3.5" />{lead.contact_name}</span>}
                       {lead.phone         && <span className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" />{lead.phone}</span>}
@@ -1132,7 +1441,7 @@ export default function LeadsPage() {
                       </div>
                     )}
 
-                    {/* Row 4: Stage progress + buttons */}
+                    {/* Row 4: Stage progress bar */}
                     {canEditLead(lead) && (
                       <div className="space-y-2 pt-1 border-t border-slate-100 dark:border-slate-700">
                         <StageProgressBar currentStatus={lead.status} canEdit={true} onStageClick={sid => handleQuickStage(lead, sid)} />
@@ -1154,7 +1463,14 @@ export default function LeadsPage() {
                       </div>
                     )}
 
-                    {/* Row 5: Quotations panel */}
+                    {/* Row 5: Action buttons — Create Task + Convert to Client at ALL stages */}
+                    {canEditLead(lead) && (
+                      <div className="pt-1 border-t border-slate-100 dark:border-slate-700">
+                        {renderLeadActionButtons(lead, false)}
+                      </div>
+                    )}
+
+                    {/* Row 6: Quotations panel */}
                     {canUseQuotations && qtnOpen && (
                       <AnimatePresence>
                         <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: .2 }}>
@@ -1202,54 +1518,13 @@ export default function LeadsPage() {
                             <span className={cn('text-sm font-bold', lead.status === 'won' ? 'text-emerald-600' : 'text-slate-400')}>
                               ₹{(Number(lead.quotation_amount) || 0).toLocaleString()}
                             </span>
-                            {canDeleteLead && (
-                              <button onClick={() => handleDelete(lead)}
-                                className="p-1.5 rounded-xl hover:bg-red-50 text-slate-300 hover:text-red-500 transition-all active:scale-90">
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            )}
                           </div>
                         </div>
 
-                        {/* Won pipeline actions */}
-                        {lead.status === 'won' && canEditLead(lead) && (
-                          <div className="flex flex-wrap gap-2 pt-1.5 border-t border-slate-100">
-                            <button onClick={() => openEdit(lead)}
-                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 transition-all active:scale-95">
-                              <Edit className="h-3 w-3" />Edit Lead
-                            </button>
-                            <button onClick={() => handleQuickStage(lead, 'negotiation')}
-                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-all active:scale-95">
-                              <RefreshCw className="h-3 w-3" />Reopen
-                            </button>
-                            {!lead.converted_client_id && (
-                              <button onClick={() => setClientConvLead(lead)}
-                                className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all active:scale-95">
-                                <Building2 className="h-3 w-3" />Convert to Client
-                              </button>
-                            )}
-                            <button onClick={() => handleToggle(lead, 'checklist_sent')}
-                              className={cn('inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all active:scale-95',
-                                lead.checklist_sent ? 'bg-teal-500 text-white border-teal-600 shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:border-teal-300 hover:text-teal-600 hover:bg-teal-50')}>
-                              <ClipboardCheck className="h-3 w-3" />{lead.checklist_sent ? 'Checklist Sent ✓' : 'Checklist Sent?'}
-                            </button>
-                            <button onClick={() => handleToggle(lead, 'documents_received')}
-                              className={cn('inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all active:scale-95',
-                                lead.documents_received ? 'bg-emerald-500 text-white border-emerald-600 shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:border-emerald-300 hover:text-emerald-600 hover:bg-emerald-50')}>
-                              <FolderCheck className="h-3 w-3" />{lead.documents_received ? 'Docs Received ✓' : 'Docs Received?'}
-                            </button>
-                          </div>
-                        )}
-                        {lead.status === 'lost' && canEditLead(lead) && (
-                          <div className="flex flex-wrap gap-2 pt-1.5 border-t border-slate-100">
-                            <button onClick={() => openEdit(lead)}
-                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 transition-all active:scale-95">
-                              <Edit className="h-3 w-3" />Edit Lead
-                            </button>
-                            <button onClick={() => handleQuickStage(lead, 'negotiation')}
-                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-all active:scale-95">
-                              <RefreshCw className="h-3 w-3" />Reopen
-                            </button>
+                        {/* Action buttons for closed leads — Create Task + Convert to Client still available */}
+                        {canEditLead(lead) && (
+                          <div className="pt-1.5 border-t border-slate-100">
+                            {renderLeadActionButtons(lead, true)}
                           </div>
                         )}
                       </div>
@@ -1292,15 +1567,23 @@ export default function LeadsPage() {
                           )}
                           {lead.quotation_amount && <p className="text-xs font-bold text-slate-700">₹{Number(lead.quotation_amount).toLocaleString()}</p>}
                           {canEditLead(lead) && (
-                            <div className="flex gap-1 pt-1 border-t border-slate-100">
+                            <div className="flex gap-1 pt-1 border-t border-slate-100 flex-wrap">
                               <button onClick={() => openEdit(lead)}
                                 className="flex-1 h-6 text-[11px] font-medium rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all active:scale-95">
                                 Edit
                               </button>
-                              <button onClick={() => setClientConvLead(lead)}
-                                className="flex-1 h-6 text-[11px] font-semibold rounded-xl border border-emerald-300 text-emerald-700 hover:bg-emerald-600 hover:text-white hover:shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1">
-                                <Zap className="h-3 w-3" />Win
+                              {/* Create Task in kanban */}
+                              <button onClick={() => setTaskLead(lead)}
+                                className="flex-1 h-6 text-[11px] font-semibold rounded-xl border border-blue-200 text-blue-700 hover:bg-blue-100 hover:shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1">
+                                <ListTodo className="h-3 w-3" />Task
                               </button>
+                              {/* Convert to Client in kanban */}
+                              {!lead.converted_client_id && (
+                                <button onClick={() => setClientConvLead(lead)}
+                                  className="flex-1 h-6 text-[11px] font-semibold rounded-xl border border-emerald-300 text-emerald-700 hover:bg-emerald-600 hover:text-white hover:shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1">
+                                  <Zap className="h-3 w-3" />Client
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1437,7 +1720,18 @@ export default function LeadsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Client Conversion Dialog (Full Client Profile) ── */}
+      {/* ── Lead Task Dialog — Create task from any lead at any stage ── */}
+      {taskLead && (
+        <LeadTaskDialog
+          lead={taskLead}
+          open={!!taskLead}
+          onClose={() => setTaskLead(null)}
+          allUsers={allUsers}
+          currentUser={user}
+        />
+      )}
+
+      {/* ── Client Conversion Dialog ── */}
       {clientConvLead && (
         <ClientConversionDialog
           lead={clientConvLead}
