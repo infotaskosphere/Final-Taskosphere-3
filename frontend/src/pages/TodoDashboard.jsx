@@ -10,6 +10,9 @@ import { format, isPast, parseISO, isToday, isTomorrow } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -19,17 +22,32 @@ import {
   Calendar as CalendarIcon, History, Users, Search, X,
   User as UserIcon, Activity, Layers, CheckSquare, Circle,
   ChevronRight, Briefcase, Clock, FileText, Tag, ArrowUpRight,
+  ArrowRight, Building2,
 } from 'lucide-react';
 
 // ── Brand Colors ──────────────────────────────────────────────────────────────
 const COLORS = {
-  deepBlue:    '#0D3B66',
-  mediumBlue:  '#1F6FB2',
-  emeraldGreen:'#1FAF5A',
-  lightGreen:  '#5CCB5F',
-  coral:       '#FF6B6B',
-  amber:       '#F59E0B',
+  deepBlue:     '#0D3B66',
+  mediumBlue:   '#1F6FB2',
+  emeraldGreen: '#1FAF5A',
+  lightGreen:   '#5CCB5F',
+  coral:        '#FF6B6B',
+  amber:        '#F59E0B',
 };
+
+// ── Departments (mirrors Tasks.jsx) ──────────────────────────────────────────
+const DEPARTMENTS = [
+  { value: 'gst',          label: 'GST' },
+  { value: 'income_tax',   label: 'INCOME TAX' },
+  { value: 'accounts',     label: 'ACCOUNTS' },
+  { value: 'tds',          label: 'TDS' },
+  { value: 'roc',          label: 'ROC' },
+  { value: 'trademark',    label: 'TRADEMARK' },
+  { value: 'msme_smadhan', label: 'MSME SMADHAN' },
+  { value: 'fema',         label: 'FEMA' },
+  { value: 'dsc',          label: 'DSC' },
+  { value: 'other',        label: 'OTHER' },
+];
 
 // ── Spring Physics ─────────────────────────────────────────────────────────────
 const springPhysics = {
@@ -145,6 +163,347 @@ function MetricCard({ icon: Icon, label, value, sub, accent, progress, onClick }
   );
 }
 
+// ── PROMOTE TO TASK MODAL ─────────────────────────────────────────────────────
+function PromoteToTaskModal({ todo, isDark, onClose, onConfirm, isLoading, allUsers, allClients }) {
+  const [form, setForm] = useState({
+    title:               todo?.title || '',
+    description:         todo?.description || '',
+    assigned_to:         'unassigned',
+    sub_assignees:       [],
+    due_date:            todo?.due_date ? format(new Date(todo.due_date), 'yyyy-MM-dd') : '',
+    priority:            'medium',
+    status:              'pending',
+    category:            'other',
+    client_id:           '',
+    is_recurring:        false,
+    recurrence_pattern:  'monthly',
+    recurrence_interval: 1,
+  });
+
+  if (!todo) return null;
+
+  const set = (key, val) => setForm(prev => ({ ...prev, [key]: val }));
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onConfirm(todo.id || todo._id, {
+      ...form,
+      assigned_to:   form.assigned_to === 'unassigned' ? null : form.assigned_to,
+      client_id:     form.client_id || null,
+      due_date:      form.due_date ? new Date(form.due_date).toISOString() : null,
+      sub_assignees: form.sub_assignees || [],
+    });
+  };
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+      style={{ background: 'rgba(7,15,30,0.78)', backdropFilter: 'blur(10px)' }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className={`w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl ${isDark ? 'bg-slate-900' : 'bg-white'}`}
+        initial={{ scale: 0.88, y: 40 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.88, y: 40 }}
+        transition={{ type: 'spring', stiffness: 200, damping: 22 }}
+        onClick={e => e.stopPropagation()}
+        style={{ maxHeight: '92vh', overflowY: 'auto' }}
+      >
+        {/* Header */}
+        <div
+          className="relative px-6 py-5 overflow-hidden"
+          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, #1a5fa8 100%)` }}
+        >
+          <div className="absolute right-0 top-0 w-48 h-48 rounded-full -mr-12 -mt-12 opacity-10"
+            style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+          <div className="relative flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 bg-white/20 rounded-2xl flex items-center justify-center flex-shrink-0">
+                <Zap className="w-5 h-5 text-amber-300" />
+              </div>
+              <div>
+                <p className="text-white/60 text-[10px] font-bold uppercase tracking-widest mb-0.5">
+                  Promote Todo → Master Task
+                </p>
+                <h2 className="text-lg font-bold text-white leading-tight pr-8">
+                  Fill Task Details
+                </h2>
+                <p className="text-white/50 text-xs mt-0.5 pr-8 line-clamp-1">
+                  From: {todo.title}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 bg-white/20 hover:bg-white/30 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors"
+            >
+              <X className="w-4 h-4 text-white" />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+
+          {/* Title */}
+          <div className="space-y-1.5">
+            <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              Task Title <span className="text-red-500">*</span>
+            </Label>
+            <input
+              type="text"
+              value={form.title}
+              onChange={e => set('title', e.target.value)}
+              required
+              placeholder="Task title…"
+              className={`w-full h-10 rounded-xl border px-3 text-sm font-medium outline-none transition-all
+                focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40
+                ${isDark
+                  ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-500'
+                  : 'bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400'}`}
+            />
+          </div>
+
+          {/* Description */}
+          <div className="space-y-1.5">
+            <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              Description / Notes
+            </Label>
+            <textarea
+              value={form.description}
+              onChange={e => set('description', e.target.value)}
+              rows={3}
+              placeholder="Task details, checklist items (use - bullet for checklist)…"
+              className={`w-full rounded-xl border px-3 py-2.5 text-sm resize-none outline-none transition-all
+                focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40
+                ${isDark
+                  ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-500'
+                  : 'bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400'}`}
+            />
+          </div>
+
+          {/* Due Date + Client */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                Due Date
+              </Label>
+              <input
+                type="date"
+                value={form.due_date}
+                onChange={e => set('due_date', e.target.value)}
+                className={`w-full h-10 rounded-xl border px-3 text-sm outline-none transition-all
+                  focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40
+                  ${isDark
+                    ? 'bg-slate-800 border-slate-600 text-slate-100'
+                    : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                Client
+              </Label>
+              <select
+                value={form.client_id || ''}
+                onChange={e => set('client_id', e.target.value)}
+                className={`w-full h-10 rounded-xl border px-3 text-sm outline-none transition-all
+                  focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40
+                  ${isDark
+                    ? 'bg-slate-800 border-slate-600 text-slate-100'
+                    : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+              >
+                <option value="">No Client</option>
+                {(allClients || []).map(c => (
+                  <option key={c.id || c._id} value={c.id || c._id}>{c.company_name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Assignee */}
+          <div className="space-y-1.5">
+            <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              Assign To
+            </Label>
+            <select
+              value={form.assigned_to}
+              onChange={e => set('assigned_to', e.target.value)}
+              className={`w-full h-10 rounded-xl border px-3 text-sm outline-none transition-all
+                focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40
+                ${isDark
+                  ? 'bg-slate-800 border-slate-600 text-slate-100'
+                  : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+            >
+              <option value="unassigned">Unassigned</option>
+              {(allUsers || []).map(u => (
+                <option key={u.id || u._id} value={u.id || u._id}>
+                  {u.full_name || u.user_name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Priority + Status */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                Priority
+              </Label>
+              <select
+                value={form.priority}
+                onChange={e => set('priority', e.target.value)}
+                className={`w-full h-10 rounded-xl border px-3 text-sm outline-none transition-all
+                  focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40
+                  ${isDark
+                    ? 'bg-slate-800 border-slate-600 text-slate-100'
+                    : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                Status
+              </Label>
+              <select
+                value={form.status}
+                onChange={e => set('status', e.target.value)}
+                className={`w-full h-10 rounded-xl border px-3 text-sm outline-none transition-all
+                  focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40
+                  ${isDark
+                    ? 'bg-slate-800 border-slate-600 text-slate-100'
+                    : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+              >
+                <option value="pending">To Do</option>
+                <option value="in_progress">In Progress</option>
+                <option value="completed">Completed</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Department */}
+          <div className="space-y-2">
+            <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              Department
+            </Label>
+            <div className="flex flex-wrap gap-1.5">
+              {DEPARTMENTS.map(dept => (
+                <button
+                  key={dept.value}
+                  type="button"
+                  onClick={() => set('category', dept.value)}
+                  className={`h-7 px-3 rounded-lg text-[11px] font-semibold transition-all
+                    ${form.category === dept.value
+                      ? 'bg-blue-700 text-white shadow-sm'
+                      : isDark
+                        ? 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                >
+                  {dept.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Recurring toggle */}
+          <div className={`border rounded-xl p-4 space-y-3 ${isDark ? 'border-slate-700 bg-slate-800/40' : 'border-slate-200 bg-slate-50'}`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="h-4 w-4 text-slate-400" />
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Recurring Task</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => set('is_recurring', !form.is_recurring)}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none
+                  ${form.is_recurring ? 'bg-blue-600' : isDark ? 'bg-slate-600' : 'bg-slate-200'}`}
+              >
+                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform
+                  ${form.is_recurring ? 'translate-x-4' : 'translate-x-1'}`} />
+              </button>
+            </div>
+            {form.is_recurring && (
+              <div className={`grid grid-cols-2 gap-3 pt-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Repeat</Label>
+                  <select
+                    value={form.recurrence_pattern}
+                    onChange={e => set('recurrence_pattern', e.target.value)}
+                    className={`w-full h-9 rounded-xl border px-3 text-sm outline-none transition-all
+                      ${isDark
+                        ? 'bg-slate-800 border-slate-600 text-slate-100'
+                        : 'bg-white border-slate-200 text-slate-800'}`}
+                  >
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="yearly">Yearly</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Every (interval)</Label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="1"
+                      max="365"
+                      value={form.recurrence_interval}
+                      onChange={e => set('recurrence_interval', parseInt(e.target.value) || 1)}
+                      className={`w-20 h-9 rounded-xl border px-3 text-sm outline-none transition-all
+                        ${isDark
+                          ? 'bg-slate-800 border-slate-600 text-slate-100'
+                          : 'bg-white border-slate-200 text-slate-800'}`}
+                    />
+                    <span className="text-xs text-slate-400">
+                      {form.recurrence_pattern === 'daily'   && 'day(s)'}
+                      {form.recurrence_pattern === 'weekly'  && 'week(s)'}
+                      {form.recurrence_pattern === 'monthly' && 'month(s)'}
+                      {form.recurrence_pattern === 'yearly'  && 'year(s)'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className={`flex items-center justify-between gap-3 pt-4 border-t ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+            <button
+              type="button"
+              onClick={onClose}
+              className={`px-4 py-2.5 text-sm font-semibold rounded-xl border transition-all
+                ${isDark
+                  ? 'border-slate-600 text-slate-300 hover:bg-slate-700'
+                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!form.title.trim() || isLoading}
+              className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+            >
+              {isLoading ? (
+                <><RefreshCw size={14} className="animate-spin" /> Promoting…</>
+              ) : (
+                <><Zap size={14} className="text-amber-300" /> Promote to Task</>
+              )}
+            </button>
+          </div>
+        </form>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ── TODO DETAIL MODAL ─────────────────────────────────────────────────────────
 function TodoDetailModal({ todo, isDark, onClose, onToggle, onPromote, onDelete, ownerName }) {
   if (!todo) return null;
@@ -215,8 +574,6 @@ function TodoDetailModal({ todo, isDark, onClose, onToggle, onPromote, onDelete,
 
         {/* Body */}
         <div className="p-6 space-y-4">
-
-          {/* Description */}
           {todo.description && (
             <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 flex items-center gap-1.5">
@@ -226,9 +583,7 @@ function TodoDetailModal({ todo, isDark, onClose, onToggle, onPromote, onDelete,
             </div>
           )}
 
-          {/* Meta grid */}
           <div className="grid grid-cols-2 gap-3">
-            {/* Due Date */}
             <div className={`p-3 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1 flex items-center gap-1">
                 <CalendarIcon size={9} /> Due Date
@@ -248,7 +603,6 @@ function TodoDetailModal({ todo, isDark, onClose, onToggle, onPromote, onDelete,
               )}
             </div>
 
-            {/* Status */}
             <div className={`p-3 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1 flex items-center gap-1">
                 <Activity size={9} /> Status
@@ -264,7 +618,6 @@ function TodoDetailModal({ todo, isDark, onClose, onToggle, onPromote, onDelete,
               </span>
             </div>
 
-            {/* Owner */}
             {ownerName && (
               <div className={`p-3 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1 flex items-center gap-1">
@@ -274,7 +627,6 @@ function TodoDetailModal({ todo, isDark, onClose, onToggle, onPromote, onDelete,
               </div>
             )}
 
-            {/* Created */}
             <div className={`p-3 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1 flex items-center gap-1">
                 <Clock size={9} /> Created
@@ -284,7 +636,6 @@ function TodoDetailModal({ todo, isDark, onClose, onToggle, onPromote, onDelete,
               </p>
             </div>
 
-            {/* Completed at */}
             {isCompleted && todo.completed_at && (
               <div className={`col-span-2 p-3 rounded-xl border border-emerald-200 dark:border-emerald-800 ${isDark ? 'bg-emerald-900/20' : 'bg-emerald-50'}`}>
                 <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600 dark:text-emerald-400 mb-1 flex items-center gap-1">
@@ -308,7 +659,7 @@ function TodoDetailModal({ todo, isDark, onClose, onToggle, onPromote, onDelete,
             </motion.button>
             <motion.button
               whileTap={{ scale: 0.9 }}
-              onClick={() => { onPromote(todo.id || todo._id); onClose(); }}
+              onClick={() => { onPromote(todo); onClose(); }}
               disabled={isCompleted}
               className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
             >
@@ -333,7 +684,7 @@ function TodoDetailModal({ todo, isDark, onClose, onToggle, onPromote, onDelete,
   );
 }
 
-// ── TODO ITEM (with click to open detail) ────────────────────────────────────
+// ── TODO ITEM ─────────────────────────────────────────────────────────────────
 function TodoItem({ todo, onToggle, onPromote, onDelete, showOwner, ownerName, onClickDetail }) {
   const isCompleted = todo.is_completed === true || todo.status === 'completed';
   const due         = getDueLabel(todo.due_date);
@@ -355,12 +706,10 @@ function TodoItem({ todo, onToggle, onPromote, onDelete, showOwner, ownerName, o
       `}
       onClick={() => onClickDetail(todo)}
     >
-      {/* Overdue left accent bar */}
       {isOverdue && !isCompleted && (
         <div className="absolute left-0 top-0 bottom-0 w-0.5 rounded-r bg-red-400" />
       )}
 
-      {/* Checkbox — stop propagation so clicking it doesn't also open popup */}
       <motion.button
         whileHover={{ scale: 1.12 }}
         whileTap={{ scale: 0.88 }}
@@ -379,7 +728,6 @@ function TodoItem({ todo, onToggle, onPromote, onDelete, showOwner, ownerName, o
         )}
       </motion.button>
 
-      {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className={`text-sm font-medium truncate max-w-[260px] ${
@@ -413,14 +761,12 @@ function TodoItem({ todo, onToggle, onPromote, onDelete, showOwner, ownerName, o
         )}
       </div>
 
-      {/* Hover hint */}
       <ChevronRight size={13} className="text-slate-300 dark:text-slate-600 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
 
-      {/* Actions — visible on hover, stop propagation */}
       <div className="flex items-center gap-1.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150" onClick={e => e.stopPropagation()}>
         <motion.button
           whileTap={{ scale: 0.88 }}
-          onClick={(e) => { e.stopPropagation(); onPromote(todo.id || todo._id); }}
+          onClick={(e) => { e.stopPropagation(); onPromote(todo); }}
           disabled={isCompleted}
           className={`flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border transition-all ${
             isCompleted
@@ -456,6 +802,13 @@ function EventBadge({ entry }) {
     return (
       <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 whitespace-nowrap">
         ↩ Reopened
+      </span>
+    );
+  }
+  if (entry.event === 'promoted') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-400 whitespace-nowrap">
+        <Zap size={10} /> Promoted · {safeFormat(entry.completed_at)}
       </span>
     );
   }
@@ -541,29 +894,31 @@ export default function TodoDashboard() {
   const queryClient = useQueryClient();
   const isAdmin     = user?.role === 'admin';
   const isManager   = user?.role === 'manager';
+  const isDark      = useDark();
 
-  // ── Dark mode observer ──────────────────────────────────────────────────
-  const isDark = useDark();
-
-  // ── Form state ───────────────────────────────────────────────────────────
+  // ── Form state ─────────────────────────────────────────────────────────────
   const [title,       setTitle]       = useState('');
   const [description, setDescription] = useState('');
   const [dueDate,     setDueDate]     = useState('');
 
-  // ── UI state ─────────────────────────────────────────────────────────────
+  // ── UI state ───────────────────────────────────────────────────────────────
   const [activeTab,    setActiveTab]    = useState('todos');
   const [selectedUser, setSelectedUser] = useState('self');
   const [todoFilter,   setTodoFilter]   = useState('all');
   const [search,       setSearch]       = useState('');
   const [logSearch,    setLogSearch]    = useState('');
 
-  // ── Detail popup state ────────────────────────────────────────────────────
+  // ── Detail popup ──────────────────────────────────────────────────────────
   const [selectedTodo, setSelectedTodo] = useState(null);
 
-  // ── In-memory todo activity log ───────────────────────────────────────────
+  // ── Promote modal ─────────────────────────────────────────────────────────
+  const [promoteTarget,    setPromoteTarget]    = useState(null); // the todo being promoted
+  const [promoteLoading,   setPromoteLoading]   = useState(false);
+
+  // ── Activity log ──────────────────────────────────────────────────────────
   const [todoLog, setTodoLog] = useState([]);
 
-  // ── Fetch all users ───────────────────────────────────────────────────────
+  // ── Fetch all users ────────────────────────────────────────────────────────
   const { data: allUsers = [] } = useQuery({
     queryKey: ['users'],
     enabled:  isAdmin || isManager,
@@ -573,7 +928,16 @@ export default function TodoDashboard() {
     },
   });
 
-  // ── "Everyone" visibility ─────────────────────────────────────────────────
+  // ── Fetch all clients ──────────────────────────────────────────────────────
+  const { data: allClients = [] } = useQuery({
+    queryKey: ['clients'],
+    queryFn:  async () => {
+      const res = await api.get('/clients');
+      return res.data || [];
+    },
+  });
+
+  // ── "Everyone" visibility ──────────────────────────────────────────────────
   const canSeeEveryone = useMemo(() => {
     if (isAdmin) return true;
     const list = Array.isArray(user?.permissions?.view_other_todos)
@@ -582,7 +946,7 @@ export default function TodoDashboard() {
     return list.includes('everyone');
   }, [isAdmin, user]);
 
-  // ── Permitted user list ───────────────────────────────────────────────────
+  // ── Permitted users ────────────────────────────────────────────────────────
   const permittedUsers = useMemo(() => {
     const selfId = user?.id;
     if (isAdmin) return allUsers.filter(u => (u.id || u._id) !== selfId);
@@ -595,14 +959,14 @@ export default function TodoDashboard() {
 
   const showDropdown = isAdmin || isManager || permittedUsers.length > 0 || canSeeEveryone;
 
-  // ── Resolve query user_id ─────────────────────────────────────────────────
+  // ── Resolved user id ───────────────────────────────────────────────────────
   const resolvedUserId = useMemo(() => {
     if (selectedUser === 'self')     return user?.id ?? null;
     if (selectedUser === 'everyone') return 'all';
     return selectedUser;
   }, [selectedUser, user?.id]);
 
-  // ── Fetch todos ───────────────────────────────────────────────────────────
+  // ── Fetch todos ────────────────────────────────────────────────────────────
   const { data: todosRaw = [], isLoading } = useQuery({
     queryKey: ['todos', 'page', resolvedUserId],
     enabled:  !!resolvedUserId,
@@ -614,7 +978,7 @@ export default function TodoDashboard() {
 
   const todos = useMemo(() => todosRaw, [todosRaw]);
 
-  // ── User map ──────────────────────────────────────────────────────────────
+  // ── User map ───────────────────────────────────────────────────────────────
   const userMap = useMemo(() => {
     const map = {};
     allUsers.forEach(u => {
@@ -631,7 +995,7 @@ export default function TodoDashboard() {
     return userMap[userId] || userId;
   }, [userMap, user]);
 
-  // ── Seed log from completed todos ─────────────────────────────────────────
+  // ── Seed log from completed todos ──────────────────────────────────────────
   useEffect(() => {
     const completed = todos.filter(t => t.is_completed === true || t.status === 'completed');
     if (!completed.length) return;
@@ -662,7 +1026,7 @@ export default function TodoDashboard() {
     });
   }, [todos]);
 
-  // ── Derived stats ─────────────────────────────────────────────────────────
+  // ── Stats ──────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
     const total     = todos.length;
     const completed = todos.filter(t => t.is_completed === true || t.status === 'completed').length;
@@ -677,7 +1041,7 @@ export default function TodoDashboard() {
     return { total, completed, pending, overdue, completionRate, healthScore };
   }, [todos]);
 
-  // ── Filtered todos ────────────────────────────────────────────────────────
+  // ── Filtered todos ─────────────────────────────────────────────────────────
   const filteredTodos = useMemo(() => {
     let list = todos;
     if (search) {
@@ -701,7 +1065,7 @@ export default function TodoDashboard() {
     return list;
   }, [todos, search, todoFilter]);
 
-  // ── Filtered log ──────────────────────────────────────────────────────────
+  // ── Filtered log ───────────────────────────────────────────────────────────
   const filteredLog = useMemo(() => {
     let list = todoLog;
     if (logSearch) {
@@ -716,7 +1080,7 @@ export default function TodoDashboard() {
     return list;
   }, [todoLog, logSearch, selectedUser, user?.id]);
 
-  // ── Dropdown label ────────────────────────────────────────────────────────
+  // ── Dropdown label ─────────────────────────────────────────────────────────
   const selectedUserLabel = useMemo(() => {
     if (selectedUser === 'self')     return `My Todos — ${user?.full_name || 'Me'}`;
     if (selectedUser === 'everyone') return 'Everyone — All Users';
@@ -724,19 +1088,19 @@ export default function TodoDashboard() {
     return u ? `${u.full_name || u.user_name}'s Todos` : 'Selected User';
   }, [selectedUser, allUsers, user]);
 
-  // ── Notification helper ───────────────────────────────────────────────────
+  // ── Notification helper ────────────────────────────────────────────────────
   const sendNotification = useCallback(async ({ title: t, message }) => {
     try { await api.post('/notifications/send', { title: t, message, type: 'todo' }); } catch (_) {}
   }, []);
 
-  // ── Invalidate ────────────────────────────────────────────────────────────
+  // ── Invalidate ─────────────────────────────────────────────────────────────
   const invalidateTodos = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['todos', 'page', resolvedUserId] });
     queryClient.invalidateQueries({ queryKey: ['todos', 'dashboard-card', user?.id] });
     queryClient.invalidateQueries({ queryKey: ['todos'] });
   }, [queryClient, resolvedUserId, user?.id]);
 
-  // ── Mutations ─────────────────────────────────────────────────────────────
+  // ── Mutations ──────────────────────────────────────────────────────────────
   const addMutation = useMutation({
     mutationFn: (payload) => api.post('/todos', payload),
     onSuccess: (_, vars) => {
@@ -778,17 +1142,6 @@ export default function TodoDashboard() {
     onError: () => toast.error('Failed to update todo'),
   });
 
-  const promoteMutation = useMutation({
-    mutationFn: (id) => api.post(`/todos/${id}/promote-to-task`),
-    onSuccess: (_, id) => {
-      toast.success('Promoted to Master Task!');
-      invalidateTodos();
-      const todo = todos.find(t => (t.id || t._id) === id);
-      sendNotification({ title: '⚡ Todo Promoted', message: `"${todo?.title || 'A todo'}" promoted by ${user?.full_name || 'a user'}.` });
-    },
-    onError: () => toast.error('Failed to promote todo'),
-  });
-
   const deleteMutation = useMutation({
     mutationFn: (id) => api.delete(`/todos/${id}`),
     onSuccess: (_, id) => {
@@ -811,8 +1164,8 @@ export default function TodoDashboard() {
     onError: () => toast.error('Failed to delete todo'),
   });
 
-  // ── Handlers ──────────────────────────────────────────────────────────────
-  const handleAdd     = () => {
+  // ── Handlers ───────────────────────────────────────────────────────────────
+  const handleAdd = () => {
     if (!title.trim()) return;
     addMutation.mutate({
       title:        title.trim(),
@@ -821,11 +1174,55 @@ export default function TodoDashboard() {
       is_completed: false,
     });
   };
+
   const handleToggle  = (id) => toggleMutation.mutate({ id });
-  const handlePromote = (id) => promoteMutation.mutate(id);
   const handleDelete  = (id) => deleteMutation.mutate(id);
 
-  // ── User selector ─────────────────────────────────────────────────────────
+  // Open promote modal instead of firing directly
+  const handleOpenPromote = (todo) => {
+    setSelectedTodo(null); // close detail modal if open
+    setPromoteTarget(todo);
+  };
+
+  // Called from PromoteToTaskModal on form submit
+  const handleConfirmPromote = async (todoId, taskData) => {
+    setPromoteLoading(true);
+    try {
+      await api.post(`/todos/${todoId}/promote-to-task`, taskData);
+      toast.success('Promoted to Master Task!');
+
+      // Log it
+      const todo = todos.find(t => (t.id || t._id) === todoId);
+      if (todo) {
+        setTodoLog(prev => [{
+          id:            todo.id || todo._id,
+          title:         todo.title || 'Untitled',
+          created_by_id: todo.user_id || todo.created_by || null,
+          owner_id:      todo.user_id || null,
+          created_at:    todo.created_at || null,
+          completed_at:  new Date(),
+          deleted_at:    null,
+          event:         'promoted',
+        }, ...prev].slice(0, 200));
+      }
+
+      sendNotification({
+        title:   '⚡ Todo Promoted',
+        message: `"${todo?.title || 'A todo'}" promoted to task by ${user?.full_name || 'a user'}.`,
+      });
+
+      invalidateTodos();
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      setPromoteTarget(null);
+    } catch (err) {
+      const msg = err?.response?.data?.message || err?.response?.data?.error || 'Failed to promote todo';
+      toast.error(msg);
+    } finally {
+      setPromoteLoading(false);
+    }
+  };
+
+  // ── User selector ──────────────────────────────────────────────────────────
   const UserSelector = () => (
     showDropdown ? (
       <Select value={selectedUser} onValueChange={setSelectedUser}>
@@ -849,9 +1246,9 @@ export default function TodoDashboard() {
     ) : null
   );
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────────────────────
   // RENDER
-  // ─────────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────────────────────
   return (
     <motion.div
       className="space-y-4"
@@ -859,22 +1256,37 @@ export default function TodoDashboard() {
       initial="hidden"
       animate="visible"
     >
-      {/* ── Todo Detail Popup ──────────────────────────────────────────────── */}
+      {/* ── Todo Detail Modal ────────────────────────────────────────────────── */}
       <AnimatePresence>
-        {selectedTodo && (
+        {selectedTodo && !promoteTarget && (
           <TodoDetailModal
             todo={selectedTodo}
             isDark={isDark}
             onClose={() => setSelectedTodo(null)}
             onToggle={(id) => { handleToggle(id); setSelectedTodo(null); }}
-            onPromote={(id) => { handlePromote(id); setSelectedTodo(null); }}
+            onPromote={(todo) => handleOpenPromote(todo)}
             onDelete={(id) => { handleDelete(id); setSelectedTodo(null); }}
             ownerName={selectedTodo.user_id ? resolveUserName(selectedTodo.user_id) : null}
           />
         )}
       </AnimatePresence>
 
-      {/* ── Page Header Banner ────────────────────────────────────────────── */}
+      {/* ── Promote to Task Modal ────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {promoteTarget && (
+          <PromoteToTaskModal
+            todo={promoteTarget}
+            isDark={isDark}
+            onClose={() => setPromoteTarget(null)}
+            onConfirm={handleConfirmPromote}
+            isLoading={promoteLoading}
+            allUsers={allUsers}
+            allClients={allClients}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Page Header ─────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
         <div
           className="relative overflow-hidden rounded-2xl px-6 py-5"
@@ -920,7 +1332,7 @@ export default function TodoDashboard() {
         </div>
       </motion.div>
 
-      {/* ── Key Metrics ──────────────────────────────────────────────────── */}
+      {/* ── Key Metrics ─────────────────────────────────────────────────────── */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-3" variants={itemVariants}>
         <MetricCard icon={Layers}      label="Total"        value={stats.total}                sub="todos tracked"                              accent={COLORS.deepBlue} />
         <MetricCard icon={AlertCircle} label="Overdue"      value={stats.overdue}              sub="need attention"                             accent={stats.overdue > 0 ? COLORS.coral : '#94A3B8'} />
@@ -930,15 +1342,14 @@ export default function TodoDashboard() {
 
       <AnimatePresence mode="wait">
 
-        {/* ─────────────────── TODOS TAB ─────────────────────────────────── */}
+        {/* ─────────────── TODOS TAB ───────────────────────────────────────── */}
         {activeTab === 'todos' && (
           <motion.div key="todos" variants={containerVariants} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
 
-              {/* LEFT — Create form + stats */}
+              {/* LEFT — Create form */}
               <div className="xl:col-span-4 space-y-4">
 
-                {/* Create card */}
                 <motion.div variants={itemVariants}>
                   <SectionCard>
                     <CardHeaderRow
@@ -987,7 +1398,7 @@ export default function TodoDashboard() {
                   </SectionCard>
                 </motion.div>
 
-                {/* Quick stats strip */}
+                {/* Quick stats */}
                 <motion.div variants={itemVariants}>
                   <SectionCard>
                     <div className="grid grid-cols-3 divide-x divide-slate-100 dark:divide-slate-700">
@@ -1005,7 +1416,7 @@ export default function TodoDashboard() {
                   </SectionCard>
                 </motion.div>
 
-                {/* Progress bar card */}
+                {/* Progress bar */}
                 <motion.div variants={itemVariants}>
                   <SectionCard>
                     <div className="p-4">
@@ -1051,7 +1462,7 @@ export default function TodoDashboard() {
                   </SectionCard>
                 </motion.div>
 
-                {/* AI Audit card */}
+                {/* AI Audit */}
                 <motion.div variants={itemVariants}>
                   <SectionCard>
                     <div className="p-4">
@@ -1095,10 +1506,9 @@ export default function TodoDashboard() {
                 </motion.div>
               </div>
 
-              {/* RIGHT — User filter + Todo list */}
+              {/* RIGHT — Todo list */}
               <div className="xl:col-span-8 space-y-4">
 
-                {/* User filter card */}
                 {showDropdown && (
                   <motion.div variants={itemVariants}>
                     <SectionCard>
@@ -1122,7 +1532,6 @@ export default function TodoDashboard() {
                   </motion.div>
                 )}
 
-                {/* Todo list card */}
                 <motion.div variants={itemVariants}>
                   <SectionCard>
                     <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700">
@@ -1150,7 +1559,6 @@ export default function TodoDashboard() {
                       </div>
                     </div>
 
-                    {/* Column header */}
                     <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-700 grid grid-cols-[20px_1fr_auto] gap-4 items-center bg-slate-50/80 dark:bg-slate-700/30">
                       <div />
                       <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Task · Click for details</span>
@@ -1182,7 +1590,7 @@ export default function TodoDashboard() {
                               key={todo.id || todo._id}
                               todo={todo}
                               onToggle={handleToggle}
-                              onPromote={handlePromote}
+                              onPromote={handleOpenPromote}
                               onDelete={handleDelete}
                               showOwner={selectedUser === 'everyone'}
                               ownerName={resolveUserName(todo.user_id)}
@@ -1199,7 +1607,7 @@ export default function TodoDashboard() {
           </motion.div>
         )}
 
-        {/* ─────────────────── LOG TAB ────────────────────────────────────── */}
+        {/* ─────────────── LOG TAB ─────────────────────────────────────────── */}
         {activeTab === 'log' && (
           <motion.div key="log" variants={containerVariants} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
 
