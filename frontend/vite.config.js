@@ -3,34 +3,61 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// In ESM (type: module), __dirname is not defined by default. 
-// We define it here to ensure the '@' alias works perfectly on Render's Linux servers.
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export default defineConfig({
   plugins: [react()],
+
   resolve: {
     alias: {
-      // This maps '@' to your 'src' folder for clean imports
       '@': path.resolve(__dirname, './src'),
     },
   },
+
+  // ✅ FIX 1: Tell esbuild to treat .js files as JSX during dep optimization
+  // This is the #1 cause of Rollup parseAst crashes after CRA → Vite migration
+  optimizeDeps: {
+    esbuildOptions: {
+      loader: {
+        '.js': 'jsx',
+      },
+    },
+  },
+
+  // ✅ FIX 2: Tell esbuild to treat .js files as JSX during the actual build
+  esbuild: {
+    loader: 'jsx',
+    include: /src\/.*\.jsx?$/,
+    exclude: [],
+  },
+
   build: {
-    // Vite builds to 'dist'. Ensure Render's "Publish Directory" is set to 'dist'
     outDir: 'dist',
-    sourcemap: true,
-    // Ensures assets like logos/fonts are hashed correctly for production
+    // ✅ FIX 3: Disable sourcemaps in prod — they consume a lot of memory
+    // on Render's free tier and can cause OOM build failures
+    sourcemap: false,
     assetsDir: 'assets',
-    // Rollup specific options to handle large chunks
     rollupOptions: {
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom', 'react-router-dom'],
+          ui: [
+            '@radix-ui/react-dialog',
+            '@radix-ui/react-dropdown-menu',
+            '@radix-ui/react-select',
+            '@radix-ui/react-tabs',
+            '@radix-ui/react-toast',
+          ],
+          charts: ['chart.js', 'recharts'],
+          motion: ['framer-motion'],
         },
       },
     },
+    // ✅ FIX 4: Raise chunk size warning limit (you have many large deps)
+    chunkSizeWarningLimit: 1000,
   },
+
   server: {
     port: 3000,
     strictPort: true,
