@@ -29,14 +29,13 @@ import { Textarea } from '@/components/ui/textarea';
 
 // ── Brand palette ─────────────────────────────────────────────────────────────
 const COLORS = {
-  deepBlue:    '#0D3B66',
-  mediumBlue:  '#1F6FB2',
-  emeraldGreen:'#1FAF5A',
-  lightGreen:  '#5CCB5F',
-  coral:       '#FF6B6B',
-  amber:       '#F59E0B',
-  whatsapp:    '#25D366',
-  whatsappDark:'#128C7E',
+  deepBlue:     '#0D3B66',
+  mediumBlue:   '#1F6FB2',
+  emeraldGreen: '#1FAF5A',
+  lightGreen:   '#5CCB5F',
+  coral:        '#FF6B6B',
+  whatsapp:     '#25D366',
+  whatsappDark: '#128C7E',
 };
 
 const springMed = { type: 'spring', stiffness: 340, damping: 24 };
@@ -60,6 +59,12 @@ const PORTAL_META = {
 
 const PORTAL_TYPES  = Object.keys(PORTAL_META);
 const DEPARTMENTS   = ['GST', 'IT', 'ACC', 'TDS', 'ROC', 'TM', 'MSME', 'FEMA', 'DSC', 'OTHER'];
+
+const DEPARTMENT_MAP = {
+  MCA: 'ROC', ROC: 'ROC', DGFT: 'OTHER', TRADEMARK: 'TM',
+  GST: 'GST', INCOME_TAX: 'IT', TDS: 'TDS', EPFO: 'ACC',
+  ESIC: 'ACC', TRACES: 'TDS', MSME: 'MSME', RERA: 'OTHER', OTHER: 'OTHER',
+};
 
 const containerVariants = {
   hidden:  { opacity: 0 },
@@ -261,11 +266,19 @@ function RevealPassword({ entryId, isDark }) {
       <button onClick={handleReveal} disabled={loading}
         className={`flex-shrink-0 p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
         title={revealed ? 'Hide' : 'Reveal'}>
-        {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin text-slate-400" /> : revealed ? <EyeOff className="h-3.5 w-3.5 text-slate-400" /> : <Eye className="h-3.5 w-3.5 text-slate-400" />}
+        {loading
+          ? <RefreshCw className="h-3.5 w-3.5 animate-spin text-slate-400" />
+          : revealed
+            ? <EyeOff className="h-3.5 w-3.5 text-slate-400" />
+            : <Eye className="h-3.5 w-3.5 text-slate-400" />
+        }
       </button>
       {revealed && (
-        <button onClick={() => navigator.clipboard.writeText(password).then(() => toast.success('Password copied'))}
-          className={`flex-shrink-0 p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Copy password">
+        <button
+          onClick={() => navigator.clipboard.writeText(password).then(() => toast.success('Password copied'))}
+          className={`flex-shrink-0 p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
+          title="Copy password"
+        >
           <Copy className="h-3 w-3 text-slate-400" />
         </button>
       )}
@@ -389,8 +402,12 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
                 </SelectContent>
               </Select>
             ) : (
-              <Input className={`rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
-                placeholder="Enter phone number (with country code)" value={customPhone} onChange={e => setCustomPhone(e.target.value)} />
+              <Input
+                className={`rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+                placeholder="Enter phone number (with country code)"
+                value={customPhone}
+                onChange={e => setCustomPhone(e.target.value)}
+              />
             )}
           </div>
           <div className="space-y-2">
@@ -402,14 +419,23 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
           </div>
           <div className="space-y-2">
             <Label className="text-xs font-bold uppercase text-slate-500">Additional Message (optional)</Label>
-            <Textarea className={`rounded-xl resize-none text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
-              rows={3} placeholder="Add any additional notes…" value={customMsg} onChange={e => setCustomMsg(e.target.value)} />
+            <Textarea
+              className={`rounded-xl resize-none text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+              rows={3}
+              placeholder="Add any additional notes…"
+              value={customMsg}
+              onChange={e => setCustomMsg(e.target.value)}
+            />
           </div>
         </div>
         <DialogFooter className={`px-6 py-4 flex items-center gap-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
           <Button variant="ghost" className="rounded-xl" onClick={handleClose}>Cancel</Button>
-          <Button disabled={!phoneReady} onClick={handleSend}
-            className="rounded-xl font-bold text-white gap-2" style={{ background: COLORS.whatsapp }}>
+          <Button
+            disabled={!phoneReady}
+            onClick={handleSend}
+            className="rounded-xl font-bold text-white gap-2"
+            style={{ background: COLORS.whatsapp }}
+          >
             <Send className="h-4 w-4" /> Send
           </Button>
         </DialogFooter>
@@ -481,8 +507,10 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
         </div>
         {!result ? (
           <div className="p-6 space-y-4">
-            <div className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer hover:border-blue-400 transition-colors"
-              style={{ borderColor: isDark ? '#475569' : '#e2e8f0' }}>
+            <div
+              className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors"
+              style={{ borderColor: isDark ? '#475569' : '#e2e8f0' }}
+            >
               <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange} className="hidden" id="bulk-import-file" />
               <label htmlFor="bulk-import-file" className="cursor-pointer block">
                 <FileUp className="h-8 w-8 mx-auto mb-2 text-slate-400" />
@@ -499,8 +527,12 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
             </div>
             <DialogFooter className={`flex items-center gap-3 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
               <Button variant="ghost" className="rounded-xl" onClick={handleClose}>Cancel</Button>
-              <Button disabled={!file || importing} onClick={handleImport}
-                className="rounded-xl font-bold text-white" style={{ background: COLORS.emeraldGreen }}>
+              <Button
+                disabled={!file || importing}
+                onClick={handleImport}
+                className="rounded-xl font-bold text-white"
+                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+              >
                 {importing ? 'Importing…' : 'Import'}
               </Button>
             </DialogFooter>
@@ -513,7 +545,7 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
                 <p className="text-xs text-slate-500 mt-1">Imported</p>
               </div>
               <div className={`p-3 rounded-xl text-center ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                <p className="text-2xl font-bold text-amber-500">{result.total_processed}</p>
+                <p className="text-2xl font-bold text-slate-500">{result.total_processed}</p>
                 <p className="text-xs text-slate-500 mt-1">Total</p>
               </div>
               <div className={`p-3 rounded-xl text-center ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
@@ -525,12 +557,20 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
               <div className={`p-3 rounded-xl text-xs max-h-40 overflow-y-auto ${isDark ? 'bg-red-900/20 border border-red-800/50' : 'bg-red-50 border border-red-200'}`}>
                 <p className={`font-bold mb-2 ${isDark ? 'text-red-300' : 'text-red-700'}`}>Errors:</p>
                 {result.errors.map((err, i) => (
-                  <p key={i} className={isDark ? 'text-red-200' : 'text-red-600'}>Row {err.row}: {typeof err.error === 'string' ? err.error : JSON.stringify(err.error).substring(0, 100)}</p>
+                  <p key={i} className={isDark ? 'text-red-200' : 'text-red-600'}>
+                    Row {err.row}: {typeof err.error === 'string' ? err.error : JSON.stringify(err.error).substring(0, 100)}
+                  </p>
                 ))}
               </div>
             )}
             <DialogFooter className={`flex items-center gap-3 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-              <Button className="rounded-xl font-bold text-white" style={{ background: COLORS.emeraldGreen }} onClick={handleClose}>Done</Button>
+              <Button
+                className="rounded-xl font-bold text-white"
+                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+                onClick={handleClose}
+              >
+                Done
+              </Button>
             </DialogFooter>
           </div>
         )}
@@ -543,7 +583,7 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
 function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark }) {
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -4, transition: springMed }}>
-      <div className={`rounded-2xl border p-4 h-full flex flex-col ${isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
+      <div className={`rounded-2xl border p-4 h-full flex flex-col ${isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'} transition-all`}>
         {/* Header */}
         <div className="flex items-start justify-between mb-3">
           <div className="flex-1 min-w-0">
@@ -555,11 +595,19 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
           </div>
           {canEdit && (
             <div className="flex items-center gap-1 ml-2 flex-shrink-0">
-              <button onClick={() => onEdit(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Edit">
+              <button
+                onClick={() => onEdit(entry)}
+                className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
+                title="Edit"
+              >
                 <Edit2 className="h-3.5 w-3.5 text-slate-400" />
               </button>
               {isAdmin && (
-                <button onClick={() => onDelete(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Delete">
+                <button
+                  onClick={() => onDelete(entry)}
+                  className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
+                  title="Delete"
+                >
                   <Trash2 className="h-3.5 w-3.5 text-red-400" />
                 </button>
               )}
@@ -581,8 +629,11 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
             <div className="flex items-center gap-2">
               <UserIcon className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
               <span className={`font-mono text-sm truncate ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{entry.username}</span>
-              <button onClick={() => navigator.clipboard.writeText(entry.username).then(() => toast.success('Username copied'))}
-                className={`flex-shrink-0 p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Copy username">
+              <button
+                onClick={() => navigator.clipboard.writeText(entry.username).then(() => toast.success('Username copied'))}
+                className={`flex-shrink-0 p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
+                title="Copy username"
+              >
                 <Copy className="h-3 w-3 text-slate-400" />
               </button>
             </div>
@@ -602,9 +653,12 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
         {entry.url && (
           <div className="mb-3">
             <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Portal URL</p>
-            <a href={entry.url.startsWith('http') ? entry.url : `https://${entry.url}`}
-              target="_blank" rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-xs font-medium text-blue-500 hover:underline truncate">
+            <a
+              href={entry.url.startsWith('http') ? entry.url : `https://${entry.url}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-xs font-medium text-blue-500 hover:underline truncate"
+            >
               <Globe className="h-3 w-3 flex-shrink-0" />
               <span className="truncate">{entry.url}</span>
               <ExternalLink className="h-2.5 w-2.5 flex-shrink-0" />
@@ -693,14 +747,13 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients 
   const handleChange = (field, value) => setForm(p => ({ ...p, [field]: value }));
 
   const handleClientChange = ({ id, name }) => {
-    setForm(p => ({ ...p, client_id: id || '', client_name: name || '' }));
-    // Auto-set department based on portal type if not yet set
-    if (id && form.department === 'OTHER') {
-      const suggestedDept = DEPARTMENT_MAP[form.portal_type] || 'OTHER';
-      if (suggestedDept !== 'OTHER') {
-        setForm(p => ({ ...p, client_id: id || '', client_name: name || '', department: suggestedDept }));
-      }
-    }
+    const suggestedDept = DEPARTMENT_MAP[form.portal_type] || 'OTHER';
+    setForm(p => ({
+      ...p,
+      client_id:   id || '',
+      client_name: name || '',
+      ...(id && p.department === 'OTHER' && suggestedDept !== 'OTHER' ? { department: suggestedDept } : {}),
+    }));
   };
 
   const inputClass = `rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white'}`;
@@ -730,8 +783,7 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients 
         </div>
 
         <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-
-          {/* Client Selector — prominent at top */}
+          {/* Client Selector */}
           <div className="space-y-1.5">
             <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
               <Building2 className="h-3 w-3" /> Link to Client
@@ -751,8 +803,12 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients 
 
           <div className="space-y-1.5">
             <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Portal Name *</Label>
-            <Input className={inputClass} placeholder="e.g. Client XYZ GST Login"
-              value={form.portal_name} onChange={e => handleChange('portal_name', e.target.value)} />
+            <Input
+              className={inputClass}
+              placeholder="e.g. Client XYZ GST Login"
+              value={form.portal_name}
+              onChange={e => handleChange('portal_name', e.target.value)}
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -784,14 +840,22 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients 
 
           <div className="space-y-1.5">
             <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Portal URL</Label>
-            <Input className={inputClass} placeholder="https://www.gst.gov.in"
-              value={form.url} onChange={e => handleChange('url', e.target.value)} />
+            <Input
+              className={inputClass}
+              placeholder="https://www.gst.gov.in"
+              value={form.url}
+              onChange={e => handleChange('url', e.target.value)}
+            />
           </div>
 
           <div className="space-y-1.5">
             <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Username / Login ID</Label>
-            <Input className={inputClass} placeholder="login@company.com or PAN/GSTIN"
-              value={form.username} onChange={e => handleChange('username', e.target.value)} />
+            <Input
+              className={inputClass}
+              placeholder="login@company.com or PAN/GSTIN"
+              value={form.username}
+              onChange={e => handleChange('username', e.target.value)}
+            />
           </div>
 
           <div className="space-y-1.5">
@@ -799,11 +863,18 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients 
               Password {existing ? '(leave blank to keep current)' : ''}
             </Label>
             <div className="relative">
-              <Input className={`${inputClass} pr-10`} type={showPass ? 'text' : 'password'}
+              <Input
+                className={`${inputClass} pr-10`}
+                type={showPass ? 'text' : 'password'}
                 placeholder={existing ? '••••••••  (unchanged)' : 'Enter password'}
-                value={form.password_plain} onChange={e => handleChange('password_plain', e.target.value)} />
-              <button type="button" onClick={() => setShowPass(p => !p)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                value={form.password_plain}
+                onChange={e => handleChange('password_plain', e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPass(p => !p)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
                 {showPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
@@ -811,9 +882,13 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients 
 
           <div className="space-y-1.5">
             <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Notes</Label>
-            <Textarea className={`rounded-xl resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : ''}`}
-              rows={3} placeholder="Any additional information…"
-              value={form.notes} onChange={e => handleChange('notes', e.target.value)} />
+            <Textarea
+              className={`rounded-xl resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : ''}`}
+              rows={3}
+              placeholder="Any additional information…"
+              value={form.notes}
+              onChange={e => handleChange('notes', e.target.value)}
+            />
           </div>
 
           <div className={`flex items-start gap-2.5 p-3 rounded-xl text-xs ${isDark ? 'bg-emerald-900/20 border border-emerald-800/50' : 'bg-emerald-50 border border-emerald-200'}`}>
@@ -826,9 +901,12 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients 
 
         <DialogFooter className={`px-6 py-4 flex items-center gap-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
           <Button variant="ghost" className="rounded-xl" onClick={onClose}>Cancel</Button>
-          <Button disabled={loading || !form.portal_name.trim()} onClick={() => onSave(form)}
+          <Button
+            disabled={loading || !form.portal_name.trim()}
+            onClick={() => onSave(form)}
             className="rounded-xl font-bold px-8 text-white"
-            style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+            style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+          >
             {loading ? 'Saving…' : existing ? 'Update Credential' : 'Save Credential'}
           </Button>
         </DialogFooter>
@@ -883,7 +961,6 @@ export default function PasswordRepository() {
     staleTime: 60_000,
   });
 
-  // ── Clients for selector ────────────────────────────────────────────────────
   const { data: clients = [] } = useQuery({
     queryKey: ['passwords-clients'],
     queryFn: () => api.get('/passwords/clients-list').then(r => r.data),
@@ -925,23 +1002,33 @@ export default function PasswordRepository() {
     finally { setSaving(false); }
   }, [editEntry, saveMutation]);
 
+  // ── FIXED: Template download with proper blob responseType ────────────────
   const handleDownloadTemplate = async () => {
     try {
-      const res = await api.get('/passwords/template', { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const res = await api.get('/passwords/template', {
+        responseType: 'blob',
+      });
+      const blob = new Blob([res.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
       link.setAttribute('download', 'password_template.xlsx');
       document.body.appendChild(link);
       link.click();
       link.parentNode.removeChild(link);
-      toast.success('Template downloaded');
-    } catch { toast.error('Failed to download template'); }
+      window.URL.revokeObjectURL(url);
+      toast.success('Template downloaded successfully');
+    } catch (err) {
+      console.error('Template download error:', err);
+      toast.error('Failed to download template');
+    }
   };
 
-  const handleEdit = (entry) => { setEditEntry(entry); setModalOpen(true); };
+  const handleEdit   = (entry) => { setEditEntry(entry); setModalOpen(true); };
   const handleDelete = (entry) => setDeleteTarget(entry);
-  const handleShare = (entry) => setShareTarget(entry);
+  const handleShare  = (entry) => setShareTarget(entry);
   const handleAddNew = () => { setEditEntry(null); setModalOpen(true); };
 
   // ── Counts ──────────────────────────────────────────────────────────────────
@@ -951,7 +1038,6 @@ export default function PasswordRepository() {
     return counts;
   }, [entries]);
 
-  // Unique clients in current results for filter dropdown
   const clientsInResults = useMemo(() => {
     const map = {};
     entries.forEach(e => {
@@ -960,12 +1046,15 @@ export default function PasswordRepository() {
     return Object.entries(map).map(([id, name]) => ({ id, name }));
   }, [entries]);
 
-  // ── Access guard ──────────────────────────────────────────────────────────
+  // ── Access guard ────────────────────────────────────────────────────────────
   if (!canView) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-          className={`text-center p-12 rounded-3xl border max-w-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <motion.div
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className={`text-center p-12 rounded-3xl border max-w-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
+        >
           <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <Lock className="h-8 w-8 text-red-500" />
           </div>
@@ -983,8 +1072,13 @@ export default function PasswordRepository() {
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
-        <div className="relative overflow-hidden rounded-2xl px-6 py-5"
-          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
+        <div
+          className="relative overflow-hidden rounded-2xl px-6 py-5"
+          style={{
+            background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
+            boxShadow: '0 8px 32px rgba(13,59,102,0.28)',
+          }}
+        >
           <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
             style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
           <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -999,17 +1093,32 @@ export default function PasswordRepository() {
             </div>
             <div className="flex items-center gap-3 flex-wrap">
               {isAdmin && stats.total != null && (
-                <div className="px-3 py-1.5 bg-white/15 rounded-xl text-white text-xs font-semibold">{stats.total} credentials</div>
+                <div className="px-3 py-1.5 bg-white/15 rounded-xl text-white text-xs font-semibold">
+                  {stats.total} credentials
+                </div>
               )}
               {canEdit && (
                 <>
-                  <Button onClick={handleDownloadTemplate} className="rounded-xl font-bold h-9 text-sm gap-2 text-white" style={{ background: COLORS.amber }}>
+                  {/* Template button — blue theme, no orange */}
+                  <Button
+                    onClick={handleDownloadTemplate}
+                    className="rounded-xl font-bold h-9 text-sm gap-2 text-white border-white/20 hover:bg-white/20 transition-all"
+                    style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}
+                  >
                     <Download className="h-4 w-4" /> Template
                   </Button>
-                  <Button onClick={() => setImportOpen(true)} className="rounded-xl font-bold h-9 text-sm gap-2 text-white" style={{ background: COLORS.mediumBlue }}>
+                  <Button
+                    onClick={() => setImportOpen(true)}
+                    className="rounded-xl font-bold h-9 text-sm gap-2 text-white border-white/20 hover:bg-white/20 transition-all"
+                    style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}
+                  >
                     <Upload className="h-4 w-4" /> Import
                   </Button>
-                  <Button onClick={handleAddNew} className="rounded-xl font-bold h-9 text-sm gap-2 text-white" style={{ background: COLORS.emeraldGreen }}>
+                  <Button
+                    onClick={handleAddNew}
+                    className="rounded-xl font-bold h-9 text-sm gap-2 text-white shadow-lg hover:scale-105 transition-all"
+                    style={{ background: COLORS.emeraldGreen }}
+                  >
                     <Plus className="h-4 w-4" /> Add Credential
                   </Button>
                 </>
@@ -1025,12 +1134,19 @@ export default function PasswordRepository() {
           {Object.entries(stats.by_portal_type).slice(0, 6).map(([type, count]) => {
             const meta = PORTAL_META[type] || PORTAL_META.OTHER;
             return (
-              <motion.div key={type} whileHover={{ y: -2, transition: springMed }}
+              <motion.div
+                key={type}
+                whileHover={{ y: -2, transition: springMed }}
                 onClick={() => setFilterType(filterType === type ? 'ALL' : type)}
                 className={`rounded-xl border p-3 cursor-pointer transition-all ${
-                  filterType === type ? 'shadow-md' : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'
+                  filterType === type
+                    ? 'shadow-md'
+                    : isDark
+                      ? 'bg-slate-800 border-slate-700 hover:border-slate-600'
+                      : 'bg-white border-slate-200 hover:border-slate-300'
                 }`}
-                style={filterType === type ? { background: meta.bg, border: `1.5px solid ${meta.color}40` } : {}}>
+                style={filterType === type ? { background: meta.bg, border: `1.5px solid ${meta.color}40` } : {}}
+              >
                 <div className="text-lg mb-1">{meta.icon}</div>
                 <p className="text-lg font-black" style={{ color: meta.color }}>{count}</p>
                 <p className={`text-[10px] font-semibold ${isDark && filterType !== type ? 'text-slate-400' : 'text-slate-500'}`}>{meta.label}</p>
@@ -1041,19 +1157,25 @@ export default function PasswordRepository() {
       )}
 
       {/* ── Search + Filters ─────────────────────────────────────────────────── */}
-      <motion.div variants={itemVariants}
-        className={`flex flex-col sm:flex-row gap-3 p-4 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+      <motion.div
+        variants={itemVariants}
+        className={`flex flex-col sm:flex-row gap-3 p-4 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
+      >
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input className={`pl-10 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
-            placeholder="Search portal name, username, client…" value={search} onChange={e => setSearch(e.target.value)} />
+          <Input
+            className={`pl-10 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+            placeholder="Search portal name, username, client…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
         </div>
 
-        {/* Client filter */}
         {clientsInResults.length > 0 && (
           <Select value={filterClient} onValueChange={setFilterClient}>
             <SelectTrigger className={`w-full sm:w-44 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
-              <Building2 className="h-3.5 w-3.5 mr-1.5 text-slate-400" /><SelectValue placeholder="All Clients" />
+              <Building2 className="h-3.5 w-3.5 mr-1.5 text-slate-400" />
+              <SelectValue placeholder="All Clients" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">All Clients</SelectItem>
@@ -1066,7 +1188,8 @@ export default function PasswordRepository() {
 
         <Select value={filterDept} onValueChange={setFilterDept}>
           <SelectTrigger className={`w-full sm:w-40 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
-            <Filter className="h-3.5 w-3.5 mr-1.5 text-slate-400" /><SelectValue placeholder="Department" />
+            <Filter className="h-3.5 w-3.5 mr-1.5 text-slate-400" />
+            <SelectValue placeholder="Department" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="ALL">All Departments</SelectItem>
@@ -1078,7 +1201,8 @@ export default function PasswordRepository() {
 
         <Select value={filterType} onValueChange={setFilterType}>
           <SelectTrigger className={`w-full sm:w-44 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
-            <Tag className="h-3.5 w-3.5 mr-1.5 text-slate-400" /><SelectValue placeholder="Portal Type" />
+            <Tag className="h-3.5 w-3.5 mr-1.5 text-slate-400" />
+            <SelectValue placeholder="Portal Type" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="ALL">All Types</SelectItem>
@@ -1089,8 +1213,11 @@ export default function PasswordRepository() {
         </Select>
 
         {(filterDept !== 'ALL' || filterType !== 'ALL' || filterClient !== 'ALL' || search) && (
-          <Button variant="ghost" className="rounded-xl h-10 px-3 text-xs"
-            onClick={() => { setFilterDept('ALL'); setFilterType('ALL'); setFilterClient('ALL'); setSearch(''); }}>
+          <Button
+            variant="ghost"
+            className="rounded-xl h-10 px-3 text-xs"
+            onClick={() => { setFilterDept('ALL'); setFilterType('ALL'); setFilterClient('ALL'); setSearch(''); }}
+          >
             <X className="h-3.5 w-3.5 mr-1" /> Clear
           </Button>
         )}
@@ -1099,31 +1226,45 @@ export default function PasswordRepository() {
       {/* ── Results grid ─────────────────────────────────────────────────────── */}
       {isLoading ? (
         <div className="flex items-center justify-center py-20">
-          <div className="h-8 w-8 border-2 border-t-transparent rounded-full animate-spin"
-            style={{ borderColor: COLORS.mediumBlue, borderTopColor: 'transparent' }} />
+          <div
+            className="h-8 w-8 border-2 border-t-transparent rounded-full animate-spin"
+            style={{ borderColor: COLORS.mediumBlue, borderTopColor: 'transparent' }}
+          />
         </div>
       ) : isError ? (
         <div className={`text-center py-16 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <AlertTriangle className="h-12 w-12 text-amber-400 mx-auto mb-3" />
+          <AlertTriangle className="h-12 w-12 text-red-400 mx-auto mb-3" />
           <p className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Failed to load password vault</p>
           <p className="text-sm text-slate-400 mt-1">Check your network or contact the administrator.</p>
         </div>
       ) : entries.length === 0 ? (
-        <motion.div variants={itemVariants}
-          className={`text-center py-20 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <motion.div
+          variants={itemVariants}
+          className={`text-center py-20 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
+        >
           <KeyRound className="h-12 w-12 text-slate-300 mx-auto mb-3" />
           <p className={`font-semibold text-lg ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>No credentials found</p>
           <p className="text-sm text-slate-400 mt-1 mb-4">
-            {filterDept !== 'ALL' || filterType !== 'ALL' || search ? 'Try adjusting your filters.' : 'Start by adding your first portal credential.'}
+            {filterDept !== 'ALL' || filterType !== 'ALL' || search
+              ? 'Try adjusting your filters.'
+              : 'Start by adding your first portal credential.'
+            }
           </p>
           {canEdit && (
-            <Button onClick={handleAddNew} className="rounded-xl font-bold text-white" style={{ background: COLORS.emeraldGreen }}>
+            <Button
+              onClick={handleAddNew}
+              className="rounded-xl font-bold text-white"
+              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+            >
               <Plus className="h-4 w-4 mr-1.5" /> Add First Credential
             </Button>
           )}
         </motion.div>
       ) : (
-        <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+        <motion.div
+          variants={containerVariants}
+          className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4"
+        >
           <AnimatePresence>
             {entries.map(entry => (
               <EntryCard
@@ -1183,9 +1324,11 @@ export default function PasswordRepository() {
               </DialogHeader>
               <DialogFooter className="gap-3 pt-4">
                 <Button variant="ghost" className="rounded-xl" onClick={() => setDeleteTarget(null)}>Cancel</Button>
-                <Button className="rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold"
+                <Button
+                  className="rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold"
                   disabled={deleteMutation.isPending}
-                  onClick={() => deleteMutation.mutate(deleteTarget.id)}>
+                  onClick={() => deleteMutation.mutate(deleteTarget.id)}
+                >
                   {deleteMutation.isPending ? 'Deleting…' : 'Yes, Delete'}
                 </Button>
               </DialogFooter>
