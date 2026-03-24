@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -13,6 +13,7 @@ import {
   X, Check, RefreshCw, Clock, User as UserIcon, Tag,
   Building2, FileText, Activity, Filter, ExternalLink,
   MessageCircle, Phone, Send, Download, Upload, FileUp,
+  ChevronDown, Users,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,8 +39,7 @@ const COLORS = {
   whatsappDark:'#128C7E',
 };
 
-const springSnap = { type: 'spring', stiffness: 500, damping: 28 };
-const springMed  = { type: 'spring', stiffness: 340, damping: 24 };
+const springMed = { type: 'spring', stiffness: 340, damping: 24 };
 
 // ── Portal type meta ──────────────────────────────────────────────────────────
 const PORTAL_META = {
@@ -61,7 +61,6 @@ const PORTAL_META = {
 const PORTAL_TYPES  = Object.keys(PORTAL_META);
 const DEPARTMENTS   = ['GST', 'IT', 'ACC', 'TDS', 'ROC', 'TM', 'MSME', 'FEMA', 'DSC', 'OTHER'];
 
-// ── Animations ────────────────────────────────────────────────────────────────
 const containerVariants = {
   hidden:  { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } },
@@ -71,7 +70,7 @@ const itemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
-// ── WhatsApp SVG icon (inline, no external dep) ───────────────────────────────
+// ── WhatsApp SVG icon ─────────────────────────────────────────────────────────
 function WAIcon({ className }) {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="currentColor">
@@ -105,6 +104,133 @@ function DeptBadge({ dept }) {
 
 function MaskedPassword() {
   return <span className="font-mono tracking-widest text-slate-400 text-sm select-none">••••••••••</span>;
+}
+
+// ── Client Search Dropdown ────────────────────────────────────────────────────
+function ClientSearchDropdown({ value, onChange, isDark, clients = [] }) {
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+  const ref = React.useRef(null);
+
+  const selectedClient = clients.find(c => c.id === value);
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return clients.slice(0, 50);
+    const q = search.toLowerCase();
+    return clients.filter(c =>
+      (c.company_name || '').toLowerCase().includes(q)
+    ).slice(0, 50);
+  }, [clients, search]);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleSelect = (client) => {
+    onChange(client ? { id: client.id, name: client.company_name } : { id: '', name: '' });
+    setOpen(false);
+    setSearch('');
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <div
+        className={`flex items-center gap-2 h-10 rounded-xl border px-3 cursor-pointer transition-colors ${
+          isDark
+            ? 'bg-slate-700 border-slate-600 text-slate-100 hover:border-slate-500'
+            : 'bg-white border-slate-200 hover:border-slate-300'
+        }`}
+        onClick={() => setOpen(o => !o)}
+      >
+        <Building2 className="h-4 w-4 text-slate-400 flex-shrink-0" />
+        <span className={`flex-1 text-sm truncate ${selectedClient ? '' : 'text-slate-400'}`}>
+          {selectedClient ? selectedClient.company_name : 'Search client…'}
+        </span>
+        {value && (
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); handleSelect(null); }}
+            className="text-slate-400 hover:text-red-500 transition-colors"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+        <ChevronDown className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+      </div>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.15 }}
+            className={`absolute z-50 top-full left-0 right-0 mt-1 rounded-xl border shadow-xl overflow-hidden ${
+              isDark ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-200'
+            }`}
+            style={{ maxHeight: 260 }}
+          >
+            <div className={`p-2 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <input
+                  autoFocus
+                  className={`w-full pl-8 pr-3 h-8 text-sm rounded-lg border outline-none transition-colors ${
+                    isDark
+                      ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500'
+                      : 'bg-slate-50 border-slate-200 focus:border-blue-300'
+                  }`}
+                  placeholder="Search clients…"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  onClick={e => e.stopPropagation()}
+                />
+              </div>
+            </div>
+            <div className="overflow-y-auto" style={{ maxHeight: 192 }}>
+              <button
+                type="button"
+                onClick={() => handleSelect(null)}
+                className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                  isDark ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-50 text-slate-400'
+                } ${!value ? 'font-semibold' : ''}`}
+              >
+                — No client (internal) —
+              </button>
+              {filtered.map(c => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => handleSelect(c)}
+                  className={`w-full text-left px-3 py-2 transition-colors flex items-center gap-2 ${
+                    isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-50'
+                  } ${value === c.id ? (isDark ? 'bg-slate-700' : 'bg-blue-50') : ''}`}
+                >
+                  <div
+                    className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                    style={{ background: `linear-gradient(135deg, #0D3B66, #1F6FB2)` }}
+                  >
+                    {(c.company_name || '?').charAt(0).toUpperCase()}
+                  </div>
+                  <span className={`text-sm truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                    {c.company_name}
+                  </span>
+                  {value === c.id && <Check className="h-3.5 w-3.5 text-blue-500 ml-auto flex-shrink-0" />}
+                </button>
+              ))}
+              {filtered.length === 0 && (
+                <div className="px-3 py-4 text-center text-sm text-slate-400">No clients found</div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
 }
 
 // ── Reveal Password Component ─────────────────────────────────────────────────
@@ -150,42 +276,39 @@ function RevealPassword({ entryId, isDark }) {
 // ── WhatsApp Share Modal ──────────────────────────────────────────────────────
 function WhatsAppShareModal({ open, onClose, entry, isDark }) {
   const [recipientType, setRecipientType] = useState('');
-  const [customPhone,   setCustomPhone]   = useState('');
-  const [password,      setPassword]      = useState('');
-  const [loadingPw,     setLoadingPw]     = useState(false);
-  const [includePass,   setIncludePass]   = useState(false);
-  const [customMsg,     setCustomMsg]     = useState('');
+  const [customPhone, setCustomPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [loadingPw, setLoadingPw] = useState(false);
+  const [includePass, setIncludePass] = useState(false);
+  const [customMsg, setCustomMsg] = useState('');
 
-  // Fetch linked client contacts
   const { data: clientData } = useQuery({
     queryKey: ['client-contacts', entry?.client_id],
-    queryFn:  () => api.get(`/clients/${entry.client_id}`).then(r => r.data),
-    enabled:  open && !!entry?.client_id,
+    queryFn: () => api.get(`/clients/${entry.client_id}`).then(r => r.data),
+    enabled: open && !!entry?.client_id,
   });
 
-  // Build recipient list from client data
   const recipients = useMemo(() => {
     const list = [];
-    if (clientData?.phone)          list.push({ type: 'company',  label: 'Company',       name: clientData.name          || entry?.client_name || 'Company',  phone: clientData.phone });
-    if (clientData?.director_phone) list.push({ type: 'director', label: 'Director',      name: clientData.director_name || 'Director',                        phone: clientData.director_phone });
-    if (clientData?.contact_phone)  list.push({ type: 'contact',  label: 'Contact Person',name: clientData.contact_name  || 'Contact Person',                  phone: clientData.contact_phone });
+    if (clientData?.phone) list.push({ type: 'company', label: 'Company', name: clientData.name || entry?.client_name || 'Company', phone: clientData.phone });
+    if (clientData?.contact_persons?.length) {
+      clientData.contact_persons.forEach((cp, i) => {
+        if (cp.phone) list.push({ type: `contact_${i}`, label: cp.designation || 'Contact', name: cp.name, phone: cp.phone });
+      });
+    }
     return list;
   }, [clientData, entry]);
 
   const selectedRecipient = recipients.find(r => r.type === recipientType);
 
-  // Reveal password on demand for sharing
   const fetchPassword = useCallback(async () => {
     if (!entry?.id || password) return;
     setLoadingPw(true);
     try {
       const res = await api.get(`/passwords/${entry.id}/reveal`);
       setPassword(res.data.password || '');
-    } catch {
-      toast.error('Could not retrieve password for sharing');
-    } finally {
-      setLoadingPw(false);
-    }
+    } catch { toast.error('Could not retrieve password for sharing'); }
+    finally { setLoadingPw(false); }
   }, [entry?.id, password]);
 
   const handleIncludeToggle = async (checked) => {
@@ -193,18 +316,17 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
     if (checked) await fetchPassword();
   };
 
-  // Compose the message
   const buildMessage = useCallback(() => {
-    const meta   = PORTAL_META[entry?.portal_type] || PORTAL_META.OTHER;
+    const meta = PORTAL_META[entry?.portal_type] || PORTAL_META.OTHER;
     const toName = selectedRecipient?.name || 'Sir/Madam';
-    const lines  = [];
+    const lines = [];
     lines.push(`Dear ${toName},`);
     lines.push('');
     lines.push(`Please find the login credentials for *${entry?.portal_name || ''}* (${meta.fullName}):`);
-    if (entry?.url)                      lines.push(`🌐 URL: ${entry.url}`);
-    if (entry?.username)                 lines.push(`👤 Username: ${entry.username}`);
-    if (includePass && password)         lines.push(`🔑 Password: ${password}`);
-    if (entry?.notes)                    lines.push(`📝 Note: ${entry.notes}`);
+    if (entry?.url) lines.push(`🌐 URL: ${entry.url}`);
+    if (entry?.username) lines.push(`👤 Username: ${entry.username}`);
+    if (includePass && password) lines.push(`🔑 Password: ${password}`);
+    if (entry?.notes) lines.push(`📝 Note: ${entry.notes}`);
     lines.push('');
     lines.push('🔒 _This message contains confidential credentials. Please do not forward._');
     if (customMsg.trim()) { lines.push(''); lines.push(customMsg.trim()); }
@@ -217,7 +339,7 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
     const phone = selectedRecipient?.phone || customPhone;
     if (!phone) { toast.error('Please select a recipient or enter a phone number'); return; }
     const digits = phone.replace(/\D/g, '');
-    const e164   = digits.startsWith('91') ? digits : `91${digits}`;
+    const e164 = digits.startsWith('91') ? digits : `91${digits}`;
     window.open(`https://web.whatsapp.com/send?phone=${e164}&text=${encodeURIComponent(buildMessage())}`, '_blank');
     toast.success('Opening WhatsApp Web…');
     handleClose();
@@ -263,7 +385,7 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
                   <SelectValue placeholder="Select recipient" />
                 </SelectTrigger>
                 <SelectContent>
-                  {recipients.map(r => <SelectItem key={r.type} value={r.type}>{r.label} ({r.phone})</SelectItem>)}
+                  {recipients.map(r => <SelectItem key={r.type} value={r.type}>{r.label} — {r.name} ({r.phone})</SelectItem>)}
                 </SelectContent>
               </Select>
             ) : (
@@ -274,8 +396,7 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-xs font-bold uppercase text-slate-500">Include Password?</Label>
-              <input type="checkbox" checked={includePass} onChange={e => handleIncludeToggle(e.target.checked)}
-                className="w-4 h-4 rounded cursor-pointer" />
+              <input type="checkbox" checked={includePass} onChange={e => handleIncludeToggle(e.target.checked)} className="w-4 h-4 rounded cursor-pointer" />
             </div>
             {includePass && loadingPw && <p className="text-xs text-slate-400">Fetching password…</p>}
           </div>
@@ -337,11 +458,7 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
     }
   };
 
-  const handleClose = () => {
-    setFile(null);
-    setResult(null);
-    onClose();
-  };
+  const handleClose = () => { setFile(null); setResult(null); onClose(); };
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -362,13 +479,11 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
             </button>
           </div>
         </div>
-
         {!result ? (
           <div className="p-6 space-y-4">
             <div className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer hover:border-blue-400 transition-colors"
               style={{ borderColor: isDark ? '#475569' : '#e2e8f0' }}>
-              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange}
-                className="hidden" id="bulk-import-file" />
+              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange} className="hidden" id="bulk-import-file" />
               <label htmlFor="bulk-import-file" className="cursor-pointer block">
                 <FileUp className="h-8 w-8 mx-auto mb-2 text-slate-400" />
                 <p className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
@@ -377,13 +492,11 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
                 <p className="text-xs text-slate-400 mt-1">Excel (.xlsx, .xls) or CSV (.csv)</p>
               </label>
             </div>
-
             <div className={`p-3 rounded-xl text-xs ${isDark ? 'bg-blue-900/20 border border-blue-800/50' : 'bg-blue-50 border border-blue-200'}`}>
               <p className={isDark ? 'text-blue-300' : 'text-blue-700'}>
                 <b>Required columns:</b> portal_name, portal_type, url, username, password_plain, department, client_name, client_id, notes, tags
               </p>
             </div>
-
             <DialogFooter className={`flex items-center gap-3 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
               <Button variant="ghost" className="rounded-xl" onClick={handleClose}>Cancel</Button>
               <Button disabled={!file || importing} onClick={handleImport}
@@ -408,7 +521,6 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
                 <p className="text-xs text-slate-500 mt-1">Failed</p>
               </div>
             </div>
-
             {result.errors.length > 0 && (
               <div className={`p-3 rounded-xl text-xs max-h-40 overflow-y-auto ${isDark ? 'bg-red-900/20 border border-red-800/50' : 'bg-red-50 border border-red-200'}`}>
                 <p className={`font-bold mb-2 ${isDark ? 'text-red-300' : 'text-red-700'}`}>Errors:</p>
@@ -417,10 +529,8 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
                 ))}
               </div>
             )}
-
             <DialogFooter className={`flex items-center gap-3 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-              <Button className="rounded-xl font-bold text-white" style={{ background: COLORS.emeraldGreen }}
-                onClick={handleClose}>Done</Button>
+              <Button className="rounded-xl font-bold text-white" style={{ background: COLORS.emeraldGreen }} onClick={handleClose}>Done</Button>
             </DialogFooter>
           </div>
         )}
@@ -456,6 +566,14 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
             </div>
           )}
         </div>
+
+        {/* Client badge */}
+        {entry.client_name && (
+          <div className={`flex items-center gap-1.5 mb-2 px-2 py-1 rounded-lg text-xs font-medium ${isDark ? 'bg-blue-900/30 text-blue-300' : 'bg-blue-50 text-blue-700'}`}>
+            <Building2 className="h-3 w-3 flex-shrink-0" />
+            <span className="truncate">{entry.client_name}</span>
+          </div>
+        )}
 
         {/* Username */}
         {entry.username && (
@@ -496,7 +614,7 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
 
         {/* Notes */}
         {entry.notes && (
-          <div className={`mt-3 pt-3 border-t text-xs ${isDark ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-500'}`}>
+          <div className={`mt-auto pt-3 border-t text-xs ${isDark ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-500'}`}>
             {entry.notes.slice(0, 100)}{entry.notes.length > 100 ? '…' : ''}
           </div>
         )}
@@ -515,15 +633,15 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
           )}
         </div>
 
-        {/* WhatsApp quick-share button at bottom of card */}
+        {/* WhatsApp share */}
         <motion.button
           whileTap={{ scale: 0.97 }}
           onClick={() => onShare(entry)}
           className="mt-3 w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold transition-all"
           style={{
-            background:  isDark ? 'rgba(37,211,102,0.08)' : 'rgba(37,211,102,0.07)',
-            color:       COLORS.whatsapp,
-            border:      `1px solid ${COLORS.whatsapp}28`,
+            background: isDark ? 'rgba(37,211,102,0.08)' : 'rgba(37,211,102,0.07)',
+            color: COLORS.whatsapp,
+            border: `1px solid ${COLORS.whatsapp}28`,
           }}
         >
           <WAIcon className="h-3.5 w-3.5" />
@@ -536,23 +654,23 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
 
 // ── Add / Edit Modal ──────────────────────────────────────────────────────────
 const EMPTY_FORM = {
-  portal_name:    '',
-  portal_type:    'OTHER',
-  url:            '',
-  username:       '',
+  portal_name: '',
+  portal_type: 'OTHER',
+  url: '',
+  username: '',
   password_plain: '',
-  department:     'OTHER',
-  client_name:    '',
-  client_id:      '',
-  notes:          '',
-  tags:           [],
+  department: 'OTHER',
+  client_id: '',
+  client_name: '',
+  notes: '',
+  tags: [],
 };
 
-function EntryModal({ open, onClose, existing, isDark, onSave, loading }) {
-  const [form, setForm]         = useState(EMPTY_FORM);
+function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients }) {
+  const [form, setForm] = useState(EMPTY_FORM);
   const [showPass, setShowPass] = useState(false);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (existing) {
       setForm({
         portal_name:    existing.portal_name    || '',
@@ -561,8 +679,8 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading }) {
         username:       existing.username       || '',
         password_plain: '',
         department:     existing.department     || 'OTHER',
-        client_name:    existing.client_name    || '',
         client_id:      existing.client_id      || '',
+        client_name:    existing.client_name    || '',
         notes:          existing.notes          || '',
         tags:           existing.tags           || [],
       });
@@ -573,6 +691,18 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading }) {
   }, [existing, open]);
 
   const handleChange = (field, value) => setForm(p => ({ ...p, [field]: value }));
+
+  const handleClientChange = ({ id, name }) => {
+    setForm(p => ({ ...p, client_id: id || '', client_name: name || '' }));
+    // Auto-set department based on portal type if not yet set
+    if (id && form.department === 'OTHER') {
+      const suggestedDept = DEPARTMENT_MAP[form.portal_type] || 'OTHER';
+      if (suggestedDept !== 'OTHER') {
+        setForm(p => ({ ...p, client_id: id || '', client_name: name || '', department: suggestedDept }));
+      }
+    }
+  };
+
   const inputClass = `rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white'}`;
 
   return (
@@ -599,16 +729,40 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading }) {
           </div>
         </div>
 
-        <div className="p-6 space-y-4 max-h-[65vh] overflow-y-auto">
+        <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+
+          {/* Client Selector — prominent at top */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+              <Building2 className="h-3 w-3" /> Link to Client
+            </Label>
+            <ClientSearchDropdown
+              value={form.client_id}
+              onChange={handleClientChange}
+              isDark={isDark}
+              clients={clients}
+            />
+            {form.client_name && (
+              <p className="text-[10px] text-blue-500 font-medium flex items-center gap-1">
+                <Check className="h-3 w-3" /> Linked to: {form.client_name}
+              </p>
+            )}
+          </div>
+
           <div className="space-y-1.5">
             <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Portal Name *</Label>
             <Input className={inputClass} placeholder="e.g. Client XYZ GST Login"
               value={form.portal_name} onChange={e => handleChange('portal_name', e.target.value)} />
           </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Portal Type</Label>
-              <Select value={form.portal_type} onValueChange={v => handleChange('portal_type', v)}>
+              <Select value={form.portal_type} onValueChange={v => {
+                handleChange('portal_type', v);
+                const dept = DEPARTMENT_MAP[v];
+                if (dept && dept !== 'OTHER') handleChange('department', dept);
+              }}>
                 <SelectTrigger className={`${inputClass} w-full`}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {PORTAL_TYPES.map(t => (
@@ -627,16 +781,19 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading }) {
               </Select>
             </div>
           </div>
+
           <div className="space-y-1.5">
             <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Portal URL</Label>
             <Input className={inputClass} placeholder="https://www.gst.gov.in"
               value={form.url} onChange={e => handleChange('url', e.target.value)} />
           </div>
+
           <div className="space-y-1.5">
             <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Username / Login ID</Label>
             <Input className={inputClass} placeholder="login@company.com or PAN/GSTIN"
               value={form.username} onChange={e => handleChange('username', e.target.value)} />
           </div>
+
           <div className="space-y-1.5">
             <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
               Password {existing ? '(leave blank to keep current)' : ''}
@@ -651,17 +808,14 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading }) {
               </button>
             </div>
           </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Client Name (optional)</Label>
-            <Input className={inputClass} placeholder="Associated client company"
-              value={form.client_name} onChange={e => handleChange('client_name', e.target.value)} />
-          </div>
+
           <div className="space-y-1.5">
             <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Notes</Label>
             <Textarea className={`rounded-xl resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : ''}`}
               rows={3} placeholder="Any additional information…"
               value={form.notes} onChange={e => handleChange('notes', e.target.value)} />
           </div>
+
           <div className={`flex items-start gap-2.5 p-3 rounded-xl text-xs ${isDark ? 'bg-emerald-900/20 border border-emerald-800/50' : 'bg-emerald-50 border border-emerald-200'}`}>
             <Shield className="h-4 w-4 text-emerald-500 flex-shrink-0 mt-0.5" />
             <p className={isDark ? 'text-emerald-300' : 'text-emerald-700'}>
@@ -685,33 +839,35 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading }) {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function PasswordRepository() {
-  const { user }  = useAuth();
-  const isDark    = useDark();
-  const qc        = useQueryClient();
+  const { user } = useAuth();
+  const isDark = useDark();
+  const qc = useQueryClient();
 
   const isAdmin = user?.role === 'admin';
-  const perms   = (typeof user?.permissions === 'object' && user?.permissions) || {};
+  const perms = (typeof user?.permissions === 'object' && user?.permissions) || {};
   const canView = isAdmin || !!perms.can_view_passwords;
   const canEdit = isAdmin || !!perms.can_edit_passwords;
 
-  const [search,       setSearch]       = useState('');
-  const [filterDept,   setFilterDept]   = useState('ALL');
-  const [filterType,   setFilterType]   = useState('ALL');
-  const [modalOpen,    setModalOpen]    = useState(false);
-  const [editEntry,    setEditEntry]    = useState(null);
+  const [search, setSearch] = useState('');
+  const [filterDept, setFilterDept] = useState('ALL');
+  const [filterType, setFilterType] = useState('ALL');
+  const [filterClient, setFilterClient] = useState('ALL');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editEntry, setEditEntry] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [shareTarget,  setShareTarget]  = useState(null);
-  const [importOpen,   setImportOpen]   = useState(false);
-  const [saving,       setSaving]       = useState(false);
+  const [shareTarget, setShareTarget] = useState(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   // ── Data fetch ──────────────────────────────────────────────────────────────
   const { data: entries = [], isLoading, isError } = useQuery({
-    queryKey: ['passwords', filterDept, filterType, search],
+    queryKey: ['passwords', filterDept, filterType, search, filterClient],
     queryFn: async () => {
       const params = {};
-      if (filterDept !== 'ALL') params.department  = filterDept;
+      if (filterDept !== 'ALL') params.department = filterDept;
       if (filterType !== 'ALL') params.portal_type = filterType;
-      if (search.trim())        params.search      = search.trim();
+      if (filterClient !== 'ALL') params.client_id = filterClient;
+      if (search.trim()) params.search = search.trim();
       const res = await api.get('/passwords', { params });
       return res.data || [];
     },
@@ -722,8 +878,16 @@ export default function PasswordRepository() {
 
   const { data: stats = {} } = useQuery({
     queryKey: ['passwords-stats'],
-    queryFn:  () => api.get('/passwords/admin/stats').then(r => r.data),
-    enabled:  isAdmin,
+    queryFn: () => api.get('/passwords/admin/stats').then(r => r.data),
+    enabled: isAdmin,
+    staleTime: 60_000,
+  });
+
+  // ── Clients for selector ────────────────────────────────────────────────────
+  const { data: clients = [] } = useQuery({
+    queryKey: ['passwords-clients'],
+    queryFn: () => api.get('/passwords/clients-list').then(r => r.data),
+    enabled: canView,
     staleTime: 60_000,
   });
 
@@ -772,15 +936,13 @@ export default function PasswordRepository() {
       link.click();
       link.parentNode.removeChild(link);
       toast.success('Template downloaded');
-    } catch {
-      toast.error('Failed to download template');
-    }
+    } catch { toast.error('Failed to download template'); }
   };
 
-  const handleEdit   = (entry) => { setEditEntry(entry); setModalOpen(true); };
+  const handleEdit = (entry) => { setEditEntry(entry); setModalOpen(true); };
   const handleDelete = (entry) => setDeleteTarget(entry);
-  const handleShare  = (entry) => setShareTarget(entry);
-  const handleAddNew = ()      => { setEditEntry(null); setModalOpen(true); };
+  const handleShare = (entry) => setShareTarget(entry);
+  const handleAddNew = () => { setEditEntry(null); setModalOpen(true); };
 
   // ── Counts ──────────────────────────────────────────────────────────────────
   const deptCounts = useMemo(() => {
@@ -789,13 +951,16 @@ export default function PasswordRepository() {
     return counts;
   }, [entries]);
 
-  const typeCounts = useMemo(() => {
-    const counts = {};
-    entries.forEach(e => { counts[e.portal_type] = (counts[e.portal_type] || 0) + 1; });
-    return counts;
+  // Unique clients in current results for filter dropdown
+  const clientsInResults = useMemo(() => {
+    const map = {};
+    entries.forEach(e => {
+      if (e.client_id && e.client_name) map[e.client_id] = e.client_name;
+    });
+    return Object.entries(map).map(([id, name]) => ({ id, name }));
   }, [entries]);
 
-  // ── Access guard ─────────────────────────────────────────────────────────────
+  // ── Access guard ──────────────────────────────────────────────────────────
   if (!canView) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -883,6 +1048,22 @@ export default function PasswordRepository() {
           <Input className={`pl-10 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
             placeholder="Search portal name, username, client…" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
+
+        {/* Client filter */}
+        {clientsInResults.length > 0 && (
+          <Select value={filterClient} onValueChange={setFilterClient}>
+            <SelectTrigger className={`w-full sm:w-44 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
+              <Building2 className="h-3.5 w-3.5 mr-1.5 text-slate-400" /><SelectValue placeholder="All Clients" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All Clients</SelectItem>
+              {clientsInResults.map(c => (
+                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
         <Select value={filterDept} onValueChange={setFilterDept}>
           <SelectTrigger className={`w-full sm:w-40 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
             <Filter className="h-3.5 w-3.5 mr-1.5 text-slate-400" /><SelectValue placeholder="Department" />
@@ -894,6 +1075,7 @@ export default function PasswordRepository() {
             ))}
           </SelectContent>
         </Select>
+
         <Select value={filterType} onValueChange={setFilterType}>
           <SelectTrigger className={`w-full sm:w-44 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
             <Tag className="h-3.5 w-3.5 mr-1.5 text-slate-400" /><SelectValue placeholder="Portal Type" />
@@ -905,9 +1087,10 @@ export default function PasswordRepository() {
             ))}
           </SelectContent>
         </Select>
-        {(filterDept !== 'ALL' || filterType !== 'ALL' || search) && (
+
+        {(filterDept !== 'ALL' || filterType !== 'ALL' || filterClient !== 'ALL' || search) && (
           <Button variant="ghost" className="rounded-xl h-10 px-3 text-xs"
-            onClick={() => { setFilterDept('ALL'); setFilterType('ALL'); setSearch(''); }}>
+            onClick={() => { setFilterDept('ALL'); setFilterType('ALL'); setFilterClient('ALL'); setSearch(''); }}>
             <X className="h-3.5 w-3.5 mr-1" /> Clear
           </Button>
         )}
@@ -966,6 +1149,7 @@ export default function PasswordRepository() {
         isDark={isDark}
         onSave={handleSave}
         loading={saving}
+        clients={clients}
       />
 
       {/* ── Bulk Import Modal ────────────────────────────────────────────────── */}
