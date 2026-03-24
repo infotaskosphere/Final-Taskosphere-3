@@ -61,6 +61,7 @@ const NAV_GROUPS = [
       { path: '/dsc',       icon: FileText, label: 'DSC Register',      permission: 'can_view_all_dsc'     },
       { path: '/documents', icon: FileText, label: 'Document Register', permission: 'can_view_documents'   },
       { path: '/clients',   icon: Users,    label: 'Clients',           permission: 'can_view_all_clients' },
+      { path: '/passwords', icon: KeyRound, label: 'Password Vault', permission: 'can_view_passwords' },
     ],
   },
   {
