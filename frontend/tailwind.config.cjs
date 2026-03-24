@@ -2,27 +2,21 @@
 module.exports = {
   darkMode: ["class"],
   content: [
+    "./index.html",            // ✅ ADD THIS: Scans your root index.html
     "./src/**/*.{js,jsx,ts,tsx}",
   ],
   theme: {
     screens: {
-      // Mobile Breakpoints (360-414px)
       'xs': '360px',
       'sm': '375px',
       'sm-md': '390px',
       'md': '414px',
-      
-      // Foldable / Tablet Breakpoints (600-820px)
       'tablet': '600px',
       'tablet-md': '768px',
       'tablet-lg': '820px',
-      
-      // Laptop Breakpoints (1024-1440px)
       'lg': '1024px',
       'xl': '1366px',
       '2xl': '1440px',
-      
-      // Desktop Breakpoints (1920-3840px)
       '3xl': '1920px',
       '4xl': '2560px',
       '5xl': '3840px',
@@ -81,13 +75,11 @@ module.exports = {
         }
       },
       spacing: {
-        // Additional responsive spacing utilities
         'safe-xs': 'max(0.25rem, env(safe-area-inset-left))',
         'safe-sm': 'max(0.5rem, env(safe-area-inset-left))',
         'safe-md': 'max(1rem, env(safe-area-inset-left))',
       },
       fontSize: {
-        // Responsive typography
         'xs': ['0.75rem', { lineHeight: '1rem' }],
         'sm': ['0.875rem', { lineHeight: '1.25rem' }],
         'base': ['1rem', { lineHeight: '1.5rem' }],
