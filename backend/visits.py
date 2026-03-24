@@ -215,26 +215,19 @@ def _sanitize_visit(v: dict) -> dict:
     v.pop("_id", None)
     return v
 
-
 async def _find_visit_by_any_id(visit_id: str) -> Optional[dict]:
-    """
-    FIX FOR 404 ERRORS:
-    Old documents may only have MongoDB _id, or the `id` string field.
-    Try both lookups before giving up.
-    """
-    # 1. Try custom string `id` field first (standard for new documents)
+    # 1. Try custom string `id` field
     visit = await db.visits.find_one({"id": visit_id})
     if visit:
         return _sanitize_visit(visit)
 
-    # 2. Try MongoDB ObjectId (_id) — for legacy documents
+    # 2. Try MongoDB ObjectId (for legacy docs with ObjectId _id)
     try:
         from bson import ObjectId
         oid = ObjectId(visit_id)
         visit = await db.visits.find_one({"_id": oid})
         if visit:
             sanitized = _sanitize_visit(visit)
-            # If this legacy doc has no `id`, patch it into the DB now
             if not visit.get("id"):
                 await db.visits.update_one(
                     {"_id": oid},
@@ -243,6 +236,11 @@ async def _find_visit_by_any_id(visit_id: str) -> Optional[dict]:
             return sanitized
     except Exception:
         pass
+
+    # 3. NEW: Try _id as plain string (some old docs may store UUID as _id)
+    visit = await db.visits.find_one({"_id": visit_id})
+    if visit:
+        return _sanitize_visit(visit)
 
     return None
 
