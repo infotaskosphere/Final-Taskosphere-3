@@ -1,66 +1,96 @@
+# =========================
 # Web Framework
+# =========================
 fastapi==0.110.1
 uvicorn==0.25.0
 
+# =========================
 # AI / LLM
+# =========================
 google-generativeai==0.8.3
 openai==1.30.1
 
+# =========================
 # Data
+# =========================
 pandas==2.2.2
 numpy==1.26.4
 
+# =========================
 # Environment
+# =========================
 python-dotenv==1.0.1
 
-# CORS
-flask-cors==4.0.0
-
+# =========================
 # Database
+# =========================
 motor==3.3.1
 pymongo==4.5.0
 
-# Validation (pinned for litellm compatibility)
+# =========================
+# Validation
+# =========================
 pydantic==2.7.4
+email-validator==2.1.1
 
+# =========================
 # File Uploads
+# =========================
 python-multipart==0.0.9
 
-# Auth
+# =========================
+# Authentication / Security
+# =========================
 python-jose==3.3.0
 passlib==1.7.4
 bcrypt==4.0.1
 PyJWT==2.8.0
 
-# HTTP
+# =========================
+# HTTP Clients
+# =========================
 requests==2.31.0
 httpx==0.27.0
 aiohttp==3.9.5
 
-# Parsing
+# =========================
+# Parsing / Scraping
+# =========================
 beautifulsoup4==4.12.3
 
+# =========================
 # Excel / PDF / Docs
+# =========================
 openpyxl==3.1.2
 pdfplumber==0.11.0
 fpdf==1.7.2
 python-docx==1.1.2
 
+# =========================
 # Scheduling
+# =========================
 apscheduler==3.10.4
 
+# =========================
 # ORM
+# =========================
 sqlalchemy==2.0.28
 
+# =========================
 # Payments & Email
+# =========================
 stripe==9.12.0
 sendgrid==6.11.0
 
+# =========================
 # AWS
+# =========================
 boto3==1.34.100
 botocore==1.34.100
 
+# =========================
 # CLI / Utilities
+# =========================
 rich==13.7.1
 tqdm==4.66.4
 typer==0.12.3
@@ -68,7 +98,9 @@ pyparsing==3.1.2
 python-dateutil==2.9.0.post0
 jsonschema==4.22.0
 
+# =========================
 # SSL / Encoding
+# =========================
 certifi==2024.2.2
 charset-normalizer==3.3.2
 idna==3.7
