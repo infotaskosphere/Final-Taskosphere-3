@@ -229,7 +229,213 @@ async def _enrich_entry(doc: dict) -> dict:
     return doc
 
 
-# ── CRUD ROUTES ───────────────────────────────────────────────────────────────
+# ── STATIC / UTILITY ROUTES (must come BEFORE /{entry_id}) ───────────────────
+
+@router.get("/portal-types")
+async def get_portal_types(current_user: User = Depends(get_current_user)):
+    return {"portal_types": PORTAL_TYPES, "department_map": DEPARTMENT_MAP}
+
+
+@router.get("/clients-list")
+async def get_clients_for_password(current_user: User = Depends(get_current_user)):
+    """Return a lightweight list of clients for the password form dropdown."""
+    query = {}
+    if current_user.role != "admin":
+        perms = _get_user_perms(current_user)
+        if not perms.get("can_view_all_clients", False):
+            query["$or"] = [
+                {"assigned_to": current_user.id},
+                {"assignments.user_id": current_user.id},
+            ]
+
+    clients = await db.clients.find(
+        query,
+        {"_id": 0, "id": 1, "company_name": 1, "phone": 1, "email": 1,
+         "client_type": 1, "director_phone": 1, "contact_phone": 1,
+         "director_name": 1, "contact_name": 1, "contact_persons": 1}
+    ).sort("company_name", 1).to_list(2000)
+
+    return clients
+
+
+# ── IMPORTANT: /template and /bulk-import MUST be before /{entry_id} ─────────
+
+@router.get("/template", response_class=Response)
+async def download_template(current_user: User = Depends(get_current_user)):
+    if not _can_edit(current_user):
+        raise HTTPException(403, "You do not have permission to download templates")
+
+    template_columns = [
+        "portal_name", "portal_type", "url", "username", "password_plain",
+        "department", "client_name", "client_id", "notes", "tags"
+    ]
+    df = pd.DataFrame(columns=template_columns)
+
+    example_data = {
+        "portal_name":    "Example GST Portal",
+        "portal_type":    "GST",
+        "url":            "https://www.gst.gov.in",
+        "username":       "example@gst.com",
+        "password_plain": "SecurePassword123",
+        "department":     "GST",
+        "client_name":    "Example Client Pvt Ltd",
+        "client_id":      "CL001",
+        "notes":          "GST login for quarterly filings",
+        "tags":           "GST,Client,Important"
+    }
+    df.loc[0] = example_data
+
+    output = io.BytesIO()
+    df.to_excel(output, index=False, engine='openpyxl')
+    output.seek(0)
+
+    headers = {
+        "Content-Disposition": "attachment; filename=password_template.xlsx",
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    }
+    return Response(content=output.getvalue(), headers=headers)
+
+
+@router.post("/bulk-import", response_model=BulkImportResult, status_code=200)
+async def bulk_import_passwords(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    if not _can_edit(current_user):
+        raise HTTPException(403, "You do not have permission to bulk import passwords")
+
+    contents = await file.read()
+    file_like_object = io.BytesIO(contents)
+
+    df = None
+    if file.filename.endswith(('.xlsx', '.xls')):
+        df = pd.read_excel(file_like_object, engine='openpyxl')
+    elif file.filename.endswith('.csv'):
+        df = pd.read_csv(file_like_object)
+    else:
+        raise HTTPException(400, "Unsupported file type. Please upload an Excel (.xlsx, .xls) or CSV (.csv) file.")
+
+    required_columns = [
+        "portal_name", "portal_type", "url", "username", "password_plain",
+        "department", "client_name", "client_id", "notes", "tags"
+    ]
+    df.columns = df.columns.str.lower()
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        raise HTTPException(400, f"Missing required columns in the file: {', '.join(missing_columns)}")
+
+    total_processed = 0
+    successful_imports = 0
+    failed_imports = 0
+    errors = []
+
+    for index, row in df.iterrows():
+        total_processed += 1
+        try:
+            client_name_val = str(row.get("client_name", "")).strip() or None
+            client_id_val = str(row.get("client_id", "")).strip() or None
+
+            if client_id_val and not client_name_val:
+                client_doc = await db.clients.find_one({"id": client_id_val}, {"_id": 0, "company_name": 1})
+                if client_doc:
+                    client_name_val = client_doc.get("company_name")
+
+            entry_data = {
+                "portal_name":    str(row.get("portal_name", "")).strip(),
+                "portal_type":    str(row.get("portal_type", "OTHER")).upper(),
+                "url":            str(row.get("url", "")).strip() or None,
+                "username":       str(row.get("username", "")).strip() or None,
+                "password_plain": str(row.get("password_plain", "")).strip() or None,
+                "department":     str(row.get("department", "OTHER")).upper(),
+                "client_name":    client_name_val,
+                "client_id":      client_id_val,
+                "notes":          str(row.get("notes", "")).strip() or None,
+                "tags":           [t.strip() for t in str(row.get("tags", "")).split(',') if t.strip()] if isinstance(row.get("tags"), str) else [],
+            }
+
+            new_entry = PasswordEntryCreate(**entry_data)
+
+            now = datetime.now(timezone.utc).isoformat()
+            entry_id = str(uuid.uuid4())
+            doc = {
+                "id":                 entry_id,
+                "portal_name":        new_entry.portal_name,
+                "portal_type":        new_entry.portal_type,
+                "url":                new_entry.url,
+                "username":           new_entry.username,
+                "password_encrypted": _encrypt(new_entry.password_plain or ""),
+                "_password_set":      bool(new_entry.password_plain),
+                "department":         new_entry.department,
+                "client_name":        new_entry.client_name,
+                "client_id":          new_entry.client_id,
+                "notes":              new_entry.notes,
+                "tags":               new_entry.tags,
+                "created_by":         current_user.id,
+                "created_at":         now,
+                "updated_at":         now,
+                "last_accessed_at":   now,
+            }
+            await db.passwords.insert_one(doc)
+
+            await db.password_access_logs.insert_one({
+                "id":          str(uuid.uuid4()),
+                "action":      "BULK_CREATE",
+                "entry_id":    entry_id,
+                "portal_name": new_entry.portal_name,
+                "user_id":     current_user.id,
+                "user_name":   current_user.full_name,
+                "timestamp":   now,
+            })
+            successful_imports += 1
+        except ValidationError as e:
+            failed_imports += 1
+            errors.append({"row": index + 2, "error": e.errors(), "data": row.to_dict()})
+        except Exception as e:
+            failed_imports += 1
+            errors.append({"row": index + 2, "error": str(e), "data": row.to_dict()})
+
+    return {
+        "total_processed": total_processed,
+        "successful_imports": successful_imports,
+        "failed_imports": failed_imports,
+        "errors": errors
+    }
+
+
+# ── ADMIN ROUTES (also before /{entry_id}) ────────────────────────────────────
+
+@router.get("/admin/access-logs")
+async def get_access_logs(
+    entry_id: Optional[str] = Query(None),
+    limit: int = Query(200, le=500),
+    current_user: User = Depends(require_admin),
+):
+    query: dict = {}
+    if entry_id:
+        query["entry_id"] = entry_id
+    logs = (
+        await db.password_access_logs.find(query, {"_id": 0})
+        .sort("timestamp", -1)
+        .to_list(limit)
+    )
+    return logs
+
+
+@router.get("/admin/stats")
+async def get_password_stats(current_user: User = Depends(require_admin)):
+    total = await db.passwords.count_documents({})
+    by_dept = {}
+    by_type = {}
+    docs = await db.passwords.find({}, {"_id": 0, "department": 1, "portal_type": 1}).to_list(5000)
+    for d in docs:
+        dept = d.get("department", "OTHER")
+        ptype = d.get("portal_type", "OTHER")
+        by_dept[dept] = by_dept.get(dept, 0) + 1
+        by_type[ptype] = by_type.get(ptype, 0) + 1
+    return {"total": total, "by_department": by_dept, "by_portal_type": by_type}
+
+
+# ── LIST + CREATE ─────────────────────────────────────────────────────────────
 
 @router.get("", response_model=List[PasswordEntry])
 async def list_passwords(
@@ -267,33 +473,6 @@ async def list_passwords(
     return result
 
 
-@router.get("/portal-types")
-async def get_portal_types(current_user: User = Depends(get_current_user)):
-    return {"portal_types": PORTAL_TYPES, "department_map": DEPARTMENT_MAP}
-
-
-@router.get("/clients-list")
-async def get_clients_for_password(current_user: User = Depends(get_current_user)):
-    """Return a lightweight list of clients for the password form dropdown."""
-    query = {}
-    if current_user.role != "admin":
-        perms = _get_user_perms(current_user)
-        if not perms.get("can_view_all_clients", False):
-            query["$or"] = [
-                {"assigned_to": current_user.id},
-                {"assignments.user_id": current_user.id},
-            ]
-
-    clients = await db.clients.find(
-        query,
-        {"_id": 0, "id": 1, "company_name": 1, "phone": 1, "email": 1,
-         "client_type": 1, "director_phone": 1, "contact_phone": 1,
-         "director_name": 1, "contact_name": 1, "contact_persons": 1}
-    ).sort("company_name", 1).to_list(2000)
-
-    return clients
-
-
 @router.post("", response_model=PasswordEntry, status_code=201)
 async def create_password(
     data: PasswordEntryCreate,
@@ -302,7 +481,6 @@ async def create_password(
     if not _can_edit(current_user):
         raise HTTPException(403, "You do not have permission to create passwords")
 
-    # If client_id provided but client_name not, fetch it
     client_name = data.client_name
     if data.client_id and not client_name:
         client_doc = await db.clients.find_one({"id": data.client_id}, {"_id": 0, "company_name": 1})
@@ -345,6 +523,8 @@ async def create_password(
     doc = await _enrich_entry(dict(doc))
     return _strip_sensitive(doc)
 
+
+# ── PARAMETERIZED ROUTES (/{entry_id} — must come LAST) ──────────────────────
 
 @router.get("/{entry_id}", response_model=PasswordEntry)
 async def get_password_entry(
@@ -429,7 +609,6 @@ async def update_password_entry(
         updates["department"] = data.department.upper()
     if data.client_id is not None:
         updates["client_id"] = data.client_id or None
-        # Auto-fetch client name if client_id changed
         if data.client_id and not data.client_name:
             client_doc = await db.clients.find_one({"id": data.client_id}, {"_id": 0, "company_name": 1})
             if client_doc:
@@ -483,183 +662,3 @@ async def delete_password_entry(
         "timestamp":   now,
     })
     return {"message": f"Entry '{existing.get('portal_name')}' deleted successfully"}
-
-
-# ── BULK IMPORT / TEMPLATE ────────────────────────────────────────────────────
-
-@router.get("/template", response_class=Response)
-async def download_template(current_user: User = Depends(get_current_user)):
-    if not _can_edit(current_user):
-        raise HTTPException(403, "You do not have permission to download templates")
-
-    template_columns = [
-        "portal_name", "portal_type", "url", "username", "password_plain",
-        "department", "client_name", "client_id", "notes", "tags"
-    ]
-    df = pd.DataFrame(columns=template_columns)
-
-    example_data = {
-        "portal_name":    "Example GST Portal",
-        "portal_type":    "GST",
-        "url":            "https://www.gst.gov.in",
-        "username":       "example@gst.com",
-        "password_plain": "SecurePassword123",
-        "department":     "GST",
-        "client_name":    "Example Client Pvt Ltd",
-        "client_id":      "CL001",
-        "notes":          "GST login for quarterly filings",
-        "tags":           "GST,Client,Important"
-    }
-    df.loc[0] = example_data
-
-    output = io.BytesIO()
-    df.to_excel(output, index=False, engine='openpyxl')
-    output.seek(0)
-
-    headers = {
-        "Content-Disposition": "attachment; filename=password_template.xlsx",
-        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    }
-    return Response(content=output.getvalue(), headers=headers)
-
-
-@router.post("/bulk-import", response_model=BulkImportResult, status_code=200)
-async def bulk_import_passwords(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
-):
-    if not _can_edit(current_user):
-        raise HTTPException(403, "You do not have permission to bulk import passwords")
-
-    contents = await file.read()
-    file_like_object = io.BytesIO(contents)
-
-    df = None
-    if file.filename.endswith(('.xlsx', '.xls')):
-        df = pd.read_excel(file_like_object, engine='openpyxl')
-    elif file.filename.endswith('.csv'):
-        df = pd.read_csv(file_like_object)
-    else:
-        raise HTTPException(400, "Unsupported file type. Please upload an Excel (.xlsx, .xls) or CSV (.csv) file.")
-
-    required_columns = [
-        "portal_name", "portal_type", "url", "username", "password_plain",
-        "department", "client_name", "client_id", "notes", "tags"
-    ]
-    df.columns = df.columns.str.lower()
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    if missing_columns:
-        raise HTTPException(400, f"Missing required columns in the file: {', '.join(missing_columns)}")
-
-    total_processed = 0
-    successful_imports = 0
-    failed_imports = 0
-    errors = []
-
-    for index, row in df.iterrows():
-        total_processed += 1
-        try:
-            client_name_val = str(row.get("client_name", "")).strip() or None
-            client_id_val = str(row.get("client_id", "")).strip() or None
-
-            # Auto-resolve client name from client_id if needed
-            if client_id_val and not client_name_val:
-                client_doc = await db.clients.find_one({"id": client_id_val}, {"_id": 0, "company_name": 1})
-                if client_doc:
-                    client_name_val = client_doc.get("company_name")
-
-            entry_data = {
-                "portal_name":    str(row.get("portal_name", "")).strip(),
-                "portal_type":    str(row.get("portal_type", "OTHER")).upper(),
-                "url":            str(row.get("url", "")).strip() or None,
-                "username":       str(row.get("username", "")).strip() or None,
-                "password_plain": str(row.get("password_plain", "")).strip() or None,
-                "department":     str(row.get("department", "OTHER")).upper(),
-                "client_name":    client_name_val,
-                "client_id":      client_id_val,
-                "notes":          str(row.get("notes", "")).strip() or None,
-                "tags":           [t.strip() for t in str(row.get("tags", "")).split(',') if t.strip()] if isinstance(row.get("tags"), str) else [],
-            }
-
-            new_entry = PasswordEntryCreate(**entry_data)
-
-            now = datetime.now(timezone.utc).isoformat()
-            entry_id = str(uuid.uuid4())
-            doc = {
-                "id":                 entry_id,
-                "portal_name":        new_entry.portal_name,
-                "portal_type":        new_entry.portal_type,
-                "url":                new_entry.url,
-                "username":           new_entry.username,
-                "password_encrypted": _encrypt(new_entry.password_plain or ""),
-                "_password_set":      bool(new_entry.password_plain),
-                "department":         new_entry.department,
-                "client_name":        new_entry.client_name,
-                "client_id":          new_entry.client_id,
-                "notes":              new_entry.notes,
-                "tags":               new_entry.tags,
-                "created_by":         current_user.id,
-                "created_at":         now,
-                "updated_at":         now,
-                "last_accessed_at":   now,
-            }
-            await db.passwords.insert_one(doc)
-
-            await db.password_access_logs.insert_one({
-                "id":          str(uuid.uuid4()),
-                "action":      "BULK_CREATE",
-                "entry_id":    entry_id,
-                "portal_name": new_entry.portal_name,
-                "user_id":     current_user.id,
-                "user_name":   current_user.full_name,
-                "timestamp":   now,
-            })
-            successful_imports += 1
-        except ValidationError as e:
-            failed_imports += 1
-            errors.append({"row": index + 2, "error": e.errors(), "data": row.to_dict()})
-        except Exception as e:
-            failed_imports += 1
-            errors.append({"row": index + 2, "error": str(e), "data": row.to_dict()})
-
-    return {
-        "total_processed": total_processed,
-        "successful_imports": successful_imports,
-        "failed_imports": failed_imports,
-        "errors": errors
-    }
-
-
-# ── ACCESS LOG (admin only) ───────────────────────────────────────────────────
-
-@router.get("/admin/access-logs")
-async def get_access_logs(
-    entry_id: Optional[str] = Query(None),
-    limit: int = Query(200, le=500),
-    current_user: User = Depends(require_admin),
-):
-    query: dict = {}
-    if entry_id:
-        query["entry_id"] = entry_id
-    logs = (
-        await db.password_access_logs.find(query, {"_id": 0})
-        .sort("timestamp", -1)
-        .to_list(limit)
-    )
-    return logs
-
-
-# ── STATS (admin only) ────────────────────────────────────────────────────────
-
-@router.get("/admin/stats")
-async def get_password_stats(current_user: User = Depends(require_admin)):
-    total = await db.passwords.count_documents({})
-    by_dept = {}
-    by_type = {}
-    docs = await db.passwords.find({}, {"_id": 0, "department": 1, "portal_type": 1}).to_list(5000)
-    for d in docs:
-        dept = d.get("department", "OTHER")
-        ptype = d.get("portal_type", "OTHER")
-        by_dept[dept] = by_dept.get(dept, 0) + 1
-        by_type[ptype] = by_type.get(ptype, 0) + 1
-    return {"total": total, "by_department": by_dept, "by_portal_type": by_type}
