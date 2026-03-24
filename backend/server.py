@@ -971,14 +971,14 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
 
 @api_router.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin):
-    # 🔍 Find user
+    # Find user
     user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
 
-    # ❌ Invalid credentials
+    # Invalid credentials
     if not user or not verify_password(credentials.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    # ❌ Inactive user
+    # Inactive user
     user_status = user.get("status")
     if user_status is not None and user_status != "active":
         raise HTTPException(
@@ -986,28 +986,24 @@ async def login(credentials: UserLogin):
             detail=f"Your account is {user_status}. Awaiting admin approval."
         )
 
-    # ✅ Ensure permissions exist
+    # Ensure permissions exist
     user["permissions"] = user.get("permissions", UserPermissions().model_dump())
 
-    # ✅ Fix datetime
+    # Fix datetime
     if "created_at" in user and isinstance(user["created_at"], str):
         user["created_at"] = datetime.fromisoformat(user["created_at"])
 
-    # ✅ Ensure consent field exists (IMPORTANT)
-    consent_given = user.get("consent_given", False)
-
-    # ✅ Create user object (without password)
+    # Create user object
     user_obj = User(**{k: v for k, v in user.items() if k != "password"})
 
-    # 🔐 Generate token
+    # Generate token
     access_token = create_access_token({"sub": user_obj.id})
 
-    # ✅ FINAL RESPONSE (UPDATED)
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "user": user_obj,
-        "consent_given": consent_given   # 🔥 NEW FIELD
+        "consent_given": True   # Always true — popup removed
     }
 
 @api_router.get("/auth/me", response_model=User)
