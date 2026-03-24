@@ -314,13 +314,12 @@ async def startup_event():
         # 🔥 AUTO MIGRATION: Add consent_given for old users
     try:
         result = await db.users.update_many(
-            {"consent_given": {"$exists": False}},
+            {},  # all users
             {"$set": {"consent_given": True}}
         )
-        logger.info(f"Consent migration completed. Updated users: {result.modified_count}")
+        logger.info(f"Consent cleanup: Updated {result.modified_count} users")
     except Exception as e:
-        logger.error(f"Consent migration failed: {e}")
-
+        logger.error(f"Consent cleanup failed: {e}")
 
 # ====================== HEALTH ======================
 @app.get("/health")
