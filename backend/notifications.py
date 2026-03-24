@@ -1,21 +1,21 @@
-"""
+""" 
 notifications.py
 ================
 Full notification router + internal event helpers.
 
 Notification visibility rules:
-  • Admin          → always receives ALL system/task/todo/dsc/lead notifications
-  • Specific users → receive task/todo notifications only if their permissions
-                     include  can_receive_task_notifications = True
-  • Notification owners → always see their own notifications
+ • Admin → always receives ALL system/task/todo/dsc/lead notifications
+ • Specific users → receive task/todo notifications only if their permissions
+   include can_receive_task_notifications = True
+ • Notification owners → always see their own notifications
 
 NOTE: Add the following field to UserPermissions in models.py:
-    can_receive_task_notifications: bool = False
+  can_receive_task_notifications: bool = False
 
 And add it to DEFAULT_ROLE_PERMISSIONS:
-    admin   → True
-    manager → False   (admin can toggle per-user)
-    staff   → False   (admin can toggle per-user)
+  admin → True
+  manager → False (admin can toggle per-user)
+  staff → False (admin can toggle per-user)
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # ====================== HELPERS ======================
 
 def safe_dt(value):
-    """
+    """ 
     Coerce any datetime-like value to a timezone-aware datetime.
     Defined locally to avoid circular imports with dependencies.py.
     """
@@ -57,9 +57,9 @@ def safe_dt(value):
 
 class NotificationBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    title: str
-    message: str
-    type: str = "system"   # task | todo | dsc | system | lead
+    title: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    type: str = "system" # task | todo | dsc | system | lead
 
 
 class Notification(NotificationBase):
@@ -72,8 +72,8 @@ class Notification(NotificationBase):
 
 
 class AdminNotificationRequest(BaseModel):
-    title: str
-    message: str
+    title: str = Field(min_length=1)
+    message: str = Field(min_length=1)
     type: str = "system"
     user_id: Optional[str] = None
     broadcast: bool = False
@@ -98,6 +98,16 @@ def normalize_notification(doc: dict) -> dict:
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
 
+# ✅ OPTIONAL BUT IMPORTANT (run once)
+async def create_notification_indexes():
+    try:
+        await db.notifications.create_index("user_id")
+        await db.notifications.create_index("is_read")
+        await db.notifications.create_index("created_at")
+    except Exception as e:
+        logger.error(f"Index creation failed: {e}")
+
+
 # ====================== INTERNAL UTILITY ======================
 
 async def create_notification(
@@ -106,7 +116,7 @@ async def create_notification(
     message: str,
     type: str = "system",
 ) -> Optional[Notification]:
-    """
+    """ 
     Low-level helper — inserts a single notification for one user.
     Does NOT check permissions. Callers must decide who to notify.
     Returns the Notification object or None on failure.
@@ -120,7 +130,9 @@ async def create_notification(
         )
         doc = notification.model_dump()
         doc["created_at"] = datetime.now(timezone.utc)
-        await db.notifications.insert_one(doc)
+        result = await db.notifications.insert_one(doc)
+        if not result.inserted_id:
+            raise Exception("Insert failed")
         doc.pop("_id", None)
         return notification
     except Exception as e:
@@ -138,7 +150,7 @@ async def _get_admin_user_ids() -> List[str]:
 
 
 async def _get_permitted_user_ids() -> List[str]:
-    """
+    """ 
     Returns user IDs (non-admin) who have can_receive_task_notifications = True.
     These users receive task/todo event notifications alongside admins.
     """
@@ -159,14 +171,14 @@ async def notify_admins_and_permitted(
     type: str = "task",
     exclude_user_id: Optional[str] = None,
 ) -> None:
-    """
+    """ 
     Fires a notification to:
-      • All admin users
-      • All non-admin users who have can_receive_task_notifications = True
+    • All admin users
+    • All non-admin users who have can_receive_task_notifications = True
 
     Pass exclude_user_id to avoid notifying the actor themselves.
     """
-    admin_ids     = await _get_admin_user_ids()
+    admin_ids = await _get_admin_user_ids()
     permitted_ids = await _get_permitted_user_ids()
 
     # Merge, deduplicate, exclude actor
@@ -177,29 +189,35 @@ async def notify_admins_and_permitted(
     if not recipient_ids:
         return
 
-    now  = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
     docs = [
         {
-            "id":         str(uuid.uuid4()),
-            "user_id":    uid,
-            "title":      title,
-            "message":    message,
-            "type":       type,
-            "is_read":    False,
+            "id": str(uuid.uuid4()),
+            "user_id": uid,
+            "title": title,
+            "message": message,
+            "type": type,
+            "is_read": False,
             "created_at": now,
         }
         for uid in recipient_ids
     ]
 
-    if docs:
-        await db.notifications.insert_many(docs)
+    # prevent duplicate spam within short time (optional)
+    # you can enhance this later
+
+    try:
+        if docs:
+            await db.notifications.insert_many(docs, ordered=False)
+    except Exception as e:
+        logger.error(f"[Notification] bulk insert failed: {e}")
 
 
 # ====================== EVENT HELPERS ======================
 # Import and call these from your tasks / todos / visits routers.
 
 def _role_value(user: User) -> str:
-    """
+    """ 
     Safely extract the role string whether it is stored as a plain str
     or as a Pydantic enum (has a .value attribute).
     Fixes the AttributeError: 'str' object has no attribute 'value' crash
@@ -215,7 +233,7 @@ async def on_task_status_changed(
     new_status: str,
     changed_by_user: User,
 ) -> None:
-    """
+    """ 
     Call this whenever a task's status is updated.
     Notifies admins + permitted users (excludes the actor if they are admin).
     """
@@ -236,7 +254,7 @@ async def on_task_completed(
     task_title: str,
     completed_by_user: User,
 ) -> None:
-    """
+    """ 
     Call this when a task reaches 'completed' status specifically.
     Wrapper around on_task_status_changed for clarity.
     """
@@ -254,7 +272,7 @@ async def on_task_assigned(
     assigned_to_user_id: str,
     assigned_by_user: User,
 ) -> None:
-    """
+    """ 
     Call this when a NON-ADMIN user assigns a task.
     Admin self-assignments are excluded from generating a notification.
     Also sends a personal notification to the assignee.
@@ -290,13 +308,13 @@ async def on_todo_created(
     todo_title: str,
     created_by_user: User,
 ) -> None:
-    """
+    """ 
     Call this when any user creates a todo.
     Notifies admins + permitted users (non-admin creator triggers the alert).
     Admin-created todos do NOT generate an alert (avoids self-spam).
     """
     if _role_value(created_by_user) == "admin":
-        return  # Admins creating todos don't need to alert themselves
+        return # Admins creating todos don't need to alert themselves
 
     await notify_admins_and_permitted(
         title="New Todo Created",
@@ -318,10 +336,10 @@ async def send_notification(
     # with () here. Use Depends(require_admin) not Depends(require_admin()).
     current_user: User = Depends(require_admin),
 ):
-    """
+    """ 
     Admin-only endpoint to manually send notifications.
-    • Single-user  → provide user_id
-    • Broadcast    → set broadcast=true (max 5 000 users)
+    • Single-user → provide user_id
+    • Broadcast → set broadcast=true (max 5 000 users)
     """
     now = datetime.now(timezone.utc)
 
@@ -336,12 +354,12 @@ async def send_notification(
 
         docs = [
             {
-                "id":         str(uuid.uuid4()),
-                "user_id":    u["id"],
-                "title":      payload.title,
-                "message":    payload.message,
-                "type":       payload.type,
-                "is_read":    False,
+                "id": str(uuid.uuid4()),
+                "user_id": u["id"],
+                "title": payload.title,
+                "message": payload.message,
+                "type": payload.type,
+                "is_read": False,
                 "created_at": now,
             }
             for u in users
@@ -349,7 +367,7 @@ async def send_notification(
         ]
 
         if docs:
-            await db.notifications.insert_many(docs)
+            await db.notifications.insert_many(docs, ordered=False)
 
         return {
             "status": "success",
@@ -407,10 +425,14 @@ async def get_my_notifications(
 async def get_unread_count(
     current_user: User = Depends(get_current_user),
 ):
-    count = await db.notifications.count_documents(
-        {"user_id": current_user.id, "is_read": False}
-    )
-    return {"count": count}
+    try:
+        count = await db.notifications.count_documents(
+            {"user_id": current_user.id, "is_read": False}
+        )
+        return {"count": int(count or 0)}
+    except Exception as e:
+        logger.error(f"[Notification] unread-count error: {e}")
+        return {"count": 0}
 
 
 @router.patch("/{notification_id}/read")
