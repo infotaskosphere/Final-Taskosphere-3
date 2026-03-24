@@ -32,75 +32,74 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const COLORS = {
-  deepBlue:     '#0D3B66',
-  mediumBlue:   '#1F6FB2',
-  lightBlue:    '#E0F2FE',
+  deepBlue: '#0D3B66',
+  mediumBlue: '#1F6FB2',
+  lightBlue: '#E0F2FE',
   emeraldGreen: '#1FAF5A',
-  lightGreen:   '#5CCB5F',
+  lightGreen: '#5CCB5F',
 };
 
-const SIDEBAR_EXPANDED  = 280; // Increased from 260
-const SIDEBAR_COLLAPSED = 80;  // Increased from 72
+const SIDEBAR_EXPANDED = 280;
+const SIDEBAR_COLLAPSED = 80;
 
-// ── Nav sequence: Core → Records → Client Proposals → Admin → Settings ────────
 const NAV_GROUPS = [
   {
     id: 'core',
     items: [
-      { path: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard'           },
-      { path: '/tasks',      icon: CheckSquare,     label: 'Tasks'               },
-      { path: '/todos',      icon: CheckSquare,     label: 'To Do'               },
-      { path: '/attendance', icon: Clock,           label: 'Attendance'          },
-      { path: '/duedates',   icon: Calendar,        label: 'Compliance Calendar' },
-      { path: '/visits',     icon: MapPin,          label: 'Client Visits'       },
+      { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+      { path: '/tasks', icon: CheckSquare, label: 'Tasks' },
+      { path: '/todos', icon: CheckSquare, label: 'To Do' },
+      { path: '/attendance', icon: Clock, label: 'Attendance' },
+      { path: '/duedates', icon: Calendar, label: 'Compliance Calendar' },
+      { path: '/visits', icon: MapPin, label: 'Client Visits' },
     ],
   },
   {
     id: 'records',
     dividerLabel: 'Records',
     items: [
-      { path: '/dsc',       icon: FileText, label: 'DSC Register',      permission: 'can_view_all_dsc'     },
-      { path: '/documents', icon: FileText, label: 'Document Register', permission: 'can_view_documents'   },
-      { path: '/clients',   icon: Users,    label: 'Clients',           permission: 'can_view_all_clients' },
-      { path: '/passwords', icon: KeyRound, label: 'Password Vault',    permission: 'can_view_passwords'   },
+      { path: '/dsc', icon: FileText, label: 'DSC Register', permission: 'can_view_all_dsc' },
+      { path: '/documents', icon: FileText, label: 'Document Register', permission: 'can_view_documents' },
+      { path: '/clients', icon: Users, label: 'Clients', permission: 'can_view_all_clients' },
+      { path: '/passwords', icon: KeyRound, label: 'Password Vault', permission: 'can_view_passwords' },
     ],
   },
   {
     id: 'proposals',
     dividerLabel: 'Client Proposals',
     items: [
-      { path: '/leads',      icon: Target,  label: 'Lead Management', permission: 'can_view_all_leads'    },
-      { path: '/quotations', icon: Receipt, label: 'Quotations',      permission: 'can_create_quotations' },
+      { path: '/leads', icon: Target, label: 'Lead Management', permission: 'can_view_all_leads' },
+      { path: '/quotations', icon: Receipt, label: 'Quotations', permission: 'can_create_quotations' },
     ],
   },
   {
     id: 'admin',
     dividerLabel: 'Admin',
     items: [
-      { path: '/staff-activity', icon: Activity,  label: 'Staff Activity',  permission: 'can_view_staff_activity' },
-      { path: '/reports',        icon: BarChart3,  label: 'Reports'                                               },
-      { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log', permission: 'can_view_audit_logs'    },
-      { path: '/users',          icon: Users,      label: 'Users',          permission: 'can_view_user_page'     },
+      { path: '/staff-activity', icon: Activity, label: 'Staff Activity', permission: 'can_view_staff_activity' },
+      { path: '/reports', icon: BarChart3, label: 'Reports' },
+      { path: '/task-audit', icon: Activity, label: 'Task Audit Log', permission: 'can_view_audit_logs' },
+      { path: '/users', icon: Users, label: 'Users', permission: 'can_view_user_page' },
     ],
   },
   {
     id: 'settings',
     dividerLabel: 'Settings',
     items: [
-      { path: '/settings/email', icon: Mail,     label: 'Email Accounts'   },
-      { path: '/settings',       icon: Settings, label: 'General Settings' },
+      { path: '/settings/email', icon: Mail, label: 'Email Accounts' },
+      { path: '/settings', icon: Settings, label: 'General Settings' },
     ],
   },
 ];
 
 const springSnap = { type: 'spring', stiffness: 500, damping: 28 };
-const springMed  = { type: 'spring', stiffness: 400, damping: 24 };
+const springMed = { type: 'spring', stiffness: 400, damping: 24 };
 const springSoft = { type: 'spring', stiffness: 300, damping: 20 };
 
 const DashboardLayout = ({ children }) => {
   const { user, logout, hasPermission, loading } = useAuth();
-  const navigate  = useNavigate();
-  const location  = useLocation();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => {
@@ -115,6 +114,9 @@ const DashboardLayout = ({ children }) => {
   const [isDesktop, setIsDesktop] = useState(
     () => typeof window !== 'undefined' && window.innerWidth >= 1024
   );
+
+  // ✅ NEW STATE ADDED
+  const [hasUnread, setHasUnread] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
@@ -143,7 +145,6 @@ const DashboardLayout = ({ children }) => {
     if (window.innerWidth >= 1024) setSidebarOpen(true);
   }, []);
 
-  // Close sidebar on mobile when route changes
   useEffect(() => {
     if (!isDesktop) setSidebarOpen(false);
   }, [location.pathname, isDesktop]);
@@ -157,6 +158,29 @@ const DashboardLayout = ({ children }) => {
     return () => document.removeEventListener('mousedown', handle);
   }, [userMenuOpen]);
 
+  // ✅ NEW: Fetch unread notifications count
+  useEffect(() => {
+    const fetchUnread = async () => {
+      try {
+        const res = await fetch('/notifications/unread-count', {
+          credentials: 'include',
+        });
+
+        if (!res.ok) return;
+
+        const data = await res.json();
+        setHasUnread(data.count > 0);
+      } catch (err) {
+        console.error('Unread fetch error:', err);
+      }
+    };
+
+    fetchUnread();
+
+    const interval = setInterval(fetchUnread, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   if (loading) return null;
   if (!user) {
     navigate('/login', { replace: true });
@@ -169,16 +193,15 @@ const DashboardLayout = ({ children }) => {
     navigate('/login', { replace: true });
   };
 
-  const allNavItems     = NAV_GROUPS.flatMap(g => g.items);
+  const allNavItems = NAV_GROUPS.flatMap(g => g.items);
   const visibleNavItems = allNavItems.filter(
     item => !item.permission || hasPermission(item.permission)
   );
   const activeLabel = visibleNavItems.find(i => i.path === location.pathname)?.label || 'Dashboard';
 
   const sidebarPx = collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED;
-  const offsetPx  = isDesktop ? sidebarPx : 0;
+  const offsetPx = isDesktop ? sidebarPx : 0;
 
-  // ── Sidebar nav item ──────────────────────────────────────────────────────
   const NavItem = ({ item }) => {
     if (item.permission && !hasPermission(item.permission)) return null;
     const isActive = location.pathname === item.path;
@@ -193,8 +216,7 @@ const DashboardLayout = ({ children }) => {
         <Link
           to={item.path}
           title={collapsed ? item.label : undefined}
-          className={`
-            relative flex items-center gap-3
+          className={`relative flex items-center gap-3
             ${collapsed ? 'justify-center px-0 py-3' : 'px-3 py-2.5'}
             rounded-xl transition-all duration-200 group
             ${isActive
@@ -204,10 +226,9 @@ const DashboardLayout = ({ children }) => {
           `}
           style={isActive ? {
             background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`,
-            boxShadow:  '0 4px 14px rgba(13,59,102,0.28)',
+            boxShadow: '0 4px 14px rgba(13,59,102,0.28)',
           } : {}}
         >
-          {/* Active left accent bar */}
           {isActive && !collapsed && (
             <span
               className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full"
@@ -227,21 +248,12 @@ const DashboardLayout = ({ children }) => {
             </span>
           )}
 
-          {/* Active dot indicator when collapsed */}
           {isActive && collapsed && (
             <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-white/70" />
           )}
 
-          {/* Tooltip when collapsed */}
           {collapsed && (
-            <div className="
-              absolute left-full ml-3 px-2.5 py-1.5
-              bg-slate-800 dark:bg-slate-700 text-white text-xs font-medium
-              rounded-lg whitespace-nowrap pointer-events-none
-              opacity-0 group-hover:opacity-100
-              translate-x-1 group-hover:translate-x-0
-              transition-all duration-200 z-[100] shadow-lg
-            ">
+            <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-800 dark:bg-slate-700 text-white text-xs font-medium rounded-lg whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 translate-x-1 group-hover:translate-x-0 transition-all duration-200 z-[100] shadow-lg">
               {item.label}
               <span className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-slate-800 dark:border-r-slate-700" />
             </div>
@@ -251,7 +263,6 @@ const DashboardLayout = ({ children }) => {
     );
   };
 
-  // ── Nav divider ───────────────────────────────────────────────────────────
   const NavDivider = ({ label }) => (
     <div className={`mt-4 mb-2 ${collapsed ? 'px-2' : 'px-3'}`}>
       {!collapsed && label ? (
@@ -267,7 +278,7 @@ const DashboardLayout = ({ children }) => {
   return (
     <div className={`min-h-screen relative ${isDark ? 'bg-[#0f172a]' : 'bg-[#F4F6FA]'}`}>
 
-      {/* ── Mobile Overlay ── */}
+      {/* Mobile Overlay */}
       <AnimatePresence>
         {sidebarOpen && !isDesktop && (
           <motion.div
@@ -280,40 +291,34 @@ const DashboardLayout = ({ children }) => {
         )}
       </AnimatePresence>
 
-      {/* ── Sidebar ── */}
+      {/* Sidebar */}
       <aside
-        className={`
-          fixed top-0 left-0 h-full z-50 flex flex-col
-          transform transition-all duration-300 ease-in-out
-          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-          lg:translate-x-0
-        `}
+        className="fixed top-0 left-0 h-full z-50 flex flex-col transform transition-all duration-300 ease-in-out lg:translate-x-0"
         style={{
-          width:       sidebarPx,
-          background:  isDark ? '#1e293b' : '#ffffff',
+          width: sidebarPx,
+          background: isDark ? '#1e293b' : '#ffffff',
           borderRight: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
-          boxShadow:   isDark ? '10px 0 30px rgba(0,0,0,0.2)' : '10px 0 30px rgba(0,0,0,0.03)',
+          boxShadow: isDark ? '10px 0 30px rgba(0,0,0,0.2)' : '10px 0 30px rgba(0,0,0,0.03)',
+          transform: sidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
         }}
       >
-        {/* Logo Section - Full Logo with Notification Pulse */}
+        {/* Logo Section - Fixed & Improved */}
         <div className={`h-20 flex items-center justify-center flex-shrink-0 transition-all duration-300 border-b ${isDark ? 'border-slate-700/60' : 'border-slate-100'}`}>
-          <motion.div 
+          <motion.div
             className={`relative flex items-center justify-center transition-all duration-300 ${collapsed ? 'w-12 px-2' : 'w-full px-6'}`}
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             whileHover={{ scale: 1.03 }}
             transition={springSnap}
           >
-            <motion.img 
-              src="/logo.png" 
-              alt="TaskOsphere" 
+            <motion.img
+              src="/logo.png"
+              alt="TaskOsphere"
               className="max-w-full h-auto object-contain cursor-pointer z-10"
               onClick={() => navigate('/dashboard')}
-              
-              // Notification Pulse & Emerald Glow Animation
               animate={hasUnread ? {
                 scale: [1, 1.05, 1],
-                filter: isDark 
+                filter: isDark
                   ? [
                       'brightness(1.1) drop-shadow(0px 0px 2px rgba(31, 175, 90, 0.2))',
                       'brightness(1.2) drop-shadow(0px 0px 8px rgba(31, 175, 90, 0.5))',
@@ -326,22 +331,21 @@ const DashboardLayout = ({ children }) => {
                     ]
               } : {
                 scale: 1,
-                filter: isDark ? 'brightness(1.1) drop-shadow(0px 0px 2px rgba(255,255,255,0.1))' : 'none'
+                filter: isDark
+                  ? 'brightness(1.1) drop-shadow(0px 0px 2px rgba(255,255,255,0.1))'
+                  : 'none'
               }}
               transition={hasUnread ? {
                 duration: 2.5,
                 repeat: Infinity,
                 ease: "easeInOut"
               } : { duration: 0.3 }}
-
-              style={{ 
-                maxHeight: collapsed ? '40px' : '52px' 
-              }}
+              style={{ maxHeight: collapsed ? '40px' : '52px' }}
             />
 
-            {/* Notification Badge Dot */}
+            {/* Notification Dot on Logo */}
             {hasUnread && (
-              <motion.span 
+              <motion.span
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
                 className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#1FAF5A] rounded-full border-2 border-white dark:border-slate-800 shadow-sm z-20"
@@ -350,13 +354,11 @@ const DashboardLayout = ({ children }) => {
           </motion.div>
         </div>
 
-        {/* Navigation Items - Logic for Core, Records, Admin, etc. */}
+        {/* Navigation */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar py-4">
           {NAV_GROUPS.map((group) => (
             <div key={group.id} className="mb-2">
-              {/* Renders the group header (e.g., "RECORDS") if it exists */}
               {group.dividerLabel && <NavDivider label={group.dividerLabel} />}
-              
               <div className={`space-y-1 ${collapsed ? 'px-2' : 'px-3'}`}>
                 {group.items.map((item) => (
                   <NavItem key={item.path} item={item} />
@@ -365,7 +367,8 @@ const DashboardLayout = ({ children }) => {
             </div>
           ))}
         </div>
-        {/* Sidebar Footer (Collapse Toggle Only) */}
+
+        {/* Sidebar Footer */}
         <div className={`p-4 ${isDark ? 'border-t border-slate-700/60' : 'border-t border-slate-100'} hidden lg:block`}>
           <Button
             variant="ghost"
@@ -382,11 +385,11 @@ const DashboardLayout = ({ children }) => {
         </div>
       </aside>
 
-      {/* ── Header ── */}
+      {/* Header */}
       <header
         className="fixed top-0 right-0 z-30 flex items-center h-14 transition-all duration-300 ease-in-out backdrop-blur-md"
         style={{
-          left:       offsetPx,
+          left: offsetPx,
           background: isDark ? 'rgba(15,23,42,0.8)' : 'rgba(255,255,255,0.8)',
           borderBottom: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
         }}
@@ -407,22 +410,18 @@ const DashboardLayout = ({ children }) => {
           <div className="flex items-center gap-2 sm:gap-4">
             <NotificationBell />
 
-            {/* Theme Toggle Switch */}
+            {/* Theme Toggle */}
             <motion.button
               onClick={() => setIsDark(!isDark)}
               className={`relative w-14 h-8 rounded-full p-1 flex items-center border transition-colors ${
-                isDark
-                  ? 'bg-slate-800 border-slate-600'
-                  : 'bg-slate-100 border-slate-200'
+                isDark ? 'bg-slate-800 border-slate-600' : 'bg-slate-100 border-slate-200'
               }`}
               whileTap={{ scale: 0.93 }}
               transition={springMed}
               aria-label="Toggle theme"
             >
-              {/* Track icons */}
-              <Sun  className="absolute left-1.5 h-3 w-3 text-amber-400 opacity-70" />
+              <Sun className="absolute left-1.5 h-3 w-3 text-amber-400 opacity-70" />
               <Moon className="absolute right-1.5 h-3 w-3 text-slate-400 opacity-70" />
-              {/* Sliding thumb */}
               <motion.div
                 className={`absolute w-6 h-6 rounded-full shadow-sm flex items-center justify-center ${isDark ? 'bg-slate-200' : 'bg-white'}`}
                 animate={{ x: isDark ? 32 : 4 }}
@@ -433,20 +432,17 @@ const DashboardLayout = ({ children }) => {
                   <motion.div
                     key={isDark ? 'moon' : 'sun'}
                     initial={{ rotate: -30, opacity: 0, scale: 0.7 }}
-                    animate={{ rotate: 0,   opacity: 1, scale: 1   }}
-                    exit={{   rotate:  30, opacity: 0, scale: 0.7  }}
+                    animate={{ rotate: 0, opacity: 1, scale: 1 }}
+                    exit={{ rotate: 30, opacity: 0, scale: 0.7 }}
                     transition={{ duration: 0.15 }}
                   >
-                    {isDark
-                      ? <Moon className="h-3 w-3 text-slate-700" />
-                      : <Sun  className="h-3 w-3 text-amber-500" />
-                    }
+                    {isDark ? <Moon className="h-3 w-3 text-slate-700" /> : <Sun className="h-3 w-3 text-amber-500" />}
                   </motion.div>
                 </AnimatePresence>
               </motion.div>
             </motion.button>
 
-            {/* User dropdown */}
+            {/* User Menu */}
             <div className="relative" data-user-menu>
               <motion.button
                 onClick={() => setUserMenuOpen(prev => !prev)}
@@ -482,23 +478,19 @@ const DashboardLayout = ({ children }) => {
                 {userMenuOpen && (
                   <motion.div
                     initial={{ opacity: 0, y: -8, scale: 0.96 }}
-                    animate={{ opacity: 1, y: 0,  scale: 1    }}
-                    exit={{   opacity: 0, y: -8, scale: 0.96  }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -8, scale: 0.96 }}
                     transition={springSoft}
                     className="absolute right-0 mt-2 w-60 z-50 overflow-hidden"
                     style={{
-                      background:   isDark ? '#1e293b' : '#ffffff',
+                      background: isDark ? '#1e293b' : '#ffffff',
                       borderRadius: '16px',
-                      boxShadow:    isDark
+                      boxShadow: isDark
                         ? '0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(51,65,85,0.8)'
                         : '0 8px 32px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06)',
                     }}
                   >
-                    {/* User info header */}
-                    <div
-                      className="px-4 py-3.5"
-                      style={{ borderBottom: isDark ? '1px solid #334155' : '1px solid #f1f5f9' }}
-                    >
+                    <div className="px-4 py-3.5" style={{ borderBottom: isDark ? '1px solid #334155' : '1px solid #f1f5f9' }}>
                       <div className="flex items-center gap-3">
                         <div className="w-11 h-11 rounded-xl overflow-hidden flex-shrink-0 ring-2 ring-slate-100 dark:ring-slate-700">
                           {user?.profile_picture ? (
@@ -529,7 +521,6 @@ const DashboardLayout = ({ children }) => {
                       </div>
                     </div>
 
-                    {/* Quick links */}
                     <div className="p-1.5">
                       <motion.button
                         onClick={() => { setUserMenuOpen(false); navigate('/settings'); }}
@@ -562,7 +553,7 @@ const DashboardLayout = ({ children }) => {
         </div>
       </header>
 
-      {/* ── Main Content ── */}
+      {/* Main Content */}
       <div
         className="transition-all duration-300 ease-in-out min-h-screen flex flex-col"
         style={{
@@ -576,7 +567,6 @@ const DashboardLayout = ({ children }) => {
           </div>
         </main>
       </div>
-
     </div>
   );
 };
