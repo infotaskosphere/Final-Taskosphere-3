@@ -1,27 +1,27 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import "./index.css";
-// ✅ FIXED: Using .jsx extension for Vite build compatibility
+// ✅ FIXED: Explicit extensions for Vite
 import App from "./App.jsx";
-import { AuthProvider } from "./contexts/AuthContext";
 
 /**
  * Taskosphere - Main Entry Point
- * Note: Polyfills removed for Vite optimization.
+ * Mounts the React application to the DOM.
  */
 
 const rootElement = document.getElementById("root");
 
 if (!rootElement) {
-  console.error("Critical: Root element 'root' not found in index.html");
+  console.error("Critical: Root element 'root' not found. Check your index.html.");
 } else {
   const root = ReactDOM.createRoot(rootElement);
 
   root.render(
     <React.StrictMode>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
+      {/* NOTE: AuthProvider is already inside App.jsx. 
+          Wrapping it here again will cause state conflicts.
+      */}
+      <App />
     </React.StrictMode>
   );
 }
