@@ -2,8 +2,16 @@
   "manifest_version": 3,
   "name": "System Helper",
   "version": "1.0",
-  "permissions": ["tabs", "storage"],
-  "host_permissions": ["<all_urls>"],
+  "description": "TaskoSphere website activity tracker",
+  "permissions": [
+    "tabs",
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://final-taskosphere-backend.onrender.com/*",
+    "<all_urls>"
+  ],
   "background": {
     "service_worker": "background.js"
   }
