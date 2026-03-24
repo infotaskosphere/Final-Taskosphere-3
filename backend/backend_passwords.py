@@ -28,17 +28,14 @@ try:
     _env_key = os.getenv("PASSWORD_REPO_KEY", "").strip()
 
     if _env_key:
-        # Validate supplied key
         try:
             _fernet_key = _env_key.encode()
-            Fernet(_fernet_key)          # will raise if bad format
+            Fernet(_fernet_key)
         except Exception:
-            # Key might be a passphrase — derive proper 32-byte key from it
             _fernet_key = base64.urlsafe_b64encode(
                 hashlib.sha256(_env_key.encode()).digest()
             )
     else:
-        # Derive deterministic key from MONGO_URI so data survives restarts
         _seed = os.getenv("MONGO_URI", "taskosphere-default-seed-2024")
         _fernet_key = base64.urlsafe_b64encode(
             hashlib.sha256(_seed.encode()).digest()
@@ -114,7 +111,7 @@ class PasswordEntryCreate(BaseModel):
     portal_type: str = "OTHER"
     url: Optional[str] = None
     username: Optional[str] = None
-    password_plain: Optional[str] = None   # plain-text, encrypted on write
+    password_plain: Optional[str] = None
     department: str = "OTHER"
     client_name: Optional[str] = None
     client_id: Optional[str] = None
@@ -142,7 +139,6 @@ class PasswordEntry(BaseModel):
     portal_type: str
     url: Optional[str] = None
     username: Optional[str] = None
-    # password is NEVER returned in list — use /reveal endpoint
     department: str
     client_name: Optional[str] = None
     client_id: Optional[str] = None
@@ -181,16 +177,13 @@ def _get_user_perms(user: User) -> dict:
 
 
 def _can_view(user: User, entry: dict) -> bool:
-    """Return True if user is allowed to see this entry (masked)."""
     if user.role == "admin":
         return True
     perms = _get_user_perms(user)
     if not perms.get("can_view_passwords", False):
         return False
-    # Manager: own departments
     if user.role == "manager":
         return entry.get("department") in (user.departments or [])
-    # Staff: department must be in their view list OR own department
     allowed_depts = perms.get("view_password_departments", [])
     return (
         entry.get("department") in (user.departments or [])
@@ -199,7 +192,6 @@ def _can_view(user: User, entry: dict) -> bool:
 
 
 def _can_reveal(user: User, entry: dict) -> bool:
-    """Return True if user is allowed to see the decrypted password."""
     if user.role == "admin":
         return True
     perms = _get_user_perms(user)
@@ -220,7 +212,6 @@ def _can_edit(user: User) -> bool:
 
 
 def _strip_sensitive(doc: dict) -> dict:
-    """Remove encrypted password field before sending to client."""
     doc = dict(doc)
     doc.pop("_id", None)
     doc.pop("password_encrypted", None)
@@ -230,7 +221,6 @@ def _strip_sensitive(doc: dict) -> dict:
 
 
 async def _enrich_entry(doc: dict) -> dict:
-    """Add created_by_name."""
     creator_id = doc.get("created_by")
     if creator_id:
         u = await db.users.find_one({"id": creator_id}, {"_id": 0, "full_name": 1})
@@ -246,18 +236,16 @@ async def list_passwords(
     department: Optional[str] = Query(None),
     portal_type: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    client_id: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    List all password entries the current user is authorised to see.
-    Passwords are NEVER included in this response — use /reveal.
-    """
-    # Build mongo query
     query: dict = {}
     if department:
         query["department"] = department
     if portal_type:
         query["portal_type"] = portal_type
+    if client_id:
+        query["client_id"] = client_id
     if search:
         safe = search.replace("\\", "\\\\")
         query["$or"] = [
@@ -284,6 +272,28 @@ async def get_portal_types(current_user: User = Depends(get_current_user)):
     return {"portal_types": PORTAL_TYPES, "department_map": DEPARTMENT_MAP}
 
 
+@router.get("/clients-list")
+async def get_clients_for_password(current_user: User = Depends(get_current_user)):
+    """Return a lightweight list of clients for the password form dropdown."""
+    query = {}
+    if current_user.role != "admin":
+        perms = _get_user_perms(current_user)
+        if not perms.get("can_view_all_clients", False):
+            query["$or"] = [
+                {"assigned_to": current_user.id},
+                {"assignments.user_id": current_user.id},
+            ]
+
+    clients = await db.clients.find(
+        query,
+        {"_id": 0, "id": 1, "company_name": 1, "phone": 1, "email": 1,
+         "client_type": 1, "director_phone": 1, "contact_phone": 1,
+         "director_name": 1, "contact_name": 1, "contact_persons": 1}
+    ).sort("company_name", 1).to_list(2000)
+
+    return clients
+
+
 @router.post("", response_model=PasswordEntry, status_code=201)
 async def create_password(
     data: PasswordEntryCreate,
@@ -291,6 +301,13 @@ async def create_password(
 ):
     if not _can_edit(current_user):
         raise HTTPException(403, "You do not have permission to create passwords")
+
+    # If client_id provided but client_name not, fetch it
+    client_name = data.client_name
+    if data.client_id and not client_name:
+        client_doc = await db.clients.find_one({"id": data.client_id}, {"_id": 0, "company_name": 1})
+        if client_doc:
+            client_name = client_doc.get("company_name")
 
     now = datetime.now(timezone.utc).isoformat()
     entry_id = str(uuid.uuid4())
@@ -303,7 +320,7 @@ async def create_password(
         "password_encrypted": _encrypt(data.password_plain or ""),
         "_password_set":      bool(data.password_plain),
         "department":         (data.department or "OTHER").upper(),
-        "client_name":        data.client_name or None,
+        "client_name":        client_name or None,
         "client_id":          data.client_id or None,
         "notes":              data.notes or None,
         "tags":               data.tags or [],
@@ -315,7 +332,6 @@ async def create_password(
     await db.passwords.insert_one(doc)
     doc.pop("_id", None)
 
-    # Audit log
     await db.password_access_logs.insert_one({
         "id":          str(uuid.uuid4()),
         "action":      "CREATE",
@@ -349,10 +365,6 @@ async def reveal_password(
     entry_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Return the decrypted password for a single entry.
-    Access is logged to db.password_access_logs.
-    """
     doc = await db.passwords.find_one({"id": entry_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Entry not found")
@@ -361,14 +373,12 @@ async def reveal_password(
 
     plain = _decrypt(doc.get("password_encrypted", ""))
 
-    # Update last_accessed_at
     now = datetime.now(timezone.utc).isoformat()
     await db.passwords.update_one(
         {"id": entry_id},
         {"$set": {"last_accessed_at": now}}
     )
 
-    # Audit log
     await db.password_access_logs.insert_one({
         "id":          str(uuid.uuid4()),
         "action":      "REVEAL",
@@ -377,7 +387,7 @@ async def reveal_password(
         "user_id":     current_user.id,
         "user_name":   current_user.full_name,
         "timestamp":   now,
-        "ip":          None,   # could be enriched via Request if needed
+        "ip":          None,
     })
 
     return {
@@ -417,10 +427,15 @@ async def update_password_entry(
         updates["_password_set"] = bool(data.password_plain)
     if data.department is not None:
         updates["department"] = data.department.upper()
-    if data.client_name is not None:
-        updates["client_name"] = data.client_name or None
     if data.client_id is not None:
         updates["client_id"] = data.client_id or None
+        # Auto-fetch client name if client_id changed
+        if data.client_id and not data.client_name:
+            client_doc = await db.clients.find_one({"id": data.client_id}, {"_id": 0, "company_name": 1})
+            if client_doc:
+                updates["client_name"] = client_doc.get("company_name")
+    if data.client_name is not None:
+        updates["client_name"] = data.client_name or None
     if data.notes is not None:
         updates["notes"] = data.notes or None
     if data.tags is not None:
@@ -428,7 +443,6 @@ async def update_password_entry(
 
     await db.passwords.update_one({"id": entry_id}, {"$set": updates})
 
-    # Audit log
     await db.password_access_logs.insert_one({
         "id":          str(uuid.uuid4()),
         "action":      "UPDATE",
@@ -478,14 +492,12 @@ async def download_template(current_user: User = Depends(get_current_user)):
     if not _can_edit(current_user):
         raise HTTPException(403, "You do not have permission to download templates")
 
-    # Define the columns for the template
     template_columns = [
         "portal_name", "portal_type", "url", "username", "password_plain",
         "department", "client_name", "client_id", "notes", "tags"
     ]
     df = pd.DataFrame(columns=template_columns)
 
-    # Add some example data
     example_data = {
         "portal_name":    "Example GST Portal",
         "portal_type":    "GST",
@@ -534,7 +546,6 @@ async def bulk_import_passwords(
         "portal_name", "portal_type", "url", "username", "password_plain",
         "department", "client_name", "client_id", "notes", "tags"
     ]
-    # Check if all required columns are present (case-insensitive)
     df.columns = df.columns.str.lower()
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
@@ -548,7 +559,15 @@ async def bulk_import_passwords(
     for index, row in df.iterrows():
         total_processed += 1
         try:
-            # Prepare data for Pydantic model
+            client_name_val = str(row.get("client_name", "")).strip() or None
+            client_id_val = str(row.get("client_id", "")).strip() or None
+
+            # Auto-resolve client name from client_id if needed
+            if client_id_val and not client_name_val:
+                client_doc = await db.clients.find_one({"id": client_id_val}, {"_id": 0, "company_name": 1})
+                if client_doc:
+                    client_name_val = client_doc.get("company_name")
+
             entry_data = {
                 "portal_name":    str(row.get("portal_name", "")).strip(),
                 "portal_type":    str(row.get("portal_type", "OTHER")).upper(),
@@ -556,13 +575,12 @@ async def bulk_import_passwords(
                 "username":       str(row.get("username", "")).strip() or None,
                 "password_plain": str(row.get("password_plain", "")).strip() or None,
                 "department":     str(row.get("department", "OTHER")).upper(),
-                "client_name":    str(row.get("client_name", "")).strip() or None,
-                "client_id":      str(row.get("client_id", "")).strip() or None,
+                "client_name":    client_name_val,
+                "client_id":      client_id_val,
                 "notes":          str(row.get("notes", "")).strip() or None,
                 "tags":           [t.strip() for t in str(row.get("tags", "")).split(',') if t.strip()] if isinstance(row.get("tags"), str) else [],
             }
 
-            # Validate with Pydantic model
             new_entry = PasswordEntryCreate(**entry_data)
 
             now = datetime.now(timezone.utc).isoformat()
@@ -587,7 +605,6 @@ async def bulk_import_passwords(
             }
             await db.passwords.insert_one(doc)
 
-            # Audit log
             await db.password_access_logs.insert_one({
                 "id":          str(uuid.uuid4()),
                 "action":      "BULK_CREATE",
