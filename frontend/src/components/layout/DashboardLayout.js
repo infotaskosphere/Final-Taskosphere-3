@@ -39,10 +39,10 @@ const COLORS = {
   lightGreen:   '#5CCB5F',
 };
 
-const SIDEBAR_EXPANDED  = 280; // Increased from 260
-const SIDEBAR_COLLAPSED = 80;  // Increased from 72
+const SIDEBAR_EXPANDED  = 280;
+const SIDEBAR_COLLAPSED = 80;
 
-// ── Nav sequence: Core → Records → Client Proposals → Admin → Settings ────────
+// ── Nav groups ────────────────────────────────────────────────────────────────
 const NAV_GROUPS = [
   {
     id: 'core',
@@ -97,6 +97,23 @@ const springSnap = { type: 'spring', stiffness: 500, damping: 28 };
 const springMed  = { type: 'spring', stiffness: 400, damping: 24 };
 const springSoft = { type: 'spring', stiffness: 300, damping: 20 };
 
+// ── Page transition variants ──────────────────────────────────────────────────
+const pageVariants = {
+  initial: { opacity: 0, y: 16, scale: 0.99 },
+  animate: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: { duration: 0.28, ease: [0.25, 0.46, 0.45, 0.94] },
+  },
+  exit: {
+    opacity: 0,
+    y: -8,
+    scale: 0.99,
+    transition: { duration: 0.18, ease: 'easeIn' },
+  },
+};
+
 const DashboardLayout = ({ children }) => {
   const { user, logout, hasPermission, loading } = useAuth();
   const navigate  = useNavigate();
@@ -143,7 +160,6 @@ const DashboardLayout = ({ children }) => {
     if (window.innerWidth >= 1024) setSidebarOpen(true);
   }, []);
 
-  // Close sidebar on mobile when route changes
   useEffect(() => {
     if (!isDesktop) setSidebarOpen(false);
   }, [location.pathname, isDesktop]);
@@ -207,7 +223,6 @@ const DashboardLayout = ({ children }) => {
             boxShadow:  '0 4px 14px rgba(13,59,102,0.28)',
           } : {}}
         >
-          {/* Active left accent bar */}
           {isActive && !collapsed && (
             <span
               className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full"
@@ -227,12 +242,10 @@ const DashboardLayout = ({ children }) => {
             </span>
           )}
 
-          {/* Active dot indicator when collapsed */}
           {isActive && collapsed && (
             <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-white/70" />
           )}
 
-          {/* Tooltip when collapsed */}
           {collapsed && (
             <div className="
               absolute left-full ml-3 px-2.5 py-1.5
@@ -295,26 +308,45 @@ const DashboardLayout = ({ children }) => {
           boxShadow:   isDark ? '10px 0 30px rgba(0,0,0,0.2)' : '10px 0 30px rgba(0,0,0,0.03)',
         }}
       >
-        {/* Logo Section */}
-        <div className={`h-16 flex items-center ${collapsed ? 'justify-center' : 'px-6'} flex-shrink-0`}>
+        {/* ── Logo Section — updated wordmark ── */}
+        <div className={`h-16 flex items-center ${collapsed ? 'justify-center' : 'px-5'} flex-shrink-0`}>
           <div className="flex items-center gap-3">
+            {/* Icon mark */}
             <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center text-white shadow-lg"
+              className="w-9 h-9 rounded-xl flex items-center justify-center text-white shadow-lg flex-shrink-0"
               style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
             >
               <Target className="h-5 w-5" />
             </div>
+
+            {/* Wordmark — only text changes, icon stays */}
             {!collapsed && (
-              <span className={`text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                Tasko<span style={{ color: COLORS.mediumBlue }}>Sphere</span>
-              </span>
+              <div className="flex flex-col leading-none">
+                <span
+                  className="text-[17px] font-extrabold tracking-tight"
+                  style={{
+                    background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    backgroundClip: 'text',
+                  }}
+                >
+                  Taskosphere
+                </span>
+                <span
+                  className="text-[9px] font-semibold tracking-[0.18em] uppercase"
+                  style={{ color: COLORS.emeraldGreen }}
+                >
+                  Practice Manager
+                </span>
+              </div>
             )}
           </div>
         </div>
 
         {/* Navigation Items */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar py-4">
-          {NAV_GROUPS.map((group, idx) => (
+          {NAV_GROUPS.map((group) => (
             <div key={group.id} className="mb-2">
               {group.dividerLabel && <NavDivider label={group.dividerLabel} />}
               <div className={`space-y-1 ${collapsed ? 'px-2' : 'px-3'}`}>
@@ -326,7 +358,7 @@ const DashboardLayout = ({ children }) => {
           ))}
         </div>
 
-        {/* Sidebar Footer (Collapse Toggle Only) */}
+        {/* Sidebar Footer */}
         <div className={`p-4 ${isDark ? 'border-t border-slate-700/60' : 'border-t border-slate-100'} hidden lg:block`}>
           <Button
             variant="ghost"
@@ -347,8 +379,8 @@ const DashboardLayout = ({ children }) => {
       <header
         className="fixed top-0 right-0 z-30 flex items-center h-14 transition-all duration-300 ease-in-out backdrop-blur-md"
         style={{
-          left:       offsetPx,
-          background: isDark ? 'rgba(15,23,42,0.8)' : 'rgba(255,255,255,0.8)',
+          left:         offsetPx,
+          background:   isDark ? 'rgba(15,23,42,0.85)' : 'rgba(255,255,255,0.85)',
           borderBottom: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
         }}
       >
@@ -380,10 +412,8 @@ const DashboardLayout = ({ children }) => {
               transition={springMed}
               aria-label="Toggle theme"
             >
-              {/* Track icons */}
-              <Sun  className="absolute left-1.5 h-3 w-3 text-amber-400 opacity-70" />
+              <Sun  className="absolute left-1.5 h-3 w-3 text-slate-400 opacity-70" />
               <Moon className="absolute right-1.5 h-3 w-3 text-slate-400 opacity-70" />
-              {/* Sliding thumb */}
               <motion.div
                 className={`absolute w-6 h-6 rounded-full shadow-sm flex items-center justify-center ${isDark ? 'bg-slate-200' : 'bg-white'}`}
                 animate={{ x: isDark ? 32 : 4 }}
@@ -395,12 +425,12 @@ const DashboardLayout = ({ children }) => {
                     key={isDark ? 'moon' : 'sun'}
                     initial={{ rotate: -30, opacity: 0, scale: 0.7 }}
                     animate={{ rotate: 0,   opacity: 1, scale: 1   }}
-                    exit={{   rotate:  30, opacity: 0, scale: 0.7  }}
+                    exit={{   rotate:  30,  opacity: 0, scale: 0.7 }}
                     transition={{ duration: 0.15 }}
                   >
                     {isDark
                       ? <Moon className="h-3 w-3 text-slate-700" />
-                      : <Sun  className="h-3 w-3 text-amber-500" />
+                      : <Sun  className="h-3 w-3 text-slate-500" />
                     }
                   </motion.div>
                 </AnimatePresence>
@@ -455,7 +485,6 @@ const DashboardLayout = ({ children }) => {
                         : '0 8px 32px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06)',
                     }}
                   >
-                    {/* User info header */}
                     <div
                       className="px-4 py-3.5"
                       style={{ borderBottom: isDark ? '1px solid #334155' : '1px solid #f1f5f9' }}
@@ -490,7 +519,6 @@ const DashboardLayout = ({ children }) => {
                       </div>
                     </div>
 
-                    {/* Quick links */}
                     <div className="p-1.5">
                       <motion.button
                         onClick={() => { setUserMenuOpen(false); navigate('/settings'); }}
@@ -523,7 +551,7 @@ const DashboardLayout = ({ children }) => {
         </div>
       </header>
 
-      {/* ── Main Content ── */}
+      {/* ── Main Content with page transition ── */}
       <div
         className="transition-all duration-300 ease-in-out min-h-screen flex flex-col"
         style={{
@@ -533,7 +561,18 @@ const DashboardLayout = ({ children }) => {
       >
         <main className="flex-1 p-5 md:p-7">
           <div className="max-w-[1400px] mx-auto">
-            {children}
+            {/* AnimatePresence enables exit animations; key on pathname triggers on route change */}
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={location.pathname}
+                variants={pageVariants}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+              >
+                {children}
+              </motion.div>
+            </AnimatePresence>
           </div>
         </main>
       </div>
