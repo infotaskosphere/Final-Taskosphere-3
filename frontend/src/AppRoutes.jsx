@@ -4,35 +4,36 @@ import { useAuth } from "@/contexts/AuthContext";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import PasswordRepository from '@/pages/PasswordRepository';
 
-
-/* Lazy Pages */
-const Login             = lazy(() => import("@/pages/Login"));
-const TaskAudit         = lazy(() => import("@/pages/TaskAudit"));
-const Register          = lazy(() => import("@/pages/Register"));
-const Dashboard         = lazy(() => import("@/pages/Dashboard"));
-const Tasks             = lazy(() => import("@/pages/Tasks"));
-const TodoDashboard     = lazy(() => import("@/pages/TodoDashboard"));
-const DSCRegister       = lazy(() => import("@/pages/DSCRegister"));
-const DocumentsRegister = lazy(() => import("@/pages/DocumentsRegister"));
-const Attendance        = lazy(() => import("@/pages/Attendance"));
-const Reports           = lazy(() => import("@/pages/Reports"));
-const Clients           = lazy(() => import("@/pages/Clients"));
-const Users             = lazy(() => import("@/pages/Users"));
-const DueDates          = lazy(() => import("@/pages/DueDates"));
-const StaffActivity     = lazy(() => import("@/pages/StaffActivity"));
-const LeadsPage         = lazy(() => import("@/pages/Leads"));
-const VisitsPage        = lazy(() => import("@/pages/VisitsPage"));
-const EmailSettings     = lazy(() => import("@/components/EmailSettings"));
-const Quotations        = lazy(() => import("@/pages/Quotations"));
-
-// ✅ FIX: GeneralSettings — if build fails saying "can't resolve", check which
-// folder the file is in and update this import path to match:
-//   If in src/pages/         → import("@/pages/GeneralSettings")
-//   If in src/components/    → import("@/components/GeneralSettings")
-const GeneralSettings   = lazy(() => import("@/pages/GeneralSettings"));
+/* ── Lazy Loaded Pages ────────────────────────────────────────────────────── */
+/** * NOTE: Vite handles the @/ alias automatically via your jsconfig.json.
+ * If any of these fail to load, ensure the file physically exists as .jsx
+ */
+const Login             = lazy(() => import("@/pages/Login.jsx"));
+const TaskAudit         = lazy(() => import("@/pages/TaskAudit.jsx"));
+const Register          = lazy(() => import("@/pages/Register.jsx"));
+const Dashboard         = lazy(() => import("@/pages/Dashboard.jsx"));
+const Tasks             = lazy(() => import("@/pages/Tasks.jsx"));
+const TodoDashboard     = lazy(() => import("@/pages/TodoDashboard.jsx"));
+const DSCRegister       = lazy(() => import("@/pages/DSCRegister.jsx"));
+const DocumentsRegister = lazy(() => import("@/pages/DocumentsRegister.jsx"));
+const Attendance        = lazy(() => import("@/pages/Attendance.jsx"));
+const Reports           = lazy(() => import("@/pages/Reports.jsx"));
+const Clients           = lazy(() => import("@/pages/Clients.jsx"));
+const Users             = lazy(() => import("@/pages/Users.jsx"));
+const DueDates          = lazy(() => import("@/pages/DueDates.jsx"));
+const StaffActivity     = lazy(() => import("@/pages/StaffActivity.jsx"));
+const LeadsPage         = lazy(() => import("@/pages/Leads.jsx"));
+const VisitsPage        = lazy(() => import("@/pages/VisitsPage.jsx"));
+const EmailSettings     = lazy(() => import("@/components/EmailSettings.jsx"));
+const Quotations        = lazy(() => import("@/pages/Quotations.jsx"));
+const GeneralSettings   = lazy(() => import("@/pages/GeneralSettings.jsx"));
 
 /* ── Route Guards ─────────────────────────────────────────────────────────── */
 
+/**
+ * Protected Route: Requires user to be logged in.
+ * Wraps content in DashboardLayout.
+ */
 const Protected = ({ children }) => {
   const { user, loading } = useAuth();
   if (loading) return null;
@@ -40,6 +41,9 @@ const Protected = ({ children }) => {
   return <DashboardLayout>{children}</DashboardLayout>;
 };
 
+/**
+ * Public Route: Prevents logged-in users from seeing Login/Register.
+ */
 const Public = ({ children }) => {
   const { user, loading } = useAuth();
   if (loading) return null;
@@ -47,24 +51,35 @@ const Public = ({ children }) => {
   return children;
 };
 
+/**
+ * Permission Route: Gated by specific user permissions.
+ */
 const Permission = ({ permission, children }) => {
   const { user, loading, hasPermission } = useAuth();
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
+  
+  // If user lacks the specific permission, kick them back to safety (Dashboard)
   if (permission && !hasPermission(permission)) {
     return <Navigate to="/dashboard" replace />;
   }
   return <DashboardLayout>{children}</DashboardLayout>;
 };
 
-/* ── Main Routes ──────────────────────────────────────────────────────────── */
+/* ── Main App Routes ──────────────────────────────────────────────────────── */
 
 function AppRoutes() {
   return (
-    <Suspense fallback={<div className="p-10">Loading...</div>}>
+    <Suspense 
+      fallback={
+        <div className="flex items-center justify-center min-h-screen p-10 text-slate-500">
+          <div className="animate-pulse">Loading Route...</div>
+        </div>
+      }
+    >
       <Routes>
 
-        {/* Public Routes */}
+        {/* --- Public Auth Routes --- */}
         <Route
           path="/"
           element={
@@ -92,7 +107,7 @@ function AppRoutes() {
           }
         />
 
-        {/* Dashboard */}
+        {/* --- Protected Dashboard --- */}
         <Route
           path="/dashboard"
           element={
@@ -102,7 +117,7 @@ function AppRoutes() {
           }
         />
 
-        {/* Tasks */}
+        {/* --- Operations --- */}
         <Route
           path="/tasks"
           element={
@@ -112,7 +127,6 @@ function AppRoutes() {
           }
         />
 
-        {/* Todo Dashboard */}
         <Route
           path="/todos"
           element={
@@ -122,7 +136,7 @@ function AppRoutes() {
           }
         />
 
-        {/* DSC */}
+        {/* --- Gated Registers --- */}
         <Route
           path="/dsc"
           element={
@@ -132,7 +146,6 @@ function AppRoutes() {
           }
         />
 
-        {/* Documents */}
         <Route
           path="/documents"
           element={
@@ -142,7 +155,7 @@ function AppRoutes() {
           }
         />
 
-        {/* Attendance */}
+        {/* --- Employee Management --- */}
         <Route
           path="/attendance"
           element={
@@ -152,7 +165,6 @@ function AppRoutes() {
           }
         />
 
-        {/* Reports */}
         <Route
           path="/reports"
           element={
@@ -162,7 +174,7 @@ function AppRoutes() {
           }
         />
 
-        {/* Clients */}
+        {/* --- CRM --- */}
         <Route
           path="/clients"
           element={
@@ -172,7 +184,6 @@ function AppRoutes() {
           }
         />
 
-        {/* Users */}
         <Route
           path="/users"
           element={
@@ -182,7 +193,6 @@ function AppRoutes() {
           }
         />
 
-        {/* Leads Management */}
         <Route
           path="/leads"
           element={
@@ -192,71 +202,6 @@ function AppRoutes() {
           }
         />
 
-        {/* Due Dates */}
-        <Route
-          path="/duedates"
-          element={
-            <Protected>
-              <DueDates />
-            </Protected>
-          }
-        />
-
-        {/* Staff Activity */}
-        <Route
-          path="/staff-activity"
-          element={
-            <Permission permission="can_view_staff_activity">
-              <StaffActivity />
-            </Permission>
-          }
-        />
-
-        {/* Task Audit */}
-        <Route
-          path="/task-audit"
-          element={
-            <Permission permission="can_view_audit_logs">
-              <TaskAudit />
-            </Permission>
-          }
-        />
-
-        {/* Email Account Settings */}
-        <Route
-          path="/settings/email"
-          element={
-            <Protected>
-              <EmailSettings />
-            </Protected>
-          }
-        />
-
-        {/* ✅ General Settings — was missing, caused redirect to dashboard */}
-        <Route
-          path="/settings/general"
-          element={
-            <Protected>
-              <GeneralSettings />
-            </Protected>
-          }
-        />
-
-        {/* /settings alone → redirect to general */}
-        <Route
-          path="/settings"
-          element={<Navigate to="/settings/general" replace />}
-        />
-        {/* Password Repository */}
-<Route
-  path="/passwords"
-  element={
-    <Protected>
-      <PasswordRepository />
-    </Protected>
-  }
-/>
-        {/* Client Visits */}
         <Route
           path="/visits"
           element={
@@ -266,7 +211,16 @@ function AppRoutes() {
           }
         />
 
-        {/* Quotations — permission gated */}
+        {/* --- Compliance & Finance --- */}
+        <Route
+          path="/duedates"
+          element={
+            <Protected>
+              <DueDates />
+            </Protected>
+          }
+        />
+
         <Route
           path="/quotations"
           element={
@@ -276,7 +230,61 @@ function AppRoutes() {
           }
         />
 
-        {/* Fallback */}
+        {/* --- Logs & Activity --- */}
+        <Route
+          path="/staff-activity"
+          element={
+            <Permission permission="can_view_staff_activity">
+              <StaffActivity />
+            </Permission>
+          }
+        />
+
+        <Route
+          path="/task-audit"
+          element={
+            <Permission permission="can_view_audit_logs">
+              <TaskAudit />
+            </Permission>
+          }
+        />
+
+        {/* --- Security --- */}
+        <Route
+          path="/passwords"
+          element={
+            <Protected>
+              <PasswordRepository />
+            </Protected>
+          }
+        />
+
+        {/* --- Settings --- */}
+        <Route
+          path="/settings/email"
+          element={
+            <Protected>
+              <EmailSettings />
+            </Protected>
+          }
+        />
+
+        <Route
+          path="/settings/general"
+          element={
+            <Protected>
+              <GeneralSettings />
+            </Protected>
+          }
+        />
+
+        {/* Handle /settings base path redirect */}
+        <Route
+          path="/settings"
+          element={<Navigate to="/settings/general" replace />}
+        />
+
+        {/* Global Fallback: Redirect unknown routes to login */}
         <Route path="*" element={<Navigate to="/login" replace />} />
 
       </Routes>
