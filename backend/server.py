@@ -293,7 +293,22 @@ async def startup_event():
         # Log index creation errors but do NOT crash the server
         logger.warning(f"Index creation warning (non-fatal): {e}")
 
-    # Scheduled jobs
+    try:
+        visits = await db.visits.find({"id": {"$exists": False}}).to_list(10000)
+        repaired = 0
+        for v in visits:
+            raw_id = v.get("_id")
+            new_id = str(raw_id)
+            await db.visits.update_one(
+                {"_id": raw_id},
+                {"$set": {"id": new_id}}
+            )
+            repaired += 1
+        logger.info(f"✅ Visit ID repair: {repaired} documents patched")
+    except Exception as e:
+        logger.error(f"⚠️ Visit ID repair failed (non-fatal): {e}")
+
+    # Scheduled jobs=====================================================================
     try:
         scheduler.add_job(fetch_indian_holidays_task, 'cron', day=1, hour=0, minute=5)
         # Absent marking job — fires every working day at 19:00 IST
