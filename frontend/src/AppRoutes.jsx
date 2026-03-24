@@ -2,6 +2,8 @@ import React, { Suspense, lazy } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import PasswordRepository from '@/pages/PasswordRepository';
+
 
 /* Lazy Pages */
 const Login             = lazy(() => import("@/pages/Login"));
