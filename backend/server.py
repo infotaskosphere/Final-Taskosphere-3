@@ -13,6 +13,7 @@ import requests
 import httpx
 import pandas as pd
 from datetime import datetime, date, timezone, timedelta
+from backend.passwords import router as passwords_router
 from backend.quotations import router as quotation_router
 from backend.website_tracking import router as website_tracking_router
 from zoneinfo import ZoneInfo
@@ -4934,6 +4935,7 @@ async def universal_exception_handler(request: Request, exc: Exception):
 
 # Api Router
 api_router.include_router(visits_router)
+api_router.include_router(passwords_router)
 api_router.include_router(website_tracking_router)
 api_router.include_router(quotation_router)
 api_router.include_router(telegram_router)
