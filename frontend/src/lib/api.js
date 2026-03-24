@@ -1,32 +1,34 @@
 import axios from "axios";
 
-/*
-  CRA environment variable
-  Example:
-  REACT_APP_BACKEND_URL=https://final-taskosphere-backend.onrender.com
-*/
+/**
+ * VITE ENVIRONMENT VARIABLE CONFIGURATION
+ * ---------------------------------------
+ * In Render (Frontend Service), you MUST set:
+ * Key: VITE_API_URL
+ * Value: https://final-taskosphere-backend.onrender.com
+ */
 
-const BACKEND =
-  process.env.REACT_APP_BACKEND_URL ||
+const BACKEND_URL =
+  import.meta.env.VITE_API_URL || 
   "https://final-taskosphere-backend.onrender.com";
 
-// ✅ FIXED: removed /api
-const BASE_URL = `${BACKEND.replace(/\/$/, "")}/api`;
+// Ensures the URL always ends with /api and handles trailing slashes safely
+const BASE_URL = `${BACKEND_URL.replace(/\/$/, "")}/api`;
 
 const getToken = () =>
   localStorage.getItem("token") || sessionStorage.getItem("token");
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 120000, // ✅ increased timeout
+  timeout: 120000, // 2-minute timeout to handle Render "Cold Starts"
   headers: {
     "Content-Type": "application/json",
   },
 });
 
-/* ===============================
-   Attach JWT Token Automatically
-================================= */
+/* ============================================================
+   REQUEST INTERCEPTOR: Attach JWT Token
+   ============================================================ */
 api.interceptors.request.use(
   (config) => {
     const token = getToken();
@@ -35,9 +37,10 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
 
-    if (process.env.NODE_ENV === "development") {
+    // Logging for development
+    if (import.meta.env.DEV) {
       console.log(
-        `[API] ${config.method?.toUpperCase()} ${config.baseURL}${config.url?.replace(/^\/+/, "")}`
+        `🚀 [API Request] ${config.method?.toUpperCase()} -> ${config.baseURL}${config.url}`
       );
     }
 
@@ -46,24 +49,32 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-/* ===============================
-   Global Error Handling
-================================= */
+/* ============================================================
+   RESPONSE INTERCEPTOR: Global Error & Auth Handling
+   ============================================================ */
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error.response?.status;
+    const contentType = error.response?.headers["content-type"];
 
-    // Network error (Render cold start)
+    // 1. Handle "Unexpected token <" (Received HTML instead of JSON)
+    if (contentType && contentType.includes("text/html")) {
+      console.error(
+        "❌ CRITICAL ERROR: Received HTML instead of JSON. Check VITE_API_URL in Render."
+      );
+    }
+
+    // 2. Handle Network Errors (Backend Sleeping/Down)
     if (!error.response) {
-      console.error("Network error (likely backend sleeping):", error.message);
+      console.error("📡 Network Error: Backend is likely sleeping or CORS is blocked.");
       return Promise.reject(error);
     }
 
-    // Unauthorized
+    // 3. Handle Unauthorized (401) - Clear Session & Redirect
     if (status === 401) {
-      console.warn("Session expired — logging out");
-
+      console.warn("🔑 Session expired — Logging out.");
+      
       localStorage.removeItem("token");
       localStorage.removeItem("user");
       sessionStorage.removeItem("token");
@@ -72,10 +83,6 @@ api.interceptors.response.use(
       if (window.location.pathname !== "/login") {
         window.location.href = "/login";
       }
-    }
-
-    if (status === 403) {
-      console.warn("Forbidden request (403)");
     }
 
     return Promise.reject(error);
