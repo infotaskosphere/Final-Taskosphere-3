@@ -53,11 +53,15 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_connect_email": True,
         "can_view_own_data": True,
         "can_create_quotations": True,
+        # ── Password Repository ──────────────────────────────────────────────
+        "can_view_passwords": True,
+        "can_edit_passwords": True,
+        "view_password_departments": [],   # empty = all (admin sees everything)
         # ── Visit delete permissions ──
         "can_view_all_visits": True,
         "can_edit_visits": True,
-        "can_delete_visits": True,       # can delete ANY user's visits
-        "can_delete_own_visits": True,   # can delete own visits
+        "can_delete_visits": True,
+        "can_delete_own_visits": True,
         "view_other_visits": [],
         "view_other_tasks": [],
         "view_other_attendance": [],
@@ -99,11 +103,15 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_connect_email": True,
         "can_view_own_data": True,
         "can_create_quotations": False,
+        # ── Password Repository ──────────────────────────────────────────────
+        "can_view_passwords": True,
+        "can_edit_passwords": False,
+        "view_password_departments": [],   # defaults to own departments
         # ── Visit delete permissions ──
         "can_view_all_visits": False,
         "can_edit_visits": True,
-        "can_delete_visits": False,      # cannot delete other users' visits by default
-        "can_delete_own_visits": True,   # can delete own visits
+        "can_delete_visits": False,
+        "can_delete_own_visits": True,
         "view_other_visits": [],
         "view_other_tasks": [],
         "view_other_attendance": [],
@@ -145,11 +153,15 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_connect_email": True,
         "can_view_own_data": True,
         "can_create_quotations": False,
+        # ── Password Repository ──────────────────────────────────────────────
+        "can_view_passwords": False,
+        "can_edit_passwords": False,
+        "view_password_departments": [],
         # ── Visit delete permissions ──
         "can_view_all_visits": False,
         "can_edit_visits": False,
-        "can_delete_visits": False,      # cannot delete other users' visits
-        "can_delete_own_visits": True,   # can delete own visits by default
+        "can_delete_visits": False,
+        "can_delete_own_visits": True,
         "view_other_visits": [],
         "view_other_tasks": [],
         "view_other_attendance": [],
@@ -196,13 +208,17 @@ class UserPermissions(BaseModel):
     can_connect_email: bool = True
     can_view_own_data: bool = True
     can_create_quotations: bool = False
-    # ── Visit-specific permissions ──────────────────────────────────────────
-    can_view_all_visits: bool = False       # see every user's visits
-    can_edit_visits: bool = False           # create/edit any visit
-    can_delete_visits: bool = False         # delete ANY user's visit
-    can_delete_own_visits: bool = True      # delete own visits (default True)
-    view_other_visits: List[str] = Field(default_factory=list)   # specific UIDs readable
-    # ── List permissions ────────────────────────────────────────────────────
+    # ── Password Repository ──────────────────────────────────────────────────
+    can_view_passwords: bool = False
+    can_edit_passwords: bool = False
+    view_password_departments: List[str] = Field(default_factory=list)
+    # ── Visit-specific permissions ───────────────────────────────────────────
+    can_view_all_visits: bool = False
+    can_edit_visits: bool = False
+    can_delete_visits: bool = False
+    can_delete_own_visits: bool = True
+    view_other_visits: List[str] = Field(default_factory=list)
+    # ── List permissions ─────────────────────────────────────────────────────
     view_other_tasks: List[str] = Field(default_factory=list)
     view_other_attendance: List[str] = Field(default_factory=list)
     view_other_reports: List[str] = Field(default_factory=list)
@@ -843,3 +859,68 @@ class ExtractedEvent(BaseModel):
     source_from: str
     source_date: str
     raw_snippet: Optional[str] = None
+
+
+# ======================
+# PASSWORD REPOSITORY MODELS
+# ======================
+
+PORTAL_TYPES_LIST = [
+    "MCA", "DGFT", "TRADEMARK", "GST", "INCOME_TAX", "TDS",
+    "EPFO", "ESIC", "TRACES", "MSME", "RERA", "ROC", "OTHER",
+]
+
+
+class PasswordEntryCreate(BaseModel):
+    """Payload to create a new portal credential entry."""
+    portal_name: str = Field(..., min_length=2, max_length=120)
+    portal_type: str = "OTHER"
+    url: Optional[str] = None
+    username: Optional[str] = None
+    password_plain: Optional[str] = None   # plain text — backend encrypts
+    department: str = "OTHER"
+    client_name: Optional[str] = None
+    client_id: Optional[str] = None
+    notes: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+
+
+class PasswordEntryUpdate(BaseModel):
+    portal_name: Optional[str] = None
+    portal_type: Optional[str] = None
+    url: Optional[str] = None
+    username: Optional[str] = None
+    password_plain: Optional[str] = None
+    department: Optional[str] = None
+    client_name: Optional[str] = None
+    client_id: Optional[str] = None
+    notes: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+class PasswordEntry(BaseModel):
+    """Public-facing model — never includes the encrypted password field."""
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    portal_name: str
+    portal_type: str
+    url: Optional[str] = None
+    username: Optional[str] = None
+    department: str
+    client_name: Optional[str] = None
+    client_id: Optional[str] = None
+    notes: Optional[str] = None
+    tags: List[str] = []
+    created_by: str
+    created_by_name: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    last_accessed_at: Optional[str] = None
+    has_password: bool = False
+
+
+class PasswordRevealResponse(BaseModel):
+    id: str
+    username: Optional[str]
+    password: str
+    portal_name: str
