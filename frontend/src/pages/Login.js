@@ -12,12 +12,10 @@ export default function Login() {
   const [password, setPassword]         = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading]           = useState(false);
-  const [serverWaking, setServerWaking] = useState(false);  // 🔥 NEW
-  const [wakingDots, setWakingDots]     = useState('');     // 🔥 animated dots
+  const [serverWaking, setServerWaking] = useState(false);
+  const [wakingDots, setWakingDots]     = useState('');
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [forgotEmail, setForgotEmail]   = useState('');
-  const [showConfirm, setShowConfirm]   = useState(false);
-  const [tempToken, setTempToken]       = useState(null);
 
   const navigate  = useNavigate();
   const { login } = useAuth();
@@ -40,30 +38,7 @@ export default function Login() {
     }
   };
 
-  /* ── Confirm-popup: Yes ── */
-  const handleYes = async () => {
-    try {
-      await api.post("/auth/confirm-login", {}, {
-        headers: { Authorization: `Bearer ${tempToken}` }
-      });
-      login({ access_token: tempToken }, true);
-      sendTokenToExtension(tempToken);
-      setShowConfirm(false);
-      toast.success("Welcome!");
-      navigate('/dashboard');
-    } catch {
-      toast.error("Something went wrong");
-    }
-  };
-
-  /* ── Confirm-popup: No ── */
-  const handleNo = () => {
-    setShowConfirm(false);
-    setTempToken(null);
-    toast.error("Please select Yes to continue");
-  };
-
-  /* ── Login with retry (no fixed pre-delays) ── */
+  /* ── Login with retry ── */
   const loginWithRetry = async (retries = 2, retryDelay = 2000) => {
     for (let i = 0; i < retries; i++) {
       try {
@@ -85,7 +60,7 @@ export default function Login() {
     setLoading(true);
     setServerWaking(false);
 
-    // Show "waking up" UI after 3 s if still loading
+    // Show "waking up" UI after 3s if still loading
     const wakingTimer = setTimeout(() => setServerWaking(true), 3000);
 
     try {
@@ -97,12 +72,7 @@ export default function Login() {
       clearTimeout(wakingTimer);
       setServerWaking(false);
 
-      if (!response.data.consent_given) {
-        setTempToken(response.data.access_token);
-        setShowConfirm(true);
-        return;
-      }
-
+      // Direct login — works on all browsers, no popup
       login(response.data, true);
       sendTokenToExtension(response.data.access_token);
       toast.success('Welcome back!');
@@ -130,9 +100,7 @@ export default function Login() {
     setForgotEmail('');
   };
 
-  /* ═══════════════════════════════════════
-     THEME
-  ═══════════════════════════════════════ */
+  /* ── Theme ── */
   const pageBg  = isDark
     ? 'linear-gradient(135deg,#0f172a,#1e293b,#0f172a)'
     : 'linear-gradient(135deg,#f0f9ff,#f0fdf4,#ecfeff)';
@@ -140,24 +108,9 @@ export default function Login() {
   const headClr = isDark ? '#f1f5f9' : '#1e293b';
   const subClr  = isDark ? '#94a3b8' : '#64748b';
 
-  /* ═══════════════════════════════════════
-     RENDER
-  ═══════════════════════════════════════ */
+  /* ── Render ── */
   return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: pageBg }}>
-
-      {/* ── Consent popup ── */}
-      {showConfirm && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-xl text-center shadow-xl">
-            <h2 className="text-lg font-semibold mb-4">Select Yes To Continue</h2>
-            <div className="flex gap-4 justify-center">
-              <button onClick={handleYes} className="bg-green-600 text-white px-4 py-2 rounded">Yes</button>
-              <button onClick={handleNo}  className="bg-gray-400  text-white px-4 py-2 rounded">No</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── Card ── */}
       <div className="w-full max-w-md p-8 rounded-2xl shadow-xl" style={{ background: cardBg }}>
@@ -170,25 +123,37 @@ export default function Login() {
         {/* ── Forgot-password view ── */}
         {showForgotPassword ? (
           <div className="space-y-4">
-            <h2 className="text-xl font-bold text-center" style={{ color: headClr }}>Reset Password</h2>
+            <h2 className="text-xl font-bold text-center" style={{ color: headClr }}>
+              Reset Password
+            </h2>
             <Input
               type="email"
               placeholder="Enter your email"
               value={forgotEmail}
               onChange={e => setForgotEmail(e.target.value)}
             />
-            <button onClick={handleForgotPassword} className="w-full bg-blue-600 text-white p-2 rounded">
+            <button
+              onClick={handleForgotPassword}
+              className="w-full bg-blue-600 text-white p-2 rounded"
+            >
               Send Reset Link
             </button>
-            <button onClick={() => setShowForgotPassword(false)} className="text-sm w-full" style={{ color: subClr }}>
+            <button
+              onClick={() => setShowForgotPassword(false)}
+              className="text-sm w-full"
+              style={{ color: subClr }}
+            >
               Back to Login
             </button>
           </div>
 
         ) : (
+
           /* ── Login view ── */
           <div className="space-y-4">
-            <h2 className="text-xl font-bold text-center" style={{ color: headClr }}>Welcome Back</h2>
+            <h2 className="text-xl font-bold text-center" style={{ color: headClr }}>
+              Welcome Back
+            </h2>
 
             <Input
               type="email"
@@ -223,22 +188,29 @@ export default function Login() {
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
-                  {/* Spinner */}
                   <svg
                     className="animate-spin h-4 w-4 text-white"
                     xmlns="http://www.w3.org/2000/svg"
-                    fill="none" viewBox="0 0 24 24"
+                    fill="none"
+                    viewBox="0 0 24 24"
                   >
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path  className="opacity-75" fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    <circle
+                      className="opacity-25"
+                      cx="12" cy="12" r="10"
+                      stroke="currentColor" strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
                   </svg>
                   Signing in…
                 </span>
               ) : 'Login'}
             </button>
 
-            {/* 🔥 Server-waking banner */}
+            {/* ── Server waking banner ── */}
             {serverWaking && (
               <div
                 className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm"
