@@ -91,6 +91,9 @@ PORTAL_TYPES = [
     "EPFO", "ESIC", "TRACES", "MSME", "RERA", "ROC", "OTHER",
 ]
 
+# Merged display: ROC and MCA are treated as same group "MCA/ROC"
+MCA_ROC_GROUP = {"MCA", "ROC"}
+
 DEPARTMENT_MAP = {
     "MCA":        "ROC",
     "ROC":        "ROC",
@@ -110,8 +113,9 @@ DEPARTMENT_MAP = {
 # Credential holder types
 HOLDER_TYPES = ["COMPANY", "DIRECTOR", "INDIVIDUAL", "PARTNER", "TRUSTEE", "OTHER"]
 
-# ── Smart column alias mapping (for flexible Excel headers) ───────────────────
+# ── Extended smart column alias mapping ──────────────────────────────────────
 # Maps any possible user column header to our canonical field name
+# Greatly expanded to auto-detect more variations
 COLUMN_ALIASES = {
     # portal_name
     "portal_name": "portal_name",
@@ -123,6 +127,10 @@ COLUMN_ALIASES = {
     "account": "portal_name",
     "account name": "portal_name",
     "service": "portal_name",
+    "application": "portal_name",
+    "app": "portal_name",
+    "system": "portal_name",
+    "platform": "portal_name",
 
     # portal_type
     "portal_type": "portal_type",
@@ -130,6 +138,8 @@ COLUMN_ALIASES = {
     "type": "portal_type",
     "category": "portal_type",
     "portal category": "portal_type",
+    "govt portal": "portal_type",
+    "government portal": "portal_type",
 
     # url
     "url": "url",
@@ -140,6 +150,9 @@ COLUMN_ALIASES = {
     "address": "url",
     "login url": "url",
     "login link": "url",
+    "web url": "url",
+    "site url": "url",
+    "webpage": "url",
 
     # username
     "username": "username",
@@ -149,11 +162,18 @@ COLUMN_ALIASES = {
     "login id": "username",
     "email": "username",
     "email id": "username",
+    "email address": "username",
     "user id": "username",
     "userid": "username",
     "id": "username",
     "login email": "username",
     "user email": "username",
+    "login name": "username",
+    "account email": "username",
+    "registered email": "username",
+    "gstin": "username",
+    "gst number": "username",
+    "pan number login": "username",
 
     # password_plain
     "password_plain": "password_plain",
@@ -163,6 +183,32 @@ COLUMN_ALIASES = {
     "pwd": "password_plain",
     "secret": "password_plain",
     "passphrase": "password_plain",
+    "login password": "password_plain",
+    "portal password": "password_plain",
+    "current password": "password_plain",
+    "new password": "password_plain",
+
+    # mobile / phone (extra field stored in notes or holder_name context)
+    "mobile": "mobile",
+    "mobile no": "mobile",
+    "mobile number": "mobile",
+    "phone": "mobile",
+    "phone no": "mobile",
+    "phone number": "mobile",
+    "contact": "mobile",
+    "contact no": "mobile",
+    "contact number": "mobile",
+    "registered mobile": "mobile",
+    "otp mobile": "mobile",
+    "whatsapp": "mobile",
+
+    # trade_name (stored in notes)
+    "trade name": "trade_name",
+    "tradename": "trade_name",
+    "trade": "trade_name",
+    "business name": "trade_name",
+    "brand name": "trade_name",
+    "dba": "trade_name",
 
     # department
     "department": "department",
@@ -176,6 +222,7 @@ COLUMN_ALIASES = {
     "credential holder": "holder_type",
     "login type": "holder_type",
     "account type": "holder_type",
+    "registered as": "holder_type",
 
     # holder_name
     "holder_name": "holder_name",
@@ -187,6 +234,15 @@ COLUMN_ALIASES = {
     "person": "holder_name",
     "full name": "holder_name",
     "director": "holder_name",
+    "authorized person": "holder_name",
+    "authorised person": "holder_name",
+    "proprietor": "holder_name",
+    "owner": "holder_name",
+    "signatory": "holder_name",
+    "authorised signatory": "holder_name",
+    "authorized signatory": "holder_name",
+    "first name": "holder_name",
+    "name of director": "holder_name",
 
     # holder_pan
     "holder_pan": "holder_pan",
@@ -195,6 +251,10 @@ COLUMN_ALIASES = {
     "pan no": "holder_pan",
     "pan number": "holder_pan",
     "pan no.": "holder_pan",
+    "permanent account number": "holder_pan",
+    "director pan": "holder_pan",
+    "individual pan": "holder_pan",
+    "taxpayer pan": "holder_pan",
 
     # holder_din
     "holder_din": "holder_din",
@@ -203,6 +263,8 @@ COLUMN_ALIASES = {
     "din no": "holder_din",
     "din number": "holder_din",
     "din no.": "holder_din",
+    "director identification number": "holder_din",
+    "director din": "holder_din",
 
     # client_name
     "client_name": "client_name",
@@ -214,6 +276,12 @@ COLUMN_ALIASES = {
     "firm name": "client_name",
     "organization": "client_name",
     "organisation": "client_name",
+    "entity": "client_name",
+    "entity name": "client_name",
+    "business": "client_name",
+    "business name": "client_name",
+    "registered name": "client_name",
+    "legal name": "client_name",
 
     # client_id
     "client_id": "client_id",
@@ -221,6 +289,8 @@ COLUMN_ALIASES = {
     "client code": "client_id",
     "company id": "client_id",
     "company code": "client_id",
+    "customer id": "client_id",
+    "customer code": "client_id",
 
     # notes
     "notes": "notes",
@@ -230,6 +300,10 @@ COLUMN_ALIASES = {
     "description": "notes",
     "info": "notes",
     "additional info": "notes",
+    "other info": "notes",
+    "misc": "notes",
+    "miscellaneous": "notes",
+    "details": "notes",
 
     # tags
     "tags": "tags",
@@ -237,7 +311,11 @@ COLUMN_ALIASES = {
     "labels": "tags",
     "label": "tags",
     "keywords": "tags",
+    "category tags": "tags",
 }
+
+# Extended canonical fields (including mobile, trade_name for richer import)
+EXTENDED_CANONICAL_FIELDS = list(set(COLUMN_ALIASES.values()))
 
 
 def _normalize_column_name(col: str) -> str:
@@ -250,22 +328,28 @@ def _map_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
     Intelligently map arbitrary Excel columns to canonical field names.
     Returns: (mapped_df, mapping_used, unmapped_columns)
     """
-    mapping_used = {}    # original_col -> canonical_field
-    unmapped_cols = []   # columns that couldn't be mapped
+    mapping_used = {}
+    unmapped_cols = []
 
     rename_map = {}
+    col_seen_canonical = {}  # Track first occurrence of each canonical
+
     for col in df.columns:
         normalized = _normalize_column_name(col)
         canonical = COLUMN_ALIASES.get(normalized)
         if canonical:
-            rename_map[col] = canonical
-            mapping_used[col] = canonical
+            if canonical not in col_seen_canonical:
+                rename_map[col] = canonical
+                mapping_used[col] = canonical
+                col_seen_canonical[canonical] = col
+            else:
+                unmapped_cols.append(col)
         else:
             unmapped_cols.append(col)
 
     df_mapped = df.rename(columns=rename_map)
 
-    # If duplicate canonical cols after rename, keep first occurrence
+    # Deduplicate
     seen = set()
     dedup_cols = []
     for col in df_mapped.columns:
@@ -292,6 +376,28 @@ def _derive_department(portal_type: str) -> str:
     return DEPARTMENT_MAP.get(portal_type.upper(), "OTHER")
 
 
+def _normalize_portal_type(raw: str) -> str:
+    """Normalize portal type — merge ROC into MCA/ROC group stored as MCA."""
+    pt = raw.strip().upper()
+    if pt in PORTAL_TYPES:
+        return pt
+    # Fuzzy match
+    fuzzy = {
+        "INCOME TAX": "INCOME_TAX",
+        "INCOMETAX": "INCOME_TAX",
+        "IT": "INCOME_TAX",
+        "PF": "EPFO",
+        "EPF": "EPFO",
+        "ESI": "ESIC",
+        "TM": "TRADEMARK",
+        "IP": "TRADEMARK",
+        "FEMA": "DGFT",
+        "EXPORT": "DGFT",
+        "IMPORT": "DGFT",
+    }
+    return fuzzy.get(pt, "OTHER")
+
+
 class PasswordEntryCreate(BaseModel):
     portal_name: str = Field(..., min_length=1, max_length=120)
     portal_type: str = "OTHER"
@@ -305,6 +411,8 @@ class PasswordEntryCreate(BaseModel):
     holder_name: Optional[str] = None
     holder_pan: Optional[str] = None
     holder_din: Optional[str] = None
+    mobile: Optional[str] = None
+    trade_name: Optional[str] = None
     notes: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
 
@@ -322,6 +430,8 @@ class PasswordEntryUpdate(BaseModel):
     holder_name: Optional[str] = None
     holder_pan: Optional[str] = None
     holder_din: Optional[str] = None
+    mobile: Optional[str] = None
+    trade_name: Optional[str] = None
     notes: Optional[str] = None
     tags: Optional[List[str]] = None
 
@@ -340,6 +450,8 @@ class PasswordEntry(BaseModel):
     holder_name: Optional[str] = None
     holder_pan: Optional[str] = None
     holder_din: Optional[str] = None
+    mobile: Optional[str] = None
+    trade_name: Optional[str] = None
     notes: Optional[str] = None
     tags: List[str] = []
     created_by: str
@@ -370,14 +482,14 @@ class BulkImportResult(BaseModel):
 class ColumnMappingPreview(BaseModel):
     """Returned by /parse-preview — shows how columns will be mapped before import."""
     original_columns: List[str]
-    mapping: dict          # original_col -> canonical_field
+    mapping: dict
     unmapped_columns: List[str]
     sample_rows: List[dict]
     total_rows: int
-    missing_required: List[str]   # canonical required fields not found in any column
+    missing_required: List[str]
+    suggested_mappings: dict = {}  # unmapped_col -> list of possible canonical fields
 
 
-# Google Sheets link schema
 class GoogleSheetLink(BaseModel):
     label: str = Field(..., min_length=1, max_length=120)
     sheet_url: str = Field(..., min_length=10)
@@ -509,9 +621,45 @@ def _read_file_to_df(contents: bytes, filename: str) -> pd.DataFrame:
         df = pd.read_csv(file_like, dtype=str)
     else:
         raise ValueError("Unsupported file type. Please upload an Excel (.xlsx, .xls) or CSV (.csv) file.")
-    # Strip whitespace from all string cells
     df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
     return df
+
+
+def _suggest_canonical_for_unmapped(col: str) -> List[str]:
+    """
+    Suggest possible canonical field assignments for an unrecognised column
+    using simple heuristics / substring matching.
+    Returns a ranked list of suggestions (up to 3).
+    """
+    col_lower = col.lower().replace("_", " ").replace("-", " ")
+    suggestions = []
+
+    keyword_map = [
+        (["password", "pass", "pwd", "secret"], "password_plain"),
+        (["user", "email", "login", "id", "gstin", "pan login"], "username"),
+        (["portal", "site", "platform", "app", "system"], "portal_name"),
+        (["url", "link", "web", "http", "address"], "url"),
+        (["type", "category", "portal type", "govt"], "portal_type"),
+        (["department", "dept", "division", "section"], "department"),
+        (["holder", "director", "person", "individual", "proprietor", "owner", "signatory"], "holder_name"),
+        (["pan", "permanent account"], "holder_pan"),
+        (["din", "director identification"], "holder_din"),
+        (["client", "company", "firm", "entity", "organisation", "organization", "business", "legal", "registered"], "client_name"),
+        (["client id", "client code", "customer id", "customer code", "company id"], "client_id"),
+        (["mobile", "phone", "contact", "whatsapp", "otp"], "mobile"),
+        (["trade", "brand", "dba", "trading"], "trade_name"),
+        (["note", "remark", "comment", "info", "detail", "misc"], "notes"),
+        (["tag", "label", "keyword"], "tags"),
+    ]
+
+    for keywords, canonical in keyword_map:
+        for kw in keywords:
+            if kw in col_lower:
+                if canonical not in suggestions:
+                    suggestions.append(canonical)
+                break
+
+    return suggestions[:3]
 
 
 # ── STATIC / UTILITY ROUTES ───────────────────────────────────────────────────
@@ -698,7 +846,7 @@ async def download_template(current_user: User = Depends(get_current_user)):
     template_columns = [
         "portal_name", "portal_type", "url", "username", "password_plain",
         "department", "holder_type", "holder_name", "holder_pan", "holder_din",
-        "client_name", "client_id", "notes", "tags"
+        "mobile", "trade_name", "client_name", "client_id", "notes", "tags"
     ]
     df = pd.DataFrame(columns=template_columns)
 
@@ -714,6 +862,8 @@ async def download_template(current_user: User = Depends(get_current_user)):
             "holder_name":    "",
             "holder_pan":     "",
             "holder_din":     "",
+            "mobile":         "9876543210",
+            "trade_name":     "Example Traders",
             "client_name":    "Example Client Pvt Ltd",
             "client_id":      "CL001",
             "notes":          "GST login for quarterly filings",
@@ -730,6 +880,8 @@ async def download_template(current_user: User = Depends(get_current_user)):
             "holder_name":    "Rajesh Kumar",
             "holder_pan":     "ABCPK1234D",
             "holder_din":     "08123456",
+            "mobile":         "9123456789",
+            "trade_name":     "",
             "client_name":    "Example Client Pvt Ltd",
             "client_id":      "CL001",
             "notes":          "MCA login for Director Rajesh Kumar",
@@ -750,7 +902,7 @@ async def download_template(current_user: User = Depends(get_current_user)):
     return Response(content=output.getvalue(), headers=headers)
 
 
-# ── PARSE PREVIEW (new endpoint — called before bulk import) ──────────────────
+# ── PARSE PREVIEW ─────────────────────────────────────────────────────────────
 
 @router.post("/parse-preview", response_model=ColumnMappingPreview)
 async def parse_file_preview(
@@ -758,9 +910,8 @@ async def parse_file_preview(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Parse the uploaded file, auto-map columns, and return a preview.
-    The frontend uses this to show the user how columns will be mapped
-    and ask for clarification on unmapped columns before importing.
+    Parse uploaded file, auto-map columns, suggest mappings for unmapped ones,
+    and return a comprehensive preview for the smart import UI.
     """
     if not _can_edit(current_user):
         raise HTTPException(403, "You do not have permission to import passwords")
@@ -774,12 +925,17 @@ async def parse_file_preview(
     original_columns = list(df.columns)
     df_mapped, mapping_used, unmapped_cols = _map_columns(df)
 
-    # Check which required fields are still missing
     required_fields = ["portal_name", "username", "password_plain"]
     mapped_fields = set(mapping_used.values())
     missing_required = [f for f in required_fields if f not in mapped_fields]
 
-    # Sample preview (first 5 rows, mapped column names)
+    # Generate AI-style suggestions for unmapped columns
+    suggested_mappings = {}
+    for col in unmapped_cols:
+        suggestions = _suggest_canonical_for_unmapped(col)
+        if suggestions:
+            suggested_mappings[col] = suggestions
+
     sample = df_mapped.head(5).fillna("").to_dict(orient="records")
 
     return {
@@ -789,6 +945,7 @@ async def parse_file_preview(
         "sample_rows": sample,
         "total_rows": len(df),
         "missing_required": missing_required,
+        "suggested_mappings": suggested_mappings,
     }
 
 
@@ -801,7 +958,8 @@ async def bulk_import_passwords(
 ):
     """
     Bulk import passwords from Excel/CSV.
-    - Auto-maps column names using alias table
+    - Auto-maps column names using extended alias table
+    - Handles mobile, trade_name as extra fields
     - Auto-derives department from portal_type when missing
     - Auto-sets holder_type to COMPANY when missing
     - Skips completely empty rows
@@ -816,10 +974,8 @@ async def bulk_import_passwords(
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    # Smart column mapping
     df, mapping_used, unmapped_cols = _map_columns(df)
 
-    # Must have at least portal_name to proceed
     if "portal_name" not in df.columns:
         raise HTTPException(
             400,
@@ -834,7 +990,6 @@ async def bulk_import_passwords(
     errors = []
 
     for index, row in df.iterrows():
-        # Skip completely empty rows
         row_vals = [v for v in row.values if _clean_val(v) is not None]
         if not row_vals:
             skipped_rows += 1
@@ -843,7 +998,6 @@ async def bulk_import_passwords(
         total_processed += 1
 
         try:
-            # ── Extract fields with smart defaults ────────────────────────────
             portal_name = _clean_val(row.get("portal_name", ""))
             if not portal_name:
                 failed_imports += 1
@@ -851,11 +1005,8 @@ async def bulk_import_passwords(
                 continue
 
             portal_type_raw = _clean_val(row.get("portal_type", "")) or "OTHER"
-            portal_type = portal_type_raw.upper()
-            if portal_type not in PORTAL_TYPES:
-                portal_type = "OTHER"
+            portal_type = _normalize_portal_type(portal_type_raw)
 
-            # Auto-derive department from portal_type if missing
             dept_raw = _clean_val(row.get("department", ""))
             if dept_raw:
                 department = dept_raw.upper()
@@ -875,11 +1026,12 @@ async def bulk_import_passwords(
             if holder_pan:
                 holder_pan = holder_pan.upper()
             holder_din = _clean_val(row.get("holder_din", ""))
+            mobile = _clean_val(row.get("mobile", ""))
+            trade_name = _clean_val(row.get("trade_name", ""))
 
             client_name = _clean_val(row.get("client_name", ""))
             client_id = _clean_val(row.get("client_id", ""))
 
-            # If client_id given but no client_name, look it up
             if client_id and not client_name:
                 client_doc = await db.clients.find_one({"id": client_id}, {"_id": 0, "company_name": 1})
                 if client_doc:
@@ -892,7 +1044,6 @@ async def bulk_import_passwords(
             else:
                 tags = []
 
-            # ── Build and validate entry ──────────────────────────────────────
             entry_data = {
                 "portal_name":    portal_name,
                 "portal_type":    portal_type,
@@ -904,6 +1055,8 @@ async def bulk_import_passwords(
                 "holder_name":    holder_name,
                 "holder_pan":     holder_pan,
                 "holder_din":     holder_din,
+                "mobile":         mobile,
+                "trade_name":     trade_name,
                 "client_name":    client_name,
                 "client_id":      client_id,
                 "notes":          notes,
@@ -912,7 +1065,6 @@ async def bulk_import_passwords(
 
             new_entry = PasswordEntryCreate(**entry_data)
 
-            # ── Insert into DB ────────────────────────────────────────────────
             now = datetime.now(timezone.utc).isoformat()
             entry_id = str(uuid.uuid4())
             doc = {
@@ -928,6 +1080,8 @@ async def bulk_import_passwords(
                 "holder_name":        new_entry.holder_name,
                 "holder_pan":         new_entry.holder_pan,
                 "holder_din":         new_entry.holder_din,
+                "mobile":             new_entry.mobile,
+                "trade_name":         new_entry.trade_name,
                 "client_name":        new_entry.client_name,
                 "client_id":          new_entry.client_id,
                 "notes":              new_entry.notes,
@@ -1030,13 +1184,22 @@ async def list_passwords(
     search: Optional[str] = Query(None),
     client_id: Optional[str] = Query(None),
     holder_type: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query("portal_name"),   # portal_name | created_at | updated_at
+    sort_order: Optional[str] = Query("asc"),          # asc | desc
     current_user: User = Depends(get_current_user),
 ):
     query: dict = {}
     if department:
-        query["department"] = department
+        # MCA/ROC merged group — if filtering by MCA query both
+        if department.upper() in ("MCA", "ROC"):
+            query["portal_type"] = {"$in": ["MCA", "ROC"]}
+        else:
+            query["department"] = department
     if portal_type:
-        query["portal_type"] = portal_type
+        if portal_type.upper() in ("MCA", "ROC"):
+            query["portal_type"] = {"$in": ["MCA", "ROC"]}
+        else:
+            query["portal_type"] = portal_type
     if client_id:
         query["client_id"] = client_id
     if holder_type:
@@ -1051,9 +1214,21 @@ async def list_passwords(
             {"holder_name":  {"$regex": safe, "$options": "i"}},
             {"holder_pan":   {"$regex": safe, "$options": "i"}},
             {"holder_din":   {"$regex": safe, "$options": "i"}},
+            {"mobile":       {"$regex": safe, "$options": "i"}},
+            {"trade_name":   {"$regex": safe, "$options": "i"}},
         ]
 
-    raw = await db.passwords.find(query, {"_id": 0}).sort("portal_name", 1).to_list(2000)
+    # Sort mapping
+    sort_field_map = {
+        "portal_name": "portal_name",
+        "created_at": "created_at",
+        "updated_at": "updated_at",
+        "name": "portal_name",
+    }
+    sort_field = sort_field_map.get(sort_by or "portal_name", "portal_name")
+    mongo_sort_dir = 1 if (sort_order or "asc") == "asc" else -1
+
+    raw = await db.passwords.find(query, {"_id": 0}).sort(sort_field, mongo_sort_dir).to_list(5000)
 
     result = []
     for doc in raw:
@@ -1094,6 +1269,8 @@ async def create_password(
         "holder_name":        (data.holder_name or "").strip() or None,
         "holder_pan":         (data.holder_pan or "").strip().upper() or None,
         "holder_din":         (data.holder_din or "").strip() or None,
+        "mobile":             (data.mobile or "").strip() or None,
+        "trade_name":         (data.trade_name or "").strip() or None,
         "client_name":        client_name or None,
         "client_id":          data.client_id or None,
         "notes":              data.notes or None,
@@ -1120,7 +1297,7 @@ async def create_password(
     return _strip_sensitive(doc)
 
 
-# ── PARAMETERIZED ROUTES (must come LAST) ─────────────────────────────────────
+# ── PARAMETERIZED ROUTES ──────────────────────────────────────────────────────
 
 @router.get("/{entry_id}", response_model=PasswordEntry)
 async def get_password_entry(
@@ -1211,6 +1388,10 @@ async def update_password_entry(
         updates["holder_pan"] = data.holder_pan.strip().upper() or None
     if data.holder_din is not None:
         updates["holder_din"] = data.holder_din.strip() or None
+    if data.mobile is not None:
+        updates["mobile"] = data.mobile.strip() or None
+    if data.trade_name is not None:
+        updates["trade_name"] = data.trade_name.strip() or None
     if data.client_id is not None:
         updates["client_id"] = data.client_id or None
         if data.client_id and not data.client_name:
