@@ -872,57 +872,84 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
             "role": "staff",
             "todos": todos
         }
+#TodoRouter
 
 @api_router.post("/todos/{todo_id}/promote-to-task")
-async def promote_todo(todo_id: str, current_user: User = Depends(get_current_user)):
-    try:
-        todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid Todo ID")
+async def promote_todo(
+    todo_id: str,
+    task_data: dict = Body(default={}),
+    current_user: User = Depends(get_current_user)
+):
+    # Try lookup by string `id` field first, then fallback to ObjectId `_id`
+    todo = await db.todos.find_one({"id": todo_id})
+    if not todo:
+        try:
+            todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Todo ID")
     if not todo:
         raise HTTPException(status_code=404, detail="Todo not found")
     if current_user.role != "admin" and todo["user_id"] != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to promote this todo")
+
     now = datetime.now(IST)
+
     new_task = {
-        "id": str(uuid.uuid4()),
-        "title": todo["title"],
-        "description": todo.get("description"),
-        "assigned_to": todo["user_id"],
-        "sub_assignees": [],
-        "priority": "medium",
-        "status": "pending",
-        "category": "other",
-        "client_id": None,
-        "is_recurring": False,
-        "type": "task",
-        "created_by": current_user.id,
-        "created_at": now,
-        "updated_at": now
+        "id":                  str(uuid.uuid4()),
+        "title":               task_data.get("title")               or todo["title"],
+        "description":         task_data.get("description")         or todo.get("description"),
+        "assigned_to":         task_data.get("assigned_to")         or todo["user_id"],
+        "sub_assignees":       task_data.get("sub_assignees")       or [],
+        "priority":            task_data.get("priority")            or "medium",
+        "status":              task_data.get("status")              or "pending",
+        "category":            task_data.get("category")            or "other",
+        "client_id":           task_data.get("client_id")           or None,
+        "due_date":            task_data.get("due_date")            or None,
+        "is_recurring":        task_data.get("is_recurring")        or False,
+        "recurrence_pattern":  task_data.get("recurrence_pattern")  or "monthly",
+        "recurrence_interval": task_data.get("recurrence_interval") or 1,
+        "type":                "task",
+        "created_by":          current_user.id,
+        "created_at":          now,
+        "updated_at":          now,
     }
+
+    # Use the correct _id for deletion
+    mongo_id = todo.get("_id")
+
     async with await client.start_session() as session:
         async def cb(session):
             await db.tasks.insert_one(new_task, session=session)
-            await db.todos.delete_one({"_id": ObjectId(todo_id)}, session=session)
+            await db.todos.delete_one({"_id": mongo_id}, session=session)
         await session.with_transaction(cb)
+
     return {"message": "Todo promoted to task successfully"}
+
 
 @api_router.delete("/todos/{todo_id}")
 async def delete_todo(
     todo_id: str,
     current_user: User = Depends(get_current_user)
 ):
-    try:
-        obj_id = ObjectId(todo_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid Todo ID")
-    todo = await db.todos.find_one({"_id": obj_id})
+    # Strategy 1: lookup by string `id` field (todos created via API)
+    todo = await db.todos.find_one({"id": todo_id})
+
+    # Strategy 2: fallback to MongoDB ObjectId `_id`
+    if not todo:
+        try:
+            todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Todo ID")
+
     if not todo:
         raise HTTPException(status_code=404, detail="Todo not found")
     if current_user.role != "admin" and todo["user_id"] != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
-    await db.todos.delete_one({"_id": obj_id})
+
+    # Always delete using the actual MongoDB `_id` to avoid ambiguity
+    await db.todos.delete_one({"_id": todo["_id"]})
     return {"message": "Todo deleted successfully"}
+
 
 @api_router.patch("/todos/{todo_id}")
 async def update_todo(
@@ -930,24 +957,33 @@ async def update_todo(
     updates: dict,
     current_user: User = Depends(get_current_user)
 ):
-    try:
-        todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid Todo ID")
+    # Strategy 1: lookup by string `id` field
+    todo = await db.todos.find_one({"id": todo_id})
+
+    # Strategy 2: fallback to MongoDB ObjectId `_id`
+    if not todo:
+        try:
+            todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Todo ID")
+
     if not todo:
         raise HTTPException(status_code=404, detail="Todo not found")
     if current_user.role != "admin" and todo["user_id"] != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
+
     now = datetime.now(IST)
     if updates.get("is_completed") is True:
         updates["completed_at"] = now
     updates["updated_at"] = now
+
+    # Always update using the actual MongoDB `_id`
     await db.todos.update_one(
-        {"_id": ObjectId(todo_id)},
+        {"_id": todo["_id"]},
         {"$set": updates}
     )
     return {"message": "Todo updated successfully"}
-
+    
 # REGISTER Endpoint
 @api_router.post("/auth/register", response_model=Token)
 async def register(user_data: UserCreate, current_user: User = Depends(get_current_user)):
