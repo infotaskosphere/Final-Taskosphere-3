@@ -1201,7 +1201,7 @@ async def get_reminders(
         query = {"user_id": current_user.id}
 
     reminders = await db.reminders.find(
-        query, {"_id": 0}
+        query
     ).sort("remind_at", 1).to_list(500)
     return [normalize_reminder_doc(doc) for doc in reminders]
 
