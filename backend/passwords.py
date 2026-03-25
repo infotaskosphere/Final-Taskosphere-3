@@ -110,9 +110,190 @@ DEPARTMENT_MAP = {
 # Credential holder types
 HOLDER_TYPES = ["COMPANY", "DIRECTOR", "INDIVIDUAL", "PARTNER", "TRUSTEE", "OTHER"]
 
+# ── Smart column alias mapping (for flexible Excel headers) ───────────────────
+# Maps any possible user column header to our canonical field name
+COLUMN_ALIASES = {
+    # portal_name
+    "portal_name": "portal_name",
+    "portal": "portal_name",
+    "portal name": "portal_name",
+    "name": "portal_name",
+    "site": "portal_name",
+    "website": "portal_name",
+    "account": "portal_name",
+    "account name": "portal_name",
+    "service": "portal_name",
+
+    # portal_type
+    "portal_type": "portal_type",
+    "portal type": "portal_type",
+    "type": "portal_type",
+    "category": "portal_type",
+    "portal category": "portal_type",
+
+    # url
+    "url": "url",
+    "link": "url",
+    "website url": "url",
+    "portal url": "url",
+    "web address": "url",
+    "address": "url",
+    "login url": "url",
+    "login link": "url",
+
+    # username
+    "username": "username",
+    "user name": "username",
+    "user": "username",
+    "login": "username",
+    "login id": "username",
+    "email": "username",
+    "email id": "username",
+    "user id": "username",
+    "userid": "username",
+    "id": "username",
+    "login email": "username",
+    "user email": "username",
+
+    # password_plain
+    "password_plain": "password_plain",
+    "password": "password_plain",
+    "pass": "password_plain",
+    "passwd": "password_plain",
+    "pwd": "password_plain",
+    "secret": "password_plain",
+    "passphrase": "password_plain",
+
+    # department
+    "department": "department",
+    "dept": "department",
+    "division": "department",
+    "section": "department",
+
+    # holder_type
+    "holder_type": "holder_type",
+    "holder type": "holder_type",
+    "credential holder": "holder_type",
+    "login type": "holder_type",
+    "account type": "holder_type",
+
+    # holder_name
+    "holder_name": "holder_name",
+    "holder name": "holder_name",
+    "holder": "holder_name",
+    "director name": "holder_name",
+    "individual name": "holder_name",
+    "person name": "holder_name",
+    "person": "holder_name",
+    "full name": "holder_name",
+    "director": "holder_name",
+
+    # holder_pan
+    "holder_pan": "holder_pan",
+    "holder pan": "holder_pan",
+    "pan": "holder_pan",
+    "pan no": "holder_pan",
+    "pan number": "holder_pan",
+    "pan no.": "holder_pan",
+
+    # holder_din
+    "holder_din": "holder_din",
+    "holder din": "holder_din",
+    "din": "holder_din",
+    "din no": "holder_din",
+    "din number": "holder_din",
+    "din no.": "holder_din",
+
+    # client_name
+    "client_name": "client_name",
+    "client name": "client_name",
+    "client": "client_name",
+    "company": "client_name",
+    "company name": "client_name",
+    "firm": "client_name",
+    "firm name": "client_name",
+    "organization": "client_name",
+    "organisation": "client_name",
+
+    # client_id
+    "client_id": "client_id",
+    "client id": "client_id",
+    "client code": "client_id",
+    "company id": "client_id",
+    "company code": "client_id",
+
+    # notes
+    "notes": "notes",
+    "note": "notes",
+    "remarks": "notes",
+    "comments": "notes",
+    "description": "notes",
+    "info": "notes",
+    "additional info": "notes",
+
+    # tags
+    "tags": "tags",
+    "tag": "tags",
+    "labels": "tags",
+    "label": "tags",
+    "keywords": "tags",
+}
+
+
+def _normalize_column_name(col: str) -> str:
+    """Normalize a column header: lowercase, strip whitespace."""
+    return str(col).strip().lower().replace("_", " ").replace("-", " ")
+
+
+def _map_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
+    """
+    Intelligently map arbitrary Excel columns to canonical field names.
+    Returns: (mapped_df, mapping_used, unmapped_columns)
+    """
+    mapping_used = {}    # original_col -> canonical_field
+    unmapped_cols = []   # columns that couldn't be mapped
+
+    rename_map = {}
+    for col in df.columns:
+        normalized = _normalize_column_name(col)
+        canonical = COLUMN_ALIASES.get(normalized)
+        if canonical:
+            rename_map[col] = canonical
+            mapping_used[col] = canonical
+        else:
+            unmapped_cols.append(col)
+
+    df_mapped = df.rename(columns=rename_map)
+
+    # If duplicate canonical cols after rename, keep first occurrence
+    seen = set()
+    dedup_cols = []
+    for col in df_mapped.columns:
+        if col not in seen:
+            seen.add(col)
+            dedup_cols.append(col)
+    df_mapped = df_mapped[dedup_cols]
+
+    return df_mapped, mapping_used, unmapped_cols
+
+
+def _clean_val(v) -> Optional[str]:
+    """Convert a cell value to clean string or None."""
+    if v is None:
+        return None
+    s = str(v).strip()
+    if s.lower() in ("nan", "none", "null", "n/a", "na", ""):
+        return None
+    return s
+
+
+def _derive_department(portal_type: str) -> str:
+    """Auto-derive department from portal type."""
+    return DEPARTMENT_MAP.get(portal_type.upper(), "OTHER")
+
 
 class PasswordEntryCreate(BaseModel):
-    portal_name: str = Field(..., min_length=2, max_length=120)
+    portal_name: str = Field(..., min_length=1, max_length=120)
     portal_type: str = "OTHER"
     url: Optional[str] = None
     username: Optional[str] = None
@@ -120,11 +301,10 @@ class PasswordEntryCreate(BaseModel):
     department: str = "OTHER"
     client_name: Optional[str] = None
     client_id: Optional[str] = None
-    # New fields for individual/director tracking
-    holder_type: str = "COMPANY"          # COMPANY / DIRECTOR / INDIVIDUAL etc.
-    holder_name: Optional[str] = None     # Director name / individual name
-    holder_pan: Optional[str] = None      # PAN of individual/director
-    holder_din: Optional[str] = None      # DIN (for MCA/ROC directors)
+    holder_type: str = "COMPANY"
+    holder_name: Optional[str] = None
+    holder_pan: Optional[str] = None
+    holder_din: Optional[str] = None
     notes: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
 
@@ -182,13 +362,26 @@ class BulkImportResult(BaseModel):
     successful_imports: int
     failed_imports: int
     errors: List[dict]
+    column_mapping: dict = {}
+    unmapped_columns: List[str] = []
+    skipped_rows: int = 0
+
+
+class ColumnMappingPreview(BaseModel):
+    """Returned by /parse-preview — shows how columns will be mapped before import."""
+    original_columns: List[str]
+    mapping: dict          # original_col -> canonical_field
+    unmapped_columns: List[str]
+    sample_rows: List[dict]
+    total_rows: int
+    missing_required: List[str]   # canonical required fields not found in any column
 
 
 # Google Sheets link schema
 class GoogleSheetLink(BaseModel):
     label: str = Field(..., min_length=1, max_length=120)
     sheet_url: str = Field(..., min_length=10)
-    sheet_type: str = "OTHER"   # GST | ROC | MCA | OTHER
+    sheet_type: str = "OTHER"
     description: Optional[str] = None
 
 
@@ -263,19 +456,16 @@ async def _enrich_entry(doc: dict) -> dict:
 
 
 def _extract_sheet_id(url: str) -> Optional[str]:
-    """Extract Google Sheets ID from a share URL."""
     match = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", url)
     return match.group(1) if match else None
 
 
 def _extract_gid(url: str) -> Optional[str]:
-    """Extract gid (sheet tab) from URL."""
     match = re.search(r"[#&?]gid=(\d+)", url)
     return match.group(1) if match else None
 
 
 async def _fetch_sheet_as_csv(sheet_id: str, gid: Optional[str] = None) -> Optional[pd.DataFrame]:
-    """Fetch a Google Sheet tab as CSV (must be publicly shared)."""
     if gid:
         csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
     else:
@@ -292,7 +482,6 @@ async def _fetch_sheet_as_csv(sheet_id: str, gid: Optional[str] = None) -> Optio
 
 
 async def _get_all_sheet_tabs(sheet_id: str) -> List[dict]:
-    """Get list of all tabs in a Google Sheet using the sheets API export trick."""
     try:
         url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
         async with httpx.AsyncClient(timeout=15) as client:
@@ -310,7 +499,22 @@ async def _get_all_sheet_tabs(sheet_id: str) -> List[dict]:
         return []
 
 
-# ── STATIC / UTILITY ROUTES (must come BEFORE /{entry_id}) ───────────────────
+def _read_file_to_df(contents: bytes, filename: str) -> pd.DataFrame:
+    """Read uploaded file (xlsx/xls/csv) into a DataFrame."""
+    file_like = io.BytesIO(contents)
+    fname = (filename or "").lower()
+    if fname.endswith((".xlsx", ".xls")):
+        df = pd.read_excel(file_like, engine="openpyxl", dtype=str)
+    elif fname.endswith(".csv"):
+        df = pd.read_csv(file_like, dtype=str)
+    else:
+        raise ValueError("Unsupported file type. Please upload an Excel (.xlsx, .xls) or CSV (.csv) file.")
+    # Strip whitespace from all string cells
+    df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+    return df
+
+
+# ── STATIC / UTILITY ROUTES ───────────────────────────────────────────────────
 
 @router.get("/portal-types")
 async def get_portal_types(current_user: User = Depends(get_current_user)):
@@ -323,7 +527,6 @@ async def get_portal_types(current_user: User = Depends(get_current_user)):
 
 @router.get("/clients-list")
 async def get_clients_for_password(current_user: User = Depends(get_current_user)):
-    """Return a lightweight list of clients for the password form dropdown."""
     query = {}
     if current_user.role != "admin":
         perms = _get_user_perms(current_user)
@@ -347,7 +550,6 @@ async def get_clients_for_password(current_user: User = Depends(get_current_user
 
 @router.get("/sheet-links")
 async def list_sheet_links(current_user: User = Depends(get_current_user)):
-    """List all saved Google Sheet links."""
     links = await db.password_sheet_links.find({}, {"_id": 0}).sort("label", 1).to_list(200)
     return links
 
@@ -357,7 +559,6 @@ async def add_sheet_link(
     data: GoogleSheetLink,
     current_user: User = Depends(require_admin),
 ):
-    """Save a Google Sheet link for future password import."""
     sheet_id = _extract_sheet_id(data.sheet_url)
     if not sheet_id:
         raise HTTPException(400, "Invalid Google Sheets URL — could not extract sheet ID")
@@ -429,12 +630,6 @@ async def preview_sheet_data(
     link_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Preview data from a saved Google Sheet link.
-    For ROC/MCA sheets: fetches ALL tabs and merges.
-    For GST sheets: fetches only the LAST (most recent) tab.
-    Returns first 20 rows for preview.
-    """
     link = await db.password_sheet_links.find_one({"id": link_id}, {"_id": 0})
     if not link:
         raise HTTPException(404, "Sheet link not found")
@@ -493,7 +688,7 @@ async def preview_sheet_data(
         }
 
 
-# ── TEMPLATE + BULK IMPORT (must come BEFORE /{entry_id}) ────────────────────
+# ── TEMPLATE ──────────────────────────────────────────────────────────────────
 
 @router.get("/template", response_class=Response)
 async def download_template(current_user: User = Depends(get_current_user)):
@@ -555,79 +750,169 @@ async def download_template(current_user: User = Depends(get_current_user)):
     return Response(content=output.getvalue(), headers=headers)
 
 
+# ── PARSE PREVIEW (new endpoint — called before bulk import) ──────────────────
+
+@router.post("/parse-preview", response_model=ColumnMappingPreview)
+async def parse_file_preview(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Parse the uploaded file, auto-map columns, and return a preview.
+    The frontend uses this to show the user how columns will be mapped
+    and ask for clarification on unmapped columns before importing.
+    """
+    if not _can_edit(current_user):
+        raise HTTPException(403, "You do not have permission to import passwords")
+
+    contents = await file.read()
+    try:
+        df = _read_file_to_df(contents, file.filename or "")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    original_columns = list(df.columns)
+    df_mapped, mapping_used, unmapped_cols = _map_columns(df)
+
+    # Check which required fields are still missing
+    required_fields = ["portal_name", "username", "password_plain"]
+    mapped_fields = set(mapping_used.values())
+    missing_required = [f for f in required_fields if f not in mapped_fields]
+
+    # Sample preview (first 5 rows, mapped column names)
+    sample = df_mapped.head(5).fillna("").to_dict(orient="records")
+
+    return {
+        "original_columns": original_columns,
+        "mapping": mapping_used,
+        "unmapped_columns": unmapped_cols,
+        "sample_rows": sample,
+        "total_rows": len(df),
+        "missing_required": missing_required,
+    }
+
+
+# ── BULK IMPORT ───────────────────────────────────────────────────────────────
+
 @router.post("/bulk-import", response_model=BulkImportResult, status_code=200)
 async def bulk_import_passwords(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):
+    """
+    Bulk import passwords from Excel/CSV.
+    - Auto-maps column names using alias table
+    - Auto-derives department from portal_type when missing
+    - Auto-sets holder_type to COMPANY when missing
+    - Skips completely empty rows
+    - Returns detailed per-row error info
+    """
     if not _can_edit(current_user):
         raise HTTPException(403, "You do not have permission to bulk import passwords")
 
     contents = await file.read()
-    file_like_object = io.BytesIO(contents)
+    try:
+        df = _read_file_to_df(contents, file.filename or "")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
-    df = None
-    fname = file.filename or ""
-    if fname.endswith(('.xlsx', '.xls')):
-        df = pd.read_excel(file_like_object, engine='openpyxl')
-    elif fname.endswith('.csv'):
-        df = pd.read_csv(file_like_object)
-    else:
-        raise HTTPException(400, "Unsupported file type. Please upload an Excel (.xlsx, .xls) or CSV (.csv) file.")
+    # Smart column mapping
+    df, mapping_used, unmapped_cols = _map_columns(df)
 
-    required_columns = [
-        "portal_name", "portal_type", "url", "username", "password_plain",
-        "department", "client_name", "client_id", "notes", "tags"
-    ]
-    df.columns = df.columns.str.lower().str.strip()
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    if missing_columns:
-        raise HTTPException(400, f"Missing required columns in the file: {', '.join(missing_columns)}")
+    # Must have at least portal_name to proceed
+    if "portal_name" not in df.columns:
+        raise HTTPException(
+            400,
+            "Could not find a 'portal name' column in your file. "
+            "Please ensure your Excel has a column for the portal/website name."
+        )
 
     total_processed = 0
     successful_imports = 0
     failed_imports = 0
+    skipped_rows = 0
     errors = []
 
     for index, row in df.iterrows():
+        # Skip completely empty rows
+        row_vals = [v for v in row.values if _clean_val(v) is not None]
+        if not row_vals:
+            skipped_rows += 1
+            continue
+
         total_processed += 1
+
         try:
-            client_name_val = str(row.get("client_name", "")).strip() or None
-            client_id_val = str(row.get("client_id", "")).strip() or None
+            # ── Extract fields with smart defaults ────────────────────────────
+            portal_name = _clean_val(row.get("portal_name", ""))
+            if not portal_name:
+                failed_imports += 1
+                errors.append({"row": index + 2, "error": "Portal name is empty", "data": dict(row)})
+                continue
 
-            if client_id_val and client_id_val.lower() in ("nan", "none", ""):
-                client_id_val = None
-            if client_name_val and client_name_val.lower() in ("nan", "none", ""):
-                client_name_val = None
+            portal_type_raw = _clean_val(row.get("portal_type", "")) or "OTHER"
+            portal_type = portal_type_raw.upper()
+            if portal_type not in PORTAL_TYPES:
+                portal_type = "OTHER"
 
-            if client_id_val and not client_name_val:
-                client_doc = await db.clients.find_one({"id": client_id_val}, {"_id": 0, "company_name": 1})
+            # Auto-derive department from portal_type if missing
+            dept_raw = _clean_val(row.get("department", ""))
+            if dept_raw:
+                department = dept_raw.upper()
+            else:
+                department = _derive_department(portal_type)
+
+            holder_type_raw = _clean_val(row.get("holder_type", ""))
+            holder_type = holder_type_raw.upper() if holder_type_raw else "COMPANY"
+            if holder_type not in HOLDER_TYPES:
+                holder_type = "COMPANY"
+
+            url = _clean_val(row.get("url", ""))
+            username = _clean_val(row.get("username", ""))
+            password_plain = _clean_val(row.get("password_plain", ""))
+            holder_name = _clean_val(row.get("holder_name", ""))
+            holder_pan = _clean_val(row.get("holder_pan", ""))
+            if holder_pan:
+                holder_pan = holder_pan.upper()
+            holder_din = _clean_val(row.get("holder_din", ""))
+
+            client_name = _clean_val(row.get("client_name", ""))
+            client_id = _clean_val(row.get("client_id", ""))
+
+            # If client_id given but no client_name, look it up
+            if client_id and not client_name:
+                client_doc = await db.clients.find_one({"id": client_id}, {"_id": 0, "company_name": 1})
                 if client_doc:
-                    client_name_val = client_doc.get("company_name")
+                    client_name = client_doc.get("company_name")
 
-            def clean(v):
-                s = str(v).strip() if v is not None else ""
-                return None if s.lower() in ("nan", "none", "") else s
+            notes = _clean_val(row.get("notes", ""))
+            tags_raw = _clean_val(row.get("tags", ""))
+            if tags_raw:
+                tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
+            else:
+                tags = []
 
+            # ── Build and validate entry ──────────────────────────────────────
             entry_data = {
-                "portal_name":    str(row.get("portal_name", "")).strip(),
-                "portal_type":    str(row.get("portal_type", "OTHER")).upper(),
-                "url":            clean(row.get("url")),
-                "username":       clean(row.get("username")),
-                "password_plain": clean(row.get("password_plain")),
-                "department":     str(row.get("department", "OTHER")).upper(),
-                "holder_type":    str(row.get("holder_type", "COMPANY")).upper() if clean(row.get("holder_type")) else "COMPANY",
-                "holder_name":    clean(row.get("holder_name")),
-                "holder_pan":     clean(row.get("holder_pan")),
-                "holder_din":     clean(row.get("holder_din")),
-                "client_name":    client_name_val,
-                "client_id":      client_id_val,
-                "notes":          clean(row.get("notes")),
-                "tags":           [t.strip() for t in str(row.get("tags", "")).split(',') if t.strip()] if isinstance(row.get("tags"), str) else [],
+                "portal_name":    portal_name,
+                "portal_type":    portal_type,
+                "url":            url,
+                "username":       username,
+                "password_plain": password_plain,
+                "department":     department,
+                "holder_type":    holder_type,
+                "holder_name":    holder_name,
+                "holder_pan":     holder_pan,
+                "holder_din":     holder_din,
+                "client_name":    client_name,
+                "client_id":      client_id,
+                "notes":          notes,
+                "tags":           tags,
             }
 
             new_entry = PasswordEntryCreate(**entry_data)
 
+            # ── Insert into DB ────────────────────────────────────────────────
             now = datetime.now(timezone.utc).isoformat()
             entry_id = str(uuid.uuid4())
             doc = {
@@ -663,23 +948,36 @@ async def bulk_import_passwords(
                 "user_name":   current_user.full_name,
                 "timestamp":   now,
             })
+
             successful_imports += 1
+
         except ValidationError as e:
             failed_imports += 1
-            errors.append({"row": index + 2, "error": e.errors(), "data": row.to_dict()})
+            errors.append({
+                "row": index + 2,
+                "error": str(e.errors()),
+                "data": {k: str(v) for k, v in dict(row).items()}
+            })
         except Exception as e:
             failed_imports += 1
-            errors.append({"row": index + 2, "error": str(e), "data": row.to_dict()})
+            errors.append({
+                "row": index + 2,
+                "error": str(e),
+                "data": {k: str(v) for k, v in dict(row).items()}
+            })
 
     return {
         "total_processed": total_processed,
         "successful_imports": successful_imports,
         "failed_imports": failed_imports,
-        "errors": errors
+        "errors": errors,
+        "column_mapping": mapping_used,
+        "unmapped_columns": unmapped_cols,
+        "skipped_rows": skipped_rows,
     }
 
 
-# ── ADMIN ROUTES (also before /{entry_id}) ────────────────────────────────────
+# ── ADMIN ROUTES ──────────────────────────────────────────────────────────────
 
 @router.get("/admin/access-logs")
 async def get_access_logs(
@@ -822,7 +1120,7 @@ async def create_password(
     return _strip_sensitive(doc)
 
 
-# ── PARAMETERIZED ROUTES (/{entry_id} — must come LAST) ──────────────────────
+# ── PARAMETERIZED ROUTES (must come LAST) ─────────────────────────────────────
 
 @router.get("/{entry_id}", response_model=PasswordEntry)
 async def get_password_entry(
