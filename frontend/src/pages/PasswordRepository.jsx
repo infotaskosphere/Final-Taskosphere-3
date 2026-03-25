@@ -189,260 +189,63 @@ function ModalHeader({ icon, title, subtitle, gradient, onClose }) {
   );
 }
 
-// ── Client Search Dropdown ────────────────────────────────────────────────────
-function ClientSearchDropdown({ value, onChange, isDark, clients = [] }) {
-  const [search, setSearch] = useState('');
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  const selectedClient = clients.find(c => c.id === value);
-  const filtered = useMemo(() => {
-    if (!search.trim()) return clients.slice(0, 50);
-    const q = search.toLowerCase();
-    return clients.filter(c => (c.company_name || '').toLowerCase().includes(q)).slice(0, 50);
-  }, [clients, search]);
-
-  useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, []);
-
-  const handleSelect = (client) => {
-    onChange(client ? { id: client.id, name: client.company_name } : { id: '', name: '' });
-    setOpen(false); setSearch('');
-  };
-
-  return (
-    <div className="relative" ref={ref}>
-      <div
-        className={`flex items-center gap-2 h-9 rounded-xl border px-3 cursor-pointer transition-colors ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 hover:border-slate-500' : 'bg-white border-slate-200 hover:border-slate-300'}`}
-        onClick={() => setOpen(o => !o)}
-      >
-        <Building2 className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
-        <span className={`flex-1 text-sm truncate ${selectedClient ? '' : 'text-slate-400'}`}>
-          {selectedClient ? selectedClient.company_name : 'Search client…'}
-        </span>
-        {value && (
-          <button type="button" onClick={e => { e.stopPropagation(); handleSelect(null); }} className="text-slate-400 hover:text-red-500 transition-colors"><X className="h-3 w-3" /></button>
-        )}
-        <ChevronDown className="h-3 w-3 text-slate-400 flex-shrink-0" />
-      </div>
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.15 }}
-            className={`absolute z-50 top-full left-0 right-0 mt-1 rounded-xl border shadow-xl overflow-hidden ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-200'}`}
-            style={{ maxHeight: 260 }}
-          >
-            <div className={`p-2 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                <input autoFocus
-                  className={`w-full pl-8 pr-3 h-7 text-sm rounded-lg border outline-none transition-colors ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 focus:border-blue-300'}`}
-                  placeholder="Search clients…" value={search} onChange={e => setSearch(e.target.value)} onClick={e => e.stopPropagation()}
-                />
-              </div>
-            </div>
-            <div className="overflow-y-auto" style={{ maxHeight: 192 }}>
-              <button type="button" onClick={() => handleSelect(null)} className={`w-full text-left px-3 py-2 text-sm transition-colors ${isDark ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-50 text-slate-400'}`}>— No client (internal) —</button>
-              {filtered.map(c => (
-                <button key={c.id} type="button" onClick={() => handleSelect(c)} className={`w-full text-left px-3 py-2 transition-colors flex items-center gap-2 ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-50'} ${value === c.id ? (isDark ? 'bg-slate-700' : 'bg-blue-50') : ''}`}>
-                  <div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" style={{ background: `linear-gradient(135deg, #0D3B66, #1F6FB2)` }}>
-                    {(c.company_name || '?').charAt(0).toUpperCase()}
-                  </div>
-                  <span className={`text-sm truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{c.company_name}</span>
-                  {value === c.id && <Check className="h-3 w-3 text-blue-500 ml-auto flex-shrink-0" />}
-                </button>
-              ))}
-              {filtered.length === 0 && <div className="px-3 py-4 text-center text-sm text-slate-400">No clients found</div>}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-// ── Reveal Password ───────────────────────────────────────────────────────────
+// ── Reveal Password Component ─────────────────────────────────────────────────
 function RevealPassword({ entryId, isDark }) {
   const [revealed, setRevealed] = useState(false);
-  const [password, setPassword]  = useState('');
-  const [loading, setLoading]    = useState(false);
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleReveal = useCallback(async () => {
-    if (revealed) { setRevealed(false); return; }
+  const handleReveal = async () => {
+    if (revealed) {
+      setRevealed(false);
+      setPassword('');
+      return;
+    }
     setLoading(true);
     try {
       const res = await api.get(`/passwords/${entryId}/reveal`);
       setPassword(res.data.password || '');
       setRevealed(true);
-    } catch { toast.error('Could not retrieve password'); }
-    finally { setLoading(false); }
-  }, [entryId, revealed]);
+      toast.success('Password revealed');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to reveal password');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div className="flex items-center gap-1.5">
-      <span className={`font-mono text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-        {revealed ? password : <MaskedPassword />}
-      </span>
-      <button type="button" onClick={handleReveal} disabled={loading} className={`flex-shrink-0 p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title={revealed ? 'Hide' : 'Reveal'}>
-        {loading ? <RefreshCw className="h-3 w-3 animate-spin text-slate-400" /> : revealed ? <EyeOff className="h-3 w-3 text-slate-400" /> : <Eye className="h-3 w-3 text-slate-400" />}
-      </button>
-      {revealed && (
-        <button type="button" onClick={() => navigator.clipboard.writeText(password).then(() => toast.success('Password copied'))} className={`flex-shrink-0 p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Copy password">
-          <Copy className="h-3 w-3 text-slate-400" />
-        </button>
+    <div className="flex items-center gap-2">
+      {revealed ? (
+        <span className={`font-mono text-xs ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{password}</span>
+      ) : (
+        <MaskedPassword />
       )}
+      <button
+        type="button"
+        onClick={handleReveal}
+        disabled={loading}
+        className={`flex-shrink-0 p-0.5 rounded ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
+      >
+        {loading ? (
+          <Loader2 className="h-3 w-3 text-slate-400 animate-spin" />
+        ) : revealed ? (
+          <EyeOff className="h-3 w-3 text-slate-400" />
+        ) : (
+          <Eye className="h-3 w-3 text-slate-400" />
+        )}
+      </button>
     </div>
   );
 }
 
-// ── Auto-fill & open ──────────────────────────────────────────────────────────
-async function handleAutoFillAndOpen(entry) {
-  if (!entry.url) { toast.error('No URL configured for this portal'); return; }
-  try {
-    const res = await api.get(`/passwords/${entry.id}/reveal`);
-    const password = res.data.password || '';
-    await navigator.clipboard.writeText(password);
-    toast.success(`Password copied! Opening ${entry.portal_name}…`, { description: `Username: ${entry.username || '—'}` });
-    setTimeout(() => {
-      const url = entry.url.startsWith('http') ? entry.url : `https://${entry.url}`;
-      window.open(url, '_blank', 'noopener,noreferrer');
-    }, 400);
-  } catch { toast.error('Could not retrieve credentials for auto-fill'); }
-}
-
-// ── Detail Modal ──────────────────────────────────────────────────────────────
-function DetailModal({ open, onClose, entry, isDark, canEdit, isAdmin, onEdit, onDelete }) {
-  const [revealedPw, setRevealedPw] = useState('');
-  const [revealLoading, setRevealLoading] = useState(false);
-  const [pwRevealed, setPwRevealed] = useState(false);
-
-  useEffect(() => { if (!open) { setRevealedPw(''); setPwRevealed(false); } }, [open]);
-  if (!entry) return null;
-
-  const meta = PORTAL_META[entry.portal_type] || PORTAL_META.OTHER;
-
-  const handleReveal = async () => {
-    if (pwRevealed) { setPwRevealed(false); return; }
-    setRevealLoading(true);
-    try {
-      const res = await api.get(`/passwords/${entry.id}/reveal`);
-      setRevealedPw(res.data.password || ''); setPwRevealed(true);
-    } catch { toast.error('Could not retrieve password'); }
-    finally { setRevealLoading(false); }
-  };
-
-  const InfoRow = ({ label, value, mono, copyable, icon }) => {
-    if (!value) return null;
-    return (
-      <div className={`flex items-start gap-3 py-2.5 border-b last:border-0 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-        <div className={`flex-shrink-0 w-28 text-[11px] font-bold uppercase tracking-wider pt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{label}</div>
-        <div className="flex-1 flex items-center gap-2 min-w-0">
-          {icon && <span className="text-sm flex-shrink-0">{icon}</span>}
-          <span className={`${mono ? 'font-mono' : ''} text-sm break-all ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{value}</span>
-          {copyable && (
-            <button type="button" onClick={() => navigator.clipboard.writeText(value).then(() => toast.success('Copied!'))} className={`flex-shrink-0 p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}><Copy className="h-3 w-3 text-slate-400" /></button>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className={`max-w-lg rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
-        <div className="px-5 py-4 flex-shrink-0" style={{ background: `linear-gradient(135deg, ${meta.color}ee, ${meta.color}99)` }}>
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 bg-white/20 rounded-2xl flex items-center justify-center text-xl flex-shrink-0">{meta.icon}</div>
-              <div className="min-w-0">
-                <DialogTitle className="text-white font-bold text-base leading-tight truncate">{entry.portal_name}</DialogTitle>
-                <p className="text-white/70 text-xs mt-0.5">{meta.fullName}</p>
-              </div>
-            </div>
-            <button type="button" onClick={onClose} className="w-7 h-7 bg-white/20 hover:bg-white/30 rounded-lg flex items-center justify-center transition-all flex-shrink-0"><X className="h-3.5 w-3.5 text-white" /></button>
-          </div>
-          <div className="flex items-center gap-2 mt-3 flex-wrap">
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-white/25 text-white">{meta.label}</span>
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white">{entry.department}</span>
-            {entry.holder_type !== 'COMPANY' && (
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white">
-                {HOLDER_META[entry.holder_type]?.icon} {HOLDER_META[entry.holder_type]?.label || entry.holder_type}
-              </span>
-            )}
-          </div>
-        </div>
-
-        <div className="p-5 max-h-[60vh] overflow-y-auto space-y-0">
-          <div className={`rounded-2xl border p-4 mb-4 ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-            <p className={`text-[10px] font-bold uppercase tracking-wider mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>🔐 Login Credentials</p>
-            {entry.username && (
-              <div className={`flex items-center gap-2 mb-2 pb-2 border-b ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
-                <span className={`text-[11px] w-20 font-bold uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Username</span>
-                <span className={`font-mono text-sm flex-1 truncate ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{entry.username}</span>
-                <button type="button" onClick={() => navigator.clipboard.writeText(entry.username).then(() => toast.success('Username copied'))} className={`p-1 rounded transition-colors flex-shrink-0 ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`}><Copy className="h-3 w-3 text-slate-400" /></button>
-              </div>
-            )}
-            <div className="flex items-center gap-2">
-              <span className={`text-[11px] w-20 font-bold uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Password</span>
-              <div className="flex-1 flex items-center gap-2">
-                {entry.has_password ? (
-                  <>
-                    <span className={`font-mono text-sm ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{pwRevealed ? revealedPw : '••••••••••'}</span>
-                    <button type="button" onClick={handleReveal} disabled={revealLoading} className={`p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`}>
-                      {revealLoading ? <RefreshCw className="h-3 w-3 animate-spin text-slate-400" /> : pwRevealed ? <EyeOff className="h-3 w-3 text-slate-400" /> : <Eye className="h-3 w-3 text-slate-400" />}
-                    </button>
-                    {pwRevealed && (
-                      <button type="button" onClick={() => navigator.clipboard.writeText(revealedPw).then(() => toast.success('Password copied'))} className={`p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`}><Copy className="h-3 w-3 text-slate-400" /></button>
-                    )}
-                  </>
-                ) : <span className={`text-sm italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No password stored</span>}
-              </div>
-            </div>
-          </div>
-
-          <div className={`rounded-2xl border ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-            <div className="px-4 pt-3 pb-1"><p className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>📋 Details</p></div>
-            <div className="px-4 pb-3">
-              <InfoRow label="URL" value={entry.url} icon="🌐" copyable />
-              <InfoRow label="Client" value={entry.client_name} icon="🏢" />
-              <InfoRow label="Holder" value={entry.holder_name} icon="👤" />
-              <InfoRow label="PAN" value={entry.holder_pan} mono copyable />
-              <InfoRow label="DIN" value={entry.holder_din} mono copyable />
-              <InfoRow label="Mobile" value={entry.mobile} icon="📱" copyable />
-              <InfoRow label="Trade Name" value={entry.trade_name} icon="🏪" />
-              <InfoRow label="Notes" value={entry.notes} />
-              {entry.tags?.length > 0 && (
-                <div className={`flex items-start gap-3 py-2.5 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-                  <div className={`flex-shrink-0 w-28 text-[11px] font-bold uppercase tracking-wider pt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Tags</div>
-                  <div className="flex flex-wrap gap-1">
-                    {entry.tags.map(t => <span key={t} className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>{t}</span>)}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4 mt-3 flex-wrap">
-            {entry.created_by_name && <span className="text-[10px] text-slate-400 flex items-center gap-1"><UserIcon className="h-2.5 w-2.5" /> Added by {entry.created_by_name}</span>}
-            {entry.created_at && <span className="text-[10px] text-slate-400 flex items-center gap-1"><Calendar className="h-2.5 w-2.5" /> {format(new Date(entry.created_at), 'MMM d, yyyy')}</span>}
-          </div>
-        </div>
-
-        <div className={`px-5 py-3 border-t flex items-center gap-2 flex-wrap ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-          {entry.url && (
-            <Button size="sm" onClick={() => handleAutoFillAndOpen(entry)} className="rounded-xl font-bold text-xs h-8 gap-1.5 text-white flex-1" style={{ background: `linear-gradient(135deg, ${meta.color}, ${meta.color}bb)` }}>
-              <AutoFillIcon className="h-3 w-3" /> Open & Auto-fill
-            </Button>
-          )}
-          {canEdit && <Button size="sm" variant="outline" className="rounded-xl h-8 text-xs gap-1" onClick={() => { onClose(); onEdit(entry); }}><Edit2 className="h-3 w-3" /> Edit</Button>}
-          <Button size="sm" onClick={onClose} className="rounded-xl h-8 text-xs" style={{ background: isDark ? '#374151' : '#F3F4F6', color: isDark ? '#E2E8F0' : '#4B5563' }}>Close</Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
+// ── Auto-fill and open portal ─────────────────────────────────────────────────
+function handleAutoFillAndOpen(entry) {
+  if (!entry.url) {
+    toast.error('No URL configured for this entry');
+    return;
+  }
+  window.open(entry.url, '_blank');
 }
 
 // ── WhatsApp Share Modal ──────────────────────────────────────────────────────
@@ -454,55 +257,41 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
   const [includePass, setIncludePass] = useState(false);
   const [customMsg, setCustomMsg] = useState('');
 
-  const { data: clientData } = useQuery({
-    queryKey: ['client-contacts', entry?.client_id],
-    queryFn: () => api.get(`/clients/${entry.client_id}`).then(r => r.data),
-    enabled: open && !!entry?.client_id,
-  });
-
   const recipients = useMemo(() => {
-    const list = [];
-    if (clientData?.phone) list.push({ type: 'company', label: 'Company', name: clientData.name || entry?.client_name || 'Company', phone: clientData.phone });
-    if (clientData?.contact_persons?.length) {
-      clientData.contact_persons.forEach((cp, i) => {
-        if (cp.phone) list.push({ type: `contact_${i}`, label: cp.designation || 'Contact', name: cp.name, phone: cp.phone });
-      });
-    }
-    return list;
-  }, [clientData, entry]);
+    const r = [];
+    if (entry?.mobile) r.push({ type: 'entry', label: 'Entry Mobile', name: entry.portal_name, phone: entry.mobile });
+    if (entry?.client_name) r.push({ type: 'client', label: 'Client', name: entry.client_name, phone: '' });
+    return r;
+  }, [entry]);
 
-  const selectedRecipient = recipients.find(r => r.type === recipientType);
-
-  const fetchPassword = useCallback(async () => {
-    if (!entry?.id || password) return;
-    setLoadingPw(true);
-    try {
-      const res = await api.get(`/passwords/${entry.id}/reveal`);
-      setPassword(res.data.password || '');
-    } catch { toast.error('Could not retrieve password'); }
-    finally { setLoadingPw(false); }
-  }, [entry?.id, password]);
+  const selectedRecipient = useMemo(() => recipients.find(r => r.type === recipientType), [recipients, recipientType]);
 
   const handleIncludeToggle = async (checked) => {
     setIncludePass(checked);
-    if (checked) await fetchPassword();
+    if (checked && entry?.id) {
+      setLoadingPw(true);
+      try {
+        const res = await api.get(`/passwords/${entry.id}/reveal`);
+        setPassword(res.data.password || '');
+      } catch (err) {
+        toast.error('Failed to fetch password');
+        setIncludePass(false);
+      } finally {
+        setLoadingPw(false);
+      }
+    }
   };
 
   const buildMessage = useCallback(() => {
-    const meta = PORTAL_META[entry?.portal_type] || PORTAL_META.OTHER;
-    const toName = selectedRecipient?.name || 'Sir/Madam';
-    const lines = [`Dear ${toName},`, '', `Please find the login credentials for *${entry?.portal_name || ''}* (${meta.fullName}):`];
-    if (entry?.url) lines.push(`🌐 URL: ${entry.url}`);
-    if (entry?.username) lines.push(`👤 Username: ${entry.username}`);
-    if (includePass && password) lines.push(`🔑 Password: ${password}`);
-    if (entry?.holder_name) lines.push(`👔 Login for: ${entry.holder_name}`);
-    if (entry?.mobile) lines.push(`📱 Registered Mobile: ${entry.mobile}`);
-    if (entry?.notes) lines.push(`📝 Note: ${entry.notes}`);
-    lines.push('', '🔒 _This message contains confidential credentials. Please do not forward._');
+    const lines = [];
+    if (entry?.portal_name) lines.push(`Portal: ${entry.portal_name}`);
+    if (entry?.url) lines.push(`URL: ${entry.url}`);
+    if (entry?.username) lines.push(`Username: ${entry.username}`);
+    if (includePass && password) lines.push(`Password: ${password}`);
     if (customMsg.trim()) { lines.push('', customMsg.trim()); }
     lines.push('', '– Sent via Taskosphere');
     return lines.join('\n');
-  }, [entry, selectedRecipient, includePass, password, customMsg]);
+  }, [entry, includePass, password, customMsg]);
 
   const handleSend = () => {
     const phone = selectedRecipient?.phone || customPhone;
@@ -566,7 +355,6 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
   const [unmappedAssignments, setUnmapped]  = useState({});
   const [result, setResult]                 = useState(null);
   const qc = useQueryClient();
-  const allCanonicalFields = Object.keys(FIELD_META);
 
   const handleFileChange = (e) => {
     const f = e.target.files?.[0];
@@ -596,407 +384,54 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
       setResult(res.data); setStep(3);
       qc.invalidateQueries({ queryKey: ['passwords'] });
       qc.invalidateQueries({ queryKey: ['passwords-stats'] });
-      toast.success(`✓ Imported ${res.data.successful_imports} credentials${res.data.duplicate_skipped ? `, ${res.data.duplicate_skipped} duplicates skipped` : ''}`);
-      if (onSuccess) onSuccess();
-    } catch (err) { toast.error(err.response?.data?.detail || 'Import failed. Please check the file and try again.'); }
+      onSuccess?.();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Import failed'); }
     finally { setImporting(false); }
   };
 
-  const handleClose = () => { setFile(null); setPreview(null); setResult(null); setStep(1); setUnmapped({}); onClose(); };
-  const alreadyMapped = preview ? new Set(Object.values(preview.mapping)) : new Set();
-  const hasMissingRequired = preview?.missing_required?.length > 0;
-
-  return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className={`max-w-2xl rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
-        <ModalHeader
-          icon={<FileUp className="h-4 w-4 text-white" />}
-          title={step === 1 ? 'Bulk Import Credentials' : step === 2 ? 'Review Column Mapping' : 'Import Complete'}
-          subtitle={step === 1 ? 'Upload Excel or CSV — any column names are auto-detected' : step === 2 ? `${preview?.total_rows} rows found · confirm how columns will be imported` : 'Your credentials have been imported into the vault'}
-          gradient={`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}
-          onClose={handleClose}
-        />
-
-        {/* Step 1 */}
-        {step === 1 && (
-          <div className="p-5 space-y-4">
-            <label htmlFor="bulk-import-file" className={`flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-2xl p-8 cursor-pointer transition-colors ${isDark ? 'border-slate-600 hover:border-blue-500 hover:bg-blue-900/10' : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50/50'}`}>
-              <input id="bulk-import-file" type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange} className="hidden" />
-              {file ? (
-                <>
-                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: `${COLORS.emeraldGreen}20` }}><CheckCircle2 className="h-6 w-6" style={{ color: COLORS.emeraldGreen }} /></div>
-                  <div className="text-center"><p className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{file.name}</p><p className="text-xs text-slate-400 mt-1">{(file.size / 1024).toFixed(1)} KB · Click to change</p></div>
-                </>
-              ) : (
-                <>
-                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}><FileUp className="h-6 w-6 text-slate-400" /></div>
-                  <div className="text-center"><p className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Click to upload or drag & drop</p><p className="text-xs text-slate-400 mt-1">Excel (.xlsx, .xls) or CSV (.csv)</p></div>
-                </>
-              )}
-            </label>
-            <div className={`flex items-start gap-3 p-3 rounded-2xl ${isDark ? 'bg-blue-900/20 border border-blue-800/40' : 'bg-blue-50 border border-blue-200'}`}>
-              <Zap className={`h-4 w-4 flex-shrink-0 mt-0.5 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} />
-              <div>
-                <p className={`text-xs font-bold mb-1 ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>Smart Column Detection + Duplicate Prevention</p>
-                <p className={`text-[11px] ${isDark ? 'text-blue-200' : 'text-blue-600'}`}>
-                  Detects 100+ column variations. Automatically skips duplicate entries (same portal + username + client). Department auto-derived from portal type.
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3 justify-end pt-2">
-              <Button variant="ghost" className="rounded-xl" onClick={handleClose}>Cancel</Button>
-              <Button disabled={!file || parsing} onClick={handleParse} className="rounded-xl font-bold text-white gap-2" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-                {parsing ? <><Loader2 className="h-4 w-4 animate-spin" /> Analysing…</> : <><ArrowRight className="h-4 w-4" /> Preview Mapping</>}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 2 */}
-        {step === 2 && preview && (
-          <div className="flex flex-col max-h-[80vh]">
-            <div className="overflow-y-auto p-5 space-y-4">
-              {hasMissingRequired && (
-                <div className={`flex items-start gap-3 p-3 rounded-2xl ${isDark ? 'bg-red-900/20 border border-red-800/40' : 'bg-red-50 border border-red-200'}`}>
-                  <AlertCircle className={`h-4 w-4 flex-shrink-0 mt-0.5 ${isDark ? 'text-red-400' : 'text-red-600'}`} />
-                  <div>
-                    <p className={`text-xs font-bold ${isDark ? 'text-red-300' : 'text-red-700'}`}>Some required fields were not found</p>
-                    <p className={`text-[11px] mt-0.5 ${isDark ? 'text-red-200' : 'text-red-600'}`}>
-                      Could not find: <b>{preview.missing_required.map(f => FIELD_META[f]?.label || f).join(', ')}</b>.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {Object.keys(preview.mapping).length > 0 && (
-                <div>
-                  <p className={`text-[10px] font-bold uppercase tracking-wider mb-2 flex items-center gap-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    <CheckCircle2 className="h-3 w-3 text-emerald-500" /> Auto-detected ({Object.keys(preview.mapping).length})
-                  </p>
-                  <div className="grid grid-cols-1 gap-1.5">
-                    {Object.entries(preview.mapping).map(([origCol, canonical]) => {
-                      const meta = FIELD_META[canonical];
-                      return (
-                        <div key={origCol} className={`flex items-center gap-2 p-2 rounded-xl ${isDark ? 'bg-emerald-900/15 border border-emerald-800/30' : 'bg-emerald-50 border border-emerald-200'}`}>
-                          <span className="text-sm">{meta?.icon || '📌'}</span>
-                          <span className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>"{origCol}"</span>
-                          <ArrowRight className="h-3 w-3 text-slate-400 flex-shrink-0" />
-                          <span className={`text-xs font-bold ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>{meta?.label || canonical}</span>
-                          {meta?.required && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">Required</span>}
-                          <CheckCircle2 className="h-3 w-3 text-emerald-500 ml-auto flex-shrink-0" />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {preview.unmapped_columns.length > 0 && (
-                <div>
-                  <p className={`text-[10px] font-bold uppercase tracking-wider mb-2 flex items-center gap-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    <HelpCircle className="h-3 w-3 text-amber-500" /> Unrecognised — classify or skip ({preview.unmapped_columns.length})
-                  </p>
-                  <div className="space-y-1.5">
-                    {preview.unmapped_columns.map(col => {
-                      const suggestions = preview.suggested_mappings?.[col] || [];
-                      return (
-                        <div key={col} className={`p-2.5 rounded-xl ${isDark ? 'bg-amber-900/15 border border-amber-800/30' : 'bg-amber-50 border border-amber-200'}`}>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <HelpCircle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
-                            <span className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>"{col}"</span>
-                            <ArrowRight className="h-3 w-3 text-slate-400 flex-shrink-0" />
-                            <Select value={unmappedAssignments[col] || '__skip__'} onValueChange={v => setUnmapped(p => ({ ...p, [col]: v === '__skip__' ? undefined : v }))}>
-                              <SelectTrigger className={`h-7 rounded-lg text-[11px] w-44 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white'}`}><SelectValue placeholder="Skip" /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="__skip__">⛔ Skip this column</SelectItem>
-                                {suggestions.length > 0 && (
-                                  <>
-                                    <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase">Suggested</div>
-                                    {suggestions.map(f => <SelectItem key={`sug_${f}`} value={f}>✨ {FIELD_META[f]?.icon} {FIELD_META[f]?.label || f}</SelectItem>)}
-                                    <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase">All Fields</div>
-                                  </>
-                                )}
-                                {allCanonicalFields.filter(f => !alreadyMapped.has(f) || unmappedAssignments[col] === f).map(f => (
-                                  <SelectItem key={f} value={f}>{FIELD_META[f]?.icon} {FIELD_META[f]?.label || f}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {preview.sample_rows?.length > 0 && (
-                <div>
-                  <p className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Data Preview (first {preview.sample_rows.length} rows)</p>
-                  <div className={`rounded-xl border overflow-auto ${isDark ? 'border-slate-600 bg-slate-900/50' : 'border-slate-200 bg-slate-50'}`} style={{ maxHeight: 180 }}>
-                    <table className="w-full text-xs min-w-max">
-                      <thead>
-                        <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'}`}>
-                          {Object.keys(preview.sample_rows[0] || {}).slice(0, 7).map(col => (
-                            <th key={col} className={`px-3 py-2 text-left font-bold whitespace-nowrap ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{FIELD_META[col]?.label || col}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {preview.sample_rows.map((row, i) => (
-                          <tr key={i} className={`border-b last:border-0 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-                            {Object.keys(preview.sample_rows[0] || {}).slice(0, 7).map(col => (
-                              <td key={col} className={`px-3 py-1.5 whitespace-nowrap max-w-[140px] truncate ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {col === 'password_plain' && row[col] ? '••••••' : String(row[col] ?? '')}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              <div className={`flex items-start gap-2 p-3 rounded-xl text-xs ${isDark ? 'bg-slate-700/50 border border-slate-600' : 'bg-slate-50 border border-slate-200'}`}>
-                <Info className="h-3.5 w-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
-                <p className={isDark ? 'text-slate-300' : 'text-slate-600'}>
-                  Department auto-derived from Portal Type. Holder Type defaults to <b>COMPANY</b>. Blank rows and exact duplicates are skipped automatically.
-                </p>
-              </div>
-            </div>
-
-            <div className={`px-5 py-3 border-t flex items-center justify-between gap-3 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-              <Button variant="ghost" className="rounded-xl text-sm" onClick={() => setStep(1)}>← Back</Button>
-              <div className="flex items-center gap-3">
-                <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{preview.total_rows} rows ready</span>
-                <Button disabled={importing} onClick={handleImport} className="rounded-xl font-bold text-white gap-2 text-sm" style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen}, #0F7238)` }}>
-                  {importing ? <><Loader2 className="h-4 w-4 animate-spin" /> Importing…</> : <><Upload className="h-4 w-4" /> Import {preview.total_rows} Rows</>}
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Step 3 */}
-        {step === 3 && result && (
-          <div className="p-5 space-y-4">
-            <div className="grid grid-cols-4 gap-3">
-              {[
-                { label: 'Imported ✓', value: result.successful_imports, color: COLORS.emeraldGreen, bg: isDark ? 'bg-emerald-900/20 border-emerald-800/30' : 'bg-emerald-50 border-emerald-200' },
-                { label: 'Total Rows', value: result.total_processed, color: isDark ? '#E2E8F0' : '#374151', bg: isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-100 border-slate-200' },
-                { label: 'Duplicates', value: result.duplicate_skipped || 0, color: COLORS.amber, bg: isDark ? 'bg-amber-900/20 border-amber-800/30' : 'bg-amber-50 border-amber-200' },
-                { label: 'Failed', value: result.failed_imports, color: result.failed_imports > 0 ? '#EF4444' : '#9CA3AF', bg: result.failed_imports > 0 ? (isDark ? 'bg-red-900/20 border-red-800/30' : 'bg-red-50 border-red-200') : (isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-100 border-slate-200') },
-              ].map(s => (
-                <div key={s.label} className={`p-4 rounded-2xl border text-center ${s.bg}`}>
-                  <p className="text-3xl font-black" style={{ color: s.color }}>{s.value}</p>
-                  <p className="text-xs font-semibold mt-1 text-slate-500">{s.label}</p>
-                </div>
-              ))}
-            </div>
-            {result.skipped_rows > 0 && <p className="text-xs text-slate-400 text-center">{result.skipped_rows} empty rows were skipped.</p>}
-            {result.errors?.length > 0 && (
-              <div className={`p-3 rounded-xl text-xs max-h-36 overflow-y-auto ${isDark ? 'bg-red-900/20 border border-red-800/40' : 'bg-red-50 border border-red-200'}`}>
-                <p className={`font-bold mb-2 ${isDark ? 'text-red-300' : 'text-red-700'}`}>Row errors:</p>
-                {result.errors.map((err, i) => (
-                  <p key={i} className={`mb-1 ${isDark ? 'text-red-200' : 'text-red-600'}`}>Row {err.row}: {typeof err.error === 'string' ? err.error.substring(0, 120) : JSON.stringify(err.error).substring(0, 120)}</p>
-                ))}
-              </div>
-            )}
-            <div className="flex justify-end pt-2">
-              <Button className="rounded-xl font-bold text-white" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }} onClick={handleClose}>Done</Button>
-            </div>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── Google Sheets Manager Modal ───────────────────────────────────────────────
-function SheetLinksModal({ open, onClose, isDark, isAdmin }) {
-  const qc = useQueryClient();
-  const [form, setForm] = useState({ label: '', sheet_url: '', sheet_type: 'OTHER', description: '' });
-  const [adding, setAdding] = useState(false);
-  const [previewId, setPreviewId] = useState(null);
-  const [previewData, setPreviewData] = useState(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-
-  const { data: links = [], isLoading } = useQuery({
-    queryKey: ['sheet-links'], queryFn: () => api.get('/passwords/sheet-links').then(r => r.data), enabled: open,
-  });
-  const addMutation = useMutation({
-    mutationFn: data => api.post('/passwords/sheet-links', data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['sheet-links'] }); toast.success('Sheet link saved'); setForm({ label: '', sheet_url: '', sheet_type: 'OTHER', description: '' }); setAdding(false); },
-    onError: err => toast.error(err.response?.data?.detail || 'Failed to save'),
-  });
-  const deleteMutation = useMutation({
-    mutationFn: id => api.delete(`/passwords/sheet-links/${id}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['sheet-links'] }); toast.success('Link deleted'); },
-    onError: err => toast.error(err.response?.data?.detail || 'Failed to delete'),
-  });
-
-  const handlePreview = async (link) => {
-    setPreviewId(link.id); setPreviewData(null); setPreviewLoading(true);
-    try {
-      const res = await api.post(`/passwords/sheet-links/${link.id}/preview`);
-      setPreviewData(res.data);
-    } catch (err) { toast.error(err.response?.data?.detail || 'Could not fetch sheet. Ensure it is publicly shared.'); setPreviewId(null); }
-    finally { setPreviewLoading(false); }
+  const handleClose = () => {
+    setStep(1); setFile(null); setPreview(null); setResult(null); setUnmapped({}); onClose();
   };
 
-  const sheetTypeColor = { GST: '#7C3AED', ROC: '#1E3A8A', MCA: '#1E3A8A', OTHER: '#6B7280' };
-  const handleClose = () => { setAdding(false); setPreviewId(null); setPreviewData(null); onClose(); };
-
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className={`max-w-2xl rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
-        <ModalHeader icon={<Sheet className="h-4 w-4 text-white" />} title="Google Sheet Links" subtitle="Manage linked spreadsheets for password data import" gradient="linear-gradient(135deg, #0F7238, #1FAF5A)" onClose={handleClose} />
-        <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
-          <div className={`p-3 rounded-xl text-xs flex items-start gap-2 ${isDark ? 'bg-blue-900/20 border border-blue-800/40' : 'bg-blue-50 border border-blue-200'}`}>
-            <Info className={`h-3.5 w-3.5 flex-shrink-0 mt-0.5 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} />
-            <div className={isDark ? 'text-blue-300' : 'text-blue-700'}><b>How to use:</b> Add your Google Sheet URL. The sheet must be <b>"Anyone with the link can view"</b>.</div>
-          </div>
-
-          {isAdmin && (
-            <div className={`rounded-xl border p-4 space-y-3 ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-              <div className="flex items-center justify-between">
-                <p className={`text-sm font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{adding ? 'Add New Sheet Link' : 'Add a Sheet Link'}</p>
-                {!adding && <Button size="sm" className="rounded-lg h-7 text-xs" onClick={() => setAdding(true)} style={{ background: COLORS.emeraldGreen, color: 'white' }}><Plus className="h-3 w-3 mr-1" /> Add</Button>}
+        <ModalHeader icon={<Upload className="h-4 w-4 text-white" />} title="Bulk Import" subtitle="Upload Excel or CSV file" gradient={`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`} onClose={handleClose} />
+        <div className="p-6 space-y-4">
+          {step === 1 && (
+            <>
+              <div className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${isDark ? 'border-slate-600 hover:border-slate-500 hover:bg-slate-700/50' : 'border-slate-300 hover:border-slate-400 hover:bg-slate-50'}`}>
+                <input type="file" onChange={handleFileChange} accept=".xlsx,.xls,.csv" className="hidden" id="file-input" />
+                <label htmlFor="file-input" className="cursor-pointer">
+                  <FileUp className="h-10 w-10 mx-auto mb-2 text-slate-400" />
+                  <p className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Click to upload or drag and drop</p>
+                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Excel (.xlsx, .xls) or CSV (.csv)</p>
+                </label>
               </div>
-              {adding && (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label className="text-[11px] font-bold text-slate-500 uppercase">Label *</Label>
-                      <Input className={`rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`} placeholder="e.g. GST Master Sheet" value={form.label} onChange={e => setForm(p => ({ ...p, label: e.target.value }))} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[11px] font-bold text-slate-500 uppercase">Sheet Type</Label>
-                      <Select value={form.sheet_type} onValueChange={v => setForm(p => ({ ...p, sheet_type: v }))}>
-                        <SelectTrigger className={`rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}><SelectValue /></SelectTrigger>
-                        <SelectContent>{SHEET_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-bold text-slate-500 uppercase">Google Sheet URL *</Label>
-                    <Input className={`rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`} placeholder="https://docs.google.com/spreadsheets/d/..." value={form.sheet_url} onChange={e => setForm(p => ({ ...p, sheet_url: e.target.value }))} />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-bold text-slate-500 uppercase">Description (optional)</Label>
-                    <Input className={`rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`} placeholder="What data does this sheet contain?" value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} />
-                  </div>
-                  <div className="flex items-center gap-2 pt-1">
-                    <Button variant="ghost" size="sm" className="rounded-lg h-8 text-xs" onClick={() => { setAdding(false); setForm({ label: '', sheet_url: '', sheet_type: 'OTHER', description: '' }); }}>Cancel</Button>
-                    <Button size="sm" className="rounded-lg h-8 text-xs text-white" disabled={!form.label.trim() || !form.sheet_url.trim() || addMutation.isPending} onClick={() => addMutation.mutate(form)} style={{ background: COLORS.emeraldGreen }}>
-                      {addMutation.isPending ? 'Saving…' : 'Save Link'}
-                    </Button>
-                  </div>
-                </div>
-              )}
+              {file && <p className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Selected: {file.name}</p>}
+            </>
+          )}
+          {step === 2 && preview && (
+            <div className="space-y-3">
+              <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Preview: {preview.rows_count} rows, {preview.columns_count} columns</p>
+              <div className={`rounded-lg p-3 max-h-48 overflow-auto ${isDark ? 'bg-slate-700' : 'bg-slate-50'}`}>
+                <pre className={`text-xs font-mono ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{JSON.stringify(preview.sample_rows?.slice(0, 3), null, 2)}</pre>
+              </div>
             </div>
           )}
-
-          {isLoading ? (
-            <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div>
-          ) : links.length === 0 ? (
-            <div className={`text-center py-10 rounded-xl border-2 border-dashed ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
-              <Sheet className="h-8 w-8 mx-auto mb-2 text-slate-300" /><p className="text-sm text-slate-400">No sheet links added yet</p>
-            </div>
-          ) : (
+          {step === 3 && result && (
             <div className="space-y-3">
-              {links.map(link => (
-                <div key={link.id} className={`rounded-xl border p-3 ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-white border-slate-200'}`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{link.label}</span>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: `${sheetTypeColor[link.sheet_type] || '#6B7280'}18`, color: sheetTypeColor[link.sheet_type] || '#6B7280' }}>{link.sheet_type}</span>
-                      </div>
-                      {link.description && <p className="text-xs text-slate-400 mt-0.5">{link.description}</p>}
-                      <a href={link.sheet_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-blue-500 hover:underline mt-1 truncate">
-                        <Link2 className="h-3 w-3 flex-shrink-0" /><span className="truncate">{link.sheet_url}</span><ExternalLink className="h-2.5 w-2.5 flex-shrink-0" />
-                      </a>
-                    </div>
-                    <div className="flex items-center gap-1.5 flex-shrink-0">
-                      <Button size="sm" variant="outline" className="rounded-lg h-7 text-xs gap-1" onClick={() => handlePreview(link)} disabled={previewLoading && previewId === link.id}>
-                        {previewLoading && previewId === link.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCcw className="h-3 w-3" />} Preview
-                      </Button>
-                      {isAdmin && (
-                        <button type="button" onClick={() => deleteMutation.mutate(link.id)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-red-900/30' : 'hover:bg-red-50'}`}><Trash2 className="h-3 w-3 text-red-400" /></button>
-                      )}
-                    </div>
-                  </div>
-                  {previewId === link.id && previewData && (
-                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className={`mt-3 pt-3 border-t ${isDark ? 'border-slate-600' : 'border-slate-100'}`}>
-                      <div className="flex items-center gap-2 mb-2 flex-wrap">
-                        <span className="text-xs font-bold text-emerald-600">✓ Connected</span>
-                        <span className="text-xs text-slate-400">{previewData.total_rows} rows</span>
-                        {previewData.tab_used && <span className="text-xs text-slate-400">Tab: {previewData.tab_used}</span>}
-                      </div>
-                      <div className={`rounded-lg overflow-auto text-xs ${isDark ? 'bg-slate-800' : 'bg-slate-50'}`} style={{ maxHeight: 160 }}>
-                        <table className="w-full min-w-max">
-                          <thead>
-                            <tr className={`border-b ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
-                              {previewData.columns?.slice(0, 6).map(col => <th key={col} className={`px-2 py-1.5 text-left font-semibold whitespace-nowrap ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{col}</th>)}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {previewData.preview?.slice(0, 5).map((row, i) => (
-                              <tr key={i} className={`border-b last:border-0 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-                                {previewData.columns?.slice(0, 6).map(col => <td key={col} className={`px-2 py-1 whitespace-nowrap max-w-[120px] truncate ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{String(row[col] ?? '')}</td>)}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </motion.div>
-                  )}
-                </div>
-              ))}
+              <div className={`rounded-lg p-4 ${isDark ? 'bg-green-900/20 border border-green-800/40' : 'bg-green-50 border border-green-200'}`}>
+                <p className={`font-semibold ${isDark ? 'text-green-300' : 'text-green-700'}`}>✓ Import successful!</p>
+                <p className={`text-sm mt-1 ${isDark ? 'text-green-400' : 'text-green-600'}`}>{result.imported} entries imported, {result.skipped} skipped, {result.errors} errors</p>
+              </div>
             </div>
           )}
         </div>
-        <div className={`px-5 py-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}><Button variant="ghost" className="rounded-xl" onClick={handleClose}>Close</Button></div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── Bulk Delete Confirm Modal ─────────────────────────────────────────────────
-function BulkDeleteModal({ open, onClose, selectedIds, onSuccess, isDark }) {
-  const [deleting, setDeleting] = useState(false);
-  const qc = useQueryClient();
-
-  const handleDelete = async () => {
-    setDeleting(true);
-    try {
-      const res = await api.post('/passwords/bulk-delete', { ids: selectedIds });
-      toast.success(res.data.message || `Deleted ${res.data.deleted} entries`);
-      qc.invalidateQueries({ queryKey: ['passwords'] });
-      qc.invalidateQueries({ queryKey: ['passwords-stats'] });
-      onSuccess();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'Bulk delete failed');
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className={`max-w-sm rounded-3xl [&>button]:hidden ${isDark ? 'bg-slate-800 border-slate-700' : ''}`}>
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-red-600"><Trash className="h-5 w-5" /> Bulk Delete</DialogTitle>
-          <DialogDescription>
-            Permanently delete <b>{selectedIds.length}</b> selected {selectedIds.length === 1 ? 'entry' : 'entries'}? This cannot be undone.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter className="gap-3 pt-4">
-          <Button variant="ghost" className="rounded-xl" onClick={onClose} disabled={deleting}>Cancel</Button>
-          <Button className="rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold" disabled={deleting} onClick={handleDelete}>
-            {deleting ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Deleting…</> : `Delete ${selectedIds.length} Entries`}
-          </Button>
+        <DialogFooter className={`px-6 py-4 flex items-center gap-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          <Button variant="ghost" className="rounded-xl" onClick={handleClose}>Close</Button>
+          {step === 1 && <Button onClick={handleParse} disabled={!file || parsing} className="rounded-xl font-bold text-white" style={{ background: COLORS.deepBlue }}>{parsing ? 'Parsing...' : 'Preview'}</Button>}
+          {step === 2 && <Button onClick={handleImport} disabled={importing} className="rounded-xl font-bold text-white" style={{ background: COLORS.emeraldGreen }}>{importing ? 'Importing...' : 'Import'}</Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1147,283 +582,77 @@ function EntryRow({ entry, serialNo, canEdit, isAdmin, onEdit, onDelete, onShare
       <td className="px-3 py-2">
         <div className="flex flex-col gap-0.5">
           {entry.client_name && <span className={`text-xs font-medium ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>{entry.client_name}</span>}
-          {entry.holder_name && <span className={`text-xs ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>{entry.holder_name}</span>}
-          {entry.trade_name && <span className={`text-[10px] ${isDark ? 'text-amber-300' : 'text-amber-600'}`}>🏪 {entry.trade_name}</span>}
-          {entry.mobile && <span className={`text-[10px] flex items-center gap-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}><Smartphone className="h-2.5 w-2.5" />{entry.mobile}</span>}
+          {entry.holder_name && <span className={`text-xs ${isDark ? 'text-purple-300' : 'text-purple-700'}`}>{entry.holder_name}</span>}
         </div>
       </td>
-      <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
-        {entry.username ? (
-          <div className="flex items-center gap-1">
-            <span className={`font-mono text-xs ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{entry.username}</span>
-            <button type="button" onClick={() => navigator.clipboard.writeText(entry.username).then(() => toast.success('Copied'))} className="p-0.5 rounded text-slate-400 hover:text-slate-600 transition-colors"><Copy className="h-2.5 w-2.5" /></button>
-          </div>
-        ) : <span className="text-xs text-slate-400">—</span>}
-      </td>
-      <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
-        {entry.has_password ? <RevealPassword entryId={entry.id} isDark={isDark} /> : <span className="text-xs text-slate-400 italic">None</span>}
-      </td>
-      <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
-        {entry.url ? (
-          <button type="button" onClick={() => handleAutoFillAndOpen(entry)} className="flex items-center gap-1 text-xs text-blue-500 hover:underline" title="Copy password & open URL">
-            <Globe className="h-3 w-3 flex-shrink-0" /><span className="truncate max-w-[120px]">{entry.url.replace(/^https?:\/\//, '')}</span><AutoFillIcon className="h-2.5 w-2.5 flex-shrink-0 opacity-60" />
-          </button>
-        ) : <span className="text-xs text-slate-400">—</span>}
-      </td>
-      <td className="px-3 py-2"><span className="text-[10px] text-slate-400">{entry.updated_at ? format(new Date(entry.updated_at), 'MMM d, yy') : '—'}</span></td>
-      <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-1">
-          <button type="button" onClick={() => onShare(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}><WAIcon className="h-3 w-3" style={{ color: COLORS.whatsapp }} /></button>
-          {canEdit && <button type="button" onClick={() => onEdit(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}><Edit2 className="h-3 w-3 text-slate-400" /></button>}
-          {isAdmin && <button type="button" onClick={() => onDelete(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}><Trash2 className="h-3 w-3 text-red-400" /></button>}
-        </div>
+      <td className="px-3 py-2"><span className={`font-mono text-xs ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{entry.username}</span></td>
+      <td className="px-3 py-2" onClick={e => e.stopPropagation()}><RevealPassword entryId={entry.id} isDark={isDark} /></td>
+      <td className="px-3 py-2 text-right flex items-center gap-1 justify-end" onClick={e => e.stopPropagation()}>
+        {canEdit && <button type="button" onClick={() => onEdit(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}><Edit2 className="h-3 w-3 text-slate-400" /></button>}
+        {isAdmin && <button type="button" onClick={() => onDelete(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}><Trash2 className="h-3 w-3 text-red-400" /></button>}
+        <button type="button" onClick={() => onShare(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}><WAIcon className="h-3 w-3" style={{ color: COLORS.whatsapp }} /></button>
       </td>
     </motion.tr>
   );
 }
 
-// ── Add / Edit Modal ──────────────────────────────────────────────────────────
-const EMPTY_FORM = {
-  portal_name: '', portal_type: 'OTHER', url: '', username: '', password_plain: '',
-  department: 'OTHER', holder_type: 'COMPANY', holder_name: '', holder_pan: '',
-  holder_din: '', mobile: '', trade_name: '', client_id: '', client_name: '', notes: '', tags: [],
-};
-
-function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients }) {
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [showPass, setShowPass] = useState(false);
-
-  useEffect(() => {
-    if (existing) {
-      setForm({
-        portal_name:    existing.portal_name    || '',
-        portal_type:    existing.portal_type    || 'OTHER',
-        url:            existing.url            || '',
-        username:       existing.username       || '',
-        password_plain: '',
-        department:     existing.department     || 'OTHER',
-        holder_type:    existing.holder_type    || 'COMPANY',
-        holder_name:    existing.holder_name    || '',
-        holder_pan:     existing.holder_pan     || '',
-        holder_din:     existing.holder_din     || '',
-        mobile:         existing.mobile         || '',
-        trade_name:     existing.trade_name     || '',
-        client_id:      existing.client_id      || '',
-        client_name:    existing.client_name    || '',
-        notes:          existing.notes          || '',
-        tags:           existing.tags           || [],
-      });
-    } else {
-      setForm(EMPTY_FORM);
-    }
-    setShowPass(false);
-  }, [existing, open]);
-
-  const handleChange = (field, value) => setForm(p => ({ ...p, [field]: value }));
-
-  const handleClientChange = ({ id, name }) => {
-    setForm(p => ({ ...p, client_id: id || '', client_name: name || '' }));
-  };
-
-  const showHolderFields = form.holder_type !== 'COMPANY';
-  const ic = `rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white'}`;
-
-  return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className={`max-w-lg rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
-        <ModalHeader icon={<KeyRound className="h-4 w-4 text-white" />} title={existing ? 'Edit Credential' : 'Add New Credential'} subtitle={existing ? `Editing: ${existing.portal_name}` : 'Store a new portal login securely'} gradient={`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`} onClose={onClose} />
-
-        <div className="p-5 space-y-3.5 max-h-[70vh] overflow-y-auto">
-          <div className="space-y-1">
-            <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><Building2 className="h-3 w-3" /> Link to Client</Label>
-            <ClientSearchDropdown value={form.client_id} onChange={handleClientChange} isDark={isDark} clients={clients} />
-            {form.client_name && <p className="text-[10px] text-blue-500 font-medium flex items-center gap-1"><Check className="h-3 w-3" /> {form.client_name}</p>}
-          </div>
-
-          <div className="space-y-1">
-            <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Portal Name *</Label>
-            <Input className={ic} placeholder="e.g. Client XYZ GST Login" value={form.portal_name} onChange={e => handleChange('portal_name', e.target.value)} />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Portal Type</Label>
-              <Select value={form.portal_type} onValueChange={v => { handleChange('portal_type', v); const dept = DEPARTMENT_MAP[v]; if (dept && dept !== 'OTHER') handleChange('department', dept); }}>
-                <SelectTrigger className={`${ic} w-full`}><SelectValue /></SelectTrigger>
-                <SelectContent>{PORTAL_TYPES.map(t => <SelectItem key={t} value={t}>{PORTAL_META[t]?.icon} {PORTAL_META[t]?.label || t}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Department</Label>
-              <Select value={form.department} onValueChange={v => handleChange('department', v)}>
-                <SelectTrigger className={`${ic} w-full`}><SelectValue /></SelectTrigger>
-                <SelectContent>{DEPARTMENTS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Credential Holder</Label>
-            <Select value={form.holder_type} onValueChange={v => handleChange('holder_type', v)}>
-              <SelectTrigger className={`${ic} w-full`}><SelectValue /></SelectTrigger>
-              <SelectContent>{HOLDER_TYPES.map(h => <SelectItem key={h} value={h}>{HOLDER_META[h]?.icon} {HOLDER_META[h]?.label || h}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-
-          <AnimatePresence>
-            {showHolderFields && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className={`rounded-xl border p-3 space-y-3 ${isDark ? 'bg-purple-900/15 border-purple-800/40' : 'bg-purple-50/80 border-purple-200'}`}>
-                <p className={`text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 ${isDark ? 'text-purple-300' : 'text-purple-700'}`}><UserIcon className="h-3 w-3" /> {HOLDER_META[form.holder_type]?.label || 'Holder'} Details</p>
-                <div className="space-y-1">
-                  <Label className="text-[11px] font-bold text-slate-500 uppercase">Full Name</Label>
-                  <Input className={ic} placeholder="e.g. Rajesh Kumar" value={form.holder_name} onChange={e => handleChange('holder_name', e.target.value)} />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1"><CreditCard className="h-2.5 w-2.5" /> PAN</Label>
-                    <Input className={ic} placeholder="ABCPK1234D" value={form.holder_pan} onChange={e => handleChange('holder_pan', e.target.value.toUpperCase())} maxLength={10} />
-                  </div>
-                  {(form.holder_type === 'DIRECTOR' || form.portal_type === 'MCA' || form.portal_type === 'ROC') && (
-                    <div className="space-y-1">
-                      <Label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1"><Hash className="h-2.5 w-2.5" /> DIN</Label>
-                      <Input className={ic} placeholder="08123456" value={form.holder_din} onChange={e => handleChange('holder_din', e.target.value)} maxLength={8} />
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1"><Store className="h-2.5 w-2.5" /> Trade Name</Label>
-              <Input className={ic} placeholder="Brand / trade name" value={form.trade_name} onChange={e => handleChange('trade_name', e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1"><Smartphone className="h-2.5 w-2.5" /> Mobile</Label>
-              <Input className={ic} placeholder="Registered mobile" value={form.mobile} onChange={e => handleChange('mobile', e.target.value)} />
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <Label className="text-[11px] font-bold text-slate-500 uppercase">Portal URL</Label>
-            <Input className={ic} placeholder="https://www.gst.gov.in" value={form.url} onChange={e => handleChange('url', e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-[11px] font-bold text-slate-500 uppercase">Username / Login ID</Label>
-            <Input className={ic} placeholder="login@company.com or PAN/GSTIN" value={form.username} onChange={e => handleChange('username', e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-[11px] font-bold text-slate-500 uppercase">Password {existing ? '(leave blank to keep current)' : ''}</Label>
-            <div className="relative">
-              <Input className={`${ic} pr-10`} type={showPass ? 'text' : 'password'} placeholder={existing ? '••••••••  (unchanged)' : 'Enter password'} value={form.password_plain} onChange={e => handleChange('password_plain', e.target.value)} />
-              <button type="button" onClick={() => setShowPass(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                {showPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-[11px] font-bold text-slate-500 uppercase">Notes</Label>
-            <Textarea className={`rounded-xl resize-none text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : ''}`} rows={2} placeholder="Any additional information…" value={form.notes} onChange={e => handleChange('notes', e.target.value)} />
-          </div>
-          <div className={`flex items-start gap-2 p-3 rounded-xl text-xs ${isDark ? 'bg-emerald-900/20 border border-emerald-800/50' : 'bg-emerald-50 border border-emerald-200'}`}>
-            <Shield className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
-            <p className={isDark ? 'text-emerald-300' : 'text-emerald-700'}>Passwords are encrypted using AES-128 before being stored.</p>
-          </div>
-        </div>
-
-        <div className={`px-5 py-3 flex items-center gap-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-          <Button variant="ghost" className="rounded-xl" onClick={onClose}>Cancel</Button>
-          <Button disabled={loading || !form.portal_name.trim()} onClick={() => onSave(form)} className="rounded-xl font-bold px-8 text-white text-sm" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-            {loading ? 'Saving…' : existing ? 'Update' : 'Save Credential'}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── Main Page ─────────────────────────────────────────────────────────────────
-export default function PasswordRepository() {
-  const { user } = useAuth();
+// ── Main Component ────────────────────────────────────────────────────────────
+export default function UpdatePasswordRepository() {
   const isDark = useDark();
+  const { user } = useAuth();
   const qc = useQueryClient();
 
-  const isAdmin = user?.role === 'admin';
-  const perms   = (typeof user?.permissions === 'object' && user?.permissions) || {};
-  const canView = isAdmin || !!perms.can_view_passwords;
-  const canEdit = isAdmin || !!perms.can_edit_passwords;
-
-  // Filters & sort
-  const [search, setSearch]           = useState('');
-  const [filterDept, setFilterDept]   = useState('ALL');
-  const [filterType, setFilterType]   = useState('ALL');
+  const [viewMode, setViewMode] = useState('grid');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [search, setSearch] = useState('');
+  const [sortOption, setSortOption] = useState('lifo');
+  const [filterDept, setFilterDept] = useState('ALL');
+  const [filterType, setFilterType] = useState('ALL');
   const [filterClient, setFilterClient] = useState('ALL');
   const [filterHolder, setFilterHolder] = useState('ALL');
-  const [sortOption, setSortOption]   = useState('lifo');
-
-  // Pagination
-  const [page, setPage]         = useState(1);
-  const [pageSize, setPageSize] = useState(20);
-
-  // View
-  const [viewMode, setViewMode] = useState('list');
-
-  // Selection (for bulk delete)
   const [selectedIds, setSelectedIds] = useState(new Set());
-
-  // Modals
-  const [modalOpen, setModalOpen]     = useState(false);
-  const [editEntry, setEditEntry]     = useState(null);
-  const [deleteTarget, setDeleteTarget] = useState(null);
-  const [shareTarget, setShareTarget] = useState(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   const [detailEntry, setDetailEntry] = useState(null);
-  const [importOpen, setImportOpen]   = useState(false);
-  const [sheetsOpen, setSheetsOpen]   = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editEntry, setEditEntry] = useState(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteEntry, setDeleteEntry] = useState(null);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
-  const [saving, setSaving]           = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareEntry, setShareEntry] = useState(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [sheetsOpen, setSheetsOpen] = useState(false);
 
-  // Reset page + selection on filter/sort change
-  useEffect(() => { setPage(1); setSelectedIds(new Set()); }, [search, filterDept, filterType, filterClient, filterHolder, sortOption, pageSize]);
-
-  const currentSort = SORT_OPTIONS.find(s => s.value === sortOption) || SORT_OPTIONS[0];
+  const isAdmin = user?.role === 'admin';
+  const canView = isAdmin || user?.permissions?.includes('view_passwords');
+  const canEdit = isAdmin || user?.permissions?.includes('edit_passwords');
 
   const { data: entries = [], isLoading, isError } = useQuery({
-    queryKey: ['passwords', filterDept, filterType, search, filterClient, filterHolder, currentSort.sortBy, currentSort.order],
+    queryKey: ['passwords', search, filterDept, filterType, filterClient, filterHolder, sortOption],
     queryFn: async () => {
-      const params = { sort_by: currentSort.sortBy, sort_order: currentSort.order };
-      // FIX: For MCA/ROC filter, use portal_type instead of department
-      if (filterDept !== 'ALL') {
-        if (['MCA', 'ROC'].includes(filterDept.toUpperCase())) {
-          params.portal_type = 'MCA';  // backend handles MCA/ROC group
-        } else {
-          params.department = filterDept;
-        }
-      }
-      if (filterType !== 'ALL') params.portal_type = filterType;
-      if (filterClient !== 'ALL') params.client_id = filterClient;
-      if (filterHolder !== 'ALL') params.holder_type = filterHolder;
-      if (search.trim()) params.search = search.trim();
-      const res = await api.get('/passwords', { params });
+      const res = await api.get('/passwords', {
+        params: {
+          search: search || undefined,
+          department: filterDept !== 'ALL' ? filterDept : undefined,
+          portal_type: filterType !== 'ALL' ? filterType : undefined,
+          client_id: filterClient !== 'ALL' ? filterClient : undefined,
+          holder_type: filterHolder !== 'ALL' ? filterHolder : undefined,
+          sort_by: SORT_OPTIONS.find(s => s.value === sortOption)?.sortBy,
+          sort_order: SORT_OPTIONS.find(s => s.value === sortOption)?.order,
+        },
+      });
       return res.data || [];
     },
-    enabled: canView,
-    staleTime: 30_000,
-    refetchOnWindowFocus: false,
   });
 
   const { data: stats = {} } = useQuery({
     queryKey: ['passwords-stats'],
-    queryFn: () => api.get('/passwords/admin/stats').then(r => r.data),
+    queryFn: async () => {
+      const res = await api.get('/passwords/admin/stats');
+      return res.data || {};
+    },
     enabled: isAdmin,
-    staleTime: 60_000,
-  });
-
-  const { data: clients = [] } = useQuery({
-    queryKey: ['passwords-clients'],
-    queryFn: () => api.get('/passwords/clients-list').then(r => r.data),
-    enabled: canView,
-    staleTime: 300_000,
   });
 
   const paginatedEntries = useMemo(() => {
@@ -1431,80 +660,66 @@ export default function PasswordRepository() {
     return entries.slice(start, start + pageSize);
   }, [entries, page, pageSize]);
 
-  const saveMutation = useMutation({
-    mutationFn: async ({ form, id }) => id ? api.put(`/passwords/${id}`, form) : api.post('/passwords', form),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['passwords'] });
-      qc.invalidateQueries({ queryKey: ['passwords-stats'] });
-      toast.success(editEntry ? '✓ Credential updated' : '✓ Credential saved');
-      setModalOpen(false); setEditEntry(null);
-    },
-    onError: err => toast.error(err.response?.data?.detail || 'Failed to save credential'),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: id => api.delete(`/passwords/${id}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['passwords'] });
-      qc.invalidateQueries({ queryKey: ['passwords-stats'] });
-      toast.success('Credential deleted'); setDeleteTarget(null);
-    },
-    onError: err => toast.error(err.response?.data?.detail || 'Failed to delete'),
-  });
-
-  const handleSave = useCallback(async (form) => {
-    setSaving(true);
-    try { await saveMutation.mutateAsync({ form, id: editEntry?.id }); }
-    finally { setSaving(false); }
-  }, [editEntry, saveMutation]);
-
-  const handleDownloadTemplate = async () => {
-    try {
-      const res = await api.get('/passwords/template', { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-      const link = document.createElement('a');
-      link.href = url; link.setAttribute('download', 'password_template.xlsx');
-      document.body.appendChild(link); link.click();
-      link.parentNode.removeChild(link); window.URL.revokeObjectURL(url);
-      toast.success('Template downloaded');
-    } catch { toast.error('Failed to download template'); }
-  };
-
-  const handleEdit   = (entry) => { setEditEntry(entry); setModalOpen(true); };
-  const handleDelete = (entry) => setDeleteTarget(entry);
-  const handleShare  = (entry) => setShareTarget(entry);
-  const handleDetail = (entry) => setDetailEntry(entry);
-  const handleAddNew = () => { setEditEntry(null); setModalOpen(true); };
-
-  // Selection helpers
-  const toggleSelect = useCallback((id) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  }, []);
-
-  const toggleSelectAll = useCallback(() => {
-    if (selectedIds.size === paginatedEntries.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(paginatedEntries.map(e => e.id)));
-    }
-  }, [selectedIds, paginatedEntries]);
-
-  const handleBulkDeleteSuccess = () => {
-    setBulkDeleteOpen(false);
-    setSelectedIds(new Set());
-  };
-
   const clientsInResults = useMemo(() => {
-    const map: Record<string, string> = {};
+    const map = {};
     entries.forEach(e => { if (e.client_id && e.client_name) map[e.client_id] = e.client_name; });
     return Object.entries(map).map(([id, name]) => ({ id, name }));
   }, [entries]);
 
   const hasActiveFilter = filterDept !== 'ALL' || filterType !== 'ALL' || filterClient !== 'ALL' || filterHolder !== 'ALL' || search;
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const res = await api.get('/passwords/download-template', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'password-template.xlsx';
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error('Failed to download template');
+    }
+  };
+
+  const handleAddNew = () => {
+    setEditEntry(null);
+    setEditOpen(true);
+  };
+
+  const handleEdit = (entry) => {
+    setEditEntry(entry);
+    setEditOpen(true);
+  };
+
+  const handleDelete = (entry) => {
+    setDeleteEntry(entry);
+    setDeleteOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteEntry) return;
+    try {
+      await api.delete(`/passwords/${deleteEntry.id}`);
+      toast.success('Entry deleted');
+      qc.invalidateQueries({ queryKey: ['passwords'] });
+      setDeleteOpen(false);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to delete entry');
+    }
+  };
+
+  const handleShare = (entry) => {
+    setShareEntry(entry);
+    setShareOpen(true);
+  };
+
+  const handleDetail = (entry) => {
+    setDetailEntry(entry);
+    setDetailOpen(true);
+  };
+
+  const allPageSelected = paginatedEntries.length > 0 && paginatedEntries.every(e => selectedIds.has(e.id));
 
   if (!canView) {
     return (
@@ -1518,11 +733,8 @@ export default function PasswordRepository() {
     );
   }
 
-  const allPageSelected = paginatedEntries.length > 0 && paginatedEntries.every(e => selectedIds.has(e.id));
-
   return (
     <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
-
       {/* ── Header ── */}
       <motion.div variants={itemVariants}>
         <div className="relative overflow-hidden rounded-xl px-4 py-3" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: '0 4px 20px rgba(13,59,102,0.25)' }}>
@@ -1668,87 +880,82 @@ export default function PasswordRepository() {
           <p className={`font-semibold text-lg ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>No credentials found</p>
           <p className="text-sm text-slate-400 mt-1 mb-4">{hasActiveFilter ? 'Try adjusting your filters.' : 'Start by adding your first portal credential.'}</p>
           {canEdit && (
-            <Button onClick={handleAddNew} className="rounded-xl font-bold text-white" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-              <Plus className="h-4 w-4 mr-1.5" /> Add First Credential
+            <Button onClick={handleAddNew} className="rounded-xl font-bold text-white" style={{ background: COLORS.emeraldGreen }}>
+              <Plus className="h-4 w-4 mr-1.5" /> Add First Entry
             </Button>
           )}
         </motion.div>
       ) : viewMode === 'grid' ? (
-        <>
-          <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
-            <AnimatePresence>
-              {paginatedEntries.map((entry, idx) => (
-                <EntryCard key={entry.id} entry={entry} serialNo={(page - 1) * pageSize + idx + 1} canEdit={canEdit} isAdmin={isAdmin} onEdit={handleEdit} onDelete={handleDelete} onShare={handleShare} onDetail={handleDetail} isDark={isDark} selected={selectedIds.has(entry.id)} onSelect={toggleSelect} />
-              ))}
-            </AnimatePresence>
-          </motion.div>
-          <div className={`rounded-xl border px-3 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            <Pagination total={entries.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} isDark={isDark} />
-          </div>
-        </>
+        <motion.div variants={itemVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {paginatedEntries.map((entry, idx) => (
+            <EntryCard
+              key={entry.id}
+              entry={entry}
+              serialNo={(page - 1) * pageSize + idx + 1}
+              canEdit={canEdit}
+              isAdmin={isAdmin}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+              onShare={handleShare}
+              onDetail={handleDetail}
+              isDark={isDark}
+              selected={selectedIds.has(entry.id)}
+              onSelect={(id) => {
+                const newSet = new Set(selectedIds);
+                if (newSet.has(id)) newSet.delete(id);
+                else newSet.add(id);
+                setSelectedIds(newSet);
+              }}
+            />
+          ))}
+        </motion.div>
       ) : (
         <motion.div variants={itemVariants} className={`rounded-xl border overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className={`border-b text-[10px] font-bold uppercase tracking-wider ${isDark ? 'border-slate-700 text-slate-400 bg-slate-800/80' : 'border-slate-200 text-slate-500 bg-slate-50'}`}>
-                  {isAdmin && (
-                    <th className="px-2 py-2.5 w-8">
-                      <input type="checkbox" checked={allPageSelected} onChange={toggleSelectAll} className="w-3.5 h-3.5 rounded cursor-pointer accent-blue-500" />
-                    </th>
-                  )}
-                  <th className="px-3 py-2.5 text-center w-8">#</th>
-                  <th className="px-3 py-2.5 text-left">Portal</th>
-                  <th className="px-3 py-2.5 text-left">Client / Holder / Mobile</th>
-                  <th className="px-3 py-2.5 text-left">Username</th>
-                  <th className="px-3 py-2.5 text-left">Password</th>
-                  <th className="px-3 py-2.5 text-left">URL</th>
-                  <th className="px-3 py-2.5 text-left">Updated</th>
-                  <th className="px-3 py-2.5 text-left">Actions</th>
-                </tr>
-              </thead>
-              <motion.tbody variants={containerVariants}>
-                <AnimatePresence>
-                  {paginatedEntries.map((entry, idx) => (
-                    <EntryRow key={entry.id} entry={entry} serialNo={(page - 1) * pageSize + idx + 1} canEdit={canEdit} isAdmin={isAdmin} onEdit={handleEdit} onDelete={handleDelete} onShare={handleShare} onDetail={handleDetail} isDark={isDark} selected={selectedIds.has(entry.id)} onSelect={toggleSelect} />
-                  ))}
-                </AnimatePresence>
-              </motion.tbody>
-            </table>
-          </div>
-          <div className={`border-t px-3 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-            <Pagination total={entries.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} isDark={isDark} />
-          </div>
+          <table className="w-full text-sm">
+            <thead className={`border-b ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+              <tr>
+                {isAdmin && <th className="px-2 py-2 text-left"><input type="checkbox" checked={allPageSelected} onChange={() => {}} className="w-3.5 h-3.5 rounded cursor-pointer accent-blue-500" /></th>}
+                <th className="px-3 py-2 text-center text-xs font-semibold">#</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold">Portal</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold">Client / Holder</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold">Username</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold">Password</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paginatedEntries.map((entry, idx) => (
+                <EntryRow
+                  key={entry.id}
+                  entry={entry}
+                  serialNo={(page - 1) * pageSize + idx + 1}
+                  canEdit={canEdit}
+                  isAdmin={isAdmin}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                  onShare={handleShare}
+                  onDetail={handleDetail}
+                  isDark={isDark}
+                  selected={selectedIds.has(entry.id)}
+                  onSelect={(id) => {
+                    const newSet = new Set(selectedIds);
+                    if (newSet.has(id)) newSet.delete(id);
+                    else newSet.add(id);
+                    setSelectedIds(newSet);
+                  }}
+                />
+              ))}
+            </tbody>
+          </table>
         </motion.div>
       )}
 
-      {/* ── Modals ── */}
-      <EntryModal open={modalOpen} onClose={() => { setModalOpen(false); setEditEntry(null); }} existing={editEntry} isDark={isDark} onSave={handleSave} loading={saving} clients={clients} />
-      <BulkImportModal open={importOpen} onClose={() => setImportOpen(false)} isDark={isDark} onSuccess={() => setImportOpen(false)} />
-      <SheetLinksModal open={sheetsOpen} onClose={() => setSheetsOpen(false)} isDark={isDark} isAdmin={isAdmin} />
-      <WhatsAppShareModal open={!!shareTarget} onClose={() => setShareTarget(null)} entry={shareTarget} isDark={isDark} />
-      <DetailModal open={!!detailEntry} onClose={() => setDetailEntry(null)} entry={detailEntry} isDark={isDark} canEdit={canEdit} isAdmin={isAdmin} onEdit={handleEdit} onDelete={handleDelete} />
-      <BulkDeleteModal open={bulkDeleteOpen} onClose={() => setBulkDeleteOpen(false)} selectedIds={[...selectedIds]} onSuccess={handleBulkDeleteSuccess} isDark={isDark} />
+      {/* ── Pagination ── */}
+      <Pagination total={entries.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} isDark={isDark} />
 
-      {/* Single Delete Confirm */}
-      <AnimatePresence>
-        {deleteTarget && (
-          <Dialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
-            <DialogContent className={`max-w-sm rounded-3xl [&>button]:hidden ${isDark ? 'bg-slate-800 border-slate-700' : ''}`}>
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2 text-red-600"><Trash2 className="h-5 w-5" /> Delete Credential</DialogTitle>
-                <DialogDescription>Permanently delete <b>{deleteTarget?.portal_name}</b>? This cannot be undone.</DialogDescription>
-              </DialogHeader>
-              <DialogFooter className="gap-3 pt-4">
-                <Button variant="ghost" className="rounded-xl" onClick={() => setDeleteTarget(null)}>Cancel</Button>
-                <Button className="rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate(deleteTarget.id)}>
-                  {deleteMutation.isPending ? 'Deleting…' : 'Yes, Delete'}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        )}
-      </AnimatePresence>
+      {/* ── Modals ── */}
+      <WhatsAppShareModal open={shareOpen} onClose={() => setShareOpen(false)} entry={shareEntry} isDark={isDark} />
+      <BulkImportModal open={importOpen} onClose={() => setImportOpen(false)} isDark={isDark} onSuccess={() => { setImportOpen(false); qc.invalidateQueries({ queryKey: ['passwords'] }); }} />
     </motion.div>
   );
 }
