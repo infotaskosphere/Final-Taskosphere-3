@@ -13,10 +13,12 @@ import {
   X, Check, RefreshCw, Clock, User as UserIcon, Tag,
   Building2, FileText, Activity, Filter, ExternalLink,
   MessageCircle, Phone, Send, Download, Upload, FileUp,
-  ChevronDown, Users, LayoutGrid, List, Link2, Unlink,
+  ChevronDown, Users, LayoutGrid, List, Link2,
   TableProperties, Sheet, RefreshCcw, Info, Loader2,
   CreditCard, Hash, ArrowRight, CheckCircle2, AlertCircle,
-  HelpCircle, Zap,
+  HelpCircle, Zap, SortAsc, SortDesc, ChevronLeft, ChevronRight,
+  ChevronUp, ExternalLink as AutoFillIcon, Smartphone, Store,
+  ArrowUpDown, Calendar, Star, BadgeCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -39,25 +41,28 @@ const COLORS = {
   coral:        '#FF6B6B',
   whatsapp:     '#25D366',
   whatsappDark: '#128C7E',
+  amber:        '#F59E0B',
+  purple:       '#7C3AED',
 };
 
 const springMed = { type: 'spring', stiffness: 340, damping: 24 };
+const springFast = { type: 'spring', stiffness: 500, damping: 30 };
 
-// ── Portal type meta ──────────────────────────────────────────────────────────
+// ── Portal type meta — MCA & ROC merged as MCA/ROC ───────────────────────────
 const PORTAL_META = {
-  MCA:        { label: 'MCA',        color: '#1E3A8A', bg: '#EFF6FF', icon: '🏛️', fullName: 'Ministry of Corporate Affairs'      },
-  ROC:        { label: 'ROC',        color: '#1E3A8A', bg: '#EFF6FF', icon: '📋', fullName: 'Registrar of Companies'              },
-  DGFT:       { label: 'DGFT',       color: '#065F46', bg: '#ECFDF5', icon: '🌐', fullName: 'Directorate General of Foreign Trade'},
-  TRADEMARK:  { label: 'Trademark',  color: '#0F766E', bg: '#F0FDFA', icon: '™️',  fullName: 'Trademark / IP India'               },
-  GST:        { label: 'GST',        color: '#7C3AED', bg: '#F5F3FF', icon: '📊', fullName: 'GST Portal'                         },
-  INCOME_TAX: { label: 'Income Tax', color: '#DC2626', bg: '#FEF2F2', icon: '💰', fullName: 'Income Tax India'                   },
-  TDS:        { label: 'TDS',        color: '#B45309', bg: '#FFFBEB', icon: '🧾', fullName: 'TDS / TRACES'                       },
-  TRACES:     { label: 'TRACES',     color: '#B45309', bg: '#FFFBEB', icon: '🔍', fullName: 'TRACES Portal'                      },
-  EPFO:       { label: 'EPFO',       color: '#1D4ED8', bg: '#EFF6FF', icon: '👷', fullName: 'EPFO / PF Portal'                   },
-  ESIC:       { label: 'ESIC',       color: '#0369A1', bg: '#F0F9FF', icon: '🏥', fullName: 'ESIC Portal'                        },
-  MSME:       { label: 'MSME',       color: '#92400E', bg: '#FEF3C7', icon: '🏭', fullName: 'MSME Samadhaan'                     },
-  RERA:       { label: 'RERA',       color: '#4B5563', bg: '#F9FAFB', icon: '🏗️', fullName: 'RERA Portal'                        },
-  OTHER:      { label: 'Other',      color: '#6B7280', bg: '#F9FAFB', icon: '🔗', fullName: 'Custom / Other Portal'              },
+  MCA:        { label: 'MCA/ROC',    color: '#1E3A8A', bg: '#EFF6FF', icon: '🏛️', fullName: 'Ministry of Corporate Affairs / ROC' },
+  ROC:        { label: 'MCA/ROC',    color: '#1E3A8A', bg: '#EFF6FF', icon: '🏛️', fullName: 'Registrar of Companies / MCA'          },
+  DGFT:       { label: 'DGFT',       color: '#065F46', bg: '#ECFDF5', icon: '🌐', fullName: 'Directorate General of Foreign Trade'  },
+  TRADEMARK:  { label: 'Trademark',  color: '#0F766E', bg: '#F0FDFA', icon: '™️',  fullName: 'Trademark / IP India'                 },
+  GST:        { label: 'GST',        color: '#7C3AED', bg: '#F5F3FF', icon: '📊', fullName: 'GST Portal'                           },
+  INCOME_TAX: { label: 'Income Tax', color: '#DC2626', bg: '#FEF2F2', icon: '💰', fullName: 'Income Tax India'                     },
+  TDS:        { label: 'TDS',        color: '#B45309', bg: '#FFFBEB', icon: '🧾', fullName: 'TDS / TRACES'                         },
+  TRACES:     { label: 'TRACES',     color: '#B45309', bg: '#FFFBEB', icon: '🔍', fullName: 'TRACES Portal'                        },
+  EPFO:       { label: 'EPFO',       color: '#1D4ED8', bg: '#EFF6FF', icon: '👷', fullName: 'EPFO / PF Portal'                     },
+  ESIC:       { label: 'ESIC',       color: '#0369A1', bg: '#F0F9FF', icon: '🏥', fullName: 'ESIC Portal'                          },
+  MSME:       { label: 'MSME',       color: '#92400E', bg: '#FEF3C7', icon: '🏭', fullName: 'MSME Samadhaan'                       },
+  RERA:       { label: 'RERA',       color: '#4B5563', bg: '#F9FAFB', icon: '🏗️', fullName: 'RERA Portal'                          },
+  OTHER:      { label: 'Other',      color: '#6B7280', bg: '#F9FAFB', icon: '🔗', fullName: 'Custom / Other Portal'               },
 };
 
 const PORTAL_TYPES  = Object.keys(PORTAL_META);
@@ -79,25 +84,38 @@ const DEPARTMENT_MAP = {
   ESIC: 'ACC', TRACES: 'TDS', MSME: 'MSME', RERA: 'OTHER', OTHER: 'OTHER',
 };
 
-// Canonical field display info (for the column mapping UI)
+// Canonical field display info for the smart import UI
 const FIELD_META = {
-  portal_name:    { label: 'Portal Name',     required: true,  icon: '🔑', description: 'Name of the portal/website' },
-  portal_type:    { label: 'Portal Type',     required: false, icon: '📂', description: 'e.g. MCA, GST, INCOME_TAX' },
-  url:            { label: 'Portal URL',      required: false, icon: '🌐', description: 'Website link' },
-  username:       { label: 'Username / Email',required: true,  icon: '👤', description: 'Login ID or email' },
-  password_plain: { label: 'Password',        required: true,  icon: '🔐', description: 'Login password' },
-  department:     { label: 'Department',      required: false, icon: '🏢', description: 'Auto-derived from portal type if empty' },
-  holder_type:    { label: 'Holder Type',     required: false, icon: '👥', description: 'COMPANY / DIRECTOR / INDIVIDUAL etc.' },
-  holder_name:    { label: 'Holder Name',     required: false, icon: '🧑', description: 'Director or individual name' },
-  holder_pan:     { label: 'Holder PAN',      required: false, icon: '💳', description: 'PAN number' },
-  holder_din:     { label: 'Holder DIN',      required: false, icon: '#️⃣', description: 'DIN number (for directors)' },
-  client_name:    { label: 'Client Name',     required: false, icon: '🏭', description: 'Associated client company' },
-  client_id:      { label: 'Client ID',       required: false, icon: '🔢', description: 'Client code in the system' },
-  notes:          { label: 'Notes',           required: false, icon: '📝', description: 'Additional remarks' },
-  tags:           { label: 'Tags',            required: false, icon: '🏷️', description: 'Comma-separated tags' },
+  portal_name:    { label: 'Portal Name',        required: true,  icon: '🔑', description: 'Name of the portal/website' },
+  portal_type:    { label: 'Portal Type',        required: false, icon: '📂', description: 'e.g. MCA, GST, INCOME_TAX' },
+  url:            { label: 'Portal URL',         required: false, icon: '🌐', description: 'Website link' },
+  username:       { label: 'Username / Email',   required: true,  icon: '👤', description: 'Login ID or email' },
+  password_plain: { label: 'Password',           required: true,  icon: '🔐', description: 'Login password' },
+  department:     { label: 'Department',         required: false, icon: '🏢', description: 'Auto-derived from portal type if empty' },
+  holder_type:    { label: 'Holder Type',        required: false, icon: '👥', description: 'COMPANY / DIRECTOR / INDIVIDUAL etc.' },
+  holder_name:    { label: 'Holder Name',        required: false, icon: '🧑', description: 'Director or individual name' },
+  holder_pan:     { label: 'Holder PAN',         required: false, icon: '💳', description: 'PAN number' },
+  holder_din:     { label: 'Holder DIN',         required: false, icon: '#️⃣', description: 'DIN number (for directors)' },
+  mobile:         { label: 'Mobile / Phone',     required: false, icon: '📱', description: 'Registered mobile number' },
+  trade_name:     { label: 'Trade Name',         required: false, icon: '🏪', description: 'Business/trade/brand name' },
+  client_name:    { label: 'Client Name',        required: false, icon: '🏭', description: 'Associated client company' },
+  client_id:      { label: 'Client ID',          required: false, icon: '🔢', description: 'Client code in the system' },
+  notes:          { label: 'Notes',              required: false, icon: '📝', description: 'Additional remarks' },
+  tags:           { label: 'Tags',               required: false, icon: '🏷️', description: 'Comma-separated tags' },
 };
 
 const SHEET_TYPES = ['GST', 'ROC', 'MCA', 'OTHER'];
+
+// Sort options
+const SORT_OPTIONS = [
+  { value: 'lifo',   label: 'Newest First (LIFO)',  icon: '🕐', sortBy: 'created_at', order: 'desc' },
+  { value: 'fifo',   label: 'Oldest First (FIFO)',  icon: '📅', sortBy: 'created_at', order: 'asc'  },
+  { value: 'az',     label: 'A → Z',                icon: '🔤', sortBy: 'portal_name', order: 'asc'  },
+  { value: 'za',     label: 'Z → A',                icon: '🔡', sortBy: 'portal_name', order: 'desc' },
+];
+
+// Page size options
+const PAGE_SIZE_OPTIONS = [20, 40, 80, 100];
 
 const containerVariants = {
   hidden:  { opacity: 0 },
@@ -159,26 +177,26 @@ function MaskedPassword() {
 
 function ModalHeader({ icon, title, subtitle, gradient, onClose }) {
   return (
-    <div className="px-6 py-5 flex-shrink-0" style={{ background: gradient }}>
+    <div className="px-5 py-4 flex-shrink-0" style={{ background: gradient }}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-9 h-9 bg-white/15 rounded-xl flex items-center justify-center flex-shrink-0">
+          <div className="w-8 h-8 bg-white/15 rounded-xl flex items-center justify-center flex-shrink-0">
             {icon}
           </div>
           <div className="min-w-0">
-            <DialogTitle className="text-white font-bold text-base leading-tight">{title}</DialogTitle>
+            <DialogTitle className="text-white font-bold text-sm leading-tight">{title}</DialogTitle>
             {subtitle && (
-              <p className="text-white/60 text-xs mt-0.5 truncate">{subtitle}</p>
+              <p className="text-white/60 text-[11px] mt-0.5 truncate">{subtitle}</p>
             )}
           </div>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="w-8 h-8 bg-white/15 hover:bg-white/25 rounded-xl flex items-center justify-center transition-all flex-shrink-0 ml-2"
+          className="w-7 h-7 bg-white/15 hover:bg-white/25 rounded-lg flex items-center justify-center transition-all flex-shrink-0 ml-2"
           aria-label="Close"
         >
-          <X className="h-4 w-4 text-white" />
+          <X className="h-3.5 w-3.5 text-white" />
         </button>
       </div>
     </div>
@@ -218,14 +236,14 @@ function ClientSearchDropdown({ value, onChange, isDark, clients = [] }) {
   return (
     <div className="relative" ref={ref}>
       <div
-        className={`flex items-center gap-2 h-10 rounded-xl border px-3 cursor-pointer transition-colors ${
+        className={`flex items-center gap-2 h-9 rounded-xl border px-3 cursor-pointer transition-colors ${
           isDark
             ? 'bg-slate-700 border-slate-600 text-slate-100 hover:border-slate-500'
             : 'bg-white border-slate-200 hover:border-slate-300'
         }`}
         onClick={() => setOpen(o => !o)}
       >
-        <Building2 className="h-4 w-4 text-slate-400 flex-shrink-0" />
+        <Building2 className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
         <span className={`flex-1 text-sm truncate ${selectedClient ? '' : 'text-slate-400'}`}>
           {selectedClient ? selectedClient.company_name : 'Search client…'}
         </span>
@@ -235,10 +253,10 @@ function ClientSearchDropdown({ value, onChange, isDark, clients = [] }) {
             onClick={e => { e.stopPropagation(); handleSelect(null); }}
             className="text-slate-400 hover:text-red-500 transition-colors"
           >
-            <X className="h-3.5 w-3.5" />
+            <X className="h-3 w-3" />
           </button>
         )}
-        <ChevronDown className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+        <ChevronDown className="h-3 w-3 text-slate-400 flex-shrink-0" />
       </div>
 
       <AnimatePresence>
@@ -258,7 +276,7 @@ function ClientSearchDropdown({ value, onChange, isDark, clients = [] }) {
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                 <input
                   autoFocus
-                  className={`w-full pl-8 pr-3 h-8 text-sm rounded-lg border outline-none transition-colors ${
+                  className={`w-full pl-8 pr-3 h-7 text-sm rounded-lg border outline-none transition-colors ${
                     isDark
                       ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500'
                       : 'bg-slate-50 border-slate-200 focus:border-blue-300'
@@ -298,7 +316,7 @@ function ClientSearchDropdown({ value, onChange, isDark, clients = [] }) {
                   <span className={`text-sm truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                     {c.company_name}
                   </span>
-                  {value === c.id && <Check className="h-3.5 w-3.5 text-blue-500 ml-auto flex-shrink-0" />}
+                  {value === c.id && <Check className="h-3 w-3 text-blue-500 ml-auto flex-shrink-0" />}
                 </button>
               ))}
               {filtered.length === 0 && (
@@ -333,7 +351,7 @@ function RevealPassword({ entryId, isDark }) {
   }, [entryId, revealed]);
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5">
       <span className={`font-mono text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
         {revealed ? password : <MaskedPassword />}
       </span>
@@ -345,10 +363,10 @@ function RevealPassword({ entryId, isDark }) {
         title={revealed ? 'Hide' : 'Reveal'}
       >
         {loading
-          ? <RefreshCw className="h-3.5 w-3.5 animate-spin text-slate-400" />
+          ? <RefreshCw className="h-3 w-3 animate-spin text-slate-400" />
           : revealed
-            ? <EyeOff className="h-3.5 w-3.5 text-slate-400" />
-            : <Eye className="h-3.5 w-3.5 text-slate-400" />
+            ? <EyeOff className="h-3 w-3 text-slate-400" />
+            : <Eye className="h-3 w-3 text-slate-400" />
         }
       </button>
       {revealed && (
@@ -362,6 +380,246 @@ function RevealPassword({ entryId, isDark }) {
         </button>
       )}
     </div>
+  );
+}
+
+// ── Auto-Fill & Open Portal ───────────────────────────────────────────────────
+// Copies credentials to clipboard then opens portal URL
+// Also attempts to open a special bookmarklet-style autofill
+async function handleAutoFillAndOpen(entry) {
+  if (!entry.url) {
+    toast.error('No URL configured for this portal');
+    return;
+  }
+
+  try {
+    // Fetch password first
+    const res = await api.get(`/passwords/${entry.id}/reveal`);
+    const password = res.data.password || '';
+    const username = entry.username || '';
+
+    // Copy credentials to clipboard as formatted text for easy pasting
+    const credText = `Username: ${username}\nPassword: ${password}`;
+    await navigator.clipboard.writeText(password);
+
+    toast.success(
+      `Password copied! Opening ${entry.portal_name}…`,
+      { description: `Username: ${username} — paste password when prompted` }
+    );
+
+    // Small delay then open URL
+    setTimeout(() => {
+      const url = entry.url.startsWith('http') ? entry.url : `https://${entry.url}`;
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }, 400);
+  } catch (err) {
+    toast.error('Could not retrieve credentials for auto-fill');
+  }
+}
+
+// ── Full Detail Modal ─────────────────────────────────────────────────────────
+function DetailModal({ open, onClose, entry, isDark, canEdit, isAdmin, onEdit, onDelete }) {
+  const [revealedPw, setRevealedPw] = useState('');
+  const [revealLoading, setRevealLoading] = useState(false);
+  const [pwRevealed, setPwRevealed] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setRevealedPw('');
+      setPwRevealed(false);
+    }
+  }, [open]);
+
+  if (!entry) return null;
+
+  const meta = PORTAL_META[entry.portal_type] || PORTAL_META.OTHER;
+
+  const handleReveal = async () => {
+    if (pwRevealed) { setPwRevealed(false); return; }
+    setRevealLoading(true);
+    try {
+      const res = await api.get(`/passwords/${entry.id}/reveal`);
+      setRevealedPw(res.data.password || '');
+      setPwRevealed(true);
+    } catch {
+      toast.error('Could not retrieve password');
+    } finally {
+      setRevealLoading(false);
+    }
+  };
+
+  const InfoRow = ({ label, value, mono, copyable, icon }) => {
+    if (!value) return null;
+    return (
+      <div className={`flex items-start gap-3 py-2.5 border-b last:border-0 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+        <div className={`flex-shrink-0 w-28 text-[11px] font-bold uppercase tracking-wider pt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+          {label}
+        </div>
+        <div className="flex-1 flex items-center gap-2 min-w-0">
+          {icon && <span className="text-sm flex-shrink-0">{icon}</span>}
+          <span className={`${mono ? 'font-mono' : ''} text-sm break-all ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+            {value}
+          </span>
+          {copyable && (
+            <button
+              type="button"
+              onClick={() => navigator.clipboard.writeText(value).then(() => toast.success('Copied!'))}
+              className={`flex-shrink-0 p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
+            >
+              <Copy className="h-3 w-3 text-slate-400" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className={`max-w-lg rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+        {/* Colored header based on portal type */}
+        <div className="px-5 py-4 flex-shrink-0" style={{ background: `linear-gradient(135deg, ${meta.color}ee, ${meta.color}99)` }}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 bg-white/20 rounded-2xl flex items-center justify-center text-xl flex-shrink-0">
+                {meta.icon}
+              </div>
+              <div className="min-w-0">
+                <DialogTitle className="text-white font-bold text-base leading-tight truncate">{entry.portal_name}</DialogTitle>
+                <p className="text-white/70 text-xs mt-0.5">{meta.fullName}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-7 h-7 bg-white/20 hover:bg-white/30 rounded-lg flex items-center justify-center transition-all flex-shrink-0"
+            >
+              <X className="h-3.5 w-3.5 text-white" />
+            </button>
+          </div>
+          {/* Badges */}
+          <div className="flex items-center gap-2 mt-3 flex-wrap">
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-white/25 text-white">{meta.label}</span>
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white">{entry.department}</span>
+            {entry.holder_type !== 'COMPANY' && (
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white">
+                {HOLDER_META[entry.holder_type]?.icon} {HOLDER_META[entry.holder_type]?.label || entry.holder_type}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="p-5 max-h-[60vh] overflow-y-auto space-y-0">
+          {/* Credentials section */}
+          <div className={`rounded-2xl border p-4 mb-4 ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+            <p className={`text-[10px] font-bold uppercase tracking-wider mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>🔐 Login Credentials</p>
+
+            {entry.username && (
+              <div className={`flex items-center gap-2 mb-2 pb-2 border-b ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+                <span className={`text-[11px] w-20 font-bold uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Username</span>
+                <span className={`font-mono text-sm flex-1 truncate ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{entry.username}</span>
+                <button type="button" onClick={() => navigator.clipboard.writeText(entry.username).then(() => toast.success('Username copied'))} className={`p-1 rounded transition-colors flex-shrink-0 ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`}><Copy className="h-3 w-3 text-slate-400" /></button>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2">
+              <span className={`text-[11px] w-20 font-bold uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Password</span>
+              <div className="flex-1 flex items-center gap-2">
+                {entry.has_password ? (
+                  <>
+                    <span className={`font-mono text-sm ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                      {pwRevealed ? revealedPw : '••••••••••'}
+                    </span>
+                    <button type="button" onClick={handleReveal} disabled={revealLoading} className={`p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`}>
+                      {revealLoading ? <RefreshCw className="h-3 w-3 animate-spin text-slate-400" /> : pwRevealed ? <EyeOff className="h-3 w-3 text-slate-400" /> : <Eye className="h-3 w-3 text-slate-400" />}
+                    </button>
+                    {pwRevealed && (
+                      <button type="button" onClick={() => navigator.clipboard.writeText(revealedPw).then(() => toast.success('Password copied'))} className={`p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`}><Copy className="h-3 w-3 text-slate-400" /></button>
+                    )}
+                  </>
+                ) : (
+                  <span className={`text-sm italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No password stored</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Details */}
+          <div className={`rounded-2xl border ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+            <div className="px-4 pt-3 pb-1">
+              <p className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>📋 Details</p>
+            </div>
+            <div className="px-4 pb-3">
+              <InfoRow label="URL" value={entry.url} icon="🌐" copyable />
+              <InfoRow label="Client" value={entry.client_name} icon="🏢" />
+              <InfoRow label="Holder" value={entry.holder_name} icon="👤" />
+              <InfoRow label="PAN" value={entry.holder_pan} mono copyable />
+              <InfoRow label="DIN" value={entry.holder_din} mono copyable />
+              <InfoRow label="Mobile" value={entry.mobile} icon="📱" copyable />
+              <InfoRow label="Trade Name" value={entry.trade_name} icon="🏪" />
+              <InfoRow label="Notes" value={entry.notes} />
+              {entry.tags?.length > 0 && (
+                <div className={`flex items-start gap-3 py-2.5 border-b last:border-0 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                  <div className={`flex-shrink-0 w-28 text-[11px] font-bold uppercase tracking-wider pt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Tags</div>
+                  <div className="flex flex-wrap gap-1">
+                    {entry.tags.map(t => (
+                      <span key={t} className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>{t}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Meta */}
+          <div className="flex items-center gap-4 mt-3 flex-wrap">
+            {entry.created_by_name && (
+              <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                <UserIcon className="h-2.5 w-2.5" /> Added by {entry.created_by_name}
+              </span>
+            )}
+            {entry.created_at && (
+              <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                <Calendar className="h-2.5 w-2.5" /> {format(new Date(entry.created_at), 'MMM d, yyyy')}
+              </span>
+            )}
+            {entry.last_accessed_at && (
+              <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                <Activity className="h-2.5 w-2.5" /> Last used {format(new Date(entry.last_accessed_at), 'MMM d')}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className={`px-5 py-3 border-t flex items-center gap-2 flex-wrap ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          {entry.url && (
+            <Button
+              size="sm"
+              onClick={() => handleAutoFillAndOpen(entry)}
+              className="rounded-xl font-bold text-xs h-8 gap-1.5 text-white flex-1"
+              style={{ background: `linear-gradient(135deg, ${meta.color}, ${meta.color}bb)` }}
+            >
+              <AutoFillIcon className="h-3 w-3" /> Open & Auto-fill
+            </Button>
+          )}
+          {canEdit && (
+            <Button size="sm" variant="outline" className="rounded-xl h-8 text-xs gap-1" onClick={() => { onClose(); onEdit(entry); }}>
+              <Edit2 className="h-3 w-3" /> Edit
+            </Button>
+          )}
+          <Button
+            size="sm"
+            onClick={onClose}
+            className="rounded-xl h-8 text-xs"
+            style={{ background: isDark ? '#374151' : '#F3F4F6', color: isDark ? '#E2E8F0' : '#4B5563' }}
+          >
+            Close
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -419,6 +677,7 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
     if (entry?.username) lines.push(`👤 Username: ${entry.username}`);
     if (includePass && password) lines.push(`🔑 Password: ${password}`);
     if (entry?.holder_name) lines.push(`👔 Login for: ${entry.holder_name}`);
+    if (entry?.mobile) lines.push(`📱 Registered Mobile: ${entry.mobile}`);
     if (entry?.notes) lines.push(`📝 Note: ${entry.notes}`);
     lines.push('');
     lines.push('🔒 _This message contains confidential credentials. Please do not forward._');
@@ -454,18 +713,18 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className={`max-w-md rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
         <ModalHeader
-          icon={<WAIcon className="h-5 w-5 text-white" />}
+          icon={<WAIcon className="h-4 w-4 text-white" />}
           title="Share via WhatsApp"
           subtitle="Send credentials securely to a contact"
           gradient="linear-gradient(135deg, #075E54 0%, #25D366 100%)"
           onClose={handleClose}
         />
-        <div className="p-6 space-y-4">
-          <div className="space-y-2">
+        <div className="p-5 space-y-4">
+          <div className="space-y-1.5">
             <Label className="text-xs font-bold uppercase text-slate-500">Recipient</Label>
             {recipients.length > 0 ? (
               <Select value={recipientType} onValueChange={setRecipientType}>
-                <SelectTrigger className={`rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
+                <SelectTrigger className={`rounded-xl h-9 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
                   <SelectValue placeholder="Select recipient" />
                 </SelectTrigger>
                 <SelectContent>
@@ -474,21 +733,19 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
               </Select>
             ) : (
               <Input
-                className={`rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+                className={`rounded-xl h-9 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
                 placeholder="Enter phone number (with country code)"
                 value={customPhone}
                 onChange={e => setCustomPhone(e.target.value)}
               />
             )}
           </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs font-bold uppercase text-slate-500">Include Password?</Label>
-              <input type="checkbox" checked={includePass} onChange={e => handleIncludeToggle(e.target.checked)} className="w-4 h-4 rounded cursor-pointer" />
-            </div>
-            {includePass && loadingPw && <p className="text-xs text-slate-400">Fetching password…</p>}
+          <div className="flex items-center justify-between">
+            <Label className="text-xs font-bold uppercase text-slate-500">Include Password?</Label>
+            <input type="checkbox" checked={includePass} onChange={e => handleIncludeToggle(e.target.checked)} className="w-4 h-4 rounded cursor-pointer" />
           </div>
-          <div className="space-y-2">
+          {includePass && loadingPw && <p className="text-xs text-slate-400">Fetching password…</p>}
+          <div className="space-y-1.5">
             <Label className="text-xs font-bold uppercase text-slate-500">Additional Message (optional)</Label>
             <Textarea
               className={`rounded-xl resize-none text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
@@ -499,7 +756,7 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
             />
           </div>
         </div>
-        <DialogFooter className={`px-6 py-4 flex items-center gap-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+        <DialogFooter className={`px-5 py-3 flex items-center gap-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
           <Button variant="ghost" className="rounded-xl" onClick={handleClose}>Cancel</Button>
           <Button
             disabled={!phoneReady}
@@ -516,16 +773,13 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
 }
 
 // ── Smart Bulk Import Modal ───────────────────────────────────────────────────
-// Step 1: Upload → parse-preview (see mapping + ask about unmapped cols)
-// Step 2: Confirm mapping (optionally assign unmapped cols)
-// Step 3: Import → show results
 function BulkImportModal({ open, onClose, isDark, onSuccess }) {
-  const [step, setStep] = useState(1); // 1=upload, 2=review mapping, 3=result
+  const [step, setStep] = useState(1);
   const [file, setFile] = useState(null);
   const [parsing, setParsing] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [preview, setPreview] = useState(null);      // ColumnMappingPreview response
-  const [unmappedAssignments, setUnmappedAssignments] = useState({}); // col -> canonical field
+  const [preview, setPreview] = useState(null);
+  const [unmappedAssignments, setUnmappedAssignments] = useState({});
   const [result, setResult] = useState(null);
   const qc = useQueryClient();
 
@@ -595,18 +849,14 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
     onClose();
   };
 
-  const inputClass = `rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`;
-
-  // Already-mapped canonical fields (not available for unmapped assignment)
   const alreadyMapped = preview ? new Set(Object.values(preview.mapping)) : new Set();
-
   const hasMissingRequired = preview?.missing_required?.length > 0;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className={`max-w-2xl rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
         <ModalHeader
-          icon={<FileUp className="h-5 w-5 text-white" />}
+          icon={<FileUp className="h-4 w-4 text-white" />}
           title={step === 1 ? 'Bulk Import Credentials' : step === 2 ? 'Review Column Mapping' : 'Import Complete'}
           subtitle={
             step === 1 ? 'Upload Excel or CSV — any column names are auto-detected' :
@@ -617,9 +867,9 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
           onClose={handleClose}
         />
 
-        {/* ── Step 1: Upload ── */}
+        {/* Step 1: Upload */}
         {step === 1 && (
-          <div className="p-6 space-y-4">
+          <div className="p-5 space-y-4">
             <label
               htmlFor="bulk-import-file"
               className={`flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-2xl p-8 cursor-pointer transition-colors ${
@@ -628,13 +878,7 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
                   : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50/50'
               }`}
             >
-              <input
-                id="bulk-import-file"
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                onChange={handleFileChange}
-                className="hidden"
-              />
+              <input id="bulk-import-file" type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange} className="hidden" />
               {file ? (
                 <>
                   <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: `${COLORS.emeraldGreen}20` }}>
@@ -658,19 +902,18 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
               )}
             </label>
 
-            {/* Smart detection notice */}
-            <div className={`flex items-start gap-3 p-4 rounded-2xl ${isDark ? 'bg-blue-900/20 border border-blue-800/40' : 'bg-blue-50 border border-blue-200'}`}>
-              <Zap className={`h-5 w-5 flex-shrink-0 mt-0.5 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} />
+            <div className={`flex items-start gap-3 p-3 rounded-2xl ${isDark ? 'bg-blue-900/20 border border-blue-800/40' : 'bg-blue-50 border border-blue-200'}`}>
+              <Zap className={`h-4 w-4 flex-shrink-0 mt-0.5 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} />
               <div>
-                <p className={`text-sm font-bold mb-1 ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>Smart Column Detection</p>
-                <p className={`text-xs ${isDark ? 'text-blue-200' : 'text-blue-600'}`}>
-                  Your Excel doesn't need specific column names. We automatically detect "Name", "Email", "Password", "Portal", and many other common headers.
-                  Before importing, you'll see exactly how each column will be mapped — and can fix any that weren't recognised.
+                <p className={`text-xs font-bold mb-1 ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>Smart Column Detection</p>
+                <p className={`text-[11px] ${isDark ? 'text-blue-200' : 'text-blue-600'}`}>
+                  Automatically detects: Name, Email, Password, PAN, DIN, Mobile, Trade Name, Portal, Company and 100+ column name variations.
+                  Any unrecognised columns get a smart suggestion popup before importing.
                 </p>
               </div>
             </div>
 
-            <DialogFooter className={`flex items-center gap-3 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+            <div className="flex items-center gap-3 justify-end pt-2">
               <Button variant="ghost" className="rounded-xl" onClick={handleClose}>Cancel</Button>
               <Button
                 disabled={!file || parsing}
@@ -680,59 +923,46 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
               >
                 {parsing ? <><Loader2 className="h-4 w-4 animate-spin" /> Analysing…</> : <><ArrowRight className="h-4 w-4" /> Preview Mapping</>}
               </Button>
-            </DialogFooter>
+            </div>
           </div>
         )}
 
-        {/* ── Step 2: Review Mapping ── */}
+        {/* Step 2: Review Mapping */}
         {step === 2 && preview && (
           <div className="flex flex-col max-h-[80vh]">
-            <div className="overflow-y-auto p-6 space-y-5">
+            <div className="overflow-y-auto p-5 space-y-4">
 
-              {/* Missing required fields warning */}
               {hasMissingRequired && (
-                <div className={`flex items-start gap-3 p-4 rounded-2xl ${isDark ? 'bg-red-900/20 border border-red-800/40' : 'bg-red-50 border border-red-200'}`}>
-                  <AlertCircle className={`h-5 w-5 flex-shrink-0 mt-0.5 ${isDark ? 'text-red-400' : 'text-red-600'}`} />
+                <div className={`flex items-start gap-3 p-3 rounded-2xl ${isDark ? 'bg-red-900/20 border border-red-800/40' : 'bg-red-50 border border-red-200'}`}>
+                  <AlertCircle className={`h-4 w-4 flex-shrink-0 mt-0.5 ${isDark ? 'text-red-400' : 'text-red-600'}`} />
                   <div>
-                    <p className={`text-sm font-bold ${isDark ? 'text-red-300' : 'text-red-700'}`}>Some required fields were not found</p>
-                    <p className={`text-xs mt-1 ${isDark ? 'text-red-200' : 'text-red-600'}`}>
-                      Could not find columns for: <b>{preview.missing_required.map(f => FIELD_META[f]?.label || f).join(', ')}</b>.
+                    <p className={`text-xs font-bold ${isDark ? 'text-red-300' : 'text-red-700'}`}>Some required fields were not found</p>
+                    <p className={`text-[11px] mt-0.5 ${isDark ? 'text-red-200' : 'text-red-600'}`}>
+                      Could not find: <b>{preview.missing_required.map(f => FIELD_META[f]?.label || f).join(', ')}</b>.
                       Please assign them below or go back and check your file.
                     </p>
                   </div>
                 </div>
               )}
 
-              {/* Auto-mapped columns */}
+              {/* Auto-mapped */}
               {Object.keys(preview.mapping).length > 0 && (
                 <div>
-                  <p className={`text-xs font-bold uppercase tracking-wider mb-3 flex items-center gap-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                    Auto-detected columns ({Object.keys(preview.mapping).length})
+                  <p className={`text-[10px] font-bold uppercase tracking-wider mb-2 flex items-center gap-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                    Auto-detected ({Object.keys(preview.mapping).length})
                   </p>
-                  <div className="grid grid-cols-1 gap-2">
+                  <div className="grid grid-cols-1 gap-1.5">
                     {Object.entries(preview.mapping).map(([origCol, canonical]) => {
                       const meta = FIELD_META[canonical];
                       return (
-                        <div
-                          key={origCol}
-                          className={`flex items-center gap-3 p-2.5 rounded-xl ${isDark ? 'bg-emerald-900/15 border border-emerald-800/30' : 'bg-emerald-50 border border-emerald-200'}`}
-                        >
-                          <span className="text-base">{meta?.icon || '📌'}</span>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>"{origCol}"</span>
-                              <ArrowRight className="h-3 w-3 text-slate-400 flex-shrink-0" />
-                              <span className={`text-sm font-bold ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>{meta?.label || canonical}</span>
-                              {meta?.required && (
-                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">Required</span>
-                              )}
-                            </div>
-                            {meta?.description && (
-                              <p className="text-[10px] text-slate-400 mt-0.5">{meta.description}</p>
-                            )}
-                          </div>
-                          <CheckCircle2 className="h-4 w-4 text-emerald-500 flex-shrink-0" />
+                        <div key={origCol} className={`flex items-center gap-2 p-2 rounded-xl ${isDark ? 'bg-emerald-900/15 border border-emerald-800/30' : 'bg-emerald-50 border border-emerald-200'}`}>
+                          <span className="text-sm">{meta?.icon || '📌'}</span>
+                          <span className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>"{origCol}"</span>
+                          <ArrowRight className="h-3 w-3 text-slate-400 flex-shrink-0" />
+                          <span className={`text-xs font-bold ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>{meta?.label || canonical}</span>
+                          {meta?.required && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">Required</span>}
+                          <CheckCircle2 className="h-3 w-3 text-emerald-500 ml-auto flex-shrink-0" />
                         </div>
                       );
                     })}
@@ -740,43 +970,57 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
                 </div>
               )}
 
-              {/* Unmapped columns — ask user */}
+              {/* Unmapped — with smart suggestions as pop-up style selects */}
               {preview.unmapped_columns.length > 0 && (
                 <div>
-                  <p className={`text-xs font-bold uppercase tracking-wider mb-3 flex items-center gap-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    <HelpCircle className="h-3.5 w-3.5 text-amber-500" />
-                    Columns we couldn't identify ({preview.unmapped_columns.length}) — assign or skip
+                  <p className={`text-[10px] font-bold uppercase tracking-wider mb-2 flex items-center gap-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    <HelpCircle className="h-3 w-3 text-amber-500" />
+                    Unrecognised columns — classify or skip ({preview.unmapped_columns.length})
                   </p>
-                  <div className="space-y-2">
-                    {preview.unmapped_columns.map(col => (
-                      <div
-                        key={col}
-                        className={`flex items-center gap-3 p-2.5 rounded-xl ${isDark ? 'bg-amber-900/15 border border-amber-800/30' : 'bg-amber-50 border border-amber-200'}`}
-                      >
-                        <HelpCircle className="h-4 w-4 text-amber-500 flex-shrink-0" />
-                        <span className={`text-sm font-semibold flex-shrink-0 ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>"{col}"</span>
-                        <ArrowRight className="h-3 w-3 text-slate-400 flex-shrink-0" />
-                        <Select
-                          value={unmappedAssignments[col] || '__skip__'}
-                          onValueChange={v => setUnmappedAssignments(p => ({ ...p, [col]: v === '__skip__' ? undefined : v }))}
-                        >
-                          <SelectTrigger className={`h-8 rounded-lg text-xs flex-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white'}`}>
-                            <SelectValue placeholder="Skip this column" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__skip__">⛔ Skip this column</SelectItem>
-                            {allCanonicalFields
-                              .filter(f => !alreadyMapped.has(f) || unmappedAssignments[col] === f)
-                              .map(f => (
-                                <SelectItem key={f} value={f}>
-                                  {FIELD_META[f]?.icon} {FIELD_META[f]?.label || f}
-                                </SelectItem>
-                              ))
-                            }
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    ))}
+                  <div className="space-y-1.5">
+                    {preview.unmapped_columns.map(col => {
+                      const suggestions = preview.suggested_mappings?.[col] || [];
+                      return (
+                        <div key={col} className={`p-2.5 rounded-xl ${isDark ? 'bg-amber-900/15 border border-amber-800/30' : 'bg-amber-50 border border-amber-200'}`}>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <HelpCircle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
+                            <span className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>"{col}"</span>
+                            <ArrowRight className="h-3 w-3 text-slate-400 flex-shrink-0" />
+                            <Select
+                              value={unmappedAssignments[col] || '__skip__'}
+                              onValueChange={v => setUnmappedAssignments(p => ({ ...p, [col]: v === '__skip__' ? undefined : v }))}
+                            >
+                              <SelectTrigger className={`h-7 rounded-lg text-[11px] w-44 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white'}`}>
+                                <SelectValue placeholder="Skip" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__skip__">⛔ Skip this column</SelectItem>
+                                {/* Smart suggestions first */}
+                                {suggestions.length > 0 && (
+                                  <>
+                                    <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase">Suggested</div>
+                                    {suggestions.map(f => (
+                                      <SelectItem key={`sug_${f}`} value={f}>
+                                        ✨ {FIELD_META[f]?.icon} {FIELD_META[f]?.label || f}
+                                      </SelectItem>
+                                    ))}
+                                    <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase">All Fields</div>
+                                  </>
+                                )}
+                                {allCanonicalFields
+                                  .filter(f => !alreadyMapped.has(f) || unmappedAssignments[col] === f)
+                                  .map(f => (
+                                    <SelectItem key={f} value={f}>
+                                      {FIELD_META[f]?.icon} {FIELD_META[f]?.label || f}
+                                    </SelectItem>
+                                  ))
+                                }
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -784,10 +1028,10 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
               {/* Data preview table */}
               {preview.sample_rows?.length > 0 && (
                 <div>
-                  <p className={`text-xs font-bold uppercase tracking-wider mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  <p className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                     Data Preview (first {preview.sample_rows.length} rows)
                   </p>
-                  <div className={`rounded-xl border overflow-auto ${isDark ? 'border-slate-600 bg-slate-900/50' : 'border-slate-200 bg-slate-50'}`} style={{ maxHeight: 200 }}>
+                  <div className={`rounded-xl border overflow-auto ${isDark ? 'border-slate-600 bg-slate-900/50' : 'border-slate-200 bg-slate-50'}`} style={{ maxHeight: 180 }}>
                     <table className="w-full text-xs min-w-max">
                       <thead>
                         <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'}`}>
@@ -814,43 +1058,36 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
                 </div>
               )}
 
-              {/* Auto-derive info */}
-              <div className={`flex items-start gap-3 p-3 rounded-xl text-xs ${isDark ? 'bg-slate-700/50 border border-slate-600' : 'bg-slate-50 border border-slate-200'}`}>
-                <Info className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
+              <div className={`flex items-start gap-2 p-3 rounded-xl text-xs ${isDark ? 'bg-slate-700/50 border border-slate-600' : 'bg-slate-50 border border-slate-200'}`}>
+                <Info className="h-3.5 w-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
                 <p className={isDark ? 'text-slate-300' : 'text-slate-600'}>
-                  Missing <b>Department</b> values will be auto-derived from Portal Type (e.g. MCA → ROC, GST → GST).
-                  Missing <b>Holder Type</b> defaults to <b>COMPANY</b>. Blank rows are skipped automatically.
+                  Missing <b>Department</b> auto-derived from Portal Type (MCA → ROC, GST → GST, etc.).
+                  Missing <b>Holder Type</b> defaults to <b>COMPANY</b>. Blank rows are skipped.
+                  <b>Mobile</b> and <b>Trade Name</b> fields are now supported.
                 </p>
               </div>
             </div>
 
-            <div className={`px-6 py-4 border-t flex items-center justify-between gap-3 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-              <Button variant="ghost" className="rounded-xl" onClick={() => setStep(1)}>
-                ← Back
-              </Button>
+            <div className={`px-5 py-3 border-t flex items-center justify-between gap-3 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+              <Button variant="ghost" className="rounded-xl text-sm" onClick={() => setStep(1)}>← Back</Button>
               <div className="flex items-center gap-3">
-                <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  {preview.total_rows} rows ready to import
-                </span>
+                <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{preview.total_rows} rows ready</span>
                 <Button
                   disabled={importing}
                   onClick={handleImport}
-                  className="rounded-xl font-bold text-white gap-2"
+                  className="rounded-xl font-bold text-white gap-2 text-sm"
                   style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen}, #0F7238)` }}
                 >
-                  {importing
-                    ? <><Loader2 className="h-4 w-4 animate-spin" /> Importing…</>
-                    : <><Upload className="h-4 w-4" /> Import {preview.total_rows} Rows</>
-                  }
+                  {importing ? <><Loader2 className="h-4 w-4 animate-spin" /> Importing…</> : <><Upload className="h-4 w-4" /> Import {preview.total_rows} Rows</>}
                 </Button>
               </div>
             </div>
           </div>
         )}
 
-        {/* ── Step 3: Result ── */}
+        {/* Step 3: Result */}
         {step === 3 && result && (
-          <div className="p-6 space-y-4">
+          <div className="p-5 space-y-4">
             <div className="grid grid-cols-3 gap-3">
               <div className={`p-4 rounded-2xl text-center ${isDark ? 'bg-emerald-900/20 border border-emerald-800/30' : 'bg-emerald-50 border border-emerald-200'}`}>
                 <p className="text-3xl font-black" style={{ color: COLORS.emeraldGreen }}>{result.successful_imports}</p>
@@ -860,8 +1097,8 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
                 <p className={`text-3xl font-black ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{result.total_processed}</p>
                 <p className="text-xs font-semibold mt-1 text-slate-500">Total Rows</p>
               </div>
-              <div className={`p-4 rounded-2xl text-center ${result.failed_imports > 0 ? (isDark ? 'bg-red-900/20 border border-red-800/30' : 'bg-red-50 border border-red-200') : (isDark ? 'bg-slate-700' : 'bg-slate-100')}`}>
-                <p className={`text-3xl font-black ${result.failed_imports > 0 ? 'text-red-500' : (isDark ? 'text-slate-400' : 'text-slate-400')}`}>{result.failed_imports}</p>
+              <div className={`p-4 rounded-2xl text-center ${result.failed_imports > 0 ? (isDark ? 'bg-red-900/20 border border-red-800/30' : 'bg-red-50 border border-red-200') : (isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-100 border-slate-200')}`}>
+                <p className={`text-3xl font-black ${result.failed_imports > 0 ? 'text-red-500' : 'text-slate-400'}`}>{result.failed_imports}</p>
                 <p className={`text-xs font-semibold mt-1 ${result.failed_imports > 0 ? 'text-red-400' : 'text-slate-400'}`}>Failed</p>
               </div>
             </div>
@@ -870,7 +1107,6 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
               <p className="text-xs text-slate-400 text-center">{result.skipped_rows} empty rows were skipped automatically.</p>
             )}
 
-            {/* Column mapping summary */}
             {result.column_mapping && Object.keys(result.column_mapping).length > 0 && (
               <div className={`p-3 rounded-xl text-xs ${isDark ? 'bg-slate-700/50 border border-slate-600' : 'bg-slate-50 border border-slate-200'}`}>
                 <p className={`font-bold mb-2 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Columns mapped:</p>
@@ -885,7 +1121,7 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
             )}
 
             {result.errors?.length > 0 && (
-              <div className={`p-3 rounded-xl text-xs max-h-40 overflow-y-auto ${isDark ? 'bg-red-900/20 border border-red-800/40' : 'bg-red-50 border border-red-200'}`}>
+              <div className={`p-3 rounded-xl text-xs max-h-36 overflow-y-auto ${isDark ? 'bg-red-900/20 border border-red-800/40' : 'bg-red-50 border border-red-200'}`}>
                 <p className={`font-bold mb-2 ${isDark ? 'text-red-300' : 'text-red-700'}`}>Row errors:</p>
                 {result.errors.map((err, i) => (
                   <p key={i} className={`mb-1 ${isDark ? 'text-red-200' : 'text-red-600'}`}>
@@ -895,7 +1131,7 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
               </div>
             )}
 
-            <DialogFooter className={`flex items-center gap-3 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+            <div className="flex justify-end pt-2">
               <Button
                 className="rounded-xl font-bold text-white"
                 style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
@@ -903,7 +1139,7 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
               >
                 Done
               </Button>
-            </DialogFooter>
+            </div>
           </div>
         )}
       </DialogContent>
@@ -962,23 +1198,22 @@ function SheetLinksModal({ open, onClose, isDark, isAdmin }) {
   };
 
   const sheetTypeColor = { GST: '#7C3AED', ROC: '#1E3A8A', MCA: '#1E3A8A', OTHER: '#6B7280' };
-
   const handleClose = () => { setAdding(false); setPreviewId(null); setPreviewData(null); onClose(); };
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className={`max-w-2xl rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
         <ModalHeader
-          icon={<Sheet className="h-5 w-5 text-white" />}
+          icon={<Sheet className="h-4 w-4 text-white" />}
           title="Google Sheet Links"
           subtitle="Manage linked spreadsheets for password data import"
           gradient="linear-gradient(135deg, #0F7238, #1FAF5A)"
           onClose={handleClose}
         />
 
-        <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+        <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
           <div className={`p-3 rounded-xl text-xs flex items-start gap-2 ${isDark ? 'bg-blue-900/20 border border-blue-800/40' : 'bg-blue-50 border border-blue-200'}`}>
-            <Info className={`h-4 w-4 flex-shrink-0 mt-0.5 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} />
+            <Info className={`h-3.5 w-3.5 flex-shrink-0 mt-0.5 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} />
             <div className={isDark ? 'text-blue-300' : 'text-blue-700'}>
               <b>How to use:</b> Add your Google Sheet URL. The sheet must be <b>"Anyone with the link can view"</b>.
               For ROC/MCA sheets, all tabs are merged. For GST, only the latest tab is used.
@@ -988,7 +1223,7 @@ function SheetLinksModal({ open, onClose, isDark, isAdmin }) {
           {isAdmin && (
             <div className={`rounded-xl border p-4 space-y-3 ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
               <div className="flex items-center justify-between">
-                <p className={`text-sm font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{adding ? 'Add New Sheet Link' : '+ Add a Sheet Link'}</p>
+                <p className={`text-sm font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{adding ? 'Add New Sheet Link' : 'Add a Sheet Link'}</p>
                 {!adding && (
                   <Button size="sm" className="rounded-lg h-7 text-xs" onClick={() => setAdding(true)} style={{ background: COLORS.emeraldGreen, color: 'white' }}>
                     <Plus className="h-3 w-3 mr-1" /> Add
@@ -1039,7 +1274,7 @@ function SheetLinksModal({ open, onClose, isDark, isAdmin }) {
           ) : (
             <div className="space-y-3">
               {links.map(link => (
-                <div key={link.id} className={`rounded-xl border p-4 ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-white border-slate-200'}`}>
+                <div key={link.id} className={`rounded-xl border p-3 ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-white border-slate-200'}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -1057,7 +1292,7 @@ function SheetLinksModal({ open, onClose, isDark, isAdmin }) {
                       </Button>
                       {isAdmin && (
                         <button type="button" onClick={() => deleteMutation.mutate(link.id)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-red-900/30' : 'hover:bg-red-50'}`} title="Delete">
-                          <Trash2 className="h-3.5 w-3.5 text-red-400" />
+                          <Trash2 className="h-3 w-3 text-red-400" />
                         </button>
                       )}
                     </div>
@@ -1071,7 +1306,7 @@ function SheetLinksModal({ open, onClose, isDark, isAdmin }) {
                         {previewData.tab_used && <span className="text-xs text-slate-400">Tab: {previewData.tab_used}</span>}
                         {previewData.tabs_found?.length > 0 && <span className="text-xs text-slate-400">Tabs: {previewData.tabs_found.join(', ')}</span>}
                       </div>
-                      <div className={`rounded-lg overflow-auto text-xs ${isDark ? 'bg-slate-800' : 'bg-slate-50'}`} style={{ maxHeight: 180 }}>
+                      <div className={`rounded-lg overflow-auto text-xs ${isDark ? 'bg-slate-800' : 'bg-slate-50'}`} style={{ maxHeight: 160 }}>
                         <table className="w-full min-w-max">
                           <thead>
                             <tr className={`border-b ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
@@ -1099,40 +1334,133 @@ function SheetLinksModal({ open, onClose, isDark, isAdmin }) {
           )}
         </div>
 
-        <DialogFooter className={`px-6 py-4 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+        <div className={`px-5 py-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
           <Button variant="ghost" className="rounded-xl" onClick={handleClose}>Close</Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );
 }
 
+// ── Pagination Component ──────────────────────────────────────────────────────
+function Pagination({ total, page, pageSize, onPage, onPageSize, isDark }) {
+  const totalPages = Math.ceil(total / pageSize);
+  if (total === 0) return null;
+
+  const pages = [];
+  const maxVisible = 5;
+  let start = Math.max(1, page - Math.floor(maxVisible / 2));
+  let end = Math.min(totalPages, start + maxVisible - 1);
+  if (end - start < maxVisible - 1) start = Math.max(1, end - maxVisible + 1);
+
+  for (let i = start; i <= end; i++) pages.push(i);
+
+  const btnBase = `h-7 min-w-[28px] px-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center`;
+
+  return (
+    <div className={`flex items-center justify-between gap-3 py-2 px-1 flex-wrap ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+      <div className="flex items-center gap-2">
+        <span className="text-xs">Rows per page:</span>
+        <Select value={String(pageSize)} onValueChange={v => { onPageSize(Number(v)); onPage(1); }}>
+          <SelectTrigger className={`h-7 w-20 rounded-lg text-xs ${isDark ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-white'}`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PAGE_SIZE_OPTIONS.map(s => <SelectItem key={s} value={String(s)}>{s}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <span className="text-xs">
+          {Math.min((page - 1) * pageSize + 1, total)}–{Math.min(page * pageSize, total)} of {total}
+        </span>
+      </div>
+
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          disabled={page === 1}
+          onClick={() => onPage(1)}
+          className={`${btnBase} ${isDark ? 'hover:bg-slate-700 disabled:opacity-30' : 'hover:bg-slate-100 disabled:opacity-30'}`}
+        >
+          «
+        </button>
+        <button
+          type="button"
+          disabled={page === 1}
+          onClick={() => onPage(page - 1)}
+          className={`${btnBase} ${isDark ? 'hover:bg-slate-700 disabled:opacity-30' : 'hover:bg-slate-100 disabled:opacity-30'}`}
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+        </button>
+        {pages.map(p => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => onPage(p)}
+            className={`${btnBase} ${p === page
+              ? 'text-white shadow-sm'
+              : isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'
+            }`}
+            style={p === page ? { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` } : {}}
+          >
+            {p}
+          </button>
+        ))}
+        <button
+          type="button"
+          disabled={page === totalPages}
+          onClick={() => onPage(page + 1)}
+          className={`${btnBase} ${isDark ? 'hover:bg-slate-700 disabled:opacity-30' : 'hover:bg-slate-100 disabled:opacity-30'}`}
+        >
+          <ChevronRight className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          disabled={page === totalPages}
+          onClick={() => onPage(totalPages)}
+          className={`${btnBase} ${isDark ? 'hover:bg-slate-700 disabled:opacity-30' : 'hover:bg-slate-100 disabled:opacity-30'}`}
+        >
+          »
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Entry Card (Grid View) ────────────────────────────────────────────────────
-function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark }) {
+function EntryCard({ entry, serialNo, canEdit, isAdmin, onEdit, onDelete, onShare, onDetail, isDark }) {
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -3, transition: springMed }}>
-      <div className={`rounded-2xl border p-4 h-full flex flex-col ${isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'} transition-all`}>
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex-1 min-w-0">
-            <h3 className={`font-bold text-sm truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{entry.portal_name}</h3>
-            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-              <PortalBadge type={entry.portal_type} size="sm" />
-              <DeptBadge dept={entry.department} />
-              <HolderBadge holderType={entry.holder_type} />
+      <div
+        className={`rounded-2xl border p-3.5 h-full flex flex-col cursor-pointer ${isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'} transition-all`}
+        onClick={() => onDetail(entry)}
+      >
+        {/* Serial + actions row */}
+        <div className="flex items-start justify-between mb-2.5">
+          <div className="flex items-start gap-2 flex-1 min-w-0">
+            <span className={`text-[10px] font-black mt-0.5 flex-shrink-0 w-5 h-5 rounded-lg flex items-center justify-center ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+              {serialNo}
+            </span>
+            <div className="flex-1 min-w-0">
+              <h3 className={`font-bold text-sm truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{entry.portal_name}</h3>
+              <div className="flex items-center gap-1 mt-1 flex-wrap">
+                <PortalBadge type={entry.portal_type} size="sm" />
+                <DeptBadge dept={entry.department} />
+                <HolderBadge holderType={entry.holder_type} />
+              </div>
             </div>
           </div>
-          {canEdit && (
-            <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+          <div className="flex items-center gap-0.5 ml-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
+            {canEdit && (
               <button type="button" onClick={() => onEdit(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Edit">
-                <Edit2 className="h-3.5 w-3.5 text-slate-400" />
+                <Edit2 className="h-3 w-3 text-slate-400" />
               </button>
-              {isAdmin && (
-                <button type="button" onClick={() => onDelete(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Delete">
-                  <Trash2 className="h-3.5 w-3.5 text-red-400" />
-                </button>
-              )}
-            </div>
-          )}
+            )}
+            {isAdmin && (
+              <button type="button" onClick={() => onDelete(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Delete">
+                <Trash2 className="h-3 w-3 text-red-400" />
+              </button>
+            )}
+          </div>
         </div>
 
         {entry.holder_name && (
@@ -1150,44 +1478,62 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
           </div>
         )}
 
+        {entry.trade_name && (
+          <div className={`flex items-center gap-1.5 mb-2 px-2 py-1 rounded-lg text-xs font-medium ${isDark ? 'bg-amber-900/30 text-amber-300' : 'bg-amber-50 text-amber-700'}`}>
+            <Store className="h-3 w-3 flex-shrink-0" />
+            <span className="truncate">{entry.trade_name}</span>
+          </div>
+        )}
+
         {entry.username && (
-          <div className="mb-3">
+          <div className="mb-2.5" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-2">
-              <UserIcon className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
-              <span className={`font-mono text-sm truncate ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{entry.username}</span>
-              <button type="button" onClick={() => navigator.clipboard.writeText(entry.username).then(() => toast.success('Username copied'))} className={`flex-shrink-0 p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Copy username">
+              <UserIcon className="h-3 w-3 text-slate-400 flex-shrink-0" />
+              <span className={`font-mono text-xs truncate flex-1 ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{entry.username}</span>
+              <button type="button" onClick={() => navigator.clipboard.writeText(entry.username).then(() => toast.success('Username copied'))} className={`flex-shrink-0 p-0.5 rounded transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Copy username">
                 <Copy className="h-3 w-3 text-slate-400" />
               </button>
             </div>
           </div>
         )}
 
-        <div className="mb-3">
-          <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Password</p>
+        <div className="mb-2.5" onClick={e => e.stopPropagation()}>
+          <p className={`text-[10px] font-bold uppercase tracking-wider mb-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Password</p>
           {entry.has_password
             ? <RevealPassword entryId={entry.id} isDark={isDark} />
             : <span className={`text-xs italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No password stored</span>
           }
         </div>
 
+        {entry.mobile && (
+          <div className={`flex items-center gap-1.5 mb-2 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            <Smartphone className="h-3 w-3 flex-shrink-0" />
+            <span className="font-mono">{entry.mobile}</span>
+          </div>
+        )}
+
         {entry.url && (
-          <div className="mb-3">
-            <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Portal URL</p>
-            <a href={entry.url.startsWith('http') ? entry.url : `https://${entry.url}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs font-medium text-blue-500 hover:underline truncate">
+          <div className="mb-2.5" onClick={e => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => handleAutoFillAndOpen(entry)}
+              className={`flex items-center gap-1.5 text-xs font-medium text-blue-500 hover:text-blue-600 hover:underline truncate w-full text-left`}
+              title="Copy password & open portal"
+            >
               <Globe className="h-3 w-3 flex-shrink-0" />
               <span className="truncate">{entry.url}</span>
-              <ExternalLink className="h-2.5 w-2.5 flex-shrink-0" />
-            </a>
+              <AutoFillIcon className="h-2.5 w-2.5 flex-shrink-0 opacity-60" />
+            </button>
           </div>
         )}
 
         {entry.notes && (
-          <div className={`mt-auto pt-3 border-t text-xs ${isDark ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-500'}`}>
-            {entry.notes.slice(0, 100)}{entry.notes.length > 100 ? '…' : ''}
+          <div className={`mt-auto pt-2 border-t text-[11px] ${isDark ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-500'}`}>
+            {entry.notes.slice(0, 80)}{entry.notes.length > 80 ? '…' : ''}
           </div>
         )}
 
-        <div className={`flex items-center justify-between mt-3 pt-3 border-t text-[10px] ${isDark ? 'border-slate-700 text-slate-500' : 'border-slate-100 text-slate-400'}`}>
+        <div className={`flex items-center justify-between mt-2.5 pt-2.5 border-t text-[10px] ${isDark ? 'border-slate-700 text-slate-500' : 'border-slate-100 text-slate-400'}`}>
           <span className="flex items-center gap-1">
             <Clock className="h-2.5 w-2.5" />
             {entry.updated_at ? format(new Date(entry.updated_at), 'MMM d, yyyy') : '—'}
@@ -1195,7 +1541,7 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
           {entry.last_accessed_at && (
             <span className="flex items-center gap-1">
               <Activity className="h-2.5 w-2.5" />
-              Last used {format(new Date(entry.last_accessed_at), 'MMM d')}
+              {format(new Date(entry.last_accessed_at), 'MMM d')}
             </span>
           )}
         </div>
@@ -1203,11 +1549,11 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
         <motion.button
           type="button"
           whileTap={{ scale: 0.97 }}
-          onClick={() => onShare(entry)}
-          className="mt-3 w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold transition-all"
+          onClick={e => { e.stopPropagation(); onShare(entry); }}
+          className="mt-2.5 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-bold transition-all"
           style={{ background: isDark ? 'rgba(37,211,102,0.08)' : 'rgba(37,211,102,0.07)', color: COLORS.whatsapp, border: `1px solid ${COLORS.whatsapp}28` }}
         >
-          <WAIcon className="h-3.5 w-3.5" />
+          <WAIcon className="h-3 w-3" />
           Share via WhatsApp
         </motion.button>
       </div>
@@ -1216,63 +1562,78 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
 }
 
 // ── Entry Row (List View) ─────────────────────────────────────────────────────
-function EntryRow({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark }) {
+function EntryRow({ entry, serialNo, canEdit, isAdmin, onEdit, onDelete, onShare, onDetail, isDark }) {
   return (
-    <motion.tr variants={itemVariants} className={`border-b transition-colors ${isDark ? 'border-slate-700 hover:bg-slate-700/40' : 'border-slate-100 hover:bg-slate-50'}`}>
-      <td className="px-4 py-3">
-        <div className="flex flex-col gap-1">
+    <motion.tr
+      variants={itemVariants}
+      className={`border-b transition-colors cursor-pointer ${isDark ? 'border-slate-700 hover:bg-slate-700/40' : 'border-slate-100 hover:bg-slate-50'}`}
+      onClick={() => onDetail(entry)}
+    >
+      <td className="px-3 py-2 text-center">
+        <span className={`text-[10px] font-black ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{serialNo}</span>
+      </td>
+      <td className="px-3 py-2">
+        <div className="flex flex-col gap-0.5">
           <span className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{entry.portal_name}</span>
-          <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="flex items-center gap-1 flex-wrap">
             <PortalBadge type={entry.portal_type} size="sm" />
             <DeptBadge dept={entry.department} />
             <HolderBadge holderType={entry.holder_type} />
           </div>
         </div>
       </td>
-      <td className="px-4 py-3">
+      <td className="px-3 py-2">
         <div className="flex flex-col gap-0.5">
           {entry.client_name && <span className={`text-xs font-medium ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>{entry.client_name}</span>}
           {entry.holder_name && <span className={`text-xs ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>{entry.holder_name}</span>}
+          {entry.trade_name && <span className={`text-[10px] ${isDark ? 'text-amber-300' : 'text-amber-600'}`}>🏪 {entry.trade_name}</span>}
           {entry.holder_din && <span className="text-[10px] text-slate-400">DIN: {entry.holder_din}</span>}
+          {entry.mobile && <span className={`text-[10px] flex items-center gap-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}><Smartphone className="h-2.5 w-2.5" />{entry.mobile}</span>}
         </div>
       </td>
-      <td className="px-4 py-3">
+      <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
         {entry.username ? (
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1">
             <span className={`font-mono text-xs ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{entry.username}</span>
             <button type="button" onClick={() => navigator.clipboard.writeText(entry.username).then(() => toast.success('Copied'))} className="p-0.5 rounded text-slate-400 hover:text-slate-600 transition-colors">
-              <Copy className="h-3 w-3" />
+              <Copy className="h-2.5 w-2.5" />
             </button>
           </div>
         ) : <span className="text-xs text-slate-400">—</span>}
       </td>
-      <td className="px-4 py-3">
+      <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
         {entry.has_password ? <RevealPassword entryId={entry.id} isDark={isDark} /> : <span className="text-xs text-slate-400 italic">None</span>}
       </td>
-      <td className="px-4 py-3">
+      <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
         {entry.url ? (
-          <a href={entry.url.startsWith('http') ? entry.url : `https://${entry.url}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-blue-500 hover:underline">
+          <button
+            type="button"
+            onClick={() => handleAutoFillAndOpen(entry)}
+            className="flex items-center gap-1 text-xs text-blue-500 hover:underline"
+            title="Copy password & open URL"
+          >
             <Globe className="h-3 w-3 flex-shrink-0" />
-            <span className="truncate max-w-[140px]">{entry.url}</span>
-          </a>
+            <span className="truncate max-w-[120px]">{entry.url.replace(/^https?:\/\//, '')}</span>
+            <AutoFillIcon className="h-2.5 w-2.5 flex-shrink-0 opacity-60" />
+          </button>
         ) : <span className="text-xs text-slate-400">—</span>}
       </td>
-      <td className="px-4 py-3">
-        <span className="text-xs text-slate-400">{entry.updated_at ? format(new Date(entry.updated_at), 'MMM d, yy') : '—'}</span>
+      <td className="px-3 py-2">
+        <span className="text-[10px] text-slate-400">{entry.updated_at ? format(new Date(entry.updated_at), 'MMM d, yy') : '—'}</span>
       </td>
-      <td className="px-4 py-3">
+      <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-1">
           <button type="button" onClick={() => onShare(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Share via WhatsApp">
-            <WAIcon className="h-3.5 w-3.5" style={{ color: COLORS.whatsapp }} />
+            <WAIcon className="h-3 w-3" style={{ color: COLORS.whatsapp }} />
           </button>
           {canEdit && (
             <button type="button" onClick={() => onEdit(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Edit">
-              <Edit2 className="h-3.5 w-3.5 text-slate-400" />
+              <Edit2 className="h-3 w-3 text-slate-400" />
             </button>
           )}
           {isAdmin && (
             <button type="button" onClick={() => onDelete(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Delete">
-              <Trash2 className="h-3.5 w-3.5 text-red-400" />
+              <Trash2 className="h-3 w-3 text-red-400" />
             </button>
           )}
         </div>
@@ -1285,7 +1646,7 @@ function EntryRow({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark }
 const EMPTY_FORM = {
   portal_name: '', portal_type: 'OTHER', url: '', username: '', password_plain: '',
   department: 'OTHER', holder_type: 'COMPANY', holder_name: '', holder_pan: '',
-  holder_din: '', client_id: '', client_name: '', notes: '', tags: [],
+  holder_din: '', mobile: '', trade_name: '', client_id: '', client_name: '', notes: '', tags: [],
 };
 
 function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients }) {
@@ -1305,6 +1666,8 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients 
         holder_name:    existing.holder_name    || '',
         holder_pan:     existing.holder_pan     || '',
         holder_din:     existing.holder_din     || '',
+        mobile:         existing.mobile         || '',
+        trade_name:     existing.trade_name     || '',
         client_id:      existing.client_id      || '',
         client_name:    existing.client_name    || '',
         notes:          existing.notes          || '',
@@ -1329,41 +1692,43 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients 
   };
 
   const showHolderFields = form.holder_type !== 'COMPANY';
-  const inputClass = `rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white'}`;
+  const inputClass = `rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white'}`;
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className={`max-w-lg rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
         <ModalHeader
-          icon={<KeyRound className="h-5 w-5 text-white" />}
+          icon={<KeyRound className="h-4 w-4 text-white" />}
           title={existing ? 'Edit Credential' : 'Add New Credential'}
           subtitle={existing ? `Editing: ${existing.portal_name}` : 'Store a new portal login securely'}
           gradient={`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}
           onClose={onClose}
         />
 
-        <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-          <div className="space-y-1.5">
-            <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><Building2 className="h-3 w-3" /> Link to Client</Label>
+        <div className="p-5 space-y-3.5 max-h-[70vh] overflow-y-auto">
+          {/* Client */}
+          <div className="space-y-1">
+            <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><Building2 className="h-3 w-3" /> Link to Client</Label>
             <ClientSearchDropdown value={form.client_id} onChange={handleClientChange} isDark={isDark} clients={clients} />
-            {form.client_name && <p className="text-[10px] text-blue-500 font-medium flex items-center gap-1"><Check className="h-3 w-3" /> Linked to: {form.client_name}</p>}
+            {form.client_name && <p className="text-[10px] text-blue-500 font-medium flex items-center gap-1"><Check className="h-3 w-3" /> {form.client_name}</p>}
           </div>
 
-          <div className="space-y-1.5">
-            <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Portal Name *</Label>
+          {/* Portal Name */}
+          <div className="space-y-1">
+            <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Portal Name *</Label>
             <Input className={inputClass} placeholder="e.g. Client XYZ GST Login" value={form.portal_name} onChange={e => handleChange('portal_name', e.target.value)} />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Portal Type</Label>
+            <div className="space-y-1">
+              <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Portal Type</Label>
               <Select value={form.portal_type} onValueChange={v => { handleChange('portal_type', v); const dept = DEPARTMENT_MAP[v]; if (dept && dept !== 'OTHER') handleChange('department', dept); }}>
                 <SelectTrigger className={`${inputClass} w-full`}><SelectValue /></SelectTrigger>
                 <SelectContent>{PORTAL_TYPES.map(t => <SelectItem key={t} value={t}>{PORTAL_META[t]?.icon} {PORTAL_META[t]?.label || t}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Department</Label>
+            <div className="space-y-1">
+              <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Department</Label>
               <Select value={form.department} onValueChange={v => handleChange('department', v)}>
                 <SelectTrigger className={`${inputClass} w-full`}><SelectValue /></SelectTrigger>
                 <SelectContent>{DEPARTMENTS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
@@ -1371,8 +1736,9 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients 
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><UserIcon className="h-3 w-3" /> Credential Holder</Label>
+          {/* Holder Type */}
+          <div className="space-y-1">
+            <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Credential Holder</Label>
             <Select value={form.holder_type} onValueChange={v => handleChange('holder_type', v)}>
               <SelectTrigger className={`${inputClass} w-full`}><SelectValue /></SelectTrigger>
               <SelectContent>{HOLDER_TYPES.map(h => <SelectItem key={h} value={h}>{HOLDER_META[h]?.icon} {HOLDER_META[h]?.label || h}</SelectItem>)}</SelectContent>
@@ -1382,19 +1748,19 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients 
           <AnimatePresence>
             {showHolderFields && (
               <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className={`rounded-xl border p-3 space-y-3 ${isDark ? 'bg-purple-900/15 border-purple-800/40' : 'bg-purple-50/80 border-purple-200'}`}>
-                <p className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${isDark ? 'text-purple-300' : 'text-purple-700'}`}><UserIcon className="h-3 w-3" /> {HOLDER_META[form.holder_type]?.label || 'Holder'} Details</p>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Full Name</Label>
+                <p className={`text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 ${isDark ? 'text-purple-300' : 'text-purple-700'}`}><UserIcon className="h-3 w-3" /> {HOLDER_META[form.holder_type]?.label || 'Holder'} Details</p>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-bold text-slate-500 uppercase">Full Name</Label>
                   <Input className={inputClass} placeholder="e.g. Rajesh Kumar" value={form.holder_name} onChange={e => handleChange('holder_name', e.target.value)} />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1"><CreditCard className="h-3 w-3" /> PAN</Label>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1"><CreditCard className="h-2.5 w-2.5" /> PAN</Label>
                     <Input className={inputClass} placeholder="ABCPK1234D" value={form.holder_pan} onChange={e => handleChange('holder_pan', e.target.value.toUpperCase())} maxLength={10} />
                   </div>
                   {(form.holder_type === 'DIRECTOR' || form.portal_type === 'MCA' || form.portal_type === 'ROC') && (
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1"><Hash className="h-3 w-3" /> DIN</Label>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1"><Hash className="h-2.5 w-2.5" /> DIN</Label>
                       <Input className={inputClass} placeholder="08123456" value={form.holder_din} onChange={e => handleChange('holder_din', e.target.value)} maxLength={8} />
                     </div>
                   )}
@@ -1403,18 +1769,33 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients 
             )}
           </AnimatePresence>
 
-          <div className="space-y-1.5">
-            <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Portal URL</Label>
+          {/* Trade Name & Mobile */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1"><Store className="h-2.5 w-2.5" /> Trade Name</Label>
+              <Input className={inputClass} placeholder="Brand / trade name" value={form.trade_name} onChange={e => handleChange('trade_name', e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1"><Smartphone className="h-2.5 w-2.5" /> Mobile</Label>
+              <Input className={inputClass} placeholder="Registered mobile" value={form.mobile} onChange={e => handleChange('mobile', e.target.value)} />
+            </div>
+          </div>
+
+          {/* URL */}
+          <div className="space-y-1">
+            <Label className="text-[11px] font-bold text-slate-500 uppercase">Portal URL</Label>
             <Input className={inputClass} placeholder="https://www.gst.gov.in" value={form.url} onChange={e => handleChange('url', e.target.value)} />
           </div>
 
-          <div className="space-y-1.5">
-            <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Username / Login ID</Label>
+          {/* Username */}
+          <div className="space-y-1">
+            <Label className="text-[11px] font-bold text-slate-500 uppercase">Username / Login ID</Label>
             <Input className={inputClass} placeholder="login@company.com or PAN/GSTIN" value={form.username} onChange={e => handleChange('username', e.target.value)} />
           </div>
 
-          <div className="space-y-1.5">
-            <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Password {existing ? '(leave blank to keep current)' : ''}</Label>
+          {/* Password */}
+          <div className="space-y-1">
+            <Label className="text-[11px] font-bold text-slate-500 uppercase">Password {existing ? '(leave blank to keep current)' : ''}</Label>
             <div className="relative">
               <Input className={`${inputClass} pr-10`} type={showPass ? 'text' : 'password'} placeholder={existing ? '••••••••  (unchanged)' : 'Enter password'} value={form.password_plain} onChange={e => handleChange('password_plain', e.target.value)} />
               <button type="button" onClick={() => setShowPass(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
@@ -1423,23 +1804,25 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients 
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Notes</Label>
-            <Textarea className={`rounded-xl resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : ''}`} rows={3} placeholder="Any additional information…" value={form.notes} onChange={e => handleChange('notes', e.target.value)} />
+          {/* Notes */}
+          <div className="space-y-1">
+            <Label className="text-[11px] font-bold text-slate-500 uppercase">Notes</Label>
+            <Textarea className={`rounded-xl resize-none text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : ''}`} rows={2} placeholder="Any additional information…" value={form.notes} onChange={e => handleChange('notes', e.target.value)} />
           </div>
 
-          <div className={`flex items-start gap-2.5 p-3 rounded-xl text-xs ${isDark ? 'bg-emerald-900/20 border border-emerald-800/50' : 'bg-emerald-50 border border-emerald-200'}`}>
-            <Shield className="h-4 w-4 text-emerald-500 flex-shrink-0 mt-0.5" />
-            <p className={isDark ? 'text-emerald-300' : 'text-emerald-700'}>Passwords are encrypted using AES-128 before being stored. They are never revealed in logs or lists.</p>
+          {/* Security notice */}
+          <div className={`flex items-start gap-2 p-3 rounded-xl text-xs ${isDark ? 'bg-emerald-900/20 border border-emerald-800/50' : 'bg-emerald-50 border border-emerald-200'}`}>
+            <Shield className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
+            <p className={isDark ? 'text-emerald-300' : 'text-emerald-700'}>Passwords are encrypted using AES-128 before being stored. Never revealed in logs or lists.</p>
           </div>
         </div>
 
-        <DialogFooter className={`px-6 py-4 flex items-center gap-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+        <div className={`px-5 py-3 flex items-center gap-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
           <Button variant="ghost" className="rounded-xl" onClick={onClose}>Cancel</Button>
-          <Button disabled={loading || !form.portal_name.trim()} onClick={() => onSave(form)} className="rounded-xl font-bold px-8 text-white" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-            {loading ? 'Saving…' : existing ? 'Update Credential' : 'Save Credential'}
+          <Button disabled={loading || !form.portal_name.trim()} onClick={() => onSave(form)} className="rounded-xl font-bold px-8 text-white text-sm" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+            {loading ? 'Saving…' : existing ? 'Update' : 'Save Credential'}
           </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -1456,24 +1839,43 @@ export default function PasswordRepository() {
   const canView = isAdmin || !!perms.can_view_passwords;
   const canEdit = isAdmin || !!perms.can_edit_passwords;
 
+  // Filters & sort
   const [search, setSearch] = useState('');
   const [filterDept, setFilterDept] = useState('ALL');
   const [filterType, setFilterType] = useState('ALL');
   const [filterClient, setFilterClient] = useState('ALL');
   const [filterHolder, setFilterHolder] = useState('ALL');
-  const [viewMode, setViewMode] = useState('grid');
+  const [sortOption, setSortOption] = useState('lifo');
+
+  // Pagination
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  // View
+  const [viewMode, setViewMode] = useState('list');
+
+  // Modals
   const [modalOpen, setModalOpen] = useState(false);
   const [editEntry, setEditEntry] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [shareTarget, setShareTarget] = useState(null);
+  const [detailEntry, setDetailEntry] = useState(null);
   const [importOpen, setImportOpen] = useState(false);
   const [sheetsOpen, setSheetsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Reset page on filter change
+  useEffect(() => { setPage(1); }, [search, filterDept, filterType, filterClient, filterHolder, sortOption, pageSize]);
+
+  const currentSort = SORT_OPTIONS.find(s => s.value === sortOption) || SORT_OPTIONS[0];
+
   const { data: entries = [], isLoading, isError } = useQuery({
-    queryKey: ['passwords', filterDept, filterType, search, filterClient, filterHolder],
+    queryKey: ['passwords', filterDept, filterType, search, filterClient, filterHolder, currentSort.sortBy, currentSort.order],
     queryFn: async () => {
-      const params = {};
+      const params = {
+        sort_by: currentSort.sortBy,
+        sort_order: currentSort.order,
+      };
       if (filterDept !== 'ALL') params.department = filterDept;
       if (filterType !== 'ALL') params.portal_type = filterType;
       if (filterClient !== 'ALL') params.client_id = filterClient;
@@ -1500,6 +1902,12 @@ export default function PasswordRepository() {
     enabled: canView,
     staleTime: 60_000,
   });
+
+  // Paginated slice
+  const paginatedEntries = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return entries.slice(start, start + pageSize);
+  }, [entries, page, pageSize]);
 
   const saveMutation = useMutation({
     mutationFn: async ({ form, id }) => {
@@ -1554,13 +1962,8 @@ export default function PasswordRepository() {
   const handleEdit   = (entry) => { setEditEntry(entry); setModalOpen(true); };
   const handleDelete = (entry) => setDeleteTarget(entry);
   const handleShare  = (entry) => setShareTarget(entry);
+  const handleDetail = (entry) => setDetailEntry(entry);
   const handleAddNew = () => { setEditEntry(null); setModalOpen(true); };
-
-  const deptCounts = useMemo(() => {
-    const counts = { ALL: entries.length };
-    entries.forEach(e => { counts[e.department] = (counts[e.department] || 0) + 1; });
-    return counts;
-  }, [entries]);
 
   const clientsInResults = useMemo(() => {
     const map = {};
@@ -1583,37 +1986,42 @@ export default function PasswordRepository() {
   }
 
   return (
-    <motion.div className="space-y-6" variants={containerVariants} initial="hidden" animate="visible">
+    <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
 
-      {/* Header */}
+      {/* ── Compact Header ── */}
       <motion.div variants={itemVariants}>
-        <div className="relative overflow-hidden rounded-2xl px-6 py-5" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
-          <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10" style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
-          <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-white/15 rounded-2xl flex items-center justify-center flex-shrink-0"><KeyRound className="h-6 w-6 text-white" /></div>
+        <div
+          className="relative overflow-hidden rounded-xl px-4 py-3"
+          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: '0 4px 20px rgba(13,59,102,0.25)' }}
+        >
+          <div className="absolute right-0 top-0 w-48 h-48 rounded-full -mr-16 -mt-16 opacity-10" style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+          <div className="relative flex items-center justify-between gap-3 flex-wrap">
+            {/* Left: icon + title */}
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 bg-white/15 rounded-xl flex items-center justify-center flex-shrink-0"><KeyRound className="h-5 w-5 text-white" /></div>
               <div>
-                <h1 className="text-2xl font-bold text-white tracking-tight">Password Vault</h1>
-                <p className="text-white/60 text-sm mt-0.5">Encrypted portal credentials — MCA · GST · IT · TDS · DGFT · TM & more</p>
+                <h1 className="text-lg font-bold text-white leading-tight">Password Vault</h1>
+                <p className="text-white/55 text-[11px]">MCA/ROC · GST · IT · TDS · DGFT · TM & more</p>
               </div>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
               {isAdmin && stats.total != null && (
-                <div className="px-3 py-1.5 bg-white/15 rounded-xl text-white text-xs font-semibold">{stats.total} credentials</div>
+                <div className="px-2.5 py-1 bg-white/15 rounded-lg text-white text-xs font-bold hidden sm:block">{stats.total} total</div>
               )}
-              <Button onClick={() => setSheetsOpen(true)} className="rounded-xl font-bold h-9 text-sm gap-2 text-white border-white/20 hover:bg-white/20 transition-all" style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}>
-                <Sheet className="h-4 w-4" /> Sheets
+            </div>
+            {/* Right: action buttons */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <Button onClick={() => setSheetsOpen(true)} size="sm" className="rounded-lg font-bold h-8 text-xs gap-1.5 text-white border-white/20 hover:bg-white/20 transition-all" style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}>
+                <Sheet className="h-3.5 w-3.5" /> Sheets
               </Button>
               {canEdit && (
                 <>
-                  <Button onClick={handleDownloadTemplate} className="rounded-xl font-bold h-9 text-sm gap-2 text-white border-white/20 hover:bg-white/20 transition-all" style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}>
-                    <Download className="h-4 w-4" /> Template
+                  <Button onClick={handleDownloadTemplate} size="sm" className="rounded-lg font-bold h-8 text-xs gap-1.5 text-white border-white/20 hover:bg-white/20 transition-all" style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}>
+                    <Download className="h-3.5 w-3.5" /> Template
                   </Button>
-                  <Button onClick={() => setImportOpen(true)} className="rounded-xl font-bold h-9 text-sm gap-2 text-white border-white/20 hover:bg-white/20 transition-all" style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}>
-                    <Upload className="h-4 w-4" /> Import
+                  <Button onClick={() => setImportOpen(true)} size="sm" className="rounded-lg font-bold h-8 text-xs gap-1.5 text-white border-white/20 hover:bg-white/20 transition-all" style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}>
+                    <Upload className="h-3.5 w-3.5" /> Import
                   </Button>
-                  <Button onClick={handleAddNew} className="rounded-xl font-bold h-9 text-sm gap-2 text-white shadow-lg hover:scale-105 transition-all" style={{ background: COLORS.emeraldGreen }}>
-                    <Plus className="h-4 w-4" /> Add Credential
+                  <Button onClick={handleAddNew} size="sm" className="rounded-lg font-bold h-8 text-xs gap-1.5 text-white shadow-lg hover:scale-105 transition-all" style={{ background: COLORS.emeraldGreen }}>
+                    <Plus className="h-3.5 w-3.5" /> Add
                   </Button>
                 </>
               )}
@@ -1622,103 +2030,138 @@ export default function PasswordRepository() {
         </div>
       </motion.div>
 
-      {/* Stats row */}
+      {/* ── Stats row (compact) ── */}
       {isAdmin && stats.by_portal_type && (
-        <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
-          {Object.entries(stats.by_portal_type).slice(0, 6).map(([type, count]) => {
-            const meta = PORTAL_META[type] || PORTAL_META.OTHER;
-            return (
-              <motion.div key={type} whileHover={{ y: -2, transition: springMed }} onClick={() => setFilterType(filterType === type ? 'ALL' : type)}
-                className={`rounded-xl border p-3 cursor-pointer transition-all ${filterType === type ? 'shadow-md' : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'}`}
-                style={filterType === type ? { background: meta.bg, border: `1.5px solid ${meta.color}40` } : {}}>
-                <div className="text-lg mb-1">{meta.icon}</div>
-                <p className="text-lg font-black" style={{ color: meta.color }}>{count}</p>
-                <p className={`text-[10px] font-semibold ${isDark && filterType !== type ? 'text-slate-400' : 'text-slate-500'}`}>{meta.label}</p>
-              </motion.div>
-            );
-          })}
+        <motion.div variants={itemVariants} className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+          {Object.entries(stats.by_portal_type)
+            .filter(([type]) => !['ROC'].includes(type)) // ROC merged with MCA display
+            .slice(0, 6)
+            .map(([type, count]) => {
+              const meta = PORTAL_META[type] || PORTAL_META.OTHER;
+              const isActive = filterType === type;
+              return (
+                <motion.div
+                  key={type}
+                  whileHover={{ y: -2, transition: springMed }}
+                  onClick={() => setFilterType(isActive ? 'ALL' : type)}
+                  className={`rounded-xl border p-2 cursor-pointer transition-all text-center ${isActive ? 'shadow-md' : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'}`}
+                  style={isActive ? { background: meta.bg, border: `1.5px solid ${meta.color}40` } : {}}
+                >
+                  <div className="text-base mb-0.5">{meta.icon}</div>
+                  <p className="text-lg font-black leading-none" style={{ color: meta.color }}>{count}</p>
+                  <p className={`text-[10px] font-semibold mt-0.5 ${isDark && !isActive ? 'text-slate-400' : 'text-slate-500'}`}>{meta.label}</p>
+                </motion.div>
+              );
+            })}
         </motion.div>
       )}
 
-      {/* Search + Filters */}
-      <motion.div variants={itemVariants} className={`flex flex-col sm:flex-row gap-3 p-4 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input className={`pl-10 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`} placeholder="Search portal, username, client, holder name, PAN…" value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
+      {/* ── Search + Filters (compact) ── */}
+      <motion.div variants={itemVariants}>
+        <div className={`flex flex-col sm:flex-row gap-2 p-3 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          {/* Search */}
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+            <Input
+              className={`pl-9 rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+              placeholder="Search portal, username, client, PAN, mobile…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
 
-        {clientsInResults.length > 0 && (
-          <Select value={filterClient} onValueChange={setFilterClient}>
-            <SelectTrigger className={`w-full sm:w-44 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
-              <Building2 className="h-3.5 w-3.5 mr-1.5 text-slate-400" /><SelectValue placeholder="All Clients" />
+          {/* Sort */}
+          <Select value={sortOption} onValueChange={setSortOption}>
+            <SelectTrigger className={`w-full sm:w-44 rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
+              <ArrowUpDown className="h-3.5 w-3.5 mr-1.5 text-slate-400" /><SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="ALL">All Clients</SelectItem>
-              {clientsInResults.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              {SORT_OPTIONS.map(s => <SelectItem key={s.value} value={s.value}>{s.icon} {s.label}</SelectItem>)}
             </SelectContent>
           </Select>
-        )}
 
-        <Select value={filterHolder} onValueChange={setFilterHolder}>
-          <SelectTrigger className={`w-full sm:w-40 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
-            <Users className="h-3.5 w-3.5 mr-1.5 text-slate-400" /><SelectValue placeholder="Holder Type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">All Holders</SelectItem>
-            {HOLDER_TYPES.map(h => <SelectItem key={h} value={h}>{HOLDER_META[h]?.icon} {HOLDER_META[h]?.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
+          {/* Client filter */}
+          {clientsInResults.length > 0 && (
+            <Select value={filterClient} onValueChange={setFilterClient}>
+              <SelectTrigger className={`w-full sm:w-40 rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
+                <Building2 className="h-3.5 w-3.5 mr-1 text-slate-400" /><SelectValue placeholder="All Clients" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All Clients</SelectItem>
+                {clientsInResults.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
 
-        <Select value={filterDept} onValueChange={setFilterDept}>
-          <SelectTrigger className={`w-full sm:w-40 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
-            <Filter className="h-3.5 w-3.5 mr-1.5 text-slate-400" /><SelectValue placeholder="Department" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">All Departments</SelectItem>
-            {DEPARTMENTS.map(d => <SelectItem key={d} value={d}>{d} {deptCounts[d] ? `(${deptCounts[d]})` : ''}</SelectItem>)}
-          </SelectContent>
-        </Select>
+          {/* Holder filter */}
+          <Select value={filterHolder} onValueChange={setFilterHolder}>
+            <SelectTrigger className={`w-full sm:w-36 rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
+              <Users className="h-3.5 w-3.5 mr-1 text-slate-400" /><SelectValue placeholder="Holder" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All Holders</SelectItem>
+              {HOLDER_TYPES.map(h => <SelectItem key={h} value={h}>{HOLDER_META[h]?.icon} {HOLDER_META[h]?.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
 
-        <Select value={filterType} onValueChange={setFilterType}>
-          <SelectTrigger className={`w-full sm:w-44 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
-            <Tag className="h-3.5 w-3.5 mr-1.5 text-slate-400" /><SelectValue placeholder="Portal Type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">All Types</SelectItem>
-            {PORTAL_TYPES.map(t => <SelectItem key={t} value={t}>{PORTAL_META[t]?.icon} {PORTAL_META[t]?.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
+          {/* Dept filter */}
+          <Select value={filterDept} onValueChange={setFilterDept}>
+            <SelectTrigger className={`w-full sm:w-36 rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
+              <Filter className="h-3.5 w-3.5 mr-1 text-slate-400" /><SelectValue placeholder="Dept" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All Depts</SelectItem>
+              {DEPARTMENTS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+            </SelectContent>
+          </Select>
 
-        <div className={`flex items-center rounded-xl p-1 gap-0.5 border flex-shrink-0 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-100 border-slate-200'}`}>
-          <button type="button" onClick={() => setViewMode('grid')} className={`p-1.5 rounded-lg transition-all ${viewMode === 'grid' ? isDark ? 'bg-slate-500 text-white shadow-sm' : 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`} title="Grid view">
-            <LayoutGrid className="h-4 w-4" />
-          </button>
-          <button type="button" onClick={() => setViewMode('list')} className={`p-1.5 rounded-lg transition-all ${viewMode === 'list' ? isDark ? 'bg-slate-500 text-white shadow-sm' : 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`} title="List view">
-            <List className="h-4 w-4" />
-          </button>
+          {/* Type filter */}
+          <Select value={filterType} onValueChange={setFilterType}>
+            <SelectTrigger className={`w-full sm:w-40 rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
+              <Tag className="h-3.5 w-3.5 mr-1 text-slate-400" /><SelectValue placeholder="Type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All Types</SelectItem>
+              {/* Merged MCA/ROC */}
+              <SelectItem value="MCA">🏛️ MCA/ROC</SelectItem>
+              {PORTAL_TYPES.filter(t => !['MCA', 'ROC'].includes(t)).map(t => (
+                <SelectItem key={t} value={t}>{PORTAL_META[t]?.icon} {PORTAL_META[t]?.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* View toggle */}
+          <div className={`flex items-center rounded-xl p-0.5 gap-0.5 border flex-shrink-0 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-100 border-slate-200'}`}>
+            <button type="button" onClick={() => setViewMode('grid')} className={`p-1.5 rounded-lg transition-all ${viewMode === 'grid' ? isDark ? 'bg-slate-500 text-white' : 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`} title="Grid view">
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+            <button type="button" onClick={() => setViewMode('list')} className={`p-1.5 rounded-lg transition-all ${viewMode === 'list' ? isDark ? 'bg-slate-500 text-white' : 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`} title="List view">
+              <List className="h-4 w-4" />
+            </button>
+          </div>
+
+          {/* Clear */}
+          {hasActiveFilter && (
+            <Button variant="ghost" className="rounded-xl h-9 px-2.5 text-xs flex-shrink-0" onClick={() => { setFilterDept('ALL'); setFilterType('ALL'); setFilterClient('ALL'); setFilterHolder('ALL'); setSearch(''); }}>
+              <X className="h-3.5 w-3.5 mr-1" /> Clear
+            </Button>
+          )}
         </div>
-
-        {hasActiveFilter && (
-          <Button variant="ghost" className="rounded-xl h-10 px-3 text-xs flex-shrink-0" onClick={() => { setFilterDept('ALL'); setFilterType('ALL'); setFilterClient('ALL'); setFilterHolder('ALL'); setSearch(''); }}>
-            <X className="h-3.5 w-3.5 mr-1" /> Clear
-          </Button>
-        )}
       </motion.div>
 
-      {/* Results */}
+      {/* ── Results ── */}
       {isLoading ? (
-        <div className="flex items-center justify-center py-20">
-          <div className="h-8 w-8 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: COLORS.mediumBlue, borderTopColor: 'transparent' }} />
+        <div className="flex items-center justify-center py-16">
+          <div className="h-7 w-7 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: COLORS.mediumBlue, borderTopColor: 'transparent' }} />
         </div>
       ) : isError ? (
-        <div className={`text-center py-16 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <AlertTriangle className="h-12 w-12 text-red-400 mx-auto mb-3" />
+        <div className={`text-center py-12 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <AlertTriangle className="h-10 w-10 text-red-400 mx-auto mb-3" />
           <p className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Failed to load password vault</p>
-          <p className="text-sm text-slate-400 mt-1">Check your network or contact the administrator.</p>
         </div>
       ) : entries.length === 0 ? (
-        <motion.div variants={itemVariants} className={`text-center py-20 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <KeyRound className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+        <motion.div variants={itemVariants} className={`text-center py-16 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <KeyRound className="h-10 w-10 text-slate-300 mx-auto mb-3" />
           <p className={`font-semibold text-lg ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>No credentials found</p>
           <p className="text-sm text-slate-400 mt-1 mb-4">{hasActiveFilter ? 'Try adjusting your filters.' : 'Start by adding your first portal credential.'}</p>
           {canEdit && (
@@ -1728,51 +2171,113 @@ export default function PasswordRepository() {
           )}
         </motion.div>
       ) : viewMode === 'grid' ? (
-        <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
-          <AnimatePresence>
-            {entries.map(entry => (
-              <EntryCard key={entry.id} entry={entry} canEdit={canEdit} isAdmin={isAdmin} onEdit={handleEdit} onDelete={handleDelete} onShare={handleShare} isDark={isDark} />
-            ))}
-          </AnimatePresence>
-        </motion.div>
+        <>
+          <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
+            <AnimatePresence>
+              {paginatedEntries.map((entry, idx) => (
+                <EntryCard
+                  key={entry.id}
+                  entry={entry}
+                  serialNo={(page - 1) * pageSize + idx + 1}
+                  canEdit={canEdit}
+                  isAdmin={isAdmin}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                  onShare={handleShare}
+                  onDetail={handleDetail}
+                  isDark={isDark}
+                />
+              ))}
+            </AnimatePresence>
+          </motion.div>
+          <div className={`rounded-xl border px-3 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <Pagination total={entries.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} isDark={isDark} />
+          </div>
+        </>
       ) : (
-        <motion.div variants={itemVariants} className={`rounded-2xl border overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <motion.div variants={itemVariants} className={`rounded-xl border overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className={`border-b text-[11px] font-bold uppercase tracking-wider ${isDark ? 'border-slate-700 text-slate-400 bg-slate-800/80' : 'border-slate-200 text-slate-500 bg-slate-50'}`}>
-                  <th className="px-4 py-3 text-left">Portal</th>
-                  <th className="px-4 py-3 text-left">Client / Holder</th>
-                  <th className="px-4 py-3 text-left">Username</th>
-                  <th className="px-4 py-3 text-left">Password</th>
-                  <th className="px-4 py-3 text-left">URL</th>
-                  <th className="px-4 py-3 text-left">Updated</th>
-                  <th className="px-4 py-3 text-left">Actions</th>
+                <tr className={`border-b text-[10px] font-bold uppercase tracking-wider ${isDark ? 'border-slate-700 text-slate-400 bg-slate-800/80' : 'border-slate-200 text-slate-500 bg-slate-50'}`}>
+                  <th className="px-3 py-2.5 text-center w-8">#</th>
+                  <th className="px-3 py-2.5 text-left">Portal</th>
+                  <th className="px-3 py-2.5 text-left">Client / Holder / Mobile</th>
+                  <th className="px-3 py-2.5 text-left">Username</th>
+                  <th className="px-3 py-2.5 text-left">Password</th>
+                  <th className="px-3 py-2.5 text-left">URL</th>
+                  <th className="px-3 py-2.5 text-left">Updated</th>
+                  <th className="px-3 py-2.5 text-left">Actions</th>
                 </tr>
               </thead>
               <motion.tbody variants={containerVariants}>
                 <AnimatePresence>
-                  {entries.map(entry => (
-                    <EntryRow key={entry.id} entry={entry} canEdit={canEdit} isAdmin={isAdmin} onEdit={handleEdit} onDelete={handleDelete} onShare={handleShare} isDark={isDark} />
+                  {paginatedEntries.map((entry, idx) => (
+                    <EntryRow
+                      key={entry.id}
+                      entry={entry}
+                      serialNo={(page - 1) * pageSize + idx + 1}
+                      canEdit={canEdit}
+                      isAdmin={isAdmin}
+                      onEdit={handleEdit}
+                      onDelete={handleDelete}
+                      onShare={handleShare}
+                      onDetail={handleDetail}
+                      isDark={isDark}
+                    />
                   ))}
                 </AnimatePresence>
               </motion.tbody>
             </table>
           </div>
-          <div className={`px-4 py-2.5 border-t text-xs text-slate-400 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-            Showing {entries.length} credential{entries.length !== 1 ? 's' : ''}
+          <div className={`border-t px-3 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+            <Pagination total={entries.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} isDark={isDark} />
           </div>
         </motion.div>
       )}
 
-      {/* Modals */}
-      <EntryModal open={modalOpen} onClose={() => { setModalOpen(false); setEditEntry(null); }} existing={editEntry} isDark={isDark} onSave={handleSave} loading={saving} clients={clients} />
+      {/* ── Modals ── */}
+      <EntryModal
+        open={modalOpen}
+        onClose={() => { setModalOpen(false); setEditEntry(null); }}
+        existing={editEntry}
+        isDark={isDark}
+        onSave={handleSave}
+        loading={saving}
+        clients={clients}
+      />
 
-      <BulkImportModal open={importOpen} onClose={() => setImportOpen(false)} isDark={isDark} onSuccess={() => setImportOpen(false)} />
+      <BulkImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        isDark={isDark}
+        onSuccess={() => setImportOpen(false)}
+      />
 
-      <SheetLinksModal open={sheetsOpen} onClose={() => setSheetsOpen(false)} isDark={isDark} isAdmin={isAdmin} />
+      <SheetLinksModal
+        open={sheetsOpen}
+        onClose={() => setSheetsOpen(false)}
+        isDark={isDark}
+        isAdmin={isAdmin}
+      />
 
-      <WhatsAppShareModal open={!!shareTarget} onClose={() => setShareTarget(null)} entry={shareTarget} isDark={isDark} />
+      <WhatsAppShareModal
+        open={!!shareTarget}
+        onClose={() => setShareTarget(null)}
+        entry={shareTarget}
+        isDark={isDark}
+      />
+
+      <DetailModal
+        open={!!detailEntry}
+        onClose={() => setDetailEntry(null)}
+        entry={detailEntry}
+        isDark={isDark}
+        canEdit={canEdit}
+        isAdmin={isAdmin}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
+      />
 
       {/* Delete Confirm */}
       <AnimatePresence>
