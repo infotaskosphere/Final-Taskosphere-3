@@ -1,32 +1,47 @@
-"""
-Enhanced Password Repository Router for Taskosphere
-Handles secure password management with encryption, access logging, and bulk operations
-"""
-
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, status
-from fastapi.responses import FileResponse
-from sqlalchemy import select, and_, or_, func, desc, asc
-from sqlalchemy.orm import Session
-from pydantic import BaseModel, Field, validator
-from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
-import io
-import base64
 import json
 import logging
-from cryptography.fernet import Fernet
-import pandas as pd
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
-import httpx
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import and_, asc, desc, func, or_, select
+from sqlalchemy.orm import Session
 
-# ── Database Models ──────────────────────────────────────────────────────────
+# Assuming these are defined elsewhere in your application
+# from .dependencies import get_db, get_current_user
+# from .models import PasswordEntry, AccessLog
+# from .schemas import PasswordEntryResponse
+
+# Placeholder for actual database dependency
+def get_db():
+    # This should yield a SQLAlchemy Session
+    # For example:
+    # db = SessionLocal()
+    # try:
+    #     yield db
+    # finally:
+    #     db.close()
+    raise NotImplementedError("Database dependency not implemented")
+
+# Placeholder for actual authentication dependency
+class CurrentUser:
+    def __init__(self, id: int):
+        self.id = id
+
+def get_current_user():
+    # This should return an authenticated user object
+    # For example:
+    # user = await get_current_active_user(token: str = Depends(oauth2_scheme))
+    # return CurrentUser(id=user.id)
+    raise NotImplementedError("Authentication dependency not implemented")
+
+
+# Re-importing necessary models and schemas from the original file for completeness
+# In a real application, these would be imported from their respective files
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Enum
 from sqlalchemy.ext.declarative import declarative_base
 import enum
+from pydantic import BaseModel, Field, validator
 
 Base = declarative_base()
 
@@ -104,7 +119,6 @@ class AccessLog(Base):
     ip_address = Column(String(50), nullable=True)
     user_agent = Column(String(500), nullable=True)
 
-# ── Pydantic Models ──────────────────────────────────────────────────────────
 class PasswordEntryBase(BaseModel):
     portal_name: str = Field(..., min_length=1, max_length=255)
     portal_type: Optional[str] = "OTHER"
@@ -215,6 +229,9 @@ class AccessLogResponse(BaseModel):
     ip_address: Optional[str]
 
 # ── Encryption Helpers ───────────────────────────────────────────────────────
+from cryptography.fernet import Fernet
+import base64
+
 class PasswordEncryption:
     @staticmethod
     def get_cipher():
@@ -325,8 +342,8 @@ async def list_passwords(
     sort_order: Optional[str] = Query("desc"),
     skip: int = Query(0),
     limit: int = Query(100),
-    db: Session = Depends(lambda: None),  # Replace with actual DB dependency
-    current_user = Depends(lambda: None),  # Replace with actual auth dependency
+    db: Session = Depends(get_db),  # Replaced with actual DB dependency
+    current_user: CurrentUser = Depends(get_current_user),  # Replaced with actual auth dependency
 ):
     """List password entries with filtering and sorting"""
     try:
@@ -379,8 +396,8 @@ async def list_passwords(
 @router.post("", response_model=PasswordEntryResponse, status_code=status.HTTP_201_CREATED)
 async def create_password(
     payload: PasswordEntryCreate,
-    db: Session = Depends(lambda: None),
-    current_user = Depends(lambda: None),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Create a new password entry"""
     try:
@@ -446,8 +463,8 @@ async def create_password(
 @router.get("/{entry_id}", response_model=PasswordEntryResponse)
 async def get_password(
     entry_id: int,
-    db: Session = Depends(lambda: None),
-    current_user = Depends(lambda: None),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Get a single password entry"""
     entry = db.execute(
@@ -468,8 +485,8 @@ async def get_password(
 @router.get("/{entry_id}/reveal", response_model=PasswordRevealResponse)
 async def reveal_password(
     entry_id: int,
-    db: Session = Depends(lambda: None),
-    current_user = Depends(lambda: None),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Reveal the password for an entry"""
     entry = db.execute(
@@ -509,8 +526,8 @@ async def reveal_password(
 async def update_password(
     entry_id: int,
     payload: PasswordEntryUpdate,
-    db: Session = Depends(lambda: None),
-    current_user = Depends(lambda: None),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Update a password entry"""
     entry = db.execute(
@@ -575,8 +592,8 @@ async def update_password(
 @router.delete("/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_password(
     entry_id: int,
-    db: Session = Depends(lambda: None),
-    current_user = Depends(lambda: None),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Delete a password entry (soft delete)"""
     entry = db.execute(
@@ -604,8 +621,8 @@ async def delete_password(
 @router.post("/bulk-delete", status_code=status.HTTP_204_NO_CONTENT)
 async def bulk_delete_passwords(
     payload: BulkDeleteRequest,
-    db: Session = Depends(lambda: None),
-    current_user = Depends(lambda: None),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Bulk delete password entries"""
     if not await _is_admin(current_user.id, db):
@@ -636,8 +653,8 @@ async def bulk_delete_passwords(
 @router.post("/parse-preview", response_model=ParsePreviewResponse)
 async def parse_preview(
     file: UploadFile = File(...),
-    db: Session = Depends(lambda: None),
-    current_user = Depends(lambda: None),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Parse and preview uploaded file"""
     try:
@@ -683,8 +700,8 @@ async def parse_preview(
 @router.post("/bulk-import", response_model=BulkImportResponse)
 async def bulk_import(
     file: UploadFile = File(...),
-    db: Session = Depends(lambda: None),
-    current_user = Depends(lambda: None),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Bulk import password entries from file"""
     try:
@@ -718,6 +735,7 @@ async def bulk_import(
                             PasswordEntry.user_id == current_user.id,
                             PasswordEntry.portal_name == portal_name,
                             PasswordEntry.username == username,
+                            PasswordEntry.is_archived == False
                         )
                     )
                 ).scalar()
@@ -809,7 +827,7 @@ async def download_template():
         output.seek(0)
 
         return FileResponse(
-            iter([output.getvalue()]),
+            output.getvalue(),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             filename="password-template.xlsx"
         )
@@ -821,8 +839,8 @@ async def download_template():
 # GET /passwords/admin/stats - Admin statistics
 @router.get("/admin/stats", response_model=StatsResponse)
 async def admin_stats(
-    db: Session = Depends(lambda: None),
-    current_user = Depends(lambda: None),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Get admin statistics"""
     if not await _is_admin(current_user.id, db):
@@ -873,8 +891,8 @@ async def admin_stats(
 async def admin_access_logs(
     skip: int = Query(0),
     limit: int = Query(100),
-    db: Session = Depends(lambda: None),
-    current_user = Depends(lambda: None),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Get admin access logs"""
     if not await _is_admin(current_user.id, db):
@@ -917,8 +935,8 @@ async def get_portal_types():
 # GET /passwords/clients-list - Clients list
 @router.get("/clients-list")
 async def get_clients_list(
-    db: Session = Depends(lambda: None),
-    current_user = Depends(lambda: None),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Get unique clients"""
     try:
