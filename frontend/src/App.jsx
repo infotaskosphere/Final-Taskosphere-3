@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { Toaster } from "@/components/ui/sonner";
 import AppRoutes from "./AppRoutes.jsx";
-import { useLoading } from "./api";
+import { useLoading } from "./lib/api";
 
 /* ============================================================
    SHIMMER STYLE
@@ -82,9 +82,8 @@ function RouteChangeHandler({ children }) {
   const [isChanging, setIsChanging] = useState(false);
 
   useEffect(() => {
-    // Show skeleton on every route change
     setIsChanging(true);
-    const timer = setTimeout(() => setIsChanging(false), 600); // show for 600ms
+    const timer = setTimeout(() => setIsChanging(false), 600);
     return () => clearTimeout(timer);
   }, [location.pathname]);
 
@@ -115,7 +114,7 @@ function App() {
         <BrowserRouter>
           <TopLoadingBar />
           <Suspense fallback={<PageSkeleton />}>
-            <RouteChangeHandler> {/* ✅ wraps routes — shows skeleton on every page change */}
+            <RouteChangeHandler>
               <AppRoutes />
             </RouteChangeHandler>
           </Suspense>
