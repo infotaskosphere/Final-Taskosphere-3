@@ -15,7 +15,8 @@ import {
   MessageCircle, Phone, Send, Download, Upload, FileUp,
   ChevronDown, Users, LayoutGrid, List, Link2, Unlink,
   TableProperties, Sheet, RefreshCcw, Info, Loader2,
-  CreditCard, Hash,
+  CreditCard, Hash, ArrowRight, CheckCircle2, AlertCircle,
+  HelpCircle, Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -78,6 +79,24 @@ const DEPARTMENT_MAP = {
   ESIC: 'ACC', TRACES: 'TDS', MSME: 'MSME', RERA: 'OTHER', OTHER: 'OTHER',
 };
 
+// Canonical field display info (for the column mapping UI)
+const FIELD_META = {
+  portal_name:    { label: 'Portal Name',     required: true,  icon: '🔑', description: 'Name of the portal/website' },
+  portal_type:    { label: 'Portal Type',     required: false, icon: '📂', description: 'e.g. MCA, GST, INCOME_TAX' },
+  url:            { label: 'Portal URL',      required: false, icon: '🌐', description: 'Website link' },
+  username:       { label: 'Username / Email',required: true,  icon: '👤', description: 'Login ID or email' },
+  password_plain: { label: 'Password',        required: true,  icon: '🔐', description: 'Login password' },
+  department:     { label: 'Department',      required: false, icon: '🏢', description: 'Auto-derived from portal type if empty' },
+  holder_type:    { label: 'Holder Type',     required: false, icon: '👥', description: 'COMPANY / DIRECTOR / INDIVIDUAL etc.' },
+  holder_name:    { label: 'Holder Name',     required: false, icon: '🧑', description: 'Director or individual name' },
+  holder_pan:     { label: 'Holder PAN',      required: false, icon: '💳', description: 'PAN number' },
+  holder_din:     { label: 'Holder DIN',      required: false, icon: '#️⃣', description: 'DIN number (for directors)' },
+  client_name:    { label: 'Client Name',     required: false, icon: '🏭', description: 'Associated client company' },
+  client_id:      { label: 'Client ID',       required: false, icon: '🔢', description: 'Client code in the system' },
+  notes:          { label: 'Notes',           required: false, icon: '📝', description: 'Additional remarks' },
+  tags:           { label: 'Tags',            required: false, icon: '🏷️', description: 'Comma-separated tags' },
+};
+
 const SHEET_TYPES = ['GST', 'ROC', 'MCA', 'OTHER'];
 
 const containerVariants = {
@@ -90,9 +109,9 @@ const itemVariants = {
 };
 
 // ── WhatsApp SVG icon ─────────────────────────────────────────────────────────
-function WAIcon({ className }) {
+function WAIcon({ className, style }) {
   return (
-    <svg viewBox="0 0 24 24" className={className} fill="currentColor">
+    <svg viewBox="0 0 24 24" className={className} style={style} fill="currentColor">
       <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
     </svg>
   );
@@ -138,9 +157,6 @@ function MaskedPassword() {
   return <span className="font-mono tracking-widest text-slate-400 text-sm select-none">••••••••••</span>;
 }
 
-// ── Modal Header — single custom close button, no duplicate ──────────────────
-// All DialogContent instances use className="[&>button]:hidden" to suppress
-// shadcn's auto-injected close button, keeping only this custom one.
 function ModalHeader({ icon, title, subtitle, gradient, onClose }) {
   return (
     <div className="px-6 py-5 flex-shrink-0" style={{ background: gradient }}>
@@ -296,7 +312,7 @@ function ClientSearchDropdown({ value, onChange, isDark, clients = [] }) {
   );
 }
 
-// ── Reveal Password Component ─────────────────────────────────────────────────
+// ── Reveal Password ───────────────────────────────────────────────────────────
 function RevealPassword({ entryId, isDark }) {
   const [revealed, setRevealed] = useState(false);
   const [password, setPassword] = useState('');
@@ -436,10 +452,7 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      {/* [&>button]:hidden suppresses shadcn's auto close button; ModalHeader provides the single custom one */}
-      <DialogContent
-        className={`max-w-md rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}
-      >
+      <DialogContent className={`max-w-md rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
         <ModalHeader
           icon={<WAIcon className="h-5 w-5 text-white" />}
           title="Share via WhatsApp"
@@ -502,120 +515,386 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
   );
 }
 
-// ── Bulk Import Modal ─────────────────────────────────────────────────────────
+// ── Smart Bulk Import Modal ───────────────────────────────────────────────────
+// Step 1: Upload → parse-preview (see mapping + ask about unmapped cols)
+// Step 2: Confirm mapping (optionally assign unmapped cols)
+// Step 3: Import → show results
 function BulkImportModal({ open, onClose, isDark, onSuccess }) {
+  const [step, setStep] = useState(1); // 1=upload, 2=review mapping, 3=result
   const [file, setFile] = useState(null);
+  const [parsing, setParsing] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [preview, setPreview] = useState(null);      // ColumnMappingPreview response
+  const [unmappedAssignments, setUnmappedAssignments] = useState({}); // col -> canonical field
   const [result, setResult] = useState(null);
   const qc = useQueryClient();
 
+  const allCanonicalFields = Object.keys(FIELD_META);
+
   const handleFileChange = (e) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      const ext = selectedFile.name.split('.').pop()?.toLowerCase();
-      if (!['xlsx', 'xls', 'csv'].includes(ext)) {
-        toast.error('Please upload an Excel (.xlsx, .xls) or CSV (.csv) file');
-        return;
-      }
-      setFile(selectedFile);
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const ext = f.name.split('.').pop()?.toLowerCase();
+    if (!['xlsx', 'xls', 'csv'].includes(ext)) {
+      toast.error('Please upload an Excel (.xlsx, .xls) or CSV (.csv) file');
+      return;
+    }
+    setFile(f);
+    setPreview(null);
+    setResult(null);
+    setStep(1);
+  };
+
+  const handleParse = async () => {
+    if (!file) return;
+    setParsing(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.post('/passwords/parse-preview', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setPreview(res.data);
+      setUnmappedAssignments({});
+      setStep(2);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to parse file');
+    } finally {
+      setParsing(false);
     }
   };
 
   const handleImport = async () => {
-    if (!file) { toast.error('Please select a file'); return; }
+    if (!file) return;
     setImporting(true);
     try {
       const formData = new FormData();
       formData.append('file', file);
       const res = await api.post('/passwords/bulk-import', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
       setResult(res.data);
+      setStep(3);
       qc.invalidateQueries({ queryKey: ['passwords'] });
       qc.invalidateQueries({ queryKey: ['passwords-stats'] });
       toast.success(`✓ Imported ${res.data.successful_imports} credentials`);
       if (onSuccess) onSuccess();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Import failed');
+      toast.error(err.response?.data?.detail || 'Import failed. Please check the file and try again.');
     } finally {
       setImporting(false);
     }
   };
 
-  const handleClose = () => { setFile(null); setResult(null); onClose(); };
+  const handleClose = () => {
+    setFile(null);
+    setPreview(null);
+    setResult(null);
+    setStep(1);
+    setUnmappedAssignments({});
+    onClose();
+  };
+
+  const inputClass = `rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`;
+
+  // Already-mapped canonical fields (not available for unmapped assignment)
+  const alreadyMapped = preview ? new Set(Object.values(preview.mapping)) : new Set();
+
+  const hasMissingRequired = preview?.missing_required?.length > 0;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      {/* [&>button]:hidden suppresses shadcn's auto close button */}
-      <DialogContent
-        className={`max-w-lg rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}
-      >
+      <DialogContent className={`max-w-2xl rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
         <ModalHeader
           icon={<FileUp className="h-5 w-5 text-white" />}
-          title="Bulk Import Credentials"
-          subtitle="Upload Excel or CSV file with password entries"
+          title={step === 1 ? 'Bulk Import Credentials' : step === 2 ? 'Review Column Mapping' : 'Import Complete'}
+          subtitle={
+            step === 1 ? 'Upload Excel or CSV — any column names are auto-detected' :
+            step === 2 ? `${preview?.total_rows} rows found · confirm how columns will be imported` :
+            'Your credentials have been imported into the vault'
+          }
           gradient={`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}
           onClose={handleClose}
         />
-        {!result ? (
+
+        {/* ── Step 1: Upload ── */}
+        {step === 1 && (
           <div className="p-6 space-y-4">
-            <div
-              className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors"
-              style={{ borderColor: isDark ? '#475569' : '#e2e8f0' }}
+            <label
+              htmlFor="bulk-import-file"
+              className={`flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-2xl p-8 cursor-pointer transition-colors ${
+                isDark
+                  ? 'border-slate-600 hover:border-blue-500 hover:bg-blue-900/10'
+                  : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50/50'
+              }`}
             >
-              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange} className="hidden" id="bulk-import-file" />
-              <label htmlFor="bulk-import-file" className="cursor-pointer block">
-                <FileUp className="h-8 w-8 mx-auto mb-2 text-slate-400" />
-                <p className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-                  {file ? file.name : 'Click to upload or drag & drop'}
+              <input
+                id="bulk-import-file"
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+              {file ? (
+                <>
+                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: `${COLORS.emeraldGreen}20` }}>
+                    <CheckCircle2 className="h-6 w-6" style={{ color: COLORS.emeraldGreen }} />
+                  </div>
+                  <div className="text-center">
+                    <p className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{file.name}</p>
+                    <p className="text-xs text-slate-400 mt-1">{(file.size / 1024).toFixed(1)} KB · Click to change</p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                    <FileUp className="h-6 w-6 text-slate-400" />
+                  </div>
+                  <div className="text-center">
+                    <p className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Click to upload or drag & drop</p>
+                    <p className="text-xs text-slate-400 mt-1">Excel (.xlsx, .xls) or CSV (.csv)</p>
+                  </div>
+                </>
+              )}
+            </label>
+
+            {/* Smart detection notice */}
+            <div className={`flex items-start gap-3 p-4 rounded-2xl ${isDark ? 'bg-blue-900/20 border border-blue-800/40' : 'bg-blue-50 border border-blue-200'}`}>
+              <Zap className={`h-5 w-5 flex-shrink-0 mt-0.5 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} />
+              <div>
+                <p className={`text-sm font-bold mb-1 ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>Smart Column Detection</p>
+                <p className={`text-xs ${isDark ? 'text-blue-200' : 'text-blue-600'}`}>
+                  Your Excel doesn't need specific column names. We automatically detect "Name", "Email", "Password", "Portal", and many other common headers.
+                  Before importing, you'll see exactly how each column will be mapped — and can fix any that weren't recognised.
                 </p>
-                <p className="text-xs text-slate-400 mt-1">Excel (.xlsx, .xls) or CSV (.csv)</p>
-              </label>
+              </div>
             </div>
-            <div className={`p-3 rounded-xl text-xs ${isDark ? 'bg-blue-900/20 border border-blue-800/50' : 'bg-blue-50 border border-blue-200'}`}>
-              <p className={`font-bold mb-1 ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>Required columns:</p>
-              <p className={isDark ? 'text-blue-200' : 'text-blue-600'}>
-                portal_name, portal_type, url, username, password_plain, department, holder_type, holder_name, holder_pan, holder_din, client_name, client_id, notes, tags
-              </p>
-            </div>
+
             <DialogFooter className={`flex items-center gap-3 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
               <Button variant="ghost" className="rounded-xl" onClick={handleClose}>Cancel</Button>
               <Button
-                disabled={!file || importing}
-                onClick={handleImport}
-                className="rounded-xl font-bold text-white"
+                disabled={!file || parsing}
+                onClick={handleParse}
+                className="rounded-xl font-bold text-white gap-2"
                 style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
               >
-                {importing ? 'Importing…' : 'Import'}
+                {parsing ? <><Loader2 className="h-4 w-4 animate-spin" /> Analysing…</> : <><ArrowRight className="h-4 w-4" /> Preview Mapping</>}
               </Button>
             </DialogFooter>
           </div>
-        ) : (
-          <div className="p-6 space-y-4">
-            <div className="grid grid-cols-3 gap-3">
-              <div className={`p-3 rounded-xl text-center ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                <p className="text-2xl font-bold" style={{ color: COLORS.mediumBlue }}>{result.successful_imports}</p>
-                <p className="text-xs text-slate-500 mt-1">Imported</p>
-              </div>
-              <div className={`p-3 rounded-xl text-center ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                <p className="text-2xl font-bold text-slate-500">{result.total_processed}</p>
-                <p className="text-xs text-slate-500 mt-1">Total</p>
-              </div>
-              <div className={`p-3 rounded-xl text-center ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                <p className="text-2xl font-bold text-red-500">{result.failed_imports}</p>
-                <p className="text-xs text-slate-500 mt-1">Failed</p>
+        )}
+
+        {/* ── Step 2: Review Mapping ── */}
+        {step === 2 && preview && (
+          <div className="flex flex-col max-h-[80vh]">
+            <div className="overflow-y-auto p-6 space-y-5">
+
+              {/* Missing required fields warning */}
+              {hasMissingRequired && (
+                <div className={`flex items-start gap-3 p-4 rounded-2xl ${isDark ? 'bg-red-900/20 border border-red-800/40' : 'bg-red-50 border border-red-200'}`}>
+                  <AlertCircle className={`h-5 w-5 flex-shrink-0 mt-0.5 ${isDark ? 'text-red-400' : 'text-red-600'}`} />
+                  <div>
+                    <p className={`text-sm font-bold ${isDark ? 'text-red-300' : 'text-red-700'}`}>Some required fields were not found</p>
+                    <p className={`text-xs mt-1 ${isDark ? 'text-red-200' : 'text-red-600'}`}>
+                      Could not find columns for: <b>{preview.missing_required.map(f => FIELD_META[f]?.label || f).join(', ')}</b>.
+                      Please assign them below or go back and check your file.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Auto-mapped columns */}
+              {Object.keys(preview.mapping).length > 0 && (
+                <div>
+                  <p className={`text-xs font-bold uppercase tracking-wider mb-3 flex items-center gap-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                    Auto-detected columns ({Object.keys(preview.mapping).length})
+                  </p>
+                  <div className="grid grid-cols-1 gap-2">
+                    {Object.entries(preview.mapping).map(([origCol, canonical]) => {
+                      const meta = FIELD_META[canonical];
+                      return (
+                        <div
+                          key={origCol}
+                          className={`flex items-center gap-3 p-2.5 rounded-xl ${isDark ? 'bg-emerald-900/15 border border-emerald-800/30' : 'bg-emerald-50 border border-emerald-200'}`}
+                        >
+                          <span className="text-base">{meta?.icon || '📌'}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>"{origCol}"</span>
+                              <ArrowRight className="h-3 w-3 text-slate-400 flex-shrink-0" />
+                              <span className={`text-sm font-bold ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>{meta?.label || canonical}</span>
+                              {meta?.required && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">Required</span>
+                              )}
+                            </div>
+                            {meta?.description && (
+                              <p className="text-[10px] text-slate-400 mt-0.5">{meta.description}</p>
+                            )}
+                          </div>
+                          <CheckCircle2 className="h-4 w-4 text-emerald-500 flex-shrink-0" />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Unmapped columns — ask user */}
+              {preview.unmapped_columns.length > 0 && (
+                <div>
+                  <p className={`text-xs font-bold uppercase tracking-wider mb-3 flex items-center gap-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    <HelpCircle className="h-3.5 w-3.5 text-amber-500" />
+                    Columns we couldn't identify ({preview.unmapped_columns.length}) — assign or skip
+                  </p>
+                  <div className="space-y-2">
+                    {preview.unmapped_columns.map(col => (
+                      <div
+                        key={col}
+                        className={`flex items-center gap-3 p-2.5 rounded-xl ${isDark ? 'bg-amber-900/15 border border-amber-800/30' : 'bg-amber-50 border border-amber-200'}`}
+                      >
+                        <HelpCircle className="h-4 w-4 text-amber-500 flex-shrink-0" />
+                        <span className={`text-sm font-semibold flex-shrink-0 ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>"{col}"</span>
+                        <ArrowRight className="h-3 w-3 text-slate-400 flex-shrink-0" />
+                        <Select
+                          value={unmappedAssignments[col] || '__skip__'}
+                          onValueChange={v => setUnmappedAssignments(p => ({ ...p, [col]: v === '__skip__' ? undefined : v }))}
+                        >
+                          <SelectTrigger className={`h-8 rounded-lg text-xs flex-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white'}`}>
+                            <SelectValue placeholder="Skip this column" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__skip__">⛔ Skip this column</SelectItem>
+                            {allCanonicalFields
+                              .filter(f => !alreadyMapped.has(f) || unmappedAssignments[col] === f)
+                              .map(f => (
+                                <SelectItem key={f} value={f}>
+                                  {FIELD_META[f]?.icon} {FIELD_META[f]?.label || f}
+                                </SelectItem>
+                              ))
+                            }
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Data preview table */}
+              {preview.sample_rows?.length > 0 && (
+                <div>
+                  <p className={`text-xs font-bold uppercase tracking-wider mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    Data Preview (first {preview.sample_rows.length} rows)
+                  </p>
+                  <div className={`rounded-xl border overflow-auto ${isDark ? 'border-slate-600 bg-slate-900/50' : 'border-slate-200 bg-slate-50'}`} style={{ maxHeight: 200 }}>
+                    <table className="w-full text-xs min-w-max">
+                      <thead>
+                        <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'}`}>
+                          {Object.keys(preview.sample_rows[0] || {}).slice(0, 7).map(col => (
+                            <th key={col} className={`px-3 py-2 text-left font-bold whitespace-nowrap ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                              {FIELD_META[col]?.label || col}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {preview.sample_rows.map((row, i) => (
+                          <tr key={i} className={`border-b last:border-0 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                            {Object.keys(preview.sample_rows[0] || {}).slice(0, 7).map(col => (
+                              <td key={col} className={`px-3 py-1.5 whitespace-nowrap max-w-[140px] truncate ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                                {col === 'password_plain' && row[col] ? '••••••' : String(row[col] ?? '')}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Auto-derive info */}
+              <div className={`flex items-start gap-3 p-3 rounded-xl text-xs ${isDark ? 'bg-slate-700/50 border border-slate-600' : 'bg-slate-50 border border-slate-200'}`}>
+                <Info className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
+                <p className={isDark ? 'text-slate-300' : 'text-slate-600'}>
+                  Missing <b>Department</b> values will be auto-derived from Portal Type (e.g. MCA → ROC, GST → GST).
+                  Missing <b>Holder Type</b> defaults to <b>COMPANY</b>. Blank rows are skipped automatically.
+                </p>
               </div>
             </div>
-            {result.errors.length > 0 && (
-              <div className={`p-3 rounded-xl text-xs max-h-40 overflow-y-auto ${isDark ? 'bg-red-900/20 border border-red-800/50' : 'bg-red-50 border border-red-200'}`}>
-                <p className={`font-bold mb-2 ${isDark ? 'text-red-300' : 'text-red-700'}`}>Errors:</p>
+
+            <div className={`px-6 py-4 border-t flex items-center justify-between gap-3 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+              <Button variant="ghost" className="rounded-xl" onClick={() => setStep(1)}>
+                ← Back
+              </Button>
+              <div className="flex items-center gap-3">
+                <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  {preview.total_rows} rows ready to import
+                </span>
+                <Button
+                  disabled={importing}
+                  onClick={handleImport}
+                  className="rounded-xl font-bold text-white gap-2"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen}, #0F7238)` }}
+                >
+                  {importing
+                    ? <><Loader2 className="h-4 w-4 animate-spin" /> Importing…</>
+                    : <><Upload className="h-4 w-4" /> Import {preview.total_rows} Rows</>
+                  }
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 3: Result ── */}
+        {step === 3 && result && (
+          <div className="p-6 space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div className={`p-4 rounded-2xl text-center ${isDark ? 'bg-emerald-900/20 border border-emerald-800/30' : 'bg-emerald-50 border border-emerald-200'}`}>
+                <p className="text-3xl font-black" style={{ color: COLORS.emeraldGreen }}>{result.successful_imports}</p>
+                <p className={`text-xs font-semibold mt-1 ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>Imported ✓</p>
+              </div>
+              <div className={`p-4 rounded-2xl text-center ${isDark ? 'bg-slate-700 border border-slate-600' : 'bg-slate-100 border border-slate-200'}`}>
+                <p className={`text-3xl font-black ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{result.total_processed}</p>
+                <p className="text-xs font-semibold mt-1 text-slate-500">Total Rows</p>
+              </div>
+              <div className={`p-4 rounded-2xl text-center ${result.failed_imports > 0 ? (isDark ? 'bg-red-900/20 border border-red-800/30' : 'bg-red-50 border border-red-200') : (isDark ? 'bg-slate-700' : 'bg-slate-100')}`}>
+                <p className={`text-3xl font-black ${result.failed_imports > 0 ? 'text-red-500' : (isDark ? 'text-slate-400' : 'text-slate-400')}`}>{result.failed_imports}</p>
+                <p className={`text-xs font-semibold mt-1 ${result.failed_imports > 0 ? 'text-red-400' : 'text-slate-400'}`}>Failed</p>
+              </div>
+            </div>
+
+            {result.skipped_rows > 0 && (
+              <p className="text-xs text-slate-400 text-center">{result.skipped_rows} empty rows were skipped automatically.</p>
+            )}
+
+            {/* Column mapping summary */}
+            {result.column_mapping && Object.keys(result.column_mapping).length > 0 && (
+              <div className={`p-3 rounded-xl text-xs ${isDark ? 'bg-slate-700/50 border border-slate-600' : 'bg-slate-50 border border-slate-200'}`}>
+                <p className={`font-bold mb-2 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Columns mapped:</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {Object.entries(result.column_mapping).map(([orig, canon]) => (
+                    <span key={orig} className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${isDark ? 'bg-slate-600 text-slate-200' : 'bg-white border border-slate-200 text-slate-600'}`}>
+                      {orig} → {FIELD_META[canon]?.label || canon}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {result.errors?.length > 0 && (
+              <div className={`p-3 rounded-xl text-xs max-h-40 overflow-y-auto ${isDark ? 'bg-red-900/20 border border-red-800/40' : 'bg-red-50 border border-red-200'}`}>
+                <p className={`font-bold mb-2 ${isDark ? 'text-red-300' : 'text-red-700'}`}>Row errors:</p>
                 {result.errors.map((err, i) => (
-                  <p key={i} className={isDark ? 'text-red-200' : 'text-red-600'}>
-                    Row {err.row}: {typeof err.error === 'string' ? err.error : JSON.stringify(err.error).substring(0, 100)}
+                  <p key={i} className={`mb-1 ${isDark ? 'text-red-200' : 'text-red-600'}`}>
+                    Row {err.row}: {typeof err.error === 'string' ? err.error.substring(0, 120) : JSON.stringify(err.error).substring(0, 120)}
                   </p>
                 ))}
               </div>
             )}
+
             <DialogFooter className={`flex items-center gap-3 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
               <Button
                 className="rounded-xl font-bold text-white"
@@ -682,52 +961,36 @@ function SheetLinksModal({ open, onClose, isDark, isAdmin }) {
     }
   };
 
-  const sheetTypeColor = {
-    GST: '#7C3AED', ROC: '#1E3A8A', MCA: '#1E3A8A', OTHER: '#6B7280',
-  };
+  const sheetTypeColor = { GST: '#7C3AED', ROC: '#1E3A8A', MCA: '#1E3A8A', OTHER: '#6B7280' };
 
-  const handleClose = () => {
-    setAdding(false);
-    setPreviewId(null);
-    setPreviewData(null);
-    onClose();
-  };
+  const handleClose = () => { setAdding(false); setPreviewId(null); setPreviewData(null); onClose(); };
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      {/* [&>button]:hidden suppresses shadcn's auto close button */}
-      <DialogContent
-        className={`max-w-2xl rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}
-      >
+      <DialogContent className={`max-w-2xl rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
         <ModalHeader
           icon={<Sheet className="h-5 w-5 text-white" />}
           title="Google Sheet Links"
           subtitle="Manage linked spreadsheets for password data import"
-          gradient={`linear-gradient(135deg, #0F7238, #1FAF5A)`}
+          gradient="linear-gradient(135deg, #0F7238, #1FAF5A)"
           onClose={handleClose}
         />
 
         <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
-          {/* Info Banner */}
           <div className={`p-3 rounded-xl text-xs flex items-start gap-2 ${isDark ? 'bg-blue-900/20 border border-blue-800/40' : 'bg-blue-50 border border-blue-200'}`}>
             <Info className={`h-4 w-4 flex-shrink-0 mt-0.5 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} />
             <div className={isDark ? 'text-blue-300' : 'text-blue-700'}>
-              <b>How to use:</b> Add your Google Sheet URL below. The sheet must be set to <b>"Anyone with the link can view"</b>.
-              For ROC/MCA sheets, data from all tabs will be merged. For GST sheets, only the latest (last) tab is used.
-              Click <b>Preview</b> to test the connection before using.
+              <b>How to use:</b> Add your Google Sheet URL. The sheet must be <b>"Anyone with the link can view"</b>.
+              For ROC/MCA sheets, all tabs are merged. For GST, only the latest tab is used.
             </div>
           </div>
 
-          {/* Add new form (admin only) */}
           {isAdmin && (
             <div className={`rounded-xl border p-4 space-y-3 ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
               <div className="flex items-center justify-between">
-                <p className={`text-sm font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-                  {adding ? 'Add New Sheet Link' : '+ Add a Sheet Link'}
-                </p>
+                <p className={`text-sm font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{adding ? 'Add New Sheet Link' : '+ Add a Sheet Link'}</p>
                 {!adding && (
-                  <Button size="sm" className="rounded-lg h-7 text-xs" onClick={() => setAdding(true)}
-                    style={{ background: COLORS.emeraldGreen, color: 'white' }}>
+                  <Button size="sm" className="rounded-lg h-7 text-xs" onClick={() => setAdding(true)} style={{ background: COLORS.emeraldGreen, color: 'white' }}>
                     <Plus className="h-3 w-3 mr-1" /> Add
                   </Button>
                 )}
@@ -737,54 +1000,27 @@ function SheetLinksModal({ open, onClose, isDark, isAdmin }) {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <Label className="text-xs font-bold text-slate-500 uppercase">Label *</Label>
-                      <Input
-                        className={`rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
-                        placeholder="e.g. GST Master Sheet"
-                        value={form.label}
-                        onChange={e => setForm(p => ({ ...p, label: e.target.value }))}
-                      />
+                      <Input className={`rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`} placeholder="e.g. GST Master Sheet" value={form.label} onChange={e => setForm(p => ({ ...p, label: e.target.value }))} />
                     </div>
                     <div className="space-y-1">
                       <Label className="text-xs font-bold text-slate-500 uppercase">Sheet Type</Label>
                       <Select value={form.sheet_type} onValueChange={v => setForm(p => ({ ...p, sheet_type: v }))}>
-                        <SelectTrigger className={`rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {SHEET_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                        </SelectContent>
+                        <SelectTrigger className={`rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}><SelectValue /></SelectTrigger>
+                        <SelectContent>{SHEET_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs font-bold text-slate-500 uppercase">Google Sheet URL *</Label>
-                    <Input
-                      className={`rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
-                      placeholder="https://docs.google.com/spreadsheets/d/..."
-                      value={form.sheet_url}
-                      onChange={e => setForm(p => ({ ...p, sheet_url: e.target.value }))}
-                    />
+                    <Input className={`rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`} placeholder="https://docs.google.com/spreadsheets/d/..." value={form.sheet_url} onChange={e => setForm(p => ({ ...p, sheet_url: e.target.value }))} />
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs font-bold text-slate-500 uppercase">Description (optional)</Label>
-                    <Input
-                      className={`rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
-                      placeholder="What data does this sheet contain?"
-                      value={form.description}
-                      onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
-                    />
+                    <Input className={`rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`} placeholder="What data does this sheet contain?" value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} />
                   </div>
                   <div className="flex items-center gap-2 pt-1">
-                    <Button variant="ghost" size="sm" className="rounded-lg h-8 text-xs" onClick={() => { setAdding(false); setForm({ label: '', sheet_url: '', sheet_type: 'OTHER', description: '' }); }}>
-                      Cancel
-                    </Button>
-                    <Button
-                      size="sm"
-                      className="rounded-lg h-8 text-xs text-white"
-                      disabled={!form.label.trim() || !form.sheet_url.trim() || addMutation.isPending}
-                      onClick={() => addMutation.mutate(form)}
-                      style={{ background: COLORS.emeraldGreen }}
-                    >
+                    <Button variant="ghost" size="sm" className="rounded-lg h-8 text-xs" onClick={() => { setAdding(false); setForm({ label: '', sheet_url: '', sheet_type: 'OTHER', description: '' }); }}>Cancel</Button>
+                    <Button size="sm" className="rounded-lg h-8 text-xs text-white" disabled={!form.label.trim() || !form.sheet_url.trim() || addMutation.isPending} onClick={() => addMutation.mutate(form)} style={{ background: COLORS.emeraldGreen }}>
                       {addMutation.isPending ? 'Saving…' : 'Save Link'}
                     </Button>
                   </div>
@@ -793,11 +1029,8 @@ function SheetLinksModal({ open, onClose, isDark, isAdmin }) {
             </div>
           )}
 
-          {/* Existing links */}
           {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
-            </div>
+            <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div>
           ) : links.length === 0 ? (
             <div className={`text-center py-10 rounded-xl border-2 border-dashed ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
               <Sheet className="h-8 w-8 mx-auto mb-2 text-slate-300" />
@@ -811,77 +1044,39 @@ function SheetLinksModal({ open, onClose, isDark, isAdmin }) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{link.label}</span>
-                        <span
-                          className="px-2 py-0.5 rounded-full text-[10px] font-bold"
-                          style={{ background: `${sheetTypeColor[link.sheet_type] || '#6B7280'}18`, color: sheetTypeColor[link.sheet_type] || '#6B7280' }}
-                        >
-                          {link.sheet_type}
-                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: `${sheetTypeColor[link.sheet_type] || '#6B7280'}18`, color: sheetTypeColor[link.sheet_type] || '#6B7280' }}>{link.sheet_type}</span>
                       </div>
-                      {link.description && (
-                        <p className="text-xs text-slate-400 mt-0.5">{link.description}</p>
-                      )}
-                      <a
-                        href={link.sheet_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-xs text-blue-500 hover:underline mt-1 truncate"
-                      >
-                        <Link2 className="h-3 w-3 flex-shrink-0" />
-                        <span className="truncate">{link.sheet_url}</span>
-                        <ExternalLink className="h-2.5 w-2.5 flex-shrink-0" />
+                      {link.description && <p className="text-xs text-slate-400 mt-0.5">{link.description}</p>}
+                      <a href={link.sheet_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-blue-500 hover:underline mt-1 truncate">
+                        <Link2 className="h-3 w-3 flex-shrink-0" /><span className="truncate">{link.sheet_url}</span><ExternalLink className="h-2.5 w-2.5 flex-shrink-0" />
                       </a>
                     </div>
                     <div className="flex items-center gap-1.5 flex-shrink-0">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="rounded-lg h-7 text-xs gap-1"
-                        onClick={() => handlePreview(link)}
-                        disabled={previewLoading && previewId === link.id}
-                      >
-                        {previewLoading && previewId === link.id
-                          ? <Loader2 className="h-3 w-3 animate-spin" />
-                          : <RefreshCcw className="h-3 w-3" />
-                        }
-                        Preview
+                      <Button size="sm" variant="outline" className="rounded-lg h-7 text-xs gap-1" onClick={() => handlePreview(link)} disabled={previewLoading && previewId === link.id}>
+                        {previewLoading && previewId === link.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCcw className="h-3 w-3" />} Preview
                       </Button>
                       {isAdmin && (
-                        <button
-                          type="button"
-                          onClick={() => deleteMutation.mutate(link.id)}
-                          className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-red-900/30' : 'hover:bg-red-50'}`}
-                          title="Delete"
-                        >
+                        <button type="button" onClick={() => deleteMutation.mutate(link.id)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-red-900/30' : 'hover:bg-red-50'}`} title="Delete">
                           <Trash2 className="h-3.5 w-3.5 text-red-400" />
                         </button>
                       )}
                     </div>
                   </div>
 
-                  {/* Preview results */}
                   {previewId === link.id && previewData && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      className={`mt-3 pt-3 border-t ${isDark ? 'border-slate-600' : 'border-slate-100'}`}
-                    >
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className={`mt-3 pt-3 border-t ${isDark ? 'border-slate-600' : 'border-slate-100'}`}>
                       <div className="flex items-center gap-2 mb-2 flex-wrap">
                         <span className="text-xs font-bold text-emerald-600">✓ Connected</span>
                         <span className="text-xs text-slate-400">{previewData.total_rows} rows</span>
                         {previewData.tab_used && <span className="text-xs text-slate-400">Tab: {previewData.tab_used}</span>}
-                        {previewData.tabs_found?.length > 0 && (
-                          <span className="text-xs text-slate-400">Tabs: {previewData.tabs_found.join(', ')}</span>
-                        )}
+                        {previewData.tabs_found?.length > 0 && <span className="text-xs text-slate-400">Tabs: {previewData.tabs_found.join(', ')}</span>}
                       </div>
                       <div className={`rounded-lg overflow-auto text-xs ${isDark ? 'bg-slate-800' : 'bg-slate-50'}`} style={{ maxHeight: 180 }}>
                         <table className="w-full min-w-max">
                           <thead>
                             <tr className={`border-b ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
                               {previewData.columns?.slice(0, 6).map(col => (
-                                <th key={col} className={`px-2 py-1.5 text-left font-semibold whitespace-nowrap ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                                  {col}
-                                </th>
+                                <th key={col} className={`px-2 py-1.5 text-left font-semibold whitespace-nowrap ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{col}</th>
                               ))}
                             </tr>
                           </thead>
@@ -889,9 +1084,7 @@ function SheetLinksModal({ open, onClose, isDark, isAdmin }) {
                             {previewData.preview?.slice(0, 5).map((row, i) => (
                               <tr key={i} className={`border-b last:border-0 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
                                 {previewData.columns?.slice(0, 6).map(col => (
-                                  <td key={col} className={`px-2 py-1 whitespace-nowrap max-w-[120px] truncate ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                    {String(row[col] ?? '')}
-                                  </td>
+                                  <td key={col} className={`px-2 py-1 whitespace-nowrap max-w-[120px] truncate ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{String(row[col] ?? '')}</td>
                                 ))}
                               </tr>
                             ))}
@@ -919,7 +1112,6 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -3, transition: springMed }}>
       <div className={`rounded-2xl border p-4 h-full flex flex-col ${isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'} transition-all`}>
-        {/* Header */}
         <div className="flex items-start justify-between mb-3">
           <div className="flex-1 min-w-0">
             <h3 className={`font-bold text-sm truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{entry.portal_name}</h3>
@@ -931,21 +1123,11 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
           </div>
           {canEdit && (
             <div className="flex items-center gap-1 ml-2 flex-shrink-0">
-              <button
-                type="button"
-                onClick={() => onEdit(entry)}
-                className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
-                title="Edit"
-              >
+              <button type="button" onClick={() => onEdit(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Edit">
                 <Edit2 className="h-3.5 w-3.5 text-slate-400" />
               </button>
               {isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => onDelete(entry)}
-                  className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
-                  title="Delete"
-                >
+                <button type="button" onClick={() => onDelete(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Delete">
                   <Trash2 className="h-3.5 w-3.5 text-red-400" />
                 </button>
               )}
@@ -953,7 +1135,6 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
           )}
         </div>
 
-        {/* Holder info */}
         {entry.holder_name && (
           <div className={`flex items-center gap-1.5 mb-2 px-2 py-1 rounded-lg text-xs font-medium ${isDark ? 'bg-purple-900/30 text-purple-300' : 'bg-purple-50 text-purple-700'}`}>
             <UserIcon className="h-3 w-3 flex-shrink-0" />
@@ -962,7 +1143,6 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
           </div>
         )}
 
-        {/* Client badge */}
         {entry.client_name && (
           <div className={`flex items-center gap-1.5 mb-2 px-2 py-1 rounded-lg text-xs font-medium ${isDark ? 'bg-blue-900/30 text-blue-300' : 'bg-blue-50 text-blue-700'}`}>
             <Building2 className="h-3 w-3 flex-shrink-0" />
@@ -970,25 +1150,18 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
           </div>
         )}
 
-        {/* Username */}
         {entry.username && (
           <div className="mb-3">
             <div className="flex items-center gap-2">
               <UserIcon className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
               <span className={`font-mono text-sm truncate ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{entry.username}</span>
-              <button
-                type="button"
-                onClick={() => navigator.clipboard.writeText(entry.username).then(() => toast.success('Username copied'))}
-                className={`flex-shrink-0 p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
-                title="Copy username"
-              >
+              <button type="button" onClick={() => navigator.clipboard.writeText(entry.username).then(() => toast.success('Username copied'))} className={`flex-shrink-0 p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Copy username">
                 <Copy className="h-3 w-3 text-slate-400" />
               </button>
             </div>
           </div>
         )}
 
-        {/* Password */}
         <div className="mb-3">
           <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Password</p>
           {entry.has_password
@@ -997,16 +1170,10 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
           }
         </div>
 
-        {/* URL */}
         {entry.url && (
           <div className="mb-3">
             <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Portal URL</p>
-            <a
-              href={entry.url.startsWith('http') ? entry.url : `https://${entry.url}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-xs font-medium text-blue-500 hover:underline truncate"
-            >
+            <a href={entry.url.startsWith('http') ? entry.url : `https://${entry.url}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs font-medium text-blue-500 hover:underline truncate">
               <Globe className="h-3 w-3 flex-shrink-0" />
               <span className="truncate">{entry.url}</span>
               <ExternalLink className="h-2.5 w-2.5 flex-shrink-0" />
@@ -1014,14 +1181,12 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
           </div>
         )}
 
-        {/* Notes */}
         {entry.notes && (
           <div className={`mt-auto pt-3 border-t text-xs ${isDark ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-500'}`}>
             {entry.notes.slice(0, 100)}{entry.notes.length > 100 ? '…' : ''}
           </div>
         )}
 
-        {/* Timestamps */}
         <div className={`flex items-center justify-between mt-3 pt-3 border-t text-[10px] ${isDark ? 'border-slate-700 text-slate-500' : 'border-slate-100 text-slate-400'}`}>
           <span className="flex items-center gap-1">
             <Clock className="h-2.5 w-2.5" />
@@ -1035,17 +1200,12 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
           )}
         </div>
 
-        {/* WhatsApp share */}
         <motion.button
           type="button"
           whileTap={{ scale: 0.97 }}
           onClick={() => onShare(entry)}
           className="mt-3 w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold transition-all"
-          style={{
-            background: isDark ? 'rgba(37,211,102,0.08)' : 'rgba(37,211,102,0.07)',
-            color: COLORS.whatsapp,
-            border: `1px solid ${COLORS.whatsapp}28`,
-          }}
+          style={{ background: isDark ? 'rgba(37,211,102,0.08)' : 'rgba(37,211,102,0.07)', color: COLORS.whatsapp, border: `1px solid ${COLORS.whatsapp}28` }}
         >
           <WAIcon className="h-3.5 w-3.5" />
           Share via WhatsApp
@@ -1058,10 +1218,7 @@ function EntryCard({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark 
 // ── Entry Row (List View) ─────────────────────────────────────────────────────
 function EntryRow({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark }) {
   return (
-    <motion.tr
-      variants={itemVariants}
-      className={`border-b transition-colors ${isDark ? 'border-slate-700 hover:bg-slate-700/40' : 'border-slate-100 hover:bg-slate-50'}`}
-    >
+    <motion.tr variants={itemVariants} className={`border-b transition-colors ${isDark ? 'border-slate-700 hover:bg-slate-700/40' : 'border-slate-100 hover:bg-slate-50'}`}>
       <td className="px-4 py-3">
         <div className="flex flex-col gap-1">
           <span className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{entry.portal_name}</span>
@@ -1074,82 +1231,47 @@ function EntryRow({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark }
       </td>
       <td className="px-4 py-3">
         <div className="flex flex-col gap-0.5">
-          {entry.client_name && (
-            <span className={`text-xs font-medium ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>{entry.client_name}</span>
-          )}
-          {entry.holder_name && (
-            <span className={`text-xs ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>{entry.holder_name}</span>
-          )}
-          {entry.holder_din && (
-            <span className="text-[10px] text-slate-400">DIN: {entry.holder_din}</span>
-          )}
+          {entry.client_name && <span className={`text-xs font-medium ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>{entry.client_name}</span>}
+          {entry.holder_name && <span className={`text-xs ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>{entry.holder_name}</span>}
+          {entry.holder_din && <span className="text-[10px] text-slate-400">DIN: {entry.holder_din}</span>}
         </div>
       </td>
       <td className="px-4 py-3">
         {entry.username ? (
           <div className="flex items-center gap-1.5">
             <span className={`font-mono text-xs ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{entry.username}</span>
-            <button
-              type="button"
-              onClick={() => navigator.clipboard.writeText(entry.username).then(() => toast.success('Copied'))}
-              className="p-0.5 rounded text-slate-400 hover:text-slate-600 transition-colors"
-            >
+            <button type="button" onClick={() => navigator.clipboard.writeText(entry.username).then(() => toast.success('Copied'))} className="p-0.5 rounded text-slate-400 hover:text-slate-600 transition-colors">
               <Copy className="h-3 w-3" />
             </button>
           </div>
         ) : <span className="text-xs text-slate-400">—</span>}
       </td>
       <td className="px-4 py-3">
-        {entry.has_password
-          ? <RevealPassword entryId={entry.id} isDark={isDark} />
-          : <span className="text-xs text-slate-400 italic">None</span>
-        }
+        {entry.has_password ? <RevealPassword entryId={entry.id} isDark={isDark} /> : <span className="text-xs text-slate-400 italic">None</span>}
       </td>
       <td className="px-4 py-3">
         {entry.url ? (
-          <a
-            href={entry.url.startsWith('http') ? entry.url : `https://${entry.url}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 text-xs text-blue-500 hover:underline"
-          >
+          <a href={entry.url.startsWith('http') ? entry.url : `https://${entry.url}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-blue-500 hover:underline">
             <Globe className="h-3 w-3 flex-shrink-0" />
             <span className="truncate max-w-[140px]">{entry.url}</span>
           </a>
         ) : <span className="text-xs text-slate-400">—</span>}
       </td>
       <td className="px-4 py-3">
-        <span className="text-xs text-slate-400">
-          {entry.updated_at ? format(new Date(entry.updated_at), 'MMM d, yy') : '—'}
-        </span>
+        <span className="text-xs text-slate-400">{entry.updated_at ? format(new Date(entry.updated_at), 'MMM d, yy') : '—'}</span>
       </td>
       <td className="px-4 py-3">
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => onShare(entry)}
-            className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
-            title="Share via WhatsApp"
-          >
+          <button type="button" onClick={() => onShare(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Share via WhatsApp">
             <WAIcon className="h-3.5 w-3.5" style={{ color: COLORS.whatsapp }} />
           </button>
           {canEdit && (
-            <button
-              type="button"
-              onClick={() => onEdit(entry)}
-              className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
-              title="Edit"
-            >
+            <button type="button" onClick={() => onEdit(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Edit">
               <Edit2 className="h-3.5 w-3.5 text-slate-400" />
             </button>
           )}
           {isAdmin && (
-            <button
-              type="button"
-              onClick={() => onDelete(entry)}
-              className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
-              title="Delete"
-            >
+            <button type="button" onClick={() => onDelete(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`} title="Delete">
               <Trash2 className="h-3.5 w-3.5 text-red-400" />
             </button>
           )}
@@ -1161,20 +1283,9 @@ function EntryRow({ entry, canEdit, isAdmin, onEdit, onDelete, onShare, isDark }
 
 // ── Add / Edit Modal ──────────────────────────────────────────────────────────
 const EMPTY_FORM = {
-  portal_name: '',
-  portal_type: 'OTHER',
-  url: '',
-  username: '',
-  password_plain: '',
-  department: 'OTHER',
-  holder_type: 'COMPANY',
-  holder_name: '',
-  holder_pan: '',
-  holder_din: '',
-  client_id: '',
-  client_name: '',
-  notes: '',
-  tags: [],
+  portal_name: '', portal_type: 'OTHER', url: '', username: '', password_plain: '',
+  department: 'OTHER', holder_type: 'COMPANY', holder_name: '', holder_pan: '',
+  holder_din: '', client_id: '', client_name: '', notes: '', tags: [],
 };
 
 function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients }) {
@@ -1218,148 +1329,73 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients 
   };
 
   const showHolderFields = form.holder_type !== 'COMPANY';
-
   const inputClass = `rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white'}`;
 
-  const handleClose = () => {
-    onClose();
-  };
-
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      {/* [&>button]:hidden suppresses shadcn's auto close button */}
-      <DialogContent
-        className={`max-w-lg rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}
-      >
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className={`max-w-lg rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
         <ModalHeader
           icon={<KeyRound className="h-5 w-5 text-white" />}
           title={existing ? 'Edit Credential' : 'Add New Credential'}
           subtitle={existing ? `Editing: ${existing.portal_name}` : 'Store a new portal login securely'}
           gradient={`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}
-          onClose={handleClose}
+          onClose={onClose}
         />
 
         <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-          {/* Client Selector */}
           <div className="space-y-1.5">
-            <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-              <Building2 className="h-3 w-3" /> Link to Client
-            </Label>
-            <ClientSearchDropdown
-              value={form.client_id}
-              onChange={handleClientChange}
-              isDark={isDark}
-              clients={clients}
-            />
-            {form.client_name && (
-              <p className="text-[10px] text-blue-500 font-medium flex items-center gap-1">
-                <Check className="h-3 w-3" /> Linked to: {form.client_name}
-              </p>
-            )}
+            <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><Building2 className="h-3 w-3" /> Link to Client</Label>
+            <ClientSearchDropdown value={form.client_id} onChange={handleClientChange} isDark={isDark} clients={clients} />
+            {form.client_name && <p className="text-[10px] text-blue-500 font-medium flex items-center gap-1"><Check className="h-3 w-3" /> Linked to: {form.client_name}</p>}
           </div>
 
-          {/* Portal Name */}
           <div className="space-y-1.5">
             <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Portal Name *</Label>
-            <Input
-              className={inputClass}
-              placeholder="e.g. Client XYZ GST Login"
-              value={form.portal_name}
-              onChange={e => handleChange('portal_name', e.target.value)}
-            />
+            <Input className={inputClass} placeholder="e.g. Client XYZ GST Login" value={form.portal_name} onChange={e => handleChange('portal_name', e.target.value)} />
           </div>
 
-          {/* Portal Type + Department */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Portal Type</Label>
-              <Select value={form.portal_type} onValueChange={v => {
-                handleChange('portal_type', v);
-                const dept = DEPARTMENT_MAP[v];
-                if (dept && dept !== 'OTHER') handleChange('department', dept);
-              }}>
+              <Select value={form.portal_type} onValueChange={v => { handleChange('portal_type', v); const dept = DEPARTMENT_MAP[v]; if (dept && dept !== 'OTHER') handleChange('department', dept); }}>
                 <SelectTrigger className={`${inputClass} w-full`}><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {PORTAL_TYPES.map(t => (
-                    <SelectItem key={t} value={t}>{PORTAL_META[t]?.icon} {PORTAL_META[t]?.label || t}</SelectItem>
-                  ))}
-                </SelectContent>
+                <SelectContent>{PORTAL_TYPES.map(t => <SelectItem key={t} value={t}>{PORTAL_META[t]?.icon} {PORTAL_META[t]?.label || t}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Department</Label>
               <Select value={form.department} onValueChange={v => handleChange('department', v)}>
                 <SelectTrigger className={`${inputClass} w-full`}><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {DEPARTMENTS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
-                </SelectContent>
+                <SelectContent>{DEPARTMENTS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
               </Select>
             </div>
           </div>
 
-          {/* Credential Holder */}
           <div className="space-y-1.5">
-            <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-              <UserIcon className="h-3 w-3" /> Credential Holder
-            </Label>
+            <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><UserIcon className="h-3 w-3" /> Credential Holder</Label>
             <Select value={form.holder_type} onValueChange={v => handleChange('holder_type', v)}>
               <SelectTrigger className={`${inputClass} w-full`}><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {HOLDER_TYPES.map(h => (
-                  <SelectItem key={h} value={h}>
-                    {HOLDER_META[h]?.icon} {HOLDER_META[h]?.label || h}
-                  </SelectItem>
-                ))}
-              </SelectContent>
+              <SelectContent>{HOLDER_TYPES.map(h => <SelectItem key={h} value={h}>{HOLDER_META[h]?.icon} {HOLDER_META[h]?.label || h}</SelectItem>)}</SelectContent>
             </Select>
           </div>
 
-          {/* Director/Individual fields */}
           <AnimatePresence>
             {showHolderFields && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className={`rounded-xl border p-3 space-y-3 ${isDark ? 'bg-purple-900/15 border-purple-800/40' : 'bg-purple-50/80 border-purple-200'}`}
-              >
-                <p className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${isDark ? 'text-purple-300' : 'text-purple-700'}`}>
-                  <UserIcon className="h-3 w-3" /> {HOLDER_META[form.holder_type]?.label || 'Holder'} Details
-                </p>
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className={`rounded-xl border p-3 space-y-3 ${isDark ? 'bg-purple-900/15 border-purple-800/40' : 'bg-purple-50/80 border-purple-200'}`}>
+                <p className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${isDark ? 'text-purple-300' : 'text-purple-700'}`}><UserIcon className="h-3 w-3" /> {HOLDER_META[form.holder_type]?.label || 'Holder'} Details</p>
                 <div className="space-y-1.5">
                   <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Full Name</Label>
-                  <Input
-                    className={inputClass}
-                    placeholder="e.g. Rajesh Kumar"
-                    value={form.holder_name}
-                    onChange={e => handleChange('holder_name', e.target.value)}
-                  />
+                  <Input className={inputClass} placeholder="e.g. Rajesh Kumar" value={form.holder_name} onChange={e => handleChange('holder_name', e.target.value)} />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                      <CreditCard className="h-3 w-3" /> PAN
-                    </Label>
-                    <Input
-                      className={inputClass}
-                      placeholder="ABCPK1234D"
-                      value={form.holder_pan}
-                      onChange={e => handleChange('holder_pan', e.target.value.toUpperCase())}
-                      maxLength={10}
-                    />
+                    <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1"><CreditCard className="h-3 w-3" /> PAN</Label>
+                    <Input className={inputClass} placeholder="ABCPK1234D" value={form.holder_pan} onChange={e => handleChange('holder_pan', e.target.value.toUpperCase())} maxLength={10} />
                   </div>
                   {(form.holder_type === 'DIRECTOR' || form.portal_type === 'MCA' || form.portal_type === 'ROC') && (
                     <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                        <Hash className="h-3 w-3" /> DIN
-                      </Label>
-                      <Input
-                        className={inputClass}
-                        placeholder="08123456"
-                        value={form.holder_din}
-                        onChange={e => handleChange('holder_din', e.target.value)}
-                        maxLength={8}
-                      />
+                      <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1"><Hash className="h-3 w-3" /> DIN</Label>
+                      <Input className={inputClass} placeholder="08123456" value={form.holder_din} onChange={e => handleChange('holder_din', e.target.value)} maxLength={8} />
                     </div>
                   )}
                 </div>
@@ -1367,80 +1403,40 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients 
             )}
           </AnimatePresence>
 
-          {/* URL */}
           <div className="space-y-1.5">
             <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Portal URL</Label>
-            <Input
-              className={inputClass}
-              placeholder="https://www.gst.gov.in"
-              value={form.url}
-              onChange={e => handleChange('url', e.target.value)}
-            />
+            <Input className={inputClass} placeholder="https://www.gst.gov.in" value={form.url} onChange={e => handleChange('url', e.target.value)} />
           </div>
 
-          {/* Username */}
           <div className="space-y-1.5">
             <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Username / Login ID</Label>
-            <Input
-              className={inputClass}
-              placeholder="login@company.com or PAN/GSTIN"
-              value={form.username}
-              onChange={e => handleChange('username', e.target.value)}
-            />
+            <Input className={inputClass} placeholder="login@company.com or PAN/GSTIN" value={form.username} onChange={e => handleChange('username', e.target.value)} />
           </div>
 
-          {/* Password */}
           <div className="space-y-1.5">
-            <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-              Password {existing ? '(leave blank to keep current)' : ''}
-            </Label>
+            <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Password {existing ? '(leave blank to keep current)' : ''}</Label>
             <div className="relative">
-              <Input
-                className={`${inputClass} pr-10`}
-                type={showPass ? 'text' : 'password'}
-                placeholder={existing ? '••••••••  (unchanged)' : 'Enter password'}
-                value={form.password_plain}
-                onChange={e => handleChange('password_plain', e.target.value)}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPass(p => !p)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              >
+              <Input className={`${inputClass} pr-10`} type={showPass ? 'text' : 'password'} placeholder={existing ? '••••••••  (unchanged)' : 'Enter password'} value={form.password_plain} onChange={e => handleChange('password_plain', e.target.value)} />
+              <button type="button" onClick={() => setShowPass(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
                 {showPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
           </div>
 
-          {/* Notes */}
           <div className="space-y-1.5">
             <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Notes</Label>
-            <Textarea
-              className={`rounded-xl resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : ''}`}
-              rows={3}
-              placeholder="Any additional information…"
-              value={form.notes}
-              onChange={e => handleChange('notes', e.target.value)}
-            />
+            <Textarea className={`rounded-xl resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : ''}`} rows={3} placeholder="Any additional information…" value={form.notes} onChange={e => handleChange('notes', e.target.value)} />
           </div>
 
-          {/* Security notice */}
           <div className={`flex items-start gap-2.5 p-3 rounded-xl text-xs ${isDark ? 'bg-emerald-900/20 border border-emerald-800/50' : 'bg-emerald-50 border border-emerald-200'}`}>
             <Shield className="h-4 w-4 text-emerald-500 flex-shrink-0 mt-0.5" />
-            <p className={isDark ? 'text-emerald-300' : 'text-emerald-700'}>
-              Passwords are encrypted using AES-128 before being stored. They are never revealed in logs or lists.
-            </p>
+            <p className={isDark ? 'text-emerald-300' : 'text-emerald-700'}>Passwords are encrypted using AES-128 before being stored. They are never revealed in logs or lists.</p>
           </div>
         </div>
 
         <DialogFooter className={`px-6 py-4 flex items-center gap-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-          <Button variant="ghost" className="rounded-xl" onClick={handleClose}>Cancel</Button>
-          <Button
-            disabled={loading || !form.portal_name.trim()}
-            onClick={() => onSave(form)}
-            className="rounded-xl font-bold px-8 text-white"
-            style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
-          >
+          <Button variant="ghost" className="rounded-xl" onClick={onClose}>Cancel</Button>
+          <Button disabled={loading || !form.portal_name.trim()} onClick={() => onSave(form)} className="rounded-xl font-bold px-8 text-white" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
             {loading ? 'Saving…' : existing ? 'Update Credential' : 'Save Credential'}
           </Button>
         </DialogFooter>
@@ -1465,7 +1461,7 @@ export default function PasswordRepository() {
   const [filterType, setFilterType] = useState('ALL');
   const [filterClient, setFilterClient] = useState('ALL');
   const [filterHolder, setFilterHolder] = useState('ALL');
-  const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
+  const [viewMode, setViewMode] = useState('grid');
   const [modalOpen, setModalOpen] = useState(false);
   const [editEntry, setEditEntry] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -1474,7 +1470,6 @@ export default function PasswordRepository() {
   const [sheetsOpen, setSheetsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // ── Data fetch ──────────────────────────────────────────────────────────────
   const { data: entries = [], isLoading, isError } = useQuery({
     queryKey: ['passwords', filterDept, filterType, search, filterClient, filterHolder],
     queryFn: async () => {
@@ -1506,7 +1501,6 @@ export default function PasswordRepository() {
     staleTime: 60_000,
   });
 
-  // ── Mutations ───────────────────────────────────────────────────────────────
   const saveMutation = useMutation({
     mutationFn: async ({ form, id }) => {
       if (id) return api.put(`/passwords/${id}`, form);
@@ -1533,7 +1527,6 @@ export default function PasswordRepository() {
     onError: err => toast.error(err.response?.data?.detail || 'Failed to delete'),
   });
 
-  // ── Handlers ────────────────────────────────────────────────────────────────
   const handleSave = useCallback(async (form) => {
     setSaving(true);
     try { await saveMutation.mutateAsync({ form, id: editEntry?.id }); }
@@ -1543,9 +1536,7 @@ export default function PasswordRepository() {
   const handleDownloadTemplate = async () => {
     try {
       const res = await api.get('/passwords/template', { responseType: 'blob' });
-      const blob = new Blob([res.data], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      });
+      const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -1555,7 +1546,7 @@ export default function PasswordRepository() {
       link.parentNode.removeChild(link);
       window.URL.revokeObjectURL(url);
       toast.success('Template downloaded');
-    } catch (err) {
+    } catch {
       toast.error('Failed to download template');
     }
   };
@@ -1565,7 +1556,6 @@ export default function PasswordRepository() {
   const handleShare  = (entry) => setShareTarget(entry);
   const handleAddNew = () => { setEditEntry(null); setModalOpen(true); };
 
-  // ── Counts ──────────────────────────────────────────────────────────────────
   const deptCounts = useMemo(() => {
     const counts = { ALL: entries.length };
     entries.forEach(e => { counts[e.department] = (counts[e.department] || 0) + 1; });
@@ -1574,30 +1564,19 @@ export default function PasswordRepository() {
 
   const clientsInResults = useMemo(() => {
     const map = {};
-    entries.forEach(e => {
-      if (e.client_id && e.client_name) map[e.client_id] = e.client_name;
-    });
+    entries.forEach(e => { if (e.client_id && e.client_name) map[e.client_id] = e.client_name; });
     return Object.entries(map).map(([id, name]) => ({ id, name }));
   }, [entries]);
 
   const hasActiveFilter = filterDept !== 'ALL' || filterType !== 'ALL' || filterClient !== 'ALL' || filterHolder !== 'ALL' || search;
 
-  // ── Access guard ────────────────────────────────────────────────────────────
   if (!canView) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <motion.div
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className={`text-center p-12 rounded-3xl border max-w-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
-        >
-          <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <Lock className="h-8 w-8 text-red-500" />
-          </div>
+        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className={`text-center p-12 rounded-3xl border max-w-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-4"><Lock className="h-8 w-8 text-red-500" /></div>
           <h2 className={`text-xl font-bold mb-2 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Access Restricted</h2>
-          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            You need the <b>View Password Repository</b> permission. Ask your administrator to grant access.
-          </p>
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>You need the <b>View Password Repository</b> permission. Ask your administrator to grant access.</p>
         </motion.div>
       </div>
     );
@@ -1606,63 +1585,34 @@ export default function PasswordRepository() {
   return (
     <motion.div className="space-y-6" variants={containerVariants} initial="hidden" animate="visible">
 
-      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      {/* Header */}
       <motion.div variants={itemVariants}>
-        <div
-          className="relative overflow-hidden rounded-2xl px-6 py-5"
-          style={{
-            background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
-            boxShadow: '0 8px 32px rgba(13,59,102,0.28)',
-          }}
-        >
-          <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
-            style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+        <div className="relative overflow-hidden rounded-2xl px-6 py-5" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
+          <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10" style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
           <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-white/15 rounded-2xl flex items-center justify-center flex-shrink-0">
-                <KeyRound className="h-6 w-6 text-white" />
-              </div>
+              <div className="w-12 h-12 bg-white/15 rounded-2xl flex items-center justify-center flex-shrink-0"><KeyRound className="h-6 w-6 text-white" /></div>
               <div>
                 <h1 className="text-2xl font-bold text-white tracking-tight">Password Vault</h1>
                 <p className="text-white/60 text-sm mt-0.5">Encrypted portal credentials — MCA · GST · IT · TDS · DGFT · TM & more</p>
               </div>
             </div>
-            {/* Header actions — view toggle has been moved to the filter bar below */}
             <div className="flex items-center gap-2 flex-wrap">
               {isAdmin && stats.total != null && (
-                <div className="px-3 py-1.5 bg-white/15 rounded-xl text-white text-xs font-semibold">
-                  {stats.total} credentials
-                </div>
+                <div className="px-3 py-1.5 bg-white/15 rounded-xl text-white text-xs font-semibold">{stats.total} credentials</div>
               )}
-              {/* Google Sheets */}
-              <Button
-                onClick={() => setSheetsOpen(true)}
-                className="rounded-xl font-bold h-9 text-sm gap-2 text-white border-white/20 hover:bg-white/20 transition-all"
-                style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}
-              >
+              <Button onClick={() => setSheetsOpen(true)} className="rounded-xl font-bold h-9 text-sm gap-2 text-white border-white/20 hover:bg-white/20 transition-all" style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}>
                 <Sheet className="h-4 w-4" /> Sheets
               </Button>
               {canEdit && (
                 <>
-                  <Button
-                    onClick={handleDownloadTemplate}
-                    className="rounded-xl font-bold h-9 text-sm gap-2 text-white border-white/20 hover:bg-white/20 transition-all"
-                    style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}
-                  >
+                  <Button onClick={handleDownloadTemplate} className="rounded-xl font-bold h-9 text-sm gap-2 text-white border-white/20 hover:bg-white/20 transition-all" style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}>
                     <Download className="h-4 w-4" /> Template
                   </Button>
-                  <Button
-                    onClick={() => setImportOpen(true)}
-                    className="rounded-xl font-bold h-9 text-sm gap-2 text-white border-white/20 hover:bg-white/20 transition-all"
-                    style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}
-                  >
+                  <Button onClick={() => setImportOpen(true)} className="rounded-xl font-bold h-9 text-sm gap-2 text-white border-white/20 hover:bg-white/20 transition-all" style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}>
                     <Upload className="h-4 w-4" /> Import
                   </Button>
-                  <Button
-                    onClick={handleAddNew}
-                    className="rounded-xl font-bold h-9 text-sm gap-2 text-white shadow-lg hover:scale-105 transition-all"
-                    style={{ background: COLORS.emeraldGreen }}
-                  >
+                  <Button onClick={handleAddNew} className="rounded-xl font-bold h-9 text-sm gap-2 text-white shadow-lg hover:scale-105 transition-all" style={{ background: COLORS.emeraldGreen }}>
                     <Plus className="h-4 w-4" /> Add Credential
                   </Button>
                 </>
@@ -1672,25 +1622,15 @@ export default function PasswordRepository() {
         </div>
       </motion.div>
 
-      {/* ── Admin Stats Row ──────────────────────────────────────────────────── */}
+      {/* Stats row */}
       {isAdmin && stats.by_portal_type && (
         <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
           {Object.entries(stats.by_portal_type).slice(0, 6).map(([type, count]) => {
             const meta = PORTAL_META[type] || PORTAL_META.OTHER;
             return (
-              <motion.div
-                key={type}
-                whileHover={{ y: -2, transition: springMed }}
-                onClick={() => setFilterType(filterType === type ? 'ALL' : type)}
-                className={`rounded-xl border p-3 cursor-pointer transition-all ${
-                  filterType === type
-                    ? 'shadow-md'
-                    : isDark
-                      ? 'bg-slate-800 border-slate-700 hover:border-slate-600'
-                      : 'bg-white border-slate-200 hover:border-slate-300'
-                }`}
-                style={filterType === type ? { background: meta.bg, border: `1.5px solid ${meta.color}40` } : {}}
-              >
+              <motion.div key={type} whileHover={{ y: -2, transition: springMed }} onClick={() => setFilterType(filterType === type ? 'ALL' : type)}
+                className={`rounded-xl border p-3 cursor-pointer transition-all ${filterType === type ? 'shadow-md' : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'}`}
+                style={filterType === type ? { background: meta.bg, border: `1.5px solid ${meta.color}40` } : {}}>
                 <div className="text-lg mb-1">{meta.icon}</div>
                 <p className="text-lg font-black" style={{ color: meta.color }}>{count}</p>
                 <p className={`text-[10px] font-semibold ${isDark && filterType !== type ? 'text-slate-400' : 'text-slate-500'}`}>{meta.label}</p>
@@ -1700,122 +1640,75 @@ export default function PasswordRepository() {
         </motion.div>
       )}
 
-      {/* ── Search + Filters + View Toggle ───────────────────────────────────── */}
-      <motion.div
-        variants={itemVariants}
-        className={`flex flex-col sm:flex-row gap-3 p-4 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
-      >
-        {/* Search */}
+      {/* Search + Filters */}
+      <motion.div variants={itemVariants} className={`flex flex-col sm:flex-row gap-3 p-4 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input
-            className={`pl-10 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
-            placeholder="Search portal, username, client, holder name, PAN…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
+          <Input className={`pl-10 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`} placeholder="Search portal, username, client, holder name, PAN…" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
 
         {clientsInResults.length > 0 && (
           <Select value={filterClient} onValueChange={setFilterClient}>
             <SelectTrigger className={`w-full sm:w-44 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
-              <Building2 className="h-3.5 w-3.5 mr-1.5 text-slate-400" />
-              <SelectValue placeholder="All Clients" />
+              <Building2 className="h-3.5 w-3.5 mr-1.5 text-slate-400" /><SelectValue placeholder="All Clients" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">All Clients</SelectItem>
-              {clientsInResults.map(c => (
-                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-              ))}
+              {clientsInResults.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
             </SelectContent>
           </Select>
         )}
 
         <Select value={filterHolder} onValueChange={setFilterHolder}>
           <SelectTrigger className={`w-full sm:w-40 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
-            <Users className="h-3.5 w-3.5 mr-1.5 text-slate-400" />
-            <SelectValue placeholder="Holder Type" />
+            <Users className="h-3.5 w-3.5 mr-1.5 text-slate-400" /><SelectValue placeholder="Holder Type" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="ALL">All Holders</SelectItem>
-            {HOLDER_TYPES.map(h => (
-              <SelectItem key={h} value={h}>{HOLDER_META[h]?.icon} {HOLDER_META[h]?.label}</SelectItem>
-            ))}
+            {HOLDER_TYPES.map(h => <SelectItem key={h} value={h}>{HOLDER_META[h]?.icon} {HOLDER_META[h]?.label}</SelectItem>)}
           </SelectContent>
         </Select>
 
         <Select value={filterDept} onValueChange={setFilterDept}>
           <SelectTrigger className={`w-full sm:w-40 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
-            <Filter className="h-3.5 w-3.5 mr-1.5 text-slate-400" />
-            <SelectValue placeholder="Department" />
+            <Filter className="h-3.5 w-3.5 mr-1.5 text-slate-400" /><SelectValue placeholder="Department" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="ALL">All Departments</SelectItem>
-            {DEPARTMENTS.map(d => (
-              <SelectItem key={d} value={d}>{d} {deptCounts[d] ? `(${deptCounts[d]})` : ''}</SelectItem>
-            ))}
+            {DEPARTMENTS.map(d => <SelectItem key={d} value={d}>{d} {deptCounts[d] ? `(${deptCounts[d]})` : ''}</SelectItem>)}
           </SelectContent>
         </Select>
 
         <Select value={filterType} onValueChange={setFilterType}>
           <SelectTrigger className={`w-full sm:w-44 rounded-xl h-10 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
-            <Tag className="h-3.5 w-3.5 mr-1.5 text-slate-400" />
-            <SelectValue placeholder="Portal Type" />
+            <Tag className="h-3.5 w-3.5 mr-1.5 text-slate-400" /><SelectValue placeholder="Portal Type" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="ALL">All Types</SelectItem>
-            {PORTAL_TYPES.map(t => (
-              <SelectItem key={t} value={t}>{PORTAL_META[t]?.icon} {PORTAL_META[t]?.label}</SelectItem>
-            ))}
+            {PORTAL_TYPES.map(t => <SelectItem key={t} value={t}>{PORTAL_META[t]?.icon} {PORTAL_META[t]?.label}</SelectItem>)}
           </SelectContent>
         </Select>
 
-        {/* ── View Toggle — lives in the filter bar ── */}
         <div className={`flex items-center rounded-xl p-1 gap-0.5 border flex-shrink-0 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-100 border-slate-200'}`}>
-          <button
-            type="button"
-            onClick={() => setViewMode('grid')}
-            className={`p-1.5 rounded-lg transition-all ${
-              viewMode === 'grid'
-                ? isDark ? 'bg-slate-500 text-white shadow-sm' : 'bg-white text-slate-700 shadow-sm'
-                : 'text-slate-400 hover:text-slate-600'
-            }`}
-            title="Grid view"
-          >
+          <button type="button" onClick={() => setViewMode('grid')} className={`p-1.5 rounded-lg transition-all ${viewMode === 'grid' ? isDark ? 'bg-slate-500 text-white shadow-sm' : 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`} title="Grid view">
             <LayoutGrid className="h-4 w-4" />
           </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('list')}
-            className={`p-1.5 rounded-lg transition-all ${
-              viewMode === 'list'
-                ? isDark ? 'bg-slate-500 text-white shadow-sm' : 'bg-white text-slate-700 shadow-sm'
-                : 'text-slate-400 hover:text-slate-600'
-            }`}
-            title="List view"
-          >
+          <button type="button" onClick={() => setViewMode('list')} className={`p-1.5 rounded-lg transition-all ${viewMode === 'list' ? isDark ? 'bg-slate-500 text-white shadow-sm' : 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`} title="List view">
             <List className="h-4 w-4" />
           </button>
         </div>
 
         {hasActiveFilter && (
-          <Button
-            variant="ghost"
-            className="rounded-xl h-10 px-3 text-xs flex-shrink-0"
-            onClick={() => { setFilterDept('ALL'); setFilterType('ALL'); setFilterClient('ALL'); setFilterHolder('ALL'); setSearch(''); }}
-          >
+          <Button variant="ghost" className="rounded-xl h-10 px-3 text-xs flex-shrink-0" onClick={() => { setFilterDept('ALL'); setFilterType('ALL'); setFilterClient('ALL'); setFilterHolder('ALL'); setSearch(''); }}>
             <X className="h-3.5 w-3.5 mr-1" /> Clear
           </Button>
         )}
       </motion.div>
 
-      {/* ── Results ──────────────────────────────────────────────────────────── */}
+      {/* Results */}
       {isLoading ? (
         <div className="flex items-center justify-center py-20">
-          <div
-            className="h-8 w-8 border-2 border-t-transparent rounded-full animate-spin"
-            style={{ borderColor: COLORS.mediumBlue, borderTopColor: 'transparent' }}
-          />
+          <div className="h-8 w-8 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: COLORS.mediumBlue, borderTopColor: 'transparent' }} />
         </div>
       ) : isError ? (
         <div className={`text-center py-16 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -1824,47 +1717,25 @@ export default function PasswordRepository() {
           <p className="text-sm text-slate-400 mt-1">Check your network or contact the administrator.</p>
         </div>
       ) : entries.length === 0 ? (
-        <motion.div
-          variants={itemVariants}
-          className={`text-center py-20 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
-        >
+        <motion.div variants={itemVariants} className={`text-center py-20 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <KeyRound className="h-12 w-12 text-slate-300 mx-auto mb-3" />
           <p className={`font-semibold text-lg ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>No credentials found</p>
-          <p className="text-sm text-slate-400 mt-1 mb-4">
-            {hasActiveFilter ? 'Try adjusting your filters.' : 'Start by adding your first portal credential.'}
-          </p>
+          <p className="text-sm text-slate-400 mt-1 mb-4">{hasActiveFilter ? 'Try adjusting your filters.' : 'Start by adding your first portal credential.'}</p>
           {canEdit && (
-            <Button
-              onClick={handleAddNew}
-              className="rounded-xl font-bold text-white"
-              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
-            >
+            <Button onClick={handleAddNew} className="rounded-xl font-bold text-white" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
               <Plus className="h-4 w-4 mr-1.5" /> Add First Credential
             </Button>
           )}
         </motion.div>
       ) : viewMode === 'grid' ? (
-        <motion.div
-          variants={containerVariants}
-          className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4"
-        >
+        <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
           <AnimatePresence>
             {entries.map(entry => (
-              <EntryCard
-                key={entry.id}
-                entry={entry}
-                canEdit={canEdit}
-                isAdmin={isAdmin}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-                onShare={handleShare}
-                isDark={isDark}
-              />
+              <EntryCard key={entry.id} entry={entry} canEdit={canEdit} isAdmin={isAdmin} onEdit={handleEdit} onDelete={handleDelete} onShare={handleShare} isDark={isDark} />
             ))}
           </AnimatePresence>
         </motion.div>
       ) : (
-        /* List View */
         <motion.div variants={itemVariants} className={`rounded-2xl border overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -1882,16 +1753,7 @@ export default function PasswordRepository() {
               <motion.tbody variants={containerVariants}>
                 <AnimatePresence>
                   {entries.map(entry => (
-                    <EntryRow
-                      key={entry.id}
-                      entry={entry}
-                      canEdit={canEdit}
-                      isAdmin={isAdmin}
-                      onEdit={handleEdit}
-                      onDelete={handleDelete}
-                      onShare={handleShare}
-                      isDark={isDark}
-                    />
+                    <EntryRow key={entry.id} entry={entry} canEdit={canEdit} isAdmin={isAdmin} onEdit={handleEdit} onDelete={handleDelete} onShare={handleShare} isDark={isDark} />
                   ))}
                 </AnimatePresence>
               </motion.tbody>
@@ -1903,59 +1765,27 @@ export default function PasswordRepository() {
         </motion.div>
       )}
 
-      {/* ── Modals ───────────────────────────────────────────────────────────── */}
-      <EntryModal
-        open={modalOpen}
-        onClose={() => { setModalOpen(false); setEditEntry(null); }}
-        existing={editEntry}
-        isDark={isDark}
-        onSave={handleSave}
-        loading={saving}
-        clients={clients}
-      />
+      {/* Modals */}
+      <EntryModal open={modalOpen} onClose={() => { setModalOpen(false); setEditEntry(null); }} existing={editEntry} isDark={isDark} onSave={handleSave} loading={saving} clients={clients} />
 
-      <BulkImportModal
-        open={importOpen}
-        onClose={() => setImportOpen(false)}
-        isDark={isDark}
-        onSuccess={() => setImportOpen(false)}
-      />
+      <BulkImportModal open={importOpen} onClose={() => setImportOpen(false)} isDark={isDark} onSuccess={() => setImportOpen(false)} />
 
-      <SheetLinksModal
-        open={sheetsOpen}
-        onClose={() => setSheetsOpen(false)}
-        isDark={isDark}
-        isAdmin={isAdmin}
-      />
+      <SheetLinksModal open={sheetsOpen} onClose={() => setSheetsOpen(false)} isDark={isDark} isAdmin={isAdmin} />
 
-      <WhatsAppShareModal
-        open={!!shareTarget}
-        onClose={() => setShareTarget(null)}
-        entry={shareTarget}
-        isDark={isDark}
-      />
+      <WhatsAppShareModal open={!!shareTarget} onClose={() => setShareTarget(null)} entry={shareTarget} isDark={isDark} />
 
-      {/* ── Delete Confirm Dialog ─────────────────────────────────────────────── */}
+      {/* Delete Confirm */}
       <AnimatePresence>
         {deleteTarget && (
           <Dialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
-            {/* [&>button]:hidden suppresses shadcn's auto close button */}
             <DialogContent className={`max-w-sm rounded-3xl [&>button]:hidden ${isDark ? 'bg-slate-800 border-slate-700' : ''}`}>
               <DialogHeader>
-                <DialogTitle className="flex items-center gap-2 text-red-600">
-                  <Trash2 className="h-5 w-5" /> Delete Credential
-                </DialogTitle>
-                <DialogDescription>
-                  Permanently delete <b>{deleteTarget?.portal_name}</b>? This cannot be undone.
-                </DialogDescription>
+                <DialogTitle className="flex items-center gap-2 text-red-600"><Trash2 className="h-5 w-5" /> Delete Credential</DialogTitle>
+                <DialogDescription>Permanently delete <b>{deleteTarget?.portal_name}</b>? This cannot be undone.</DialogDescription>
               </DialogHeader>
               <DialogFooter className="gap-3 pt-4">
                 <Button variant="ghost" className="rounded-xl" onClick={() => setDeleteTarget(null)}>Cancel</Button>
-                <Button
-                  className="rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold"
-                  disabled={deleteMutation.isPending}
-                  onClick={() => deleteMutation.mutate(deleteTarget.id)}
-                >
+                <Button className="rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate(deleteTarget.id)}>
                   {deleteMutation.isPending ? 'Deleting…' : 'Yes, Delete'}
                 </Button>
               </DialogFooter>
@@ -1963,7 +1793,6 @@ export default function PasswordRepository() {
           </Dialog>
         )}
       </AnimatePresence>
-
     </motion.div>
   );
 }
