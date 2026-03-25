@@ -293,18 +293,14 @@ async def _fetch_sheet_as_csv(sheet_id: str, gid: Optional[str] = None) -> Optio
 
 async def _get_all_sheet_tabs(sheet_id: str) -> List[dict]:
     """Get list of all tabs in a Google Sheet using the sheets API export trick."""
-    # We fetch the sheet metadata via the HTML page (no API key needed for public sheets)
     try:
         url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(url, follow_redirects=True)
             html = resp.text
-        # Parse sheet tab names and gids from the HTML
         tabs = []
-        # Match pattern: "gid":123456,"name":"Sheet1"
         matches = re.findall(r'"gid"\s*:\s*"?(\d+)"?\s*,\s*"name"\s*:\s*"([^"]+)"', html)
         if not matches:
-            # Try alternative pattern
             matches = re.findall(r'name="([^"]+)"[^>]*data-sheet-id="(\d+)"', html)
         for gid, name in matches:
             tabs.append({"gid": gid, "name": name})
@@ -378,7 +374,11 @@ async def add_sheet_link(
         "created_at":  now,
         "updated_at":  now,
     }
-    await db.password_sheet_links.insert_one(doc)
+    try:
+        await db.password_sheet_links.insert_one(doc)
+    except Exception as e:
+        logger.error(f"Failed to insert sheet link: {e}")
+        raise HTTPException(500, f"Database error while saving sheet link: {str(e)}")
     doc.pop("_id", None)
     return doc
 
@@ -446,7 +446,6 @@ async def preview_sheet_data(
     gid_from_url = _extract_gid(link.get("sheet_url", ""))
 
     if sheet_type in ("ROC", "MCA") and tabs:
-        # Fetch ALL tabs and merge
         all_dfs = []
         for tab in tabs:
             df = await _fetch_sheet_as_csv(sheet_id, tab["gid"])
@@ -466,7 +465,6 @@ async def preview_sheet_data(
             "preview": preview,
         }
     elif sheet_type == "GST" and tabs:
-        # Use last tab (most recent period)
         last_tab = tabs[-1]
         df = await _fetch_sheet_as_csv(sheet_id, last_tab["gid"])
         if df is None or df.empty:
@@ -481,7 +479,6 @@ async def preview_sheet_data(
             "preview": preview,
         }
     else:
-        # Single tab — use gid from URL or default
         df = await _fetch_sheet_as_csv(sheet_id, gid_from_url)
         if df is None or df.empty:
             raise HTTPException(502, "Could not fetch sheet data. Ensure the sheet is publicly shared (Anyone with link can view).")
