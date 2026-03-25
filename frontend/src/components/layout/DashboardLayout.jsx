@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useActivityTracker } from '@/hooks/useActivityTracker';
@@ -13,7 +13,6 @@ import NotificationBell from './NotificationBell';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 
-/* ── Brand ───────────────────────────────────────────────────────────── */
 const COLORS = {
   deepBlue:     '#0D3B66',
   mediumBlue:   '#1F6FB2',
@@ -25,7 +24,6 @@ const COLORS = {
 const SIDEBAR_EXPANDED  = 280;
 const SIDEBAR_COLLAPSED = 80;
 
-/* ── Navigation tree ─────────────────────────────────────────────────── */
 const NAV_GROUPS = [
   {
     id: 'core',
@@ -42,10 +40,10 @@ const NAV_GROUPS = [
     id: 'records',
     dividerLabel: 'Records',
     items: [
-      { path: '/dsc',       icon: FileText,  label: 'DSC Register',      permission: 'can_view_all_dsc'    },
-      { path: '/documents', icon: FileText,  label: 'Document Register', permission: 'can_view_documents'  },
+      { path: '/dsc',       icon: FileText,  label: 'DSC Register',      permission: 'can_view_all_dsc'     },
+      { path: '/documents', icon: FileText,  label: 'Document Register', permission: 'can_view_documents'   },
       { path: '/clients',   icon: Users,     label: 'Clients',           permission: 'can_view_all_clients' },
-      { path: '/passwords', icon: KeyRound,  label: 'Password Vault',    permission: 'can_view_passwords'  },
+      { path: '/passwords', icon: KeyRound,  label: 'Password Vault',    permission: 'can_view_passwords'   },
     ],
   },
   {
@@ -76,42 +74,22 @@ const NAV_GROUPS = [
   },
 ];
 
-/* ── Spring physics ──────────────────────────────────────────────────── */
 const springSnap = { type: 'spring', stiffness: 500, damping: 28 };
 const springMed  = { type: 'spring', stiffness: 400, damping: 24 };
 const springSoft = { type: 'spring', stiffness: 300, damping: 20 };
 
-/* ── Page transition variants
-     enter: slide up from +18px → 0, fade in
-     exit:  slide up to -8px, fade out (shorter — feels snappier)
-     mode="wait" in AnimatePresence ensures old page fully exits
-     before new page enters — no overlap, no freeze.               ── */
 const PAGE_VARIANTS = {
-  initial:  {
-    opacity: 0,
-    y: 18,
-  },
-  animate:  {
-    opacity: 1,
-    y: 0,
-    transition: {
-      type: 'spring',
-      stiffness: 320,
-      damping: 28,
-      mass: 0.9,
-    },
+  initial: { opacity: 0, y: 18 },
+  animate: {
+    opacity: 1, y: 0,
+    transition: { type: 'spring', stiffness: 320, damping: 28, mass: 0.9 },
   },
   exit: {
-    opacity: 0,
-    y: -8,
-    transition: {
-      duration: 0.16,
-      ease: 'easeIn',
-    },
+    opacity: 0, y: -8,
+    transition: { duration: 0.16, ease: 'easeIn' },
   },
 };
 
-/* ── Component ───────────────────────────────────────────────────────── */
 const DashboardLayout = ({ children }) => {
   const { user, logout, hasPermission, loading } = useAuth();
   const navigate = useNavigate();
@@ -123,7 +101,7 @@ const DashboardLayout = ({ children }) => {
     return localStorage.getItem('sidebarCollapsed') === 'true';
   });
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [isDark,       setIsDark]       = useState(() => {
+  const [isDark, setIsDark] = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('theme') === 'dark';
   });
@@ -131,6 +109,34 @@ const DashboardLayout = ({ children }) => {
     () => typeof window !== 'undefined' && window.innerWidth >= 1024
   );
   const [hasUnread, setHasUnread] = useState(false);
+
+  /* ── FIX 1 & 2: Refs for scroll control ─────────────────────────────
+     sidebarNavRef  → the scrollable nav div inside the sidebar
+     mainRef        → the main content area
+     activeItemRef  → set on whichever NavItem is currently active      */
+  const sidebarNavRef  = useRef(null);
+  const mainRef        = useRef(null);
+  const activeItemRef  = useRef(null);
+
+  /* ── FIX 1: Scroll main content to top on every route change ──────── */
+  useEffect(() => {
+    if (mainRef.current) {
+      mainRef.current.scrollTo({ top: 0, behavior: 'instant' });
+    }
+  }, [location.pathname]);
+
+  /* ── FIX 2: Scroll active nav item into view without moving sidebar
+     scrollbar to top. Uses scrollIntoView with block:"nearest" so it
+     only scrolls the minimum needed — if item is already visible,
+     nothing moves at all.                                               */
+  useEffect(() => {
+    if (activeItemRef.current) {
+      activeItemRef.current.scrollIntoView({
+        block: 'nearest',
+        behavior: 'smooth',
+      });
+    }
+  }, [location.pathname]);
 
   useEffect(() => {
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
@@ -155,6 +161,9 @@ const DashboardLayout = ({ children }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, [handleResize]);
 
+  /* ── FIX 3: Open sidebar on desktop mount — use visibility trick
+     so sidebar is always "present" on desktop and never re-mounts,
+     preventing the scroll-to-top flash on nav click.                   */
   useEffect(() => {
     if (window.innerWidth >= 1024) setSidebarOpen(true);
   }, []);
@@ -172,7 +181,6 @@ const DashboardLayout = ({ children }) => {
     return () => document.removeEventListener('mousedown', handle);
   }, [userMenuOpen]);
 
-  /* Unread notifications */
   useEffect(() => {
     const fetchUnread = async () => {
       try {
@@ -197,7 +205,7 @@ const DashboardLayout = ({ children }) => {
   };
 
   const allNavItems     = NAV_GROUPS.flatMap(g => g.items);
-  const visibleNavItems = allNavItems.filter(item => !item.permission || hasPermission(item.permission));
+  const visibleNavItems = allNavItems.filter(i => !i.permission || hasPermission(i.permission));
   const activeLabel     = visibleNavItems.find(i => i.path === location.pathname)?.label || 'Dashboard';
 
   const sidebarPx = collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED;
@@ -210,7 +218,9 @@ const DashboardLayout = ({ children }) => {
     const Icon = item.icon;
 
     return (
+      /* ── FIX 2: attach ref to active item's wrapper div ── */
       <motion.div
+        ref={isActive ? activeItemRef : null}
         whileHover={{ x: collapsed ? 0 : 3 }}
         whileTap={{ scale: 0.97 }}
         transition={springSnap}
@@ -236,7 +246,6 @@ const DashboardLayout = ({ children }) => {
               style={{ background: 'rgba(255,255,255,0.6)' }}
             />
           )}
-
           <Icon className={`flex-shrink-0 transition-colors
             ${collapsed ? 'h-5 w-5' : 'h-4 w-4'}
             ${isActive
@@ -244,17 +253,14 @@ const DashboardLayout = ({ children }) => {
               : 'text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300'
             }`}
           />
-
           {!collapsed && (
             <span className="font-medium text-sm whitespace-nowrap tracking-tight">
               {item.label}
             </span>
           )}
-
           {isActive && collapsed && (
             <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-white/70" />
           )}
-
           {collapsed && (
             <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-800 dark:bg-slate-700 text-white text-xs font-medium rounded-lg whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 translate-x-1 group-hover:translate-x-0 transition-all duration-200 z-[100] shadow-lg">
               {item.label}
@@ -294,9 +300,20 @@ const DashboardLayout = ({ children }) => {
         )}
       </AnimatePresence>
 
-      {/* ── Sidebar ── */}
+      {/* ── Sidebar ──────────────────────────────────────────────────────
+           FIX 3: On desktop, sidebar is ALWAYS visible (no transform).
+           We use a CSS class toggle instead of inline transform so the
+           sidebar never re-mounts or resets its scroll position.
+           On mobile, transform slides it in/out as before.             ── */}
       <aside
-        className="fixed top-0 left-0 h-full z-50 flex flex-col transition-all duration-300 ease-in-out lg:translate-x-0"
+        className={`
+          fixed top-0 left-0 h-full z-50 flex flex-col
+          transition-all duration-300 ease-in-out
+          ${isDesktop
+            ? 'translate-x-0'                                   /* always visible on desktop */
+            : sidebarOpen ? 'translate-x-0' : '-translate-x-full' /* slide on mobile */
+          }
+        `}
         style={{
           width: sidebarPx,
           background: isDark ? '#1e293b' : '#ffffff',
@@ -304,7 +321,6 @@ const DashboardLayout = ({ children }) => {
           boxShadow: isDark
             ? '10px 0 30px rgba(0,0,0,0.2)'
             : '10px 0 30px rgba(0,0,0,0.03)',
-          transform: sidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
         }}
       >
         {/* Logo */}
@@ -348,8 +364,13 @@ const DashboardLayout = ({ children }) => {
           </motion.div>
         </div>
 
-        {/* Nav */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar py-4">
+        {/* ── FIX 1 & 2: Nav scroll container with ref ─────────────────
+             overflow-y: auto is correct — we just prevent it from
+             resetting via the scrollIntoView + no-remount approach.   */}
+        <div
+          ref={sidebarNavRef}
+          className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar py-4"
+        >
           {NAV_GROUPS.map((group) => (
             <div key={group.id} className="mb-2">
               {group.dividerLabel && <NavDivider label={group.dividerLabel} />}
@@ -389,13 +410,11 @@ const DashboardLayout = ({ children }) => {
         <div className="flex-1 flex items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-4">
             <button
-              onClick={() => setSidebarOpen(true)}
+              onClick={() => setSidebarOpen(prev => !prev)}
               className="lg:hidden p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500"
             >
               <Menu className="h-5 w-5" />
             </button>
-
-            {/* Page title — slides up on route change */}
             <AnimatePresence mode="wait">
               <motion.h1
                 key={location.pathname}
@@ -417,10 +436,7 @@ const DashboardLayout = ({ children }) => {
             <motion.button
               onClick={() => setIsDark(!isDark)}
               className={`relative w-14 h-8 rounded-full p-1 flex items-center border transition-colors
-                ${isDark
-                  ? 'bg-slate-800 border-slate-600'
-                  : 'bg-slate-100 border-slate-200'
-                }`}
+                ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-slate-100 border-slate-200'}`}
               whileTap={{ scale: 0.93 }}
               transition={springMed}
               aria-label="Toggle theme"
@@ -557,15 +573,14 @@ const DashboardLayout = ({ children }) => {
         </div>
       </header>
 
-      {/* ── Main content ─────────────────────────────────────────────────
-           Single AnimatePresence keyed on pathname.
-           mode="wait" → old page exits fully before new page enters.
-           No skeleton, no double-animation, no freeze.             ── */}
+      {/* ── Main content ──────────────────────────────────────────────────
+           FIX 1: ref={mainRef} + scrollTo(0,0) on route change keeps
+           new pages starting at the top, independent of old page pos.  */}
       <div
         className="transition-all duration-300 ease-in-out min-h-screen flex flex-col"
         style={{ marginLeft: offsetPx, paddingTop: 56 }}
       >
-        <main className="flex-1 p-5 md:p-7">
+        <main ref={mainRef} className="flex-1 p-5 md:p-7 overflow-y-auto">
           <div className="max-w-[1400px] mx-auto">
             <AnimatePresence mode="wait" initial={false}>
               <motion.div
