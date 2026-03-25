@@ -17,7 +17,7 @@ import {
   Hash, ArrowRight, CheckCircle2, AlertCircle, HelpCircle, Zap,
   SortAsc, SortDesc, ChevronLeft, ChevronRight, ChevronUp,
   ExternalLink as AutoFillIcon, Smartphone, Store, ArrowUpDown,
-  Calendar, Star, BadgeCheck, Trash,
+  Calendar, Star, BadgeCheck, Trash, Mail, MapPin, Briefcase,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -49,21 +49,21 @@ const COLORS = {
 const springMed  = { type: 'spring', stiffness: 340, damping: 24 };
 const springFast = { type: 'spring', stiffness: 500, damping: 30 };
 
-// ── Portal type meta ──────────────────────────────────────────────────────────
+// ── Portal type meta with color language ──────────────────────────────────────
 const PORTAL_META = {
-  MCA:        { label: 'MCA/ROC',    color: '#1E3A8A', bg: '#EFF6FF', icon: '🏛️', fullName: 'Ministry of Corporate Affairs / ROC' },
-  ROC:        { label: 'MCA/ROC',    color: '#1E3A8A', bg: '#EFF6FF', icon: '🏛️', fullName: 'Registrar of Companies / MCA' },
-  DGFT:       { label: 'DGFT',       color: '#065F46', bg: '#ECFDF5', icon: '🌐', fullName: 'Directorate General of Foreign Trade' },
-  TRADEMARK:  { label: 'Trademark',  color: '#0F766E', bg: '#F0FDFA', icon: '™️',  fullName: 'Trademark / IP India' },
-  GST:        { label: 'GST',        color: '#7C3AED', bg: '#F5F3FF', icon: '📊', fullName: 'GST Portal' },
-  INCOME_TAX: { label: 'Income Tax', color: '#DC2626', bg: '#FEF2F2', icon: '💰', fullName: 'Income Tax India' },
-  TDS:        { label: 'TDS',        color: '#B45309', bg: '#FFFBEB', icon: '🧾', fullName: 'TDS / TRACES' },
-  TRACES:     { label: 'TRACES',     color: '#B45309', bg: '#FFFBEB', icon: '🔍', fullName: 'TRACES Portal' },
-  EPFO:       { label: 'EPFO',       color: '#1D4ED8', bg: '#EFF6FF', icon: '👷', fullName: 'EPFO / PF Portal' },
-  ESIC:       { label: 'ESIC',       color: '#0369A1', bg: '#F0F9FF', icon: '🏥', fullName: 'ESIC Portal' },
-  MSME:       { label: 'MSME',       color: '#92400E', bg: '#FEF3C7', icon: '🏭', fullName: 'MSME Samadhaan' },
-  RERA:       { label: 'RERA',       color: '#4B5563', bg: '#F9FAFB', icon: '🏗️', fullName: 'RERA Portal' },
-  OTHER:      { label: 'Other',      color: '#6B7280', bg: '#F9FAFB', icon: '🔗', fullName: 'Custom / Other Portal' },
+  MCA:        { label: 'MCA/ROC',    color: '#1E3A8A', bg: '#EFF6FF', borderColor: '#3B82F6', accentBg: '#DBEAFE', icon: '🏛️', fullName: 'Ministry of Corporate Affairs / ROC' },
+  ROC:        { label: 'MCA/ROC',    color: '#1E3A8A', bg: '#EFF6FF', borderColor: '#3B82F6', accentBg: '#DBEAFE', icon: '🏛️', fullName: 'Registrar of Companies / MCA' },
+  DGFT:       { label: 'DGFT',       color: '#065F46', bg: '#ECFDF5', borderColor: '#10B981', accentBg: '#D1FAE5', icon: '🌐', fullName: 'Directorate General of Foreign Trade' },
+  TRADEMARK:  { label: 'Trademark',  color: '#0F766E', bg: '#F0FDFA', borderColor: '#14B8A6', accentBg: '#CCFBF1', icon: '™️',  fullName: 'Trademark / IP India' },
+  GST:        { label: 'GST',        color: '#7C3AED', bg: '#F5F3FF', borderColor: '#A78BFA', accentBg: '#EDE9FE', icon: '📊', fullName: 'GST Portal' },
+  INCOME_TAX: { label: 'Income Tax', color: '#DC2626', bg: '#FEF2F2', borderColor: '#EF4444', accentBg: '#FEE2E2', icon: '💰', fullName: 'Income Tax India' },
+  TDS:        { label: 'TDS',        color: '#B45309', bg: '#FFFBEB', borderColor: '#F59E0B', accentBg: '#FEF3C7', icon: '🧾', fullName: 'TDS / TRACES' },
+  TRACES:     { label: 'TRACES',     color: '#B45309', bg: '#FFFBEB', borderColor: '#F59E0B', accentBg: '#FEF3C7', icon: '🔍', fullName: 'TRACES Portal' },
+  EPFO:       { label: 'EPFO',       color: '#1D4ED8', bg: '#EFF6FF', borderColor: '#3B82F6', accentBg: '#DBEAFE', icon: '👷', fullName: 'EPFO / PF Portal' },
+  ESIC:       { label: 'ESIC',       color: '#0369A1', bg: '#F0F9FF', borderColor: '#0EA5E9', accentBg: '#CFFAFE', icon: '🏥', fullName: 'ESIC Portal' },
+  MSME:       { label: 'MSME',       color: '#92400E', bg: '#FEF3C7', borderColor: '#F59E0B', accentBg: '#FCD34D', icon: '🏭', fullName: 'MSME Samadhaan' },
+  RERA:       { label: 'RERA',       color: '#4B5563', bg: '#F9FAFB', borderColor: '#6B7280', accentBg: '#F3F4F6', icon: '🏗️', fullName: 'RERA Portal' },
+  OTHER:      { label: 'Other',      color: '#6B7280', bg: '#F9FAFB', borderColor: '#9CA3AF', accentBg: '#F3F4F6', icon: '🔗', fullName: 'Custom / Other Portal' },
 };
 
 const PORTAL_TYPES = Object.keys(PORTAL_META);
@@ -138,7 +138,7 @@ function PortalBadge({ type, size = 'sm' }) {
   return (
     <span
       className={`inline-flex items-center gap-1 font-bold rounded-full ${size === 'lg' ? 'px-3 py-1 text-xs' : 'px-2 py-0.5 text-[10px]'}`}
-      style={{ background: meta.bg, color: meta.color, border: `1px solid ${meta.color}30` }}
+      style={{ background: meta.bg, color: meta.color, border: `1px solid ${meta.borderColor}` }}
     >
       <span>{meta.icon}</span>{meta.label}
     </span>
@@ -239,59 +239,510 @@ function RevealPassword({ entryId, isDark }) {
   );
 }
 
-// ── Auto-fill and open portal ─────────────────────────────────────────────────
-function handleAutoFillAndOpen(entry) {
-  if (!entry.url) {
-    toast.error('No URL configured for this entry');
-    return;
-  }
-  window.open(entry.url, '_blank');
+// ── Detail Modal ──────────────────────────────────────────────────────────────
+function DetailModal({ open, onClose, entry, isDark }) {
+  if (!entry) return null;
+
+  const meta = PORTAL_META[entry.portal_type] || PORTAL_META.OTHER;
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className={`max-w-2xl rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+        <ModalHeader
+          icon={<span className="text-2xl">{meta.icon}</span>}
+          title={entry.portal_name}
+          subtitle={meta.fullName}
+          gradient={`linear-gradient(135deg, ${meta.color}, ${meta.borderColor})`}
+          onClose={onClose}
+        />
+        <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+          {/* Portal Information */}
+          <div className="space-y-3">
+            <h3 className={`font-bold text-sm uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Portal Information</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className={`text-xs font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Portal Type</p>
+                <p className={`text-sm mt-1 ${isDark ? 'text-slate-200' : 'text-slate-900'}`}>{entry.portal_type}</p>
+              </div>
+              <div>
+                <p className={`text-xs font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Department</p>
+                <p className={`text-sm mt-1 ${isDark ? 'text-slate-200' : 'text-slate-900'}`}>{entry.department}</p>
+              </div>
+              {entry.url && (
+                <div className="col-span-2">
+                  <p className={`text-xs font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Website URL</p>
+                  <a href={entry.url} target="_blank" rel="noopener noreferrer" className="text-sm mt-1 text-blue-500 hover:text-blue-600 underline truncate flex items-center gap-1">
+                    {entry.url} <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Credentials */}
+          <div className={`p-4 rounded-xl border ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+            <h3 className={`font-bold text-sm uppercase tracking-wider mb-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Login Credentials</h3>
+            <div className="space-y-3">
+              {entry.username && (
+                <div>
+                  <p className={`text-xs font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Username / Email</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className={`font-mono text-sm ${isDark ? 'text-slate-200' : 'text-slate-900'}`}>{entry.username}</span>
+                    <button type="button" onClick={() => navigator.clipboard.writeText(entry.username).then(() => toast.success('Username copied'))} className={`p-1 rounded ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-200'}`}>
+                      <Copy className="h-3 w-3 text-slate-400" />
+                    </button>
+                  </div>
+                </div>
+              )}
+              {entry.has_password && (
+                <div>
+                  <p className={`text-xs font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Password</p>
+                  <div className="mt-1"><RevealPassword entryId={entry.id} isDark={isDark} /></div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Holder Information */}
+          {(entry.holder_name || entry.holder_pan || entry.holder_din) && (
+            <div className="space-y-3">
+              <h3 className={`font-bold text-sm uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Holder Information</h3>
+              <div className="grid grid-cols-2 gap-4">
+                {entry.holder_type && (
+                  <div>
+                    <p className={`text-xs font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Holder Type</p>
+                    <p className={`text-sm mt-1 ${isDark ? 'text-slate-200' : 'text-slate-900'}`}>{entry.holder_type}</p>
+                  </div>
+                )}
+                {entry.holder_name && (
+                  <div>
+                    <p className={`text-xs font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Holder Name</p>
+                    <p className={`text-sm mt-1 ${isDark ? 'text-slate-200' : 'text-slate-900'}`}>{entry.holder_name}</p>
+                  </div>
+                )}
+                {entry.holder_pan && (
+                  <div>
+                    <p className={`text-xs font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>PAN</p>
+                    <p className={`text-sm mt-1 font-mono ${isDark ? 'text-slate-200' : 'text-slate-900'}`}>{entry.holder_pan}</p>
+                  </div>
+                )}
+                {entry.holder_din && (
+                  <div>
+                    <p className={`text-xs font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>DIN</p>
+                    <p className={`text-sm mt-1 font-mono ${isDark ? 'text-slate-200' : 'text-slate-900'}`}>{entry.holder_din}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Client Information */}
+          {(entry.client_name || entry.client_id) && (
+            <div className="space-y-3">
+              <h3 className={`font-bold text-sm uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Client Information</h3>
+              <div className="grid grid-cols-2 gap-4">
+                {entry.client_name && (
+                  <div>
+                    <p className={`text-xs font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Client Name</p>
+                    <p className={`text-sm mt-1 ${isDark ? 'text-slate-200' : 'text-slate-900'}`}>{entry.client_name}</p>
+                  </div>
+                )}
+                {entry.client_id && (
+                  <div>
+                    <p className={`text-xs font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Client ID</p>
+                    <p className={`text-sm mt-1 font-mono ${isDark ? 'text-slate-200' : 'text-slate-900'}`}>{entry.client_id}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Contact Information */}
+          {(entry.mobile || entry.trade_name) && (
+            <div className="space-y-3">
+              <h3 className={`font-bold text-sm uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Contact Information</h3>
+              <div className="grid grid-cols-2 gap-4">
+                {entry.mobile && (
+                  <div>
+                    <p className={`text-xs font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Mobile Number</p>
+                    <p className={`text-sm mt-1 font-mono ${isDark ? 'text-slate-200' : 'text-slate-900'}`}>{entry.mobile}</p>
+                  </div>
+                )}
+                {entry.trade_name && (
+                  <div>
+                    <p className={`text-xs font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Trade Name</p>
+                    <p className={`text-sm mt-1 ${isDark ? 'text-slate-200' : 'text-slate-900'}`}>{entry.trade_name}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Notes */}
+          {entry.notes && (
+            <div className="space-y-3">
+              <h3 className={`font-bold text-sm uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Notes</h3>
+              <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{entry.notes}</p>
+            </div>
+          )}
+
+          {/* Tags */}
+          {entry.tags && entry.tags.length > 0 && (
+            <div className="space-y-3">
+              <h3 className={`font-bold text-sm uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Tags</h3>
+              <div className="flex flex-wrap gap-2">
+                {entry.tags.map((tag, idx) => (
+                  <Badge key={idx} variant="secondary" className="rounded-full">{tag}</Badge>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Metadata */}
+          <div className={`p-3 rounded-lg text-xs space-y-1 ${isDark ? 'bg-slate-700/30 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
+            {entry.created_at && <p>Created: {format(new Date(entry.created_at), 'MMM d, yyyy HH:mm')}</p>}
+            {entry.updated_at && <p>Updated: {format(new Date(entry.updated_at), 'MMM d, yyyy HH:mm')}</p>}
+            {entry.last_accessed_at && <p>Last Accessed: {format(new Date(entry.last_accessed_at), 'MMM d, yyyy HH:mm')}</p>}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
-// ── WhatsApp Share Modal ──────────────────────────────────────────────────────
+// ── Edit Modal ────────────────────────────────────────────────────────────────
+function EditModal({ open, onClose, entry, isDark, onSuccess }) {
+  const [formData, setFormData] = useState(entry || {});
+  const [loading, setLoading] = useState(false);
+  const qc = useQueryClient();
+
+  useEffect(() => {
+    setFormData(entry || {});
+  }, [entry, open]);
+
+  const handleChange = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleSubmit = async () => {
+    if (!formData.portal_name || !formData.username) {
+      toast.error('Portal name and username are required');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      if (entry?.id) {
+        await api.put(`/passwords/${entry.id}`, formData);
+        toast.success('Entry updated successfully');
+      } else {
+        await api.post('/passwords', formData);
+        toast.success('Entry created successfully');
+      }
+      qc.invalidateQueries({ queryKey: ['passwords'] });
+      onSuccess?.();
+      onClose();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to save entry');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className={`max-w-2xl rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+        <ModalHeader
+          icon={entry?.id ? <Edit2 className="h-4 w-4 text-white" /> : <Plus className="h-4 w-4 text-white" />}
+          title={entry?.id ? 'Edit Entry' : 'Add New Entry'}
+          subtitle="Update credential details"
+          gradient={`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}
+          onClose={onClose}
+        />
+        <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs font-bold uppercase">Portal Name *</Label>
+              <Input
+                className={`rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+                value={formData.portal_name || ''}
+                onChange={(e) => handleChange('portal_name', e.target.value)}
+                placeholder="e.g., GST Portal"
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-bold uppercase">Portal Type</Label>
+              <Select value={formData.portal_type || 'OTHER'} onValueChange={(v) => handleChange('portal_type', v)}>
+                <SelectTrigger className={`rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}><SelectValue /></SelectTrigger>
+                <SelectContent>{PORTAL_TYPES.map(t => <SelectItem key={t} value={t}>{PORTAL_META[t]?.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div>
+            <Label className="text-xs font-bold uppercase">Portal URL</Label>
+            <Input
+              className={`rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+              value={formData.url || ''}
+              onChange={(e) => handleChange('url', e.target.value)}
+              placeholder="https://..."
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs font-bold uppercase">Username / Email *</Label>
+              <Input
+                className={`rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+                value={formData.username || ''}
+                onChange={(e) => handleChange('username', e.target.value)}
+                placeholder="user@example.com"
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-bold uppercase">Password *</Label>
+              <Input
+                type="password"
+                className={`rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+                value={formData.password_plain || ''}
+                onChange={(e) => handleChange('password_plain', e.target.value)}
+                placeholder="••••••••"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs font-bold uppercase">Holder Type</Label>
+              <Select value={formData.holder_type || 'COMPANY'} onValueChange={(v) => handleChange('holder_type', v)}>
+                <SelectTrigger className={`rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}><SelectValue /></SelectTrigger>
+                <SelectContent>{HOLDER_TYPES.map(t => <SelectItem key={t} value={t}>{HOLDER_META[t]?.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs font-bold uppercase">Holder Name</Label>
+              <Input
+                className={`rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+                value={formData.holder_name || ''}
+                onChange={(e) => handleChange('holder_name', e.target.value)}
+                placeholder="Director name"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs font-bold uppercase">Holder PAN</Label>
+              <Input
+                className={`rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+                value={formData.holder_pan || ''}
+                onChange={(e) => handleChange('holder_pan', e.target.value)}
+                placeholder="ABCDE1234F"
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-bold uppercase">Holder DIN</Label>
+              <Input
+                className={`rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+                value={formData.holder_din || ''}
+                onChange={(e) => handleChange('holder_din', e.target.value)}
+                placeholder="DIN number"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs font-bold uppercase">Mobile Number</Label>
+              <Input
+                className={`rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+                value={formData.mobile || ''}
+                onChange={(e) => handleChange('mobile', e.target.value)}
+                placeholder="+91 9876543210"
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-bold uppercase">Trade Name</Label>
+              <Input
+                className={`rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+                value={formData.trade_name || ''}
+                onChange={(e) => handleChange('trade_name', e.target.value)}
+                placeholder="Business name"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs font-bold uppercase">Client Name</Label>
+              <Input
+                className={`rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+                value={formData.client_name || ''}
+                onChange={(e) => handleChange('client_name', e.target.value)}
+                placeholder="Company name"
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-bold uppercase">Client ID</Label>
+              <Input
+                className={`rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+                value={formData.client_id || ''}
+                onChange={(e) => handleChange('client_id', e.target.value)}
+                placeholder="Client code"
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label className="text-xs font-bold uppercase">Notes</Label>
+            <Textarea
+              className={`rounded-xl mt-1 resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+              rows={3}
+              value={formData.notes || ''}
+              onChange={(e) => handleChange('notes', e.target.value)}
+              placeholder="Additional notes..."
+            />
+          </div>
+
+          <div>
+            <Label className="text-xs font-bold uppercase">Tags (comma-separated)</Label>
+            <Input
+              className={`rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+              value={Array.isArray(formData.tags) ? formData.tags.join(', ') : ''}
+              onChange={(e) => handleChange('tags', e.target.value.split(',').map(t => t.trim()))}
+              placeholder="tag1, tag2, tag3"
+            />
+          </div>
+        </div>
+        <DialogFooter className={`px-6 py-4 flex items-center gap-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          <Button variant="ghost" className="rounded-xl" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={loading} className="rounded-xl font-bold text-white" style={{ background: COLORS.emeraldGreen }}>
+            {loading ? 'Saving...' : 'Save Entry'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Delete Confirmation Modal ─────────────────────────────────────────────────
+function DeleteConfirmModal({ open, onClose, entry, isDark, onConfirm }) {
+  const [loading, setLoading] = useState(false);
+
+  const handleDelete = async () => {
+    setLoading(true);
+    try {
+      await api.delete(`/passwords/${entry.id}`);
+      toast.success('Entry deleted successfully');
+      onConfirm?.();
+      onClose();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to delete entry');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className={`max-w-md rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+        <ModalHeader
+          icon={<Trash2 className="h-4 w-4 text-white" />}
+          title="Delete Entry"
+          subtitle="This action cannot be undone"
+          gradient="linear-gradient(135deg, #DC2626, #EF4444)"
+          onClose={onClose}
+        />
+        <div className="p-6 space-y-4">
+          <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+            Are you sure you want to delete <span className="font-bold">{entry?.portal_name}</span>? This action cannot be undone.
+          </p>
+          <div className={`p-3 rounded-lg ${isDark ? 'bg-red-900/20 border border-red-800/40' : 'bg-red-50 border border-red-200'}`}>
+            <p className={`text-xs font-semibold ${isDark ? 'text-red-300' : 'text-red-700'}`}>
+              ⚠️ This will permanently delete the credential and all associated data.
+            </p>
+          </div>
+        </div>
+        <DialogFooter className={`px-6 py-4 flex items-center gap-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          <Button variant="ghost" className="rounded-xl" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleDelete} disabled={loading} className="rounded-xl font-bold text-white bg-red-500 hover:bg-red-600">
+            {loading ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── WhatsApp Share Modal (Auto-includes credentials) ────────────────────────
 function WhatsAppShareModal({ open, onClose, entry, isDark }) {
   const [recipientType, setRecipientType] = useState('');
   const [customPhone, setCustomPhone] = useState('');
   const [password, setPassword] = useState('');
   const [loadingPw, setLoadingPw] = useState(false);
-  const [includePass, setIncludePass] = useState(false);
   const [customMsg, setCustomMsg] = useState('');
 
   const recipients = useMemo(() => {
     const r = [];
     if (entry?.mobile) r.push({ type: 'entry', label: 'Entry Mobile', name: entry.portal_name, phone: entry.mobile });
-    if (entry?.client_name) r.push({ type: 'client', label: 'Client', name: entry.client_name, phone: '' });
     return r;
   }, [entry]);
 
   const selectedRecipient = useMemo(() => recipients.find(r => r.type === recipientType), [recipients, recipientType]);
 
-  const handleIncludeToggle = async (checked) => {
-    setIncludePass(checked);
-    if (checked && entry?.id) {
+  // Auto-fetch password when modal opens
+  useEffect(() => {
+    if (open && entry?.id) {
       setLoadingPw(true);
-      try {
-        const res = await api.get(`/passwords/${entry.id}/reveal`);
-        setPassword(res.data.password || '');
-      } catch (err) {
-        toast.error('Failed to fetch password');
-        setIncludePass(false);
-      } finally {
-        setLoadingPw(false);
-      }
+      api.get(`/passwords/${entry.id}/reveal`)
+        .then(res => {
+          setPassword(res.data.password || '');
+        })
+        .catch(err => {
+          logger.error('Failed to fetch password:', err);
+          setPassword('');
+        })
+        .finally(() => setLoadingPw(false));
     }
-  };
+  }, [open, entry?.id]);
 
   const buildMessage = useCallback(() => {
     const lines = [];
+    lines.push('🔐 Portal Credentials');
+    lines.push('─'.repeat(30));
+    
     if (entry?.portal_name) lines.push(`Portal: ${entry.portal_name}`);
+    if (entry?.portal_type) lines.push(`Type: ${entry.portal_type}`);
     if (entry?.url) lines.push(`URL: ${entry.url}`);
-    if (entry?.username) lines.push(`Username: ${entry.username}`);
-    if (includePass && password) lines.push(`Password: ${password}`);
-    if (customMsg.trim()) { lines.push('', customMsg.trim()); }
-    lines.push('', '– Sent via Taskosphere');
+    
+    lines.push('');
+    lines.push('👤 Login Details');
+    lines.push('─'.repeat(30));
+    if (entry?.username) lines.push(`ID: ${entry.username}`);
+    if (password) lines.push(`Password: ${password}`);
+    
+    if (entry?.holder_name) {
+      lines.push('');
+      lines.push('👥 Holder Info');
+      lines.push('─'.repeat(30));
+      lines.push(`Name: ${entry.holder_name}`);
+      if (entry?.holder_pan) lines.push(`PAN: ${entry.holder_pan}`);
+      if (entry?.holder_din) lines.push(`DIN: ${entry.holder_din}`);
+    }
+    
+    if (customMsg.trim()) {
+      lines.push('');
+      lines.push('📝 Additional Notes');
+      lines.push('─'.repeat(30));
+      lines.push(customMsg.trim());
+    }
+    
+    lines.push('');
+    lines.push('─'.repeat(30));
+    lines.push('Sent via Taskosphere 📱');
+    
     return lines.join('\n');
-  }, [entry, includePass, password, customMsg]);
+  }, [entry, password, customMsg]);
 
   const handleSend = () => {
     const phone = selectedRecipient?.phone || customPhone;
@@ -305,13 +756,13 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
 
   const handleClose = () => {
     setRecipientType(''); setCustomPhone(''); setPassword('');
-    setLoadingPw(false); setIncludePass(false); setCustomMsg(''); onClose();
+    setLoadingPw(false); setCustomMsg(''); onClose();
   };
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className={`max-w-md rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
-        <ModalHeader icon={<WAIcon className="h-4 w-4 text-white" />} title="Share via WhatsApp" subtitle="Send credentials securely to a contact" gradient="linear-gradient(135deg, #075E54 0%, #25D366 100%)" onClose={handleClose} />
+        <ModalHeader icon={<WAIcon className="h-4 w-4 text-white" />} title="Share via WhatsApp" subtitle="Credentials will be auto-included" gradient="linear-gradient(135deg, #075E54 0%, #25D366 100%)" onClose={handleClose} />
         <div className="p-5 space-y-4">
           <div className="space-y-1.5">
             <Label className="text-xs font-bold uppercase text-slate-500">Recipient</Label>
@@ -324,19 +775,29 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
               <Input className={`rounded-xl h-9 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`} placeholder="Enter phone number (with country code)" value={customPhone} onChange={e => setCustomPhone(e.target.value)} />
             )}
           </div>
-          <div className="flex items-center justify-between">
-            <Label className="text-xs font-bold uppercase text-slate-500">Include Password?</Label>
-            <input type="checkbox" checked={includePass} onChange={e => handleIncludeToggle(e.target.checked)} className="w-4 h-4 rounded cursor-pointer" />
-          </div>
-          {includePass && loadingPw && <p className="text-xs text-slate-400">Fetching password…</p>}
+
+          {loadingPw && <p className="text-xs text-slate-400 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Fetching credentials…</p>}
+
+          {password && (
+            <div className={`p-3 rounded-lg text-xs space-y-1 ${isDark ? 'bg-slate-700/50 border border-slate-600' : 'bg-slate-50 border border-slate-200'}`}>
+              <p className={`font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>✓ Credentials ready to send:</p>
+              <p className={`font-mono text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>ID: {entry?.username}</p>
+              <p className={`font-mono text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Password: {password}</p>
+            </div>
+          )}
+
           <div className="space-y-1.5">
             <Label className="text-xs font-bold uppercase text-slate-500">Additional Message (optional)</Label>
             <Textarea className={`rounded-xl resize-none text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`} rows={3} placeholder="Add any additional notes…" value={customMsg} onChange={e => setCustomMsg(e.target.value)} />
           </div>
+
+          <div className={`p-2.5 rounded-lg text-[11px] ${isDark ? 'bg-blue-900/20 border border-blue-800/40 text-blue-300' : 'bg-blue-50 border border-blue-200 text-blue-700'}`}>
+            <p>ℹ️ <strong>Auto-included in message:</strong> Portal name, URL, ID, password, and holder info</p>
+          </div>
         </div>
         <DialogFooter className={`px-5 py-3 flex items-center gap-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
           <Button variant="ghost" className="rounded-xl" onClick={handleClose}>Cancel</Button>
-          <Button disabled={!(selectedRecipient?.phone || customPhone)} onClick={handleSend} className="rounded-xl font-bold text-white gap-2" style={{ background: COLORS.whatsapp }}>
+          <Button disabled={!(selectedRecipient?.phone || customPhone) || loadingPw} onClick={handleSend} className="rounded-xl font-bold text-white gap-2" style={{ background: COLORS.whatsapp }}>
             <Send className="h-4 w-4" /> Send
           </Button>
         </DialogFooter>
@@ -352,7 +813,6 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
   const [parsing, setParsing]               = useState(false);
   const [importing, setImporting]           = useState(false);
   const [preview, setPreview]               = useState(null);
-  const [unmappedAssignments, setUnmapped]  = useState({});
   const [result, setResult]                 = useState(null);
   const qc = useQueryClient();
 
@@ -370,7 +830,7 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
     try {
       const fd = new FormData(); fd.append('file', file);
       const res = await api.post('/passwords/parse-preview', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      setPreview(res.data); setUnmapped({}); setStep(2);
+      setPreview(res.data); setStep(2);
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to parse file'); }
     finally { setParsing(false); }
   };
@@ -383,14 +843,12 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
       const res = await api.post('/passwords/bulk-import', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       setResult(res.data); setStep(3);
       qc.invalidateQueries({ queryKey: ['passwords'] });
-      qc.invalidateQueries({ queryKey: ['passwords-stats'] });
-      onSuccess?.();
     } catch (err) { toast.error(err.response?.data?.detail || 'Import failed'); }
     finally { setImporting(false); }
   };
 
   const handleClose = () => {
-    setStep(1); setFile(null); setPreview(null); setResult(null); setUnmapped({}); onClose();
+    setStep(1); setFile(null); setPreview(null); setResult(null); onClose();
   };
 
   return (
@@ -473,13 +931,16 @@ function Pagination({ total, page, pageSize, onPage, onPageSize, isDark }) {
   );
 }
 
-// ── Entry Card (Grid View) ────────────────────────────────────────────────────
+// ── Entry Card (Grid View) with Color Coding ──────────────────────────────────
 function EntryCard({ entry, serialNo, canEdit, isAdmin, onEdit, onDelete, onShare, onDetail, isDark, selected, onSelect }) {
+  const meta = PORTAL_META[entry.portal_type] || PORTAL_META.OTHER;
+
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -3, transition: springMed }}>
       <div
-        className={`rounded-2xl border p-3.5 h-full flex flex-col cursor-pointer transition-all ${selected ? (isDark ? 'border-blue-500 bg-blue-900/10' : 'border-blue-400 bg-blue-50') : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'}`}
+        className={`rounded-2xl border-2 p-3.5 h-full flex flex-col cursor-pointer transition-all ${selected ? (isDark ? 'border-blue-500 bg-blue-900/10' : 'border-blue-400 bg-blue-50') : isDark ? 'bg-slate-800 hover:shadow-lg' : 'bg-white hover:shadow-lg'}`}
         onClick={() => onDetail(entry)}
+        style={!selected ? { borderColor: meta.borderColor, boxShadow: `0 0 0 1px ${meta.borderColor}20` } : {}}
       >
         <div className="flex items-start justify-between mb-2.5">
           <div className="flex items-start gap-2 flex-1 min-w-0">
@@ -488,7 +949,7 @@ function EntryCard({ entry, serialNo, canEdit, isAdmin, onEdit, onDelete, onShar
                 <input type="checkbox" checked={selected} onChange={() => {}} className="w-3.5 h-3.5 rounded cursor-pointer accent-blue-500" />
               </div>
             )}
-            <span className={`text-[10px] font-black mt-0.5 flex-shrink-0 w-5 h-5 rounded-lg flex items-center justify-center ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>{serialNo}</span>
+            <span className={`text-[10px] font-black mt-0.5 flex-shrink-0 w-5 h-5 rounded-lg flex items-center justify-center text-white`} style={{ background: meta.color }}>{serialNo}</span>
             <div className="flex-1 min-w-0">
               <h3 className={`font-bold text-sm truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{entry.portal_name}</h3>
               <div className="flex items-center gap-1 mt-1 flex-wrap"><PortalBadge type={entry.portal_type} /><DeptBadge dept={entry.department} /><HolderBadge holderType={entry.holder_type} /></div>
@@ -499,6 +960,9 @@ function EntryCard({ entry, serialNo, canEdit, isAdmin, onEdit, onDelete, onShar
             {isAdmin && <button type="button" onClick={() => onDelete(entry)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}><Trash2 className="h-3 w-3 text-red-400" /></button>}
           </div>
         </div>
+
+        {/* Color-coded accent bar */}
+        <div className="h-1 rounded-full mb-2" style={{ background: meta.color }}></div>
 
         {entry.holder_name && (
           <div className={`flex items-center gap-1.5 mb-2 px-2 py-1 rounded-lg text-xs font-medium ${isDark ? 'bg-purple-900/30 text-purple-300' : 'bg-purple-50 text-purple-700'}`}>
@@ -539,8 +1003,8 @@ function EntryCard({ entry, serialNo, canEdit, isAdmin, onEdit, onDelete, onShar
         )}
         {entry.url && (
           <div className="mb-2.5" onClick={e => e.stopPropagation()}>
-            <button type="button" onClick={() => handleAutoFillAndOpen(entry)} className="flex items-center gap-1.5 text-xs font-medium text-blue-500 hover:text-blue-600 hover:underline truncate w-full text-left">
-              <Globe className="h-3 w-3 flex-shrink-0" /><span className="truncate">{entry.url}</span><AutoFillIcon className="h-2.5 w-2.5 flex-shrink-0 opacity-60" />
+            <button type="button" onClick={() => window.open(entry.url, '_blank')} className="flex items-center gap-1.5 text-xs font-medium text-blue-500 hover:text-blue-600 hover:underline truncate w-full text-left">
+              <Globe className="h-3 w-3 flex-shrink-0" /><span className="truncate">{entry.url}</span><ExternalLink className="h-2.5 w-2.5 flex-shrink-0 opacity-60" />
             </button>
           </div>
         )}
@@ -551,7 +1015,7 @@ function EntryCard({ entry, serialNo, canEdit, isAdmin, onEdit, onDelete, onShar
         )}
 
         <div className={`flex items-center justify-between mt-2.5 pt-2.5 border-t text-[10px] ${isDark ? 'border-slate-700 text-slate-500' : 'border-slate-100 text-slate-400'}`}>
-          <span className="flex items-center gap-1"><Clock className="h-2.5 w-2.5" />{entry.updated_at ? format(new Date(entry.updated_at), 'MMM d, yyyy') : '—'}</span>
+          <span className="flex items-center gap-1"><Clock className="h-2.5 w-2.5" />{entry.updated_at ? format(new Date(entry.updated_at), 'MMM d') : '—'}</span>
           {entry.last_accessed_at && <span className="flex items-center gap-1"><Activity className="h-2.5 w-2.5" />{format(new Date(entry.last_accessed_at), 'MMM d')}</span>}
         </div>
 
@@ -563,28 +1027,38 @@ function EntryCard({ entry, serialNo, canEdit, isAdmin, onEdit, onDelete, onShar
   );
 }
 
-// ── Entry Row (List View) ─────────────────────────────────────────────────────
+// ── Entry Row (List View) with Reorganized Columns ───────────────────────────
 function EntryRow({ entry, serialNo, canEdit, isAdmin, onEdit, onDelete, onShare, onDetail, isDark, selected, onSelect }) {
+  const meta = PORTAL_META[entry.portal_type] || PORTAL_META.OTHER;
+  
+  // First column: Client/Holder name
+  const clientHolderName = entry.client_name || entry.holder_name || '—';
+
   return (
-    <motion.tr variants={itemVariants} className={`border-b transition-colors cursor-pointer ${selected ? (isDark ? 'bg-blue-900/20 border-blue-800/40' : 'bg-blue-50 border-blue-200') : isDark ? 'border-slate-700 hover:bg-slate-700/40' : 'border-slate-100 hover:bg-slate-50'}`} onClick={() => onDetail(entry)}>
+    <motion.tr variants={itemVariants} className={`border-b transition-colors cursor-pointer ${selected ? (isDark ? 'bg-blue-900/20 border-blue-800/40' : 'bg-blue-50 border-blue-200') : isDark ? 'border-slate-700 hover:bg-slate-700/40' : 'border-slate-100 hover:bg-slate-50'}`} onClick={() => onDetail(entry)} style={{ borderLeftColor: meta.color, borderLeftWidth: '3px' }}>
       {isAdmin && (
         <td className="px-2 py-2" onClick={e => e.stopPropagation()}>
           <input type="checkbox" checked={selected} onChange={() => onSelect(entry.id)} className="w-3.5 h-3.5 rounded cursor-pointer accent-blue-500" />
         </td>
       )}
-      <td className="px-3 py-2 text-center"><span className={`text-[10px] font-black ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{serialNo}</span></td>
+      <td className="px-3 py-2 text-center"><span className={`text-[10px] font-black text-white rounded px-1.5 py-0.5`} style={{ background: meta.color }}>{serialNo}</span></td>
+      
+      {/* First Column: Client/Holder Name */}
+      <td className="px-3 py-2">
+        <div className="flex flex-col gap-0.5">
+          <span className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{clientHolderName}</span>
+          {entry.client_name && entry.holder_name && <span className={`text-xs ${isDark ? 'text-purple-300' : 'text-purple-700'}`}>{entry.holder_name}</span>}
+        </div>
+      </td>
+      
+      {/* Second Column: Portal */}
       <td className="px-3 py-2">
         <div className="flex flex-col gap-0.5">
           <span className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{entry.portal_name}</span>
-          <div className="flex items-center gap-1 flex-wrap"><PortalBadge type={entry.portal_type} /><DeptBadge dept={entry.department} /><HolderBadge holderType={entry.holder_type} /></div>
+          <div className="flex items-center gap-1 flex-wrap"><PortalBadge type={entry.portal_type} /><DeptBadge dept={entry.department} /></div>
         </div>
       </td>
-      <td className="px-3 py-2">
-        <div className="flex flex-col gap-0.5">
-          {entry.client_name && <span className={`text-xs font-medium ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>{entry.client_name}</span>}
-          {entry.holder_name && <span className={`text-xs ${isDark ? 'text-purple-300' : 'text-purple-700'}`}>{entry.holder_name}</span>}
-        </div>
-      </td>
+      
       <td className="px-3 py-2"><span className={`font-mono text-xs ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{entry.username}</span></td>
       <td className="px-3 py-2" onClick={e => e.stopPropagation()}><RevealPassword entryId={entry.id} isDark={isDark} /></td>
       <td className="px-3 py-2 text-right flex items-center gap-1 justify-end" onClick={e => e.stopPropagation()}>
@@ -618,11 +1092,9 @@ export default function UpdatePasswordRepository() {
   const [editEntry, setEditEntry] = useState(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteEntry, setDeleteEntry] = useState(null);
-  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareEntry, setShareEntry] = useState(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [sheetsOpen, setSheetsOpen] = useState(false);
 
   const isAdmin = user?.role === 'admin';
   const canView = isAdmin || user?.permissions?.includes('view_passwords');
@@ -697,18 +1169,6 @@ export default function UpdatePasswordRepository() {
     setDeleteOpen(true);
   };
 
-  const handleConfirmDelete = async () => {
-    if (!deleteEntry) return;
-    try {
-      await api.delete(`/passwords/${deleteEntry.id}`);
-      toast.success('Entry deleted');
-      qc.invalidateQueries({ queryKey: ['passwords'] });
-      setDeleteOpen(false);
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to delete entry');
-    }
-  };
-
   const handleShare = (entry) => {
     setShareEntry(entry);
     setShareOpen(true);
@@ -751,9 +1211,6 @@ export default function UpdatePasswordRepository() {
               )}
             </div>
             <div className="flex items-center gap-1.5 flex-wrap">
-              <Button onClick={() => setSheetsOpen(true)} size="sm" className="rounded-lg font-bold h-8 text-xs gap-1.5 text-white hover:bg-white/20 transition-all" style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}>
-                <Sheet className="h-3.5 w-3.5" /> Sheets
-              </Button>
               {canEdit && (
                 <>
                   <Button onClick={handleDownloadTemplate} size="sm" className="rounded-lg font-bold h-8 text-xs gap-1.5 text-white hover:bg-white/20 transition-all" style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}>
@@ -779,7 +1236,7 @@ export default function UpdatePasswordRepository() {
             const meta = PORTAL_META[type] || PORTAL_META.OTHER;
             const isActive = filterType === type;
             return (
-              <motion.div key={type} whileHover={{ y: -2, transition: springMed }} onClick={() => setFilterType(isActive ? 'ALL' : type)} className={`rounded-xl border p-2 cursor-pointer transition-all text-center ${isActive ? 'shadow-md' : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'}`} style={isActive ? { background: meta.bg, border: `1.5px solid ${meta.color}40` } : {}}>
+              <motion.div key={type} whileHover={{ y: -2, transition: springMed }} onClick={() => setFilterType(isActive ? 'ALL' : type)} className={`rounded-xl border p-2 cursor-pointer transition-all text-center ${isActive ? 'shadow-md' : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'}`} style={isActive ? { background: meta.accentBg, borderColor: meta.borderColor, borderWidth: '2px' } : {}}>
                 <div className="text-base mb-0.5">{meta.icon}</div>
                 <p className="text-lg font-black leading-none" style={{ color: meta.color }}>{count}</p>
                 <p className={`text-[10px] font-semibold mt-0.5 ${isDark && !isActive ? 'text-slate-400' : 'text-slate-500'}`}>{meta.label}</p>
@@ -789,30 +1246,12 @@ export default function UpdatePasswordRepository() {
         </motion.div>
       )}
 
-      {/* ── Bulk Action Bar ── */}
-      <AnimatePresence>
-        {isAdmin && selectedIds.size > 0 && (
-          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className={`flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl border ${isDark ? 'bg-red-900/20 border-red-800/40' : 'bg-red-50 border-red-200'}`}>
-            <div className="flex items-center gap-2">
-              <span className={`text-sm font-bold ${isDark ? 'text-red-300' : 'text-red-700'}`}>{selectedIds.size} selected</span>
-              <button type="button" onClick={() => setSelectedIds(new Set())} className={`text-xs underline ${isDark ? 'text-red-400' : 'text-red-500'}`}>Clear</button>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button size="sm" onClick={() => { setSelectedIds(new Set(entries.map(e => e.id))); }} variant="outline" className="rounded-lg h-7 text-xs">Select All ({entries.length})</Button>
-              <Button size="sm" className="rounded-lg h-7 text-xs font-bold text-white gap-1.5 bg-red-500 hover:bg-red-600" onClick={() => setBulkDeleteOpen(true)}>
-                <Trash className="h-3 w-3" /> Delete {selectedIds.size}
-              </Button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* ── Search + Filters ── */}
       <motion.div variants={itemVariants}>
         <div className={`flex flex-col sm:flex-row gap-2 p-3 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-            <Input className={`pl-9 rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`} placeholder="Search portal, username, client, PAN, mobile…" value={search} onChange={e => setSearch(e.target.value)} />
+            <Input className={`pl-9 rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`} placeholder="Search portal, username, client…" value={search} onChange={e => setSearch(e.target.value)} />
           </div>
           <Select value={sortOption} onValueChange={setSortOption}>
             <SelectTrigger className={`w-full sm:w-40 rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}><ArrowUpDown className="h-3.5 w-3.5 mr-1.5 text-slate-400" /><SelectValue /></SelectTrigger>
@@ -845,8 +1284,7 @@ export default function UpdatePasswordRepository() {
             <SelectTrigger className={`w-full sm:w-40 rounded-xl h-9 text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}><Tag className="h-3.5 w-3.5 mr-1 text-slate-400" /><SelectValue placeholder="Type" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">All Types</SelectItem>
-              <SelectItem value="MCA">🏛️ MCA/ROC</SelectItem>
-              {PORTAL_TYPES.filter(t => !['MCA', 'ROC'].includes(t)).map(t => (
+              {PORTAL_TYPES.map(t => (
                 <SelectItem key={t} value={t}>{PORTAL_META[t]?.icon} {PORTAL_META[t]?.label}</SelectItem>
               ))}
             </SelectContent>
@@ -916,8 +1354,8 @@ export default function UpdatePasswordRepository() {
               <tr>
                 {isAdmin && <th className="px-2 py-2 text-left"><input type="checkbox" checked={allPageSelected} onChange={() => {}} className="w-3.5 h-3.5 rounded cursor-pointer accent-blue-500" /></th>}
                 <th className="px-3 py-2 text-center text-xs font-semibold">#</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold">Portal</th>
                 <th className="px-3 py-2 text-left text-xs font-semibold">Client / Holder</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold">Portal</th>
                 <th className="px-3 py-2 text-left text-xs font-semibold">Username</th>
                 <th className="px-3 py-2 text-left text-xs font-semibold">Password</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold">Actions</th>
@@ -954,6 +1392,9 @@ export default function UpdatePasswordRepository() {
       <Pagination total={entries.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} isDark={isDark} />
 
       {/* ── Modals ── */}
+      <DetailModal open={detailOpen} onClose={() => setDetailOpen(false)} entry={detailEntry} isDark={isDark} />
+      <EditModal open={editOpen} onClose={() => setEditOpen(false)} entry={editEntry} isDark={isDark} onSuccess={() => { setEditOpen(false); qc.invalidateQueries({ queryKey: ['passwords'] }); }} />
+      <DeleteConfirmModal open={deleteOpen} onClose={() => setDeleteOpen(false)} entry={deleteEntry} isDark={isDark} onConfirm={() => { setDeleteOpen(false); qc.invalidateQueries({ queryKey: ['passwords'] }); }} />
       <WhatsAppShareModal open={shareOpen} onClose={() => setShareOpen(false)} entry={shareEntry} isDark={isDark} />
       <BulkImportModal open={importOpen} onClose={() => setImportOpen(false)} isDark={isDark} onSuccess={() => { setImportOpen(false); qc.invalidateQueries({ queryKey: ['passwords'] }); }} />
     </motion.div>
