@@ -1314,18 +1314,23 @@ export default function Attendance() {
     } finally { setLoading(false); }
   }, [selectedUserId, isAdmin, canViewRankings, user?.id, allUsers.length]); // eslint-disable-line
 
-  const fetchReminders = useCallback(async (overrideUserId = undefined) => {
-    try {
-      const uid = overrideUserId !== undefined ? overrideUserId : (isViewingOther ? selectedUserId : null);
-      if (uid === 'everyone') return;
-      const url = uid ? `/reminders?user_id=${uid}` : '/reminders';
-      const res = await api.get(url);
-      const normalized = (Array.isArray(res.data) ? res.data : []).map(normalizeReminder);
-      setReminders(Array.isArray(normalized) ? normalized : []);
-    } catch (err) {
-      console.error('fetchReminders error:', err);
-    }
-  }, [isViewingOther, selectedUserId]);
+const fetchReminders = useCallback(async (overrideUserId = undefined) => {
+  try {
+    const uid = overrideUserId !== undefined ? overrideUserId : (isViewingOther ? selectedUserId : null);
+    if (uid === 'everyone') return;
+    const url = uid ? `/reminders?user_id=${uid}` : '/reminders';
+    const res = await api.get(url);
+    const raw = Array.isArray(res.data) ? res.data : [];
+    // Warn about any reminders missing IDs
+    raw.forEach((r, i) => {
+      if (!resolveId(r)) console.warn(`Reminder at index ${i} has no id:`, r);
+    });
+    const normalized = raw.map(normalizeReminder);
+    setReminders(normalized);
+  } catch (err) {
+    console.error('fetchReminders error:', err);
+  }
+}, [isViewingOther, selectedUserId]);
 
   // ── Punch Action ───────────────────────────────────────────────────────────
   const handlePunchAction = useCallback(async (action, e) => {
