@@ -6,6 +6,10 @@ import api from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import { Eye, EyeOff } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+/* ── shared spring — same as DashboardLayout so everything feels unified ── */
+const spring = { type: 'spring', stiffness: 320, damping: 28, mass: 0.9 };
 
 export default function Login() {
   const [email, setEmail]               = useState('');
@@ -16,12 +20,13 @@ export default function Login() {
   const [wakingDots, setWakingDots]     = useState('');
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [forgotEmail, setForgotEmail]   = useState('');
+  const [exiting, setExiting]           = useState(false);
 
   const navigate  = useNavigate();
   const { login } = useAuth();
   const isDark    = useDark();
 
-  /* ── Animated dots for waking up message ── */
+  /* animated dots */
   useEffect(() => {
     if (!serverWaking) return;
     const id = setInterval(() => {
@@ -30,21 +35,12 @@ export default function Login() {
     return () => clearInterval(id);
   }, [serverWaking]);
 
-  /* ── Send token to browser extension via postMessage ──
-     Works on any browser, any deployment, no Extension ID needed
-     GitHub + Render friendly                                    ── */
   const sendTokenToExtension = (token) => {
     try {
-      window.postMessage(
-        { type: "SET_TOKEN", token },
-        window.location.origin
-      );
-    } catch (err) {
-      // Silently ignore — extension may not be installed
-    }
+      window.postMessage({ type: "SET_TOKEN", token }, window.location.origin);
+    } catch {}
   };
 
-  /* ── Login with retry ── */
   const loginWithRetry = async (retries = 2, retryDelay = 2000) => {
     for (let i = 0; i < retries; i++) {
       try {
@@ -56,41 +52,31 @@ export default function Login() {
     }
   };
 
-  /* ── Main submit ── */
   const handleSubmit = async () => {
-    if (!email || !password) {
-      toast.error('Please enter email and password');
-      return;
-    }
+    if (!email || !password) { toast.error('Please enter email and password'); return; }
 
     setLoading(true);
     setServerWaking(false);
-
-    // Show waking up UI after 3s if still loading
     const wakingTimer = setTimeout(() => setServerWaking(true), 3000);
 
     try {
-      // Fire health check in background — dont block on it
       fetch("https://final-taskosphere-backend.onrender.com/health").catch(() => {});
-
       const response = await loginWithRetry();
 
       clearTimeout(wakingTimer);
       setServerWaking(false);
 
-      // Direct login — works on all browsers, no popup
       login(response.data, true);
-
-      // Send token to extension — works via content.js bridge
       sendTokenToExtension(response.data.access_token);
-
       toast.success('Welcome back!');
-      navigate('/dashboard');
+
+      /* exit animation before navigating */
+      setExiting(true);
+      setTimeout(() => navigate('/dashboard'), 380);
 
     } catch (error) {
       clearTimeout(wakingTimer);
       setServerWaking(false);
-
       if (error.code === "ECONNABORTED") {
         toast.error("Server is still waking up, please try again in a moment…");
       } else {
@@ -101,201 +87,187 @@ export default function Login() {
     }
   };
 
-  /* ── Forgot password ── */
   const handleForgotPassword = () => {
-    if (!forgotEmail) {
-      toast.error('Please enter your email address');
-      return;
-    }
+    if (!forgotEmail) { toast.error('Please enter your email address'); return; }
     toast.info('Password reset functionality will be available soon.');
     setShowForgotPassword(false);
     setForgotEmail('');
   };
 
-  /* ── Theme ── */
   const pageBg = isDark
     ? 'linear-gradient(135deg,#0f172a,#1e293b,#0f172a)'
     : 'linear-gradient(135deg,#f0f9ff,#f0fdf4,#ecfeff)';
-  const cardBg  = isDark ? 'rgba(30,41,59,0.95)' : 'rgba(255,255,255,0.95)';
+  const cardBg  = isDark ? 'rgba(30,41,59,0.97)' : 'rgba(255,255,255,0.97)';
   const headClr = isDark ? '#f1f5f9' : '#1e293b';
   const subClr  = isDark ? '#94a3b8' : '#64748b';
 
-  /* ── Render ── */
   return (
-    <div
+    <motion.div
       className="min-h-screen flex items-center justify-center"
       style={{ background: pageBg }}
+      /* page-level fade — matches RouteChangeHandler's pageFadeIn */
+      initial={{ opacity: 0 }}
+      animate={{ opacity: exiting ? 0 : 1 }}
+      transition={{ duration: 0.35, ease: 'easeInOut' }}
     >
-
-      {/* ── Card ── */}
-      <div
+      {/* Card — slides up on enter, slides up further on exit */}
+      <motion.div
         className="w-full max-w-md p-8 rounded-2xl shadow-xl"
         style={{ background: cardBg }}
+        initial={{ opacity: 0, y: 24 }}
+        animate={{ opacity: exiting ? 0 : 1, y: exiting ? -16 : 0 }}
+        transition={spring}
       >
-
         {/* Logo */}
-        <div className="text-center mb-6">
-          <img
-            src="/logo.png"
-            alt="TaskoSphere"
-            className="h-16 mx-auto mb-2"
-          />
-        </div>
+        <motion.div
+          className="text-center mb-6"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ ...spring, delay: 0.05 }}
+        >
+          <img src="/logo.png" alt="TaskoSphere" className="h-16 mx-auto mb-2" />
+        </motion.div>
 
-        {/* ── Forgot password view ── */}
-        {showForgotPassword ? (
-          <div className="space-y-4">
-
-            <h2
-              className="text-xl font-bold text-center"
-              style={{ color: headClr }}
+        <AnimatePresence mode="wait">
+          {showForgotPassword ? (
+            <motion.div
+              key="forgot"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={spring}
+              className="space-y-4"
             >
-              Reset Password
-            </h2>
-
-            <Input
-              type="email"
-              placeholder="Enter your email"
-              value={forgotEmail}
-              onChange={e => setForgotEmail(e.target.value)}
-            />
-
-            <button
-              onClick={handleForgotPassword}
-              className="w-full bg-blue-600 text-white p-2 rounded"
-            >
-              Send Reset Link
-            </button>
-
-            <button
-              onClick={() => setShowForgotPassword(false)}
-              className="text-sm w-full"
-              style={{ color: subClr }}
-            >
-              Back to Login
-            </button>
-
-          </div>
-
-        ) : (
-
-          /* ── Login view ── */
-          <div className="space-y-4">
-
-            <h2
-              className="text-xl font-bold text-center"
-              style={{ color: headClr }}
-            >
-              Welcome Back
-            </h2>
-
-            <Input
-              type="email"
-              placeholder="Email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-            />
-
-            <div className="relative">
+              <h2 className="text-xl font-bold text-center" style={{ color: headClr }}>
+                Reset Password
+              </h2>
               <Input
-                type={showPassword ? 'text' : 'password'}
-                placeholder="Password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+                type="email"
+                placeholder="Enter your email"
+                value={forgotEmail}
+                onChange={e => setForgotEmail(e.target.value)}
               />
               <button
-                type="button"
-                onClick={() => setShowPassword(v => !v)}
-                className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+                onClick={handleForgotPassword}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-lg transition-colors"
               >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                Send Reset Link
               </button>
-            </div>
-
-            {/* ── Login button ── */}
-            <button
-              onClick={handleSubmit}
-              disabled={loading}
-              className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-70 text-white p-2 rounded transition-colors"
-            >
-              {loading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <svg
-                    className="animate-spin h-4 w-4 text-white"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12" cy="12" r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
-                  Signing in…
-                </span>
-              ) : 'Login'}
-            </button>
-
-            {/* ── Server waking banner ── */}
-            {serverWaking && (
-              <div
-                className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm"
-                style={{
-                  background: isDark ? 'rgba(251,191,36,0.1)' : '#fffbeb',
-                  border: '1px solid #f59e0b',
-                  color: isDark ? '#fcd34d' : '#92400e',
-                }}
-              >
-                <span className="relative flex h-3 w-3 shrink-0">
-                  <span
-                    className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
-                    style={{ background: '#f59e0b' }}
-                  />
-                  <span
-                    className="relative inline-flex rounded-full h-3 w-3"
-                    style={{ background: '#f59e0b' }}
-                  />
-                </span>
-                <span>
-                  Server is waking up{wakingDots}&nbsp;
-                  <span className="opacity-70 font-normal">
-                    This may take a few seconds.
-                  </span>
-                </span>
-              </div>
-            )}
-
-            <div className="text-right">
               <button
-                onClick={() => setShowForgotPassword(true)}
-                className="text-sm text-blue-600 hover:underline"
+                onClick={() => setShowForgotPassword(false)}
+                className="text-sm w-full transition-colors"
+                style={{ color: subClr }}
               >
-                Forgot Password?
+                Back to Login
               </button>
-            </div>
+            </motion.div>
 
-            <div className="text-center text-sm">
-              <span style={{ color: subClr }}>Don't have an account? </span>
-              <Link
-                to="/register"
-                className="text-green-600 font-semibold hover:underline"
+          ) : (
+
+            <motion.div
+              key="login"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={spring}
+              className="space-y-4"
+            >
+              <h2 className="text-xl font-bold text-center" style={{ color: headClr }}>
+                Welcome Back
+              </h2>
+
+              <Input
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+              />
+
+              <div className="relative">
+                <Input
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(v => !v)}
+                  className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+
+              <motion.button
+                onClick={handleSubmit}
+                disabled={loading}
+                className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-70 text-white p-2 rounded-lg transition-colors font-medium"
+                whileTap={{ scale: loading ? 1 : 0.98 }}
+                transition={{ duration: 0.1 }}
               >
-                Sign Up
-              </Link>
-            </div>
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Signing in…
+                  </span>
+                ) : 'Login'}
+              </motion.button>
 
-          </div>
-        )}
-      </div>
-    </div>
+              <AnimatePresence>
+                {serverWaking && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.25 }}
+                    className="overflow-hidden"
+                  >
+                    <div
+                      className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm"
+                      style={{
+                        background: isDark ? 'rgba(251,191,36,0.1)' : '#fffbeb',
+                        border: '1px solid #f59e0b',
+                        color: isDark ? '#fcd34d' : '#92400e',
+                      }}
+                    >
+                      <span className="relative flex h-3 w-3 shrink-0">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: '#f59e0b' }} />
+                        <span className="relative inline-flex rounded-full h-3 w-3" style={{ background: '#f59e0b' }} />
+                      </span>
+                      <span>
+                        Server is waking up{wakingDots}&nbsp;
+                        <span className="opacity-70 font-normal">This may take a few seconds.</span>
+                      </span>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <div className="text-right">
+                <button
+                  onClick={() => setShowForgotPassword(true)}
+                  className="text-sm text-blue-600 hover:underline transition-colors"
+                >
+                  Forgot Password?
+                </button>
+              </div>
+
+              <div className="text-center text-sm">
+                <span style={{ color: subClr }}>Don't have an account? </span>
+                <Link to="/register" className="text-green-600 font-semibold hover:underline">
+                  Sign Up
+                </Link>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
+    </motion.div>
   );
 }
