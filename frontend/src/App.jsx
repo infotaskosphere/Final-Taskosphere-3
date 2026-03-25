@@ -5,8 +5,9 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { Toaster } from "@/components/ui/sonner";
 import AppRoutes from "./AppRoutes.jsx";
 import { useLoading } from "./lib/api";
+import { AnimatePresence } from "framer-motion";
 
-/* ── Top loading bar (thin progress line at top) ─────────────────────── */
+/* ── Top loading bar ─────────────────────────────────────────────────── */
 function TopLoadingBar() {
   const loading = useLoading();
   return (
@@ -30,6 +31,18 @@ function TopLoadingBar() {
   );
 }
 
+/* ── AnimatePresence wrapper — must be inside BrowserRouter so
+      useLocation works. Keyed on pathname so login→dashboard
+      exit animation fires before the new route mounts.          ── */
+function AnimatedRoutes() {
+  const location = useLocation();
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <AppRoutes key={location.pathname} />
+    </AnimatePresence>
+  );
+}
+
 /* ── Query client ────────────────────────────────────────────────────── */
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -42,14 +55,14 @@ const queryClient = new QueryClient({
 });
 
 /* ── App ─────────────────────────────────────────────────────────────── */
-function App() {
+export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <BrowserRouter>
           <TopLoadingBar />
           <Suspense fallback={null}>
-            <AppRoutes />
+            <AnimatedRoutes />
           </Suspense>
           <Toaster position="top-right" richColors />
         </BrowserRouter>
@@ -57,5 +70,3 @@ function App() {
     </QueryClientProvider>
   );
 }
-
-export default App;
