@@ -877,7 +877,7 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
 @api_router.post("/todos/{todo_id}/promote-to-task")
 async def promote_todo(
     todo_id: str,
-    task_data: dict = Body(default={}),          # ← Body now properly imported
+    task_data: dict = Body(default={}),
     current_user: User = Depends(get_current_user)
 ):
     # Try lookup by string `id` field first, then fallback to ObjectId `_id`
@@ -909,17 +909,16 @@ async def promote_todo(
         "recurrence_interval": task_data.get("recurrence_interval") or 1,
         "type":                "task",
         "created_by":          current_user.id,
-        "created_at":          now,
-        "updated_at":          now,
+        "created_at":          now.isoformat(),
+        "updated_at":          now.isoformat(),
     }
 
     mongo_id = todo.get("_id")
 
-    async with await client.start_session() as session:
-        async def cb(session):
-            await db.tasks.insert_one(new_task, session=session)
-            await db.todos.delete_one({"_id": mongo_id}, session=session)
-        await session.with_transaction(cb)
+    # Insert task first, then delete todo (no transaction needed — works on all MongoDB tiers)
+    await db.tasks.insert_one(new_task)
+    new_task.pop("_id", None)  # remove ObjectId added by insert_one before returning
+    await db.todos.delete_one({"_id": mongo_id})
 
     return {"message": "Todo promoted to task successfully"}
 
