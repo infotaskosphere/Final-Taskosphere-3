@@ -8,25 +8,43 @@ import { toast } from 'sonner';
 import { Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-/* ── shared spring — same as DashboardLayout so everything feels unified ── */
+/* ── Shared spring — same curve as DashboardLayout PAGE_VARIANTS ─────── */
 const spring = { type: 'spring', stiffness: 320, damping: 28, mass: 0.9 };
 
+/* ── Page-level variants — exit fires via AnimatePresence in App.jsx ─── */
+const pageVariants = {
+  initial:  { opacity: 0, y: 20 },
+  animate:  { opacity: 1, y: 0,   transition: spring },
+  exit:     { opacity: 0, y: -12, transition: { duration: 0.22, ease: 'easeIn' } },
+};
+
+/* ── Card variants — staggered slightly after page ───────────────────── */
+const cardVariants = {
+  initial:  { opacity: 0, y: 28, scale: 0.98 },
+  animate:  {
+    opacity: 1, y: 0, scale: 1,
+    transition: { ...spring, delay: 0.04 },
+  },
+  exit:     { opacity: 0, y: -10, scale: 0.98, transition: { duration: 0.18, ease: 'easeIn' } },
+};
+
 export default function Login() {
-  const [email, setEmail]               = useState('');
-  const [password, setPassword]         = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading]           = useState(false);
-  const [serverWaking, setServerWaking] = useState(false);
-  const [wakingDots, setWakingDots]     = useState('');
+  const [email,            setEmail]            = useState('');
+  const [password,         setPassword]         = useState('');
+  const [showPassword,     setShowPassword]     = useState(false);
+  const [loading,          setLoading]          = useState(false);
+  const [serverWaking,     setServerWaking]     = useState(false);
+  const [wakingDots,       setWakingDots]       = useState('');
   const [showForgotPassword, setShowForgotPassword] = useState(false);
-  const [forgotEmail, setForgotEmail]   = useState('');
-  const [exiting, setExiting]           = useState(false);
+  const [forgotEmail,      setForgotEmail]      = useState('');
+  const [readyToNavigate,  setReadyToNavigate]  = useState(false);
+  const [navigateTo,       setNavigateTo]       = useState(null);
 
   const navigate  = useNavigate();
   const { login } = useAuth();
   const isDark    = useDark();
 
-  /* animated dots */
+  /* animated dots for server waking message */
   useEffect(() => {
     if (!serverWaking) return;
     const id = setInterval(() => {
@@ -34,6 +52,13 @@ export default function Login() {
     }, 500);
     return () => clearInterval(id);
   }, [serverWaking]);
+
+  /* navigate only after exit animation completes */
+  useEffect(() => {
+    if (readyToNavigate && navigateTo) {
+      navigate(navigateTo, { replace: true });
+    }
+  }, [readyToNavigate, navigateTo, navigate]);
 
   const sendTokenToExtension = (token) => {
     try {
@@ -53,7 +78,10 @@ export default function Login() {
   };
 
   const handleSubmit = async () => {
-    if (!email || !password) { toast.error('Please enter email and password'); return; }
+    if (!email || !password) {
+      toast.error('Please enter email and password');
+      return;
+    }
 
     setLoading(true);
     setServerWaking(false);
@@ -70,9 +98,9 @@ export default function Login() {
       sendTokenToExtension(response.data.access_token);
       toast.success('Welcome back!');
 
-      /* exit animation before navigating */
-      setExiting(true);
-      setTimeout(() => navigate('/dashboard'), 380);
+      /* signal exit — AnimatePresence fires exit animation,
+         onAnimationComplete sets readyToNavigate → navigate fires  */
+      setNavigateTo('/dashboard');
 
     } catch (error) {
       clearTimeout(wakingTimer);
@@ -88,7 +116,10 @@ export default function Login() {
   };
 
   const handleForgotPassword = () => {
-    if (!forgotEmail) { toast.error('Please enter your email address'); return; }
+    if (!forgotEmail) {
+      toast.error('Please enter your email address');
+      return;
+    }
     toast.info('Password reset functionality will be available soon.');
     setShowForgotPassword(false);
     setForgotEmail('');
@@ -101,35 +132,45 @@ export default function Login() {
   const headClr = isDark ? '#f1f5f9' : '#1e293b';
   const subClr  = isDark ? '#94a3b8' : '#64748b';
 
+  /* When navigateTo is set, App.jsx's AnimatePresence triggers exit.
+     onExitComplete fires after the exit animation fully finishes,
+     then we actually navigate — perfectly smooth, no setTimeout.   */
   return (
     <motion.div
       className="min-h-screen flex items-center justify-center"
       style={{ background: pageBg }}
-      /* page-level fade — matches RouteChangeHandler's pageFadeIn */
-      initial={{ opacity: 0 }}
-      animate={{ opacity: exiting ? 0 : 1 }}
-      transition={{ duration: 0.35, ease: 'easeInOut' }}
+      variants={pageVariants}
+      initial="initial"
+      animate={navigateTo ? "exit" : "animate"}
+      onAnimationComplete={(def) => {
+        /* only act when the exit animation completes */
+        if (def === "exit" && navigateTo) {
+          setReadyToNavigate(true);
+        }
+      }}
     >
-      {/* Card — slides up on enter, slides up further on exit */}
+      {/* Card */}
       <motion.div
         className="w-full max-w-md p-8 rounded-2xl shadow-xl"
         style={{ background: cardBg }}
-        initial={{ opacity: 0, y: 24 }}
-        animate={{ opacity: exiting ? 0 : 1, y: exiting ? -16 : 0 }}
-        transition={spring}
+        variants={cardVariants}
+        initial="initial"
+        animate={navigateTo ? "exit" : "animate"}
       >
         {/* Logo */}
         <motion.div
           className="text-center mb-6"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ ...spring, delay: 0.05 }}
+          transition={{ ...spring, delay: 0.08 }}
         >
           <img src="/logo.png" alt="TaskoSphere" className="h-16 mx-auto mb-2" />
         </motion.div>
 
+        {/* Login / Forgot password panels */}
         <AnimatePresence mode="wait">
           {showForgotPassword ? (
+
             <motion.div
               key="forgot"
               initial={{ opacity: 0, y: 12 }}
@@ -210,7 +251,12 @@ export default function Login() {
               >
                 {loading ? (
                   <span className="flex items-center justify-center gap-2">
-                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <svg
+                      className="animate-spin h-4 w-4 text-white"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
@@ -219,6 +265,7 @@ export default function Login() {
                 ) : 'Login'}
               </motion.button>
 
+              {/* Server waking banner */}
               <AnimatePresence>
                 {serverWaking && (
                   <motion.div
@@ -237,8 +284,14 @@ export default function Login() {
                       }}
                     >
                       <span className="relative flex h-3 w-3 shrink-0">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: '#f59e0b' }} />
-                        <span className="relative inline-flex rounded-full h-3 w-3" style={{ background: '#f59e0b' }} />
+                        <span
+                          className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
+                          style={{ background: '#f59e0b' }}
+                        />
+                        <span
+                          className="relative inline-flex rounded-full h-3 w-3"
+                          style={{ background: '#f59e0b' }}
+                        />
                       </span>
                       <span>
                         Server is waking up{wakingDots}&nbsp;
