@@ -138,7 +138,9 @@ function MaskedPassword() {
   return <span className="font-mono tracking-widest text-slate-400 text-sm select-none">••••••••••</span>;
 }
 
-// ── Modal Header (single close button, no duplicate) ─────────────────────────
+// ── Modal Header — single custom close button, no duplicate ──────────────────
+// All DialogContent instances use className="[&>button]:hidden" to suppress
+// shadcn's auto-injected close button, keeping only this custom one.
 function ModalHeader({ icon, title, subtitle, gradient, onClose }) {
   return (
     <div className="px-6 py-5 flex-shrink-0" style={{ background: gradient }}>
@@ -434,9 +436,9 @@ function WhatsAppShareModal({ open, onClose, entry, isDark }) {
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
+      {/* [&>button]:hidden suppresses shadcn's auto close button; ModalHeader provides the single custom one */}
       <DialogContent
-        className={`max-w-md rounded-3xl p-0 border-none overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}
-        hideCloseButton
+        className={`max-w-md rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}
       >
         <ModalHeader
           icon={<WAIcon className="h-5 w-5 text-white" />}
@@ -544,9 +546,9 @@ function BulkImportModal({ open, onClose, isDark, onSuccess }) {
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
+      {/* [&>button]:hidden suppresses shadcn's auto close button */}
       <DialogContent
-        className={`max-w-lg rounded-3xl p-0 border-none overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}
-        hideCloseButton
+        className={`max-w-lg rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}
       >
         <ModalHeader
           icon={<FileUp className="h-5 w-5 text-white" />}
@@ -693,9 +695,9 @@ function SheetLinksModal({ open, onClose, isDark, isAdmin }) {
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
+      {/* [&>button]:hidden suppresses shadcn's auto close button */}
       <DialogContent
-        className={`max-w-2xl rounded-3xl p-0 border-none overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}
-        hideCloseButton
+        className={`max-w-2xl rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}
       >
         <ModalHeader
           icon={<Sheet className="h-5 w-5 text-white" />}
@@ -1225,9 +1227,9 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients 
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
+      {/* [&>button]:hidden suppresses shadcn's auto close button */}
       <DialogContent
-        className={`max-w-lg rounded-3xl p-0 border-none overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}
-        hideCloseButton
+        className={`max-w-lg rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}
       >
         <ModalHeader
           icon={<KeyRound className="h-5 w-5 text-white" />}
@@ -1312,7 +1314,7 @@ function EntryModal({ open, onClose, existing, isDark, onSave, loading, clients 
             </Select>
           </div>
 
-          {/* Director/Individual fields - shown when not COMPANY */}
+          {/* Director/Individual fields */}
           <AnimatePresence>
             {showHolderFields && (
               <motion.div
@@ -1625,31 +1627,13 @@ export default function PasswordRepository() {
                 <p className="text-white/60 text-sm mt-0.5">Encrypted portal credentials — MCA · GST · IT · TDS · DGFT · TM & more</p>
               </div>
             </div>
+            {/* Header actions — view toggle has been moved to the filter bar below */}
             <div className="flex items-center gap-2 flex-wrap">
               {isAdmin && stats.total != null && (
                 <div className="px-3 py-1.5 bg-white/15 rounded-xl text-white text-xs font-semibold">
                   {stats.total} credentials
                 </div>
               )}
-              {/* View toggle */}
-              <div className="flex items-center bg-white/10 rounded-xl p-1 gap-0.5">
-                <button
-                  type="button"
-                  onClick={() => setViewMode('grid')}
-                  className={`p-1.5 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white/25 text-white' : 'text-white/60 hover:text-white'}`}
-                  title="Grid view"
-                >
-                  <LayoutGrid className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode('list')}
-                  className={`p-1.5 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white/25 text-white' : 'text-white/60 hover:text-white'}`}
-                  title="List view"
-                >
-                  <List className="h-4 w-4" />
-                </button>
-              </div>
               {/* Google Sheets */}
               <Button
                 onClick={() => setSheetsOpen(true)}
@@ -1716,11 +1700,12 @@ export default function PasswordRepository() {
         </motion.div>
       )}
 
-      {/* ── Search + Filters ─────────────────────────────────────────────────── */}
+      {/* ── Search + Filters + View Toggle ───────────────────────────────────── */}
       <motion.div
         variants={itemVariants}
         className={`flex flex-col sm:flex-row gap-3 p-4 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
       >
+        {/* Search */}
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <Input
@@ -1785,10 +1770,38 @@ export default function PasswordRepository() {
           </SelectContent>
         </Select>
 
+        {/* ── View Toggle — lives in the filter bar ── */}
+        <div className={`flex items-center rounded-xl p-1 gap-0.5 border flex-shrink-0 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-100 border-slate-200'}`}>
+          <button
+            type="button"
+            onClick={() => setViewMode('grid')}
+            className={`p-1.5 rounded-lg transition-all ${
+              viewMode === 'grid'
+                ? isDark ? 'bg-slate-500 text-white shadow-sm' : 'bg-white text-slate-700 shadow-sm'
+                : 'text-slate-400 hover:text-slate-600'
+            }`}
+            title="Grid view"
+          >
+            <LayoutGrid className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('list')}
+            className={`p-1.5 rounded-lg transition-all ${
+              viewMode === 'list'
+                ? isDark ? 'bg-slate-500 text-white shadow-sm' : 'bg-white text-slate-700 shadow-sm'
+                : 'text-slate-400 hover:text-slate-600'
+            }`}
+            title="List view"
+          >
+            <List className="h-4 w-4" />
+          </button>
+        </div>
+
         {hasActiveFilter && (
           <Button
             variant="ghost"
-            className="rounded-xl h-10 px-3 text-xs"
+            className="rounded-xl h-10 px-3 text-xs flex-shrink-0"
             onClick={() => { setFilterDept('ALL'); setFilterType('ALL'); setFilterClient('ALL'); setFilterHolder('ALL'); setSearch(''); }}
           >
             <X className="h-3.5 w-3.5 mr-1" /> Clear
@@ -1926,7 +1939,8 @@ export default function PasswordRepository() {
       <AnimatePresence>
         {deleteTarget && (
           <Dialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
-            <DialogContent className={`max-w-sm rounded-3xl ${isDark ? 'bg-slate-800 border-slate-700' : ''}`}>
+            {/* [&>button]:hidden suppresses shadcn's auto close button */}
+            <DialogContent className={`max-w-sm rounded-3xl [&>button]:hidden ${isDark ? 'bg-slate-800 border-slate-700' : ''}`}>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2 text-red-600">
                   <Trash2 className="h-5 w-5" /> Delete Credential
