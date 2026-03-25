@@ -33,7 +33,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 # ================= FASTAPI =================
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request, Body
 from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -877,7 +877,7 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
 @api_router.post("/todos/{todo_id}/promote-to-task")
 async def promote_todo(
     todo_id: str,
-    task_data: dict = Body(default={}),
+    task_data: dict = Body(default={}),          # ← Body now properly imported
     current_user: User = Depends(get_current_user)
 ):
     # Try lookup by string `id` field first, then fallback to ObjectId `_id`
@@ -893,7 +893,6 @@ async def promote_todo(
         raise HTTPException(status_code=403, detail="Not authorized to promote this todo")
 
     now = datetime.now(IST)
-
     new_task = {
         "id":                  str(uuid.uuid4()),
         "title":               task_data.get("title")               or todo["title"],
@@ -914,7 +913,6 @@ async def promote_todo(
         "updated_at":          now,
     }
 
-    # Use the correct _id for deletion
     mongo_id = todo.get("_id")
 
     async with await client.start_session() as session:
@@ -924,7 +922,6 @@ async def promote_todo(
         await session.with_transaction(cb)
 
     return {"message": "Todo promoted to task successfully"}
-
 
 @api_router.delete("/todos/{todo_id}")
 async def delete_todo(
