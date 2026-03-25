@@ -4,9 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { Toaster } from "@/components/ui/sonner";
 import AppRoutes from "./AppRoutes.jsx";
-import { useLoading } from "./api/api"; // ✅ ADD THIS
+import { useLoading } from "./api/api";
 
-// ✅ ADD THIS — YouTube-style top loading bar
 function TopLoadingBar() {
   const loading = useLoading();
   return (
@@ -23,7 +22,6 @@ function TopLoadingBar() {
   );
 }
 
-// ✅ ADD THIS — replaces the plain "Loading..." text in Suspense
 function PageSkeleton() {
   return (
     <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "12px" }}>
@@ -42,15 +40,23 @@ function PageSkeleton() {
   );
 }
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000,
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <BrowserRouter>
-          <TopLoadingBar /> {/* ✅ ADD THIS — covers all pages, zero page edits */}
-          <Suspense fallback={<PageSkeleton />}> {/* ✅ CHANGE fallback only */}
+          <TopLoadingBar />
+          <Suspense fallback={<PageSkeleton />}>
             <AppRoutes />
           </Suspense>
           <Toaster position="top-right" richColors />
