@@ -1,11 +1,31 @@
-import React, { Suspense } from "react";
-import { BrowserRouter } from "react-router-dom";
+import React, { Suspense, useState, useEffect } from "react";
+import { BrowserRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { Toaster } from "@/components/ui/sonner";
 import AppRoutes from "./AppRoutes.jsx";
-import { useLoading } from "./api/api";
+import { useLoading } from "./api";
 
+/* ============================================================
+   SHIMMER STYLE
+   ============================================================ */
+const shimmerStyle = `
+  @keyframes shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+`;
+
+const skBase = {
+  borderRadius: "8px",
+  background: "linear-gradient(90deg,#e0e0e0 25%,#f5f5f5 50%,#e0e0e0 75%)",
+  backgroundSize: "200% 100%",
+  animation: "shimmer 1.4s infinite",
+};
+
+/* ============================================================
+   TOP LOADING BAR — shows on every API call
+   ============================================================ */
 function TopLoadingBar() {
   const loading = useLoading();
   return (
@@ -22,24 +42,59 @@ function TopLoadingBar() {
   );
 }
 
+/* ============================================================
+   PAGE SKELETON — shown during Suspense + route change
+   ============================================================ */
 function PageSkeleton() {
   return (
-    <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "12px" }}>
-      {[180, 260, 220, 240, 200].map((w, i) => (
-        <div key={i} style={{
-          height: i === 0 ? "24px" : "64px",
-          width: i === 0 ? `${w}px` : "100%",
-          borderRadius: "10px",
-          background: "linear-gradient(90deg,#e0e0e0 25%,#f5f5f5 50%,#e0e0e0 75%)",
-          backgroundSize: "200% 100%",
-          animation: "shimmer 1.4s infinite",
-        }} />
-      ))}
-      <style>{`@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}`}</style>
-    </div>
+    <>
+      <style>{shimmerStyle}</style>
+      <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "12px" }}>
+        {/* Page title */}
+        <div style={{ width: "180px", height: "24px", marginBottom: "8px", ...skBase }} />
+        {/* Cards */}
+        {[1, 2, 3, 4, 5].map((_, i) => (
+          <div key={i} style={{
+            background: "#fff",
+            border: "0.5px solid #eee",
+            borderRadius: "12px",
+            padding: "16px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px",
+          }}>
+            <div style={{ width: "50%", height: "16px", ...skBase }} />
+            <div style={{ width: "100%", height: "12px", ...skBase }} />
+            <div style={{ width: "100%", height: "12px", ...skBase }} />
+            <div style={{ width: "70%", height: "12px", ...skBase }} />
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
+/* ============================================================
+   ROUTE CHANGE SKELETON — detects navigation and shows shimmer
+   ============================================================ */
+function RouteChangeHandler({ children }) {
+  const location = useLocation();
+  const [isChanging, setIsChanging] = useState(false);
+
+  useEffect(() => {
+    // Show skeleton on every route change
+    setIsChanging(true);
+    const timer = setTimeout(() => setIsChanging(false), 600); // show for 600ms
+    return () => clearTimeout(timer);
+  }, [location.pathname]);
+
+  if (isChanging) return <PageSkeleton />;
+  return children;
+}
+
+/* ============================================================
+   QUERY CLIENT
+   ============================================================ */
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -50,6 +105,9 @@ const queryClient = new QueryClient({
   },
 });
 
+/* ============================================================
+   APP
+   ============================================================ */
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -57,7 +115,9 @@ function App() {
         <BrowserRouter>
           <TopLoadingBar />
           <Suspense fallback={<PageSkeleton />}>
-            <AppRoutes />
+            <RouteChangeHandler> {/* ✅ wraps routes — shows skeleton on every page change */}
+              <AppRoutes />
+            </RouteChangeHandler>
           </Suspense>
           <Toaster position="top-right" richColors />
         </BrowserRouter>
