@@ -221,6 +221,12 @@ def mark_absent_users_task():
 
 @app.on_event("startup")
 async def startup_event():
+    try:
+        await asyncio.wait_for(client.admin.command("ping"), timeout=10.0)
+        logger.info("MongoDB connection verified.")
+    except Exception as e:
+        logger.error(f"MongoDB not ready at startup: {e} — skipping startup tasks")
+        return
     # ── NON-UNIQUE indexes ────────────────────────────────────────────────────
     try:
         await db.tasks.create_index("assigned_to")
@@ -329,7 +335,7 @@ async def startup_event():
 
     # ── APScheduler ───────────────────────────────────────────────────────────
     try:
-        scheduler.add_job(fetch_indian_holidays_task, 'cron', day=1, hour=0, minute=5)
+        scheduler.add_job(fetch_indian_holidays_task, 'cron', day=1, hour=0, minute=5, id="fetch_holidays_monthly", replace_existing=True)
         scheduler.add_job(
             mark_absent_users_task,
             'cron',
