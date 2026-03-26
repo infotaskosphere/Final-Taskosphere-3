@@ -26,10 +26,6 @@ from io import StringIO, BytesIO
 from typing import List, Optional, Dict, Any
 from dateutil import parser
 from contextlib import asynccontextmanager
-from backend.startup import startup_event
-@app.on_event("startup")
-async def on_startup():
-    await startup_event()
 
 # ================= LOGGER =================
 logger = logging.getLogger(__name__)
@@ -111,6 +107,12 @@ _last_reminder_date_cache: Optional[str] = None
 
 # ====================== APP ======================
 app = FastAPI(title="Taskosphere Backend")
+
+from backend.startup import startup_event
+@app.on_event("startup")
+async def on_startup():
+    await startup_event()
+
 
 # === CRITICAL: CORS MUST BE THE VERY FIRST MIDDLEWARE ===
 # Registered BEFORE startup_event and all other middleware.
