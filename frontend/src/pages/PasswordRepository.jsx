@@ -558,7 +558,7 @@ function ImportModal({ open, onClose, isDark }) {
     setImport(true);
     try {
       const fd = new FormData(); fd.append('file', file);
-      const r = await api.post('/passwords/bulk-import', fd);
+      const r = await api.post('/passwords/bulk-import', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       setResult(r.data); setStep(2);
       qc.invalidateQueries({ queryKey: ['passwords'] });
       toast.success(`Imported ${r.data.successful_imports} entries`);
@@ -862,7 +862,7 @@ export default function PasswordRepository() {
       const p = {
         sort_by:    sortMeta.by,
         sort_order: sortMeta.ord,
-        limit:      '500',
+        limit: 500,
       };
       if (search)            p.search      = search;
       if (fDept   !== 'ALL') p.department  = fDept;
