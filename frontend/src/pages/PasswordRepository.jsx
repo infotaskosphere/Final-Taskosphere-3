@@ -69,6 +69,28 @@ const PAGE_SIZES = [20, 40, 80, 100];
 const cv = { hidden:{ opacity:0 }, visible:{ opacity:1, transition:{ staggerChildren:0.025 } } };
 const iv = { hidden:{ opacity:0, y:12 }, visible:{ opacity:1, y:0, transition:{ duration:0.2 } } };
 
+// ── Permission helpers ────────────────────────────────────────────────────────
+/**
+ * Safely resolves whether a permission flag is granted.
+ * Handles both dict-style permissions ({ can_view_passwords: true })
+ * and array-style permissions (['view_passwords']).
+ */
+function hasPerm(user, permKey, arrayKey) {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  const perms = user.permissions;
+  if (!perms) return false;
+  // Dict style (backend returns an object)
+  if (typeof perms === 'object' && !Array.isArray(perms)) {
+    return perms[permKey] === true;
+  }
+  // Array style fallback
+  if (Array.isArray(perms)) {
+    return perms.includes(arrayKey || permKey);
+  }
+  return false;
+}
+
 // ── WhatsApp icon ─────────────────────────────────────────────────────────────
 function WA({ className, style }) {
   return (
@@ -271,8 +293,8 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   const save = async () => {
-    if (!form.portal_name?.trim() || !form.username?.trim()) {
-      return toast.error('Portal name and username are required');
+    if (!form.portal_name?.trim()) {
+      return toast.error('Portal name is required');
     }
     setBusy(true);
     try {
@@ -324,7 +346,7 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
             <Input className={ic} value={form.url || ''} onChange={e => set('url', e.target.value)} placeholder="https://..."/>
           </Field>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Username / Email *">
+            <Field label="Username / Email">
               <Input className={ic} value={form.username || ''} onChange={e => set('username', e.target.value)} placeholder="user@example.com"/>
             </Field>
             <Field label="Password">
@@ -519,9 +541,7 @@ function WAModal({ open, onClose, entry, isDark }) {
 function ImportModal({ open, onClose, isDark }) {
   const [step, setStep]        = useState(1);
   const [file, setFile]        = useState(null);
-  const [parsing, setParsing]  = useState(false);
   const [importing, setImport] = useState(false);
-  const [preview, setPreview]  = useState(null);
   const [result, setResult]    = useState(null);
   const qc = useQueryClient();
 
@@ -530,18 +550,7 @@ function ImportModal({ open, onClose, isDark }) {
     if (!f) return;
     const ext = f.name.split('.').pop()?.toLowerCase() || '';
     if (!['xlsx', 'xls', 'csv'].includes(ext)) return toast.error('Upload Excel or CSV only');
-    setFile(f); setPreview(null); setResult(null); setStep(1);
-  };
-
-  const parse = async () => {
-    if (!file) return;
-    setParsing(true);
-    try {
-      const fd = new FormData(); fd.append('file', file);
-      const r = await api.post('/passwords/parse-preview', fd);
-      setPreview(r.data); setStep(2);
-    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to parse'); }
-    finally { setParsing(false); }
+    setFile(f); setResult(null); setStep(1);
   };
 
   const doImport = async () => {
@@ -550,13 +559,15 @@ function ImportModal({ open, onClose, isDark }) {
     try {
       const fd = new FormData(); fd.append('file', file);
       const r = await api.post('/passwords/bulk-import', fd);
-      setResult(r.data); setStep(3);
+      setResult(r.data); setStep(2);
       qc.invalidateQueries({ queryKey: ['passwords'] });
-    } catch (e) { toast.error(e.response?.data?.detail || 'Import failed'); }
-    finally { setImport(false); }
+      toast.success(`Imported ${r.data.successful_imports} entries`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Import failed');
+    } finally { setImport(false); }
   };
 
-  const close_ = () => { setStep(1); setFile(null); setPreview(null); setResult(null); onClose(); };
+  const close_ = () => { setStep(1); setFile(null); setResult(null); onClose(); };
 
   return (
     <Dialog open={open} onOpenChange={close_}>
@@ -577,31 +588,20 @@ function ImportModal({ open, onClose, isDark }) {
               {file && <p className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>📎 {file.name}</p>}
             </>
           )}
-          {step === 2 && preview && (
-            <div className="space-y-3">
-              <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                {preview.rows_count} rows · {preview.columns_count} columns found
-              </p>
-              <div className={`rounded-lg p-3 max-h-48 overflow-auto text-xs font-mono ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-50 text-slate-700'}`}>
-                <pre>{JSON.stringify(preview.sample_rows && preview.sample_rows.slice(0, 3), null, 2)}</pre>
-              </div>
-              {preview.column_mapping && Object.keys(preview.column_mapping).length > 0 && (
-                <div className={`p-3 rounded-lg text-xs ${isDark ? 'bg-green-900/20 text-green-300' : 'bg-green-50 text-green-700'}`}>
-                  ✓ Auto-mapped: {Object.entries(preview.column_mapping).map(([k, v]) => `${k} → "${v}"`).join(', ')}
-                </div>
-              )}
-            </div>
-          )}
-          {step === 3 && result && (
+          {step === 2 && result && (
             <div className={`rounded-lg p-4 ${isDark ? 'bg-green-900/20 border border-green-800/40' : 'bg-green-50 border border-green-200'}`}>
               <p className={`font-semibold ${isDark ? 'text-green-300' : 'text-green-700'}`}>✓ Import complete!</p>
               <p className={`text-sm mt-1 ${isDark ? 'text-green-400' : 'text-green-600'}`}>
-                {result.imported} imported · {result.skipped} skipped · {result.errors} errors
+                {result.successful_imports} imported · {result.failed_imports} failed · {result.total_processed} total processed
               </p>
-              {result.error_details && result.error_details.length > 0 && (
+              {result.errors && result.errors.length > 0 && (
                 <details className="mt-2">
-                  <summary className="text-xs cursor-pointer text-red-400">Show errors</summary>
-                  <pre className="text-xs mt-1 text-red-400 whitespace-pre-wrap">{result.error_details.join('\n')}</pre>
+                  <summary className="text-xs cursor-pointer text-red-400">Show errors ({result.errors.length})</summary>
+                  <div className="mt-1 space-y-1">
+                    {result.errors.slice(0, 10).map((err, i) => (
+                      <p key={i} className="text-xs text-red-400">Row {err.row}: {typeof err.error === 'string' ? err.error : JSON.stringify(err.error)}</p>
+                    ))}
+                  </div>
                 </details>
               )}
             </div>
@@ -610,13 +610,8 @@ function ImportModal({ open, onClose, isDark }) {
         <DialogFooter className={`px-6 py-4 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
           <Button variant="ghost" className="rounded-xl" onClick={close_}>Close</Button>
           {step === 1 && (
-            <Button onClick={parse} disabled={!file || parsing} className="rounded-xl font-bold text-white" style={{ background: C.deepBlue }}>
-              {parsing ? <><Loader2 className="h-4 w-4 animate-spin mr-2"/>Parsing…</> : 'Preview File'}
-            </Button>
-          )}
-          {step === 2 && (
-            <Button onClick={doImport} disabled={importing} className="rounded-xl font-bold text-white" style={{ background: C.green }}>
-              {importing ? <><Loader2 className="h-4 w-4 animate-spin mr-2"/>Importing…</> : 'Import All'}
+            <Button onClick={doImport} disabled={!file || importing} className="rounded-xl font-bold text-white" style={{ background: C.green }}>
+              {importing ? <><Loader2 className="h-4 w-4 animate-spin mr-2"/>Importing…</> : 'Import Now'}
             </Button>
           )}
         </DialogFooter>
@@ -854,8 +849,11 @@ export default function PasswordRepository() {
   const [importOpen,  setImportOpen]  = useState(false);
 
   const isAdmin = user?.role === 'admin';
-  const canView = isAdmin || (user?.permissions && user.permissions.includes('view_passwords'));
-  const canEdit = isAdmin || (user?.permissions && user.permissions.includes('edit_passwords'));
+
+  // ── FIX: use hasPerm() instead of .includes() on a dict object ────────────
+  const canView = isAdmin || hasPerm(user, 'can_view_passwords', 'view_passwords');
+  const canEdit = isAdmin || hasPerm(user, 'can_edit_passwords', 'edit_passwords');
+
   const sortMeta = SORTS.find(s => s.value === sort) || SORTS[0];
 
   const { data: entries = [], isLoading, isError, refetch } = useQuery({
@@ -866,7 +864,7 @@ export default function PasswordRepository() {
         sort_order: sortMeta.ord,
         limit:      '500',
       };
-      if (search)          p.search      = search;
+      if (search)            p.search      = search;
       if (fDept   !== 'ALL') p.department  = fDept;
       if (fType   !== 'ALL') p.portal_type = fType;
       if (fClient !== 'ALL') p.client_id   = fClient;
@@ -882,7 +880,14 @@ export default function PasswordRepository() {
 
   const { data: stats = {} } = useQuery({
     queryKey: ['pw-stats'],
-    queryFn:  async () => (await api.get('/passwords/admin/stats')).data || {},
+    queryFn:  async () => {
+      try {
+        const r = await api.get('/passwords/admin/stats');
+        return r.data || {};
+      } catch {
+        return {};
+      }
+    },
     enabled:  !!isAdmin,
     staleTime: 60000,
     retry: false,
@@ -910,11 +915,11 @@ export default function PasswordRepository() {
 
   const dlTemplate = async () => {
     try {
-      const r = await api.get('/passwords/download-template', { responseType: 'blob' });
+      const r = await api.get('/passwords/template', { responseType: 'blob' });
       const url = URL.createObjectURL(new Blob([r.data]));
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'password-template.xlsx';
+      a.download = 'password_template.xlsx';
       a.click();
       URL.revokeObjectURL(url);
     } catch { toast.error('Failed to download template'); }
@@ -1080,7 +1085,7 @@ export default function PasswordRepository() {
             <Button size="sm" variant="destructive" className="h-7 text-xs rounded-lg gap-1.5"
               onClick={async () => {
                 try {
-                  await api.post('/passwords/bulk-delete', { entry_ids: [...selIds] });
+                  await Promise.all([...selIds].map(id => api.delete(`/passwords/${id}`)));
                   toast.success(`${selIds.size} entries deleted`);
                   setSelIds(new Set());
                   qc.invalidateQueries({ queryKey: ['passwords'] });
