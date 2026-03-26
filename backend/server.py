@@ -690,25 +690,50 @@ async def create_referrer(data: dict, current_user: User = Depends(get_current_u
 # ==========================================================
 # TODO DASHBOARD
 # ==========================================================
+# ================= CREATE TODO =================
 @api_router.post("/todos", response_model=Todo)
 async def create_todo(
     todo_data: TodoCreate,
     current_user: User = Depends(get_current_user)
 ):
-    todo = Todo(
-        user_id=current_user.id,
-        **todo_data.model_dump()
-    )
-    doc = todo.model_dump()
-    doc["created_at"] = doc["created_at"].isoformat()
-    doc["updated_at"] = doc["updated_at"].isoformat()
-    if doc.get("due_date"):
-        doc["due_date"] = doc["due_date"].isoformat()
-    result = await db.todos.insert_one(doc)
-    doc["id"] = str(result.inserted_id)
-    doc.pop("_id", None)
-    return doc
+    try:
+        todo = Todo(
+            user_id=current_user.id,
+            **todo_data.model_dump()
+        )
 
+        doc = todo.model_dump()
+
+        # ✅ Ensure timestamps exist (CRITICAL FIX)
+        if not doc.get("created_at"):
+            doc["created_at"] = datetime.now(timezone.utc)
+
+        if not doc.get("updated_at"):
+            doc["updated_at"] = datetime.now(timezone.utc)
+
+        # ✅ Safe conversion
+        if doc.get("created_at"):
+            doc["created_at"] = doc["created_at"].isoformat()
+
+        if doc.get("updated_at"):
+            doc["updated_at"] = doc["updated_at"].isoformat()
+
+        if doc.get("due_date"):
+            doc["due_date"] = doc["due_date"].isoformat()
+
+        result = await db.todos.insert_one(doc)
+
+        doc["id"] = str(result.inserted_id)
+        doc.pop("_id", None)
+
+        return doc
+
+    except Exception as e:
+        print("CREATE TODO ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ================= GET TODOS =================
 @api_router.get("/todos")
 async def get_todos(
     user_id: Optional[str] = None,
@@ -734,6 +759,7 @@ async def get_todos(
     else:
         permissions = current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else (current_user.permissions or {})
         allowed_others = permissions.get("view_other_todos", []) if isinstance(permissions, dict) else []
+
         if user_id:
             if user_id != current_user.id and user_id not in allowed_others:
                 raise HTTPException(status_code=403, detail="Not allowed")
@@ -742,117 +768,140 @@ async def get_todos(
             query = {"user_id": current_user.id}
 
     todos = await db.todos.find(query).to_list(1000)
+
     for t in todos:
         t["id"] = str(t["_id"])
-        del t["_id"]
+        t.pop("_id", None)
+
     return todos
 
+
+# ================= DASHBOARD =================
 @api_router.get("/dashboard/todo-overview")
 async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
     is_admin = current_user.role == "admin"
+
     if is_admin:
         todos = await db.todos.find().to_list(2000)
-        # Replaced N+1 user queries with a single batch lookup
+
         user_ids = list({t["user_id"] for t in todos if t.get("user_id")})
         users_raw = await db.users.find({"id": {"$in": user_ids}}, {"_id": 0}).to_list(1000)
         user_name_map = {u["id"]: u.get("full_name", "Unknown User") for u in users_raw}
 
         grouped_todos = {}
         all_todos_flat = []
+
         for todo in todos:
             user_name = user_name_map.get(todo["user_id"], "Unknown User")
+
             if user_name not in grouped_todos:
                 grouped_todos[user_name] = []
+
             todo["_id"] = str(todo["_id"])
             grouped_todos[user_name].append(todo)
             all_todos_flat.append(todo)
+
         return {
             "role": "admin",
             "todos": all_todos_flat,
             "grouped_todos": grouped_todos
         }
+
     elif current_user.role == "manager":
         team_ids = await get_team_user_ids(current_user.id)
         visible_ids = list(set(team_ids + [current_user.id]))
+
         todos = await db.todos.find({"user_id": {"$in": visible_ids}}).to_list(2000)
+
         for todo in todos:
             todo["_id"] = str(todo["_id"])
+
         return {
             "role": "manager",
             "todos": todos
         }
+
     else:
         permissions = get_user_permissions(current_user)
         allowed_users = permissions.get("view_other_todos", [])
+
         if not isinstance(allowed_users, list):
             allowed_users = []
+
         query_ids = list(set(allowed_users + [current_user.id]))
+
         todos = await db.todos.find({"user_id": {"$in": query_ids}}).to_list(2000)
+
         for todo in todos:
             todo["_id"] = str(todo["_id"])
+
         return {
             "role": "staff",
             "todos": todos
         }
-#TodoRouter
 
+
+# ================= PROMOTE TODO =================
 @api_router.post("/todos/{todo_id}/promote-to-task")
 async def promote_todo(
     todo_id: str,
     task_data: dict = Body(default={}),
     current_user: User = Depends(get_current_user)
 ):
-    # Try lookup by string `id` field first, then fallback to ObjectId `_id`
     todo = await db.todos.find_one({"id": todo_id})
+
     if not todo:
         try:
             todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid Todo ID")
+
     if not todo:
         raise HTTPException(status_code=404, detail="Todo not found")
+
     if current_user.role != "admin" and todo["user_id"] != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to promote this todo")
+        raise HTTPException(status_code=403, detail="Not authorized")
 
     now = datetime.now(IST)
+
     new_task = {
-        "id":                  str(uuid.uuid4()),
-        "title":               task_data.get("title")               or todo["title"],
-        "description":         task_data.get("description")         or todo.get("description"),
-        "assigned_to":         task_data.get("assigned_to")         or todo["user_id"],
-        "sub_assignees":       task_data.get("sub_assignees")       or [],
-        "priority":            task_data.get("priority")            or "medium",
-        "status":              task_data.get("status")              or "pending",
-        "category":            task_data.get("category")            or "other",
-        "client_id":           task_data.get("client_id")           or None,
-        "due_date":            task_data.get("due_date")            or None,
-        "is_recurring":        task_data.get("is_recurring")        or False,
-        "recurrence_pattern":  task_data.get("recurrence_pattern")  or "monthly",
+        "id": str(uuid.uuid4()),
+        "title": task_data.get("title") or todo["title"],
+        "description": task_data.get("description") or todo.get("description"),
+        "assigned_to": task_data.get("assigned_to") or todo["user_id"],
+        "sub_assignees": task_data.get("sub_assignees") or [],
+        "priority": task_data.get("priority") or "medium",
+        "status": task_data.get("status") or "pending",
+        "category": task_data.get("category") or "other",
+        "client_id": task_data.get("client_id") or None,
+        "due_date": task_data.get("due_date") or None,
+        "is_recurring": task_data.get("is_recurring") or False,
+        "recurrence_pattern": task_data.get("recurrence_pattern") or "monthly",
         "recurrence_interval": task_data.get("recurrence_interval") or 1,
-        "type":                "task",
-        "created_by":          current_user.id,
-        "created_at":          now.isoformat(),
-        "updated_at":          now.isoformat(),
+        "type": "task",
+        "created_by": current_user.id,
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
     }
 
     mongo_id = todo.get("_id")
 
-    # Insert task first, then delete todo (no transaction needed — works on all MongoDB tiers)
     await db.tasks.insert_one(new_task)
-    new_task.pop("_id", None)  # remove ObjectId added by insert_one before returning
+    new_task.pop("_id", None)
+
     await db.todos.delete_one({"_id": mongo_id})
 
     return {"message": "Todo promoted to task successfully"}
 
+
+# ================= DELETE TODO =================
 @api_router.delete("/todos/{todo_id}")
 async def delete_todo(
     todo_id: str,
     current_user: User = Depends(get_current_user)
 ):
-    # Strategy 1: lookup by string `id` field (todos created via API)
     todo = await db.todos.find_one({"id": todo_id})
 
-    # Strategy 2: fallback to MongoDB ObjectId `_id`
     if not todo:
         try:
             todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
@@ -861,24 +910,24 @@ async def delete_todo(
 
     if not todo:
         raise HTTPException(status_code=404, detail="Todo not found")
+
     if current_user.role != "admin" and todo["user_id"] != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
 
-    # Always delete using the actual MongoDB `_id` to avoid ambiguity
     await db.todos.delete_one({"_id": todo["_id"]})
+
     return {"message": "Todo deleted successfully"}
 
 
+# ================= UPDATE TODO =================
 @api_router.patch("/todos/{todo_id}")
 async def update_todo(
     todo_id: str,
     updates: dict,
     current_user: User = Depends(get_current_user)
 ):
-    # Strategy 1: lookup by string `id` field
     todo = await db.todos.find_one({"id": todo_id})
 
-    # Strategy 2: fallback to MongoDB ObjectId `_id`
     if not todo:
         try:
             todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
@@ -887,21 +936,23 @@ async def update_todo(
 
     if not todo:
         raise HTTPException(status_code=404, detail="Todo not found")
+
     if current_user.role != "admin" and todo["user_id"] != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
 
     now = datetime.now(IST)
-    if updates.get("is_completed") is True:
-        updates["completed_at"] = now
-    updates["updated_at"] = now
 
-    # Always update using the actual MongoDB `_id`
+    if updates.get("is_completed") is True:
+        updates["completed_at"] = now.isoformat()
+
+    updates["updated_at"] = now.isoformat()
+
     await db.todos.update_one(
         {"_id": todo["_id"]},
         {"$set": updates}
     )
+
     return {"message": "Todo updated successfully"}
-    
 # REGISTER Endpoint
 @api_router.post("/auth/register", response_model=Token)
 async def register(user_data: UserCreate, current_user: User = Depends(get_current_user)):
