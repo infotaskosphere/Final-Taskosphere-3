@@ -1,12 +1,92 @@
 import asyncio
 import logging
-from backend.dependencies import client
+import pytz
+from datetime import datetime, timezone
+
+from backend.dependencies import client, db
+from apscheduler.schedulers.background import BackgroundScheduler
 
 logger = logging.getLogger(__name__)
 
+scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Kolkata"))
+
 async def startup_event():
     try:
+        # ✅ MongoDB check
         await asyncio.wait_for(client.admin.command("ping"), timeout=5)
         logger.info("MongoDB connected successfully")
+
+        # ✅ YOUR FULL INDEX BLOCK (PASTE HERE)
+        await db.tasks.create_index("assigned_to")
+        await db.tasks.create_index("created_by")
+        await db.tasks.create_index("due_date")
+        await db.users.create_index("email")
+        await db.staff_activity.create_index("user_id")
+        await db.staff_activity.create_index("timestamp")
+        await db.staff_activity.create_index([("user_id", 1), ("timestamp", -1)])
+        await db.due_dates.create_index("department")
+        await db.tasks.create_index([("assigned_to", 1), ("status", 1)])
+        await db.tasks.create_index("created_at")
+        await db.referrers.create_index("name")
+        await db.clients.create_index("assigned_to")
+        await db.dsc_register.create_index("expiry_date")
+        await db.todos.create_index([("user_id", 1), ("created_at", -1)])
+        await db.attendance.create_index([("user_id", 1), ("date", -1)])
+        await db.notifications.create_index("user_id")
+        await db.visits.create_index([("assigned_to", 1), ("visit_date", -1)])
+        await db.visits.create_index("visit_date")
+        await db.visits.create_index("client_id")
+        await db.visits.create_index("status")
+        await db.notifications.create_index([("user_id", 1), ("is_read", 1)])
+        await db.notifications.create_index("created_at")
+        await db.quotations.create_index([("created_by", 1), ("created_at", -1)])
+        await db.quotations.create_index("status")
+        await db.quotations.create_index("service")
+        await db.companies.create_index("created_by")
+        await db.companies.create_index("name")
+        await db.staff_activity.create_index("type")
+        await db.staff_activity.create_index("domain")
+        await db.staff_activity.create_index([("user_id", 1), ("type", 1)])
+
+        # ✅ EMAIL FIX
+        try:
+            await db.email_connections.drop_index("user_id_1_provider_1")
+        except:
+            pass
+
+        await db.email_connections.create_index(
+            [("user_id", 1), ("email_address", 1)],
+            unique=True,
+            background=True
+        )
+
+        # ✅ UNIQUE INDEXES
+        await db.attendance.create_index(
+            [("user_id", 1), ("date", 1)],
+            unique=True,
+            background=True
+        )
+
+        await db.clients.create_index(
+            [("created_by", 1), ("company_name", 1)],
+            unique=True,
+            background=True
+        )
+
+        await db.holidays.create_index("date", unique=True, background=True)
+
+        # ✅ VISIT REPAIR
+        visits = await db.visits.find({"id": {"$exists": False}}).to_list(10000)
+        for v in visits:
+            await db.visits.update_one(
+                {"_id": v["_id"]},
+                {"$set": {"id": str(v["_id"])}}
+            )
+
+        logger.info("Startup DB setup completed")
+
+        # ✅ START SCHEDULER (if needed)
+        scheduler.start()
+
     except Exception as e:
         logger.error(f"Startup failed: {e}")
