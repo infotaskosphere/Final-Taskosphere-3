@@ -19,13 +19,17 @@ from backend.quotations import router as quotation_router
 from backend.website_tracking import router as website_tracking_router
 from backend.visits import router as visits_router
 
+
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from io import StringIO, BytesIO
 from typing import List, Optional, Dict, Any
 from dateutil import parser
 from contextlib import asynccontextmanager
-
+from backend.startup import startup_event
+@app.on_event("startup")
+async def on_startup():
+    await startup_event()
 
 # ================= LOGGER =================
 logger = logging.getLogger(__name__)
@@ -232,90 +236,6 @@ def mark_absent_users_task():
         if loop and not loop.is_closed():
             loop.close()
    
-
-    try:
-        await db.tasks.create_index("assigned_to")
-        await db.tasks.create_index("created_by")
-        await db.tasks.create_index("due_date")
-        await db.users.create_index("email")
-        await db.staff_activity.create_index("user_id")
-        await db.staff_activity.create_index("timestamp")
-        await db.staff_activity.create_index([("user_id", 1), ("timestamp", -1)])
-        await db.due_dates.create_index("department")
-        await db.tasks.create_index([("assigned_to", 1), ("status", 1)])
-        await db.tasks.create_index("created_at")
-        await db.referrers.create_index("name")
-        await db.clients.create_index("assigned_to")
-        await db.dsc_register.create_index("expiry_date")
-        await db.todos.create_index([("user_id", 1), ("created_at", -1)])
-        await db.attendance.create_index([("user_id", 1), ("date", -1)])
-        await db.notifications.create_index("user_id")
-        await db.visits.create_index([("assigned_to", 1), ("visit_date", -1)])
-        await db.visits.create_index("visit_date")
-        await db.visits.create_index("client_id")
-        await db.visits.create_index("status")
-        await db.notifications.create_index([("user_id", 1), ("is_read", 1)])
-        await db.notifications.create_index("created_at")
-        await db.quotations.create_index([("created_by", 1), ("created_at", -1)])
-        await db.quotations.create_index("status")
-        await db.quotations.create_index("service")
-        await db.companies.create_index("created_by")
-        await db.companies.create_index("name")
-        await db.staff_activity.create_index("type")
-        await db.staff_activity.create_index("domain")
-        await db.staff_activity.create_index([("user_id", 1), ("timestamp", -1)])
-        await db.staff_activity.create_index([("user_id", 1), ("type", 1)])
-
-    # ── FIXED: EMAIL CONNECTIONS INDEX ──────────────────────────────────
-        try:
-            # Drop old rule (Unique User + Provider)
-            await db.email_connections.drop_index("user_id_1_provider_1")
-        except Exception:
-            pass 
-
-        # Create new rule (Unique User + Email Address)
-        await db.email_connections.create_index(
-            [("user_id", 1), ("email_address", 1)],
-            unique=True,
-            background=True
-        )
-        
-        # Unique indexes — use background=True so they don't block startup if they already exist
-        await db.attendance.create_index(
-            [("user_id", 1), ("date", 1)],
-            unique=True,
-            background=True
-        )
-        await db.clients.create_index(
-            [("created_by", 1), ("company_name", 1)],
-            unique=True,
-            background=True
-        )
-        await db.holidays.create_index("date", unique=True, background=True)
-        # ── NEW: email connections index ──────────────────────────────────────
-        await db.email_connections.create_index(
-            [("user_id", 1), ("email_address", 1)],
-            unique=True,
-            background=True
-        )
-    except Exception as e:
-        # Log index creation errors but do NOT crash the server
-        logger.warning(f"Index creation warning (non-fatal): {e}")
-
-    try:
-        visits = await db.visits.find({"id": {"$exists": False}}).to_list(10000)
-        repaired = 0
-        for v in visits:
-            raw_id = v.get("_id")
-            new_id = str(raw_id)
-            await db.visits.update_one(
-                {"_id": raw_id},
-                {"$set": {"id": new_id}}
-            )
-            repaired += 1
-        logger.info(f"✅ Visit ID repair: {repaired} documents patched")
-    except Exception as e:
-        logger.error(f"⚠️ Visit ID repair failed (non-fatal): {e}")
 
     # Scheduled jobs=====================================================================
     try:
