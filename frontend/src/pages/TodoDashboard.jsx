@@ -190,7 +190,7 @@ function PromoteToTaskModal({ todo, isDark, onClose, onConfirm, isLoading, allUs
       ...form,
       assigned_to:   form.assigned_to === 'unassigned' ? null : form.assigned_to,
       client_id:     form.client_id || null,
-      due_date:      form.due_date ? new Date(form.due_date).toISOString() : null,
+      due_date:      dueDate ? `${dueDate}T00:00:00.000Z` : null,
       sub_assignees: form.sub_assignees || [],
     });
   };
