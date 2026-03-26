@@ -1,13 +1,21 @@
 @import "react-day-picker/dist/style.css";
 
+/* ── Base App Layout ─────────────────────────────────────────────── */
 .App {
   min-height: 100vh;
 }
 
+/* ── Global Reset ───────────────────────────────────────────────── */
 * {
   box-sizing: border-box;
 }
 
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+/* ── Spinner Animation ──────────────────────────────────────────── */
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -16,4 +24,14 @@
 
 .animate-spin {
   animation: spin 1s linear infinite;
+}
+
+/* ── Bottom Loading Bar Animation (IMPORTANT) ───────────────────── */
+@keyframes loadingBar {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
 }
