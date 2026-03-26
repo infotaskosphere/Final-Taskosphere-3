@@ -7,33 +7,31 @@ import AppRoutes from "./AppRoutes.jsx";
 import { useLoading } from "./lib/api";
 import { AnimatePresence } from "framer-motion";
 
-/* ── Top loading bar ─────────────────────────────────────────────────── */
-function TopLoadingBar() {
+/* ── Bottom loading bar ─────────────────────────────────────────────── */
+function BottomLoadingBar() {
   const loading = useLoading();
+
+  // ✅ Do not render anything when not loading
+  if (!loading) return null;
+
   return (
     <div
       style={{
         position: "fixed",
-        top: 0,
+        bottom: 0, // moved to bottom
         left: 0,
-        width: loading ? "75%" : "100%",
+        width: "30%",
         height: 3,
         background: "linear-gradient(90deg, #7F77DD, #1F6FB2)",
         zIndex: 9999,
-        opacity: loading ? 1 : 0,
-        transition: loading
-          ? "width 2.5s cubic-bezier(0.1, 0.4, 0.2, 1)"
-          : "opacity 0.4s ease",
-        borderRadius: "0 2px 2px 0",
+        animation: "loadingBar 1.2s infinite ease-in-out",
         pointerEvents: "none",
       }}
     />
   );
 }
 
-/* ── AnimatePresence wrapper — must be inside BrowserRouter so
-      useLocation works. Keyed on pathname so login→dashboard
-      exit animation fires before the new route mounts.          ── */
+/* ── AnimatePresence wrapper ───────────────────────────────────────── */
 function AnimatedRoutes() {
   const location = useLocation();
   return (
@@ -43,7 +41,7 @@ function AnimatedRoutes() {
   );
 }
 
-/* ── Query client ────────────────────────────────────────────────────── */
+/* ── Query client ──────────────────────────────────────────────────── */
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -54,16 +52,19 @@ const queryClient = new QueryClient({
   },
 });
 
-/* ── App ─────────────────────────────────────────────────────────────── */
+/* ── App ───────────────────────────────────────────────────────────── */
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <BrowserRouter>
-          <TopLoadingBar />
+          {/* ✅ Bottom loader */}
+          <BottomLoadingBar />
+
           <Suspense fallback={null}>
             <AnimatedRoutes />
           </Suspense>
+
           <Toaster position="top-right" richColors />
         </BrowserRouter>
       </AuthProvider>
