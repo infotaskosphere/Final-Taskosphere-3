@@ -237,34 +237,37 @@ def mark_absent_users_task():
             loop.close()
    
 
-    # Scheduled jobs=====================================================================
-    try:
-        scheduler.add_job(fetch_indian_holidays_task, 'cron', day=1, hour=0, minute=5)
-        # Absent marking job — fires every working day at 19:00 IST
-        scheduler.add_job(
-            mark_absent_users_task,
-            'cron',
-            hour=19,
-            minute=0,
-            timezone=pytz.timezone("Asia/Kolkata"),
-            id="mark_absent_daily",
-            replace_existing=True,
-        )
+# Scheduled jobs=====================================================================
+try:
+    # Monthly holiday fetch
+    scheduler.add_job(
+        fetch_indian_holidays_task,
+        'cron',
+        day=1,
+        hour=0,
+        minute=5
+    )
+
+    # Daily absent marking (7:00 PM IST)
+    scheduler.add_job(
+        mark_absent_users_task,
+        'cron',
+        hour=19,
+        minute=0,
+        timezone=pytz.timezone("Asia/Kolkata"),
+        id="mark_absent_daily",
+        replace_existing=True,
+    )
+
+    if not scheduler.running:
         scheduler.start()
-        logger.info("APScheduler started successfully.")
-    except Exception as e:
-        logger.error(f"APScheduler startup failed: {e}")
 
-        # 🔥 AUTO MIGRATION: Add consent_given for old users
-    try:
-        result = await db.users.update_many(
-            {},  # all users
-            {"$set": {"consent_given": True}}
-        )
-        logger.info(f"Consent cleanup: Updated {result.modified_count} users")
-    except Exception as e:
-        logger.error(f"Consent cleanup failed: {e}")
+    logger.info("APScheduler started successfully.")
 
+except Exception as e:
+    logger.error(f"APScheduler startup failed: {e}")
+
+   
 # ====================== HEALTH ======================
 @app.get("/health")
 async def health():
