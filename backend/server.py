@@ -688,9 +688,9 @@ async def create_referrer(data: dict, current_user: User = Depends(get_current_u
 
 
 # ==========================================================
-# TODO DASHBOARD
+# TODO DASHBOARD # CREATE TODO
 # ==========================================================
-# ================= CREATE TODO =================
+
 @api_router.post("/todos", response_model=Todo)
 async def create_todo(
     todo_data: TodoCreate,
@@ -704,32 +704,39 @@ async def create_todo(
 
         doc = todo.model_dump()
 
-        # ✅ Ensure timestamps exist (CRITICAL FIX)
         if not doc.get("created_at"):
             doc["created_at"] = datetime.now(timezone.utc)
-
         if not doc.get("updated_at"):
             doc["updated_at"] = datetime.now(timezone.utc)
 
-        # ✅ Safe conversion
-        if doc.get("created_at"):
-            doc["created_at"] = doc["created_at"].isoformat()
+        # Safe conversion — handle both datetime objects and strings
+        for field in ["created_at", "updated_at"]:
+            val = doc.get(field)
+            if val and hasattr(val, "isoformat"):
+                doc[field] = val.isoformat()
+            elif val and isinstance(val, str):
+                pass  # already a string, leave it
 
-        if doc.get("updated_at"):
-            doc["updated_at"] = doc["updated_at"].isoformat()
-
-        if doc.get("due_date"):
-            doc["due_date"] = doc["due_date"].isoformat()
+        # Safe due_date handling
+        val = doc.get("due_date")
+        if val:
+            if hasattr(val, "isoformat"):
+                doc["due_date"] = val.isoformat()
+            elif isinstance(val, str):
+                # Normalize DD-MM-YYYY → YYYY-MM-DD
+                if re.match(r'^\d{2}-\d{2}-\d{4}$', val):
+                    parts = val.split('-')
+                    doc["due_date"] = f"{parts[2]}-{parts[1]}-{parts[0]}"
+                # else leave ISO string as-is
 
         result = await db.todos.insert_one(doc)
-
         doc["id"] = str(result.inserted_id)
         doc.pop("_id", None)
 
         return doc
 
     except Exception as e:
-        print("CREATE TODO ERROR:", str(e))
+        logger.error(f"CREATE TODO ERROR: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
