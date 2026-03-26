@@ -1,817 +1,974 @@
-"""
-Password Repository Router for Taskosphere — backend/passwords.py
-"""
 
-import io
+from __future__ import annotations
+
 import os
+import uuid
 import base64
-import json
+import hashlib
 import logging
-import enum
-import tempfile
-from datetime import datetime
-from typing import Optional, List, Dict, Any
+import re
+from datetime import datetime, timezone
+from typing import Optional, List, Any
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, status
-from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import (
-    select, and_, or_, func, desc, asc,
-    Column, Integer, String, Text, DateTime, Boolean,
-)
-from sqlalchemy.orm import Session
-from sqlalchemy.ext.declarative import declarative_base
-from pydantic import BaseModel, Field, validator
-from cryptography.fernet import Fernet
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Response
+from pydantic import BaseModel, Field, ConfigDict, ValidationError
 import pandas as pd
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill
+import io
 
-# ── dependency imports ────────────────────────────────────────────────────────
-try:
-    from backend.dependencies import get_db, get_current_user
-except ImportError:
-    try:
-        from app.dependencies import get_db, get_current_user
-    except ImportError:
-        try:
-            from dependencies import get_db, get_current_user
-        except ImportError:
-            def get_db():
-                raise NotImplementedError("Fix get_db import")
-            def get_current_user():
-                raise NotImplementedError("Fix get_current_user import")
+from backend.dependencies import db, get_current_user, require_admin
+from backend.models import User
 
 logger = logging.getLogger(__name__)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# DATABASE MODELS
-# ═══════════════════════════════════════════════════════════════════════════════
-Base = declarative_base()
+# ── Router ────────────────────────────────────────────────────────────────────
+router = APIRouter(prefix="/passwords", tags=["password-repository"])
 
+# ── Encryption bootstrap ──────────────────────────────────────────────────────
+try:
+    from cryptography.fernet import Fernet, InvalidToken
 
-class PortalTypeEnum(str, enum.Enum):
-    MCA = "MCA"
-    ROC = "ROC"
-    DGFT = "DGFT"
-    TRADEMARK = "TRADEMARK"
-    GST = "GST"
-    INCOME_TAX = "INCOME_TAX"
-    TDS = "TDS"
-    TRACES = "TRACES"
-    EPFO = "EPFO"
-    ESIC = "ESIC"
-    MSME = "MSME"
-    RERA = "RERA"
-    OTHER = "OTHER"
+    _env_key = os.getenv("PASSWORD_REPO_KEY", "").strip()
 
-
-class DepartmentEnum(str, enum.Enum):
-    GST = "GST"
-    IT = "IT"
-    ACC = "ACC"
-    TDS = "TDS"
-    ROC = "ROC"
-    TM = "TM"
-    MSME = "MSME"
-    FEMA = "FEMA"
-    DSC = "DSC"
-    OTHER = "OTHER"
-
-
-class HolderTypeEnum(str, enum.Enum):
-    COMPANY = "COMPANY"
-    DIRECTOR = "DIRECTOR"
-    INDIVIDUAL = "INDIVIDUAL"
-    PARTNER = "PARTNER"
-    TRUSTEE = "TRUSTEE"
-    OTHER = "OTHER"
-
-
-class PasswordEntry(Base):
-    __tablename__ = "password_entries"
-    id                 = Column(Integer, primary_key=True, index=True)
-    user_id            = Column(Integer, index=True)
-    portal_name        = Column(String(255), index=True)
-    portal_type        = Column(String(50),  default="OTHER", index=True)
-    url                = Column(String(500),  nullable=True)
-    username           = Column(String(255),  index=True)
-    password_encrypted = Column(Text)
-    has_password       = Column(Boolean, default=True)
-    department         = Column(String(50),  default="OTHER", index=True)
-    holder_type        = Column(String(50),  default="COMPANY")
-    holder_name        = Column(String(255),  nullable=True, index=True)
-    holder_pan         = Column(String(20),   nullable=True, index=True)
-    holder_din         = Column(String(20),   nullable=True)
-    mobile             = Column(String(20),   nullable=True)
-    trade_name         = Column(String(255),  nullable=True, index=True)
-    client_name        = Column(String(255),  nullable=True, index=True)
-    client_id          = Column(String(50),   nullable=True, index=True)
-    notes              = Column(Text, nullable=True)
-    tags               = Column(Text, nullable=True)
-    created_at         = Column(DateTime, default=datetime.utcnow, index=True)
-    updated_at         = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    last_accessed_at   = Column(DateTime, nullable=True)
-    is_archived        = Column(Boolean, default=False)
-
-
-class AccessLog(Base):
-    __tablename__ = "password_access_logs"
-    id         = Column(Integer, primary_key=True, index=True)
-    user_id    = Column(Integer, index=True)
-    entry_id   = Column(Integer, index=True)
-    action     = Column(String(50), index=True)
-    timestamp  = Column(DateTime, default=datetime.utcnow, index=True)
-    ip_address = Column(String(50), nullable=True)
-    user_agent = Column(String(500), nullable=True)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PYDANTIC SCHEMAS
-# ═══════════════════════════════════════════════════════════════════════════════
-class PasswordEntryBase(BaseModel):
-    portal_name:    str             = Field(..., min_length=1, max_length=255)
-    portal_type:    Optional[str]   = "OTHER"
-    url:            Optional[str]   = None
-    username:       str             = Field(..., min_length=1, max_length=255)
-    password_plain: Optional[str]   = None
-    department:     Optional[str]   = None
-    holder_type:    Optional[str]   = "COMPANY"
-    holder_name:    Optional[str]   = None
-    holder_pan:     Optional[str]   = None
-    holder_din:     Optional[str]   = None
-    mobile:         Optional[str]   = None
-    trade_name:     Optional[str]   = None
-    client_name:    Optional[str]   = None
-    client_id:      Optional[str]   = None
-    notes:          Optional[str]   = None
-    tags:           Optional[List[str]] = None
-
-    @validator("portal_type")
-    def _vpt(cls, v):
-        valid = {e.value for e in PortalTypeEnum}
-        return v if v in valid else "OTHER"
-
-    @validator("department", always=True)
-    def _vdept(cls, v, values):
-        valid = {e.value for e in DepartmentEnum}
-        if v and v in valid:
-            return v
-        dept_map = {
-            "MCA": "ROC", "ROC": "ROC", "DGFT": "OTHER", "TRADEMARK": "TM",
-            "GST": "GST", "INCOME_TAX": "IT", "TDS": "TDS", "EPFO": "ACC",
-            "ESIC": "ACC", "TRACES": "TDS", "MSME": "MSME", "RERA": "OTHER",
-        }
-        return dept_map.get(values.get("portal_type", ""), "OTHER")
-
-
-class PasswordEntryCreate(PasswordEntryBase):
-    pass
-
-
-class PasswordEntryUpdate(BaseModel):
-    portal_name:    Optional[str]       = None
-    portal_type:    Optional[str]       = None
-    url:            Optional[str]       = None
-    username:       Optional[str]       = None
-    password_plain: Optional[str]       = None
-    department:     Optional[str]       = None
-    holder_type:    Optional[str]       = None
-    holder_name:    Optional[str]       = None
-    holder_pan:     Optional[str]       = None
-    holder_din:     Optional[str]       = None
-    mobile:         Optional[str]       = None
-    trade_name:     Optional[str]       = None
-    client_name:    Optional[str]       = None
-    client_id:      Optional[str]       = None
-    notes:          Optional[str]       = None
-    tags:           Optional[List[str]] = None
-
-
-class PasswordEntryResponse(PasswordEntryBase):
-    id:               int
-    user_id:          int
-    has_password:     bool
-    created_at:       datetime
-    updated_at:       datetime
-    last_accessed_at: Optional[datetime] = None
-    is_archived:      bool
-
-    class Config:
-        from_attributes = True
-
-
-class PasswordRevealResponse(BaseModel):
-    id:          int
-    portal_name: str
-    username:    str
-    password:    str
-    revealed_at: datetime
-
-
-class BulkDeleteRequest(BaseModel):
-    entry_ids: List[int]
-
-
-class ParsePreviewResponse(BaseModel):
-    rows_count:     int
-    columns_count:  int
-    sample_rows:    List[Dict[str, Any]]
-    column_mapping: Dict[str, str]
-
-
-class BulkImportResponse(BaseModel):
-    imported:      int
-    skipped:       int
-    errors:        int
-    error_details: Optional[List[str]] = None
-
-
-class StatsResponse(BaseModel):
-    total:             int
-    by_portal_type:    Dict[str, int]
-    by_department:     Dict[str, int]
-    by_holder_type:    Dict[str, int]
-    total_access_logs: int
-    last_updated:      datetime
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ENCRYPTION
-# ═══════════════════════════════════════════════════════════════════════════════
-class PasswordEncryption:
-    @staticmethod
-    def _key() -> bytes:
-        raw = os.environ.get("PASSWORDS_SECRET_KEY", "taskosphere-fixed-32-byte-default")
-        return base64.urlsafe_b64encode(raw.encode().ljust(32, b"0")[:32])
-
-    @staticmethod
-    def encrypt(password: str) -> str:
-        if not password: return ""
+    if _env_key:
         try:
-            return base64.b64encode(Fernet(PasswordEncryption._key()).encrypt(password.encode())).decode()
-        except Exception: return base64.b64encode(password.encode()).decode()
-
-    @staticmethod
-    def decrypt(enc: str) -> str:
-        if not enc: return ""
-        try:
-            return Fernet(PasswordEncryption._key()).decrypt(base64.b64decode(enc)).decode()
+            _fernet_key = _env_key.encode()
+            Fernet(_fernet_key)
         except Exception:
-            try: return base64.b64decode(enc).decode()
-            except Exception: return "[Decryption Error]"
-# ═══════════════════════════════════════════════════════════════════════════════
-# SHARED HELPERS
-# ═══════════════════════════════════════════════════════════════════════════════
-def _tags(raw: Optional[str]) -> List[str]:
-    if not raw:
-        return []
-    try:
-        v = json.loads(raw)
-        return v if isinstance(v, list) else []
-    except Exception:
-        return []
+            _fernet_key = base64.urlsafe_b64encode(
+                hashlib.sha256(_env_key.encode()).digest()
+            )
+    else:
+        _seed = os.getenv("MONGO_URI", "taskosphere-default-seed-2024")
+        _fernet_key = base64.urlsafe_b64encode(
+            hashlib.sha256(_seed.encode()).digest()
+        )
+        logger.warning(
+            "PASSWORD_REPO_KEY not set — using derived key. "
+            "Set PASSWORD_REPO_KEY in .env for production security."
+        )
 
+    _fernet = Fernet(_fernet_key)
+    ENCRYPTION_AVAILABLE = True
 
-def _enrich(e: PasswordEntry) -> PasswordEntryResponse:
-    return PasswordEntryResponse(
-        id=e.id,
-        user_id=e.user_id,
-        portal_name=e.portal_name,
-        portal_type=e.portal_type or "OTHER",
-        url=e.url,
-        username=e.username,
-        department=e.department or "OTHER",
-        holder_type=e.holder_type or "COMPANY",
-        holder_name=e.holder_name,
-        holder_pan=e.holder_pan,
-        holder_din=e.holder_din,
-        mobile=e.mobile,
-        trade_name=e.trade_name,
-        client_name=e.client_name,
-        client_id=e.client_id,
-        notes=e.notes,
-        tags=_tags(e.tags),
-        has_password=bool(e.has_password),
-        created_at=e.created_at or datetime.utcnow(),
-        updated_at=e.updated_at or datetime.utcnow(),
-        last_accessed_at=e.last_accessed_at,
-        is_archived=bool(e.is_archived),
+except ImportError:
+    _fernet = None
+    ENCRYPTION_AVAILABLE = False
+    logger.warning(
+        "cryptography package not installed — passwords stored as base64 only. "
+        "Run: pip install cryptography"
     )
 
 
-def _require(current_user: Any) -> None:
-    if not current_user:
-        raise HTTPException(status_code=401, detail="Authentication required")
+def _encrypt(plain: str) -> str:
+    if not plain:
+        return ""
+    if ENCRYPTION_AVAILABLE and _fernet:
+        return _fernet.encrypt(plain.encode()).decode()
+    return base64.b64encode(plain.encode()).decode()
 
 
-def _log(db: Session, user_id: int, entry_id: int, action: str) -> None:
+def _decrypt(cipher: str) -> str:
+    if not cipher:
+        return ""
+    if ENCRYPTION_AVAILABLE and _fernet:
+        try:
+            return _fernet.decrypt(cipher.encode()).decode()
+        except Exception:
+            try:
+                return base64.b64decode(cipher).decode()
+            except Exception:
+                return "[decryption failed]"
     try:
-        db.add(AccessLog(user_id=user_id, entry_id=entry_id, action=action))
-    except Exception as ex:
-        logger.warning("access log write failed: %s", ex)
+        return base64.b64decode(cipher).decode()
+    except Exception:
+        return cipher
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ROUTER
-# NOTE: Static routes MUST come before /{entry_id} routes
-# ═══════════════════════════════════════════════════════════════════════════════
-router = APIRouter(prefix="/passwords", tags=["passwords"], redirect_slashes=True)
+# ── Pydantic schemas ──────────────────────────────────────────────────────────
+
+PORTAL_TYPES = [
+    "MCA", "DGFT", "TRADEMARK", "GST", "INCOME_TAX", "TDS",
+    "EPFO", "ESIC", "TRACES", "MSME", "RERA", "ROC", "OTHER",
+]
+
+DEPARTMENT_MAP = {
+    "MCA":        "ROC",
+    "ROC":        "ROC",
+    "DGFT":       "OTHER",
+    "TRADEMARK":  "TM",
+    "GST":        "GST",
+    "INCOME_TAX": "IT",
+    "TDS":        "TDS",
+    "EPFO":       "ACC",
+    "ESIC":       "ACC",
+    "TRACES":     "TDS",
+    "MSME":       "MSME",
+    "RERA":       "OTHER",
+    "OTHER":      "OTHER",
+}
+
+# Credential holder types
+HOLDER_TYPES = ["COMPANY", "DIRECTOR", "INDIVIDUAL", "PARTNER", "TRUSTEE", "OTHER"]
 
 
-# ── LIST ──────────────────────────────────────────────────────────────────────
-@router.get("", response_model=List[PasswordEntryResponse])
-def list_passwords(
-    search:      Optional[str] = Query(None),
-    department:  Optional[str] = Query(None),
-    portal_type: Optional[str] = Query(None),
-    client_id:   Optional[str] = Query(None),
-    holder_type: Optional[str] = Query(None),
-    sort_by:     Optional[str] = Query("created_at"),
-    sort_order:  Optional[str] = Query("desc"),
-    skip:        int           = Query(0,   ge=0),
-    limit:       int           = Query(200, ge=1, le=500),
-    db: Session  = Depends(get_db),
-    current_user: Any = Depends(get_current_user),
-):
-    _require(current_user)
+class PasswordEntryCreate(BaseModel):
+    portal_name: str = Field(..., min_length=2, max_length=120)
+    portal_type: str = "OTHER"
+    url: Optional[str] = None
+    username: Optional[str] = None
+    password_plain: Optional[str] = None
+    department: str = "OTHER"
+    client_name: Optional[str] = None
+    client_id: Optional[str] = None
+    # New fields for individual/director tracking
+    holder_type: str = "COMPANY"          # COMPANY / DIRECTOR / INDIVIDUAL etc.
+    holder_name: Optional[str] = None     # Director name / individual name
+    holder_pan: Optional[str] = None      # PAN of individual/director
+    holder_din: Optional[str] = None      # DIN (for MCA/ROC directors)
+    notes: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+
+
+class PasswordEntryUpdate(BaseModel):
+    portal_name: Optional[str] = None
+    portal_type: Optional[str] = None
+    url: Optional[str] = None
+    username: Optional[str] = None
+    password_plain: Optional[str] = None
+    department: Optional[str] = None
+    client_name: Optional[str] = None
+    client_id: Optional[str] = None
+    holder_type: Optional[str] = None
+    holder_name: Optional[str] = None
+    holder_pan: Optional[str] = None
+    holder_din: Optional[str] = None
+    notes: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+class PasswordEntry(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    portal_name: str
+    portal_type: str
+    url: Optional[str] = None
+    username: Optional[str] = None
+    department: str
+    client_name: Optional[str] = None
+    client_id: Optional[str] = None
+    holder_type: str = "COMPANY"
+    holder_name: Optional[str] = None
+    holder_pan: Optional[str] = None
+    holder_din: Optional[str] = None
+    notes: Optional[str] = None
+    tags: List[str] = []
+    created_by: str
+    created_by_name: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    last_accessed_at: Optional[str] = None
+    has_password: bool = False
+
+
+class PasswordRevealResponse(BaseModel):
+    id: str
+    username: Optional[str]
+    password: str
+    portal_name: str
+
+
+class BulkImportResult(BaseModel):
+    total_processed: int
+    successful_imports: int
+    failed_imports: int
+    errors: List[dict]
+
+
+# Google Sheets link schema
+class GoogleSheetLink(BaseModel):
+    label: str = Field(..., min_length=1, max_length=120)
+    sheet_url: str = Field(..., min_length=10)
+    sheet_type: str = "OTHER"   # GST | ROC | MCA | OTHER
+    description: Optional[str] = None
+
+
+class GoogleSheetLinkUpdate(BaseModel):
+    label: Optional[str] = None
+    sheet_url: Optional[str] = None
+    sheet_type: Optional[str] = None
+    description: Optional[str] = None
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _get_user_perms(user: User) -> dict:
+    if isinstance(user.permissions, dict):
+        return user.permissions
+    if user.permissions:
+        return user.permissions.model_dump()
+    return {}
+
+
+def _can_view(user: User, entry: dict) -> bool:
+    if user.role == "admin":
+        return True
+    perms = _get_user_perms(user)
+    if not perms.get("can_view_passwords", False):
+        return False
+    if user.role == "manager":
+        return entry.get("department") in (user.departments or [])
+    allowed_depts = perms.get("view_password_departments", [])
+    return (
+        entry.get("department") in (user.departments or [])
+        or entry.get("department") in (allowed_depts or [])
+    )
+
+
+def _can_reveal(user: User, entry: dict) -> bool:
+    if user.role == "admin":
+        return True
+    perms = _get_user_perms(user)
+    if not perms.get("can_view_passwords", False):
+        return False
+    allowed_depts = perms.get("view_password_departments", [])
+    return (
+        entry.get("department") in (user.departments or [])
+        or entry.get("department") in (allowed_depts or [])
+    )
+
+
+def _can_edit(user: User) -> bool:
+    if user.role == "admin":
+        return True
+    perms = _get_user_perms(user)
+    return perms.get("can_edit_passwords", False)
+
+
+def _strip_sensitive(doc: dict) -> dict:
+    doc = dict(doc)
+    doc.pop("_id", None)
+    doc.pop("password_encrypted", None)
+    doc["has_password"] = bool(doc.get("_password_set", False))
+    doc.pop("_password_set", None)
+    return doc
+
+
+async def _enrich_entry(doc: dict) -> dict:
+    creator_id = doc.get("created_by")
+    if creator_id:
+        u = await db.users.find_one({"id": creator_id}, {"_id": 0, "full_name": 1})
+        if u:
+            doc["created_by_name"] = u.get("full_name", "Unknown")
+    return doc
+
+
+def _extract_sheet_id(url: str) -> Optional[str]:
+    """Extract Google Sheets ID from a share URL."""
+    match = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", url)
+    return match.group(1) if match else None
+
+
+def _extract_gid(url: str) -> Optional[str]:
+    """Extract gid (sheet tab) from URL."""
+    match = re.search(r"[#&?]gid=(\d+)", url)
+    return match.group(1) if match else None
+
+
+async def _fetch_sheet_as_csv(sheet_id: str, gid: Optional[str] = None) -> Optional[pd.DataFrame]:
+    """Fetch a Google Sheet tab as CSV (must be publicly shared)."""
+    if gid:
+        csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+    else:
+        csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
     try:
-        q = select(PasswordEntry).where(
-            and_(
-                PasswordEntry.user_id == current_user.id,
-                PasswordEntry.is_archived == False,
-            )
-        )
-        if search:
-            lk = f"%{search}%"
-            q = q.where(or_(
-                PasswordEntry.portal_name.ilike(lk),
-                PasswordEntry.username.ilike(lk),
-                PasswordEntry.client_name.ilike(lk),
-                PasswordEntry.holder_name.ilike(lk),
-                PasswordEntry.trade_name.ilike(lk),
-            ))
-        if department  and department  != "ALL":
-            q = q.where(PasswordEntry.department  == department)
-        if portal_type and portal_type != "ALL":
-            q = q.where(PasswordEntry.portal_type == portal_type)
-        if client_id   and client_id   != "ALL":
-            q = q.where(PasswordEntry.client_id   == client_id)
-        if holder_type and holder_type != "ALL":
-            q = q.where(PasswordEntry.holder_type == holder_type)
-
-        col = PasswordEntry.portal_name if sort_by == "portal_name" else PasswordEntry.created_at
-        q   = q.order_by(asc(col) if sort_order == "asc" else desc(col))
-        q   = q.offset(skip).limit(limit)
-
-        results = db.execute(q).scalars().all(); results = db.execute(q).scalars().all(); return [_enrich(r) for r in results] if results else []
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("list_passwords: %s", exc, exc_info=True)
-        raise HTTPException(500, detail=f"Failed to list passwords: {exc}")
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(csv_url, follow_redirects=True)
+            resp.raise_for_status()
+            df = pd.read_csv(io.StringIO(resp.text))
+            return df
+    except Exception as e:
+        logger.error(f"Failed to fetch sheet {sheet_id} gid={gid}: {e}")
+        return None
 
 
-# ── CREATE ────────────────────────────────────────────────────────────────────
-@router.post("", response_model=PasswordEntryResponse, status_code=201)
-def create_password(
-    payload: PasswordEntryCreate,
-    db: Session = Depends(get_db),
-    current_user: Any = Depends(get_current_user),
-):
-    _require(current_user)
+async def _get_all_sheet_tabs(sheet_id: str) -> List[dict]:
+    """Get list of all tabs in a Google Sheet using the sheets API export trick."""
+    # We fetch the sheet metadata via the HTML page (no API key needed for public sheets)
     try:
-        dup = db.execute(select(PasswordEntry).where(and_(
-            PasswordEntry.user_id     == current_user.id,
-            PasswordEntry.portal_name == payload.portal_name,
-            PasswordEntry.username    == payload.username,
-            PasswordEntry.is_archived == False,
-        ))).scalar()
-        if dup:
-            raise HTTPException(409, "Duplicate: portal + username already exists")
-
-        entry = PasswordEntry(
-            user_id=current_user.id,
-            portal_name=payload.portal_name,
-            portal_type=payload.portal_type or "OTHER",
-            url=payload.url,
-            username=payload.username,
-            password_encrypted=PasswordEncryption.encrypt(payload.password_plain or ""),
-            has_password=bool(payload.password_plain),
-            department=payload.department or "OTHER",
-            holder_type=payload.holder_type or "COMPANY",
-            holder_name=payload.holder_name,
-            holder_pan=payload.holder_pan,
-            holder_din=payload.holder_din,
-            mobile=payload.mobile,
-            trade_name=payload.trade_name,
-            client_name=payload.client_name,
-            client_id=payload.client_id,
-            notes=payload.notes,
-            tags=json.dumps(payload.tags or []),
-        )
-        db.add(entry)
-        db.flush()
-        _log(db, current_user.id, entry.id, "create")
-        db.commit()
-        db.refresh(entry)
-        return _enrich(entry)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        db.rollback()
-        logger.error("create_password: %s", exc, exc_info=True)
-        raise HTTPException(500, detail=f"Failed to create: {exc}")
+        url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(url, follow_redirects=True)
+            html = resp.text
+        # Parse sheet tab names and gids from the HTML
+        tabs = []
+        # Match pattern: "gid":123456,"name":"Sheet1"
+        matches = re.findall(r'"gid"\s*:\s*"?(\d+)"?\s*,\s*"name"\s*:\s*"([^"]+)"', html)
+        if not matches:
+            # Try alternative pattern
+            matches = re.findall(r'name="([^"]+)"[^>]*data-sheet-id="(\d+)"', html)
+        for gid, name in matches:
+            tabs.append({"gid": gid, "name": name})
+        return tabs
+    except Exception as e:
+        logger.error(f"Failed to get sheet tabs for {sheet_id}: {e}")
+        return []
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# STATIC SUB-ROUTES — all declared ABOVE /{entry_id}
-# ══════════════════════════════════════════════════════════════════════════════
+# ── STATIC / UTILITY ROUTES (must come BEFORE /{entry_id}) ───────────────────
 
 @router.get("/portal-types")
-def get_portal_types():
+async def get_portal_types(current_user: User = Depends(get_current_user)):
     return {
-        "types":        [e.value for e in PortalTypeEnum],
-        "departments":  [e.value for e in DepartmentEnum],
-        "holder_types": [e.value for e in HolderTypeEnum],
+        "portal_types": PORTAL_TYPES,
+        "department_map": DEPARTMENT_MAP,
+        "holder_types": HOLDER_TYPES,
     }
 
 
 @router.get("/clients-list")
-def get_clients_list(
-    db: Session = Depends(get_db),
-    current_user: Any = Depends(get_current_user),
+async def get_clients_for_password(current_user: User = Depends(get_current_user)):
+    """Return a lightweight list of clients for the password form dropdown."""
+    query = {}
+    if current_user.role != "admin":
+        perms = _get_user_perms(current_user)
+        if not perms.get("can_view_all_clients", False):
+            query["$or"] = [
+                {"assigned_to": current_user.id},
+                {"assignments.user_id": current_user.id},
+            ]
+
+    clients = await db.clients.find(
+        query,
+        {"_id": 0, "id": 1, "company_name": 1, "phone": 1, "email": 1,
+         "client_type": 1, "director_phone": 1, "contact_phone": 1,
+         "director_name": 1, "contact_name": 1, "contact_persons": 1}
+    ).sort("company_name", 1).to_list(2000)
+
+    return clients
+
+
+# ── GOOGLE SHEETS LINK ROUTES ─────────────────────────────────────────────────
+
+@router.get("/sheet-links")
+async def list_sheet_links(current_user: User = Depends(get_current_user)):
+    """List all saved Google Sheet links."""
+    links = await db.password_sheet_links.find({}, {"_id": 0}).sort("label", 1).to_list(200)
+    return links
+
+
+@router.post("/sheet-links", status_code=201)
+async def add_sheet_link(
+    data: GoogleSheetLink,
+    current_user: User = Depends(require_admin),
 ):
-    _require(current_user)
-    try:
-        rows = db.execute(
-            select(PasswordEntry.client_id, PasswordEntry.client_name)
-            .where(and_(
-                PasswordEntry.user_id     == current_user.id,
-                PasswordEntry.client_name.isnot(None),
-                PasswordEntry.client_id.isnot(None),
-                PasswordEntry.is_archived == False,
-            )).distinct()
-        ).all()
-        return [{"id": r[0], "name": r[1]} for r in rows]
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("get_clients_list: %s", exc, exc_info=True)
-        raise HTTPException(500, detail=str(exc))
+    """Save a Google Sheet link for future password import."""
+    sheet_id = _extract_sheet_id(data.sheet_url)
+    if not sheet_id:
+        raise HTTPException(400, "Invalid Google Sheets URL — could not extract sheet ID")
+
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id":          str(uuid.uuid4()),
+        "label":       data.label.strip(),
+        "sheet_url":   data.sheet_url.strip(),
+        "sheet_id":    sheet_id,
+        "sheet_type":  data.sheet_type.upper(),
+        "description": data.description or None,
+        "created_by":  current_user.id,
+        "created_at":  now,
+        "updated_at":  now,
+    }
+    await db.password_sheet_links.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
 
 
-@router.get("/download-template")
-def download_template():
-    try:
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Passwords"
-        headers = [
-            "Portal Name", "Portal Type", "URL", "Username", "Password",
-            "Department", "Holder Type", "Holder Name", "Holder PAN",
-            "Holder DIN", "Mobile", "Trade Name", "Client Name", "Client ID", "Notes",
-        ]
-        hdr_font = Font(bold=True, color="FFFFFF")
-        hdr_fill = PatternFill(start_color="1F6FB2", end_color="1F6FB2", fill_type="solid")
-        for ci, h in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=ci, value=h)
-            cell.font = hdr_font
-            cell.fill = hdr_fill
-            ws.column_dimensions[cell.column_letter].width = 20
-
-        ws.append([
-            "GST Portal", "GST", "https://www.gst.gov.in",
-            "user@example.com", "SecurePass@123", "GST", "COMPANY",
-            "Acme Pvt Ltd", "ABCDE1234F", "", "+91 9876543210",
-            "Acme Traders", "Acme Corp", "CLI001", "Main GST login",
-        ])
-
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="pw_tmpl_")
-        wb.save(tmp.name)
-        tmp.close()
-
-        return FileResponse(
-            path=tmp.name,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            filename="password-template.xlsx",
-        )
-    except Exception as exc:
-        logger.error("download_template: %s", exc, exc_info=True)
-        raise HTTPException(500, "Failed to generate template")
-
-
-@router.post("/parse-preview", response_model=ParsePreviewResponse)
-async def parse_preview(
-    file: UploadFile = File(...),
-    db:   Session    = Depends(get_db),
-    current_user: Any = Depends(get_current_user),
+@router.put("/sheet-links/{link_id}", status_code=200)
+async def update_sheet_link(
+    link_id: str,
+    data: GoogleSheetLinkUpdate,
+    current_user: User = Depends(require_admin),
 ):
-    _require(current_user)
-    try:
-        content = await file.read()
-        fname   = (file.filename or "").lower()
-        df = (
-            pd.read_csv(io.BytesIO(content))
-            if fname.endswith(".csv")
-            else pd.read_excel(io.BytesIO(content))
-        )
+    existing = await db.password_sheet_links.find_one({"id": link_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Sheet link not found")
 
-        aliases: Dict[str, List[str]] = {
-            "portal_name":    ["portal name", "portal", "site"],
-            "username":       ["username", "email", "user", "login"],
-            "password_plain": ["password", "pass", "pwd"],
-            "department":     ["department", "dept"],
-            "client_name":    ["client name", "client", "company"],
+    updates: dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    if data.label is not None:
+        updates["label"] = data.label.strip()
+    if data.sheet_url is not None:
+        sheet_id = _extract_sheet_id(data.sheet_url)
+        if not sheet_id:
+            raise HTTPException(400, "Invalid Google Sheets URL")
+        updates["sheet_url"] = data.sheet_url.strip()
+        updates["sheet_id"] = sheet_id
+    if data.sheet_type is not None:
+        updates["sheet_type"] = data.sheet_type.upper()
+    if data.description is not None:
+        updates["description"] = data.description or None
+
+    await db.password_sheet_links.update_one({"id": link_id}, {"$set": updates})
+    updated = await db.password_sheet_links.find_one({"id": link_id}, {"_id": 0})
+    return updated
+
+
+@router.delete("/sheet-links/{link_id}")
+async def delete_sheet_link(
+    link_id: str,
+    current_user: User = Depends(require_admin),
+):
+    existing = await db.password_sheet_links.find_one({"id": link_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Sheet link not found")
+    await db.password_sheet_links.delete_one({"id": link_id})
+    return {"message": "Sheet link deleted"}
+
+
+@router.post("/sheet-links/{link_id}/preview")
+async def preview_sheet_data(
+    link_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Preview data from a saved Google Sheet link.
+    For ROC/MCA sheets: fetches ALL tabs and merges.
+    For GST sheets: fetches only the LAST (most recent) tab.
+    Returns first 20 rows for preview.
+    """
+    link = await db.password_sheet_links.find_one({"id": link_id}, {"_id": 0})
+    if not link:
+        raise HTTPException(404, "Sheet link not found")
+
+    sheet_id = link.get("sheet_id")
+    sheet_type = link.get("sheet_type", "OTHER")
+
+    tabs = await _get_all_sheet_tabs(sheet_id)
+    gid_from_url = _extract_gid(link.get("sheet_url", ""))
+
+    if sheet_type in ("ROC", "MCA") and tabs:
+        # Fetch ALL tabs and merge
+        all_dfs = []
+        for tab in tabs:
+            df = await _fetch_sheet_as_csv(sheet_id, tab["gid"])
+            if df is not None and not df.empty:
+                df["_sheet_tab"] = tab["name"]
+                all_dfs.append(df)
+        if not all_dfs:
+            raise HTTPException(502, "Could not fetch any sheet data. Ensure the sheet is publicly shared.")
+        merged = pd.concat(all_dfs, ignore_index=True)
+        preview = merged.head(20).fillna("").to_dict(orient="records")
+        return {
+            "sheet_type": sheet_type,
+            "tabs_found": [t["name"] for t in tabs],
+            "tabs_fetched": len(all_dfs),
+            "total_rows": len(merged),
+            "columns": list(merged.columns),
+            "preview": preview,
         }
-        lower_cols = {c.lower(): c for c in df.columns}
-        detected: Dict[str, str] = {}
-        for field, alts in aliases.items():
-            for a in alts:
-                if a in lower_cols:
-                    detected[field] = lower_cols[a]
-                    break
+    elif sheet_type == "GST" and tabs:
+        # Use last tab (most recent period)
+        last_tab = tabs[-1]
+        df = await _fetch_sheet_as_csv(sheet_id, last_tab["gid"])
+        if df is None or df.empty:
+            raise HTTPException(502, "Could not fetch GST sheet data. Ensure the sheet is publicly shared.")
+        preview = df.head(20).fillna("").to_dict(orient="records")
+        return {
+            "sheet_type": sheet_type,
+            "tabs_found": [t["name"] for t in tabs],
+            "tab_used": last_tab["name"],
+            "total_rows": len(df),
+            "columns": list(df.columns),
+            "preview": preview,
+        }
+    else:
+        # Single tab — use gid from URL or default
+        df = await _fetch_sheet_as_csv(sheet_id, gid_from_url)
+        if df is None or df.empty:
+            raise HTTPException(502, "Could not fetch sheet data. Ensure the sheet is publicly shared (Anyone with link can view).")
+        preview = df.head(20).fillna("").to_dict(orient="records")
+        return {
+            "sheet_type": sheet_type,
+            "tabs_found": [t["name"] for t in tabs],
+            "tab_used": "default",
+            "total_rows": len(df),
+            "columns": list(df.columns),
+            "preview": preview,
+        }
 
-        return ParsePreviewResponse(
-            rows_count=len(df),
-            columns_count=len(df.columns),
-            sample_rows=df.head(3).fillna("").to_dict("records"),
-            column_mapping=detected,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("parse_preview: %s", exc, exc_info=True)
-        raise HTTPException(400, f"Failed to parse file: {exc}")
+
+# ── TEMPLATE + BULK IMPORT (must come BEFORE /{entry_id}) ────────────────────
+
+@router.get("/template", response_class=Response)
+async def download_template(current_user: User = Depends(get_current_user)):
+    if not _can_edit(current_user):
+        raise HTTPException(403, "You do not have permission to download templates")
+
+    template_columns = [
+        "portal_name", "portal_type", "url", "username", "password_plain",
+        "department", "holder_type", "holder_name", "holder_pan", "holder_din",
+        "client_name", "client_id", "notes", "tags"
+    ]
+    df = pd.DataFrame(columns=template_columns)
+
+    example_rows = [
+        {
+            "portal_name":    "Example GST Portal",
+            "portal_type":    "GST",
+            "url":            "https://www.gst.gov.in",
+            "username":       "example@gst.com",
+            "password_plain": "SecurePassword123",
+            "department":     "GST",
+            "holder_type":    "COMPANY",
+            "holder_name":    "",
+            "holder_pan":     "",
+            "holder_din":     "",
+            "client_name":    "Example Client Pvt Ltd",
+            "client_id":      "CL001",
+            "notes":          "GST login for quarterly filings",
+            "tags":           "GST,Client,Important"
+        },
+        {
+            "portal_name":    "MCA Director Login",
+            "portal_type":    "MCA",
+            "url":            "https://www.mca.gov.in",
+            "username":       "director@example.com",
+            "password_plain": "DirectorPass@456",
+            "department":     "ROC",
+            "holder_type":    "DIRECTOR",
+            "holder_name":    "Rajesh Kumar",
+            "holder_pan":     "ABCPK1234D",
+            "holder_din":     "08123456",
+            "client_name":    "Example Client Pvt Ltd",
+            "client_id":      "CL001",
+            "notes":          "MCA login for Director Rajesh Kumar",
+            "tags":           "MCA,Director,ROC"
+        },
+    ]
+    for i, row in enumerate(example_rows):
+        df.loc[i] = row
+
+    output = io.BytesIO()
+    df.to_excel(output, index=False, engine='openpyxl')
+    output.seek(0)
+
+    headers = {
+        "Content-Disposition": "attachment; filename=password_template.xlsx",
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    }
+    return Response(content=output.getvalue(), headers=headers)
 
 
-@router.post("/bulk-import", response_model=BulkImportResponse)
-async def bulk_import(
+@router.post("/bulk-import", response_model=BulkImportResult, status_code=200)
+async def bulk_import_passwords(
     file: UploadFile = File(...),
-    db:   Session    = Depends(get_db),
-    current_user: Any = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    _require(current_user)
-    try:
-        content = await file.read()
-        fname   = (file.filename or "").lower()
-        df = (
-            pd.read_csv(io.BytesIO(content))
-            if fname.endswith(".csv")
-            else pd.read_excel(io.BytesIO(content))
-        )
-        df.columns = [str(c).strip().lower() for c in df.columns]
+    if not _can_edit(current_user):
+        raise HTTPException(403, "You do not have permission to bulk import passwords")
 
-        def _col(*cands: str) -> Optional[str]:
-            for c in cands:
-                if c in df.columns:
-                    return c
-            return None
+    contents = await file.read()
+    file_like_object = io.BytesIO(contents)
 
-        name_col   = _col("portal name", "portal", "site")
-        user_col   = _col("username", "email", "user", "login")
-        pass_col   = _col("password", "pass", "pwd")
-        dept_col   = _col("department", "dept")
-        type_col   = _col("portal type", "type")
-        client_col = _col("client name", "client", "company")
+    df = None
+    fname = file.filename or ""
+    if fname.endswith(('.xlsx', '.xls')):
+        df = pd.read_excel(file_like_object, engine='openpyxl')
+    elif fname.endswith('.csv'):
+        df = pd.read_csv(file_like_object)
+    else:
+        raise HTTPException(400, "Unsupported file type. Please upload an Excel (.xlsx, .xls) or CSV (.csv) file.")
 
-        if not name_col or not user_col:
-            raise HTTPException(
-                400,
-                "File must contain 'Portal Name' and 'Username'/'Email' columns",
-            )
+    required_columns = [
+        "portal_name", "portal_type", "url", "username", "password_plain",
+        "department", "client_name", "client_id", "notes", "tags"
+    ]
+    df.columns = df.columns.str.lower().str.strip()
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        raise HTTPException(400, f"Missing required columns in the file: {', '.join(missing_columns)}")
 
-        imported = 0
-        skipped  = 0
-        errors   = 0
-        errs: List[str] = []
+    total_processed = 0
+    successful_imports = 0
+    failed_imports = 0
+    errors = []
 
-        for idx, row in df.iterrows():
-            try:
-                pname = str(row.get(name_col, "") or "").strip()
-                uname = str(row.get(user_col, "") or "").strip()
-                if not pname or not uname:
-                    skipped += 1
-                    continue
+    for index, row in df.iterrows():
+        total_processed += 1
+        try:
+            client_name_val = str(row.get("client_name", "")).strip() or None
+            client_id_val = str(row.get("client_id", "")).strip() or None
 
-                dup = db.execute(select(PasswordEntry).where(and_(
-                    PasswordEntry.user_id     == current_user.id,
-                    PasswordEntry.portal_name == pname,
-                    PasswordEntry.username    == uname,
-                    PasswordEntry.is_archived == False,
-                ))).scalar()
-                if dup:
-                    skipped += 1
-                    continue
+            if client_id_val and client_id_val.lower() in ("nan", "none", ""):
+                client_id_val = None
+            if client_name_val and client_name_val.lower() in ("nan", "none", ""):
+                client_name_val = None
 
-                raw_pw = str(row.get(pass_col, "") or "") if pass_col else ""
-                db.add(PasswordEntry(
-                    user_id=current_user.id,
-                    portal_name=pname,
-                    portal_type=str(row.get(type_col, "OTHER") or "OTHER") if type_col else "OTHER",
-                    username=uname,
-                    password_encrypted=PasswordEncryption.encrypt(raw_pw),
-                    has_password=bool(raw_pw),
-                    department=str(row.get(dept_col, "OTHER") or "OTHER") if dept_col else "OTHER",
-                    client_name=str(row.get(client_col, "") or "") or None if client_col else None,
-                    tags=json.dumps([]),
-                ))
-                imported += 1
-                if imported % 50 == 0:
-                    db.commit()
-            except Exception as re:
-                errors += 1
-                errs.append(f"Row {idx + 2}: {re}")
+            if client_id_val and not client_name_val:
+                client_doc = await db.clients.find_one({"id": client_id_val}, {"_id": 0, "company_name": 1})
+                if client_doc:
+                    client_name_val = client_doc.get("company_name")
 
-        db.commit()
-        return BulkImportResponse(
-            imported=imported,
-            skipped=skipped,
-            errors=errors,
-            error_details=errs[:20] or None,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        db.rollback()
-        logger.error("bulk_import: %s", exc, exc_info=True)
-        raise HTTPException(400, f"Import failed: {exc}")
+            def clean(v):
+                s = str(v).strip() if v is not None else ""
+                return None if s.lower() in ("nan", "none", "") else s
 
-
-@router.post("/bulk-delete", status_code=204)
-def bulk_delete_passwords(
-    payload: BulkDeleteRequest,
-    db: Session = Depends(get_db),
-    current_user: Any = Depends(get_current_user),
-):
-    _require(current_user)
-    try:
-        for eid in payload.entry_ids:
-            e = db.execute(select(PasswordEntry).where(and_(
-                PasswordEntry.id      == eid,
-                PasswordEntry.user_id == current_user.id,
-            ))).scalar()
-            if e:
-                e.is_archived = True
-                _log(db, current_user.id, eid, "bulk_delete")
-        db.commit()
-    except Exception as exc:
-        db.rollback()
-        logger.error("bulk_delete: %s", exc, exc_info=True)
-        raise HTTPException(500, str(exc))
-
-
-@router.get("/admin/stats", response_model=StatsResponse)
-def admin_stats(
-    db: Session = Depends(get_db),
-    current_user: Any = Depends(get_current_user),
-):
-    _require(current_user)
-    try:
-        base_filter = PasswordEntry.is_archived == False
-        total = db.execute(
-            select(func.count(PasswordEntry.id)).where(base_filter)
-        ).scalar() or 0
-
-        def _group(col: Any) -> Dict[str, int]:
-            return {
-                r[0]: r[1]
-                for r in db.execute(
-                    select(col, func.count(PasswordEntry.id))
-                    .where(base_filter)
-                    .group_by(col)
-                ).all()
-                if r[0]
+            entry_data = {
+                "portal_name":    str(row.get("portal_name", "")).strip(),
+                "portal_type":    str(row.get("portal_type", "OTHER")).upper(),
+                "url":            clean(row.get("url")),
+                "username":       clean(row.get("username")),
+                "password_plain": clean(row.get("password_plain")),
+                "department":     str(row.get("department", "OTHER")).upper(),
+                "holder_type":    str(row.get("holder_type", "COMPANY")).upper() if clean(row.get("holder_type")) else "COMPANY",
+                "holder_name":    clean(row.get("holder_name")),
+                "holder_pan":     clean(row.get("holder_pan")),
+                "holder_din":     clean(row.get("holder_din")),
+                "client_name":    client_name_val,
+                "client_id":      client_id_val,
+                "notes":          clean(row.get("notes")),
+                "tags":           [t.strip() for t in str(row.get("tags", "")).split(',') if t.strip()] if isinstance(row.get("tags"), str) else [],
             }
 
-        return StatsResponse(
-            total=total,
-            by_portal_type=_group(PasswordEntry.portal_type),
-            by_department=_group(PasswordEntry.department),
-            by_holder_type=_group(PasswordEntry.holder_type),
-            total_access_logs=db.execute(
-                select(func.count(AccessLog.id))
-            ).scalar() or 0,
-            last_updated=datetime.utcnow(),
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("admin_stats: %s", exc, exc_info=True)
-        raise HTTPException(500, str(exc))
+            new_entry = PasswordEntryCreate(**entry_data)
+
+            now = datetime.now(timezone.utc).isoformat()
+            entry_id = str(uuid.uuid4())
+            doc = {
+                "id":                 entry_id,
+                "portal_name":        new_entry.portal_name,
+                "portal_type":        new_entry.portal_type,
+                "url":                new_entry.url,
+                "username":           new_entry.username,
+                "password_encrypted": _encrypt(new_entry.password_plain or ""),
+                "_password_set":      bool(new_entry.password_plain),
+                "department":         new_entry.department,
+                "holder_type":        new_entry.holder_type,
+                "holder_name":        new_entry.holder_name,
+                "holder_pan":         new_entry.holder_pan,
+                "holder_din":         new_entry.holder_din,
+                "client_name":        new_entry.client_name,
+                "client_id":          new_entry.client_id,
+                "notes":              new_entry.notes,
+                "tags":               new_entry.tags,
+                "created_by":         current_user.id,
+                "created_at":         now,
+                "updated_at":         now,
+                "last_accessed_at":   now,
+            }
+            await db.passwords.insert_one(doc)
+
+            await db.password_access_logs.insert_one({
+                "id":          str(uuid.uuid4()),
+                "action":      "BULK_CREATE",
+                "entry_id":    entry_id,
+                "portal_name": new_entry.portal_name,
+                "user_id":     current_user.id,
+                "user_name":   current_user.full_name,
+                "timestamp":   now,
+            })
+            successful_imports += 1
+        except ValidationError as e:
+            failed_imports += 1
+            errors.append({"row": index + 2, "error": e.errors(), "data": row.to_dict()})
+        except Exception as e:
+            failed_imports += 1
+            errors.append({"row": index + 2, "error": str(e), "data": row.to_dict()})
+
+    return {
+        "total_processed": total_processed,
+        "successful_imports": successful_imports,
+        "failed_imports": failed_imports,
+        "errors": errors
+    }
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# /{entry_id} ROUTES — declared LAST
-# ══════════════════════════════════════════════════════════════════════════════
+# ── ADMIN ROUTES (also before /{entry_id}) ────────────────────────────────────
 
-@router.get("/{entry_id}", response_model=PasswordEntryResponse)
-def get_password(
-    entry_id: int,
-    db: Session = Depends(get_db),
-    current_user: Any = Depends(get_current_user),
+@router.get("/admin/access-logs")
+async def get_access_logs(
+    entry_id: Optional[str] = Query(None),
+    limit: int = Query(200, le=500),
+    current_user: User = Depends(require_admin),
 ):
-    _require(current_user)
-    e = db.execute(select(PasswordEntry).where(and_(
-        PasswordEntry.id      == entry_id,
-        PasswordEntry.user_id == current_user.id,
-    ))).scalar()
-    if not e:
+    query: dict = {}
+    if entry_id:
+        query["entry_id"] = entry_id
+    logs = (
+        await db.password_access_logs.find(query, {"_id": 0})
+        .sort("timestamp", -1)
+        .to_list(limit)
+    )
+    return logs
+
+
+@router.get("/admin/stats")
+async def get_password_stats(current_user: User = Depends(require_admin)):
+    total = await db.passwords.count_documents({})
+    by_dept = {}
+    by_type = {}
+    by_holder = {}
+    docs = await db.passwords.find(
+        {},
+        {"_id": 0, "department": 1, "portal_type": 1, "holder_type": 1}
+    ).to_list(5000)
+    for d in docs:
+        dept = d.get("department", "OTHER")
+        ptype = d.get("portal_type", "OTHER")
+        holder = d.get("holder_type", "COMPANY")
+        by_dept[dept] = by_dept.get(dept, 0) + 1
+        by_type[ptype] = by_type.get(ptype, 0) + 1
+        by_holder[holder] = by_holder.get(holder, 0) + 1
+    return {
+        "total": total,
+        "by_department": by_dept,
+        "by_portal_type": by_type,
+        "by_holder_type": by_holder,
+    }
+
+
+# ── LIST + CREATE ─────────────────────────────────────────────────────────────
+
+@router.get("", response_model=List[PasswordEntry])
+async def list_passwords(
+    department: Optional[str] = Query(None),
+    portal_type: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    client_id: Optional[str] = Query(None),
+    holder_type: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+):
+    query: dict = {}
+    if department:
+        query["department"] = department
+    if portal_type:
+        query["portal_type"] = portal_type
+    if client_id:
+        query["client_id"] = client_id
+    if holder_type:
+        query["holder_type"] = holder_type
+    if search:
+        safe = search.replace("\\", "\\\\")
+        query["$or"] = [
+            {"portal_name":  {"$regex": safe, "$options": "i"}},
+            {"client_name":  {"$regex": safe, "$options": "i"}},
+            {"username":     {"$regex": safe, "$options": "i"}},
+            {"url":          {"$regex": safe, "$options": "i"}},
+            {"holder_name":  {"$regex": safe, "$options": "i"}},
+            {"holder_pan":   {"$regex": safe, "$options": "i"}},
+            {"holder_din":   {"$regex": safe, "$options": "i"}},
+        ]
+
+    raw = await db.passwords.find(query, {"_id": 0}).sort("portal_name", 1).to_list(2000)
+
+    result = []
+    for doc in raw:
+        if not _can_view(current_user, doc):
+            continue
+        doc = await _enrich_entry(doc)
+        doc = _strip_sensitive(doc)
+        result.append(doc)
+    return result
+
+
+@router.post("", response_model=PasswordEntry, status_code=201)
+async def create_password(
+    data: PasswordEntryCreate,
+    current_user: User = Depends(get_current_user),
+):
+    if not _can_edit(current_user):
+        raise HTTPException(403, "You do not have permission to create passwords")
+
+    client_name = data.client_name
+    if data.client_id and not client_name:
+        client_doc = await db.clients.find_one({"id": data.client_id}, {"_id": 0, "company_name": 1})
+        if client_doc:
+            client_name = client_doc.get("company_name")
+
+    now = datetime.now(timezone.utc).isoformat()
+    entry_id = str(uuid.uuid4())
+    doc = {
+        "id":                 entry_id,
+        "portal_name":        data.portal_name.strip(),
+        "portal_type":        (data.portal_type or "OTHER").upper(),
+        "url":                (data.url or "").strip() or None,
+        "username":           (data.username or "").strip() or None,
+        "password_encrypted": _encrypt(data.password_plain or ""),
+        "_password_set":      bool(data.password_plain),
+        "department":         (data.department or "OTHER").upper(),
+        "holder_type":        (data.holder_type or "COMPANY").upper(),
+        "holder_name":        (data.holder_name or "").strip() or None,
+        "holder_pan":         (data.holder_pan or "").strip().upper() or None,
+        "holder_din":         (data.holder_din or "").strip() or None,
+        "client_name":        client_name or None,
+        "client_id":          data.client_id or None,
+        "notes":              data.notes or None,
+        "tags":               data.tags or [],
+        "created_by":         current_user.id,
+        "created_at":         now,
+        "updated_at":         now,
+        "last_accessed_at":   now,
+    }
+    await db.passwords.insert_one(doc)
+    doc.pop("_id", None)
+
+    await db.password_access_logs.insert_one({
+        "id":          str(uuid.uuid4()),
+        "action":      "CREATE",
+        "entry_id":    entry_id,
+        "portal_name": data.portal_name,
+        "user_id":     current_user.id,
+        "user_name":   current_user.full_name,
+        "timestamp":   now,
+    })
+
+    doc = await _enrich_entry(dict(doc))
+    return _strip_sensitive(doc)
+
+
+# ── PARAMETERIZED ROUTES (/{entry_id} — must come LAST) ──────────────────────
+
+@router.get("/{entry_id}", response_model=PasswordEntry)
+async def get_password_entry(
+    entry_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    doc = await db.passwords.find_one({"id": entry_id}, {"_id": 0})
+    if not doc:
         raise HTTPException(404, "Entry not found")
-    return _enrich(e)
+    if not _can_view(current_user, doc):
+        raise HTTPException(403, "Access denied")
+    doc = await _enrich_entry(doc)
+    return _strip_sensitive(doc)
 
 
 @router.get("/{entry_id}/reveal", response_model=PasswordRevealResponse)
-def reveal_password(
-    entry_id: int,
-    db: Session = Depends(get_db),
-    current_user: Any = Depends(get_current_user),
+async def reveal_password(
+    entry_id: str,
+    current_user: User = Depends(get_current_user),
 ):
-    _require(current_user)
-    e = db.execute(select(PasswordEntry).where(and_(
-        PasswordEntry.id      == entry_id,
-        PasswordEntry.user_id == current_user.id,
-    ))).scalar()
-    if not e:
+    doc = await db.passwords.find_one({"id": entry_id}, {"_id": 0})
+    if not doc:
         raise HTTPException(404, "Entry not found")
+    if not _can_reveal(current_user, doc):
+        raise HTTPException(403, "You are not authorised to reveal this password")
 
-    pw = PasswordEncryption.decrypt(e.password_encrypted) if e.has_password else ""
-    e.last_accessed_at = datetime.utcnow()
-    _log(db, current_user.id, entry_id, "reveal")
-    try:
-        db.commit()
-    except Exception as exc:
-        db.rollback()
-        logger.warning("reveal commit: %s", exc)
+    plain = _decrypt(doc.get("password_encrypted", ""))
 
-    return PasswordRevealResponse(
-        id=e.id,
-        portal_name=e.portal_name,
-        username=e.username,
-        password=pw,
-        revealed_at=datetime.utcnow(),
+    now = datetime.now(timezone.utc).isoformat()
+    await db.passwords.update_one(
+        {"id": entry_id},
+        {"$set": {"last_accessed_at": now}}
     )
 
+    await db.password_access_logs.insert_one({
+        "id":          str(uuid.uuid4()),
+        "action":      "REVEAL",
+        "entry_id":    entry_id,
+        "portal_name": doc.get("portal_name", ""),
+        "user_id":     current_user.id,
+        "user_name":   current_user.full_name,
+        "timestamp":   now,
+        "ip":          None,
+    })
 
-@router.put("/{entry_id}", response_model=PasswordEntryResponse)
-def update_password(
-    entry_id: int,
-    payload:  PasswordEntryUpdate,
-    db: Session = Depends(get_db),
-    current_user: Any = Depends(get_current_user),
+    return {
+        "id":          entry_id,
+        "username":    doc.get("username"),
+        "password":    plain,
+        "portal_name": doc.get("portal_name", ""),
+    }
+
+
+@router.put("/{entry_id}", response_model=PasswordEntry)
+async def update_password_entry(
+    entry_id: str,
+    data: PasswordEntryUpdate,
+    current_user: User = Depends(get_current_user),
 ):
-    _require(current_user)
-    e = db.execute(select(PasswordEntry).where(and_(
-        PasswordEntry.id      == entry_id,
-        PasswordEntry.user_id == current_user.id,
-    ))).scalar()
-    if not e:
+    if not _can_edit(current_user):
+        raise HTTPException(403, "You do not have permission to edit passwords")
+
+    existing = await db.passwords.find_one({"id": entry_id}, {"_id": 0})
+    if not existing:
         raise HTTPException(404, "Entry not found")
 
-    try:
-        data = payload.dict(exclude_unset=True)
-        if "password_plain" in data:
-            pw = data.pop("password_plain")
-            if pw:
-                e.password_encrypted = PasswordEncryption.encrypt(pw)
-                e.has_password = True
-        if "tags" in data:
-            e.tags = json.dumps(data.pop("tags") or [])
-        for k, v in data.items():
-            if hasattr(e, k):
-                setattr(e, k, v)
-        e.updated_at = datetime.utcnow()
-        _log(db, current_user.id, entry_id, "edit")
-        db.commit()
-        db.refresh(e)
-        return _enrich(e)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        db.rollback()
-        logger.error("update_password: %s", exc, exc_info=True)
-        raise HTTPException(500, str(exc))
+    now = datetime.now(timezone.utc).isoformat()
+    updates: dict = {"updated_at": now}
+
+    if data.portal_name is not None:
+        updates["portal_name"] = data.portal_name.strip()
+    if data.portal_type is not None:
+        updates["portal_type"] = data.portal_type.upper()
+    if data.url is not None:
+        updates["url"] = data.url.strip() or None
+    if data.username is not None:
+        updates["username"] = data.username.strip() or None
+    if data.password_plain is not None:
+        updates["password_encrypted"] = _encrypt(data.password_plain)
+        updates["_password_set"] = bool(data.password_plain)
+    if data.department is not None:
+        updates["department"] = data.department.upper()
+    if data.holder_type is not None:
+        updates["holder_type"] = data.holder_type.upper()
+    if data.holder_name is not None:
+        updates["holder_name"] = data.holder_name.strip() or None
+    if data.holder_pan is not None:
+        updates["holder_pan"] = data.holder_pan.strip().upper() or None
+    if data.holder_din is not None:
+        updates["holder_din"] = data.holder_din.strip() or None
+    if data.client_id is not None:
+        updates["client_id"] = data.client_id or None
+        if data.client_id and not data.client_name:
+            client_doc = await db.clients.find_one({"id": data.client_id}, {"_id": 0, "company_name": 1})
+            if client_doc:
+                updates["client_name"] = client_doc.get("company_name")
+    if data.client_name is not None:
+        updates["client_name"] = data.client_name or None
+    if data.notes is not None:
+        updates["notes"] = data.notes or None
+    if data.tags is not None:
+        updates["tags"] = data.tags
+
+    await db.passwords.update_one({"id": entry_id}, {"$set": updates})
+
+    await db.password_access_logs.insert_one({
+        "id":          str(uuid.uuid4()),
+        "action":      "UPDATE",
+        "entry_id":    entry_id,
+        "portal_name": existing.get("portal_name", ""),
+        "user_id":     current_user.id,
+        "user_name":   current_user.full_name,
+        "timestamp":   now,
+    })
+
+    updated = await db.passwords.find_one({"id": entry_id}, {"_id": 0})
+    updated = await _enrich_entry(updated)
+    return _strip_sensitive(updated)
 
 
-@router.delete("/{entry_id}", status_code=204)
-def delete_password(
-    entry_id: int,
-    db: Session = Depends(get_db),
-    current_user: Any = Depends(get_current_user),
+@router.delete("/{entry_id}")
+async def delete_password_entry(
+    entry_id: str,
+    current_user: User = Depends(get_current_user),
 ):
-    _require(current_user)
-    e = db.execute(select(PasswordEntry).where(and_(
-        PasswordEntry.id      == entry_id,
-        PasswordEntry.user_id == current_user.id,
-    ))).scalar()
-    if not e:
+    if current_user.role != "admin":
+        raise HTTPException(403, "Only administrators can delete password entries")
+
+    existing = await db.passwords.find_one({"id": entry_id}, {"_id": 0})
+    if not existing:
         raise HTTPException(404, "Entry not found")
 
-    e.is_archived = True
-    _log(db, current_user.id, entry_id, "delete")
-    try:
-        db.commit()
-    except Exception as exc:
-        db.rollback()
-        logger.error("delete_password: %s", exc, exc_info=True)
-        raise HTTPException(500, str(exc))
+    await db.passwords.delete_one({"id": entry_id})
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.password_access_logs.insert_one({
+        "id":          str(uuid.uuid4()),
+        "action":      "DELETE",
+        "entry_id":    entry_id,
+        "portal_name": existing.get("portal_name", ""),
+        "user_id":     current_user.id,
+        "user_name":   current_user.full_name,
+        "timestamp":   now,
+    })
+    return {"message": f"Entry '{existing.get('portal_name')}' deleted successfully"}
