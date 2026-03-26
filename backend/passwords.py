@@ -667,21 +667,29 @@ async def list_passwords(
     search: Optional[str] = Query(None),
     client_id: Optional[str] = Query(None),
     holder_type: Optional[str] = Query(None),
-    sort_by: Optional[str] = Query("portal_name"),
-    sort_order: Optional[str] = Query("asc"),
-    limit: Optional[int] = Query(50, ge=1, le=100),   # FIXED: Reduced default limit
-    page: int = Query(1, ge=1),                       # NEW: Pagination
+
+    # ✅ FIXED (MAIN ISSUE)
+    sort_by: str = Query(default="created_at"),
+    sort_order: str = Query(default="desc"),
+    limit: int = Query(default=100),
+    page: int = Query(default=1),
+
     current_user: User = Depends(get_current_user),
 ):
     query: dict = {}
+
     if department:
         query["department"] = department.upper()
+
     if portal_type:
         query["portal_type"] = portal_type.upper()
+
     if client_id:
         query["client_id"] = client_id
+
     if holder_type:
         query["holder_type"] = holder_type.upper()
+
     if search:
         safe = re.escape(search)
         query["$or"] = [
@@ -696,9 +704,13 @@ async def list_passwords(
             {"mobile": {"$regex": safe, "$options": "i"}},
         ]
 
-    # Validate sort field
-    sort_field = sort_by if sort_by in ALLOWED_SORT_FIELDS else "portal_name"
-    mongo_sort = 1 if (sort_order or "asc").lower() == "asc" else -1
+    # ✅ SAFE SORT (prevents crash + 422)
+    sort_field = sort_by if sort_by in ALLOWED_SORT_FIELDS else "created_at"
+    mongo_sort = 1 if sort_order.lower() == "asc" else -1
+
+    # ✅ SAFE PAGINATION
+    limit = max(1, min(limit, 500))
+    page = max(1, page)
     skip = (page - 1) * limit
 
     try:
@@ -706,34 +718,41 @@ async def list_passwords(
             .sort(sort_field, mongo_sort) \
             .skip(skip) \
             .limit(limit) \
-            .to_list(limit)
+            .to_list(length=limit)
     except Exception as e:
         logger.error(f"MongoDB query failed in list_passwords: {e}")
         raise HTTPException(500, "Database error while fetching passwords. Please try again.")
 
-    # 🔥 BULK USER FETCH - N+1 Query Fixed
+    # ✅ FIX N+1 QUERY
     user_ids = list(set([d.get("created_by") for d in raw if d.get("created_by")]))
+
     users = await db.users.find(
         {"id": {"$in": user_ids}},
         {"_id": 0, "id": 1, "full_name": 1}
-    ).to_list(None)
+    ).to_list(length=None)
+
     user_map = {u["id"]: u.get("full_name", "Unknown") for u in users}
 
     result = []
+
     for doc in raw:
         try:
             if not _can_view(current_user, doc):
                 continue
 
             doc["created_by_name"] = user_map.get(doc.get("created_by"))
+
             doc = _strip_sensitive(doc)
 
             entry = PasswordEntry(**doc)
             result.append(entry)
+
         except Exception as e:
             logger.error(f"Skipping malformed password entry {doc.get('id', '?')}: {e}")
             continue
+
     return result
+
 
 @router.post("", response_model=PasswordEntry, status_code=201)
 async def create_password(
@@ -742,16 +761,23 @@ async def create_password(
 ):
     if not _can_edit(current_user):
         raise HTTPException(403, "You do not have permission to create passwords")
+
     client_name = data.client_name
+
     if data.client_id and not client_name:
         try:
-            client_doc = await db.clients.find_one({"id": data.client_id}, {"_id": 0, "company_name": 1})
+            client_doc = await db.clients.find_one(
+                {"id": data.client_id},
+                {"_id": 0, "company_name": 1}
+            )
             if client_doc:
                 client_name = client_doc.get("company_name")
         except Exception as e:
             logger.warning(f"Could not fetch client name for {data.client_id}: {e}")
+
     now = datetime.now(timezone.utc).isoformat()
     entry_id = str(uuid.uuid4())
+
     doc = {
         "id": entry_id,
         "portal_name": data.portal_name.strip(),
@@ -776,7 +802,9 @@ async def create_password(
         "updated_at": now,
         "last_accessed_at": now,
     }
+
     await db.passwords.insert_one(doc)
+
     await db.password_access_logs.insert_one({
         "id": str(uuid.uuid4()),
         "action": "CREATE",
@@ -786,10 +814,11 @@ async def create_password(
         "user_name": current_user.full_name,
         "timestamp": now,
     })
-    doc = await _strip_sensitive(dict(doc))  # Note: _strip_sensitive returns dict
-    doc["created_by_name"] = current_user.full_name
-    return PasswordEntry(**doc)
 
+    doc = _strip_sensitive(dict(doc))  # ✅ FIX: no await
+    doc["created_by_name"] = current_user.full_name
+
+    return PasswordEntry(**doc)
 # ── PARAMETERIZED ROUTES (must come LAST) ─────────────────────────────────────
 @router.get("/{entry_id}", response_model=PasswordEntry)
 async def get_password_entry(
