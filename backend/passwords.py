@@ -242,8 +242,10 @@ class StatsResponse(BaseModel):
 class PasswordEncryption:
     @staticmethod
     def _key() -> bytes:
-        raw = os.environ.get("PASSWORDS_SECRET_KEY", "taskosphere-dev-key-replace-me!!")
-        padded = raw.encode()[:32].ljust(32, b"0")
+        # Prioritize Environment Variable, then fallback to a stable 32-byte key
+        raw = os.environ.get("PASSWORDS_SECRET_KEY", "taskosphere-fixed-32-byte-default")
+        # Fernet keys MUST be 32 url-safe base64-encoded bytes.
+        padded = raw.encode().ljust(32, b"0")[:32]
         return base64.urlsafe_b64encode(padded)
 
     @staticmethod
@@ -251,11 +253,11 @@ class PasswordEncryption:
         if not password:
             return ""
         try:
-            return base64.b64encode(
-                Fernet(PasswordEncryption._key()).encrypt(password.encode())
-            ).decode()
+            f = Fernet(PasswordEncryption._key())
+            return base64.b64encode(f.encrypt(password.encode())).decode()
         except Exception as e:
-            logger.error("encrypt error: %s", e)
+            logger.error("Encryption failed: %s", e)
+            # Fallback to simple base64 so the server doesn't 500
             return base64.b64encode(password.encode()).decode()
 
     @staticmethod
@@ -263,13 +265,16 @@ class PasswordEncryption:
         if not enc:
             return ""
         try:
-            return Fernet(PasswordEncryption._key()).decrypt(base64.b64decode(enc)).decode()
+            # Try Fernet first
+            f = Fernet(PasswordEncryption._key())
+            return f.decrypt(base64.b64decode(enc)).decode()
         except Exception as e:
-            logger.warning("fernet decrypt failed (%s), trying plain b64", e)
+            logger.warning("Fernet decrypt failed, attempting plain b64: %s", e)
             try:
+                # Try plain base64 (for old or fallback data)
                 return base64.b64decode(enc).decode()
             except Exception:
-                return ""
+                return "[Decryption Error]"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -328,7 +333,11 @@ def _log(db: Session, user_id: int, entry_id: int, action: str) -> None:
 # ROUTER
 # NOTE: Static routes MUST come before /{entry_id} routes
 # ═══════════════════════════════════════════════════════════════════════════════
-router = APIRouter(prefix="/passwords", tags=["passwords"])
+router = APIRouter(
+    prefix="/passwords", 
+    tags=["passwords"],
+    redirect_slashes=True  # Ensures /passwords and /passwords/ both work
+)
 
 
 # ── LIST ──────────────────────────────────────────────────────────────────────
@@ -376,7 +385,7 @@ def list_passwords(
         q   = q.order_by(asc(col) if sort_order == "asc" else desc(col))
         q   = q.offset(skip).limit(limit)
 
-        return [_enrich(r) for r in db.execute(q).scalars().all()]
+        results = db.execute(q).scalars().all(); return [_enrich(r) for r in results] if results else []
     except HTTPException:
         raise
     except Exception as exc:
