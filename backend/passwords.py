@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import os
@@ -108,8 +107,9 @@ DEPARTMENT_MAP = {
     "OTHER":      "OTHER",
 }
 
-# Credential holder types
 HOLDER_TYPES = ["COMPANY", "DIRECTOR", "INDIVIDUAL", "PARTNER", "TRUSTEE", "OTHER"]
+
+ALLOWED_SORT_FIELDS = {"portal_name", "created_at", "updated_at", "last_accessed_at"}
 
 
 class PasswordEntryCreate(BaseModel):
@@ -121,11 +121,12 @@ class PasswordEntryCreate(BaseModel):
     department: str = "OTHER"
     client_name: Optional[str] = None
     client_id: Optional[str] = None
-    # New fields for individual/director tracking
-    holder_type: str = "COMPANY"          # COMPANY / DIRECTOR / INDIVIDUAL etc.
-    holder_name: Optional[str] = None     # Director name / individual name
-    holder_pan: Optional[str] = None      # PAN of individual/director
-    holder_din: Optional[str] = None      # DIN (for MCA/ROC directors)
+    holder_type: str = "COMPANY"
+    holder_name: Optional[str] = None
+    holder_pan: Optional[str] = None
+    holder_din: Optional[str] = None
+    mobile: Optional[str] = None
+    trade_name: Optional[str] = None
     notes: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
 
@@ -143,6 +144,8 @@ class PasswordEntryUpdate(BaseModel):
     holder_name: Optional[str] = None
     holder_pan: Optional[str] = None
     holder_din: Optional[str] = None
+    mobile: Optional[str] = None
+    trade_name: Optional[str] = None
     notes: Optional[str] = None
     tags: Optional[List[str]] = None
 
@@ -151,19 +154,21 @@ class PasswordEntry(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     portal_name: str
-    portal_type: str
+    portal_type: str = "OTHER"
     url: Optional[str] = None
     username: Optional[str] = None
-    department: str
+    department: str = "OTHER"
     client_name: Optional[str] = None
     client_id: Optional[str] = None
     holder_type: str = "COMPANY"
     holder_name: Optional[str] = None
     holder_pan: Optional[str] = None
     holder_din: Optional[str] = None
+    mobile: Optional[str] = None
+    trade_name: Optional[str] = None
     notes: Optional[str] = None
     tags: List[str] = []
-    created_by: str
+    created_by: str = ""
     created_by_name: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -185,11 +190,10 @@ class BulkImportResult(BaseModel):
     errors: List[dict]
 
 
-# Google Sheets link schema
 class GoogleSheetLink(BaseModel):
     label: str = Field(..., min_length=1, max_length=120)
     sheet_url: str = Field(..., min_length=10)
-    sheet_type: str = "OTHER"   # GST | ROC | MCA | OTHER
+    sheet_type: str = "OTHER"
     description: Optional[str] = None
 
 
@@ -206,7 +210,10 @@ def _get_user_perms(user: User) -> dict:
     if isinstance(user.permissions, dict):
         return user.permissions
     if user.permissions:
-        return user.permissions.model_dump()
+        try:
+            return user.permissions.model_dump()
+        except Exception:
+            return {}
     return {}
 
 
@@ -246,37 +253,54 @@ def _can_edit(user: User) -> bool:
 
 
 def _strip_sensitive(doc: dict) -> dict:
+    """Remove encrypted password fields and set has_password flag safely."""
     doc = dict(doc)
     doc.pop("_id", None)
     doc.pop("password_encrypted", None)
     doc["has_password"] = bool(doc.get("_password_set", False))
     doc.pop("_password_set", None)
+    # Ensure required fields always have safe defaults so PasswordEntry never fails validation
+    if not doc.get("id"):
+        doc["id"] = str(uuid.uuid4())
+    if not doc.get("portal_name"):
+        doc["portal_name"] = "Unknown"
+    if not doc.get("portal_type"):
+        doc["portal_type"] = "OTHER"
+    if not doc.get("department"):
+        doc["department"] = "OTHER"
+    if not doc.get("holder_type"):
+        doc["holder_type"] = "COMPANY"
+    if not doc.get("created_by"):
+        doc["created_by"] = ""
+    if not isinstance(doc.get("tags"), list):
+        doc["tags"] = []
     return doc
 
 
 async def _enrich_entry(doc: dict) -> dict:
-    creator_id = doc.get("created_by")
-    if creator_id:
-        u = await db.users.find_one({"id": creator_id}, {"_id": 0, "full_name": 1})
-        if u:
-            doc["created_by_name"] = u.get("full_name", "Unknown")
+    """Safely enrich entry with creator name — never raises."""
+    try:
+        creator_id = doc.get("created_by")
+        if creator_id:
+            u = await db.users.find_one({"id": creator_id}, {"_id": 0, "full_name": 1})
+            if u:
+                doc["created_by_name"] = u.get("full_name", "Unknown")
+    except Exception as e:
+        logger.warning(f"_enrich_entry failed for entry {doc.get('id')}: {e}")
     return doc
 
 
 def _extract_sheet_id(url: str) -> Optional[str]:
-    """Extract Google Sheets ID from a share URL."""
     match = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", url)
     return match.group(1) if match else None
 
 
 def _extract_gid(url: str) -> Optional[str]:
-    """Extract gid (sheet tab) from URL."""
     match = re.search(r"[#&?]gid=(\d+)", url)
     return match.group(1) if match else None
 
 
 async def _fetch_sheet_as_csv(sheet_id: str, gid: Optional[str] = None) -> Optional[pd.DataFrame]:
-    """Fetch a Google Sheet tab as CSV (must be publicly shared)."""
     if gid:
         csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
     else:
@@ -293,19 +317,14 @@ async def _fetch_sheet_as_csv(sheet_id: str, gid: Optional[str] = None) -> Optio
 
 
 async def _get_all_sheet_tabs(sheet_id: str) -> List[dict]:
-    """Get list of all tabs in a Google Sheet using the sheets API export trick."""
-    # We fetch the sheet metadata via the HTML page (no API key needed for public sheets)
     try:
         url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(url, follow_redirects=True)
             html = resp.text
-        # Parse sheet tab names and gids from the HTML
         tabs = []
-        # Match pattern: "gid":123456,"name":"Sheet1"
         matches = re.findall(r'"gid"\s*:\s*"?(\d+)"?\s*,\s*"name"\s*:\s*"([^"]+)"', html)
         if not matches:
-            # Try alternative pattern
             matches = re.findall(r'name="([^"]+)"[^>]*data-sheet-id="(\d+)"', html)
         for gid, name in matches:
             tabs.append({"gid": gid, "name": name})
@@ -328,7 +347,6 @@ async def get_portal_types(current_user: User = Depends(get_current_user)):
 
 @router.get("/clients-list")
 async def get_clients_for_password(current_user: User = Depends(get_current_user)):
-    """Return a lightweight list of clients for the password form dropdown."""
     query = {}
     if current_user.role != "admin":
         perms = _get_user_perms(current_user)
@@ -352,7 +370,6 @@ async def get_clients_for_password(current_user: User = Depends(get_current_user
 
 @router.get("/sheet-links")
 async def list_sheet_links(current_user: User = Depends(get_current_user)):
-    """List all saved Google Sheet links."""
     links = await db.password_sheet_links.find({}, {"_id": 0}).sort("label", 1).to_list(200)
     return links
 
@@ -362,7 +379,6 @@ async def add_sheet_link(
     data: GoogleSheetLink,
     current_user: User = Depends(require_admin),
 ):
-    """Save a Google Sheet link for future password import."""
     sheet_id = _extract_sheet_id(data.sheet_url)
     if not sheet_id:
         raise HTTPException(400, "Invalid Google Sheets URL — could not extract sheet ID")
@@ -430,12 +446,6 @@ async def preview_sheet_data(
     link_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Preview data from a saved Google Sheet link.
-    For ROC/MCA sheets: fetches ALL tabs and merges.
-    For GST sheets: fetches only the LAST (most recent) tab.
-    Returns first 20 rows for preview.
-    """
     link = await db.password_sheet_links.find_one({"id": link_id}, {"_id": 0})
     if not link:
         raise HTTPException(404, "Sheet link not found")
@@ -447,7 +457,6 @@ async def preview_sheet_data(
     gid_from_url = _extract_gid(link.get("sheet_url", ""))
 
     if sheet_type in ("ROC", "MCA") and tabs:
-        # Fetch ALL tabs and merge
         all_dfs = []
         for tab in tabs:
             df = await _fetch_sheet_as_csv(sheet_id, tab["gid"])
@@ -467,7 +476,6 @@ async def preview_sheet_data(
             "preview": preview,
         }
     elif sheet_type == "GST" and tabs:
-        # Use last tab (most recent period)
         last_tab = tabs[-1]
         df = await _fetch_sheet_as_csv(sheet_id, last_tab["gid"])
         if df is None or df.empty:
@@ -482,7 +490,6 @@ async def preview_sheet_data(
             "preview": preview,
         }
     else:
-        # Single tab — use gid from URL or default
         df = await _fetch_sheet_as_csv(sheet_id, gid_from_url)
         if df is None or df.empty:
             raise HTTPException(502, "Could not fetch sheet data. Ensure the sheet is publicly shared (Anyone with link can view).")
@@ -507,7 +514,7 @@ async def download_template(current_user: User = Depends(get_current_user)):
     template_columns = [
         "portal_name", "portal_type", "url", "username", "password_plain",
         "department", "holder_type", "holder_name", "holder_pan", "holder_din",
-        "client_name", "client_id", "notes", "tags"
+        "mobile", "trade_name", "client_name", "client_id", "notes", "tags"
     ]
     df = pd.DataFrame(columns=template_columns)
 
@@ -523,6 +530,8 @@ async def download_template(current_user: User = Depends(get_current_user)):
             "holder_name":    "",
             "holder_pan":     "",
             "holder_din":     "",
+            "mobile":         "",
+            "trade_name":     "",
             "client_name":    "Example Client Pvt Ltd",
             "client_id":      "CL001",
             "notes":          "GST login for quarterly filings",
@@ -539,6 +548,8 @@ async def download_template(current_user: User = Depends(get_current_user)):
             "holder_name":    "Rajesh Kumar",
             "holder_pan":     "ABCPK1234D",
             "holder_din":     "08123456",
+            "mobile":         "9876543210",
+            "trade_name":     "",
             "client_name":    "Example Client Pvt Ltd",
             "client_id":      "CL001",
             "notes":          "MCA login for Director Rajesh Kumar",
@@ -572,12 +583,17 @@ async def bulk_import_passwords(
 
     df = None
     fname = file.filename or ""
-    if fname.endswith(('.xlsx', '.xls')):
-        df = pd.read_excel(file_like_object, engine='openpyxl')
-    elif fname.endswith('.csv'):
-        df = pd.read_csv(file_like_object)
-    else:
-        raise HTTPException(400, "Unsupported file type. Please upload an Excel (.xlsx, .xls) or CSV (.csv) file.")
+    try:
+        if fname.endswith(('.xlsx', '.xls')):
+            df = pd.read_excel(file_like_object, engine='openpyxl')
+        elif fname.endswith('.csv'):
+            df = pd.read_csv(file_like_object)
+        else:
+            raise HTTPException(400, "Unsupported file type. Please upload an Excel (.xlsx, .xls) or CSV (.csv) file.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Failed to parse file: {str(e)}")
 
     required_columns = [
         "portal_name", "portal_type", "url", "username", "password_plain",
@@ -624,6 +640,8 @@ async def bulk_import_passwords(
                 "holder_name":    clean(row.get("holder_name")),
                 "holder_pan":     clean(row.get("holder_pan")),
                 "holder_din":     clean(row.get("holder_din")),
+                "mobile":         clean(row.get("mobile")),
+                "trade_name":     clean(row.get("trade_name")),
                 "client_name":    client_name_val,
                 "client_id":      client_id_val,
                 "notes":          clean(row.get("notes")),
@@ -647,6 +665,8 @@ async def bulk_import_passwords(
                 "holder_name":        new_entry.holder_name,
                 "holder_pan":         new_entry.holder_pan,
                 "holder_din":         new_entry.holder_din,
+                "mobile":             new_entry.mobile,
+                "trade_name":         new_entry.trade_name,
                 "client_name":        new_entry.client_name,
                 "client_id":          new_entry.client_id,
                 "notes":              new_entry.notes,
@@ -713,11 +733,11 @@ async def get_password_stats(current_user: User = Depends(require_admin)):
         {"_id": 0, "department": 1, "portal_type": 1, "holder_type": 1}
     ).to_list(5000)
     for d in docs:
-        dept = d.get("department", "OTHER")
-        ptype = d.get("portal_type", "OTHER")
-        holder = d.get("holder_type", "COMPANY")
-        by_dept[dept] = by_dept.get(dept, 0) + 1
-        by_type[ptype] = by_type.get(ptype, 0) + 1
+        dept   = d.get("department", "OTHER") or "OTHER"
+        ptype  = d.get("portal_type", "OTHER") or "OTHER"
+        holder = d.get("holder_type", "COMPANY") or "COMPANY"
+        by_dept[dept]     = by_dept.get(dept, 0) + 1
+        by_type[ptype]    = by_type.get(ptype, 0) + 1
         by_holder[holder] = by_holder.get(holder, 0) + 1
     return {
         "total": total,
@@ -731,24 +751,29 @@ async def get_password_stats(current_user: User = Depends(require_admin)):
 
 @router.get("", response_model=List[PasswordEntry])
 async def list_passwords(
-    department: Optional[str] = Query(None),
+    department: Optional[str]  = Query(None),
     portal_type: Optional[str] = Query(None),
-    search: Optional[str] = Query(None),
-    client_id: Optional[str] = Query(None),
+    search: Optional[str]      = Query(None),
+    client_id: Optional[str]   = Query(None),
     holder_type: Optional[str] = Query(None),
+    # ── NEW: sort/limit params sent by the frontend ──────────────────────────
+    sort_by: Optional[str]     = Query("portal_name"),
+    sort_order: Optional[str]  = Query("asc"),
+    limit: Optional[int]       = Query(500, ge=1, le=2000),
     current_user: User = Depends(get_current_user),
 ):
     query: dict = {}
+
     if department:
-        query["department"] = department
+        query["department"] = department.upper()
     if portal_type:
-        query["portal_type"] = portal_type
+        query["portal_type"] = portal_type.upper()
     if client_id:
         query["client_id"] = client_id
     if holder_type:
-        query["holder_type"] = holder_type
+        query["holder_type"] = holder_type.upper()
     if search:
-        safe = search.replace("\\", "\\\\")
+        safe = re.escape(search)
         query["$or"] = [
             {"portal_name":  {"$regex": safe, "$options": "i"}},
             {"client_name":  {"$regex": safe, "$options": "i"}},
@@ -757,17 +782,35 @@ async def list_passwords(
             {"holder_name":  {"$regex": safe, "$options": "i"}},
             {"holder_pan":   {"$regex": safe, "$options": "i"}},
             {"holder_din":   {"$regex": safe, "$options": "i"}},
+            {"trade_name":   {"$regex": safe, "$options": "i"}},
+            {"mobile":       {"$regex": safe, "$options": "i"}},
         ]
 
-    raw = await db.passwords.find(query, {"_id": 0}).sort("portal_name", 1).to_list(2000)
+    # Validate sort field to prevent injection
+    sort_field = sort_by if sort_by in ALLOWED_SORT_FIELDS else "portal_name"
+    mongo_sort = 1 if (sort_order or "asc").lower() == "asc" else -1
+    safe_limit = min(limit or 500, 2000)
+
+    try:
+        raw = await db.passwords.find(query, {"_id": 0}).sort(sort_field, mongo_sort).to_list(safe_limit)
+    except Exception as e:
+        logger.error(f"MongoDB query failed in list_passwords: {e}")
+        raise HTTPException(500, "Database error while fetching passwords. Please try again.")
 
     result = []
     for doc in raw:
-        if not _can_view(current_user, doc):
+        try:
+            if not _can_view(current_user, doc):
+                continue
+            doc = await _enrich_entry(doc)
+            doc = _strip_sensitive(doc)
+            # Validate via Pydantic — skip malformed docs instead of crashing
+            entry = PasswordEntry(**doc)
+            result.append(entry)
+        except Exception as e:
+            logger.error(f"Skipping malformed password entry {doc.get('id', '?')}: {e}")
             continue
-        doc = await _enrich_entry(doc)
-        doc = _strip_sensitive(doc)
-        result.append(doc)
+
     return result
 
 
@@ -781,9 +824,12 @@ async def create_password(
 
     client_name = data.client_name
     if data.client_id and not client_name:
-        client_doc = await db.clients.find_one({"id": data.client_id}, {"_id": 0, "company_name": 1})
-        if client_doc:
-            client_name = client_doc.get("company_name")
+        try:
+            client_doc = await db.clients.find_one({"id": data.client_id}, {"_id": 0, "company_name": 1})
+            if client_doc:
+                client_name = client_doc.get("company_name")
+        except Exception as e:
+            logger.warning(f"Could not fetch client name for {data.client_id}: {e}")
 
     now = datetime.now(timezone.utc).isoformat()
     entry_id = str(uuid.uuid4())
@@ -800,6 +846,8 @@ async def create_password(
         "holder_name":        (data.holder_name or "").strip() or None,
         "holder_pan":         (data.holder_pan or "").strip().upper() or None,
         "holder_din":         (data.holder_din or "").strip() or None,
+        "mobile":             (data.mobile or "").strip() or None,
+        "trade_name":         (data.trade_name or "").strip() or None,
         "client_name":        client_name or None,
         "client_id":          data.client_id or None,
         "notes":              data.notes or None,
@@ -917,12 +965,19 @@ async def update_password_entry(
         updates["holder_pan"] = data.holder_pan.strip().upper() or None
     if data.holder_din is not None:
         updates["holder_din"] = data.holder_din.strip() or None
+    if data.mobile is not None:
+        updates["mobile"] = data.mobile.strip() or None
+    if data.trade_name is not None:
+        updates["trade_name"] = data.trade_name.strip() or None
     if data.client_id is not None:
         updates["client_id"] = data.client_id or None
         if data.client_id and not data.client_name:
-            client_doc = await db.clients.find_one({"id": data.client_id}, {"_id": 0, "company_name": 1})
-            if client_doc:
-                updates["client_name"] = client_doc.get("company_name")
+            try:
+                client_doc = await db.clients.find_one({"id": data.client_id}, {"_id": 0, "company_name": 1})
+                if client_doc:
+                    updates["client_name"] = client_doc.get("company_name")
+            except Exception as e:
+                logger.warning(f"Could not fetch client name during update: {e}")
     if data.client_name is not None:
         updates["client_name"] = data.client_name or None
     if data.notes is not None:
