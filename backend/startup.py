@@ -2,13 +2,12 @@ import asyncio
 import logging
 import pytz
 from datetime import datetime, timezone
-
 from backend.dependencies import client, db
 from apscheduler.schedulers.background import BackgroundScheduler
 
 logger = logging.getLogger(__name__)
-
 scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Kolkata"))
+
 
 async def startup_event():
     try:
@@ -16,7 +15,7 @@ async def startup_event():
         await asyncio.wait_for(client.admin.command("ping"), timeout=5)
         logger.info("MongoDB connected successfully")
 
-        # ✅ YOUR FULL INDEX BLOCK (PASTE HERE)
+        # ✅ YOUR FULL INDEX BLOCK
         await db.tasks.create_index("assigned_to")
         await db.tasks.create_index("created_by")
         await db.tasks.create_index("due_date")
@@ -51,9 +50,8 @@ async def startup_event():
         # ✅ EMAIL FIX
         try:
             await db.email_connections.drop_index("user_id_1_provider_1")
-        except:
+        except Exception:
             pass
-
         await db.email_connections.create_index(
             [("user_id", 1), ("email_address", 1)],
             unique=True,
@@ -66,16 +64,14 @@ async def startup_event():
             unique=True,
             background=True
         )
-
         await db.clients.create_index(
             [("created_by", 1), ("company_name", 1)],
             unique=True,
             background=True
         )
-
         await db.holidays.create_index("date", unique=True, background=True)
 
-        # ✅ VISIT REPAIR
+        # ✅ VISIT REPAIR — backfill missing `id` fields
         visits = await db.visits.find({"id": {"$exists": False}}).to_list(10000)
         for v in visits:
             await db.visits.update_one(
@@ -83,10 +79,22 @@ async def startup_event():
                 {"$set": {"id": str(v["_id"])}}
             )
 
+        # ✅ AUTO MIGRATION — backfill consent_given for existing users
+        # (was incorrectly placed in a sync scheduler block in server.py)
+        try:
+            result = await db.users.update_many(
+                {},
+                {"$set": {"consent_given": True}}
+            )
+            logger.info(f"Consent cleanup: Updated {result.modified_count} users")
+        except Exception as e:
+            logger.error(f"Consent cleanup failed: {e}")
+
         logger.info("Startup DB setup completed")
 
-        # ✅ START SCHEDULER (if needed)
-        scheduler.start()
+        # ✅ START SCHEDULER
+        if not scheduler.running:
+            scheduler.start()
 
     except Exception as e:
         logger.error(f"Startup failed: {e}")
