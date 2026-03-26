@@ -351,6 +351,22 @@ async def startup_event():
         logger.error(f"APScheduler startup failed: {e}")
 
 
+@app.on_event("startup")
+async def startup_event():
+    try:
+        await asyncio.wait_for(client.admin.command("ping"), timeout=10.0)
+        logger.info("MongoDB connection verified.")
+    except Exception as e:
+        logger.error(f"MongoDB not ready at startup: {e} — skipping startup tasks")
+        return
+    try:
+        await asyncio.wait_for(_startup_logic(), timeout=30.0)
+    except asyncio.TimeoutError:
+        logger.error("Startup timed out after 30s — continuing anyway")
+    except Exception as e:
+        logger.error(f"Startup logic failed: {e}")
+
+
 # ====================== HEALTH ======================
 @app.get("/health")
 async def health():
