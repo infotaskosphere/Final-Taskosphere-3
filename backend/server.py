@@ -18,6 +18,8 @@ from backend.passwords import router as passwords_router
 from backend.quotations import router as quotation_router
 from backend.website_tracking import router as website_tracking_router
 from backend.visits import router as visits_router
+from backend.startup import startup_event
+
 
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -220,13 +222,8 @@ def mark_absent_users_task():
 
 
 @app.on_event("startup")
-async def startup_event():
-    try:
-        await asyncio.wait_for(client.admin.command("ping"), timeout=10.0)
-        logger.info("MongoDB connection verified.")
-    except Exception as e:
-        logger.error(f"MongoDB not ready at startup: {e} — skipping startup tasks")
-        return
+async def startup():
+    await startup_event()
     # ── NON-UNIQUE indexes ────────────────────────────────────────────────────
     try:
         await db.tasks.create_index("assigned_to")
@@ -349,22 +346,6 @@ async def startup_event():
         logger.info("APScheduler started successfully.")
     except Exception as e:
         logger.error(f"APScheduler startup failed: {e}")
-
-
-@app.on_event("startup")
-async def startup_event():
-    try:
-        await asyncio.wait_for(client.admin.command("ping"), timeout=10.0)
-        logger.info("MongoDB connection verified.")
-    except Exception as e:
-        logger.error(f"MongoDB not ready at startup: {e} — skipping startup tasks")
-        return
-    try:
-        await asyncio.wait_for(_startup_logic(), timeout=30.0)
-    except asyncio.TimeoutError:
-        logger.error("Startup timed out after 30s — continuing anyway")
-    except Exception as e:
-        logger.error(f"Startup logic failed: {e}")
 
 
 # ====================== HEALTH ======================
