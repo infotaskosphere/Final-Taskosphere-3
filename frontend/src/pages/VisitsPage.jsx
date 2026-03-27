@@ -1,19 +1,3 @@
-/**
- * VisitsPage.jsx — Client Visits v6  CRASH & 404 FIX
- *
- * ROOT CAUSE FIXES:
- *  1. BLANK PAGE (React crash): Old DB records have null/undefined visit_date,
- *     assigned_to, id. parseISO(null) throws and crashes the whole page.
- *     Fixed with safeFormat() and safeParseISO() helpers used everywhere.
- *  2. 404 on quick-status / edit / delete: Old records have no `id` field,
- *     so /visits/{undefined} → 404. Fixed by skipping cards with no id,
- *     and backend now does dual-lookup (_find_visit_by_any_id).
- *  3. canWrite / canDelete: were returning false when assigned_to was null.
- *     Fixed by null-guarding all permission checks.
- *  4. PERMISSION SIMPLIFICATION: Every user can edit/delete/change status
- *     of their OWN visits. Admin has full rights on all visits.
- */
-
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -37,33 +21,36 @@ import {
   CheckSquare, Minus, TrendingUp, Target, ArrowUpRight,
 } from "lucide-react";
 
+// ADD THIS IMPORT AT TOP
+import { FixedSizeList as List } from "react-window";
+
 // ── Brand Colors (matching Dashboard) ────────────────────────────────────────
 const COLORS = {
-  deepBlue:    "#0D3B66",
-  mediumBlue:  "#1F6FB2",
+  deepBlue: "#0D3B66",
+  mediumBlue: "#1F6FB2",
   emeraldGreen:"#1FAF5A",
-  lightGreen:  "#5CCB5F",
-  coral:       "#FF6B6B",
-  amber:       "#F59E0B",
+  lightGreen: "#5CCB5F",
+  coral: "#FF6B6B",
+  amber: "#F59E0B",
 };
 
 // ── Spring Physics (matching Dashboard) ──────────────────────────────────────
 const springPhysics = {
-  card:   { type: "spring", stiffness: 280, damping: 22, mass: 0.85 },
-  lift:   { type: "spring", stiffness: 320, damping: 24, mass: 0.9  },
+  card: { type: "spring", stiffness: 280, damping: 22, mass: 0.85 },
+  lift: { type: "spring", stiffness: 320, damping: 24, mass: 0.9 },
   button: { type: "spring", stiffness: 400, damping: 28 },
-  tap:    { type: "spring", stiffness: 500, damping: 30 },
+  tap: { type: "spring", stiffness: 500, damping: 30 },
 };
 
 // ── Animation Variants (matching Dashboard) ───────────────────────────────────
 const containerVariants = {
-  hidden:  { opacity: 0 },
+  hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
 };
 const itemVariants = {
-  hidden:  { opacity: 0, y: 24 },
+  hidden: { opacity: 0, y: 24 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] } },
-  exit:    { opacity: 0, y: 12, transition: { duration: 0.3 } },
+  exit: { opacity: 0, y: 12, transition: { duration: 0.3 } },
 };
 
 // ── Slim scrollbar (matching Dashboard) ──────────────────────────────────────
@@ -88,30 +75,30 @@ function safeFormat(dateStr, fmt, fallback = "—") {
 
 // ─── Status / Priority meta ─────────────────────────────────────────────────
 const STATUS_META = {
-  scheduled:   { label: "Scheduled",   icon: Clock,        color: "text-blue-600 dark:text-blue-400",    bg: "bg-blue-50 dark:bg-blue-950/60",      border: "border-blue-200 dark:border-blue-800"    },
-  completed:   { label: "Completed",   icon: CheckCircle2, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-50 dark:bg-emerald-950/60", border: "border-emerald-200 dark:border-emerald-800" },
-  cancelled:   { label: "Cancelled",   icon: XCircle,      color: "text-slate-500 dark:text-slate-400",  bg: "bg-slate-50 dark:bg-slate-800",       border: "border-slate-200 dark:border-slate-700"  },
-  missed:      { label: "Missed",      icon: AlertCircle,  color: "text-orange-500 dark:text-orange-400", bg: "bg-orange-50 dark:bg-orange-950/60",  border: "border-orange-200 dark:border-orange-800" },
-  rescheduled: { label: "Rescheduled", icon: RotateCcw,    color: "text-purple-500 dark:text-purple-400", bg: "bg-purple-50 dark:bg-purple-950/60",  border: "border-purple-200 dark:border-purple-800" },
+  scheduled: { label: "Scheduled", icon: Clock, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-50 dark:bg-blue-950/60", border: "border-blue-200 dark:border-blue-800" },
+  completed: { label: "Completed", icon: CheckCircle2, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-50 dark:bg-emerald-950/60", border: "border-emerald-200 dark:border-emerald-800" },
+  cancelled: { label: "Cancelled", icon: XCircle, color: "text-slate-500 dark:text-slate-400", bg: "bg-slate-50 dark:bg-slate-800", border: "border-slate-200 dark:border-slate-700" },
+  missed: { label: "Missed", icon: AlertCircle, color: "text-orange-500 dark:text-orange-400", bg: "bg-orange-50 dark:bg-orange-950/60", border: "border-orange-200 dark:border-orange-800" },
+  rescheduled: { label: "Rescheduled", icon: RotateCcw, color: "text-purple-500 dark:text-purple-400", bg: "bg-purple-50 dark:bg-purple-950/60", border: "border-purple-200 dark:border-purple-800" },
 };
 
 const PRIORITY_META = {
-  low:    { label: "Low",    color: "text-blue-500",   dot: "bg-blue-400"   },
-  medium: { label: "Medium", color: "text-amber-500",  dot: "bg-amber-400"  },
-  high:   { label: "High",   color: "text-orange-500", dot: "bg-orange-500" },
-  urgent: { label: "Urgent", color: "text-red-600",    dot: "bg-red-500"    },
+  low: { label: "Low", color: "text-blue-500", dot: "bg-blue-400" },
+  medium: { label: "Medium", color: "text-amber-500", dot: "bg-amber-400" },
+  high: { label: "High", color: "text-orange-500", dot: "bg-orange-500" },
+  urgent: { label: "Urgent", color: "text-red-600", dot: "bg-red-500" },
 };
 
 const RECURRENCE_OPTIONS = [
-  { value: "none",         label: "No repeat"              },
-  { value: "weekly",       label: "Every week (same day)"  },
-  { value: "biweekly",     label: "Every 2 weeks"          },
-  { value: "monthly",      label: "Same date each month"   },
-  { value: "nth_weekday",  label: "Nth weekday of month…"  },
+  { value: "none", label: "No repeat" },
+  { value: "weekly", label: "Every week (same day)" },
+  { value: "biweekly", label: "Every 2 weeks" },
+  { value: "monthly", label: "Same date each month" },
+  { value: "nth_weekday", label: "Nth weekday of month…" },
   { value: "last_weekday", label: "Last weekday of month…" },
 ];
 
-const WEEKDAYS     = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+const WEEKDAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 const WEEK_NUMBERS = [
   { value: 1, label: "1st" },
   { value: 2, label: "2nd" },
@@ -121,9 +108,9 @@ const WEEK_NUMBERS = [
 ];
 
 // ─── API helpers ────────────────────────────────────────────────────────────
-const fetchVisits  = (p)          => api.get("/visits", { params: p }).then(r => r.data);
-const fetchClients = ()           => api.get("/clients").then(r => r.data);
-const fetchUsers   = ()           => api.get("/users").then(r => r.data);
+const fetchVisits = (p) => api.get("/visits", { params: p }).then(r => r.data);
+const fetchClients = () => api.get("/clients").then(r => r.data);
+const fetchUsers = () => api.get("/users").then(r => r.data);
 const fetchSummary = (uid, month) => api.get("/visits/summary", { params: { user_id: uid, month } }).then(r => r.data);
 
 // ─── Permission helpers ─────────────────────────────────────────────────────
@@ -348,11 +335,11 @@ function VisitCard({ v, onClick, onEdit, currentUser, selected, onSelectToggle, 
   const menuRef = useRef(null);
 
   const parsedDate = safeParseISO(v.visit_date);
-  const isOver     = parsedDate ? isBefore(parsedDate, new Date()) && v.status === "scheduled" : false;
+  const isOver = parsedDate ? isBefore(parsedDate, new Date()) && v.status === "scheduled" : false;
   const isCreatedByMe = currentUser && v.created_by && String(v.created_by) === String(currentUser.id)
     && v.assigned_to && String(v.assigned_to) !== String(currentUser.id);
   const showQuick = (v.status === "scheduled" || v.status === "rescheduled") && !selectionMode;
-  const canWrite  = canUserWriteVisit(currentUser, v);
+  const canWrite = canUserWriteVisit(currentUser, v);
   const canDelete = canUserDeleteVisit(currentUser, v);
 
   useEffect(() => {
@@ -380,9 +367,9 @@ function VisitCard({ v, onClick, onEdit, currentUser, selected, onSelectToggle, 
     },
     onError: (err) => {
       qc.invalidateQueries({ queryKey: ["visits"] });
-      if (err.response?.status === 404)       toast.info("Visit was already removed — refreshing list.");
-      else if (err.response?.status === 403)  toast.error("You don't have permission to delete this visit.");
-      else                                     toast.error(err.response?.data?.detail || "Delete failed");
+      if (err.response?.status === 404) toast.info("Visit was already removed — refreshing list.");
+      else if (err.response?.status === 403) toast.error("You don't have permission to delete this visit.");
+      else toast.error(err.response?.data?.detail || "Delete failed");
     },
   });
 
@@ -409,12 +396,12 @@ function VisitCard({ v, onClick, onEdit, currentUser, selected, onSelectToggle, 
         {/* Left accent bar matching Dashboard priority stripe */}
         <div className={cn(
           "w-0.5 rounded-l-xl flex-shrink-0",
-          selected                   ? "bg-blue-400"    :
-          v.status === "completed"   ? "bg-emerald-400" :
-          v.status === "missed"      ? "bg-orange-400"  :
-          v.status === "cancelled"   ? "bg-slate-300"   :
-          v.status === "rescheduled" ? "bg-purple-400"  :
-          isOver                     ? "bg-orange-400"  : "bg-blue-400"
+          selected ? "bg-blue-400" :
+          v.status === "completed" ? "bg-emerald-400" :
+          v.status === "missed" ? "bg-orange-400" :
+          v.status === "cancelled" ? "bg-slate-300" :
+          v.status === "rescheduled" ? "bg-purple-400" :
+          isOver ? "bg-orange-400" : "bg-blue-400"
         )} />
 
         <div className="flex items-center gap-3 px-3 py-2.5 flex-1 min-w-0">
@@ -601,10 +588,10 @@ function RecurrenceSection({ form, set }) {
     const wd = WEEKDAYS[form.recurrence_weekday ?? inferredWeekday] || "";
     const wn = WEEK_NUMBERS.find(w => w.value === (form.recurrence_week_number ?? 1))?.label || "1st";
     switch (form.recurrence) {
-      case "weekly":       return `Repeats every week on ${wd}`;
-      case "biweekly":     return `Repeats every 2 weeks on ${wd}`;
-      case "monthly":      return `Repeats on the same date each month`;
-      case "nth_weekday":  return `Repeats on the ${wn} ${wd} of each month`;
+      case "weekly": return `Repeats every week on ${wd}`;
+      case "biweekly": return `Repeats every 2 weeks on ${wd}`;
+      case "monthly": return `Repeats on the same date each month`;
+      case "nth_weekday": return `Repeats on the ${wn} ${wd} of each month`;
       case "last_weekday": return `Repeats on the last ${wd} of each month`;
       default: return null;
     }
@@ -660,34 +647,34 @@ function RecurrenceSection({ form, set }) {
 // ─── Visit Form Modal ─────────────────────────────────────────────────────────
 function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
   const isEdit = !!visit?.id;
-  const qc     = useQueryClient();
+  const qc = useQueryClient();
 
   const [form, setForm] = useState({
-    client_id:              visit?.client_id              || "",
-    assigned_to:            visit?.assigned_to            || currentUser.id,
-    visit_date:             visit?.visit_date             || format(new Date(), "yyyy-MM-dd"),
-    visit_time:             visit?.visit_time             || "",
-    purpose:                visit?.purpose                || "",
-    services:               (visit?.services || []).join(", "),
-    priority:               visit?.priority               || "medium",
-    notes:                  visit?.notes                  || "",
-    location:               visit?.location               || "",
-    recurrence:             visit?.recurrence             || "none",
-    recurrence_end_date:    visit?.recurrence_end_date    || "",
-    recurrence_weekday:     visit?.recurrence_weekday     ?? undefined,
+    client_id: visit?.client_id || "",
+    assigned_to: visit?.assigned_to || currentUser.id,
+    visit_date: visit?.visit_date || format(new Date(), "yyyy-MM-dd"),
+    visit_time: visit?.visit_time || "",
+    purpose: visit?.purpose || "",
+    services: (visit?.services || []).join(", "),
+    priority: visit?.priority || "medium",
+    notes: visit?.notes || "",
+    location: visit?.location || "",
+    recurrence: visit?.recurrence || "none",
+    recurrence_end_date: visit?.recurrence_end_date || "",
+    recurrence_weekday: visit?.recurrence_weekday ?? undefined,
     recurrence_week_number: visit?.recurrence_week_number ?? 1,
   });
 
-  const [bulkMode,      setBulkMode]      = useState(false);
-  const [bulkDates,     setBulkDates]     = useState([]);
-  const [bulkCalMonth,  setBulkCalMonth]  = useState(new Date());
-  const [showRecur,     setShowRecur]     = useState(form.recurrence !== "none");
-  const [dupWarning,    setDupWarning]    = useState(null);
-  const [checkingDup,   setCheckingDup]   = useState(false);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkDates, setBulkDates] = useState([]);
+  const [bulkCalMonth, setBulkCalMonth] = useState(new Date());
+  const [showRecur, setShowRecur] = useState(form.recurrence !== "none");
+  const [dupWarning, setDupWarning] = useState(null);
+  const [checkingDup, setCheckingDup] = useState(false);
   const dupDebounceRef = useRef(null);
 
   const calDays = eachDayOfInterval({ start: startOfMonth(bulkCalMonth), end: endOfMonth(bulkCalMonth) });
-  const set     = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   useEffect(() => {
     if (!form.client_id || !form.visit_date || !form.assigned_to || bulkMode) return;
@@ -699,7 +686,7 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
         const res = await api.post("/visits/check-duplicate", { client_id: form.client_id, assigned_to: form.assigned_to, visit_date: form.visit_date });
         if (res.data.is_duplicate && res.data.existing?.id !== visit?.id) setDupWarning(res.data.existing);
         else setDupWarning(null);
-      } catch {}
+      } catch {} 
       finally { setCheckingDup(false); }
     }, 500);
     return () => clearTimeout(dupDebounceRef.current);
@@ -736,7 +723,7 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
   });
 
   const canAssign = currentUser.role === "admin" || currentUser.role === "manager";
-  const canSave   = !dupWarning && form.client_id && form.purpose && (bulkMode ? bulkDates.length > 0 : true);
+  const canSave = !dupWarning && form.client_id && form.purpose && (bulkMode ? bulkDates.length > 0 : true);
 
   const inputCls = "w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800/80 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400 transition-shadow";
   const labelCls = "block text-[10px] font-bold text-slate-400 dark:text-slate-500 mb-1 uppercase tracking-wider";
@@ -953,12 +940,12 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
 // ─── Visit Detail Panel ───────────────────────────────────────────────────────
 function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
   const qc = useQueryClient();
-  const [comment,        setComment]        = useState("");
-  const [outcome,        setOutcome]        = useState(visit?.outcome || "");
+  const [comment, setComment] = useState("");
+  const [outcome, setOutcome] = useState(visit?.outcome || "");
   const [showStatusMenu, setShowStatusMenu] = useState(false);
 
-  const isAdmin   = currentUser.role === "admin";
-  const canWrite  = canUserWriteVisit(currentUser, visit);
+  const isAdmin = currentUser.role === "admin";
+  const canWrite = canUserWriteVisit(currentUser, visit);
   const canDelete = canUserDeleteVisit(currentUser, visit);
 
   const statusMut = useMutation({
@@ -990,9 +977,9 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
     onSuccess: () => { toast.success("Visit deleted"); qc.invalidateQueries({ queryKey: ["visits"] }); onDeleted?.(); onClose(); },
     onError: (err) => {
       qc.invalidateQueries({ queryKey: ["visits"] });
-      if (err.response?.status === 404)      { toast.info("Visit was already removed."); onClose(); }
-      else if (err.response?.status === 403)  toast.error("You don't have permission to delete this visit.");
-      else                                     toast.error(err.response?.data?.detail || "Delete failed");
+      if (err.response?.status === 404) { toast.info("Visit was already removed."); onClose(); }
+      else if (err.response?.status === 403) toast.error("You don't have permission to delete this visit.");
+      else toast.error(err.response?.data?.detail || "Delete failed");
     },
   });
 
@@ -1079,10 +1066,10 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
 
           <div className="grid grid-cols-2 gap-2">
             {[
-              { icon: Calendar, label: "Date",        value: safeFormat(visit.visit_date, "MMM d, yyyy") },
-              { icon: Clock,    label: "Time",        value: visit.visit_time || "—" },
-              { icon: User,     label: "Assigned To", value: visit.assigned_to_name || "—" },
-              { icon: MapPin,   label: "Location",    value: visit.location || "—" },
+              { icon: Calendar, label: "Date", value: safeFormat(visit.visit_date, "MMM d, yyyy") },
+              { icon: Clock, label: "Time", value: visit.visit_time || "—" },
+              { icon: User, label: "Assigned To", value: visit.assigned_to_name || "—" },
+              { icon: MapPin, label: "Location", value: visit.location || "—" },
             ].map(({ icon: Icon, label, value }) => (
               <div key={label} className="flex items-start gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700">
                 <Icon className="h-3.5 w-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
@@ -1194,7 +1181,7 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
 
 // ─── Month Calendar ───────────────────────────────────────────────────────────
 function MonthCalendar({ visits, currentMonth, onDayClick }) {
-  const days     = eachDayOfInterval({ start: startOfMonth(currentMonth), end: endOfMonth(currentMonth) });
+  const days = eachDayOfInterval({ start: startOfMonth(currentMonth), end: endOfMonth(currentMonth) });
   const startDay = startOfMonth(currentMonth).getDay();
 
   const visitsByDate = useMemo(() => {
@@ -1214,9 +1201,9 @@ function MonthCalendar({ visits, currentMonth, onDayClick }) {
       ))}
       {Array(startDay).fill(null).map((_, i) => <div key={`e${i}`} />)}
       {days.map(d => {
-        const key    = format(d, "yyyy-MM-dd");
+        const key = format(d, "yyyy-MM-dd");
         const dayVis = visitsByDate[key] || [];
-        const today  = isToday(d);
+        const today = isToday(d);
         return (
           <motion.button key={key} whileHover={{ scale: 1.02, transition: springPhysics.lift }} whileTap={{ scale: 0.97, transition: springPhysics.tap }}
             onClick={() => onDayClick(d, dayVis)}
@@ -1243,31 +1230,63 @@ function MonthCalendar({ visits, currentMonth, onDayClick }) {
   );
 }
 
+// ─── Virtualized Row Renderer ────────────────────────────────────────────────
+const Row = ({ index, style, data }) => {
+  const {
+    visits,
+    currentUser,
+    onClick,
+    onEdit,
+    selectedIds,
+    toggleSelect,
+    selectionMode,
+  } = data;
+
+  const v = visits[index];
+
+  // skip invalid (already handled but extra safe)
+  if (!v || !v.id) return null;
+
+  return (
+    <div style={{ ...style, padding: "6px 8px" }}>
+      <VisitCard
+        v={v}
+        currentUser={currentUser}
+        onClick={() => onClick(v)}
+        onEdit={onEdit}
+        selected={selectedIds?.includes(v.id)}
+        onSelectToggle={toggleSelect}
+        selectionMode={selectionMode}
+      />
+    </div>
+  );
+};
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function VisitsPage() {
   const { user } = useAuth();
-  const qc       = useQueryClient();
+  const qc = useQueryClient();
 
-  const [viewMode,        setViewMode]        = useState("list");
-  const [currentMonth,    setCurrentMonth]    = useState(new Date());
-  const [filterStatus,    setFilterStatus]    = useState("all");
-  const [filterUser,      setFilterUser]      = useState("all");
-  const [showForm,        setShowForm]        = useState(false);
-  const [editingVisit,    setEditingVisit]    = useState(null);
-  const [selectedVisit,   setSelectedVisit]   = useState(null);
-  const [selectedDayVis,  setSelectedDayVis]  = useState(null);
+  const [viewMode, setViewMode] = useState("list");
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterUser, setFilterUser] = useState("all");
+  const [showForm, setShowForm] = useState(false);
+  const [editingVisit, setEditingVisit] = useState(null);
+  const [selectedVisit, setSelectedVisit] = useState(null);
+  const [selectedDayVis, setSelectedDayVis] = useState(null);
   const [showEmailImport, setShowEmailImport] = useState(false);
-  const [selectionMode,   setSelectionMode]   = useState(false);
-  const [selectedIds,     setSelectedIds]     = useState(new Set());
-  const [showBulkDialog,  setShowBulkDialog]  = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [showBulkDialog, setShowBulkDialog] = useState(false);
 
   const monthStr = format(currentMonth, "yyyy-MM");
-  const isAdmin  = user?.role === "admin";
-  const isMgr    = user?.role === "manager";
+  const isAdmin = user?.role === "admin";
+  const isMgr = user?.role === "manager";
 
   const { data: visits = [], isLoading } = useQuery({
     queryKey: ["visits", monthStr, filterStatus, filterUser],
-    queryFn:  () => fetchVisits({ month: monthStr, status: filterStatus !== "all" ? filterStatus : undefined, user_id: filterUser !== "all" ? filterUser : undefined }),
+    queryFn: () => fetchVisits({ month: monthStr, status: filterStatus !== "all" ? filterStatus : undefined, user_id: filterUser !== "all" ? filterUser : undefined }),
     staleTime: 0,
   });
 
@@ -1276,7 +1295,7 @@ export default function VisitsPage() {
   const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: fetchUsers, enabled: isAdmin || isMgr || hasCrossVisibility });
   const { data: summary } = useQuery({
     queryKey: ["visits-summary", filterUser !== "all" ? filterUser : user?.id, monthStr],
-    queryFn:  () => fetchSummary(filterUser !== "all" ? filterUser : user?.id, monthStr),
+    queryFn: () => fetchSummary(filterUser !== "all" ? filterUser : user?.id, monthStr),
   });
 
   useEffect(() => {
@@ -1289,39 +1308,39 @@ export default function VisitsPage() {
   useEffect(() => {
     if (selectionMode) {
       setSelectedIds(prev => {
-        const validIds = new Set(visits.map(v => v.id));
-        return new Set([...prev].filter(id => validIds.has(id)));
+        const validIds = visits.map(v => v.id);
+        return prev.filter(id => validIds.includes(id));
       });
     }
   }, [visits]);
 
   const toggleSelect = useCallback((id) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
+    setSelectedIds(prev =>
+      prev.includes(id)
+        ? prev.filter((x) => x !== id)
+        : [...prev, id]
+    );
   }, []);
 
   const deletableVisits = useMemo(() => visits.filter(v => canUserDeleteVisit(user, v)), [visits, user]);
-  const allDeletableSelected  = deletableVisits.length > 0 && deletableVisits.every(v => selectedIds.has(v.id));
-  const someDeletableSelected = deletableVisits.some(v => selectedIds.has(v.id));
+  const allDeletableSelected = deletableVisits.length > 0 && deletableVisits.every(v => selectedIds.includes(v.id));
+  const someDeletableSelected = deletableVisits.some(v => selectedIds.includes(v.id));
 
   const toggleSelectAll = () => {
-    if (allDeletableSelected) setSelectedIds(new Set());
-    else setSelectedIds(new Set(deletableVisits.map(v => v.id)));
+    if (allDeletableSelected) setSelectedIds([]);
+    else setSelectedIds(deletableVisits.map(v => v.id));
   };
 
-  const exitSelectionMode = () => { setSelectionMode(false); setSelectedIds(new Set()); };
+  const exitSelectionMode = () => { setSelectionMode(false); setSelectedIds([]); };
 
   const bulkDeleteMut = useMutation({
     mutationFn: ({ ids, deleteRecurrences }) =>
       api.post("/visits/bulk-delete", { visit_ids: ids, delete_recurrences: deleteRecurrences }),
     onSuccess: (res) => {
       const { deleted = [], forbidden = [], not_found = [] } = res.data || {};
-      if (deleted.length > 0)    toast.success(`Deleted ${deleted.length} visit${deleted.length !== 1 ? "s" : ""} successfully.`);
-      if (forbidden.length > 0)  toast.warning(`${forbidden.length} visit${forbidden.length !== 1 ? "s" : ""} could not be deleted (no permission).`);
-      if (not_found.length > 0)  toast.info(`${not_found.length} visit${not_found.length !== 1 ? "s were" : " was"} already removed.`);
+      if (deleted.length > 0) toast.success(`Deleted ${deleted.length} visit${deleted.length !== 1 ? "s" : ""} successfully.`);
+      if (forbidden.length > 0) toast.warning(`${forbidden.length} visit${forbidden.length !== 1 ? "s" : ""} could not be deleted (no permission).`);
+      if (not_found.length > 0) toast.info(`${not_found.length} visit${not_found.length !== 1 ? "s were" : " was"} already removed.`);
       qc.invalidateQueries({ queryKey: ["visits"] });
       qc.invalidateQueries({ queryKey: ["visits-upcoming-dashboard"] });
       setShowBulkDialog(false);
@@ -1331,31 +1350,31 @@ export default function VisitsPage() {
   });
 
   // ── Metric data (matching Dashboard metric card pattern) ──────────────────
-  const metricCardCls     = "rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-default group border";
+  const metricCardCls = "rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-default group border";
   const metricCardDefault = "bg-white dark:bg-slate-800 border-slate-200/80 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600";
 
   const statCards = [
-    { label: "Total",     value: summary?.total || 0,                                                             color: COLORS.deepBlue,    iconBg: `${COLORS.deepBlue}12`,    icon: Target      },
-    { label: "Completed", value: summary?.by_status?.completed || 0,                                             color: COLORS.emeraldGreen, iconBg: `${COLORS.emeraldGreen}12`, icon: CheckCircle2, rate: summary?.completion_rate },
-    { label: "Upcoming",  value: (summary?.by_status?.scheduled || 0) + (summary?.by_status?.rescheduled || 0),  color: COLORS.mediumBlue,   iconBg: `${COLORS.mediumBlue}12`,   icon: Clock       },
-    { label: "Missed",    value: (summary?.by_status?.missed || 0) + (summary?.by_status?.cancelled || 0),       color: COLORS.coral,        iconBg: `${COLORS.coral}15`,        icon: AlertCircle },
+    { label: "Total", value: summary?.total || 0, color: COLORS.deepBlue, iconBg: `${COLORS.deepBlue}12`, icon: Target },
+    { label: "Completed", value: summary?.by_status?.completed || 0, color: COLORS.emeraldGreen, iconBg: `${COLORS.emeraldGreen}12`, icon: CheckCircle2, rate: summary?.completion_rate },
+    { label: "Upcoming", value: (summary?.by_status?.scheduled || 0) + (summary?.by_status?.rescheduled || 0), color: COLORS.mediumBlue, iconBg: `${COLORS.mediumBlue}12`, icon: Clock },
+    { label: "Missed", value: (summary?.by_status?.missed || 0) + (summary?.by_status?.cancelled || 0), color: COLORS.coral, iconBg: `${COLORS.coral}15`, icon: AlertCircle },
   ];
 
   const handleEmailEvent = useCallback((event) => {
     setEditingVisit({
-      purpose:    event.title    || "",
-      visit_date: event.date     || format(new Date(), "yyyy-MM-dd"),
-      visit_time: event.time     || "",
-      location:   event.location || "",
+      purpose: event.title || "",
+      visit_date: event.date || format(new Date(), "yyyy-MM-dd"),
+      visit_time: event.time || "",
+      location: event.location || "",
       notes: [
         event.description ? `Notes: ${event.description.slice(0, 300)}` : "",
-        event.organizer   ? `Organiser: ${event.organizer}`             : "",
-        event.source_from ? `From email: ${event.source_from}`          : "",
+        event.organizer ? `Organiser: ${event.organizer}` : "",
+        event.source_from ? `From email: ${event.source_from}` : "",
       ].filter(Boolean).join("\n"),
-      priority:    event.urgency === "urgent" ? "urgent" : event.urgency === "high" ? "high" : "medium",
-      client_id:   "",
+      priority: event.urgency === "urgent" ? "urgent" : event.urgency === "high" ? "high" : "medium",
+      client_id: "",
       assigned_to: user?.id || "",
-      services:    event.event_type === "hearing" ? "Trademark, Legal" : "",
+      services: event.event_type === "hearing" ? "Trademark, Legal" : "",
     });
     setShowForm(true);
   }, [user]);
@@ -1513,20 +1532,20 @@ export default function VisitsPage() {
               <div className={cn("h-5 w-5 rounded-md border-2 flex items-center justify-center transition-colors",
                 allDeletableSelected ? "bg-blue-500 border-blue-500" :
                 someDeletableSelected ? "bg-blue-100 border-blue-400" : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800")}>
-                {allDeletableSelected  ? <Check className="h-3 w-3 text-white" /> :
+                {allDeletableSelected ? <Check className="h-3 w-3 text-white" /> :
                  someDeletableSelected ? <Minus className="h-3 w-3 text-blue-500" /> : null}
               </div>
               {allDeletableSelected ? "Deselect all" : `Select all (${deletableVisits.length})`}
             </button>
             <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-1 flex-shrink-0" />
             <span className="text-sm text-slate-500 flex-1">
-              {selectedIds.size > 0 ? <><span className="font-bold text-blue-600">{selectedIds.size}</span> selected</> : "Tap visits to select"}
+              {selectedIds.length > 0 ? <><span className="font-bold text-blue-600">{selectedIds.length}</span> selected</> : "Tap visits to select"}
             </span>
-            {selectedIds.size > 0 && (
+            {selectedIds.length > 0 && (
               <button onClick={() => setShowBulkDialog(true)}
                 className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-white text-sm font-bold"
                 style={{ background: "linear-gradient(135deg, #DC2626, #B91C1C)" }}>
-                <Trash2 className="h-3.5 w-3.5 mr-1" />Delete {selectedIds.size}
+                <Trash2 className="h-3.5 w-3.5 mr-1" />Delete {selectedIds.length}
               </button>
             )}
             <button onClick={exitSelectionMode} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
@@ -1570,7 +1589,7 @@ export default function VisitsPage() {
             <div className="p-4">
               <MonthCalendar visits={visits} currentMonth={currentMonth}
                 onDayClick={(d, dayVis) => {
-                  if (dayVis.length === 1)    setSelectedVisit(dayVis[0]);
+                  if (dayVis.length === 1) setSelectedVisit(dayVis[0]);
                   else if (dayVis.length > 1) setSelectedDayVis({ date: d, visits: dayVis });
                   else { setEditingVisit({ visit_date: format(d, "yyyy-MM-dd") }); setShowForm(true); }
                 }} />
@@ -1586,23 +1605,38 @@ export default function VisitsPage() {
               badge={visits.filter(v => { const p = safeParseISO(v.visit_date); return p && isToday(p) && v.status === "scheduled"; }).length || undefined}
             />
             <div className="p-3">
-              <motion.div className="space-y-1.5" variants={containerVariants} initial="hidden" animate="visible">
-                <AnimatePresence>
-                  {visits.map(v => (
-                    <VisitCard key={v.id} v={v} currentUser={user}
-                      selected={selectedIds.has(v.id)} selectionMode={selectionMode} onSelectToggle={toggleSelect}
-                      onClick={() => !selectionMode && setSelectedVisit(v)}
-                      onEdit={(visit) => { setEditingVisit(visit); setShowForm(true); }} />
-                  ))}
-                </AnimatePresence>
-              </motion.div>
+              {/* VIRTUALIZED LIST - REPLACED THE OLD visits.map() */}
+              <div style={{ height: "calc(100vh - 220px)" }}>
+                <List
+                  height={window.innerHeight - 220}
+                  itemCount={visits.length}
+                  itemSize={88}
+                  width="100%"
+                  itemData={{
+                    visits,
+                    currentUser: user,
+                    onClick: (v) => {
+                      setSelectedVisit(v);
+                    },
+                    onEdit: (v) => {
+                      setEditingVisit(v);
+                      setShowForm(true);
+                    },
+                    selectedIds,
+                    toggleSelect,
+                    selectionMode,
+                  }}
+                >
+                  {Row}
+                </List>
+              </div>
             </div>
             {visits.length > 0 && (
               <div className={`px-4 py-2.5 border-t flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-700`}>
                 <div className="flex items-center gap-3">
                   {visits.filter(v => v.status === "completed").length > 0 && <span className="text-xs font-bold text-emerald-500">{visits.filter(v => v.status === "completed").length} Completed</span>}
                   {visits.filter(v => v.status === "scheduled").length > 0 && <span className="text-xs font-bold text-blue-500">{visits.filter(v => v.status === "scheduled").length} Scheduled</span>}
-                  {visits.filter(v => v.status === "missed").length > 0    && <span className="text-xs font-bold text-orange-500">{visits.filter(v => v.status === "missed").length} Missed</span>}
+                  {visits.filter(v => v.status === "missed").length > 0 && <span className="text-xs font-bold text-orange-500">{visits.filter(v => v.status === "missed").length} Missed</span>}
                 </div>
                 <p className="text-xs text-slate-400 dark:text-slate-500">
                   <span className="font-bold text-slate-700 dark:text-slate-300">{visits.length}</span> total
@@ -1694,9 +1728,9 @@ export default function VisitsPage() {
       {/* ── Bulk delete dialog ── */}
       <AnimatePresence>
         {showBulkDialog && (
-          <BulkDeleteDialog count={selectedIds.size} isPending={bulkDeleteMut.isPending}
+          <BulkDeleteDialog count={selectedIds.length} isPending={bulkDeleteMut.isPending}
             onCancel={() => setShowBulkDialog(false)}
-            onConfirm={(deleteRecurrences) => { bulkDeleteMut.mutate({ ids: [...selectedIds], deleteRecurrences }); }} />
+            onConfirm={(deleteRecurrences) => { bulkDeleteMut.mutate({ ids: selectedIds, deleteRecurrences }); }} />
         )}
       </AnimatePresence>
 
