@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { FixedSizeList as List } from 'react-window';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card } from '@/components/ui/card';
@@ -28,59 +29,59 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 // ── Brand Colors ──────────────────────────────────────────────────────────────
 const COLORS = {
-  deepBlue:     '#0D3B66',
-  mediumBlue:   '#1F6FB2',
+  deepBlue: '#0D3B66',
+  mediumBlue: '#1F6FB2',
   emeraldGreen: '#1FAF5A',
-  lightGreen:   '#5CCB5F',
-  coral:        '#FF6B6B',
-  amber:        '#F59E0B',
-  indigo:       '#4F46E5',
-  violet:       '#7C3AED',
-  teal:         '#0F766E',
-  slate:        '#475569',
+  lightGreen: '#5CCB5F',
+  coral: '#FF6B6B',
+  amber: '#F59E0B',
+  indigo: '#4F46E5',
+  violet: '#7C3AED',
+  teal: '#0F766E',
+  slate: '#475569',
 };
 
 // ── Spring Physics ────────────────────────────────────────────────────────────
 const springPhysics = {
-  card:   { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
-  lift:   { type: 'spring', stiffness: 320, damping: 24, mass: 0.9  },
+  card: { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
+  lift: { type: 'spring', stiffness: 320, damping: 24, mass: 0.9 },
   button: { type: 'spring', stiffness: 400, damping: 28 },
-  tap:    { type: 'spring', stiffness: 500, damping: 30 },
+  tap: { type: 'spring', stiffness: 500, damping: 30 },
 };
 
 // ── Animation Variants ────────────────────────────────────────────────────────
 const containerVariants = {
-  hidden:  { opacity: 0 },
+  hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
 };
 const itemVariants = {
-  hidden:  { opacity: 0, y: 24, scale: 0.97 },
+  hidden: { opacity: 0, y: 24, scale: 0.97 },
   visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] } },
 };
 const slideIn = {
-  hidden:  { opacity: 0, x: -16 },
+  hidden: { opacity: 0, x: -16 },
   visible: { opacity: 1, x: 0, transition: { duration: 0.3 } },
 };
 
 // ── Department Configuration ──────────────────────────────────────────────────
 const DEPARTMENTS = [
-  { value: 'GST',   label: 'GST',   color: '#1E3A8A', bg: '#EFF6FF' },
-  { value: 'IT',    label: 'IT',    color: '#374151', bg: '#F9FAFB' },
-  { value: 'ACC',   label: 'ACC',   color: '#065F46', bg: '#ECFDF5' },
-  { value: 'TDS',   label: 'TDS',   color: '#1F2937', bg: '#F9FAFB' },
-  { value: 'ROC',   label: 'ROC',   color: '#7C2D12', bg: '#FFF7ED' },
-  { value: 'TM',    label: 'TM',    color: '#0F766E', bg: '#F0FDFA' },
-  { value: 'MSME',  label: 'MSME',  color: '#92400E', bg: '#FFFBEB' },
-  { value: 'FEMA',  label: 'FEMA',  color: '#334155', bg: '#F8FAFC' },
-  { value: 'DSC',   label: 'DSC',   color: '#3F3F46', bg: '#FAFAFA' },
+  { value: 'GST', label: 'GST', color: '#1E3A8A', bg: '#EFF6FF' },
+  { value: 'IT', label: 'IT', color: '#374151', bg: '#F9FAFB' },
+  { value: 'ACC', label: 'ACC', color: '#065F46', bg: '#ECFDF5' },
+  { value: 'TDS', label: 'TDS', color: '#1F2937', bg: '#F9FAFB' },
+  { value: 'ROC', label: 'ROC', color: '#7C2D12', bg: '#FFF7ED' },
+  { value: 'TM', label: 'TM', color: '#0F766E', bg: '#F0FDFA' },
+  { value: 'MSME', label: 'MSME', color: '#92400E', bg: '#FFFBEB' },
+  { value: 'FEMA', label: 'FEMA', color: '#334155', bg: '#F8FAFC' },
+  { value: 'DSC', label: 'DSC', color: '#3F3F46', bg: '#FAFAFA' },
   { value: 'OTHER', label: 'OTHER', color: '#475569', bg: '#F8FAFC' },
 ];
 
 // ── Role Configuration ────────────────────────────────────────────────────────
 const ROLE_CONFIG = {
-  admin:   { gradient: `linear-gradient(135deg, ${COLORS.violet}, ${COLORS.indigo})`,       icon: Crown,     label: 'Admin'   },
-  manager: { gradient: `linear-gradient(135deg, ${COLORS.mediumBlue}, #0ea5e9)`,            icon: Briefcase, label: 'Manager' },
-  staff:   { gradient: `linear-gradient(135deg, ${COLORS.slate}, #64748b)`,                 icon: UserIcon,  label: 'Staff'   },
+  admin: { gradient: `linear-gradient(135deg, ${COLORS.violet}, ${COLORS.indigo})`, icon: Crown, label: 'Admin' },
+  manager: { gradient: `linear-gradient(135deg, ${COLORS.mediumBlue}, #0ea5e9)`, icon: Briefcase, label: 'Manager' },
+  staff: { gradient: `linear-gradient(135deg, ${COLORS.slate}, #64748b)`, icon: UserIcon, label: 'Staff' },
 };
 
 // ── Default Permissions ───────────────────────────────────────────────────────
@@ -137,7 +138,6 @@ const DEFAULT_ROLE_PERMISSIONS = {
     view_other_reports: [], view_other_todos: [], view_other_activity: [],
   },
 };
-
 const EMPTY_PERMISSIONS = {
   can_view_all_tasks: false, can_view_all_clients: false, can_view_all_dsc: false,
   can_view_documents: false, can_view_all_duedates: false, can_view_reports: false,
@@ -158,48 +158,46 @@ const EMPTY_PERMISSIONS = {
 
 // ── Permission Definitions ────────────────────────────────────────────────────
 const GLOBAL_PERMS = [
-  { key: 'can_view_all_tasks',              label: 'Universal Task Access',        desc: 'See tasks assigned to any user or department',        icon: Layers      },
-  { key: 'can_view_all_clients',            label: 'Master Client List',           desc: 'View all company legal entities',                     icon: Briefcase   },
-  { key: 'can_view_all_dsc',               label: 'DSC Vault Access',             desc: 'View all Digital Signature Certificates',             icon: Fingerprint },
-  { key: 'can_view_documents',             label: 'Document Library',             desc: 'Access physical document register',                   icon: FileText    },
-  { key: 'can_view_all_duedates',          label: 'Compliance Roadmap',           desc: 'View all upcoming statutory due dates',               icon: Calendar    },
-  { key: 'can_view_reports',               label: 'Analytics Dashboard',          desc: 'View performance and system-wide reports',            icon: BarChart2   },
-  { key: 'can_view_todo_dashboard',        label: 'Todo Dashboard',               desc: 'Access global team todo overview',                    icon: CheckCircle },
-  { key: 'can_view_audit_logs',            label: 'System Audit Trail',           desc: 'View activity logs and record histories',             icon: Activity    },
-  { key: 'can_view_all_leads',             label: 'Leads Pipeline',               desc: 'View the global leads dashboard',                     icon: Target      },
-  { key: 'can_view_user_page',             label: 'User Directory',               desc: 'View team members directory',                         icon: UsersIcon   },
-  { key: 'can_view_selected_users_reports',label: 'Team Reports Access',          desc: 'View reports for selected users',                     icon: Eye         },
-  { key: 'can_view_staff_rankings',        label: 'Staff Rankings',               desc: 'View performance leaderboard',                        icon: Star        },
-  { key: 'can_view_own_data',              label: 'View Own Data',                desc: 'Access own attendance, tasks and reports',            icon: UserIcon    },
-  { key: 'can_create_quotations',          label: 'Quotations Module',            desc: 'Create, edit, export and share quotations',           icon: Receipt     },
+  { key: 'can_view_all_tasks', label: 'Universal Task Access', desc: 'See tasks assigned to any user or department', icon: Layers },
+  { key: 'can_view_all_clients', label: 'Master Client List', desc: 'View all company legal entities', icon: Briefcase },
+  { key: 'can_view_all_dsc', label: 'DSC Vault Access', desc: 'View all Digital Signature Certificates', icon: Fingerprint },
+  { key: 'can_view_documents', label: 'Document Library', desc: 'Access physical document register', icon: FileText },
+  { key: 'can_view_all_duedates', label: 'Compliance Roadmap', desc: 'View all upcoming statutory due dates', icon: Calendar },
+  { key: 'can_view_reports', label: 'Analytics Dashboard', desc: 'View performance and system-wide reports', icon: BarChart2 },
+  { key: 'can_view_todo_dashboard', label: 'Todo Dashboard', desc: 'Access global team todo overview', icon: CheckCircle },
+  { key: 'can_view_audit_logs', label: 'System Audit Trail', desc: 'View activity logs and record histories', icon: Activity },
+  { key: 'can_view_all_leads', label: 'Leads Pipeline', desc: 'View the global leads dashboard', icon: Target },
+  { key: 'can_view_user_page', label: 'User Directory', desc: 'View team members directory', icon: UsersIcon },
+  { key: 'can_view_selected_users_reports',label: 'Team Reports Access', desc: 'View reports for selected users', icon: Eye },
+  { key: 'can_view_staff_rankings', label: 'Staff Rankings', desc: 'View performance leaderboard', icon: Star },
+  { key: 'can_view_own_data', label: 'View Own Data', desc: 'Access own attendance, tasks and reports', icon: UserIcon },
+  { key: 'can_create_quotations', label: 'Quotations Module', desc: 'Create, edit, export and share quotations', icon: Receipt },
 ];
-
 const OPS_PERMS = [
-  { key: 'can_assign_tasks',          label: 'Task Delegation',         desc: 'Assign tasks to other staff members',            icon: ArrowUpRight },
-  { key: 'can_assign_clients',        label: 'Client Assignment',       desc: 'Assign and reassign staff to clients',           icon: Briefcase    },
-  { key: 'can_manage_users',          label: 'User Governance',         desc: 'Manage team members and roles',                  icon: UsersIcon    },
-  { key: 'can_view_attendance',       label: 'Attendance Management',   desc: 'Review punch timings and late reports',          icon: Clock        },
-  { key: 'can_view_staff_activity',   label: 'Staff Monitoring',        desc: 'View app usage and screen activity',             icon: Activity     },
-  { key: 'can_send_reminders',        label: 'Automated Reminders',     desc: 'Trigger email/notification reminders',           icon: Bell         },
-  { key: 'can_download_reports',      label: 'Export Data',             desc: 'Download CSV/PDF versions of reports',           icon: Download     },
-  { key: 'can_manage_settings',       label: 'System Settings',         desc: 'Modify global system configuration',             icon: Settings     },
-  { key: 'can_delete_data',           label: 'Delete Records',          desc: 'Permanently delete data entries',                icon: Trash2       },
-  { key: 'can_delete_tasks',          label: 'Delete Tasks',            desc: 'Delete any task regardless of ownership',        icon: XCircle      },
-  { key: 'can_connect_email',         label: 'Connect Email Accounts',  desc: 'Link personal email via IMAP integration',       icon: Inbox        },
+  { key: 'can_assign_tasks', label: 'Task Delegation', desc: 'Assign tasks to other staff members', icon: ArrowUpRight },
+  { key: 'can_assign_clients', label: 'Client Assignment', desc: 'Assign and reassign staff to clients', icon: Briefcase },
+  { key: 'can_manage_users', label: 'User Governance', desc: 'Manage team members and roles', icon: UsersIcon },
+  { key: 'can_view_attendance', label: 'Attendance Management', desc: 'Review punch timings and late reports', icon: Clock },
+  { key: 'can_view_staff_activity', label: 'Staff Monitoring', desc: 'View app usage and screen activity', icon: Activity },
+  { key: 'can_send_reminders', label: 'Automated Reminders', desc: 'Trigger email/notification reminders', icon: Bell },
+  { key: 'can_download_reports', label: 'Export Data', desc: 'Download CSV/PDF versions of reports', icon: Download },
+  { key: 'can_manage_settings', label: 'System Settings', desc: 'Modify global system configuration', icon: Settings },
+  { key: 'can_delete_data', label: 'Delete Records', desc: 'Permanently delete data entries', icon: Trash2 },
+  { key: 'can_delete_tasks', label: 'Delete Tasks', desc: 'Delete any task regardless of ownership', icon: XCircle },
+  { key: 'can_connect_email', label: 'Connect Email Accounts', desc: 'Link personal email via IMAP integration', icon: Inbox },
 ];
-
 const EDIT_PERMS = [
-  { key: 'can_edit_tasks',      label: 'Modify Tasks',      desc: 'Update and delete task definitions',     icon: Pencil      },
-  { key: 'can_edit_clients',    label: 'Modify Clients',    desc: 'Update client master data records',      icon: Edit        },
-  { key: 'can_edit_dsc',        label: 'Modify DSC',        desc: 'Update certificate details and metadata',icon: Fingerprint },
-  { key: 'can_edit_documents',  label: 'Modify Documents',  desc: 'Change document records',                icon: FileText    },
-  { key: 'can_edit_due_dates',  label: 'Modify Due Dates',  desc: 'Edit statutory compliance timelines',    icon: Calendar    },
-  { key: 'can_edit_users',      label: 'Modify Users',      desc: 'Update user profiles and settings',      icon: UserIcon    },
+  { key: 'can_edit_tasks', label: 'Modify Tasks', desc: 'Update and delete task definitions', icon: Pencil },
+  { key: 'can_edit_clients', label: 'Modify Clients', desc: 'Update client master data records', icon: Edit },
+  { key: 'can_edit_dsc', label: 'Modify DSC', desc: 'Update certificate details and metadata',icon: Fingerprint },
+  { key: 'can_edit_documents', label: 'Modify Documents', desc: 'Change document records', icon: FileText },
+  { key: 'can_edit_due_dates', label: 'Modify Due Dates', desc: 'Edit statutory compliance timelines', icon: Calendar },
+  { key: 'can_edit_users', label: 'Modify Users', desc: 'Update user profiles and settings', icon: UserIcon },
 ];
 
 // ── Slim scrollbar ────────────────────────────────────────────────────────────
 const slimScroll = {
-  overflowY:      'auto',
+  overflowY: 'auto',
   scrollbarWidth: 'thin',
   scrollbarColor: '#cbd5e1 transparent',
 };
@@ -250,10 +248,10 @@ const DeptPill = ({ dept }) => {
 const StatusBadge = ({ status, isActive }) => {
   const resolved = status || (isActive !== false ? 'active' : 'inactive');
   const statusConfig = {
-    active:           { label: 'Active',   cls: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400', dot: 'bg-emerald-500' },
-    pending_approval: { label: 'Pending',  cls: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400',         dot: 'bg-amber-500 animate-pulse' },
-    rejected:         { label: 'Rejected', cls: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400',                 dot: 'bg-red-500'     },
-    inactive:         { label: 'Inactive', cls: 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300',            dot: 'bg-slate-400'   },
+    active: { label: 'Active', cls: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400', dot: 'bg-emerald-500' },
+    pending_approval: { label: 'Pending', cls: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400', dot: 'bg-amber-500 animate-pulse' },
+    rejected: { label: 'Rejected', cls: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400', dot: 'bg-red-500' },
+    inactive: { label: 'Inactive', cls: 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300', dot: 'bg-slate-400' },
   };
   const cfg = statusConfig[resolved] || statusConfig.inactive;
   return (
@@ -266,13 +264,13 @@ const StatusBadge = ({ status, isActive }) => {
 // ── Module Access Badges ──────────────────────────────────────────────────────
 const ModuleAccessBadges = ({ userData }) => {
   if (userData.role === 'admin') return null;
-  const hasLeads      = !!userData.permissions?.can_view_all_leads;
+  const hasLeads = !!userData.permissions?.can_view_all_leads;
   const hasQuotations = !!userData.permissions?.can_create_quotations;
-  const hasPasswords  = !!userData.permissions?.can_view_passwords;
-  const canEditPass   = !!userData.permissions?.can_edit_passwords;
+  const hasPasswords = !!userData.permissions?.can_view_passwords;
+  const canEditPass = !!userData.permissions?.can_edit_passwords;
   const badges = [
-    { label: 'Leads',  active: hasLeads,      color: COLORS.mediumBlue,   icon: Target   },
-    { label: 'Quotes', active: hasQuotations, color: COLORS.violet,       icon: Receipt  },
+    { label: 'Leads', active: hasLeads, color: COLORS.mediumBlue, icon: Target },
+    { label: 'Quotes', active: hasQuotations, color: COLORS.violet, icon: Receipt },
     { label: !hasPasswords ? 'Vault' : canEditPass ? 'Vault R/W' : 'Vault R',
       active: hasPasswords, color: canEditPass ? COLORS.amber : COLORS.teal, icon: KeyRound },
   ];
@@ -295,7 +293,7 @@ const ModuleAccessBadges = ({ userData }) => {
 
 // ── Pending User Card (Dashboard style) ──────────────────────────────────────
 const PendingUserCard = ({ userData, onApprove, onReject, approving }) => (
-  <motion.div variants={itemVariants} layout
+  <motion.div variants={itemVariants} layout={false}
     whileHover={{ y: -3, transition: springPhysics.lift }}
     className="group bg-white dark:bg-slate-800 rounded-2xl overflow-hidden border border-amber-200 dark:border-amber-800 shadow-sm hover:shadow-md transition-all">
     <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${COLORS.amber}, #f97316)` }} />
@@ -304,7 +302,7 @@ const PendingUserCard = ({ userData, onApprove, onReject, approving }) => (
         <div className="relative flex-shrink-0">
           <div className="w-12 h-12 rounded-xl overflow-hidden ring-1 ring-amber-200 dark:ring-amber-800">
             {userData.profile_picture
-              ? <img src={userData.profile_picture} alt={userData.full_name} className="w-full h-full object-cover" />
+              ? <img src={userData.profile_picture} alt={userData.full_name} className="w-full h-full object-cover" loading="lazy" />
               : <div className="w-full h-full flex items-center justify-center text-white text-lg font-black"
                   style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #f97316)` }}>
                   {userData.full_name?.charAt(0)?.toUpperCase()}
@@ -348,24 +346,22 @@ const PendingUserCard = ({ userData, onApprove, onReject, approving }) => (
 );
 
 // ── User Card (Dashboard style) ───────────────────────────────────────────────
-const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReject, currentUserId, isAdmin, canEditUsers, canManagePermissions, approving }) => {
+const UserCard = React.memo(({ userData, onEdit, onDelete, onPermissions, onApprove, onReject, currentUserId, isAdmin, canEditUsers, canManagePermissions, approving }) => {
   const [hovered, setHovered] = useState(false);
   const isPending = userData.status === 'pending_approval';
-  const roleCfg   = ROLE_CONFIG[userData.role?.toLowerCase()] || ROLE_CONFIG.staff;
-  const RoleIcon  = roleCfg.icon;
+  const roleCfg = ROLE_CONFIG[userData.role?.toLowerCase()] || ROLE_CONFIG.staff;
+  const RoleIcon = roleCfg.icon;
   const permCount = useMemo(() =>
     userData.permissions ? Object.entries(userData.permissions).filter(([k, v]) => k.startsWith('can_') && v === true).length : 0,
     [userData.permissions]);
-
   return (
-    <motion.div variants={itemVariants} layout
+    <motion.div variants={itemVariants} layout={false}
       onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
       whileHover={{ y: -3, transition: springPhysics.lift }}
       className={`group relative bg-white dark:bg-slate-800 rounded-2xl overflow-hidden border shadow-sm hover:shadow-md transition-all ${
         isPending ? 'border-amber-200 dark:border-amber-800' : 'border-slate-200/80 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700'
       }`}>
       <div className="h-1 w-full" style={{ background: roleCfg.gradient }} />
-
       <AnimatePresence>
         {hovered && !isPending && (
           <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
@@ -391,13 +387,12 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
           </motion.div>
         )}
       </AnimatePresence>
-
       <div className="p-4">
         <div className="flex items-start gap-3">
           <div className="relative flex-shrink-0">
             <div className="w-12 h-12 rounded-xl overflow-hidden ring-1 ring-slate-100 dark:ring-slate-700">
               {userData.profile_picture
-                ? <img src={userData.profile_picture} alt={userData.full_name} className="w-full h-full object-cover" />
+                ? <img src={userData.profile_picture} alt={userData.full_name} className="w-full h-full object-cover" loading="lazy" />
                 : <div className="w-full h-full flex items-center justify-center text-white text-xl font-black"
                     style={{ background: roleCfg.gradient }}>
                     {userData.full_name?.charAt(0)?.toUpperCase()}
@@ -419,13 +414,10 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
             </div>
           </div>
         </div>
-
         {(userData.departments || []).length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-3">{userData.departments.map(d => <DeptPill key={d} dept={d} />)}</div>
         )}
-
         <ModuleAccessBadges userData={userData} />
-
         <div className="mt-3 space-y-1.5 text-xs text-slate-400 dark:text-slate-500">
           <div className="flex items-center gap-2 truncate"><Mail className="h-3 w-3 flex-shrink-0" /><span className="truncate">{userData.email}</span></div>
           <div className="flex items-center gap-2"><Phone className="h-3 w-3 flex-shrink-0" />{userData.phone || '—'}</div>
@@ -434,7 +426,6 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
           )}
           <div className="flex items-center gap-2"><Calendar className="h-3 w-3 flex-shrink-0" />Joined {userData.created_at ? format(new Date(userData.created_at), 'dd MMM yyyy') : 'N/A'}</div>
         </div>
-
         {userData.role !== 'admin' && (
           <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Permissions</span>
@@ -444,7 +435,6 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
             </div>
           </div>
         )}
-
         {isPending && isAdmin && (
           <div className="flex gap-2 mt-3">
             <motion.button whileTap={{ scale: 0.95 }} onClick={() => onApprove(userData)} disabled={approving === userData.id}
@@ -461,7 +451,7 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
       </div>
     </motion.div>
   );
-};
+});
 
 // ── Permission Toggle Row ─────────────────────────────────────────────────────
 const PermToggleRow = ({ permKey, label, desc, icon: Icon, permissions, setPermissions }) => {
@@ -490,7 +480,7 @@ const PermToggleRow = ({ permKey, label, desc, icon: Icon, permissions, setPermi
 // ── Module Access Card ────────────────────────────────────────────────────────
 const ModuleAccessCard = ({ icon: Icon, title, desc, permKey, permissions, setPermissions, accentColor, badge }) => {
   const isEnabled = !!permissions[permKey];
-  const accent    = accentColor || COLORS.mediumBlue;
+  const accent = accentColor || COLORS.mediumBlue;
   return (
     <motion.div whileHover={{ y: -2, transition: springPhysics.lift }} whileTap={{ scale: 0.99 }}
       onClick={() => setPermissions(p => ({ ...p, [permKey]: !p[permKey] }))}
@@ -532,9 +522,9 @@ const SectionHeader = ({ icon: Icon, title, count, color }) => (
 // ── Permission Matrix Summary ─────────────────────────────────────────────────
 const PermissionMatrixSummary = ({ permissions }) => {
   const allPerms = [...GLOBAL_PERMS, ...OPS_PERMS, ...EDIT_PERMS];
-  const granted  = allPerms.filter(p => permissions[p.key]).length;
-  const total    = allPerms.length;
-  const pct      = Math.round((granted / total) * 100);
+  const granted = allPerms.filter(p => permissions[p.key]).length;
+  const total = allPerms.length;
+  const pct = Math.round((granted / total) * 100);
   return (
     <div className="flex gap-4 p-4 rounded-xl border border-slate-200 dark:border-slate-700"
       style={{ background: 'linear-gradient(135deg, rgba(13,59,102,0.04), rgba(31,111,178,0.04))' }}>
@@ -560,12 +550,12 @@ const PermissionMatrixSummary = ({ permissions }) => {
 
 // ── Permission Tabs ───────────────────────────────────────────────────────────
 const permTabs = [
-  { id: 'modules', label: 'Modules',    icon: Zap       },
-  { id: 'view',    label: 'View',       icon: Eye       },
-  { id: 'ops',     label: 'Operations', icon: Settings  },
-  { id: 'edit',    label: 'Edit',       icon: Pencil    },
-  { id: 'cross',   label: 'Cross-User', icon: UsersIcon },
-  { id: 'clients', label: 'Clients',    icon: Briefcase },
+  { id: 'modules', label: 'Modules', icon: Zap },
+  { id: 'view', label: 'View', icon: Eye },
+  { id: 'ops', label: 'Operations', icon: Settings },
+  { id: 'edit', label: 'Edit', icon: Pencil },
+  { id: 'cross', label: 'Cross-User', icon: UsersIcon },
+  { id: 'clients', label: 'Clients', icon: Briefcase },
 ];
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -573,35 +563,40 @@ const permTabs = [
 // ══════════════════════════════════════════════════════════════════════════════
 export default function Users() {
   const { user, refreshUser } = useAuth();
-  const isDark    = useDark();
-  const isAdmin   = user?.role === 'admin';
-  const perms     = user?.permissions || {};
-
-  const canViewUserPage        = isAdmin || !!perms.can_view_user_page;
-  const canEditUsers           = isAdmin || !!perms.can_manage_users;
-  const canManagePermissions   = isAdmin;
-
-  const [users,                 setUsers]                 = useState([]);
-  const [clients,               setClients]               = useState([]);
-  const [searchQuery,           setSearchQuery]           = useState('');
-  const [activeTab,             setActiveTab]             = useState('all');
-  const [dialogOpen,            setDialogOpen]            = useState(false);
-  const [permDialogOpen,        setPermDialogOpen]        = useState(false);
-  const [selectedUser,          setSelectedUser]          = useState(null);
-  const [selectedUserForPerms,  setSelectedUserForPerms]  = useState(null);
-  const [approvingId,           setApprovingId]           = useState(null);
-  const [loading,               setLoading]               = useState(false);
-  const [clientSearch,          setClientSearch]          = useState('');
-  const [activePermTab,         setActivePermTab]         = useState('modules');
-
+  const isDark = useDark();
+  const isAdmin = user?.role === 'admin';
+  const perms = user?.permissions || {};
+  const canViewUserPage = isAdmin || !!perms.can_view_user_page;
+  const canEditUsers = isAdmin || !!perms.can_manage_users;
+  const canManagePermissions = isAdmin;
+  const [users, setUsers] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [activeTab, setActiveTab] = useState('all');
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [permDialogOpen, setPermDialogOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedUserForPerms, setSelectedUserForPerms] = useState(null);
+  const [approvingId, setApprovingId] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [clientSearch, setClientSearch] = useState('');
+  const [activePermTab, setActivePermTab] = useState('modules');
   const [formData, setFormData] = useState({
     full_name: '', email: '', password: '', role: 'staff',
     departments: [], phone: '', birthday: '', profile_picture: '',
     punch_in_time: '10:30', grace_time: '00:10', punch_out_time: '19:00',
     telegram_id: '', is_active: true, status: 'active',
   });
-
   const [permissions, setPermissions] = useState({ ...EMPTY_PERMISSIONS });
+
+  // ── Debounce search input ───────────────────────────────────────────────────
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearchQuery(searchInput);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   useEffect(() => {
     if (canViewUserPage) { fetchUsers(); fetchClients(); }
@@ -609,10 +604,22 @@ export default function Users() {
 
   const fetchUsers = useCallback(async () => {
     try {
-      const res = await api.get('/users');
+      const cached = sessionStorage.getItem('users');
+
+      if (cached) {
+        setUsers(JSON.parse(cached));
+      }
+
+      const res = await api.get('/users?page=1&limit=50');
       const raw = res.data;
-      setUsers(Array.isArray(raw) ? raw : (raw?.data || []));
-    } catch { toast.error('Failed to fetch users'); }
+      const data = Array.isArray(raw) ? raw : (raw?.data || []);
+
+      setUsers(data);
+      sessionStorage.setItem('users', JSON.stringify(data));
+
+    } catch {
+      toast.error('Failed to fetch users');
+    }
   }, []);
 
   const fetchClients = useCallback(async () => {
@@ -662,20 +669,20 @@ export default function Users() {
   const handleEdit = useCallback((userData) => {
     setSelectedUser(userData);
     setFormData({
-      full_name:       userData.full_name || '',
-      email:           userData.email || '',
-      password:        '',
-      role:            userData.role || 'staff',
-      departments:     userData.departments || [],
-      phone:           userData.phone || '',
-      birthday:        userData.birthday && userData.birthday !== '' ? format(new Date(userData.birthday), 'yyyy-MM-dd') : '',
+      full_name: userData.full_name || '',
+      email: userData.email || '',
+      password: '',
+      role: userData.role || 'staff',
+      departments: userData.departments || [],
+      phone: userData.phone || '',
+      birthday: userData.birthday && userData.birthday !== '' ? format(new Date(userData.birthday), 'yyyy-MM-dd') : '',
       profile_picture: userData.profile_picture || '',
-      punch_in_time:   userData.punch_in_time || '10:30',
-      grace_time:      userData.grace_time || '00:10',
-      punch_out_time:  userData.punch_out_time || '19:00',
-      telegram_id:     userData.telegram_id != null ? String(userData.telegram_id) : '',
-      is_active:       userData.is_active !== false,
-      status:          userData.status || 'active',
+      punch_in_time: userData.punch_in_time || '10:30',
+      grace_time: userData.grace_time || '00:10',
+      punch_out_time: userData.punch_out_time || '19:00',
+      telegram_id: userData.telegram_id != null ? String(userData.telegram_id) : '',
+      is_active: userData.is_active !== false,
+      status: userData.status || 'active',
     });
     setDialogOpen(true);
   }, []);
@@ -687,15 +694,15 @@ export default function Users() {
     try {
       if (selectedUser) {
         const payload = {
-          full_name:       formData.full_name.trim(),
-          phone:           formData.phone || null,
-          birthday:        formData.birthday || null,
+          full_name: formData.full_name.trim(),
+          phone: formData.phone || null,
+          birthday: formData.birthday || null,
           profile_picture: formData.profile_picture || null,
-          punch_in_time:   formData.punch_in_time || null,
-          grace_time:      formData.grace_time || null,
-          punch_out_time:  formData.punch_out_time || null,
-          telegram_id:     formData.telegram_id !== '' ? Number(formData.telegram_id) : null,
-          is_active:       formData.is_active,
+          punch_in_time: formData.punch_in_time || null,
+          grace_time: formData.grace_time || null,
+          punch_out_time: formData.punch_out_time || null,
+          telegram_id: formData.telegram_id !== '' ? Number(formData.telegram_id) : null,
+          is_active: formData.is_active,
           ...(isAdmin && { email: formData.email.trim(), role: formData.role, status: formData.status, departments: formData.departments }),
           ...(isAdmin && formData.password.trim() && { password: formData.password.trim() }),
         };
@@ -704,19 +711,19 @@ export default function Users() {
         toast.success('✓ User updated successfully');
       } else {
         await api.post('/auth/register', {
-          full_name:     formData.full_name.trim(),
-          email:         formData.email.trim(),
-          password:      formData.password,
-          role:          formData.role,
-          departments:   formData.departments,
-          phone:         formData.phone || null,
-          birthday:      formData.birthday || null,
+          full_name: formData.full_name.trim(),
+          email: formData.email.trim(),
+          password: formData.password,
+          role: formData.role,
+          departments: formData.departments,
+          phone: formData.phone || null,
+          birthday: formData.birthday || null,
           punch_in_time: formData.punch_in_time,
-          grace_time:    formData.grace_time,
+          grace_time: formData.grace_time,
           punch_out_time:formData.punch_out_time,
-          telegram_id:   formData.telegram_id !== '' ? Number(formData.telegram_id) : null,
-          is_active:     false,
-          status:        'pending_approval',
+          telegram_id: formData.telegram_id !== '' ? Number(formData.telegram_id) : null,
+          is_active: false,
+          status: 'pending_approval',
         });
         toast.success('✓ Member registered — awaiting approval');
       }
@@ -754,12 +761,12 @@ export default function Users() {
       const payload = {
         ...permissions,
         view_password_departments: ensureArray(permissions.view_password_departments),
-        assigned_clients:          ensureArray(permissions.assigned_clients),
-        view_other_tasks:          ensureArray(permissions.view_other_tasks),
-        view_other_attendance:     ensureArray(permissions.view_other_attendance),
-        view_other_reports:        ensureArray(permissions.view_other_reports),
-        view_other_todos:          ensureArray(permissions.view_other_todos),
-        view_other_activity:       ensureArray(permissions.view_other_activity),
+        assigned_clients: ensureArray(permissions.assigned_clients),
+        view_other_tasks: ensureArray(permissions.view_other_tasks),
+        view_other_attendance: ensureArray(permissions.view_other_attendance),
+        view_other_reports: ensureArray(permissions.view_other_reports),
+        view_other_todos: ensureArray(permissions.view_other_todos),
+        view_other_activity: ensureArray(permissions.view_other_activity),
       };
       await api.put(`/users/${selectedUserForPerms?.id}/permissions`, payload);
       if (selectedUserForPerms?.id === user?.id) await refreshUser();
@@ -802,21 +809,21 @@ export default function Users() {
 
   const filteredUsers = useMemo(() => {
     return users.filter(u => {
-      const q     = searchQuery.toLowerCase();
+      const q = searchQuery.toLowerCase();
       const match = (u.full_name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
-      if (activeTab === 'pending')  return match && u.status === 'pending_approval';
+      if (activeTab === 'pending') return match && u.status === 'pending_approval';
       if (activeTab === 'rejected') return match && u.status === 'rejected';
-      if (activeTab === 'all')      return match;
+      if (activeTab === 'all') return match;
       return match && u.role?.toLowerCase() === activeTab;
     });
   }, [users, searchQuery, activeTab]);
 
   const stats = useMemo(() => [
-    { label: 'Total Members', value: users.length,                                           icon: UsersIcon,   color: COLORS.mediumBlue   },
-    { label: 'Admins',        value: users.filter(u => u.role === 'admin').length,            icon: Crown,       color: COLORS.indigo        },
-    { label: 'Pending',       value: pendingUsers.length,                                     icon: Clock,       color: COLORS.amber         },
-    { label: 'Active',        value: users.filter(u => u.is_active).length,                  icon: CheckCircle, color: COLORS.emeraldGreen  },
-    { label: 'Managers',      value: users.filter(u => u.role === 'manager').length,          icon: Briefcase,   color: COLORS.teal          },
+    { label: 'Total Members', value: users.length, icon: UsersIcon, color: COLORS.mediumBlue },
+    { label: 'Admins', value: users.filter(u => u.role === 'admin').length, icon: Crown, color: COLORS.indigo },
+    { label: 'Pending', value: pendingUsers.length, icon: Clock, color: COLORS.amber },
+    { label: 'Active', value: users.filter(u => u.is_active).length, icon: CheckCircle, color: COLORS.emeraldGreen },
+    { label: 'Managers', value: users.filter(u => u.role === 'manager').length, icon: Briefcase, color: COLORS.teal },
   ], [users, pendingUsers.length]);
 
   if (!canViewUserPage) {
@@ -836,10 +843,34 @@ export default function Users() {
     );
   }
 
+  // Virtualized Row renderer (keeps all original animations + hover states)
+  const Row = ({ index, style }) => {
+    const userData = filteredUsers[index];
+    if (!userData) return null;
+    return (
+      <div style={style}>
+        <motion.div variants={itemVariants}>
+          <UserCard
+            userData={userData}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+            onPermissions={openPermissionsDialog}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            currentUserId={user?.id || ''}
+            isAdmin={isAdmin}
+            canEditUsers={canEditUsers}
+            canManagePermissions={canManagePermissions}
+            approving={approvingId}
+          />
+        </motion.div>
+      </div>
+    );
+  };
+
   // ── JSX ───────────────────────────────────────────────────────────────────
   return (
     <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
-
       {/* ── Welcome Banner (Dashboard pattern) ─────────────────────────────── */}
       <motion.div variants={itemVariants}>
         <div className="relative overflow-hidden rounded-2xl px-6 py-5"
@@ -910,7 +941,7 @@ export default function Users() {
               badge={pendingUsers.length}
             />
             <div className="p-3">
-              <motion.div variants={containerVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              <motion.div variants={containerVariants} initial={false} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {pendingUsers.map(userData => (
                   <PendingUserCard key={userData.id} userData={userData}
                     onApprove={handleApprove} onReject={handleReject} approving={approvingId} />
@@ -948,10 +979,10 @@ export default function Users() {
             {/* Tab navigation */}
             <div className="flex gap-1.5 overflow-x-auto pb-1">
               {[
-                { id: 'all',      label: 'All'      },
-                { id: 'admin',    label: 'Admins'   },
-                { id: 'manager',  label: 'Managers' },
-                { id: 'staff',    label: 'Staff'    },
+                { id: 'all', label: 'All' },
+                { id: 'admin', label: 'Admins' },
+                { id: 'manager', label: 'Managers' },
+                { id: 'staff', label: 'Staff' },
                 { id: 'rejected', label: 'Rejected' },
               ].map(tab => (
                 <button key={tab.id} onClick={() => setActiveTab(tab.id)}
@@ -964,15 +995,15 @@ export default function Users() {
               ))}
             </div>
 
-            {/* Search */}
+            {/* Search (debounced) */}
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <input type="text" placeholder="Search by name or email…" value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
+              <input type="text" placeholder="Search by name or email…" value={searchInput}
+                onChange={e => setSearchInput(e.target.value)}
                 className="w-full pl-9 pr-4 h-9 text-sm border rounded-xl focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all bg-slate-50 dark:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:focus:ring-blue-900/40" />
             </div>
 
-            {/* Users grid */}
+            {/* Virtualized Users List */}
             {filteredUsers.length === 0
               ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -985,18 +1016,14 @@ export default function Users() {
                 </div>
               )
               : (
-                <motion.div variants={containerVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                  <AnimatePresence>
-                    {filteredUsers.map(userData => (
-                      <UserCard key={userData.id} userData={userData}
-                        onEdit={handleEdit} onDelete={handleDelete} onPermissions={openPermissionsDialog}
-                        onApprove={handleApprove} onReject={handleReject}
-                        currentUserId={user?.id || ''} isAdmin={isAdmin}
-                        canEditUsers={canEditUsers} canManagePermissions={canManagePermissions}
-                        approving={approvingId} />
-                    ))}
-                  </AnimatePresence>
-                </motion.div>
+                <List
+                  height={600}
+                  itemCount={filteredUsers.length}
+                  itemSize={200}
+                  width="100%"
+                >
+                  {Row}
+                </List>
               )}
           </div>
         </SectionCard>
@@ -1034,7 +1061,6 @@ export default function Users() {
               </div>
             </div>
           </div>
-
           <div className="p-6 space-y-6 bg-white dark:bg-slate-900">
             {/* Profile Photo */}
             <div className="flex justify-center">
@@ -1052,7 +1078,6 @@ export default function Users() {
                 <input type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
               </label>
             </div>
-
             {/* Basic Info */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -1068,7 +1093,6 @@ export default function Users() {
                   className="w-full h-9 px-3 text-sm border rounded-xl focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 disabled:opacity-60" />
               </div>
             </div>
-
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5 block">Phone Number</label>
@@ -1084,7 +1108,6 @@ export default function Users() {
                   className="w-full h-9 px-3 text-sm border rounded-xl focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 placeholder:text-slate-400" />
               </div>
             </div>
-
             {/* Shift Schedule */}
             <div className="rounded-xl p-4 border border-blue-100 dark:border-blue-900"
               style={{ background: 'linear-gradient(135deg, rgba(31,111,178,0.04), rgba(13,59,102,0.04))' }}>
@@ -1102,7 +1125,6 @@ export default function Users() {
                 ))}
               </div>
             </div>
-
             {/* Birthday + Telegram */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -1116,7 +1138,6 @@ export default function Users() {
                   className="w-full h-9 px-3 text-sm border rounded-xl focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 placeholder:text-slate-400" />
               </div>
             </div>
-
             {/* Admin Only Fields */}
             {isAdmin && (
               <>
@@ -1149,7 +1170,6 @@ export default function Users() {
                     </Select>
                   </div>
                 </div>
-
                 {/* Departments */}
                 <div>
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2 block">Assigned Departments</label>
@@ -1171,7 +1191,6 @@ export default function Users() {
               </>
             )}
           </div>
-
           {/* Dialog Footer */}
           <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 rounded-b-2xl">
             <button onClick={() => setDialogOpen(false)}
@@ -1216,11 +1235,9 @@ export default function Users() {
               </div>
             </div>
           </div>
-
           <div className="p-6 space-y-5 bg-white dark:bg-slate-900">
             {/* Permission summary */}
             <PermissionMatrixSummary permissions={permissions} />
-
             {/* Quick Reset Buttons */}
             <div className="flex flex-wrap gap-2">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 self-center mr-1">Templates:</span>
@@ -1232,7 +1249,6 @@ export default function Users() {
                 </motion.button>
               ))}
             </div>
-
             {/* Permission Tabs */}
             <div className="flex gap-1.5 overflow-x-auto pb-1">
               {permTabs.map(tab => {
@@ -1248,7 +1264,6 @@ export default function Users() {
                 );
               })}
             </div>
-
             {/* ── Modules Tab ─────────────────────────────────────────────── */}
             {activePermTab === 'modules' && (
               <div className="space-y-4">
@@ -1264,7 +1279,6 @@ export default function Users() {
                 </div>
               </div>
             )}
-
             {/* ── View Tab ────────────────────────────────────────────────── */}
             {activePermTab === 'view' && (
               <div>
@@ -1278,7 +1292,6 @@ export default function Users() {
                 </div>
               </div>
             )}
-
             {/* ── Operations Tab ──────────────────────────────────────────── */}
             {activePermTab === 'ops' && (
               <div>
@@ -1292,7 +1305,6 @@ export default function Users() {
                 </div>
               </div>
             )}
-
             {/* ── Edit Tab ────────────────────────────────────────────────── */}
             {activePermTab === 'edit' && (
               <div>
@@ -1306,20 +1318,19 @@ export default function Users() {
                 </div>
               </div>
             )}
-
             {/* ── Cross-User Tab ──────────────────────────────────────────── */}
             {activePermTab === 'cross' && (
               <div className="space-y-5">
                 <SectionHeader icon={UsersIcon} title="Cross-User Data Access" color={COLORS.emeraldGreen} />
                 <p className="text-xs text-slate-400 -mt-3">Select team members whose data this user can view</p>
                 {[
-                  { key: 'view_other_tasks',      label: 'Tasks',      icon: Layers,     color: COLORS.mediumBlue  },
-                  { key: 'view_other_attendance',  label: 'Attendance', icon: Clock,      color: COLORS.violet      },
-                  { key: 'view_other_reports',     label: 'Reports',    icon: BarChart2,  color: COLORS.amber       },
-                  { key: 'view_other_todos',       label: 'Todos',      icon: CheckCircle,color: COLORS.emeraldGreen},
-                  { key: 'view_other_activity',    label: 'Activity',   icon: Activity,   color: COLORS.coral       },
+                  { key: 'view_other_tasks', label: 'Tasks', icon: Layers, color: COLORS.mediumBlue },
+                  { key: 'view_other_attendance', label: 'Attendance', icon: Clock, color: COLORS.violet },
+                  { key: 'view_other_reports', label: 'Reports', icon: BarChart2, color: COLORS.amber },
+                  { key: 'view_other_todos', label: 'Todos', icon: CheckCircle,color: COLORS.emeraldGreen},
+                  { key: 'view_other_activity', label: 'Activity', icon: Activity, color: COLORS.coral },
                 ].map(section => {
-                  const SIcon         = section.icon;
+                  const SIcon = section.icon;
                   const selectedCount = (permissions[section.key] || []).length;
                   return (
                     <div key={section.key} className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
@@ -1359,7 +1370,6 @@ export default function Users() {
                 })}
               </div>
             )}
-
             {/* ── Clients Tab ─────────────────────────────────────────────── */}
             {activePermTab === 'clients' && (
               <div className="space-y-4">
@@ -1414,7 +1424,6 @@ export default function Users() {
               </div>
             )}
           </div>
-
           {/* Permissions Dialog Footer */}
           <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 rounded-b-2xl">
             <div className="flex items-center gap-1.5 text-xs text-slate-400">
@@ -1436,7 +1445,6 @@ export default function Users() {
           </div>
         </DialogContent>
       </Dialog>
-
     </motion.div>
   );
 }
