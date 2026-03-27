@@ -121,9 +121,21 @@ export const AuthProvider = ({ children }) => {
   Logout
   ============================================================ */
 
-  const logout = () => {
-    clearStorage();
-    setUser(null);
+  const logout = async () => {
+    const token =
+      localStorage.getItem("token") ||
+      sessionStorage.getItem("token");
+
+    try {
+      if (token) {
+        await api.post("/activity/logout");
+      }
+    } catch (e) {
+      console.error("Logout API failed", e);
+    } finally {
+      clearStorage();
+      setUser(null);
+    }
   };
 
   /* ============================================================
