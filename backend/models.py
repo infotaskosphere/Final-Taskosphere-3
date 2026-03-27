@@ -1,6 +1,8 @@
 """
 models.py — Taskosphere Core Data Models
-Complete access governance system aligned with the frontend permission engine.
+Complete access governance system.
+Admin = unrestricted superuser on ALL operations.
+Manager / Staff = permission-gated via UserPermissions.
 """
 
 import uuid
@@ -41,9 +43,9 @@ class UserStatus(str, Enum):
 
 
 class EntityType(str, Enum):
-    firm         = "firm"
-    individual   = "individual"
-    company      = "company"
+    firm       = "firm"
+    individual = "individual"
+    company    = "company"
 
 
 class TaskPriority(str, Enum):
@@ -83,33 +85,33 @@ class DSCLocation(str, Enum):
 
 
 class MovementType(str, Enum):
-    check_in  = "check_in"
-    check_out = "check_out"
+    IN  = "IN"
+    OUT = "OUT"
 
 
 class AttendanceStatus(str, Enum):
-    present     = "present"
-    absent      = "absent"
-    half_day    = "half_day"
-    on_leave    = "on_leave"
-    holiday     = "holiday"
+    present        = "present"
+    absent         = "absent"
+    half_day       = "half_day"
+    on_leave       = "on_leave"
+    holiday        = "holiday"
     work_from_home = "work_from_home"
 
 
 class PortalType(str, Enum):
-    MCA         = "MCA"
-    DGFT        = "DGFT"
-    TRADEMARK   = "TRADEMARK"
-    GST         = "GST"
-    INCOME_TAX  = "INCOME_TAX"
-    TDS         = "TDS"
-    EPFO        = "EPFO"
-    ESIC        = "ESIC"
-    TRACES      = "TRACES"
-    MSME        = "MSME"
-    RERA        = "RERA"
-    ROC         = "ROC"
-    OTHER       = "OTHER"
+    MCA        = "MCA"
+    DGFT       = "DGFT"
+    TRADEMARK  = "TRADEMARK"
+    GST        = "GST"
+    INCOME_TAX = "INCOME_TAX"
+    TDS        = "TDS"
+    EPFO       = "EPFO"
+    ESIC       = "ESIC"
+    TRACES     = "TRACES"
+    MSME       = "MSME"
+    RERA       = "RERA"
+    ROC        = "ROC"
+    OTHER      = "OTHER"
 
 
 PORTAL_TYPES_LIST: List[str] = [e.value for e in PortalType]
@@ -120,12 +122,15 @@ DEPARTMENTS: List[str] = [
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DEFAULT ROLE PERMISSION TEMPLATES
-# These must stay in sync with DEFAULT_ROLE_PERMISSIONS in the frontend.
+# PERMISSION DEFAULTS PER ROLE
+# Admin gets every flag = True.  Manager / Staff are restrictive.
+# Keep in sync with DEFAULT_ROLE_PERMISSIONS in the React frontend.
 # ─────────────────────────────────────────────────────────────────────────────
 DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
+
+    # ── ADMIN — full superuser, every boolean True ────────────────────────
     "admin": {
-        # ── View permissions ────────────────────────────────────────────────
+        # View
         "can_view_all_tasks":              True,
         "can_view_all_clients":            True,
         "can_view_all_dsc":                True,
@@ -141,14 +146,14 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_staff_rankings":         True,
         "can_view_staff_activity":         True,
         "can_view_own_data":               True,
-        # ── Edit permissions ────────────────────────────────────────────────
+        # Edit
         "can_edit_tasks":                  True,
         "can_edit_clients":                True,
         "can_edit_dsc":                    True,
         "can_edit_documents":              True,
         "can_edit_due_dates":              True,
         "can_edit_users":                  True,
-        # ── Operational permissions ─────────────────────────────────────────
+        # Operations
         "can_manage_users":                True,
         "can_manage_settings":             True,
         "can_assign_tasks":                True,
@@ -159,27 +164,29 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_delete_tasks":                True,
         "can_connect_email":               True,
         "can_use_chat":                    True,
-        # ── Module access ───────────────────────────────────────────────────
+        # Modules
         "can_create_quotations":           True,
-        # ── Password Vault ──────────────────────────────────────────────────
+        # Password Vault
         "can_view_passwords":              True,
         "can_edit_passwords":              True,
-        "view_password_departments":       [],   # empty = all departments
-        # ── Visit permissions ───────────────────────────────────────────────
+        "view_password_departments":       [],   # empty = ALL departments
+        # Visit
         "can_view_all_visits":             True,
         "can_edit_visits":                 True,
         "can_delete_visits":               True,
         "can_delete_own_visits":           True,
-        # ── Cross-user visibility lists ─────────────────────────────────────
+        # Cross-user lists (empty = access is decided by the boolean flags above)
         "view_other_visits":               [],
         "view_other_tasks":                [],
         "view_other_attendance":           [],
         "view_other_reports":              [],
         "view_other_todos":                [],
         "view_other_activity":             [],
-        # ── Client portfolio ────────────────────────────────────────────────
+        # Client portfolio
         "assigned_clients":                [],
     },
+
+    # ── MANAGER — moderate access ─────────────────────────────────────────
     "manager": {
         "can_view_all_tasks":              False,
         "can_view_all_clients":            False,
@@ -228,6 +235,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "view_other_activity":             [],
         "assigned_clients":                [],
     },
+
+    # ── STAFF — minimal access ────────────────────────────────────────────
     "staff": {
         "can_view_all_tasks":              False,
         "can_view_all_clients":            False,
@@ -280,11 +289,16 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# USER PERMISSIONS
-# Single source of truth for all permission fields.
-# Covers: view, edit, operations, modules, vault, visits, cross-user, portfolio.
+# USER PERMISSIONS MODEL
 # ─────────────────────────────────────────────────────────────────────────────
 class UserPermissions(BaseModel):
+    """
+    Single source-of-truth for all granular permission flags.
+
+    Rule: Admin users ALWAYS bypass every permission check server-side
+    (enforced by User.has_permission / User.is_admin).
+    These flags are only meaningful for manager / staff roles.
+    """
     model_config = ConfigDict(extra="ignore")
 
     # ── View ────────────────────────────────────────────────────────────────
@@ -330,16 +344,16 @@ class UserPermissions(BaseModel):
     # ── Password Vault ───────────────────────────────────────────────────────
     can_view_passwords:              bool = False
     can_edit_passwords:              bool = False
-    # Departments whose credentials this user can access (empty = own depts only)
+    # Empty list = only own departments; populated = explicit dept whitelist
     view_password_departments:       List[str] = Field(default_factory=list)
 
-    # ── Visit permissions ────────────────────────────────────────────────────
+    # ── Visits ───────────────────────────────────────────────────────────────
     can_view_all_visits:             bool = False
     can_edit_visits:                 bool = False
     can_delete_visits:               bool = False
     can_delete_own_visits:           bool = True
 
-    # ── Cross-user visibility — list of user IDs ────────────────────────────
+    # ── Cross-user visibility (lists of user IDs) ───────────────────────────
     view_other_visits:               List[str] = Field(default_factory=list)
     view_other_tasks:                List[str] = Field(default_factory=list)
     view_other_attendance:           List[str] = Field(default_factory=list)
@@ -347,33 +361,34 @@ class UserPermissions(BaseModel):
     view_other_todos:                List[str] = Field(default_factory=list)
     view_other_activity:             List[str] = Field(default_factory=list)
 
-    # ── Client portfolio — list of client IDs ───────────────────────────────
+    # ── Client portfolio (list of client IDs) ────────────────────────────────
     assigned_clients:                List[str] = Field(default_factory=list)
 
-    # ── Vault consistency guard ──────────────────────────────────────────────
+    # ── Vault consistency: edit implies view ─────────────────────────────────
     @model_validator(mode="after")
     def vault_consistency(self) -> "UserPermissions":
-        """Edit vault implies view vault must also be true."""
         if self.can_edit_passwords and not self.can_view_passwords:
             self.can_view_passwords = True
         return self
 
+    # ── Helpers ──────────────────────────────────────────────────────────────
     def active_permission_count(self) -> int:
-        """Return how many can_* flags are True (matches frontend permCount)."""
+        """Count of can_* flags set True (matches frontend permCount logic)."""
         return sum(
             1 for k, v in self.model_dump().items()
             if k.startswith("can_") and v is True
         )
 
-    def to_role_defaults(self, role: UserRole) -> "UserPermissions":
-        """Return a new instance seeded from the default template for role."""
-        defaults = DEFAULT_ROLE_PERMISSIONS.get(role.value, {})
-        return UserPermissions(**defaults)
-
     @classmethod
-    def from_role(cls, role: UserRole) -> "UserPermissions":
-        defaults = DEFAULT_ROLE_PERMISSIONS.get(role.value, {})
+    def from_role(cls, role: "UserRole") -> "UserPermissions":
+        """Return a permission set seeded from the role's default template."""
+        defaults = DEFAULT_ROLE_PERMISSIONS.get(
+            role.value if isinstance(role, UserRole) else str(role), {}
+        )
         return cls(**defaults)
+
+    def to_role_defaults(self, role: "UserRole") -> "UserPermissions":
+        return UserPermissions.from_role(role)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -384,33 +399,35 @@ class User(BaseModel):
 
     id:              str
     email:           str
-    full_name:       Optional[str]    = None
-    role:            UserRole         = UserRole.staff
-    password:        Optional[str]    = None
-    consent_given:   bool             = False
-    departments:     List[str]        = Field(default_factory=list)
-    phone:           Optional[str]    = None
-    birthday:        Optional[Any]    = None
-    profile_picture: Optional[str]    = None
-    punch_in_time:   Optional[str]    = "10:30"
-    grace_time:      Optional[str]    = "00:15"
-    punch_out_time:  Optional[str]    = "19:00"
-    telegram_id:     Optional[int]    = None
-    permissions:     UserPermissions  = Field(default_factory=UserPermissions)
-    created_at:      Optional[Any]    = None
-    is_active:       bool             = True
-    status:          UserStatus       = UserStatus.pending_approval
-    approved_by:     Optional[str]    = None
-    approved_at:     Optional[Any]    = None
+    full_name:       Optional[str]   = None
+    role:            UserRole        = UserRole.staff
+    password:        Optional[str]   = None
+    consent_given:   bool            = False
+    departments:     List[str]       = Field(default_factory=list)
+    phone:           Optional[str]   = None
+    birthday:        Optional[Any]   = None
+    profile_picture: Optional[str]   = None
+    punch_in_time:   Optional[str]   = "10:30"
+    grace_time:      Optional[str]   = "00:15"
+    punch_out_time:  Optional[str]   = "19:00"
+    telegram_id:     Optional[int]   = None
+    permissions:     UserPermissions = Field(default_factory=UserPermissions)
+    created_at:      Optional[Any]   = None
+    is_active:       bool            = True
+    status:          UserStatus      = UserStatus.pending_approval
+    approved_by:     Optional[str]   = None
+    approved_at:     Optional[Any]   = None
 
-    # ── Shortcut fields surfaced directly on User (used by permission checks) ──
-    # These mirror the matching fields inside UserPermissions for fast access.
-    can_delete:         bool       = False
-    view_other_tasks:   List[str]  = Field(default_factory=list)
-    view_other_todos:   List[str]  = Field(default_factory=list)
-    view_other_visits:  List[str]  = Field(default_factory=list)
-    assigned_clients:   List[str]  = Field(default_factory=list)
+    # ── Shortcut fields (denormalised for fast backend checks) ───────────────
+    can_delete:         bool      = False
+    view_other_tasks:   List[str] = Field(default_factory=list)
+    view_other_todos:   List[str] = Field(default_factory=list)
+    view_other_visits:  List[str] = Field(default_factory=list)
+    assigned_clients:   List[str] = Field(default_factory=list)
 
+    # ────────────────────────────────────────────────────────────────────────
+    # VALIDATORS
+    # ────────────────────────────────────────────────────────────────────────
     @field_validator("birthday", mode="before")
     @classmethod
     def empty_string_to_none(cls, v: Any) -> Optional[Any]:
@@ -426,40 +443,78 @@ class User(BaseModel):
         except ValueError:
             return UserStatus.pending_approval
 
-    # ── Convenience helpers for backend permission checks ───────────────────
+    # ────────────────────────────────────────────────────────────────────────
+    # COMPUTED HELPERS
+    # ────────────────────────────────────────────────────────────────────────
+    @property
+    def is_admin(self) -> bool:
+        """True when this user is an administrator (bypasses all perm checks)."""
+        return self.role == UserRole.admin
+
     def has_permission(self, perm: str) -> bool:
-        """Check a single boolean permission key. Admin always returns True."""
-        if self.role == UserRole.admin:
+        """
+        Check a named boolean permission.
+        Admins unconditionally return True regardless of the stored flag value.
+        """
+        if self.is_admin:
             return True
         return bool(getattr(self.permissions, perm, False))
 
-    def can_view_user(self, target_user_id: str) -> bool:
-        """True if this user may read data belonging to target_user_id."""
-        if self.role == UserRole.admin:
+    def can_view_resource(self, owner_user_id: str, cross_user_list_key: str = "view_other_tasks") -> bool:
+        """
+        Return True if this user may read a resource owned by owner_user_id.
+
+        Logic:
+          1. Admin → always True
+          2. Viewing own resource → requires can_view_own_data
+          3. Viewing other's resource → check the relevant cross-user list
+        """
+        if self.is_admin:
             return True
-        if self.id == target_user_id:
+        if self.id == owner_user_id:
             return self.permissions.can_view_own_data
-        return target_user_id in self.permissions.view_other_tasks  # broadest cross-user list
+        cross_list: List[str] = getattr(self.permissions, cross_user_list_key, [])
+        return owner_user_id in cross_list
 
     def can_access_client(self, client_id: str) -> bool:
-        """True if user has access to a specific client."""
-        if self.role == UserRole.admin:
+        """True if this user may access the given client record."""
+        if self.is_admin:
             return True
         if self.permissions.can_view_all_clients:
             return True
         return client_id in self.permissions.assigned_clients
 
     def can_access_vault_dept(self, department: str) -> bool:
-        """True if user can access password vault for the given department."""
+        """True if this user may access the password vault for department."""
+        if self.is_admin:
+            return True
         if not self.permissions.can_view_passwords:
             return False
-        if self.role == UserRole.admin:
-            return True
-        depts = self.permissions.view_password_departments
-        # Empty list → own departments only
-        if not depts:
+        dept_whitelist = self.permissions.view_password_departments
+        # Empty whitelist → own departments only
+        if not dept_whitelist:
             return department in self.departments
-        return department in depts or department in self.departments
+        return department in dept_whitelist or department in self.departments
+
+    def can_edit_resource(self, perm_key: str) -> bool:
+        """Generic edit check: admin always True, others check perm flag."""
+        return self.has_permission(perm_key)
+
+    def can_delete_resource(self) -> bool:
+        """Generic delete check."""
+        return self.has_permission("can_delete_data")
+
+    def effective_permissions(self) -> Dict[str, Any]:
+        """
+        Return the full permission dict that should be enforced.
+        For admins, every can_* flag is forced True regardless of stored values.
+        """
+        base = self.permissions.model_dump()
+        if self.is_admin:
+            for k in base:
+                if k.startswith("can_"):
+                    base[k] = True
+        return base
 
 
 class UserCreate(BaseModel):
@@ -476,7 +531,7 @@ class UserCreate(BaseModel):
     punch_out_time:  Optional[str] = "19:00"
     profile_picture: Optional[str] = None
     is_active:       bool          = True
-    # Admins can seed permissions on creation; otherwise role defaults are applied.
+    # Admins may seed permissions on creation; otherwise role defaults are used.
     permissions:     Optional[Dict[str, Any]] = None
     status:          Optional[UserStatus]     = UserStatus.pending_approval
     # Shortcut fields
@@ -493,8 +548,8 @@ class UserCreate(BaseModel):
 
     def resolve_permissions(self) -> UserPermissions:
         """
-        Return a UserPermissions instance for this creation payload.
-        If explicit permissions are provided they win; otherwise role defaults.
+        If explicit permissions were provided (e.g. by an admin), use them.
+        Otherwise seed from role defaults.
         """
         if self.permissions:
             return UserPermissions(**self.permissions)
@@ -518,7 +573,6 @@ class UserUpdate(BaseModel):
     profile_picture: Optional[str]        = None
     telegram_id:     Optional[int]        = None
     status:          Optional[UserStatus] = None
-    # Shortcut fields
     can_delete:        Optional[bool]      = None
     view_other_tasks:  Optional[List[str]] = None
     view_other_todos:  Optional[List[str]] = None
@@ -528,10 +582,10 @@ class UserUpdate(BaseModel):
 
 class UserPermissionsUpdate(BaseModel):
     """
-    Payload accepted at PUT /users/{id}/permissions.
-    All fields are optional — only supplied keys are updated (merge strategy).
-    Mirrors the full UserPermissions schema so the frontend can send partial
-    or complete payloads.
+    Payload for PUT /users/{id}/permissions.
+    All fields are Optional — backend merges only supplied keys onto the
+    existing permissions document.
+    Admin callers always succeed; non-admins are rejected server-side.
     """
     model_config = ConfigDict(extra="ignore")
 
@@ -584,8 +638,8 @@ class UserPermissionsUpdate(BaseModel):
 
     def merge_into(self, current: UserPermissions) -> UserPermissions:
         """
-        Return a new UserPermissions by overlaying only the non-None fields
-        from this update payload onto the current permissions.
+        Overlay non-None fields from this update onto the existing permission
+        document and return a new validated UserPermissions instance.
         """
         current_dict = current.model_dump()
         update_dict  = {k: v for k, v in self.model_dump().items() if v is not None}
@@ -605,7 +659,6 @@ class Token(BaseModel):
 
 
 class UserApprovalResponse(BaseModel):
-    """Response returned after approve / reject actions."""
     id:          str
     full_name:   Optional[str]
     status:      UserStatus
@@ -619,7 +672,7 @@ class UserApprovalResponse(BaseModel):
 class Todo(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    id:           str       = Field(default_factory=lambda: str(uuid.uuid4()))
+    id:           str  = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id:      str
     title:        str
     description:  Optional[str] = None
@@ -644,20 +697,20 @@ class TodoUpdate(BaseModel):
 
 
 class TaskBase(BaseModel):
-    title:                str
-    description:          Optional[str]   = None
-    assigned_to:          Optional[str]   = None
-    sub_assignees:        List[str]       = Field(default_factory=list)
-    due_date:             Optional[Any]   = None
-    priority:             TaskPriority    = TaskPriority.medium
-    status:               TaskStatus      = TaskStatus.pending
-    category:             str             = "other"
-    client_id:            Optional[str]   = None
-    is_recurring:         bool            = False
-    recurrence_pattern:   Optional[str]   = "monthly"
-    recurrence_interval:  Optional[int]   = 1
-    recurrence_end_date:  Optional[Any]   = None
-    type:                 Optional[str]   = None
+    title:               str
+    description:         Optional[str]  = None
+    assigned_to:         Optional[str]  = None
+    sub_assignees:       List[str]      = Field(default_factory=list)
+    due_date:            Optional[Any]  = None
+    priority:            TaskPriority   = TaskPriority.medium
+    status:              TaskStatus     = TaskStatus.pending
+    category:            str            = "other"
+    client_id:           Optional[str]  = None
+    is_recurring:        bool           = False
+    recurrence_pattern:  Optional[str]  = "monthly"
+    recurrence_interval: Optional[int]  = 1
+    recurrence_end_date: Optional[Any]  = None
+    type:                Optional[str]  = None
 
 
 class TaskCreate(TaskBase):
@@ -671,7 +724,7 @@ class BulkTaskCreate(BaseModel):
 class Task(TaskBase):
     model_config = ConfigDict(extra="ignore")
 
-    id:             str       = Field(default_factory=lambda: str(uuid.uuid4()))
+    id:             str  = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by:     str
     created_at:     Optional[Any] = None
     updated_at:     Optional[Any] = None
@@ -681,19 +734,19 @@ class Task(TaskBase):
 class TaskUpdate(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    title:               Optional[str]         = None
-    description:         Optional[str]         = None
-    assigned_to:         Optional[str]         = None
-    sub_assignees:       Optional[List[str]]   = None
-    due_date:            Optional[Any]         = None
-    priority:            Optional[TaskPriority]= None
-    status:              Optional[TaskStatus]  = None
-    category:            Optional[str]         = None
-    client_id:           Optional[str]         = None
-    is_recurring:        Optional[bool]        = None
-    recurrence_pattern:  Optional[str]         = None
-    recurrence_interval: Optional[int]         = None
-    recurrence_end_date: Optional[Any]         = None
+    title:               Optional[str]          = None
+    description:         Optional[str]          = None
+    assigned_to:         Optional[str]          = None
+    sub_assignees:       Optional[List[str]]    = None
+    due_date:            Optional[Any]          = None
+    priority:            Optional[TaskPriority] = None
+    status:              Optional[TaskStatus]   = None
+    category:            Optional[str]          = None
+    client_id:           Optional[str]          = None
+    is_recurring:        Optional[bool]         = None
+    recurrence_pattern:  Optional[str]          = None
+    recurrence_interval: Optional[int]          = None
+    recurrence_end_date: Optional[Any]          = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -727,41 +780,41 @@ class AttendanceCreate(BaseModel):
 # STAFF ACTIVITY
 # ─────────────────────────────────────────────────────────────────────────────
 class StaffActivityCreate(BaseModel):
-    app_name:        str                   = "Taskosphere Web"
-    window_title:    Optional[str]         = None
-    url:             Optional[str]         = None
-    website:         Optional[str]         = None
-    category:        str                   = "productivity"
-    duration_seconds:int                   = 0
-    idle:            Optional[bool]        = False
-    activity_type:   str                   = "active_time"
-    description:     Optional[str]         = None
-    metadata:        Optional[Dict[str, Any]] = None
+    app_name:         str                        = "Taskosphere Web"
+    window_title:     Optional[str]              = None
+    url:              Optional[str]              = None
+    website:          Optional[str]              = None
+    category:         str                        = "productivity"
+    duration_seconds: int                        = 0
+    idle:             Optional[bool]             = False
+    activity_type:    str                        = "active_time"
+    description:      Optional[str]              = None
+    metadata:         Optional[Dict[str, Any]]   = None
 
 
 class StaffActivityLog(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    id:               str                   = Field(default_factory=lambda: str(uuid.uuid4()))
+    id:               str                      = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id:          str
-    activity_type:    str                   = "active_time"
-    app_name:         str                   = "Taskosphere Web"
-    window_title:     Optional[str]         = None
-    url:              Optional[str]         = None
-    category:         str                   = "other"
-    duration_seconds: int                   = 0
-    timestamp:        Optional[Any]         = None
+    activity_type:    str                      = "active_time"
+    app_name:         str                      = "Taskosphere Web"
+    window_title:     Optional[str]            = None
+    url:              Optional[str]            = None
+    category:         str                      = "other"
+    duration_seconds: int                      = 0
+    timestamp:        Optional[Any]            = None
     metadata:         Optional[Dict[str, Any]] = None
 
 
 class ActivityLog(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    id:                   str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id:              str
-    date:                 str
-    screen_time_minutes:  int = 0
-    tasks_completed:      int = 0
+    id:                  str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id:             str
+    date:                str
+    screen_time_minutes: int = 0
+    tasks_completed:     int = 0
 
 
 class ActivityLogUpdate(BaseModel):
@@ -773,26 +826,31 @@ class ActivityLogUpdate(BaseModel):
 # DSC MANAGEMENT
 # ─────────────────────────────────────────────────────────────────────────────
 class DSCMovement(BaseModel):
-    movement_type: MovementType
+    """Individual DSC IN/OUT movement log entry."""
+    id:            Optional[str] = Field(default_factory=lambda: str(uuid.uuid4()))
+    movement_type: str           # "IN" or "OUT" — kept as plain str for DB flexibility
     person_name:   str
     timestamp:     Optional[Any] = None
     notes:         Optional[str] = None
+    recorded_by:   Optional[str] = None
+    edited_at:     Optional[Any] = None
+    edited_by:     Optional[str] = None
 
 
 class DSCBase(BaseModel):
     holder_name:      str
-    dsc_type:         Optional[str]         = None
-    dsc_password:     Optional[str]         = None
-    associated_with:  Optional[str]         = None
-    entity_type:      EntityType            = EntityType.firm
+    dsc_type:         Optional[str]      = None
+    dsc_password:     Optional[str]      = None
+    associated_with:  Optional[str]      = None
+    entity_type:      EntityType         = EntityType.firm
     issue_date:       Any
     expiry_date:      Any
-    notes:            Optional[str]         = None
-    current_status:   DSCStatus             = DSCStatus.IN
-    current_location: DSCLocation           = DSCLocation.with_company
-    taken_by:         Optional[str]         = None
-    taken_date:       Optional[Any]         = None
-    movement_log:     List[DSCMovement]     = Field(default_factory=list)
+    notes:            Optional[str]      = None
+    current_status:   str                = "IN"   # "IN" | "OUT"
+    current_location: str                = "with_company"
+    taken_by:         Optional[str]      = None
+    taken_date:       Optional[Any]      = None
+    movement_log:     List[DSCMovement]  = Field(default_factory=list)
 
 
 class DSCCreate(DSCBase):
@@ -802,7 +860,7 @@ class DSCCreate(DSCBase):
 class DSC(DSCBase):
     model_config = ConfigDict(extra="ignore")
 
-    id:         str       = Field(default_factory=lambda: str(uuid.uuid4()))
+    id:         str  = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: Optional[Any] = None
 
@@ -810,16 +868,16 @@ class DSC(DSCBase):
 class DSCUpdate(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    holder_name:      Optional[str]        = None
-    dsc_type:         Optional[str]        = None
-    dsc_password:     Optional[str]        = None
-    associated_with:  Optional[str]        = None
+    holder_name:      Optional[str] = None
+    dsc_type:         Optional[str] = None
+    dsc_password:     Optional[str] = None
+    associated_with:  Optional[str] = None
     entity_type:      Optional[EntityType] = None
-    issue_date:       Optional[Any]        = None
-    expiry_date:      Optional[Any]        = None
-    notes:            Optional[str]        = None
-    current_status:   Optional[DSCStatus]  = None
-    current_location: Optional[DSCLocation]= None
+    issue_date:       Optional[Any] = None
+    expiry_date:      Optional[Any] = None
+    notes:            Optional[str] = None
+    current_status:   Optional[str] = None
+    current_location: Optional[str] = None
 
 
 class DSCListResponse(BaseModel):
@@ -830,16 +888,37 @@ class DSCListResponse(BaseModel):
 
 
 class DSCMovementRequest(BaseModel):
-    movement_type: MovementType
+    """
+    Payload for POST /dsc/{id}/movement.
+    movement_type accepts "IN" or "OUT" as plain strings so the
+    frontend doesn't need to send an enum value.
+    """
+    movement_type: str   # "IN" | "OUT"
     person_name:   str
     notes:         Optional[str] = None
+
+    @field_validator("movement_type")
+    @classmethod
+    def validate_movement_type(cls, v: str) -> str:
+        v = v.upper().strip()
+        if v not in ("IN", "OUT"):
+            raise ValueError("movement_type must be 'IN' or 'OUT'")
+        return v
 
 
 class MovementUpdateRequest(BaseModel):
     movement_id:   str
-    movement_type: MovementType
+    movement_type: str
     person_name:   Optional[str] = None
     notes:         Optional[str] = None
+
+    @field_validator("movement_type")
+    @classmethod
+    def validate_movement_type(cls, v: str) -> str:
+        v = v.upper().strip()
+        if v not in ("IN", "OUT"):
+            raise ValueError("movement_type must be 'IN' or 'OUT'")
+        return v
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -867,24 +946,29 @@ class Reminder(BaseModel):
 # DOCUMENT MANAGEMENT
 # ─────────────────────────────────────────────────────────────────────────────
 class DocumentMovement(BaseModel):
-    movement_type: MovementType
+    """Individual Document IN/OUT movement log entry."""
+    id:            Optional[str] = Field(default_factory=lambda: str(uuid.uuid4()))
+    movement_type: str           # "IN" or "OUT"
     person_name:   str
     timestamp:     Optional[Any] = None
     notes:         Optional[str] = None
+    recorded_by:   Optional[str] = None
+    edited_at:     Optional[Any] = None
+    edited_by:     Optional[str] = None
 
 
 class DocumentBase(BaseModel):
-    document_name:    Optional[str]            = None
-    document_type:    Optional[str]            = None
-    holder_name:      Optional[str]            = None
-    associated_with:  Optional[str]            = None
-    entity_type:      EntityType               = EntityType.firm
-    issue_date:       Optional[Any]            = None
-    valid_upto:       Optional[Any]            = None
-    notes:            Optional[str]            = None
-    current_status:   DSCStatus                = DSCStatus.IN
-    current_location: DSCLocation              = DSCLocation.with_company
-    movement_log:     List[DocumentMovement]   = Field(default_factory=list)
+    document_name:    Optional[str]              = None
+    document_type:    Optional[str]              = None
+    holder_name:      Optional[str]              = None
+    associated_with:  Optional[str]              = None
+    entity_type:      EntityType                 = EntityType.firm
+    issue_date:       Optional[Any]              = None
+    valid_upto:       Optional[Any]              = None
+    notes:            Optional[str]              = None
+    current_status:   str                        = "IN"   # "IN" | "OUT"
+    current_location: str                        = "with_company"
+    movement_log:     List[DocumentMovement]     = Field(default_factory=list)
 
 
 class DocumentCreate(DocumentBase):
@@ -894,22 +978,42 @@ class DocumentCreate(DocumentBase):
 class Document(DocumentBase):
     model_config = ConfigDict(extra="ignore")
 
-    id:         str       = Field(default_factory=lambda: str(uuid.uuid4()))
+    id:         str  = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: Optional[Any] = None
 
 
 class DocumentMovementRequest(BaseModel):
-    movement_type: MovementType
+    """
+    Payload for POST /documents/{id}/movement.
+    Accepts "IN" or "OUT" as plain strings.
+    """
+    movement_type: str
     person_name:   str
     notes:         Optional[str] = None
+
+    @field_validator("movement_type")
+    @classmethod
+    def validate_movement_type(cls, v: str) -> str:
+        v = v.upper().strip()
+        if v not in ("IN", "OUT"):
+            raise ValueError("movement_type must be 'IN' or 'OUT'")
+        return v
 
 
 class DocumentMovementUpdateRequest(BaseModel):
     movement_id:   str
-    movement_type: MovementType
+    movement_type: str
     person_name:   Optional[str] = None
     notes:         Optional[str] = None
+
+    @field_validator("movement_type")
+    @classmethod
+    def validate_movement_type(cls, v: str) -> str:
+        v = v.upper().strip()
+        if v not in ("IN", "OUT"):
+            raise ValueError("movement_type must be 'IN' or 'OUT'")
+        return v
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -951,7 +1055,6 @@ class ClientDSC(BaseModel):
 
 
 class ClientAssignment(BaseModel):
-    """Maps a user to a subset of services for a client."""
     user_id:  str
     services: List[str] = Field(default_factory=list)
 
@@ -959,29 +1062,26 @@ class ClientAssignment(BaseModel):
 class ClientBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    company_name:          str            = Field(..., min_length=3, max_length=255)
-    client_type:           str            = Field(
+    company_name:          str           = Field(..., min_length=3, max_length=255)
+    client_type:           str           = Field(
         ..., pattern=r"^(proprietor|pvt_ltd|llp|partnership|huf|trust|other|LLP|PVT_LTD)$"
     )
-    client_type_label:     Optional[str]  = None
-    contact_persons:       List[ContactPerson]    = Field(default_factory=list)
-    email:                 Optional[EmailStr]     = None
-    phone:                 Optional[str]          = None
-    date_of_incorporation: Optional[Any]          = None
-    birthday:              Optional[Any]          = None
-    address:               Optional[str]          = None
-    city:                  Optional[str]          = None
-    state:                 Optional[str]          = None
-    status:                Optional[str]          = "active"
-    services:              List[str]              = Field(default_factory=list)
-    dsc_details:           List[ClientDSC]        = Field(default_factory=list)
-    assigned_to:           Optional[str]          = None
-    notes:                 Optional[str]          = None
-    referred_by:           Optional[str]          = None
-    assignments:           List[ClientAssignment] = Field(
-        default_factory=list,
-        description="Per-user service assignments for this client",
-    )
+    client_type_label:     Optional[str]             = None
+    contact_persons:       List[ContactPerson]        = Field(default_factory=list)
+    email:                 Optional[EmailStr]         = None
+    phone:                 Optional[str]              = None
+    date_of_incorporation: Optional[Any]              = None
+    birthday:              Optional[Any]              = None
+    address:               Optional[str]              = None
+    city:                  Optional[str]              = None
+    state:                 Optional[str]              = None
+    status:                Optional[str]              = "active"
+    services:              List[str]                  = Field(default_factory=list)
+    dsc_details:           List[ClientDSC]            = Field(default_factory=list)
+    assigned_to:           Optional[str]              = None
+    notes:                 Optional[str]              = None
+    referred_by:           Optional[str]              = None
+    assignments:           List[ClientAssignment]     = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -1024,7 +1124,7 @@ class ClientCreate(ClientBase):
 class Client(ClientBase):
     model_config = ConfigDict(extra="ignore")
 
-    id:         str       = Field(default_factory=lambda: str(uuid.uuid4()))
+    id:         str  = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: Optional[Any] = None
 
@@ -1032,24 +1132,24 @@ class Client(ClientBase):
 class ClientUpdate(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    company_name:          Optional[str]                   = None
-    client_type:           Optional[str]                   = None
-    client_type_label:     Optional[str]                   = None
-    contact_persons:       Optional[List[ContactPerson]]   = None
-    email:                 Optional[EmailStr]              = None
-    phone:                 Optional[str]                   = None
-    date_of_incorporation: Optional[Any]                   = None
-    birthday:              Optional[Any]                   = None
-    address:               Optional[str]                   = None
-    city:                  Optional[str]                   = None
-    state:                 Optional[str]                   = None
-    status:                Optional[str]                   = None
-    services:              Optional[List[str]]             = None
-    dsc_details:           Optional[List[ClientDSC]]       = None
-    assigned_to:           Optional[str]                   = None
-    notes:                 Optional[str]                   = None
-    referred_by:           Optional[str]                   = None
-    assignments:           Optional[List[ClientAssignment]]= None
+    company_name:          Optional[str]                    = None
+    client_type:           Optional[str]                    = None
+    client_type_label:     Optional[str]                    = None
+    contact_persons:       Optional[List[ContactPerson]]    = None
+    email:                 Optional[EmailStr]               = None
+    phone:                 Optional[str]                    = None
+    date_of_incorporation: Optional[Any]                    = None
+    birthday:              Optional[Any]                    = None
+    address:               Optional[str]                    = None
+    city:                  Optional[str]                    = None
+    state:                 Optional[str]                    = None
+    status:                Optional[str]                    = None
+    services:              Optional[List[str]]              = None
+    dsc_details:           Optional[List[ClientDSC]]        = None
+    assigned_to:           Optional[str]                    = None
+    notes:                 Optional[str]                    = None
+    referred_by:           Optional[str]                    = None
+    assignments:           Optional[List[ClientAssignment]] = None
 
 
 class MasterClientForm(BaseModel):
@@ -1098,7 +1198,7 @@ class LeadCreate(LeadBase):
 class Lead(LeadBase):
     model_config = ConfigDict(extra="ignore")
 
-    id:         str       = Field(default_factory=lambda: str(uuid.uuid4()))
+    id:         str  = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: Optional[Any] = None
 
@@ -1106,16 +1206,16 @@ class Lead(LeadBase):
 class LeadUpdate(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    company_name: Optional[str]       = None
-    contact_name: Optional[str]       = None
-    email:        Optional[EmailStr]  = None
-    phone:        Optional[str]       = None
-    services:     Optional[List[str]] = None
-    status:       Optional[LeadStatus]= None
-    source:       Optional[str]       = None
-    notes:        Optional[str]       = None
-    assigned_to:  Optional[str]       = None
-    referred_by:  Optional[str]       = None
+    company_name: Optional[str]        = None
+    contact_name: Optional[str]        = None
+    email:        Optional[EmailStr]   = None
+    phone:        Optional[str]        = None
+    services:     Optional[List[str]]  = None
+    status:       Optional[LeadStatus] = None
+    source:       Optional[str]        = None
+    notes:        Optional[str]        = None
+    assigned_to:  Optional[str]        = None
+    referred_by:  Optional[str]        = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1140,7 +1240,7 @@ class DueDateCreate(DueDateBase):
 class DueDate(DueDateBase):
     model_config = ConfigDict(extra="ignore")
 
-    id:         str       = Field(default_factory=lambda: str(uuid.uuid4()))
+    id:         str  = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: Optional[Any] = None
 
@@ -1180,48 +1280,48 @@ class Notification(NotificationBase):
 
 
 class AuditLog(BaseModel):
-    id:        str               = Field(default_factory=lambda: str(uuid.uuid4()))
+    id:        str            = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id:   str
     user_name: str
     action:    str
     module:    str
-    record_id: Optional[str]     = None
-    old_data:  Optional[dict]    = None
-    new_data:  Optional[dict]    = None
-    timestamp: Optional[Any]     = None
+    record_id: Optional[str]  = None
+    old_data:  Optional[dict] = None
+    new_data:  Optional[dict] = None
+    timestamp: Optional[Any]  = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DASHBOARD & METRICS
 # ─────────────────────────────────────────────────────────────────────────────
 class DashboardStats(BaseModel):
-    total_tasks:          int
-    completed_tasks:      int
-    pending_tasks:        int
-    overdue_tasks:        int
-    total_dsc:            int
-    expiring_dsc_count:   int
-    expiring_dsc_list:    List[dict]
-    expired_dsc_count:    int        = 0
-    total_clients:        int
-    upcoming_birthdays:   int
-    upcoming_due_dates:   int
-    team_workload:        List[dict]
-    compliance_status:    dict
+    total_tasks:         int
+    completed_tasks:     int
+    pending_tasks:       int
+    overdue_tasks:       int
+    total_dsc:           int
+    expiring_dsc_count:  int
+    expiring_dsc_list:   List[dict]
+    expired_dsc_count:   int        = 0
+    total_clients:       int
+    upcoming_birthdays:  int
+    upcoming_due_dates:  int
+    team_workload:       List[dict]
+    compliance_status:   dict
 
 
 class PerformanceMetric(BaseModel):
-    user_id:                  str
-    user_name:                str
-    profile_picture:          Optional[str] = None
-    attendance_percent:       float = 0.0
-    total_hours:              float = 0.0
-    task_completion_percent:  float = 0.0
-    todo_ontime_percent:      float = 0.0
-    timely_punchin_percent:   float = 0.0
-    overall_score:            float = 0.0
-    rank:                     int   = 0
-    badge:                    str   = "Good Performer"
+    user_id:                 str
+    user_name:               str
+    profile_picture:         Optional[str] = None
+    attendance_percent:      float         = 0.0
+    total_hours:             float         = 0.0
+    task_completion_percent: float         = 0.0
+    todo_ontime_percent:     float         = 0.0
+    timely_punchin_percent:  float         = 0.0
+    overall_score:           float         = 0.0
+    rank:                    int           = 0
+    badge:                   str           = "Good Performer"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1248,17 +1348,17 @@ class HolidayResponse(BaseModel):
 class EmailConnection(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    user_id:         str
-    provider:        str
-    method:          str
-    email_address:   Optional[str] = None
-    access_token:    Optional[str] = None
-    refresh_token:   Optional[str] = None
-    expires_at:      Optional[str] = None
-    app_password_enc:Optional[str] = None
-    imap_host:       Optional[str] = None
-    imap_port:       Optional[int] = None
-    connected_at:    Optional[str] = None
+    user_id:          str
+    provider:         str
+    method:           str
+    email_address:    Optional[str] = None
+    access_token:     Optional[str] = None
+    refresh_token:    Optional[str] = None
+    expires_at:       Optional[str] = None
+    app_password_enc: Optional[str] = None
+    imap_host:        Optional[str] = None
+    imap_port:        Optional[int] = None
+    connected_at:     Optional[str] = None
 
 
 class ExtractedEvent(BaseModel):
@@ -1280,17 +1380,16 @@ class ExtractedEvent(BaseModel):
 # PASSWORD VAULT
 # ─────────────────────────────────────────────────────────────────────────────
 class PasswordEntryCreate(BaseModel):
-    """Payload to create a new portal credential. Backend encrypts password_plain."""
-    portal_name:    str            = Field(..., min_length=2, max_length=120)
-    portal_type:    PortalType     = PortalType.OTHER
-    url:            Optional[str]  = None
-    username:       Optional[str]  = None
-    password_plain: Optional[str]  = None  # plain text — backend encrypts at rest
-    department:     str            = "OTHER"
-    client_name:    Optional[str]  = None
-    client_id:      Optional[str]  = None
-    notes:          Optional[str]  = None
-    tags:           List[str]      = Field(default_factory=list)
+    portal_name:    str           = Field(..., min_length=2, max_length=120)
+    portal_type:    PortalType    = PortalType.OTHER
+    url:            Optional[str] = None
+    username:       Optional[str] = None
+    password_plain: Optional[str] = None   # plain text; backend encrypts at rest
+    department:     str           = "OTHER"
+    client_name:    Optional[str] = None
+    client_id:      Optional[str] = None
+    notes:          Optional[str] = None
+    tags:           List[str]     = Field(default_factory=list)
 
     @field_validator("department")
     @classmethod
@@ -1314,11 +1413,6 @@ class PasswordEntryUpdate(BaseModel):
 
 
 class PasswordEntry(BaseModel):
-    """
-    Public-facing model returned by the API.
-    Never exposes the encrypted password field; use PasswordRevealResponse for
-    authorised reveals.
-    """
     model_config = ConfigDict(extra="ignore")
 
     id:               str
@@ -1336,14 +1430,13 @@ class PasswordEntry(BaseModel):
     created_at:       Optional[str] = None
     updated_at:       Optional[str] = None
     last_accessed_at: Optional[str] = None
-    has_password:     bool          = False  # True if an encrypted value exists
+    has_password:     bool          = False
 
 
 class PasswordRevealResponse(BaseModel):
-    """Returned only after explicit reveal — requires can_view_passwords."""
     id:          str
     username:    Optional[str]
-    password:    str            # decrypted at time of request; never stored plain
+    password:    str           # decrypted on request; never stored plain
     portal_name: str
 
 
@@ -1364,14 +1457,14 @@ class QuotationLineItem(BaseModel):
 
 
 class QuotationBase(BaseModel):
-    client_id:    Optional[str]              = None
-    client_name:  str
-    valid_until:  Optional[Any]              = None
-    currency:     str                        = "INR"
-    line_items:   List[QuotationLineItem]    = Field(default_factory=list)
-    notes:        Optional[str]              = None
-    terms:        Optional[str]              = None
-    status:       str                        = "draft"
+    client_id:   Optional[str]           = None
+    client_name: str
+    valid_until: Optional[Any]           = None
+    currency:    str                     = "INR"
+    line_items:  List[QuotationLineItem] = Field(default_factory=list)
+    notes:       Optional[str]           = None
+    terms:       Optional[str]           = None
+    status:      str                     = "draft"
 
 
 class QuotationCreate(QuotationBase):
@@ -1381,7 +1474,7 @@ class QuotationCreate(QuotationBase):
 class Quotation(QuotationBase):
     model_config = ConfigDict(extra="ignore")
 
-    id:           str       = Field(default_factory=lambda: str(uuid.uuid4()))
+    id:           str  = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by:   str
     created_at:   Optional[Any] = None
     updated_at:   Optional[Any] = None
@@ -1392,14 +1485,14 @@ class Quotation(QuotationBase):
 # VISITS
 # ─────────────────────────────────────────────────────────────────────────────
 class VisitBase(BaseModel):
-    client_id:     Optional[str] = None
-    client_name:   Optional[str] = None
-    purpose:       str
-    visit_date:    Any
-    location:      Optional[str] = None
-    notes:         Optional[str] = None
-    outcome:       Optional[str] = None
-    follow_up_date:Optional[Any] = None
+    client_id:      Optional[str] = None
+    client_name:    Optional[str] = None
+    purpose:        str
+    visit_date:     Any
+    location:       Optional[str] = None
+    notes:          Optional[str] = None
+    outcome:        Optional[str] = None
+    follow_up_date: Optional[Any] = None
 
 
 class VisitCreate(VisitBase):
@@ -1409,7 +1502,7 @@ class VisitCreate(VisitBase):
 class Visit(VisitBase):
     model_config = ConfigDict(extra="ignore")
 
-    id:         str       = Field(default_factory=lambda: str(uuid.uuid4()))
+    id:         str  = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id:    str
     created_at: Optional[Any] = None
     updated_at: Optional[Any] = None
@@ -1432,7 +1525,6 @@ class VisitUpdate(BaseModel):
 # PAGINATION HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 class PaginatedResponse(BaseModel):
-    """Generic paginated wrapper — extend with a typed data field where needed."""
     total: int
     page:  int
     limit: int
@@ -1444,3 +1536,33 @@ class PaginatedResponse(BaseModel):
             import math
             self.pages = math.ceil(self.total / self.limit)
         return self
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BACKEND PERMISSION GUARD HELPERS
+# Use these in route handlers to enforce access control cleanly.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def require_permission(user: User, perm: str, detail: str = "Insufficient permissions") -> None:
+    """
+    Raise an HTTP 403-equivalent ValueError if the user lacks perm.
+    Admin users always pass.  Integrate with FastAPI's HTTPException in routes.
+    """
+    if not user.has_permission(perm):
+        raise PermissionError(detail)
+
+
+def admin_or_permission(user: User, perm: str) -> bool:
+    """Convenience: True for admin or if the named permission is granted."""
+    return user.is_admin or user.has_permission(perm)
+
+
+def filter_for_user(user: User, records: List[Dict[str, Any]], owner_key: str = "created_by") -> List[Dict[str, Any]]:
+    """
+    Filter a list of record dicts so that:
+      - Admin sees everything.
+      - Others see only their own records (or those explicitly shared).
+    """
+    if user.is_admin:
+        return records
+    return [r for r in records if r.get(owner_key) == user.id]
