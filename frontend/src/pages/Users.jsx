@@ -270,13 +270,15 @@ const ModuleAccessBadges: React.FC<{ userData: UserData }> = ({ userData }) => {
     <div className="flex flex-wrap gap-2 mt-3">
       {badges.map((b, idx) => {
         const Icon = b.icon;
-        const style = b.active
-          ? `bg-${b.color}-50 text-${b.color}-700 border-${b.color}-200 dark:bg-${b.color}-900/30 dark:text-${b.color}-300`
-          : 'bg-slate-100 text-slate-400 border-slate-200 dark:bg-slate-800 dark:text-slate-500';
+        const colorClass = b.active ? b.color : 'slate';
         return (
           <span
             key={idx}
-            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-medium border ${style}`}
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-medium border ${
+              b.active 
+                ? `bg-${colorClass}-50 text-${colorClass}-700 border-${colorClass}-200 dark:bg-${colorClass}-900/30 dark:text-${colorClass}-300`
+                : 'bg-slate-100 text-slate-400 border-slate-200 dark:bg-slate-800 dark:text-slate-500'
+            }`}
           >
             <Icon className="h-3.5 w-3.5" />
             {b.label}
@@ -736,7 +738,6 @@ export default function Users() {
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [clientSearch, setClientSearch] = useState('');
-  const [roleChanged, setRoleChanged] = useState(false);
   const [activePermTab, setActivePermTab] = useState<'modules' | 'view' | 'ops' | 'edit' | 'cross' | 'clients'>('modules');
 
   const [formData, setFormData] = useState({
@@ -789,9 +790,8 @@ export default function Users() {
   }, []);
 
   const handleRoleChange = useCallback((newRole: string) => {
-    if (selectedUser && newRole !== formData.role) setRoleChanged(true);
     setFormData((p) => ({ ...p, role: newRole }));
-  }, [selectedUser, formData.role]);
+  }, []);
 
   const toggleDept = useCallback((dept: string) => {
     setFormData((p) => ({
@@ -812,7 +812,6 @@ export default function Users() {
 
   const handleEdit = useCallback((userData: UserData) => {
     setSelectedUser(userData);
-    setRoleChanged(false);
     setFormData({
       full_name: userData.full_name || '',
       email: userData.email || '',
@@ -1057,7 +1056,6 @@ export default function Users() {
           <Button
             onClick={() => {
               setSelectedUser(null);
-              setRoleChanged(false);
               setFormData({
                 full_name: '', email: '', password: '', role: 'staff',
                 departments: [], phone: '', birthday: '', profile_picture: '',
@@ -1650,7 +1648,7 @@ export default function Users() {
 
                   <div className="max-h-[460px] overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-3 pr-2">
                     {clients
-                      .filter((c) => c.company_name.toLowerCase().includes(clientSearch.toLowerCase()))
+                      .filter((c) => (c.company_name || '').toLowerCase().includes(clientSearch.toLowerCase()))
                       .map((client) => {
                         const isAssigned = (permissions.assigned_clients || []).includes(client.id);
                         return (
