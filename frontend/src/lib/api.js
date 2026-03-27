@@ -8,6 +8,7 @@ const BACKEND_URL =
   import.meta.env.VITE_API_URL ||
   "https://final-taskosphere-backend.onrender.com";
 
+// ⚠️ IMPORTANT: change only if backend does NOT use /api
 const BASE_URL = `${BACKEND_URL.replace(/\/$/, "")}/api`;
 
 const getToken = () =>
@@ -38,14 +39,27 @@ const api = axios.create({
 });
 
 /* ============================================================
-   REQUEST INTERCEPTOR (FIXED)
+   REQUEST INTERCEPTOR (FIXED PROPERLY)
    ============================================================ */
 api.interceptors.request.use(
   (config) => {
     const token = getToken();
 
-    // 🚫 BLOCK REQUEST IF NO TOKEN (MAIN FIX)
-    if (!token) {
+    // ✅ PUBLIC ROUTES (NO TOKEN REQUIRED)
+    const publicRoutes = [
+      "/auth/login",
+      "/auth/register",
+      "/auth/signup",
+      "/auth/forgot-password",
+      "/auth/reset-password",
+    ];
+
+    const isPublic = publicRoutes.some((route) =>
+      config.url?.includes(route)
+    );
+
+    // 🚫 BLOCK ONLY PROTECTED ROUTES
+    if (!token && !isPublic) {
       return Promise.reject({
         message: "No auth token — request blocked",
         __CANCEL__: true,
@@ -55,11 +69,19 @@ api.interceptors.request.use(
     activeRequests++;
     if (activeRequests === 1) setLoading(true);
 
-    config.headers.Authorization = `Bearer ${token}`;
+    // ✅ ATTACH TOKEN IF EXISTS
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    // DEBUG LOGIN (optional)
+    if (import.meta.env.DEV && config.url?.includes("/auth/login")) {
+      console.log("LOGIN REQUEST:", config.data);
+    }
 
     if (import.meta.env.DEV) {
       console.log(
-        `🚀 [API Request] ${config.method?.toUpperCase()} -> ${config.baseURL}${config.url}`
+        `API ${config.method?.toUpperCase()} -> ${config.baseURL}${config.url}`
       );
     }
 
@@ -73,7 +95,7 @@ api.interceptors.request.use(
 );
 
 /* ============================================================
-   RESPONSE INTERCEPTOR (IMPROVED)
+   RESPONSE INTERCEPTOR
    ============================================================ */
 api.interceptors.response.use(
   (response) => {
@@ -82,7 +104,7 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    // ✅ HANDLE BLOCKED REQUESTS (IMPORTANT)
+    // ✅ IGNORE BLOCKED REQUESTS
     if (error.__CANCEL__) {
       return Promise.reject(error);
     }
@@ -94,21 +116,17 @@ api.interceptors.response.use(
     const contentType = error.response?.headers["content-type"];
 
     if (contentType?.includes("text/html")) {
-      console.error(
-        "❌ CRITICAL: Received HTML instead of JSON. Check VITE_API_URL in Render."
-      );
+      console.error("Received HTML instead of JSON. Check API URL.");
     }
 
     if (!error.response) {
-      console.error(
-        "📡 Network Error: Backend is likely sleeping or CORS is blocked."
-      );
+      console.error("Network error or backend unreachable.");
       return Promise.reject(error);
     }
 
-    // 🔐 AUTO LOGOUT ON 401 ONLY (NOT 403)
+    // 🔐 AUTO LOGOUT ONLY ON 401
     if (status === 401) {
-      console.warn("🔑 Session expired — Logging out.");
+      console.warn("Session expired — logging out.");
 
       localStorage.removeItem("token");
       localStorage.removeItem("user");
@@ -139,11 +157,11 @@ export function useLoading() {
 }
 
 /* ============================================================
-   SKELETON — inline styles only
+   SKELETON COMPONENTS
    ============================================================ */
 const shimmerKeyframe = `
   @keyframes shimmer {
-    0%   { background-position: 200% 0; }
+    0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
   }
 `;
@@ -201,22 +219,8 @@ export function SkeletonPage({ cards = 4 }) {
   return (
     <>
       <style>{shimmerKeyframe}</style>
-      <div
-        style={{
-          padding: "24px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "12px",
-        }}
-      >
-        <div
-          style={{
-            width: "180px",
-            height: "24px",
-            marginBottom: "8px",
-            ...skBase,
-          }}
-        />
+      <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "12px" }}>
+        <div style={{ width: "180px", height: "24px", marginBottom: "8px", ...skBase }} />
         {Array.from({ length: cards }).map((_, i) => (
           <SkeletonCard key={i} rows={3} />
         ))}
