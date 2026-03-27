@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, memo, useDeferredValue } from 'react';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,11 +15,13 @@ import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import {
-  Plus, Shield, User as UserIcon, Settings, Eye,
+  Plus, Edit, Trash2, Shield, User as UserIcon, Settings, Eye,
   CheckCircle, XCircle, Search, Users as UsersIcon, Crown, Briefcase,
   Mail, Phone, Calendar, Camera, Clock, UserCheck, UserX,
-  KeyRound, Receipt, Target, Zap, Activity, BarChart2, Star, Layers, FileText, Bell,
-  ArrowUpRight, SlidersHorizontal, ShieldCheck, ShieldOff, Fingerprint, Download, Pencil, Inbox,
+  AlertCircle, KeyRound, Receipt, Target, Zap, Lock, ChevronRight,
+  Activity, BarChart2, Star, Layers, FileText, Bell,
+  Hash, ArrowUpRight, SlidersHorizontal, ShieldCheck,
+  ShieldOff, Fingerprint, Download, Pencil, Inbox,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -190,7 +193,7 @@ const slideIn = {
   visible: { opacity: 1, x: 0, transition: { duration: 0.3 } },
 };
 
-// ── Memoized Components ────────────────────────────────────────────────────────
+// ── Memoized Small Components ──────────────────────────────────────────────────
 const DeptPill = memo(({ dept }) => {
   const info = DEPARTMENTS.find((d) => d.value === dept);
   if (!info) return null;
@@ -307,10 +310,15 @@ const PendingUserCard = memo(({ userData, onApprove, onReject, approving }) => (
         </div>
 
         <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-lg text-slate-900 dark:text-white tracking-tight truncate">{userData.full_name}</h3>
+          <h3 className="font-semibold text-lg text-slate-900 dark:text-white tracking-tight truncate">
+            {userData.full_name}
+          </h3>
           <p className="text-sm text-slate-500 dark:text-slate-400 truncate mt-0.5">{userData.email}</p>
+
           <div className="flex flex-wrap gap-2 mt-4">
-            <Badge variant="secondary" className="capitalize text-xs font-medium">{userData.role}</Badge>
+            <Badge variant="secondary" className="capitalize text-xs font-medium">
+              {userData.role}
+            </Badge>
             <StatusBadge status={userData.status} />
           </div>
         </div>
@@ -525,51 +533,46 @@ const UserCard = memo(({
 const PermToggleRow = ({ permKey, label, desc, icon: Icon, permissions, setPermissions }) => {
   const isOn = !!permissions[permKey];
   return (
-    <div
-      className={`flex items-center justify-between px-5 py-4 rounded-3xl border transition-all ${
-        isOn
-          ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800'
-          : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
-      }`}
-    >
+    <div className={`flex items-center justify-between px-5 py-4 rounded-3xl border transition-all ${isOn
+      ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800'
+      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+    }`}>
       <div className="flex items-center gap-4 pr-6 flex-1 min-w-0">
         {Icon && (
-          <div
-            className={`w-9 h-9 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all ${
-              isOn ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-600' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
-            }`}
-          >
+          <div className={`w-9 h-9 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all ${isOn ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-600' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'}`}>
             <Icon className="h-4 w-4" />
           </div>
         )}
         <div className="min-w-0">
-          <p className={`font-semibold text-sm ${isOn ? 'text-emerald-800 dark:text-emerald-200' : 'text-slate-700 dark:text-slate-200'}`}>
-            {label}
-          </p>
+          <p className={`font-semibold text-sm ${isOn ? 'text-emerald-800 dark:text-emerald-200' : 'text-slate-700 dark:text-slate-200'}`}>{label}</p>
           <p className="text-xs text-slate-400 mt-0.5 leading-snug">{desc}</p>
         </div>
       </div>
-      <Switch checked={isOn} onCheckedChange={(val) => setPermissions((prev) => ({ ...prev, [permKey]: val }))} />
+      <Switch
+        checked={isOn}
+        onCheckedChange={(val) => setPermissions((prev) => ({ ...prev, [permKey]: val }))}
+      />
     </div>
   );
 };
 
-const ModuleAccessCard = ({ icon: Icon, title, desc, permKey, permissions, setPermissions, accentColor, badge }) => {
+const ModuleAccessCard = ({
+  icon: Icon, title, desc, permKey, permissions, setPermissions, accentColor, badge
+}) => {
   const isEnabled = !!permissions[permKey];
   const accent = accentColor || COLORS.mediumBlue;
 
   return (
     <div
       onClick={() => setPermissions((p) => ({ ...p, [permKey]: !p[permKey] }))}
-      className={`group relative flex gap-5 p-5 rounded-3xl border-2 cursor-pointer transition-all hover:shadow-xl ${
-        isEnabled ? 'shadow-md' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+      className={`group relative flex gap-5 p-5 rounded-3xl border-2 cursor-pointer transition-all hover:shadow-xl ${isEnabled
+        ? 'shadow-md'
+        : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
       }`}
       style={isEnabled ? { borderColor: `${accent}40`, background: `${accent}08` } : {}}
     >
       <div
-        className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all ${
-          isEnabled ? 'text-white shadow-lg' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
-        }`}
+        className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all ${isEnabled ? 'text-white shadow-lg' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'}`}
         style={isEnabled ? { background: `linear-gradient(135deg, ${accent}, ${accent}cc)` } : {}}
       >
         <Icon className="h-6 w-6" />
@@ -577,19 +580,13 @@ const ModuleAccessCard = ({ icon: Icon, title, desc, permKey, permissions, setPe
 
       <div className="flex-1 min-w-0 pt-1">
         <div className="flex items-center gap-2">
-          <p className={`font-semibold text-base ${isEnabled ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>
-            {title}
-          </p>
+          <p className={`font-semibold text-base ${isEnabled ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>{title}</p>
           {badge && <Badge variant="secondary" className="text-[10px]">{badge}</Badge>}
         </div>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{desc}</p>
       </div>
 
-      <div
-        className={`w-8 h-8 rounded-2xl flex items-center justify-center text-lg font-black transition-all flex-shrink-0 ${
-          isEnabled ? 'bg-emerald-500 text-white shadow' : 'bg-slate-100 dark:bg-slate-800 text-slate-300'
-        }`}
-      >
+      <div className={`w-8 h-8 rounded-2xl flex items-center justify-center text-lg font-black transition-all flex-shrink-0 ${isEnabled ? 'bg-emerald-500 text-white shadow' : 'bg-slate-100 dark:bg-slate-800 text-slate-300'}`}>
         {isEnabled ? '✓' : '✕'}
       </div>
     </div>
@@ -624,9 +621,7 @@ const PermissionMatrixSummary = ({ permissions }) => {
         <svg className="w-20 h-20 -rotate-90" viewBox="0 0 48 48">
           <circle cx="24" cy="24" r="20" fill="none" stroke="#e2e8f0" strokeWidth="6" />
           <circle
-            cx="24"
-            cy="24"
-            r="20"
+            cx="24" cy="24" r="20"
             fill="none"
             stroke={COLORS.emeraldGreen}
             strokeWidth="6"
@@ -641,9 +636,7 @@ const PermissionMatrixSummary = ({ permissions }) => {
       </div>
       <div className="flex-1">
         <p className="font-bold text-2xl tracking-tight">Permission Coverage</p>
-        <p className="text-slate-500 mt-1">
-          {granted} of {total} permissions enabled
-        </p>
+        <p className="text-slate-500 mt-1">{granted} of {total} permissions enabled</p>
       </div>
     </div>
   );
@@ -685,20 +678,10 @@ export default function Users() {
   const [activePermTab, setActivePermTab] = useState('modules');
 
   const [formData, setFormData] = useState({
-    full_name: '',
-    email: '',
-    password: '',
-    role: 'staff',
-    departments: [],
-    phone: '',
-    birthday: '',
-    profile_picture: '',
-    punch_in_time: '10:30',
-    grace_time: '00:10',
-    punch_out_time: '19:00',
-    telegram_id: '',
-    is_active: true,
-    status: 'active',
+    full_name: '', email: '', password: '', role: 'staff',
+    departments: [], phone: '', birthday: '', profile_picture: '',
+    punch_in_time: '10:30', grace_time: '00:10', punch_out_time: '19:00',
+    telegram_id: '', is_active: true, status: 'active',
   });
 
   const [permissions, setPermissions] = useState({ ...EMPTY_PERMISSIONS });
@@ -710,9 +693,12 @@ export default function Users() {
     const loadAllData = async () => {
       setIsInitialLoading(true);
       try {
-        const [usersRes, clientsRes] = await Promise.all([api.get('/users'), api.get('/clients')]);
-        setUsers(Array.isArray(usersRes.data) ? usersRes.data : usersRes.data?.data || []);
-        setClients(Array.isArray(clientsRes.data) ? clientsRes.data : clientsRes.data?.data || []);
+        const [usersRes, clientsRes] = await Promise.all([
+          api.get('/users'),
+          api.get('/clients'),
+        ]);
+        setUsers(Array.isArray(usersRes.data) ? usersRes.data : (usersRes.data?.data || []));
+        setClients(Array.isArray(clientsRes.data) ? clientsRes.data : (clientsRes.data?.data || []));
       } catch {
         toast.error('Failed to load users & clients');
       } finally {
@@ -768,7 +754,8 @@ export default function Users() {
       role: userData.role || 'staff',
       departments: userData.departments || [],
       phone: userData.phone || '',
-      birthday: userData.birthday && userData.birthday !== '' ? format(new Date(userData.birthday), 'yyyy-MM-dd') : '',
+      birthday: userData.birthday && userData.birthday !== ''
+        ? format(new Date(userData.birthday), 'yyyy-MM-dd') : '',
       profile_picture: userData.profile_picture || '',
       punch_in_time: userData.punch_in_time || '10:30',
       grace_time: userData.grace_time || '00:10',
@@ -781,8 +768,14 @@ export default function Users() {
   }, []);
 
   const handleSubmit = useCallback(async () => {
-    if (!formData.full_name.trim()) return toast.error('Full name is required');
-    if (!selectedUser && !formData.email.trim()) return toast.error('Email is required');
+    if (!formData.full_name.trim()) {
+      toast.error('Full name is required');
+      return;
+    }
+    if (!selectedUser && !formData.email.trim()) {
+      toast.error('Email is required');
+      return;
+    }
 
     setLoading(true);
     try {
@@ -805,6 +798,7 @@ export default function Users() {
           }),
           ...(isAdmin && formData.password.trim() && { password: formData.password.trim() }),
         };
+
         await api.put(`/users/${selectedUser.id}`, payload);
         if (selectedUser.id === user?.id) await refreshUser();
         toast.success('✓ User updated successfully');
@@ -826,6 +820,7 @@ export default function Users() {
         });
         toast.success('✓ Member registered — awaiting approval');
       }
+
       setDialogOpen(false);
     } catch (err) {
       const detail = err.response?.data?.detail;
@@ -836,15 +831,21 @@ export default function Users() {
   }, [selectedUser, formData, isAdmin, user?.id, refreshUser]);
 
   const handleDelete = useCallback(async (id) => {
-    if (!isAdmin && !canEditUsers) return toast.error('No permission to delete users');
-    if (id === user?.id) return toast.error('You cannot delete your own account');
+    if (!isAdmin && !canEditUsers) {
+      toast.error('No permission to delete users');
+      return;
+    }
+    if (id === user?.id) {
+      toast.error('You cannot delete your own account');
+      return;
+    }
     if (!window.confirm('Permanently delete this user and all their data?')) return;
 
     try {
       await api.delete(`/users/${id}`);
       toast.success('User removed');
       const res = await api.get('/users');
-      setUsers(Array.isArray(res.data) ? res.data : res.data?.data || []);
+      setUsers(Array.isArray(res.data) ? res.data : (res.data?.data || []));
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to delete user');
     }
@@ -858,7 +859,11 @@ export default function Users() {
   }, [fetchPermissions]);
 
   const handleSavePermissions = useCallback(async () => {
-    if (!canManagePermissions) return toast.error('Only administrators can update permissions');
+    if (!canManagePermissions) {
+      toast.error('Only administrators can update permissions');
+      return;
+    }
+
     setLoading(true);
     try {
       const ensureArray = (v) => (Array.isArray(v) ? v : []);
@@ -872,12 +877,13 @@ export default function Users() {
         view_other_todos: ensureArray(permissions.view_other_todos),
         view_other_activity: ensureArray(permissions.view_other_activity),
       };
+
       await api.put(`/users/${selectedUserForPerms?.id}/permissions`, payload);
       if (selectedUserForPerms?.id === user?.id) await refreshUser();
       toast.success('✓ Permissions saved');
       setPermDialogOpen(false);
       const res = await api.get('/users');
-      setUsers(Array.isArray(res.data) ? res.data : res.data?.data || []);
+      setUsers(Array.isArray(res.data) ? res.data : (res.data?.data || []));
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to update permissions');
     } finally {
@@ -891,13 +897,16 @@ export default function Users() {
   }, []);
 
   const handleApprove = useCallback(async (userData) => {
-    if (!isAdmin) return toast.error('Only admins can approve users');
+    if (!isAdmin) {
+      toast.error('Only admins can approve users');
+      return;
+    }
     setApprovingId(userData.id);
     try {
       await api.post(`/users/${userData.id}/approve`);
       toast.success(`✓ ${userData.full_name} approved`);
       const res = await api.get('/users');
-      setUsers(Array.isArray(res.data) ? res.data : res.data?.data || []);
+      setUsers(Array.isArray(res.data) ? res.data : (res.data?.data || []));
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to approve');
     } finally {
@@ -906,14 +915,18 @@ export default function Users() {
   }, [isAdmin]);
 
   const handleReject = useCallback(async (userData) => {
-    if (!isAdmin) return toast.error('Only admins can reject users');
+    if (!isAdmin) {
+      toast.error('Only admins can reject users');
+      return;
+    }
     if (!window.confirm(`Reject ${userData.full_name}?`)) return;
+
     setApprovingId(userData.id);
     try {
       await api.post(`/users/${userData.id}/reject`);
       toast.success(`${userData.full_name} rejected`);
       const res = await api.get('/users');
-      setUsers(Array.isArray(res.data) ? res.data : res.data?.data || []);
+      setUsers(Array.isArray(res.data) ? res.data : (res.data?.data || []));
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to reject');
     } finally {
@@ -927,6 +940,7 @@ export default function Users() {
     const q = deferredSearch.toLowerCase();
     return users.filter((u) => {
       const match = (u.full_name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
+
       if (activeTab === 'pending') return match && u.status === 'pending_approval';
       if (activeTab === 'rejected') return match && u.status === 'rejected';
       if (activeTab === 'all') return match;
@@ -934,15 +948,12 @@ export default function Users() {
     });
   }, [users, deferredSearch, activeTab]);
 
-  const stats = useMemo(
-    () => [
-      { label: 'Total Members', value: users.length, icon: UsersIcon, color: COLORS.mediumBlue },
-      { label: 'Admins', value: users.filter((u) => u.role === 'admin').length, icon: Crown, color: COLORS.indigo },
-      { label: 'Pending', value: pendingUsers.length, icon: Clock, color: '#D97706' },
-      { label: 'Active', value: users.filter((u) => u.is_active).length, icon: CheckCircle, color: COLORS.emeraldGreen },
-    ],
-    [users, pendingUsers.length]
-  );
+  const stats = useMemo(() => [
+    { label: 'Total Members', value: users.length, icon: UsersIcon, color: COLORS.mediumBlue },
+    { label: 'Admins', value: users.filter((u) => u.role === 'admin').length, icon: Crown, color: COLORS.indigo },
+    { label: 'Pending', value: pendingUsers.length, icon: Clock, color: '#D97706' },
+    { label: 'Active', value: users.filter((u) => u.is_active).length, icon: CheckCircle, color: COLORS.emeraldGreen },
+  ], [users, pendingUsers.length]);
 
   if (!canViewUserPage) {
     return (
@@ -984,20 +995,10 @@ export default function Users() {
             onClick={() => {
               setSelectedUser(null);
               setFormData({
-                full_name: '',
-                email: '',
-                password: '',
-                role: 'staff',
-                departments: [],
-                phone: '',
-                birthday: '',
-                profile_picture: '',
-                punch_in_time: '10:30',
-                grace_time: '00:10',
-                punch_out_time: '19:00',
-                telegram_id: '',
-                is_active: true,
-                status: 'active',
+                full_name: '', email: '', password: '', role: 'staff',
+                departments: [], phone: '', birthday: '', profile_picture: '',
+                punch_in_time: '10:30', grace_time: '00:10', punch_out_time: '19:00',
+                telegram_id: '', is_active: true, status: 'active',
               });
               setDialogOpen(true);
             }}
@@ -1034,7 +1035,7 @@ export default function Users() {
         })}
       </motion.div>
 
-      {/* Create / Edit Dialog */}
+      {/* Create/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto rounded-3xl p-0 border-0 shadow-2xl">
           <div className="sticky top-0 z-10 bg-white dark:bg-slate-900 rounded-t-3xl">
@@ -1073,7 +1074,13 @@ export default function Users() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block">FULL NAME</Label>
-                <Input name="full_name" value={formData.full_name} onChange={handleInput} placeholder="Full Name" className="h-12 rounded-2xl" />
+                <Input
+                  name="full_name"
+                  value={formData.full_name}
+                  onChange={handleInput}
+                  placeholder="Full Name"
+                  className="h-12 rounded-2xl"
+                />
               </div>
               <div>
                 <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block">EMAIL ADDRESS</Label>
@@ -1103,7 +1110,7 @@ export default function Users() {
                   name="password"
                   value={formData.password}
                   onChange={handleInput}
-                  placeholder={selectedUser ? 'Leave blank to keep current' : 'Secure password'}
+                  placeholder={selectedUser ? "Leave blank to keep current" : "Secure password"}
                   className="h-12 rounded-2xl"
                 />
               </div>
@@ -1306,7 +1313,7 @@ export default function Users() {
         )}
       </motion.div>
 
-      {/* Permissions / Access Governance Dialog (FULLY EXPANDED) */}
+      {/* Permissions / Access Governance Dialog */}
       <Dialog open={permDialogOpen} onOpenChange={setPermDialogOpen}>
         <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto rounded-3xl p-0 border-0 shadow-2xl">
           <div className="sticky top-0 z-10 bg-white dark:bg-slate-900 rounded-t-3xl">
@@ -1315,7 +1322,9 @@ export default function Users() {
               <DialogTitle className="text-2xl font-bold text-slate-900 dark:text-white">
                 Permissions — {selectedUserForPerms?.full_name}
               </DialogTitle>
-              <DialogDescription className="text-sm text-slate-500 mt-1">Configure access levels and module permissions</DialogDescription>
+              <DialogDescription className="text-sm text-slate-500 mt-1">
+                Configure access levels and module permissions
+              </DialogDescription>
             </div>
           </div>
 
@@ -1324,13 +1333,28 @@ export default function Users() {
 
             {/* Quick Reset Buttons */}
             <div className="flex flex-wrap gap-3">
-              <Button variant="outline" size="sm" onClick={() => resetPermissionsToRole('staff')} className="rounded-2xl">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => resetPermissionsToRole('staff')}
+                className="rounded-2xl"
+              >
                 Staff Template
               </Button>
-              <Button variant="outline" size="sm" onClick={() => resetPermissionsToRole('manager')} className="rounded-2xl">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => resetPermissionsToRole('manager')}
+                className="rounded-2xl"
+              >
                 Manager Template
               </Button>
-              <Button variant="outline" size="sm" onClick={() => resetPermissionsToRole('admin')} className="rounded-2xl">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => resetPermissionsToRole('admin')}
+                className="rounded-2xl"
+              >
                 Admin Template
               </Button>
             </div>
@@ -1399,7 +1423,12 @@ export default function Users() {
               {/* View Tab */}
               {activePermTab === 'view' && (
                 <div>
-                  <SectionHeader icon={Eye} title="View Permissions" color="#3B82F6" count={GLOBAL_PERMS.filter((p) => permissions[p.key]).length} />
+                  <SectionHeader
+                    icon={Eye}
+                    title="View Permissions"
+                    color="#3B82F6"
+                    count={GLOBAL_PERMS.filter((p) => permissions[p.key]).length}
+                  />
                   <div className="space-y-3">
                     {GLOBAL_PERMS.map((p) => (
                       <PermToggleRow
@@ -1419,7 +1448,12 @@ export default function Users() {
               {/* Operations Tab */}
               {activePermTab === 'ops' && (
                 <div>
-                  <SectionHeader icon={Settings} title="Operational Controls" color="#8B5CF6" count={OPS_PERMS.filter((p) => permissions[p.key]).length} />
+                  <SectionHeader
+                    icon={Settings}
+                    title="Operational Controls"
+                    color="#8B5CF6"
+                    count={OPS_PERMS.filter((p) => permissions[p.key]).length}
+                  />
                   <div className="space-y-3">
                     {OPS_PERMS.map((p) => (
                       <PermToggleRow
@@ -1439,7 +1473,12 @@ export default function Users() {
               {/* Edit Tab */}
               {activePermTab === 'edit' && (
                 <div>
-                  <SectionHeader icon={Pencil} title="Modification Rights" color="#F59E0B" count={EDIT_PERMS.filter((p) => permissions[p.key]).length} />
+                  <SectionHeader
+                    icon={Pencil}
+                    title="Modification Rights"
+                    color="#F59E0B"
+                    count={EDIT_PERMS.filter((p) => permissions[p.key]).length}
+                  />
                   <div className="space-y-3">
                     {EDIT_PERMS.map((p) => (
                       <PermToggleRow
@@ -1492,16 +1531,16 @@ export default function Users() {
                               return (
                                 <button
                                   key={u.id}
-                                  onClick={() =>
-                                    setPermissions((prev) => ({
-                                      ...prev,
-                                      [section.key]: isSelected
-                                        ? (prev[section.key] || []).filter((id) => id !== u.id)
-                                        : [...(prev[section.key] || []), u.id],
-                                    }))
-                                  }
+                                  onClick={() => setPermissions((prev) => ({
+                                    ...prev,
+                                    [section.key]: isSelected
+                                      ? (prev[section.key] || []).filter((id) => id !== u.id)
+                                      : [...(prev[section.key] || []), u.id],
+                                  }))}
                                   className={`px-5 py-2.5 rounded-2xl text-sm font-medium border-2 transition-all ${
-                                    isSelected ? 'text-white border-transparent shadow-md' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                                    isSelected
+                                      ? 'text-white border-transparent shadow-md'
+                                      : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
                                   }`}
                                   style={isSelected ? { background: section.color } : {}}
                                 >
@@ -1520,8 +1559,11 @@ export default function Users() {
               {activePermTab === 'clients' && (
                 <div className="space-y-6">
                   <SectionHeader icon={Briefcase} title="Client Portfolio" color={COLORS.teal} />
+
                   <div className="flex justify-between items-center">
-                    <p className="text-lg font-semibold">{(permissions.assigned_clients || []).length} clients assigned</p>
+                    <p className="text-lg font-semibold">
+                      {(permissions.assigned_clients || []).length} clients assigned
+                    </p>
                     {(permissions.assigned_clients || []).length > 0 && (
                       <Button
                         variant="ghost"
@@ -1573,7 +1615,11 @@ export default function Users() {
                             >
                               {isAssigned ? <CheckCircle className="h-5 w-5" /> : <Briefcase className="h-5 w-5" />}
                             </div>
-                            <span className={`font-medium leading-tight ${isAssigned ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-700 dark:text-slate-200'}`}>
+                            <span
+                              className={`font-medium leading-tight ${
+                                isAssigned ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-700 dark:text-slate-200'
+                              }`}
+                            >
                               {client.company_name}
                             </span>
                           </button>
@@ -1597,7 +1643,12 @@ export default function Users() {
               <Button variant="outline" onClick={() => setPermDialogOpen(false)} className="h-12 px-8 rounded-2xl">
                 Cancel
               </Button>
-              <Button onClick={handleSavePermissions} disabled={loading} className="h-12 px-10 rounded-2xl font-semibold" style={{ background: GRAD_GREEN, color: 'white' }}>
+              <Button
+                onClick={handleSavePermissions}
+                disabled={loading}
+                className="h-12 px-10 rounded-2xl font-semibold"
+                style={{ background: GRAD_GREEN, color: 'white' }}
+              >
                 {loading ? 'Saving Changes...' : 'Save Permissions'}
               </Button>
             </div>
