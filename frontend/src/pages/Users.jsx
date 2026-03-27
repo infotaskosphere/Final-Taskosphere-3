@@ -38,7 +38,7 @@ const COLORS = {
   teal: '#0F766E',
   amber: '#B45309',
   slate: '#475569',
-} as const;
+};
 
 const GRADIENT = `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`;
 const GRAD_GREEN = `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)`;
