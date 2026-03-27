@@ -27,8 +27,7 @@ import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // ── Color Palette ─────────────────────────────────────────────────────────────
-
-const COLORS = Object.freeze({
+const COLORS = {
   deepBlue: '#0D3B66',
   mediumBlue: '#1F6FB2',
   emeraldGreen: '#1FAF5A',
@@ -38,7 +37,7 @@ const COLORS = Object.freeze({
   teal: '#0F766E',
   amber: '#B45309',
   slate: '#475569',
-});
+};
 
 const GRADIENT = `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`;
 const GRAD_GREEN = `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)`;
@@ -55,14 +54,14 @@ const DEPARTMENTS = [
   { value: 'FEMA', label: 'FEMA', color: '#334155', bg: '#F8FAFC' },
   { value: 'DSC', label: 'DSC', color: '#3F3F46', bg: '#FAFAFA' },
   { value: 'OTHER', label: 'OTHER', color: '#475569', bg: '#F8FAFC' },
-] as const;
+];
 
 // ── Role Configuration ─────────────────────────────────────────────────────────
 const ROLE_CONFIG = {
   admin: { gradient: 'from-violet-600 to-indigo-600', textColor: 'text-white', icon: Crown, label: 'Admin' },
   manager: { gradient: 'from-blue-500 to-cyan-500', textColor: 'text-white', icon: Briefcase, label: 'Manager' },
   staff: { gradient: 'from-slate-400 to-slate-500', textColor: 'text-white', icon: UserIcon, label: 'Staff' },
-} as const;
+};
 
 // ── Default Permissions ────────────────────────────────────────────────────────
 const DEFAULT_ROLE_PERMISSIONS = {
@@ -117,7 +116,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
     assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
     view_other_reports: [], view_other_todos: [], view_other_activity: [],
   },
-} as const;
+};
 
 const EMPTY_PERMISSIONS = {
   can_view_all_tasks: false, can_view_all_clients: false, can_view_all_dsc: false,
@@ -135,7 +134,7 @@ const EMPTY_PERMISSIONS = {
   view_password_departments: [],
   assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
   view_other_reports: [], view_other_todos: [], view_other_activity: [],
-} as const;
+};
 
 // ── Permission Definitions ─────────────────────────────────────────────────────
 const GLOBAL_PERMS = [
@@ -153,7 +152,7 @@ const GLOBAL_PERMS = [
   { key: 'can_view_staff_rankings', label: 'Staff Rankings', desc: 'View performance leaderboard', icon: Star },
   { key: 'can_view_own_data', label: 'View Own Data', desc: 'Access own attendance, tasks and reports', icon: UserIcon },
   { key: 'can_create_quotations', label: 'Quotations Module', desc: 'Create, edit, export and share quotations', icon: Receipt },
-] as const;
+];
 
 const OPS_PERMS = [
   { key: 'can_assign_tasks', label: 'Task Delegation', desc: 'Assign tasks to other staff members', icon: ArrowUpRight },
@@ -167,7 +166,7 @@ const OPS_PERMS = [
   { key: 'can_delete_data', label: 'Delete Records', desc: 'Permanently delete data entries', icon: Trash2 },
   { key: 'can_delete_tasks', label: 'Delete Tasks', desc: 'Delete any task regardless of ownership', icon: XCircle },
   { key: 'can_connect_email', label: 'Connect Email Accounts', desc: 'Link personal email via IMAP integration', icon: Inbox },
-] as const;
+];
 
 const EDIT_PERMS = [
   { key: 'can_edit_tasks', label: 'Modify Tasks', desc: 'Update and delete task definitions', icon: Pencil },
@@ -176,7 +175,7 @@ const EDIT_PERMS = [
   { key: 'can_edit_documents', label: 'Modify Documents', desc: 'Change document records', icon: FileText },
   { key: 'can_edit_due_dates', label: 'Modify Due Dates', desc: 'Edit statutory compliance timelines', icon: Calendar },
   { key: 'can_edit_users', label: 'Modify Users', desc: 'Update user profiles and settings', icon: UserIcon },
-] as const;
+];
 
 // ── Animation Variants ─────────────────────────────────────────────────────────
 const containerVariants = {
@@ -195,7 +194,7 @@ const slideIn = {
 };
 
 // ── Department Pill Component ──────────────────────────────────────────────────
-const DeptPill: React.FC<{ dept: string; size?: string }> = ({ dept, size = 'sm' }) => {
+const DeptPill = ({ dept, size = 'sm' }) => {
   const info = DEPARTMENTS.find(d => d.value === dept);
   if (!info) return null;
   return (
@@ -209,7 +208,7 @@ const DeptPill: React.FC<{ dept: string; size?: string }> = ({ dept, size = 'sm'
 };
 
 // ── Status Badge Component ─────────────────────────────────────────────────────
-const StatusBadge: React.FC<{ status?: string; isActive?: boolean }> = ({ status, isActive }) => {
+const StatusBadge = ({ status, isActive }) => {
   const resolved = status || (isActive !== false ? 'active' : 'inactive');
   const statusConfig = {
     active: { label: 'Active', cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' },
@@ -217,7 +216,7 @@ const StatusBadge: React.FC<{ status?: string; isActive?: boolean }> = ({ status
     rejected: { label: 'Rejected', cls: 'bg-red-100 text-red-700 border-red-200', dot: 'bg-red-500' },
     inactive: { label: 'Inactive', cls: 'bg-slate-100 text-slate-600 border-slate-200', dot: 'bg-slate-400' },
   };
-  const cfg = statusConfig[resolved as keyof typeof statusConfig] || statusConfig.inactive;
+  const cfg = statusConfig[resolved] || statusConfig.inactive;
   return (
     <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-semibold ${cfg.cls}`}>
       <span className={`w-2 h-2 rounded-full ${cfg.dot} ${resolved === 'active' ? 'animate-pulse' : ''}`} />
@@ -227,27 +226,7 @@ const StatusBadge: React.FC<{ status?: string; isActive?: boolean }> = ({ status
 };
 
 // ── Module Access Badges Component ─────────────────────────────────────────────
-interface UserData {
-  id: string;
-  role: string;
-  full_name: string;
-  email: string;
-  phone?: string;
-  birthday?: string;
-  profile_picture?: string;
-  punch_in_time?: string;
-  punch_out_time?: string;
-  grace_time?: string;
-  telegram_id?: number;
-  is_active: boolean;
-  status: string;
-  departments?: string[];
-  permissions?: Record<string, any>;
-  created_at?: string;
-  [key: string]: any;
-}
-
-const ModuleAccessBadges: React.FC<{ userData: UserData }> = ({ userData }) => {
+const ModuleAccessBadges = ({ userData }) => {
   if (userData.role === 'admin') return null;
   
   const hasLeads = !!userData.permissions?.can_view_all_leads;
@@ -256,10 +235,9 @@ const ModuleAccessBadges: React.FC<{ userData: UserData }> = ({ userData }) => {
   const canEditPass = !!userData.permissions?.can_edit_passwords;
 
   const badges = [
-    { show: true, label: 'Leads', active: hasLeads, color: 'blue', icon: Target },
-    { show: true, label: 'Quotes', active: hasQuotations, color: 'violet', icon: Receipt },
+    { label: 'Leads', active: hasLeads, color: 'blue', icon: Target },
+    { label: 'Quotes', active: hasQuotations, color: 'violet', icon: Receipt },
     {
-      show: true,
       label: !hasPasswords ? 'Vault' : canEditPass ? 'Vault R/W' : 'Vault R',
       active: hasPasswords,
       color: canEditPass ? 'amber' : 'teal',
@@ -291,14 +269,7 @@ const ModuleAccessBadges: React.FC<{ userData: UserData }> = ({ userData }) => {
 };
 
 // ── Pending User Card Component ────────────────────────────────────────────────
-interface PendingUserCardProps {
-  userData: UserData;
-  onApprove: (user: UserData) => void;
-  onReject: (user: UserData) => void;
-  approving: string | null;
-}
-
-const PendingUserCard: React.FC<PendingUserCardProps> = ({ userData, onApprove, onReject, approving }) => (
+const PendingUserCard = ({ userData, onApprove, onReject, approving }) => (
   <motion.div
     variants={itemVariants}
     layout
@@ -342,7 +313,7 @@ const PendingUserCard: React.FC<PendingUserCardProps> = ({ userData, onApprove, 
 
       {(userData.departments || []).length > 0 && (
         <div className="flex flex-wrap gap-2 mt-5">
-          {userData.departments!.map((d: string) => <DeptPill key={d} dept={d} />)}
+          {userData.departments.map((d) => <DeptPill key={d} dept={d} />)}
         </div>
       )}
 
@@ -382,27 +353,13 @@ const PendingUserCard: React.FC<PendingUserCardProps> = ({ userData, onApprove, 
 );
 
 // ── User Card Component ────────────────────────────────────────────────────────
-interface UserCardProps {
-  userData: UserData;
-  onEdit: (user: UserData) => void;
-  onDelete: (id: string) => void;
-  onPermissions: (user: UserData) => void;
-  onApprove: (user: UserData) => void;
-  onReject: (user: UserData) => void;
-  currentUserId: string;
-  isAdmin: boolean;
-  canEditUsers: boolean;
-  canManagePermissions: boolean;
-  approving: string | null;
-}
-
-const UserCard: React.FC<UserCardProps> = ({
+const UserCard = ({
   userData, onEdit, onDelete, onPermissions, onApprove, onReject,
   currentUserId, isAdmin, canEditUsers, canManagePermissions, approving
 }) => {
   const [hovered, setHovered] = useState(false);
   const isPending = userData.status === 'pending_approval';
-  const roleCfg = ROLE_CONFIG[userData.role?.toLowerCase() as keyof typeof ROLE_CONFIG] || ROLE_CONFIG.staff;
+  const roleCfg = ROLE_CONFIG[userData.role?.toLowerCase()] || ROLE_CONFIG.staff;
   const RoleIcon = roleCfg.icon;
 
   const permCount = useMemo(() => {
@@ -496,7 +453,7 @@ const UserCard: React.FC<UserCardProps> = ({
 
         {(userData.departments || []).length > 0 && (
           <div className="flex flex-wrap gap-2 mt-6">
-            {userData.departments!.map((d: string) => <DeptPill key={d} dept={d} />)}
+            {userData.departments.map((d) => <DeptPill key={d} dept={d} />)}
           </div>
         )}
 
@@ -561,16 +518,7 @@ const UserCard: React.FC<UserCardProps> = ({
 };
 
 // ── Permission Toggle Row Component ────────────────────────────────────────────
-interface PermToggleRowProps {
-  permKey: string;
-  label: string;
-  desc: string;
-  icon: React.ComponentType<{ className?: string }>;
-  permissions: Record<string, any>;
-  setPermissions: (fn: (prev: Record<string, any>) => Record<string, any>) => void;
-}
-
-const PermToggleRow: React.FC<PermToggleRowProps> = ({ permKey, label, desc, icon: Icon, permissions, setPermissions }) => {
+const PermToggleRow = ({ permKey, label, desc, icon: Icon, permissions, setPermissions }) => {
   const isOn = !!permissions[permKey];
   return (
     <div className={`flex items-center justify-between px-5 py-4 rounded-3xl border transition-all ${isOn
@@ -597,18 +545,7 @@ const PermToggleRow: React.FC<PermToggleRowProps> = ({ permKey, label, desc, ico
 };
 
 // ── Module Access Card Component ───────────────────────────────────────────────
-interface ModuleAccessCardProps {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  desc: string;
-  permKey: string;
-  permissions: Record<string, any>;
-  setPermissions: (fn: (prev: Record<string, any>) => Record<string, any>) => void;
-  accentColor?: string;
-  badge?: string;
-}
-
-const ModuleAccessCard: React.FC<ModuleAccessCardProps> = ({
+const ModuleAccessCard = ({
   icon: Icon, title, desc, permKey, permissions, setPermissions, accentColor, badge
 }) => {
   const isEnabled = !!permissions[permKey];
@@ -646,14 +583,7 @@ const ModuleAccessCard: React.FC<ModuleAccessCardProps> = ({
 };
 
 // ── Section Header Component ───────────────────────────────────────────────────
-interface SectionHeaderProps {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  count?: number;
-  color: string;
-}
-
-const SectionHeader: React.FC<SectionHeaderProps> = ({ icon: Icon, title, count, color }) => (
+const SectionHeader = ({ icon: Icon, title, count, color }) => (
   <div className="flex items-center gap-4 mb-6">
     <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: `${color}15` }}>
       <Icon className="h-5 w-5" style={{ color }} />
@@ -670,11 +600,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ icon: Icon, title, count,
 );
 
 // ── Permission Matrix Summary Component ─────────────────────────────────────────
-interface PermissionMatrixSummaryProps {
-  permissions: Record<string, any>;
-}
-
-const PermissionMatrixSummary: React.FC<PermissionMatrixSummaryProps> = ({ permissions }) => {
+const PermissionMatrixSummary = ({ permissions }) => {
   const allPerms = [...GLOBAL_PERMS, ...OPS_PERMS, ...EDIT_PERMS];
   const granted = allPerms.filter(p => permissions[p.key]).length;
   const total = allPerms.length;
@@ -715,7 +641,7 @@ const permTabs = [
   { id: 'edit', label: 'Edit', icon: Pencil },
   { id: 'cross', label: 'Cross-User', icon: UsersIcon },
   { id: 'clients', label: 'Clients', icon: Briefcase },
-] as const;
+];
 
 // ── Main Users Component ───────────────────────────────────────────────────────
 export default function Users() {
@@ -728,27 +654,27 @@ export default function Users() {
   const canEditUsers = isAdmin || !!perms.can_manage_users;
   const canManagePermissions = isAdmin;
 
-  const [users, setUsers] = useState<UserData[]>([]);
-  const [clients, setClients] = useState<any[]>([]);
+  const [users, setUsers] = useState([]);
+  const [clients, setClients] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [permDialogOpen, setPermDialogOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<UserData | null>(null);
-  const [selectedUserForPerms, setSelectedUserForPerms] = useState<UserData | null>(null);
-  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedUserForPerms, setSelectedUserForPerms] = useState(null);
+  const [approvingId, setApprovingId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [clientSearch, setClientSearch] = useState('');
-  const [activePermTab, setActivePermTab] = useState<'modules' | 'view' | 'ops' | 'edit' | 'cross' | 'clients'>('modules');
+  const [activePermTab, setActivePermTab] = useState('modules');
 
   const [formData, setFormData] = useState({
     full_name: '', email: '', password: '', role: 'staff',
-    departments: [] as string[], phone: '', birthday: '', profile_picture: '',
+    departments: [], phone: '', birthday: '', profile_picture: '',
     punch_in_time: '10:30', grace_time: '00:10', punch_out_time: '19:00',
     telegram_id: '', is_active: true, status: 'active',
   });
 
-  const [permissions, setPermissions] = useState<Record<string, any>>({ ...EMPTY_PERMISSIONS });
+  const [permissions, setPermissions] = useState({ ...EMPTY_PERMISSIONS });
 
   useEffect(() => {
     if (canViewUserPage) {
@@ -775,7 +701,7 @@ export default function Users() {
     } catch {}
   }, []);
 
-  const fetchPermissions = useCallback(async (userId: string) => {
+  const fetchPermissions = useCallback(async (userId) => {
     try {
       const res = await api.get(`/users/${userId}/permissions`);
       setPermissions({ ...EMPTY_PERMISSIONS, ...(res.data || {}) });
@@ -785,16 +711,16 @@ export default function Users() {
     }
   }, []);
 
-  const handleInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInput = useCallback((e) => {
     const { name, value } = e.target;
     setFormData((p) => ({ ...p, [name]: value }));
   }, []);
 
-  const handleRoleChange = useCallback((newRole: string) => {
+  const handleRoleChange = useCallback((newRole) => {
     setFormData((p) => ({ ...p, role: newRole }));
   }, []);
 
-  const toggleDept = useCallback((dept: string) => {
+  const toggleDept = useCallback((dept) => {
     setFormData((p) => ({
       ...p,
       departments: p.departments.includes(dept)
@@ -803,15 +729,15 @@ export default function Users() {
     }));
   }, []);
 
-  const handlePhoto = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhoto = useCallback((e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onloadend = () => setFormData((p) => ({ ...p, profile_picture: reader.result as string }));
+    reader.onloadend = () => setFormData((p) => ({ ...p, profile_picture: reader.result }));
     reader.readAsDataURL(file);
   }, []);
 
-  const handleEdit = useCallback((userData: UserData) => {
+  const handleEdit = useCallback((userData) => {
     setSelectedUser(userData);
     setFormData({
       full_name: userData.full_name || '',
@@ -889,7 +815,7 @@ export default function Users() {
 
       setDialogOpen(false);
       fetchUsers();
-    } catch (err: any) {
+    } catch (err) {
       const detail = err.response?.data?.detail;
       toast.error(typeof detail === 'string' ? detail : 'Failed to save user');
     } finally {
@@ -897,7 +823,7 @@ export default function Users() {
     }
   }, [selectedUser, formData, isAdmin, user?.id, refreshUser, fetchUsers]);
 
-  const handleDelete = useCallback(async (id: string) => {
+  const handleDelete = useCallback(async (id) => {
     if (!isAdmin && !canEditUsers) {
       toast.error('No permission to delete users');
       return;
@@ -912,12 +838,12 @@ export default function Users() {
       await api.delete(`/users/${id}`);
       toast.success('User removed');
       fetchUsers();
-    } catch (err: any) {
+    } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to delete user');
     }
   }, [isAdmin, canEditUsers, user?.id, fetchUsers]);
 
-  const openPermissionsDialog = useCallback(async (userData: UserData) => {
+  const openPermissionsDialog = useCallback(async (userData) => {
     setSelectedUserForPerms(userData);
     setActivePermTab('modules');
     await fetchPermissions(userData.id);
@@ -932,7 +858,7 @@ export default function Users() {
 
     setLoading(true);
     try {
-      const ensureArray = (v: any) => (Array.isArray(v) ? v : []);
+      const ensureArray = (v) => (Array.isArray(v) ? v : []);
       const payload = {
         ...permissions,
         view_password_departments: ensureArray(permissions.view_password_departments),
@@ -949,19 +875,19 @@ export default function Users() {
       toast.success('✓ Permissions saved');
       setPermDialogOpen(false);
       fetchUsers();
-    } catch (err: any) {
+    } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to update permissions');
     } finally {
       setLoading(false);
     }
   }, [canManagePermissions, permissions, selectedUserForPerms?.id, user?.id, refreshUser, fetchUsers]);
 
-  const resetPermissionsToRole = useCallback((role: string) => {
-    setPermissions({ ...(DEFAULT_ROLE_PERMISSIONS[role as keyof typeof DEFAULT_ROLE_PERMISSIONS] || EMPTY_PERMISSIONS) });
+  const resetPermissionsToRole = useCallback((role) => {
+    setPermissions({ ...(DEFAULT_ROLE_PERMISSIONS[role] || EMPTY_PERMISSIONS) });
     toast.info(`Reset to ${role} defaults — click Save to apply`);
   }, []);
 
-  const handleApprove = useCallback(async (userData: UserData) => {
+  const handleApprove = useCallback(async (userData) => {
     if (!isAdmin) {
       toast.error('Only admins can approve users');
       return;
@@ -971,14 +897,14 @@ export default function Users() {
       await api.post(`/users/${userData.id}/approve`);
       toast.success(`✓ ${userData.full_name} approved`);
       fetchUsers();
-    } catch (err: any) {
+    } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to approve');
     } finally {
       setApprovingId(null);
     }
   }, [isAdmin, fetchUsers]);
 
-  const handleReject = useCallback(async (userData: UserData) => {
+  const handleReject = useCallback(async (userData) => {
     if (!isAdmin) {
       toast.error('Only admins can reject users');
       return;
@@ -990,7 +916,7 @@ export default function Users() {
       await api.post(`/users/${userData.id}/reject`);
       toast.success(`${userData.full_name} rejected`);
       fetchUsers();
-    } catch (err: any) {
+    } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to reject');
     } finally {
       setApprovingId(null);
@@ -1193,7 +1119,7 @@ export default function Users() {
                 ].map((f) => (
                   <div key={f.name}>
                     <Label className="text-xs font-medium text-blue-600 mb-2 block">{f.label}</Label>
-                    <Input type="time" name={f.name} value={formData[f.name as keyof typeof formData] as string} onChange={handleInput} className="h-12 rounded-2xl" />
+                    <Input type="time" name={f.name} value={formData[f.name]} onChange={handleInput} className="h-12 rounded-2xl" />
                   </div>
                 ))}
               </div>
@@ -1428,7 +1354,7 @@ export default function Users() {
                 return (
                   <button
                     key={tab.id}
-                    onClick={() => setActivePermTab(tab.id as any)}
+                    onClick={() => setActivePermTab(tab.id)}
                     className={`px-5 py-2.5 rounded-2xl font-semibold text-sm transition-all whitespace-nowrap flex items-center gap-2 ${activePermTab === tab.id
                       ? 'text-white shadow-md'
                       : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-slate-300'
@@ -1570,7 +1496,7 @@ export default function Users() {
                     { key: 'view_other_activity', label: 'Activity', icon: Activity, color: '#EF4444' },
                   ].map((section) => {
                     const SIcon = section.icon;
-                    const selectedCount = (permissions[section.key as keyof typeof permissions] || []).length;
+                    const selectedCount = (permissions[section.key] || []).length;
                     return (
                       <div key={section.key} className="border rounded-3xl overflow-hidden bg-white dark:bg-slate-900">
                         <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800 border-b flex items-center justify-between">
@@ -1588,15 +1514,15 @@ export default function Users() {
                           {users
                             .filter((u) => u.id !== selectedUserForPerms?.id)
                             .map((u) => {
-                              const isSelected = (permissions[section.key as keyof typeof permissions] || []).includes(u.id);
+                              const isSelected = (permissions[section.key] || []).includes(u.id);
                               return (
                                 <button
                                   key={u.id}
                                   onClick={() => setPermissions((prev) => ({
                                     ...prev,
                                     [section.key]: isSelected
-                                      ? (prev[section.key as keyof typeof prev] || []).filter((id: string) => id !== u.id)
-                                      : [...(prev[section.key as keyof typeof prev] || []), u.id],
+                                      ? (prev[section.key] || []).filter((id) => id !== u.id)
+                                      : [...(prev[section.key] || []), u.id],
                                   }))}
                                   className={`px-5 py-2.5 rounded-2xl text-sm font-medium border-2 transition-all ${
                                     isSelected
@@ -1658,7 +1584,7 @@ export default function Users() {
                             onClick={() => setPermissions((prev) => ({
                               ...prev,
                               assigned_clients: isAssigned
-                                ? (prev.assigned_clients || []).filter((id: string) => id !== client.id)
+                                ? (prev.assigned_clients || []).filter((id) => id !== client.id)
                                 : [...(prev.assigned_clients || []), client.id],
                             }))}
                             className={`flex items-center gap-4 p-5 rounded-3xl border-2 text-left transition-all hover:shadow-md ${
