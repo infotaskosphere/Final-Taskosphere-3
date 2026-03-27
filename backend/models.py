@@ -176,6 +176,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
 # CORE USER & PERMISSIONS
 # ======================
 class UserPermissions(BaseModel):
+    # ── Kept for backward data compatibility — not used in permission logic ──
     can_view_all_tasks: bool = False
     can_view_all_clients: bool = False
     can_view_all_dsc: bool = False
@@ -251,6 +252,12 @@ class User(BaseModel):
     status: str = "pending_approval"
     approved_by: Optional[str] = None
     approved_at: Optional[Any] = None
+    # ── New permission engine fields (directly on User) ──────────────────────
+    can_delete: bool = False
+    view_other_tasks: List[str] = Field(default_factory=list)
+    view_other_todos: List[str] = Field(default_factory=list)
+    view_other_visits: List[str] = Field(default_factory=list)
+    assigned_clients: List[str] = Field(default_factory=list)
 
     @field_validator("birthday", mode="before")
     @classmethod
@@ -276,6 +283,12 @@ class UserCreate(BaseModel):
     is_active: bool = True
     permissions: Optional[Dict[str, Any]] = None
     status: Optional[str] = "pending_approval"
+    # ── New permission engine fields ─────────────────────────────────────────
+    can_delete: bool = False
+    view_other_tasks: List[str] = Field(default_factory=list)
+    view_other_todos: List[str] = Field(default_factory=list)
+    view_other_visits: List[str] = Field(default_factory=list)
+    assigned_clients: List[str] = Field(default_factory=list)
 
 
 class UserUpdate(BaseModel):
@@ -292,6 +305,12 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
     profile_picture: Optional[str] = None
     telegram_id: Optional[int] = None
+    # ── New permission engine fields ─────────────────────────────────────────
+    can_delete: Optional[bool] = None
+    view_other_tasks: Optional[List[str]] = None
+    view_other_todos: Optional[List[str]] = None
+    view_other_visits: Optional[List[str]] = None
+    assigned_clients: Optional[List[str]] = None
     model_config = ConfigDict(from_attributes=True, extra="ignore")
 
 
