@@ -227,8 +227,22 @@ const StatusBadge: React.FC<{ status?: string; isActive?: boolean }> = ({ status
 
 // ── Module Access Badges Component ─────────────────────────────────────────────
 interface UserData {
+  id: string;
   role: string;
+  full_name: string;
+  email: string;
+  phone?: string;
+  birthday?: string;
+  profile_picture?: string;
+  punch_in_time?: string;
+  punch_out_time?: string;
+  grace_time?: string;
+  telegram_id?: number;
+  is_active: boolean;
+  status: string;
+  departments?: string[];
   permissions?: Record<string, any>;
+  created_at?: string;
   [key: string]: any;
 }
 
@@ -325,7 +339,7 @@ const PendingUserCard: React.FC<PendingUserCardProps> = ({ userData, onApprove, 
 
       {(userData.departments || []).length > 0 && (
         <div className="flex flex-wrap gap-2 mt-5">
-          {userData.departments.map((d: string) => <DeptPill key={d} dept={d} />)}
+          {userData.departments!.map((d: string) => <DeptPill key={d} dept={d} />)}
         </div>
       )}
 
@@ -479,7 +493,7 @@ const UserCard: React.FC<UserCardProps> = ({
 
         {(userData.departments || []).length > 0 && (
           <div className="flex flex-wrap gap-2 mt-6">
-            {userData.departments.map((d: string) => <DeptPill key={d} dept={d} />)}
+            {userData.departments!.map((d: string) => <DeptPill key={d} dept={d} />)}
           </div>
         )}
 
@@ -712,7 +726,7 @@ export default function Users() {
   const canManagePermissions = isAdmin;
 
   const [users, setUsers] = useState<UserData[]>([]);
-  const [clients, setClients] = useState<UserData[]>([]);
+  const [clients, setClients] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -732,7 +746,7 @@ export default function Users() {
     telegram_id: '', is_active: true, status: 'active',
   });
 
-  const [permissions, setPermissions] = useState({ ...EMPTY_PERMISSIONS });
+  const [permissions, setPermissions] = useState<Record<string, any>>({ ...EMPTY_PERMISSIONS });
 
   useEffect(() => {
     if (canViewUserPage) {
@@ -984,8 +998,7 @@ export default function Users() {
   }, [isAdmin, fetchUsers]);
 
   const pendingUsers = useMemo(() => users.filter((u) => u.status === 'pending_approval'), [users]);
-  const rejectedUsers = useMemo(() => users.filter((u) => u.status === 'rejected'), [users]);
-
+  
   const filteredUsers = useMemo(() => {
     return users.filter((u) => {
       const q = searchQuery.toLowerCase();
@@ -1181,7 +1194,7 @@ export default function Users() {
                 ].map((f) => (
                   <div key={f.name}>
                     <Label className="text-xs font-medium text-blue-600 mb-2 block">{f.label}</Label>
-                    <Input type="time" name={f.name} value={formData[f.name as keyof typeof formData]} onChange={handleInput} className="h-12 rounded-2xl" />
+                    <Input type="time" name={f.name} value={formData[f.name as keyof typeof formData] as string} onChange={handleInput} className="h-12 rounded-2xl" />
                   </div>
                 ))}
               </div>
@@ -1646,7 +1659,7 @@ export default function Users() {
                             onClick={() => setPermissions((prev) => ({
                               ...prev,
                               assigned_clients: isAssigned
-                                ? (prev.assigned_clients || []).filter((id) => id !== client.id)
+                                ? (prev.assigned_clients || []).filter((id: string) => id !== client.id)
                                 : [...(prev.assigned_clients || []), client.id],
                             }))}
                             className={`flex items-center gap-4 p-5 rounded-3xl border-2 text-left transition-all hover:shadow-md ${
