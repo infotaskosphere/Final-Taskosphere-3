@@ -27,7 +27,8 @@ import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // ── Color Palette ─────────────────────────────────────────────────────────────
-const COLORS = {
+
+const COLORS = Object.freeze({
   deepBlue: '#0D3B66',
   mediumBlue: '#1F6FB2',
   emeraldGreen: '#1FAF5A',
@@ -37,7 +38,7 @@ const COLORS = {
   teal: '#0F766E',
   amber: '#B45309',
   slate: '#475569',
-} as const;
+});
 
 const GRADIENT = `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`;
 const GRAD_GREEN = `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)`;
