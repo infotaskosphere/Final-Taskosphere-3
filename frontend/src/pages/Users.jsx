@@ -1,5 +1,5 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { FixedSizeList as List } from 'react-window';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card } from '@/components/ui/card';
@@ -27,39 +27,23 @@ import {
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// ── Brand Colors ──────────────────────────────────────────────────────────────
+// ── Color Palette ─────────────────────────────────────────────────────────────
 const COLORS = {
   deepBlue: '#0D3B66',
   mediumBlue: '#1F6FB2',
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
-  coral: '#FF6B6B',
-  amber: '#F59E0B',
   indigo: '#4F46E5',
   violet: '#7C3AED',
   teal: '#0F766E',
+  amber: '#B45309',
   slate: '#475569',
 };
 
-// ── Spring Physics ────────────────────────────────────────────────────────────
-const springPhysics = {
-  card: { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
-  lift: { type: 'spring', stiffness: 320, damping: 24, mass: 0.9 },
-  button: { type: 'spring', stiffness: 400, damping: 28 },
-  tap: { type: 'spring', stiffness: 500, damping: 30 },
-};
+const GRADIENT = `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`;
+const GRAD_GREEN = `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)`;
 
-// ── Animation Variants ────────────────────────────────────────────────────────
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
-};
-const itemVariants = {
-  hidden: { opacity: 0, y: 24, scale: 0.97 },
-  visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] } },
-};
-
-// ── Department Configuration ──────────────────────────────────────────────────
+// ── Department Configuration ───────────────────────────────────────────────────
 const DEPARTMENTS = [
   { value: 'GST', label: 'GST', color: '#1E3A8A', bg: '#EFF6FF' },
   { value: 'IT', label: 'IT', color: '#374151', bg: '#F9FAFB' },
@@ -73,14 +57,14 @@ const DEPARTMENTS = [
   { value: 'OTHER', label: 'OTHER', color: '#475569', bg: '#F8FAFC' },
 ];
 
-// ── Role Configuration ────────────────────────────────────────────────────────
+// ── Role Configuration ─────────────────────────────────────────────────────────
 const ROLE_CONFIG = {
-  admin: { gradient: `linear-gradient(135deg, ${COLORS.violet}, ${COLORS.indigo})`, icon: Crown, label: 'Admin' },
-  manager: { gradient: `linear-gradient(135deg, ${COLORS.mediumBlue}, #0ea5e9)`, icon: Briefcase, label: 'Manager' },
-  staff: { gradient: `linear-gradient(135deg, ${COLORS.slate}, #64748b)`, icon: UserIcon, label: 'Staff' },
+  admin: { gradient: 'from-violet-600 to-indigo-600', textColor: 'text-white', icon: Crown, label: 'Admin' },
+  manager: { gradient: 'from-blue-500 to-cyan-500', textColor: 'text-white', icon: Briefcase, label: 'Manager' },
+  staff: { gradient: 'from-slate-400 to-slate-500', textColor: 'text-white', icon: UserIcon, label: 'Staff' },
 };
 
-// ── Default Permissions ───────────────────────────────────────────────────────
+// ── Default Permissions ────────────────────────────────────────────────────────
 const DEFAULT_ROLE_PERMISSIONS = {
   admin: {
     can_view_all_tasks: true, can_view_all_clients: true, can_view_all_dsc: true,
@@ -153,7 +137,7 @@ const EMPTY_PERMISSIONS = {
   view_other_reports: [], view_other_todos: [], view_other_activity: [],
 };
 
-// ── Permission Definitions ────────────────────────────────────────────────────
+// ── Permission Definitions ─────────────────────────────────────────────────────
 const GLOBAL_PERMS = [
   { key: 'can_view_all_tasks', label: 'Universal Task Access', desc: 'See tasks assigned to any user or department', icon: Layers },
   { key: 'can_view_all_clients', label: 'Master Client List', desc: 'View all company legal entities', icon: Briefcase },
@@ -194,95 +178,90 @@ const EDIT_PERMS = [
   { key: 'can_edit_users', label: 'Modify Users', desc: 'Update user profiles and settings', icon: UserIcon },
 ];
 
-// ── Slim scrollbar ────────────────────────────────────────────────────────────
-const slimScroll = {
-  overflowY: 'auto',
-  scrollbarWidth: 'thin',
-  scrollbarColor: '#cbd5e1 transparent',
+// ── Animation Variants ─────────────────────────────────────────────────────────
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.06 } },
 };
 
-// ── Shared Card Shell ─────────────────────────────────────────────────────────
-function SectionCard({ children, className = '' }) {
-  return (
-    <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm ${className}`}>
-      {children}
-    </div>
-  );
-}
+const itemVariants = {
+  hidden: { opacity: 0, y: 24, scale: 0.97 },
+  visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.35, ease: 'easeOut' } },
+};
 
-// ── Card Header Row ───────────────────────────────────────────────────────────
-function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
-  return (
-    <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 dark:border-slate-700">
-      <div className="flex items-center gap-3">
-        <div className={`p-2.5 rounded-xl ${iconBg}`}>{icon}</div>
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className="font-semibold text-lg text-slate-900 dark:text-white">{title}</h3>
-            {badge !== undefined && badge > 0 && (
-              <span className="text-xs font-bold px-3 py-1 rounded-full bg-blue-500 text-white">{badge}</span>
-            )}
-          </div>
-          {subtitle && <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">{subtitle}</p>}
-        </div>
-      </div>
-      {action}
-    </div>
-  );
-}
+const slideIn = {
+  hidden: { opacity: 0, x: -16 },
+  visible: { opacity: 1, x: 0, transition: { duration: 0.3 } },
+};
 
-// ── Department Pill ───────────────────────────────────────────────────────────
-const DeptPill = ({ dept }) => {
+// ── Department Pill Component ──────────────────────────────────────────────────
+const DeptPill = ({ dept, size = 'sm' }) => {
   const info = DEPARTMENTS.find(d => d.value === dept);
   if (!info) return null;
   return (
-    <span className="inline-flex items-center font-bold rounded-lg px-3 py-1 text-xs tracking-wide"
-      style={{ background: info.bg, color: info.color, border: `1px solid ${info.color}30` }}>
+    <span
+      className="inline-flex items-center font-bold rounded-xl px-3 py-1 text-xs tracking-wide shadow-sm"
+      style={{ background: info.bg, color: info.color, border: `1px solid ${info.color}30` }}
+    >
       {info.label}
     </span>
   );
 };
 
-// ── Status Badge ──────────────────────────────────────────────────────────────
+// ── Status Badge Component ─────────────────────────────────────────────────────
 const StatusBadge = ({ status, isActive }) => {
   const resolved = status || (isActive !== false ? 'active' : 'inactive');
   const statusConfig = {
-    active: { label: 'Active', cls: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400', dot: 'bg-emerald-500' },
-    pending_approval: { label: 'Pending', cls: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400', dot: 'bg-amber-500 animate-pulse' },
-    rejected: { label: 'Rejected', cls: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400', dot: 'bg-red-500' },
-    inactive: { label: 'Inactive', cls: 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300', dot: 'bg-slate-400' },
+    active: { label: 'Active', cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' },
+    pending_approval: { label: 'Pending', cls: 'bg-amber-100 text-amber-700 border-amber-200', dot: 'bg-amber-500' },
+    rejected: { label: 'Rejected', cls: 'bg-red-100 text-red-700 border-red-200', dot: 'bg-red-500' },
+    inactive: { label: 'Inactive', cls: 'bg-slate-100 text-slate-600 border-slate-200', dot: 'bg-slate-400' },
   };
   const cfg = statusConfig[resolved] || statusConfig.inactive;
   return (
-    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold ${cfg.cls}`}>
-      <span className={`w-2 h-2 rounded-full ${cfg.dot}`} />{cfg.label}
+    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-semibold ${cfg.cls}`}>
+      <span className={`w-2 h-2 rounded-full ${cfg.dot} ${resolved === 'active' ? 'animate-pulse' : ''}`} />
+      {cfg.label}
     </span>
   );
 };
 
-// ── Module Access Badges ──────────────────────────────────────────────────────
+// ── Module Access Badges Component ─────────────────────────────────────────────
 const ModuleAccessBadges = ({ userData }) => {
   if (userData.role === 'admin') return null;
+  
   const hasLeads = !!userData.permissions?.can_view_all_leads;
   const hasQuotations = !!userData.permissions?.can_create_quotations;
   const hasPasswords = !!userData.permissions?.can_view_passwords;
   const canEditPass = !!userData.permissions?.can_edit_passwords;
+
   const badges = [
-    { label: 'Leads', active: hasLeads, color: COLORS.mediumBlue, icon: Target },
-    { label: 'Quotes', active: hasQuotations, color: COLORS.violet, icon: Receipt },
-    { label: !hasPasswords ? 'Vault' : canEditPass ? 'Vault R/W' : 'Vault R',
-      active: hasPasswords, color: canEditPass ? COLORS.amber : COLORS.teal, icon: KeyRound },
+    { label: 'Leads', active: hasLeads, color: 'blue', icon: Target },
+    { label: 'Quotes', active: hasQuotations, color: 'violet', icon: Receipt },
+    {
+      label: !hasPasswords ? 'Vault' : canEditPass ? 'Vault R/W' : 'Vault R',
+      active: hasPasswords,
+      color: canEditPass ? 'amber' : 'teal',
+      icon: KeyRound,
+    },
   ];
+
   return (
-    <div className="flex flex-wrap gap-2 mt-4">
+    <div className="flex flex-wrap gap-2 mt-3">
       {badges.map((b, idx) => {
         const Icon = b.icon;
+        const colorClass = b.active ? b.color : 'slate';
         return (
-          <span key={idx} className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium border"
-            style={b.active
-              ? { background: `${b.color}12`, color: b.color, borderColor: `${b.color}30` }
-              : { background: 'transparent', color: '#94a3b8', borderColor: '#e2e8f0' }}>
-            <Icon className="h-3 w-3" />{b.label}
+          <span
+            key={idx}
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-medium border ${
+              b.active 
+                ? `bg-${colorClass}-50 text-${colorClass}-700 border-${colorClass}-200 dark:bg-${colorClass}-900/30 dark:text-${colorClass}-300`
+                : 'bg-slate-100 text-slate-400 border-slate-200 dark:bg-slate-800 dark:text-slate-500'
+            }`}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {b.label}
           </span>
         );
       })}
@@ -290,270 +269,372 @@ const ModuleAccessBadges = ({ userData }) => {
   );
 };
 
-// ── Pending User Card ─────────────────────────────────────────────────────────
+// ── Pending User Card Component ────────────────────────────────────────────────
 const PendingUserCard = ({ userData, onApprove, onReject, approving }) => (
-  <motion.div variants={itemVariants} layout={false}
-    whileHover={{ y: -3, transition: springPhysics.lift }}
-    className="group bg-white dark:bg-slate-800 rounded-2xl overflow-hidden border border-amber-200 dark:border-amber-800 shadow-sm hover:shadow-md transition-all">
-    <div className="h-1.5 w-full" style={{ background: `linear-gradient(90deg, ${COLORS.amber}, #f97316)` }} />
+  <motion.div
+    variants={itemVariants}
+    layout
+    className="group relative bg-white dark:bg-slate-900 rounded-3xl overflow-hidden border border-amber-200 shadow-lg hover:shadow-2xl hover:-translate-y-1 transition-all duration-300"
+  >
+    <div className="h-2 w-full bg-gradient-to-r from-amber-400 to-orange-500" />
     <div className="p-6">
-      <div className="flex items-start gap-4">
+      <div className="flex items-start gap-5">
         <div className="relative flex-shrink-0">
-          <div className="w-14 h-14 rounded-2xl overflow-hidden ring-1 ring-amber-200 dark:ring-amber-800">
+          <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-md ring-1 ring-amber-200">
             {userData.profile_picture ? (
-              <img src={userData.profile_picture} alt={userData.full_name} className="w-full h-full object-cover" loading="lazy" />
+              <img src={userData.profile_picture} alt={userData.full_name} className="w-full h-full object-cover" />
             ) : (
-              <div className="w-full h-full flex items-center justify-center text-white text-xl font-black"
-                style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #f97316)` }}>
+              <div
+                className="w-full h-full flex items-center justify-center text-white text-2xl font-black"
+                style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)' }}
+              >
                 {userData.full_name?.charAt(0)?.toUpperCase()}
               </div>
             )}
           </div>
+          <div className="absolute -bottom-1 -right-1 bg-amber-100 text-amber-600 rounded-full p-1 border-2 border-white">
+            <Clock className="h-4 w-4" />
+          </div>
         </div>
+
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-base text-slate-900 dark:text-white truncate">{userData.full_name}</p>
-          <p className="text-sm text-slate-500 dark:text-slate-400 truncate mt-1">{userData.email}</p>
-          <div className="flex flex-wrap gap-2 mt-3">
-            <span className="text-xs font-semibold px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 capitalize">{userData.role}</span>
+          <h3 className="font-semibold text-lg text-slate-900 dark:text-white tracking-tight truncate">
+            {userData.full_name}
+          </h3>
+          <p className="text-sm text-slate-500 dark:text-slate-400 truncate mt-0.5">{userData.email}</p>
+
+          <div className="flex flex-wrap gap-2 mt-4">
+            <Badge variant="secondary" className="capitalize text-xs font-medium">
+              {userData.role}
+            </Badge>
             <StatusBadge status={userData.status} />
           </div>
         </div>
       </div>
+
       {(userData.departments || []).length > 0 && (
-        <div className="flex flex-wrap gap-2 mt-4">{userData.departments.map(d => <DeptPill key={d} dept={d} />)}</div>
+        <div className="flex flex-wrap gap-2 mt-5">
+          {userData.departments.map((d) => <DeptPill key={d} dept={d} />)}
+        </div>
       )}
-      <div className="mt-5 space-y-2 text-sm text-slate-500 dark:text-slate-400">
-        <div className="flex items-center gap-3"><Phone className="h-4 w-4" />{userData.phone || '—'}</div>
-        <div className="flex items-center gap-3"><Calendar className="h-4 w-4" />Registered {userData.created_at ? format(new Date(userData.created_at), 'dd MMM yyyy') : 'N/A'}</div>
+
+      <div className="mt-6 space-y-2 text-sm text-slate-500 dark:text-slate-400">
+        <div className="flex items-center gap-3">
+          <Phone className="h-4 w-4 text-slate-400" />
+          {userData.phone || '—'}
+        </div>
+        <div className="flex items-center gap-3">
+          <Calendar className="h-4 w-4 text-slate-400" />
+          Registered {userData.created_at ? format(new Date(userData.created_at), 'dd MMM yyyy') : 'N/A'}
+        </div>
       </div>
-      <div className="flex gap-3 mt-6">
-        <motion.button whileTap={{ scale: 0.95, transition: springPhysics.button }}
-          onClick={() => onApprove(userData)} disabled={approving === userData.id}
-          className="flex-1 h-11 rounded-2xl text-sm font-semibold text-white flex items-center justify-center gap-2"
-          style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})` }}>
-          <UserCheck className="h-4 w-4" /> Approve
-        </motion.button>
-        <motion.button whileTap={{ scale: 0.95, transition: springPhysics.button }}
-          onClick={() => onReject(userData)} disabled={approving === userData.id}
-          className="flex-1 h-11 rounded-2xl text-sm font-semibold text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center justify-center gap-2">
-          <UserX className="h-4 w-4" /> Reject
-        </motion.button>
+
+      <div className="flex gap-3 mt-8">
+        <Button
+          onClick={() => onApprove(userData)}
+          disabled={approving === userData.id}
+          className="flex-1 h-11 rounded-2xl font-semibold text-sm shadow-md hover:shadow-lg transition-all"
+          style={{ background: COLORS.emeraldGreen, color: 'white' }}
+        >
+          <UserCheck className="h-4 w-4 mr-2" />
+          {approving === userData.id ? 'Approving...' : 'Approve'}
+        </Button>
+        <Button
+          onClick={() => onReject(userData)}
+          disabled={approving === userData.id}
+          variant="outline"
+          className="flex-1 h-11 rounded-2xl border-red-200 text-red-600 hover:bg-red-50 font-semibold text-sm"
+        >
+          <UserX className="h-4 w-4 mr-2" />
+          Reject
+        </Button>
       </div>
     </div>
   </motion.div>
 );
 
-// ── User Card ─────────────────────────────────────────────────────────────────
-const UserCard = React.memo(({ userData, onEdit, onDelete, onPermissions, onApprove, onReject, currentUserId, isAdmin, canEditUsers, canManagePermissions, approving }) => {
+// ── User Card Component ────────────────────────────────────────────────────────
+const UserCard = ({
+  userData, onEdit, onDelete, onPermissions, onApprove, onReject,
+  currentUserId, isAdmin, canEditUsers, canManagePermissions, approving
+}) => {
   const [hovered, setHovered] = useState(false);
   const isPending = userData.status === 'pending_approval';
   const roleCfg = ROLE_CONFIG[userData.role?.toLowerCase()] || ROLE_CONFIG.staff;
   const RoleIcon = roleCfg.icon;
-  const permCount = useMemo(() =>
-    userData.permissions ? Object.entries(userData.permissions).filter(([k, v]) => k.startsWith('can_') && v === true).length : 0,
-    [userData.permissions]);
+
+  const permCount = useMemo(() => {
+    return userData.permissions
+      ? Object.entries(userData.permissions).filter(([k, v]) => k.startsWith('can_') && v === true).length
+      : 0;
+  }, [userData.permissions]);
 
   return (
-    <motion.div variants={itemVariants} layout={false}
-      onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
-      whileHover={{ y: -3, transition: springPhysics.lift }}
-      className={`group relative bg-white dark:bg-slate-800 rounded-2xl overflow-hidden border shadow-sm hover:shadow-md transition-all ${
-        isPending ? 'border-amber-200 dark:border-amber-800' : 'border-slate-200/80 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700'
-      }`}>
-      <div className="h-1.5 w-full" style={{ background: roleCfg.gradient }} />
+    <motion.div
+      variants={itemVariants}
+      layout
+      className={`group relative bg-white dark:bg-slate-900 rounded-3xl overflow-hidden border shadow-md hover:shadow-2xl transition-all duration-300 ${isPending
+        ? 'border-amber-300'
+        : hovered
+          ? 'border-blue-200 -translate-y-1 scale-[1.015]'
+          : 'border-slate-200 dark:border-slate-700'
+      }`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <div className={`h-2 w-full bg-gradient-to-r ${roleCfg.gradient}`} />
+
       <AnimatePresence>
         {hovered && !isPending && (
-          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-            className="absolute top-4 right-4 flex gap-2 z-20">
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="absolute top-4 right-4 flex gap-2 z-20"
+          >
             {canManagePermissions && userData.role !== 'admin' && (
-              <motion.button whileTap={{ scale: 0.9 }} onClick={() => onPermissions(userData)}
-                className="w-9 h-9 bg-emerald-50 dark:bg-emerald-900/40 hover:bg-emerald-100 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center border border-emerald-100 dark:border-emerald-800">
+              <button
+                onClick={() => onPermissions(userData)}
+                className="w-9 h-9 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center shadow-sm border border-emerald-100 hover:border-emerald-200 transition-all dark:bg-emerald-900 dark:text-emerald-300"
+                title="Manage Permissions"
+              >
                 <Shield className="h-4 w-4" />
-              </motion.button>
+              </button>
             )}
             {(isAdmin || (canEditUsers && !isPending)) && (
-              <motion.button whileTap={{ scale: 0.9 }} onClick={() => onEdit(userData)}
-                className="w-9 h-9 bg-blue-50 dark:bg-blue-900/40 hover:bg-blue-100 text-blue-600 dark:text-blue-400 rounded-xl flex items-center justify-center border border-blue-100 dark:border-blue-800">
+              <button
+                onClick={() => onEdit(userData)}
+                className="w-9 h-9 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center shadow-sm border border-blue-100 hover:border-blue-200 transition-all dark:bg-blue-900 dark:text-blue-300"
+                title="Edit User"
+              >
                 <Pencil className="h-4 w-4" />
-              </motion.button>
+              </button>
             )}
             {(isAdmin || canEditUsers) && userData.id !== currentUserId && (
-              <motion.button whileTap={{ scale: 0.9 }} onClick={() => onDelete(userData.id)}
-                className="w-9 h-9 bg-red-50 dark:bg-red-900/40 hover:bg-red-100 text-red-600 dark:text-red-400 rounded-xl flex items-center justify-center border border-red-100 dark:border-red-800">
+              <button
+                onClick={() => onDelete(userData.id)}
+                className="w-9 h-9 bg-red-50 hover:bg-red-100 text-red-600 rounded-2xl flex items-center justify-center shadow-sm border border-red-100 hover:border-red-200 transition-all dark:bg-red-900 dark:text-red-300"
+                title="Delete User"
+              >
                 <Trash2 className="h-4 w-4" />
-              </motion.button>
+              </button>
             )}
           </motion.div>
         )}
       </AnimatePresence>
 
       <div className="p-6">
-        <div className="flex items-start gap-4">
+        <div className="flex items-start gap-5">
           <div className="relative flex-shrink-0">
-            <div className="w-14 h-14 rounded-2xl overflow-hidden ring-1 ring-slate-100 dark:ring-slate-700">
+            <div className="w-[68px] h-[68px] rounded-2xl overflow-hidden shadow-md ring-1 ring-slate-100 dark:ring-slate-700">
               {userData.profile_picture ? (
-                <img src={userData.profile_picture} alt={userData.full_name} className="w-full h-full object-cover" loading="lazy" />
+                <img src={userData.profile_picture} alt={userData.full_name} className="w-full h-full object-cover" />
               ) : (
-                <div className="w-full h-full flex items-center justify-center text-white text-2xl font-black" style={{ background: roleCfg.gradient }}>
+                <div className={`w-full h-full flex items-center justify-center text-white text-3xl font-black bg-gradient-to-br ${roleCfg.gradient}`}>
                   {userData.full_name?.charAt(0)?.toUpperCase()}
                 </div>
               )}
             </div>
-            <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-xl flex items-center justify-center ring-2 ring-white dark:ring-slate-800" style={{ background: roleCfg.gradient }}>
+            <div className={`absolute -bottom-1.5 -right-1.5 w-7 h-7 rounded-2xl bg-gradient-to-br ${roleCfg.gradient} flex items-center justify-center ring-2 ring-white dark:ring-slate-900 shadow`}>
               <RoleIcon className="h-3.5 w-3.5 text-white" />
             </div>
           </div>
+
           <div className="flex-1 min-w-0 pt-1">
-            <p className="font-semibold text-base tracking-tight text-slate-900 dark:text-white truncate">{userData.full_name}</p>
-            <div className="flex items-center gap-2 mt-3 flex-wrap">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold text-white" style={{ background: roleCfg.gradient }}>
-                <RoleIcon className="h-3.5 w-3.5" />{roleCfg.label}
-              </span>
+            <h3 className="font-semibold text-lg tracking-tight text-slate-900 dark:text-white truncate">{userData.full_name}</h3>
+            <div className="flex items-center gap-3 mt-3">
+              <div className={`inline-flex items-center gap-1.5 px-4 py-1 rounded-2xl text-xs font-bold text-white bg-gradient-to-r ${roleCfg.gradient}`}>
+                <RoleIcon className="h-3.5 w-3.5" />
+                {roleCfg.label}
+              </div>
               <StatusBadge status={userData.status} isActive={userData.is_active} />
             </div>
           </div>
         </div>
 
         {(userData.departments || []).length > 0 && (
-          <div className="flex flex-wrap gap-2 mt-5">{userData.departments.map(d => <DeptPill key={d} dept={d} />)}</div>
+          <div className="flex flex-wrap gap-2 mt-6">
+            {userData.departments.map((d) => <DeptPill key={d} dept={d} />)}
+          </div>
         )}
 
         <ModuleAccessBadges userData={userData} />
 
         <div className="mt-6 space-y-2.5 text-sm text-slate-500 dark:text-slate-400">
-          <div className="flex items-center gap-3 truncate"><Mail className="h-4 w-4 flex-shrink-0" /><span className="truncate">{userData.email}</span></div>
-          <div className="flex items-center gap-3"><Phone className="h-4 w-4 flex-shrink-0" />{userData.phone || '—'}</div>
+          <div className="flex items-center gap-3 truncate">
+            <Mail className="h-4 w-4 text-slate-400 flex-shrink-0" />
+            <span className="truncate">{userData.email}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <Phone className="h-4 w-4 text-slate-400 flex-shrink-0" />
+            {userData.phone || '—'}
+          </div>
           {(userData.punch_in_time || userData.punch_out_time) && (
-            <div className="flex items-center gap-3"><Clock className="h-4 w-4 flex-shrink-0" />{userData.punch_in_time || '—'} → {userData.punch_out_time || '—'}</div>
+            <div className="flex items-center gap-3">
+              <Clock className="h-4 w-4 text-slate-400 flex-shrink-0" />
+              {userData.punch_in_time || '—'} → {userData.punch_out_time || '—'}
+            </div>
           )}
-          <div className="flex items-center gap-3"><Calendar className="h-4 w-4 flex-shrink-0" />Joined {userData.created_at ? format(new Date(userData.created_at), 'dd MMM yyyy') : 'N/A'}</div>
+          <div className="flex items-center gap-3">
+            <Calendar className="h-4 w-4 text-slate-400 flex-shrink-0" />
+            Joined {userData.created_at ? format(new Date(userData.created_at), 'dd MMM yyyy') : 'N/A'}
+          </div>
         </div>
 
         {userData.role !== 'admin' && (
-          <div className="mt-6 pt-5 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Permissions</span>
-            <div className="flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-xl" style={{ background: `${COLORS.emeraldGreen}12`, color: COLORS.emeraldGreen }}>
-              <ShieldCheck className="h-3.5 w-3.5" />{permCount} active
+          <div className="mt-6 pt-5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+            <span className="text-xs text-slate-400 font-medium">Permissions</span>
+            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full text-xs font-semibold text-slate-600 dark:text-slate-300">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              {permCount}
             </div>
           </div>
         )}
 
         {isPending && isAdmin && (
-          <div className="flex gap-3 mt-6">
-            <motion.button whileTap={{ scale: 0.95 }} onClick={() => onApprove(userData)} disabled={approving === userData.id}
-              className="flex-1 h-11 rounded-2xl text-sm font-semibold text-white flex items-center justify-center gap-2"
-              style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})` }}>
-              <UserCheck className="h-4 w-4" />Approve
-            </motion.button>
-            <motion.button whileTap={{ scale: 0.95 }} onClick={() => onReject(userData)} disabled={approving === userData.id}
-              className="flex-1 h-11 rounded-2xl text-sm font-semibold text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center justify-center gap-2">
-              <UserX className="h-4 w-4" />Reject
-            </motion.button>
+          <div className="flex gap-3 mt-8">
+            <Button
+              onClick={() => onApprove(userData)}
+              disabled={approving === userData.id}
+              className="flex-1 h-11 rounded-2xl font-semibold text-sm shadow-md"
+              style={{ background: COLORS.emeraldGreen, color: 'white' }}
+            >
+              <UserCheck className="h-4 w-4 mr-2" />
+              Approve
+            </Button>
+            <Button
+              onClick={() => onReject(userData)}
+              disabled={approving === userData.id}
+              variant="outline"
+              className="flex-1 h-11 rounded-2xl border-red-200 text-red-600 hover:bg-red-50 font-semibold text-sm"
+            >
+              <UserX className="h-4 w-4 mr-2" />
+              Reject
+            </Button>
           </div>
         )}
       </div>
     </motion.div>
   );
-});
+};
 
-// ── Permission Toggle Row ─────────────────────────────────────────────────────
+// ── Permission Toggle Row Component ────────────────────────────────────────────
 const PermToggleRow = ({ permKey, label, desc, icon: Icon, permissions, setPermissions }) => {
   const isOn = !!permissions[permKey];
   return (
-    <div className={`flex items-center justify-between px-5 py-4 rounded-2xl border transition-all ${
-      isOn ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800'
-        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+    <div className={`flex items-center justify-between px-5 py-4 rounded-3xl border transition-all ${isOn
+      ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800'
+      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
     }`}>
       <div className="flex items-center gap-4 pr-6 flex-1 min-w-0">
         {Icon && (
-          <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-all ${
-            isOn ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-600' : 'bg-slate-100 dark:bg-slate-700 text-slate-400'
-          }`}>
+          <div className={`w-9 h-9 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all ${isOn ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-600' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'}`}>
             <Icon className="h-4 w-4" />
           </div>
         )}
         <div className="min-w-0">
           <p className={`font-semibold text-sm ${isOn ? 'text-emerald-800 dark:text-emerald-200' : 'text-slate-700 dark:text-slate-200'}`}>{label}</p>
-          <p className="text-sm text-slate-500 mt-1 leading-snug">{desc}</p>
+          <p className="text-xs text-slate-400 mt-0.5 leading-snug">{desc}</p>
         </div>
       </div>
-      <Switch checked={isOn} onCheckedChange={val => setPermissions(prev => ({ ...prev, [permKey]: val }))} />
+      <Switch
+        checked={isOn}
+        onCheckedChange={(val) => setPermissions((prev) => ({ ...prev, [permKey]: val }))}
+      />
     </div>
   );
 };
 
-// ── Module Access Card ────────────────────────────────────────────────────────
-const ModuleAccessCard = ({ icon: Icon, title, desc, permKey, permissions, setPermissions, accentColor, badge }) => {
+// ── Module Access Card Component ───────────────────────────────────────────────
+const ModuleAccessCard = ({
+  icon: Icon, title, desc, permKey, permissions, setPermissions, accentColor, badge
+}) => {
   const isEnabled = !!permissions[permKey];
   const accent = accentColor || COLORS.mediumBlue;
+
   return (
-    <motion.div whileHover={{ y: -2, transition: springPhysics.lift }} whileTap={{ scale: 0.99 }}
-      onClick={() => setPermissions(p => ({ ...p, [permKey]: !p[permKey] }))}
-      className="flex gap-4 p-5 rounded-2xl border-2 cursor-pointer transition-all hover:shadow-md"
-      style={isEnabled ? { borderColor: `${accent}40`, background: `${accent}08` } : { borderColor: '#e2e8f0' }}>
-      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all ${isEnabled ? 'text-white shadow' : 'bg-slate-100 dark:bg-slate-700 text-slate-400'}`}
-        style={isEnabled ? { background: `linear-gradient(135deg, ${accent}, ${accent}cc)` } : {}}>
+    <div
+      onClick={() => setPermissions((p) => ({ ...p, [permKey]: !p[permKey] }))}
+      className={`group relative flex gap-5 p-5 rounded-3xl border-2 cursor-pointer transition-all hover:shadow-xl ${isEnabled
+        ? 'shadow-md'
+        : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+      }`}
+      style={isEnabled ? { borderColor: `${accent}40`, background: `${accent}08` } : {}}
+    >
+      <div
+        className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all ${isEnabled ? 'text-white shadow-lg' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'}`}
+        style={isEnabled ? { background: `linear-gradient(135deg, ${accent}, ${accent}cc)` } : {}}
+      >
         <Icon className="h-6 w-6" />
       </div>
+
       <div className="flex-1 min-w-0 pt-1">
         <div className="flex items-center gap-2">
           <p className={`font-semibold text-base ${isEnabled ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>{title}</p>
-          {badge && <span className="text-xs font-bold px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-500">{badge}</span>}
+          {badge && <Badge variant="secondary" className="text-[10px]">{badge}</Badge>}
         </div>
-        <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">{desc}</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{desc}</p>
       </div>
-      <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-sm font-black transition-all flex-shrink-0 mt-1 ${isEnabled ? 'bg-emerald-500 text-white shadow' : 'bg-slate-100 dark:bg-slate-700 text-slate-300'}`}>
+
+      <div className={`w-8 h-8 rounded-2xl flex items-center justify-center text-lg font-black transition-all flex-shrink-0 ${isEnabled ? 'bg-emerald-500 text-white shadow' : 'bg-slate-100 dark:bg-slate-800 text-slate-300'}`}>
         {isEnabled ? '✓' : '✕'}
       </div>
-    </motion.div>
+    </div>
   );
 };
 
-// ── Section Header ────────────────────────────────────────────────────────────
+// ── Section Header Component ───────────────────────────────────────────────────
 const SectionHeader = ({ icon: Icon, title, count, color }) => (
-  <div className="flex items-center gap-3 mb-5">
-    <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: `${color}15` }}>
+  <div className="flex items-center gap-4 mb-6">
+    <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: `${color}15` }}>
       <Icon className="h-5 w-5" style={{ color }} />
     </div>
-    <p className="font-semibold text-lg tracking-tight text-slate-900 dark:text-white">{title}</p>
+    <div>
+      <p className="font-bold text-xl tracking-tight text-slate-900 dark:text-white">{title}</p>
+    </div>
     {count !== undefined && (
-      <div className="ml-auto text-sm font-semibold px-4 py-1 rounded-xl" style={{ background: `${color}15`, color }}>
+      <div className="ml-auto text-xs font-bold px-4 py-1.5 rounded-full" style={{ background: `${color}15`, color }}>
         {count} enabled
       </div>
     )}
   </div>
 );
 
-// ── Permission Matrix Summary ─────────────────────────────────────────────────
+// ── Permission Matrix Summary Component ─────────────────────────────────────────
 const PermissionMatrixSummary = ({ permissions }) => {
   const allPerms = [...GLOBAL_PERMS, ...OPS_PERMS, ...EDIT_PERMS];
   const granted = allPerms.filter(p => permissions[p.key]).length;
   const total = allPerms.length;
   const pct = Math.round((granted / total) * 100);
+
   return (
-    <div className="flex gap-6 p-6 rounded-2xl border border-slate-200 dark:border-slate-700"
-      style={{ background: 'linear-gradient(135deg, rgba(13,59,102,0.04), rgba(31,111,178,0.04))' }}>
+    <div className="flex gap-6 p-6 bg-slate-50 dark:bg-slate-800/50 rounded-3xl border border-slate-200 dark:border-slate-700">
       <div className="relative w-20 h-20 flex-shrink-0">
         <svg className="w-20 h-20 -rotate-90" viewBox="0 0 48 48">
           <circle cx="24" cy="24" r="20" fill="none" stroke="#e2e8f0" strokeWidth="6" />
-          <circle cx="24" cy="24" r="20" fill="none" stroke={COLORS.emeraldGreen} strokeWidth="6"
+          <circle
+            cx="24" cy="24" r="20"
+            fill="none"
+            stroke={COLORS.emeraldGreen}
+            strokeWidth="6"
             strokeDasharray={`${2 * Math.PI * 20}`}
-            strokeDashoffset={`${2 * Math.PI * 20 * (1 - pct / 100)}`} strokeLinecap="round" />
+            strokeDashoffset={`${2 * Math.PI * 20 * (1 - pct / 100)}`}
+            strokeLinecap="round"
+          />
         </svg>
-        <div className="absolute inset-0 flex items-center justify-center font-black text-2xl text-slate-700 dark:text-slate-100">{pct}%</div>
-      </div>
-      <div className="flex-1 pt-1">
-        <p className="font-semibold text-lg tracking-tight text-slate-800 dark:text-white">Permission Coverage</p>
-        <p className="text-sm text-slate-500 mt-1">{granted} of {total} permissions enabled</p>
-        <div className="mt-4 h-2 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-700">
-          <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})` }} />
+        <div className="absolute inset-0 flex items-center justify-center font-black text-2xl text-slate-700 dark:text-slate-100">
+          {pct}%
         </div>
+      </div>
+      <div className="flex-1">
+        <p className="font-bold text-2xl tracking-tight">Permission Coverage</p>
+        <p className="text-slate-500 mt-1">{granted} of {total} permissions enabled</p>
       </div>
     </div>
   );
 };
 
-// ── Permission Tabs ───────────────────────────────────────────────────────────
+// ── Permission Tabs Configuration ──────────────────────────────────────────────
 const permTabs = [
   { id: 'modules', label: 'Modules', icon: Zap },
   { id: 'view', label: 'View', icon: Eye },
@@ -563,14 +644,13 @@ const permTabs = [
   { id: 'clients', label: 'Clients', icon: Briefcase },
 ];
 
-// ══════════════════════════════════════════════════════════════════════════════
-// MAIN USERS COMPONENT
-// ══════════════════════════════════════════════════════════════════════════════
+// ── Main Users Component ───────────────────────────────────────────────────────
 export default function Users() {
   const { user, refreshUser } = useAuth();
   const isDark = useDark();
   const isAdmin = user?.role === 'admin';
   const perms = user?.permissions || {};
+
   const canViewUserPage = isAdmin || !!perms.can_view_user_page;
   const canEditUsers = isAdmin || !!perms.can_manage_users;
   const canManagePermissions = isAdmin;
@@ -578,7 +658,6 @@ export default function Users() {
   const [users, setUsers] = useState([]);
   const [clients, setClients] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchInput, setSearchInput] = useState('');
   const [activeTab, setActiveTab] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [permDialogOpen, setPermDialogOpen] = useState(false);
@@ -595,30 +674,21 @@ export default function Users() {
     punch_in_time: '10:30', grace_time: '00:10', punch_out_time: '19:00',
     telegram_id: '', is_active: true, status: 'active',
   });
+
   const [permissions, setPermissions] = useState({ ...EMPTY_PERMISSIONS });
 
-  // ── Debounce search input ───────────────────────────────────────────────────
   useEffect(() => {
-    const t = setTimeout(() => {
-      setSearchQuery(searchInput);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [searchInput]);
-
-  useEffect(() => {
-    if (canViewUserPage) { fetchUsers(); fetchClients(); }
+    if (canViewUserPage) {
+      fetchUsers();
+      fetchClients();
+    }
   }, [canViewUserPage]);
 
   const fetchUsers = useCallback(async () => {
     try {
-      const cached = sessionStorage.getItem('users');
-      if (cached) setUsers(JSON.parse(cached));
-
-      const res = await api.get('/users?page=1&limit=50');
+      const res = await api.get('/users');
       const raw = res.data;
-      const data = Array.isArray(raw) ? raw : (raw?.data || []);
-      setUsers(data);
-      sessionStorage.setItem('users', JSON.stringify(data));
+      setUsers(Array.isArray(raw) ? raw : (raw?.data || []));
     } catch {
       toast.error('Failed to fetch users');
     }
@@ -644,18 +714,18 @@ export default function Users() {
 
   const handleInput = useCallback((e) => {
     const { name, value } = e.target;
-    setFormData(p => ({ ...p, [name]: value }));
+    setFormData((p) => ({ ...p, [name]: value }));
   }, []);
 
   const handleRoleChange = useCallback((newRole) => {
-    setFormData(p => ({ ...p, role: newRole }));
+    setFormData((p) => ({ ...p, role: newRole }));
   }, []);
 
   const toggleDept = useCallback((dept) => {
-    setFormData(p => ({
+    setFormData((p) => ({
       ...p,
       departments: p.departments.includes(dept)
-        ? p.departments.filter(d => d !== dept)
+        ? p.departments.filter((d) => d !== dept)
         : [...p.departments, dept],
     }));
   }, []);
@@ -664,7 +734,7 @@ export default function Users() {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onloadend = () => setFormData(p => ({ ...p, profile_picture: reader.result }));
+    reader.onloadend = () => setFormData((p) => ({ ...p, profile_picture: reader.result }));
     reader.readAsDataURL(file);
   }, []);
 
@@ -677,7 +747,8 @@ export default function Users() {
       role: userData.role || 'staff',
       departments: userData.departments || [],
       phone: userData.phone || '',
-      birthday: userData.birthday && userData.birthday !== '' ? format(new Date(userData.birthday), 'yyyy-MM-dd') : '',
+      birthday: userData.birthday && userData.birthday !== ''
+        ? format(new Date(userData.birthday), 'yyyy-MM-dd') : '',
       profile_picture: userData.profile_picture || '',
       punch_in_time: userData.punch_in_time || '10:30',
       grace_time: userData.grace_time || '00:10',
@@ -690,8 +761,15 @@ export default function Users() {
   }, []);
 
   const handleSubmit = useCallback(async () => {
-    if (!formData.full_name.trim()) { toast.error('Full name is required'); return; }
-    if (!selectedUser && !formData.email.trim()) { toast.error('Email is required'); return; }
+    if (!formData.full_name.trim()) {
+      toast.error('Full name is required');
+      return;
+    }
+    if (!selectedUser && !formData.email.trim()) {
+      toast.error('Email is required');
+      return;
+    }
+
     setLoading(true);
     try {
       if (selectedUser) {
@@ -705,9 +783,15 @@ export default function Users() {
           punch_out_time: formData.punch_out_time || null,
           telegram_id: formData.telegram_id !== '' ? Number(formData.telegram_id) : null,
           is_active: formData.is_active,
-          ...(isAdmin && { email: formData.email.trim(), role: formData.role, status: formData.status, departments: formData.departments }),
+          ...(isAdmin && {
+            email: formData.email.trim(),
+            role: formData.role,
+            status: formData.status,
+            departments: formData.departments,
+          }),
           ...(isAdmin && formData.password.trim() && { password: formData.password.trim() }),
         };
+
         await api.put(`/users/${selectedUser.id}`, payload);
         if (selectedUser.id === user?.id) await refreshUser();
         toast.success('✓ User updated successfully');
@@ -729,23 +813,35 @@ export default function Users() {
         });
         toast.success('✓ Member registered — awaiting approval');
       }
+
       setDialogOpen(false);
       fetchUsers();
     } catch (err) {
       const detail = err.response?.data?.detail;
       toast.error(typeof detail === 'string' ? detail : 'Failed to save user');
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   }, [selectedUser, formData, isAdmin, user?.id, refreshUser, fetchUsers]);
 
   const handleDelete = useCallback(async (id) => {
-    if (!isAdmin && !canEditUsers) { toast.error('No permission to delete users'); return; }
-    if (id === user?.id) { toast.error('You cannot delete your own account'); return; }
+    if (!isAdmin && !canEditUsers) {
+      toast.error('No permission to delete users');
+      return;
+    }
+    if (id === user?.id) {
+      toast.error('You cannot delete your own account');
+      return;
+    }
     if (!window.confirm('Permanently delete this user and all their data?')) return;
+
     try {
       await api.delete(`/users/${id}`);
       toast.success('User removed');
       fetchUsers();
-    } catch (err) { toast.error(err.response?.data?.detail || 'Failed to delete user'); }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to delete user');
+    }
   }, [isAdmin, canEditUsers, user?.id, fetchUsers]);
 
   const openPermissionsDialog = useCallback(async (userData) => {
@@ -756,10 +852,14 @@ export default function Users() {
   }, [fetchPermissions]);
 
   const handleSavePermissions = useCallback(async () => {
-    if (!canManagePermissions) { toast.error('Only administrators can update permissions'); return; }
+    if (!canManagePermissions) {
+      toast.error('Only administrators can update permissions');
+      return;
+    }
+
     setLoading(true);
     try {
-      const ensureArray = v => (Array.isArray(v) ? v : []);
+      const ensureArray = (v) => (Array.isArray(v) ? v : []);
       const payload = {
         ...permissions,
         view_password_departments: ensureArray(permissions.view_password_departments),
@@ -770,13 +870,17 @@ export default function Users() {
         view_other_todos: ensureArray(permissions.view_other_todos),
         view_other_activity: ensureArray(permissions.view_other_activity),
       };
+
       await api.put(`/users/${selectedUserForPerms?.id}/permissions`, payload);
       if (selectedUserForPerms?.id === user?.id) await refreshUser();
       toast.success('✓ Permissions saved');
       setPermDialogOpen(false);
       fetchUsers();
-    } catch (err) { toast.error(err.response?.data?.detail || 'Failed to update permissions'); }
-    finally { setLoading(false); }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to update permissions');
+    } finally {
+      setLoading(false);
+    }
   }, [canManagePermissions, permissions, selectedUserForPerms?.id, user?.id, refreshUser, fetchUsers]);
 
   const resetPermissionsToRole = useCallback((role) => {
@@ -785,34 +889,48 @@ export default function Users() {
   }, []);
 
   const handleApprove = useCallback(async (userData) => {
-    if (!isAdmin) { toast.error('Only admins can approve users'); return; }
+    if (!isAdmin) {
+      toast.error('Only admins can approve users');
+      return;
+    }
     setApprovingId(userData.id);
     try {
       await api.post(`/users/${userData.id}/approve`);
       toast.success(`✓ ${userData.full_name} approved`);
       fetchUsers();
-    } catch (err) { toast.error(err.response?.data?.detail || 'Failed to approve'); }
-    finally { setApprovingId(null); }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to approve');
+    } finally {
+      setApprovingId(null);
+    }
   }, [isAdmin, fetchUsers]);
 
   const handleReject = useCallback(async (userData) => {
-    if (!isAdmin) { toast.error('Only admins can reject users'); return; }
+    if (!isAdmin) {
+      toast.error('Only admins can reject users');
+      return;
+    }
     if (!window.confirm(`Reject ${userData.full_name}?`)) return;
+
     setApprovingId(userData.id);
     try {
       await api.post(`/users/${userData.id}/reject`);
       toast.success(`${userData.full_name} rejected`);
       fetchUsers();
-    } catch (err) { toast.error(err.response?.data?.detail || 'Failed to reject'); }
-    finally { setApprovingId(null); }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to reject');
+    } finally {
+      setApprovingId(null);
+    }
   }, [isAdmin, fetchUsers]);
 
-  const pendingUsers = useMemo(() => users.filter(u => u.status === 'pending_approval'), [users]);
-
+  const pendingUsers = useMemo(() => users.filter((u) => u.status === 'pending_approval'), [users]);
+  
   const filteredUsers = useMemo(() => {
-    return users.filter(u => {
+    return users.filter((u) => {
       const q = searchQuery.toLowerCase();
       const match = (u.full_name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
+
       if (activeTab === 'pending') return match && u.status === 'pending_approval';
       if (activeTab === 'rejected') return match && u.status === 'rejected';
       if (activeTab === 'all') return match;
@@ -822,228 +940,700 @@ export default function Users() {
 
   const stats = useMemo(() => [
     { label: 'Total Members', value: users.length, icon: UsersIcon, color: COLORS.mediumBlue },
-    { label: 'Admins', value: users.filter(u => u.role === 'admin').length, icon: Crown, color: COLORS.indigo },
-    { label: 'Pending', value: pendingUsers.length, icon: Clock, color: COLORS.amber },
-    { label: 'Active', value: users.filter(u => u.is_active).length, icon: CheckCircle, color: COLORS.emeraldGreen },
-    { label: 'Managers', value: users.filter(u => u.role === 'manager').length, icon: Briefcase, color: COLORS.teal },
+    { label: 'Admins', value: users.filter((u) => u.role === 'admin').length, icon: Crown, color: COLORS.indigo },
+    { label: 'Pending', value: pendingUsers.length, icon: Clock, color: '#D97706' },
+    { label: 'Active', value: users.filter((u) => u.is_active).length, icon: CheckCircle, color: COLORS.emeraldGreen },
   ], [users, pendingUsers.length]);
 
   if (!canViewUserPage) {
     return (
-      <div className="flex items-center justify-center min-h-[80vh] p-8">
+      <div className="flex items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-950 p-8">
         <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-center max-w-sm">
-          <div className="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-6" style={{ background: `${COLORS.coral}15` }}>
-            <ShieldOff className="h-10 w-10" style={{ color: COLORS.coral }} />
+          <div className="w-24 h-24 rounded-3xl bg-red-100 dark:bg-red-950 flex items-center justify-center mx-auto mb-8">
+            <ShieldOff className="h-12 w-12 text-red-500" />
           </div>
           <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-3">Access Restricted</h2>
-          <p className="text-slate-500 dark:text-slate-400">You need the <span className="font-semibold">View User Directory</span> permission to access this page.</p>
+          <p className="text-slate-600 dark:text-slate-400">
+            You need the <span className="font-semibold">View User Directory</span> permission to access this page.
+          </p>
         </motion.div>
       </div>
     );
   }
 
-  // Virtualized Row renderer
-  const Row = ({ index, style }) => {
-    const userData = filteredUsers[index];
-    if (!userData) return null;
-    return (
-      <div style={style} className="py-3 px-2">
-        <UserCard
-          userData={userData}
-          onEdit={handleEdit}
-          onDelete={handleDelete}
-          onPermissions={openPermissionsDialog}
-          onApprove={handleApprove}
-          onReject={handleReject}
-          currentUserId={user?.id || ''}
-          isAdmin={isAdmin}
-          canEditUsers={canEditUsers}
-          canManagePermissions={canManagePermissions}
-          approving={approvingId}
-        />
-      </div>
-    );
-  };
-
-  // ── MAIN LAYOUT ─────────────────────────────────────────────────────────────
   return (
-    <div className="max-w-[1280px] mx-auto px-6 py-4">
-      <motion.div className="space-y-8" variants={containerVariants} initial="hidden" animate="visible">
+    <motion.div
+      className={`space-y-10 p-6 md:p-10 min-h-screen ${isDark ? 'bg-[#0a0f1c]' : 'bg-slate-50'}`}
+      initial="hidden"
+      animate="visible"
+      variants={containerVariants}
+    >
+      {/* Page Header */}
+      <motion.div variants={slideIn} className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+        <div className="flex items-center gap-5">
+          <div className="w-14 h-14 rounded-3xl flex items-center justify-center shadow-xl" style={{ background: GRADIENT }}>
+            <UsersIcon className="h-7 w-7 text-white" />
+          </div>
+          <div>
+            <h1 className="text-4xl font-bold tracking-tighter text-slate-900 dark:text-white">User Directory</h1>
+            <p className="text-slate-500 dark:text-slate-400 mt-1">Manage team members and permissions</p>
+          </div>
+        </div>
 
-        {/* Header */}
-        <motion.div variants={itemVariants}>
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-gradient-to-r from-[#0D3B66] to-[#1F6FB2] rounded-3xl px-8 py-8 text-white">
-            <div className="flex items-center gap-5">
-              <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center flex-shrink-0">
-                <UsersIcon className="h-6 w-6" />
+        {isAdmin && (
+          <Button
+            onClick={() => {
+              setSelectedUser(null);
+              setFormData({
+                full_name: '', email: '', password: '', role: 'staff',
+                departments: [], phone: '', birthday: '', profile_picture: '',
+                punch_in_time: '10:30', grace_time: '00:10', punch_out_time: '19:00',
+                telegram_id: '', is_active: true, status: 'active',
+              });
+              setDialogOpen(true);
+            }}
+            className="h-12 px-8 rounded-2xl font-semibold shadow-lg hover:shadow-xl transition-all text-base"
+            style={{ background: GRADIENT, color: 'white' }}
+          >
+            <Plus className="h-5 w-5 mr-3" />
+            Add New Member
+          </Button>
+        )}
+      </motion.div>
+
+      {/* Stats */}
+      <motion.div variants={containerVariants} className="grid grid-cols-2 md:grid-cols-4 gap-6">
+        {stats.map((s, i) => {
+          const Icon = s.icon;
+          return (
+            <motion.div
+              key={i}
+              variants={itemVariants}
+              className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-xl transition-all"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: `${s.color}15` }}>
+                  <Icon className="h-6 w-6" style={{ color: s.color }} />
+                </div>
+                <div>
+                  <p className="text-4xl font-bold text-slate-900 dark:text-white tracking-tighter">{s.value}</p>
+                  <p className="text-sm text-slate-500 font-medium mt-1">{s.label}</p>
+                </div>
+              </div>
+            </motion.div>
+          );
+        })}
+      </motion.div>
+
+      {/* Create/Edit Dialog */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto rounded-3xl p-0 border-0 shadow-2xl">
+          <div className="sticky top-0 z-10 bg-white dark:bg-slate-900 rounded-t-3xl">
+            <div className="h-2 w-full" style={{ background: GRADIENT }} />
+            <div className="px-8 py-6 border-b dark:border-slate-700">
+              <DialogTitle className="text-2xl font-bold text-slate-900 dark:text-white">
+                {selectedUser ? `Edit — ${selectedUser.full_name}` : 'Add New Team Member'}
+              </DialogTitle>
+              <DialogDescription className="text-sm text-slate-500 mt-1">
+                {isAdmin ? 'Full administrative control' : 'Update your personal information'}
+              </DialogDescription>
+            </div>
+          </div>
+
+          <div className="p-8 space-y-10">
+            {/* Profile Picture */}
+            <div className="flex justify-center">
+              <label className="relative group cursor-pointer">
+                <div className="w-28 h-28 rounded-3xl overflow-hidden border-4 border-white dark:border-slate-800 shadow-xl">
+                  {formData.profile_picture ? (
+                    <img src={formData.profile_picture} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                      <UserIcon className="h-14 w-14 text-slate-300" />
+                    </div>
+                  )}
+                </div>
+                <div className="absolute bottom-1 right-1 bg-white dark:bg-slate-700 rounded-full p-3 shadow-lg border border-slate-200 dark:border-slate-600">
+                  <Camera className="h-5 w-5 text-blue-600" />
+                </div>
+                <input type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
+              </label>
+            </div>
+
+            {/* Basic Info */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block">FULL NAME</Label>
+                <Input
+                  name="full_name"
+                  value={formData.full_name}
+                  onChange={handleInput}
+                  placeholder="Full Name"
+                  className="h-12 rounded-2xl"
+                />
               </div>
               <div>
-                <p className="uppercase tracking-[2px] text-sm font-medium text-white/70">Team Management</p>
-                <h1 className="text-4xl font-bold tracking-tighter">User Directory</h1>
-                <p className="text-white/70 mt-1">Manage team members, roles and permissions</p>
+                <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block">EMAIL ADDRESS</Label>
+                <Input
+                  type="email"
+                  name="email"
+                  value={formData.email}
+                  onChange={handleInput}
+                  disabled={!isAdmin || (selectedUser && selectedUser.id === user?.id)}
+                  placeholder="name@company.com"
+                  className="h-12 rounded-2xl"
+                />
               </div>
             </div>
 
-            {isAdmin && (
-              <motion.button
-                whileHover={{ scale: 1.03, y: -1 }}
-                whileTap={{ scale: 0.97 }}
-                onClick={() => {
-                  setSelectedUser(null);
-                  setFormData({ full_name: '', email: '', password: '', role: 'staff', departments: [], phone: '', birthday: '', profile_picture: '', punch_in_time: '10:30', grace_time: '00:10', punch_out_time: '19:00', telegram_id: '', is_active: true, status: 'active' });
-                  setDialogOpen(true);
-                }}
-                className="flex items-center gap-3 px-7 py-3.5 bg-white/15 hover:bg-white/25 border border-white/30 backdrop-blur-md rounded-2xl font-semibold text-base transition-all whitespace-nowrap"
-              >
-                <Plus className="h-5 w-5" /> Add New Member
-              </motion.button>
-            )}
-          </div>
-        </motion.div>
-
-        {/* Stats Cards */}
-        <motion.div variants={itemVariants} className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-          {stats.map((s, i) => {
-            const Icon = s.icon;
-            return (
-              <motion.div key={i} whileHover={{ y: -3 }} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 h-full">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">{s.label}</p>
-                    <p className="text-4xl font-bold tracking-tighter mt-3" style={{ color: s.color }}>{s.value}</p>
-                  </div>
-                  <div className="p-3 rounded-2xl" style={{ backgroundColor: `${s.color}12` }}>
-                    <Icon className="h-6 w-6" style={{ color: s.color }} />
-                  </div>
-                </div>
-              </motion.div>
-            );
-          })}
-        </motion.div>
-
-        {/* Pending Approvals */}
-        {pendingUsers.length > 0 && isAdmin && (
-          <motion.div variants={itemVariants}>
-            <SectionCard>
-              <CardHeaderRow
-                iconBg="bg-amber-100 dark:bg-amber-900/30"
-                icon={<Clock className="h-5 w-5 text-amber-600" />}
-                title="Pending Approvals"
-                subtitle={`${pendingUsers.length} awaiting review`}
-                badge={pendingUsers.length}
-              />
-              <div className="p-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                  {pendingUsers.map(userData => (
-                    <PendingUserCard key={userData.id} userData={userData} onApprove={handleApprove} onReject={handleReject} approving={approvingId} />
-                  ))}
-                </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block">PHONE NUMBER</Label>
+                <Input name="phone" value={formData.phone} onChange={handleInput} placeholder="+91 98765 43210" className="h-12 rounded-2xl" />
               </div>
-            </SectionCard>
-          </motion.div>
-        )}
+              <div>
+                <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block flex items-center gap-2">
+                  <KeyRound className="h-4 w-4" /> {selectedUser ? 'NEW PASSWORD' : 'INITIAL PASSWORD'}
+                </Label>
+                <Input
+                  type="password"
+                  name="password"
+                  value={formData.password}
+                  onChange={handleInput}
+                  placeholder={selectedUser ? "Leave blank to keep current" : "Secure password"}
+                  className="h-12 rounded-2xl"
+                />
+              </div>
+            </div>
 
-        {/* Team Members Section */}
-        <motion.div variants={itemVariants}>
-          <SectionCard>
-            <CardHeaderRow
-              iconBg="bg-blue-100 dark:bg-blue-900/30"
-              icon={<UsersIcon className="h-5 w-5 text-blue-600" />}
-              title="Team Members"
-              subtitle="All roles and departments"
-              badge={filteredUsers.length}
-              action={
-                isAdmin && (
-                  <Button
-                    onClick={() => {
-                      setSelectedUser(null);
-                      setFormData({ full_name: '', email: '', password: '', role: 'staff', departments: [], phone: '', birthday: '', profile_picture: '', punch_in_time: '10:30', grace_time: '00:10', punch_out_time: '19:00', telegram_id: '', is_active: true, status: 'active' });
-                      setDialogOpen(true);
-                    }}
-                    className="h-11 px-6 rounded-2xl"
-                  >
-                    <Plus className="mr-2 h-4 w-4" />Add Member
-                  </Button>
-                )
-              }
-            />
-
-            <div className="p-6">
-              {/* Tabs */}
-              <div className="flex flex-wrap gap-2">
+            {/* Shift Schedule */}
+            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900 rounded-3xl p-8">
+              <div className="flex items-center gap-3 mb-6">
+                <Clock className="h-5 w-5 text-blue-600" />
+                <h3 className="font-semibold text-blue-700 dark:text-blue-400">WORK SHIFT SCHEDULE</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {[
-                  { id: 'all', label: 'All Members' },
-                  { id: 'admin', label: 'Admins' },
-                  { id: 'manager', label: 'Managers' },
-                  { id: 'staff', label: 'Staff' },
-                  { id: 'rejected', label: 'Rejected' },
-                ].map(tab => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`px-6 py-2.5 rounded-2xl font-medium text-sm transition-all ${
-                      activeTab === tab.id
-                        ? 'bg-gradient-to-r from-[#0D3B66] to-[#1F6FB2] text-white'
-                        : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
+                  { label: 'Punch In', name: 'punch_in_time' },
+                  { label: 'Grace Period', name: 'grace_time' },
+                  { label: 'Punch Out', name: 'punch_out_time' },
+                ].map((f) => (
+                  <div key={f.name}>
+                    <Label className="text-xs font-medium text-blue-600 mb-2 block">{f.label}</Label>
+                    <Input type="time" name={f.name} value={formData[f.name]} onChange={handleInput} className="h-12 rounded-2xl" />
+                  </div>
                 ))}
               </div>
+            </div>
 
-              {/* Search Bar */}
-              <div className="mt-6 max-w-md">
-                <div className="relative">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Search by name or email..."
-                    value={searchInput}
-                    onChange={e => setSearchInput(e.target.value)}
-                    className="w-full pl-12 h-12 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:border-blue-500 text-base"
-                  />
-                </div>
+            {/* Birthday + Telegram */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block">BIRTHDAY</Label>
+                <Input type="date" name="birthday" value={formData.birthday} onChange={handleInput} className="h-12 rounded-2xl" />
               </div>
-
-              {/* Virtualized List */}
-              <div className="mt-6">
-                {filteredUsers.length === 0 ? (
-                  <div className="py-20 text-center">
-                    <UsersIcon className="mx-auto h-12 w-12 text-slate-300 dark:text-slate-600" />
-                    <p className="mt-4 text-slate-500">No users found</p>
-                  </div>
-                ) : (
-                  <List
-                    height={680}
-                    itemCount={filteredUsers.length}
-                    itemSize={220}
-                    width="100%"
-                  >
-                    {Row}
-                  </List>
-                )}
+              <div>
+                <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block">TELEGRAM ID</Label>
+                <Input type="number" name="telegram_id" value={formData.telegram_id} onChange={handleInput} placeholder="123456789" className="h-12 rounded-2xl" />
               </div>
             </div>
-          </SectionCard>
+
+            {/* Admin Only Fields */}
+            {isAdmin && (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block">ROLE</Label>
+                    <Select value={formData.role} onValueChange={handleRoleChange}>
+                      <SelectTrigger className="h-12 rounded-2xl">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="staff">Staff</SelectItem>
+                        <SelectItem value="manager">Manager</SelectItem>
+                        <SelectItem value="admin">Admin</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block">ACCOUNT STATUS</Label>
+                    <Select
+                      value={formData.status}
+                      onValueChange={(v) => setFormData((p) => ({ ...p, status: v, is_active: v === 'active' }))}
+                    >
+                      <SelectTrigger className="h-12 rounded-2xl">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="active">Active</SelectItem>
+                        <SelectItem value="pending_approval">Pending Approval</SelectItem>
+                        <SelectItem value="rejected">Rejected</SelectItem>
+                        <SelectItem value="inactive">Inactive</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Departments */}
+                <div>
+                  <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-4 block">ASSIGNED DEPARTMENTS</Label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+                    {DEPARTMENTS.map((dept) => {
+                      const active = formData.departments.includes(dept.value);
+                      return (
+                        <button
+                          key={dept.value}
+                          type="button"
+                          onClick={() => toggleDept(dept.value)}
+                          className={`h-12 rounded-2xl text-sm font-semibold border-2 transition-all ${active
+                            ? 'text-white border-transparent shadow'
+                            : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                          }`}
+                          style={{ background: active ? dept.color : undefined }}
+                        >
+                          {dept.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          <DialogFooter className="px-8 py-6 border-t dark:border-slate-700 bg-slate-50 dark:bg-slate-900 rounded-b-3xl flex justify-end gap-4">
+            <Button variant="outline" onClick={() => setDialogOpen(false)} className="h-12 px-8 rounded-2xl">
+              Cancel
+            </Button>
+            <Button onClick={handleSubmit} disabled={loading} className="h-12 px-10 rounded-2xl font-semibold text-base" style={{ background: GRAD_GREEN }}>
+              {loading ? 'Saving...' : selectedUser ? 'Save Changes' : 'Create Member'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Pending Users Section */}
+      {pendingUsers.length > 0 && isAdmin && (
+        <motion.div variants={itemVariants} className="space-y-6">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 rounded-2xl bg-amber-100 dark:bg-amber-950 flex items-center justify-center">
+              <Clock className="h-5 w-5 text-amber-600" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Pending Approvals</h2>
+              <p className="text-sm text-slate-500 mt-0.5">{pendingUsers.length} awaiting review</p>
+            </div>
+          </div>
+          <motion.div variants={containerVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {pendingUsers.map((userData) => (
+              <PendingUserCard
+                key={userData.id}
+                userData={userData}
+                onApprove={handleApprove}
+                onReject={handleReject}
+                approving={approvingId}
+              />
+            ))}
+          </motion.div>
         </motion.div>
+      )}
 
-        {/* Create/Edit Dialog */}
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto rounded-3xl p-0 border-0 shadow-2xl">
-            {/* Dialog content with improved alignment - logic unchanged */}
-            {/* ... (full dialog content from previous version remains here) ... */}
-            {/* For brevity in this response, the full dialog is identical to the previous full version */}
-          </DialogContent>
-        </Dialog>
-
-        {/* Permissions Dialog */}
-        <Dialog open={permDialogOpen} onOpenChange={setPermDialogOpen}>
-          <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto rounded-3xl p-0 border-0 shadow-2xl">
-            {/* Full permissions dialog content - logic unchanged */}
-          </DialogContent>
-        </Dialog>
+      {/* Tabs */}
+      <motion.div variants={itemVariants} className="flex gap-2 overflow-x-auto pb-2">
+        {[
+          { id: 'all', label: 'All' },
+          { id: 'admin', label: 'Admins' },
+          { id: 'manager', label: 'Managers' },
+          { id: 'staff', label: 'Staff' },
+          { id: 'rejected', label: 'Rejected' },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-6 py-2.5 rounded-2xl font-semibold text-sm transition-all whitespace-nowrap ${activeTab === tab.id
+              ? 'text-white shadow-md'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-slate-300'
+            }`}
+            style={activeTab === tab.id ? { background: GRADIENT } : {}}
+          >
+            {tab.label}
+          </button>
+        ))}
       </motion.div>
-    </div>
+
+      {/* Search */}
+      <motion.div variants={itemVariants} className="relative">
+        <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+        <Input
+          placeholder="Search by name or email..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="pl-14 h-14 rounded-3xl text-base"
+        />
+      </motion.div>
+
+      {/* Users Grid */}
+      <motion.div variants={containerVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredUsers.length > 0 ? (
+          filteredUsers.map((userData) => (
+            <UserCard
+              key={userData.id}
+              userData={userData}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+              onPermissions={openPermissionsDialog}
+              onApprove={handleApprove}
+              onReject={handleReject}
+              currentUserId={user?.id || ''}
+              isAdmin={isAdmin}
+              canEditUsers={canEditUsers}
+              canManagePermissions={canManagePermissions}
+              approving={approvingId}
+            />
+          ))
+        ) : (
+          <motion.div variants={itemVariants} className="col-span-full flex items-center justify-center py-20">
+            <div className="text-center">
+              <UsersIcon className="h-16 w-16 text-slate-300 dark:text-slate-700 mx-auto mb-4" />
+              <p className="text-slate-500 dark:text-slate-400 text-lg font-medium">No users found</p>
+            </div>
+          </motion.div>
+        )}
+      </motion.div>
+
+      {/* Permissions Dialog */}
+      <Dialog open={permDialogOpen} onOpenChange={setPermDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto rounded-3xl p-0 border-0 shadow-2xl">
+          <div className="sticky top-0 z-10 bg-white dark:bg-slate-900 rounded-t-3xl">
+            <div className="h-2 w-full" style={{ background: GRADIENT }} />
+            <div className="px-8 py-6 border-b dark:border-slate-700">
+              <DialogTitle className="text-2xl font-bold text-slate-900 dark:text-white">
+                Permissions — {selectedUserForPerms?.full_name}
+              </DialogTitle>
+              <DialogDescription className="text-sm text-slate-500 mt-1">
+                Configure access levels and module permissions
+              </DialogDescription>
+            </div>
+          </div>
+
+          <div className="p-8 space-y-8">
+            {/* Permission Summary */}
+            <PermissionMatrixSummary permissions={permissions} />
+
+            {/* Quick Reset Buttons */}
+            <div className="flex flex-wrap gap-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => resetPermissionsToRole('staff')}
+                className="rounded-2xl"
+              >
+                Staff Template
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => resetPermissionsToRole('manager')}
+                className="rounded-2xl"
+              >
+                Manager Template
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => resetPermissionsToRole('admin')}
+                className="rounded-2xl"
+              >
+                Admin Template
+              </Button>
+            </div>
+
+            {/* Permission Tabs */}
+            <div className="flex gap-2 overflow-x-auto pb-2">
+              {permTabs.map((tab) => {
+                const TabIcon = tab.icon;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActivePermTab(tab.id)}
+                    className={`px-5 py-2.5 rounded-2xl font-semibold text-sm transition-all whitespace-nowrap flex items-center gap-2 ${activePermTab === tab.id
+                      ? 'text-white shadow-md'
+                      : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                    }`}
+                    style={activePermTab === tab.id ? { background: GRADIENT } : {}}
+                  >
+                    <TabIcon className="h-4 w-4" />
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Tab Content */}
+            <div className="space-y-6">
+              {/* Modules Tab */}
+              {activePermTab === 'modules' && (
+                <div className="space-y-6">
+                  <SectionHeader icon={Zap} title="Module Access" color={COLORS.violet} />
+                  <div className="grid grid-cols-1 gap-4">
+                    <ModuleAccessCard
+                      icon={Target}
+                      title="Leads Pipeline"
+                      desc="Access and manage the leads dashboard"
+                      permKey="can_view_all_leads"
+                      permissions={permissions}
+                      setPermissions={setPermissions}
+                      accentColor="#3B82F6"
+                    />
+                    <ModuleAccessCard
+                      icon={Receipt}
+                      title="Quotations"
+                      desc="Create and manage quotations"
+                      permKey="can_create_quotations"
+                      permissions={permissions}
+                      setPermissions={setPermissions}
+                      accentColor="#8B5CF6"
+                    />
+                    <ModuleAccessCard
+                      icon={KeyRound}
+                      title="Password Vault"
+                      desc="Access secure password storage"
+                      permKey="can_view_passwords"
+                      permissions={permissions}
+                      setPermissions={setPermissions}
+                      accentColor="#F59E0B"
+                      badge={permissions.can_edit_passwords ? 'Read/Write' : 'Read Only'}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* View Tab */}
+              {activePermTab === 'view' && (
+                <div>
+                  <SectionHeader 
+                    icon={Eye} 
+                    title="View Permissions" 
+                    color="#3B82F6" 
+                    count={GLOBAL_PERMS.filter(p => permissions[p.key]).length} 
+                  />
+                  <div className="space-y-3">
+                    {GLOBAL_PERMS.map((p) => (
+                      <PermToggleRow
+                        key={p.key}
+                        permKey={p.key}
+                        label={p.label}
+                        desc={p.desc}
+                        icon={p.icon}
+                        permissions={permissions}
+                        setPermissions={setPermissions}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Operations Tab */}
+              {activePermTab === 'ops' && (
+                <div>
+                  <SectionHeader 
+                    icon={Settings} 
+                    title="Operational Controls" 
+                    color="#8B5CF6" 
+                    count={OPS_PERMS.filter(p => permissions[p.key]).length} 
+                  />
+                  <div className="space-y-3">
+                    {OPS_PERMS.map((p) => (
+                      <PermToggleRow
+                        key={p.key}
+                        permKey={p.key}
+                        label={p.label}
+                        desc={p.desc}
+                        icon={p.icon}
+                        permissions={permissions}
+                        setPermissions={setPermissions}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Edit Tab */}
+              {activePermTab === 'edit' && (
+                <div>
+                  <SectionHeader 
+                    icon={Pencil} 
+                    title="Modification Rights" 
+                    color="#F59E0B" 
+                    count={EDIT_PERMS.filter(p => permissions[p.key]).length} 
+                  />
+                  <div className="space-y-3">
+                    {EDIT_PERMS.map((p) => (
+                      <PermToggleRow
+                        key={p.key}
+                        permKey={p.key}
+                        label={p.label}
+                        desc={p.desc}
+                        icon={p.icon}
+                        permissions={permissions}
+                        setPermissions={setPermissions}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Cross-User Tab */}
+              {activePermTab === 'cross' && (
+                <div className="space-y-8">
+                  <SectionHeader icon={UsersIcon} title="Cross-User Data Access" color={COLORS.emeraldGreen} />
+                  <p className="text-slate-500 text-sm -mt-3">Select team members whose data this user can view</p>
+
+                  {[
+                    { key: 'view_other_tasks', label: 'Tasks', icon: Layers, color: '#3B82F6' },
+                    { key: 'view_other_attendance', label: 'Attendance', icon: Clock, color: '#8B5CF6' },
+                    { key: 'view_other_reports', label: 'Reports', icon: BarChart2, color: '#F59E0B' },
+                    { key: 'view_other_todos', label: 'Todos', icon: CheckCircle, color: '#10B981' },
+                    { key: 'view_other_activity', label: 'Activity', icon: Activity, color: '#EF4444' },
+                  ].map((section) => {
+                    const SIcon = section.icon;
+                    const selectedCount = (permissions[section.key] || []).length;
+                    return (
+                      <div key={section.key} className="border rounded-3xl overflow-hidden bg-white dark:bg-slate-900">
+                        <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800 border-b flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-2xl flex items-center justify-center" style={{ background: `${section.color}15` }}>
+                              <SIcon className="h-5 w-5" style={{ color: section.color }} />
+                            </div>
+                            <span className="font-semibold text-base">{section.label}</span>
+                          </div>
+                          <div className="text-sm font-medium px-4 py-1 rounded-full" style={{ background: `${section.color}15`, color: section.color }}>
+                            {selectedCount} selected
+                          </div>
+                        </div>
+                        <div className="p-6 flex flex-wrap gap-2">
+                          {users
+                            .filter((u) => u.id !== selectedUserForPerms?.id)
+                            .map((u) => {
+                              const isSelected = (permissions[section.key] || []).includes(u.id);
+                              return (
+                                <button
+                                  key={u.id}
+                                  onClick={() => setPermissions((prev) => ({
+                                    ...prev,
+                                    [section.key]: isSelected
+                                      ? (prev[section.key] || []).filter((id) => id !== u.id)
+                                      : [...(prev[section.key] || []), u.id],
+                                  }))}
+                                  className={`px-5 py-2.5 rounded-2xl text-sm font-medium border-2 transition-all ${
+                                    isSelected
+                                      ? 'text-white border-transparent shadow-md'
+                                      : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                                  }`}
+                                  style={isSelected ? { background: section.color } : {}}
+                                >
+                                  {isSelected ? '✓ ' : ''}{u.full_name}
+                                </button>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Clients Tab */}
+              {activePermTab === 'clients' && (
+                <div className="space-y-6">
+                  <SectionHeader icon={Briefcase} title="Client Portfolio" color={COLORS.teal} />
+                  
+                  <div className="flex justify-between items-center">
+                    <p className="text-lg font-semibold">
+                      {(permissions.assigned_clients || []).length} clients assigned
+                    </p>
+                    {(permissions.assigned_clients || []).length > 0 && (
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={() => setPermissions((p) => ({ ...p, assigned_clients: [] }))}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        Clear All
+                      </Button>
+                    )}
+                  </div>
+
+                  <div className="relative">
+                    <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+                    <Input
+                      placeholder="Search clients by name..."
+                      value={clientSearch}
+                      onChange={(e) => setClientSearch(e.target.value)}
+                      className="pl-14 h-14 rounded-3xl text-base"
+                    />
+                  </div>
+
+                  <div className="max-h-[460px] overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-3 pr-2">
+                    {clients
+                      .filter((c) => (c.company_name || '').toLowerCase().includes(clientSearch.toLowerCase()))
+                      .map((client) => {
+                        const isAssigned = (permissions.assigned_clients || []).includes(client.id);
+                        return (
+                          <button
+                            key={client.id}
+                            onClick={() => setPermissions((prev) => ({
+                              ...prev,
+                              assigned_clients: isAssigned
+                                ? (prev.assigned_clients || []).filter((id) => id !== client.id)
+                                : [...(prev.assigned_clients || []), client.id],
+                            }))}
+                            className={`flex items-center gap-4 p-5 rounded-3xl border-2 text-left transition-all hover:shadow-md ${
+                              isAssigned
+                                ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950'
+                                : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                            }`}
+                          >
+                            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 ${isAssigned ? 'bg-emerald-500 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'}`}>
+                              {isAssigned ? <CheckCircle className="h-5 w-5" /> : <Briefcase className="h-5 w-5" />}
+                            </div>
+                            <span className={`font-medium leading-tight ${isAssigned ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-700 dark:text-slate-200'}`}>
+                              {client.company_name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Footer */}
+          <DialogFooter className="px-8 py-6 bg-slate-50 dark:bg-slate-900 border-t dark:border-slate-700 rounded-b-3xl flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm text-slate-500">
+              <SlidersHorizontal className="h-4 w-4" />
+              <span>
+                {Object.entries(permissions).filter(([k, v]) => k.startsWith('can_') && v === true).length} permissions enabled
+              </span>
+            </div>
+
+            <div className="flex gap-4">
+              <Button variant="outline" onClick={() => setPermDialogOpen(false)} className="h-12 px-8 rounded-2xl">
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSavePermissions}
+                disabled={loading}
+                className="h-12 px-10 rounded-2xl font-semibold"
+                style={{ background: GRAD_GREEN, color: 'white' }}
+              >
+                {loading ? 'Saving Changes...' : 'Save Permissions'}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </motion.div>
   );
 }
