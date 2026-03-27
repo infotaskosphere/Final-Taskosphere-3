@@ -7,6 +7,7 @@ Manager / Staff = permission-gated via UserPermissions.
 
 import uuid
 import re
+import math
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List, Dict, Any, Union
 from pydantic import (
@@ -382,9 +383,8 @@ class UserPermissions(BaseModel):
     @classmethod
     def from_role(cls, role: "UserRole") -> "UserPermissions":
         """Return a permission set seeded from the role's default template."""
-        defaults = DEFAULT_ROLE_PERMISSIONS.get(
-            role.value if isinstance(role, UserRole) else str(role), {}
-        )
+        role_key = role.value if isinstance(role, UserRole) else str(role)
+        defaults = DEFAULT_ROLE_PERMISSIONS.get(role_key, {})
         return cls(**defaults)
 
     def to_role_defaults(self, role: "UserRole") -> "UserPermissions":
@@ -460,7 +460,11 @@ class User(BaseModel):
             return True
         return bool(getattr(self.permissions, perm, False))
 
-    def can_view_resource(self, owner_user_id: str, cross_user_list_key: str = "view_other_tasks") -> bool:
+    def can_view_resource(
+        self,
+        owner_user_id: str,
+        cross_user_list_key: str = "view_other_tasks",
+    ) -> bool:
         """
         Return True if this user may read a resource owned by owner_user_id.
 
@@ -764,7 +768,7 @@ class Attendance(BaseModel):
     duration_minutes: Optional[int]    = 0
     leave_reason:     Optional[str]    = None
     is_late:          bool             = False
-    punched_out_early:bool             = False
+    punched_out_early: bool            = False
 
 
 class AttendanceBase(BaseModel):
@@ -868,16 +872,16 @@ class DSC(DSCBase):
 class DSCUpdate(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    holder_name:      Optional[str] = None
-    dsc_type:         Optional[str] = None
-    dsc_password:     Optional[str] = None
-    associated_with:  Optional[str] = None
+    holder_name:      Optional[str]        = None
+    dsc_type:         Optional[str]        = None
+    dsc_password:     Optional[str]        = None
+    associated_with:  Optional[str]        = None
     entity_type:      Optional[EntityType] = None
-    issue_date:       Optional[Any] = None
-    expiry_date:      Optional[Any] = None
-    notes:            Optional[str] = None
-    current_status:   Optional[str] = None
-    current_location: Optional[str] = None
+    issue_date:       Optional[Any]        = None
+    expiry_date:      Optional[Any]        = None
+    notes:            Optional[str]        = None
+    current_status:   Optional[str]        = None
+    current_location: Optional[str]        = None
 
 
 class DSCListResponse(BaseModel):
@@ -981,6 +985,21 @@ class Document(DocumentBase):
     id:         str  = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: Optional[Any] = None
+
+
+class DocumentUpdate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    document_name:    Optional[str]          = None
+    document_type:    Optional[str]          = None
+    holder_name:      Optional[str]          = None
+    associated_with:  Optional[str]          = None
+    entity_type:      Optional[EntityType]   = None
+    issue_date:       Optional[Any]          = None
+    valid_upto:       Optional[Any]          = None
+    notes:            Optional[str]          = None
+    current_status:   Optional[str]          = None
+    current_location: Optional[str]          = None
 
 
 class DocumentMovementRequest(BaseModel):
@@ -1533,7 +1552,6 @@ class PaginatedResponse(BaseModel):
     @model_validator(mode="after")
     def compute_pages(self) -> "PaginatedResponse":
         if self.limit > 0:
-            import math
             self.pages = math.ceil(self.total / self.limit)
         return self
 
@@ -1545,8 +1563,14 @@ class PaginatedResponse(BaseModel):
 
 def require_permission(user: User, perm: str, detail: str = "Insufficient permissions") -> None:
     """
-    Raise an HTTP 403-equivalent ValueError if the user lacks perm.
+    Raise a PermissionError if the user lacks perm.
     Admin users always pass.  Integrate with FastAPI's HTTPException in routes.
+
+    Usage in a FastAPI route:
+        try:
+            require_permission(current_user, "can_view_documents")
+        except PermissionError as e:
+            raise HTTPException(status_code=403, detail=str(e))
     """
     if not user.has_permission(perm):
         raise PermissionError(detail)
@@ -1557,7 +1581,11 @@ def admin_or_permission(user: User, perm: str) -> bool:
     return user.is_admin or user.has_permission(perm)
 
 
-def filter_for_user(user: User, records: List[Dict[str, Any]], owner_key: str = "created_by") -> List[Dict[str, Any]]:
+def filter_for_user(
+    user: User,
+    records: List[Dict[str, Any]],
+    owner_key: str = "created_by",
+) -> List[Dict[str, Any]]:
     """
     Filter a list of record dicts so that:
       - Admin sees everything.
@@ -1566,3 +1594,42 @@ def filter_for_user(user: User, records: List[Dict[str, Any]], owner_key: str = 
     if user.is_admin:
         return records
     return [r for r in records if r.get(owner_key) == user.id]
+
+
+def guard_document_access(user: User) -> None:
+    """
+    Call at the top of every /documents route handler.
+    Raises PermissionError for non-admin users who lack can_view_documents.
+    Admins always pass through.
+    """
+    if user.is_admin:
+        return
+    if not user.permissions.can_view_documents:
+        raise PermissionError("You do not have permission to access the Document Register.")
+
+
+def guard_document_edit(user: User) -> None:
+    """
+    Call before any write operation on /documents.
+    Admins always pass; others need can_edit_documents.
+    """
+    if user.is_admin:
+        return
+    if not user.permissions.can_edit_documents:
+        raise PermissionError("You do not have permission to create or edit documents.")
+
+
+def guard_dsc_access(user: User) -> None:
+    """Guard for DSC Register read access."""
+    if user.is_admin:
+        return
+    if not user.permissions.can_view_all_dsc:
+        raise PermissionError("You do not have permission to access the DSC Register.")
+
+
+def guard_dsc_edit(user: User) -> None:
+    """Guard for DSC Register write access."""
+    if user.is_admin:
+        return
+    if not user.permissions.can_edit_dsc:
+        raise PermissionError("You do not have permission to edit DSC records.")
