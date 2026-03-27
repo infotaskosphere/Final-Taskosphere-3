@@ -199,6 +199,9 @@ const DashboardLayout = ({ children }) => {
   if (!user) { navigate('/login', { replace: true }); return null; }
 
   const handleLogout = () => {
+    // 🔴 stop activity tracking instantly
+    window.__STOP_ACTIVITY__ = true;
+
     logout();
     toast.success('Logged out successfully');
     navigate('/login', { replace: true });
