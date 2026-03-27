@@ -143,7 +143,7 @@ const DashboardLayout = ({ children }) => {
     document.documentElement.classList.toggle('dark', isDark);
   }, [isDark]);
 
-  useActivityTracker(true);
+  useActivityTracker(!!user);
 
   useEffect(() => {
     localStorage.setItem('sidebarCollapsed', String(collapsed));
