@@ -12,6 +12,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import api from '@/lib/api';
+const getToken = () =>
+  localStorage.getItem("token") || sessionStorage.getItem("token");
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format, subMonths } from 'date-fns';
@@ -62,41 +64,37 @@ import {
   BarChart2,
   Eye,
 } from 'lucide-react';
-
 // ─── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
-  deepBlue:     '#0D3B66',
-  mediumBlue:   '#1F6FB2',
+  deepBlue: '#0D3B66',
+  mediumBlue: '#1F6FB2',
   emeraldGreen: '#1FAF5A',
-  lightGreen:   '#5CCB5F',
-  coral:        '#FF6B6B',
-  amber:        '#F59E0B',
+  lightGreen: '#5CCB5F',
+  coral: '#FF6B6B',
+  amber: '#F59E0B',
 };
-
 // ─── Spring Physics ───────────────────────────────────────────────────────────
 const springPhysics = {
   card: { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
 };
-
 // ─── Animation Variants ───────────────────────────────────────────────────────
 const containerVariants = {
-  hidden:  { opacity: 0 },
+  hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
 };
 const itemVariants = {
-  hidden:  { opacity: 0, y: 24 },
+  hidden: { opacity: 0, y: 24 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] } },
-  exit:    { opacity: 0, y: 12, transition: { duration: 0.3 } },
+  exit: { opacity: 0, y: 12, transition: { duration: 0.3 } },
 };
 const staggerChildren = {
-  hidden:  { opacity: 0 },
+  hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.04, delayChildren: 0.05 } },
 };
 const listItem = {
-  hidden:  { opacity: 0, y: 16, scale: 0.98 },
+  hidden: { opacity: 0, y: 16, scale: 0.98 },
   visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.38, ease: [0.23, 1, 0.32, 1] } },
 };
-
 // ─── Shared Card Shell ────────────────────────────────────────────────────────
 function SectionCard({ children, className, onClick, isDark }) {
   const base = `border rounded-2xl overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`;
@@ -107,7 +105,6 @@ function SectionCard({ children, className, onClick, isDark }) {
     </div>
   );
 }
-
 // ─── Card Header Row ──────────────────────────────────────────────────────────
 function CardHeaderRow({ iconBg, icon, title, subtitle, action, isDark }) {
   return (
@@ -123,7 +120,6 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action, isDark }) {
     </div>
   );
 }
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function secondsToHM(s) {
   const t = Math.floor(Number(s) || 0);
@@ -144,77 +140,66 @@ function getDomain(url) {
     return url.length > 30 ? url.slice(0, 30) + '…' : url;
   }
 }
-
 const CAT_COLORS = {
-  productivity:  COLORS.emeraldGreen,
+  productivity: COLORS.emeraldGreen,
   communication: COLORS.mediumBlue,
   entertainment: COLORS.coral,
-  social:        COLORS.amber,
-  development:   COLORS.deepBlue,
-  other:         '#94a3b8',
+  social: COLORS.amber,
+  development: COLORS.deepBlue,
+  other: '#94a3b8',
 };
-
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 export default function StaffActivity() {
   const { user, hasPermission } = useAuth();
   const isDark = useDark();
-
   // ── Permissions ───────────────────────────────────────────────────────────
-  const isAdmin            = user?.role === 'admin';
-  const canViewActivity    = hasPermission('can_view_staff_activity') || isAdmin;
+  const isAdmin = user?.role === 'admin';
+  const canViewActivity = hasPermission('can_view_staff_activity') || isAdmin;
   const canDownloadReports = hasPermission('can_download_reports') || isAdmin;
-
   // ── UI state ──────────────────────────────────────────────────────────────
-  const [activeTab,      setActiveTab]      = useState('activity_log');
-  const [loading,        setLoading]        = useState(true);
+  const [activeTab, setActiveTab] = useState('activity_log');
+  const [loading, setLoading] = useState(true);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [isAuditing,     setIsAuditing]     = useState(false);
-  const [auditInsights,  setAuditInsights]  = useState([]);
-
+  const [isAuditing, setIsAuditing] = useState(false);
+  const [auditInsights, setAuditInsights] = useState([]);
   // ── Data state ────────────────────────────────────────────────────────────
   const [attendanceRegister, setAttendanceRegister] = useState([]);
-  const [activitySummary,    setActivitySummary]    = useState([]);
-  const [activePersonnel,    setActivePersonnel]    = useState([]);
-  const [taskVectors,        setTaskVectors]        = useState([]);
+  const [activitySummary, setActivitySummary] = useState([]);
+  const [activePersonnel, setActivePersonnel] = useState([]);
+  const [taskVectors, setTaskVectors] = useState([]);
   const [taskVectorsLoading, setTaskVectorsLoading] = useState(false);
-
   // ── Filter state ──────────────────────────────────────────────────────────
-  const [selectedUnit,  setSelectedUnit]  = useState('all');
+  const [selectedUnit, setSelectedUnit] = useState('all');
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), 'yyyy-MM'));
-  const [unitAlpha,     setUnitAlpha]     = useState('');
-  const [unitBeta,      setUnitBeta]      = useState('');
-
+  const [unitAlpha, setUnitAlpha] = useState('');
+  const [unitBeta, setUnitBeta] = useState('');
   // ── Month options ─────────────────────────────────────────────────────────
   const monthOptions = useMemo(() =>
     Array.from({ length: 12 }, (_, i) => {
       const d = subMonths(new Date(), i);
       return { value: format(d, 'yyyy-MM'), label: format(d, 'MMMM yyyy') };
     }), []);
-
   // ── 24-hr intensity map ───────────────────────────────────────────────────
   const intensityMap = useMemo(() =>
     Array.from({ length: 24 }, (_, i) => ({
-      hour:    `${String(i).padStart(2, '0')}:00`,
+      hour: `${String(i).padStart(2, '0')}:00`,
       density: (i >= 9 && i <= 18)
         ? 35 + (i === 10 || i === 11 || i === 14 || i === 15 ? 30 : 10) + (i * 2 % 15)
         : 2 + (i * 3 % 8),
     })), []);
-
   // ── Filtered arrays ───────────────────────────────────────────────────────
   const filteredActivity = useMemo(() =>
     selectedUnit === 'all'
       ? activitySummary
       : activitySummary.filter((s) => s.user_id === selectedUnit),
   [activitySummary, selectedUnit]);
-
   const filteredAttendance = useMemo(() =>
     selectedUnit === 'all'
       ? attendanceRegister
       : attendanceRegister.filter((s) => s.user_id === selectedUnit),
   [attendanceRegister, selectedUnit]);
-
   // ── Aggregated apps ───────────────────────────────────────────────────────
   const aggregatedApps = useMemo(() => {
     const map = {};
@@ -222,12 +207,11 @@ export default function StaffActivity() {
       (u.apps_list || []).forEach((app) => {
         if (!map[app.name]) map[app.name] = { name: app.name, duration: 0, count: 0 };
         map[app.name].duration += Number(app.duration) || 0;
-        map[app.name].count   += Number(app.count)    || 0;
+        map[app.name].count += Number(app.count) || 0;
       });
     });
     return Object.values(map).sort((a, b) => b.duration - a.duration).slice(0, 8);
   }, [filteredActivity]);
-
   // ── Aggregated websites ───────────────────────────────────────────────────
   const aggregatedWebsites = useMemo(() => {
     const map = {};
@@ -236,7 +220,7 @@ export default function StaffActivity() {
       if (!websites) return;
       if (Array.isArray(websites)) {
         websites.forEach((entry) => {
-          const url      = entry?.url || entry?.domain || '';
+          const url = entry?.url || entry?.domain || '';
           const duration = Number(entry?.duration ?? entry?.time ?? 0);
           if (!url) return;
           const domain = getDomain(url);
@@ -254,21 +238,20 @@ export default function StaffActivity() {
     });
     return Object.values(map).sort((a, b) => b.duration - a.duration).slice(0, 10);
   }, [filteredActivity]);
-
   // ── Idle stats ────────────────────────────────────────────────────────────
   const idleStats = useMemo(() => {
-    const totalDur  = filteredActivity.reduce((a, u) => a + (Number(u.total_duration)  || 0), 0);
-    const idleDur   = filteredActivity.reduce((a, u) => a + (Number(u.idle_duration)   || 0), 0);
+    const totalDur = filteredActivity.reduce((a, u) => a + (Number(u.total_duration) || 0), 0);
+    const idleDur = filteredActivity.reduce((a, u) => a + (Number(u.idle_duration) || 0), 0);
     const activeDur = filteredActivity.reduce((a, u) => a + (Number(u.active_duration) || 0), 0);
-    const idlePct   = pct(idleDur,   totalDur);
+    const idlePct = pct(idleDur, totalDur);
     const activePct = pct(activeDur, totalDur);
-    const perUser   = filteredActivity.map((u) => {
-      const total  = Number(u.total_duration)  || 0;
-      const idle   = Number(u.idle_duration)   || 0;
+    const perUser = filteredActivity.map((u) => {
+      const total = Number(u.total_duration) || 0;
+      const idle = Number(u.idle_duration) || 0;
       const active = Number(u.active_duration) || 0;
       return {
         user_name: u.user_name || 'Unknown',
-        user_id:   u.user_id,
+        user_id: u.user_id,
         total,
         idle,
         active,
@@ -277,7 +260,6 @@ export default function StaffActivity() {
     }).sort((a, b) => b.idlePct - a.idlePct);
     return { totalDur, idleDur, activeDur, idlePct, activePct, perUser };
   }, [filteredActivity]);
-
   // ── Category breakdown ────────────────────────────────────────────────────
   const categoryBreakdown = useMemo(() => {
     const map = {};
@@ -291,39 +273,34 @@ export default function StaffActivity() {
       .map(([category, duration]) => ({ category, duration, pct: pct(duration, total) }))
       .sort((a, b) => b.duration - a.duration);
   }, [filteredActivity]);
-
   // ── Header metrics ────────────────────────────────────────────────────────
   const totalLoggedTime = useMemo(() => {
     const mins = filteredAttendance.reduce((acc, s) => acc + (Number(s.total_minutes) || 0), 0);
     return minutesToHM(mins);
   }, [filteredAttendance]);
-
   const avgProductivity = useMemo(() => {
     if (!filteredActivity.length) return null;
     const sum = filteredActivity.reduce((a, s) => a + (Number(s.productivity_percent) || 0), 0);
     return Math.round(sum / filteredActivity.length);
   }, [filteredActivity]);
-
   const peakHour = useMemo(
     () => intensityMap.reduce((mx, h) => (h.density > mx.density ? h : mx), intensityMap[0]),
     [intensityMap],
   );
-
   const displayPersonnelCount = useMemo(() => {
     if (selectedUnit === 'all') return activePersonnel.length;
     return activePersonnel.some((u) => u.id === selectedUnit) ? 1 : 0;
   }, [activePersonnel, selectedUnit]);
-
   // ── Radar metrics ─────────────────────────────────────────────────────────
   const radarMetrics = useMemo(() => {
     if (!unitAlpha || !unitBeta) return [];
     const labels = ['Efficiency', 'Precision', 'Consistency', 'Communication', 'Volume', 'Initiative'];
-    const a    = activitySummary.find((s) => s.user_id === unitAlpha);
-    const b    = activitySummary.find((s) => s.user_id === unitBeta);
+    const a = activitySummary.find((s) => s.user_id === unitAlpha);
+    const b = activitySummary.find((s) => s.user_id === unitBeta);
     const aAtt = attendanceRegister.find((s) => s.user_id === unitAlpha);
     const bAtt = attendanceRegister.find((s) => s.user_id === unitBeta);
-    const aBase   = a ? Math.min(100, Number(a.productivity_percent) || 60) : 60;
-    const bBase   = b ? Math.min(100, Number(b.productivity_percent) || 55) : 55;
+    const aBase = a ? Math.min(100, Number(a.productivity_percent) || 60) : 60;
+    const bBase = b ? Math.min(100, Number(b.productivity_percent) || 55) : 55;
     const aAttPct = aAtt ? Math.min(100, Math.round(((aAtt.days_present || 0) / 22) * 100)) : 70;
     const bAttPct = bAtt ? Math.min(100, Math.round(((bAtt.days_present || 0) / 22) * 100)) : 65;
     const variation = [0, 8, -5, 12, -3, 7];
@@ -333,93 +310,129 @@ export default function StaffActivity() {
       B: Math.max(10, Math.min(100, i === 1 ? bAttPct : bBase + variation[i] - 5)),
     }));
   }, [unitAlpha, unitBeta, activitySummary, attendanceRegister]);
-
   // ── Task stats ────────────────────────────────────────────────────────────
   const taskStats = useMemo(() => {
     const completed = taskVectors.filter((t) => t.is_completed).length;
-    const total     = taskVectors.length;
+    const total = taskVectors.length;
     return { completed, active: total - completed, total, rate: pct(completed, total) };
   }, [taskVectors]);
-
+  // ── TOKEN GUARD (after all hooks) ────────────────────────────────────────
+  const token = getToken();
+  if (!token) {
+    return null;
+  }
   // ─────────────────────────────────────────────────────────────────────────
   // DATA FETCHING
   // ─────────────────────────────────────────────────────────────────────────
   const synchronize = useCallback(async () => {
+    const token = getToken();
+
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
+
     try {
       const [year, month] = selectedMonth.split('-').map(Number);
-      const lastDay  = new Date(year, month, 0).getDate();
+      const lastDay = new Date(year, month, 0).getDate();
+
       const dateFrom = `${selectedMonth}-01T00:00:00`;
-      const dateTo   = `${selectedMonth}-${String(lastDay).padStart(2, '0')}T23:59:59`;
+      const dateTo = `${selectedMonth}-${String(lastDay).padStart(2, '0')}T23:59:59`;
+
       const [uRes, aRes, attRes] = await Promise.all([
         api.get('/users'),
         api.get(`/activity/summary?date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}`),
         api.get(`/attendance/staff-report?month=${selectedMonth}`),
       ]);
-      setActivePersonnel(Array.isArray(uRes.data)     ? uRes.data     : []);
-      setActivitySummary(Array.isArray(aRes.data)     ? aRes.data     : []);
-      setAttendanceRegister(Array.isArray(attRes.data) ? attRes.data  : []);
+
+      setActivePersonnel(Array.isArray(uRes.data) ? uRes.data : []);
+      setActivitySummary(Array.isArray(aRes.data) ? aRes.data : []);
+      setAttendanceRegister(Array.isArray(attRes.data) ? attRes.data : []);
+
     } catch (err) {
+      if (err?.message === "No auth token — request blocked") return;
+
       console.error('Sync error:', err);
       toast.error('Telemetry sync failed. Check network.');
     } finally {
       setLoading(false);
     }
   }, [selectedMonth]);
-
   const fetchTaskVectors = useCallback(async () => {
-    if (!selectedUnit || selectedUnit === 'all') { setTaskVectors([]); return; }
+    const token = getToken();
+
+    if (!token || !selectedUnit || selectedUnit === 'all') {
+      setTaskVectors([]);
+      return;
+    }
+
     setTaskVectorsLoading(true);
+
     try {
       const res = await api.get(`/todos?user_id=${selectedUnit}`);
       setTaskVectors(Array.isArray(res.data) ? res.data : []);
-    } catch {
+
+    } catch (err) {
+      if (err?.message === "No auth token — request blocked") return;
+
       toast.error('Failed to load task data.');
       setTaskVectors([]);
+
     } finally {
       setTaskVectorsLoading(false);
     }
   }, [selectedUnit]);
+  // ── SAFE DATA FETCH TRIGGER ───────────────────────────────────────────────
+  useEffect(() => {
+    const token = getToken();
+    if (!token || !canViewActivity) return;
 
-  useEffect(() => { if (canViewActivity) synchronize(); }, [selectedMonth, refreshTrigger, canViewActivity]);
-  useEffect(() => { fetchTaskVectors(); }, [selectedUnit]);
+    synchronize();
+  }, [selectedMonth, refreshTrigger, canViewActivity]);
+  // ── SAFE TASK FETCH TRIGGER ───────────────────────────────────────────────
+  useEffect(() => {
+    const token = getToken();
+    if (!token) return;
 
+    fetchTaskVectors();
+  }, [selectedUnit]);
   // ── AI audit ──────────────────────────────────────────────────────────────
   const runAudit = () => {
     setIsAuditing(true);
     setTimeout(() => {
       const topIdler = idleStats.perUser[0];
-      const topApp   = aggregatedApps[0];
+      const topApp = aggregatedApps[0];
       setAuditInsights([
         {
           title: 'Peak Efficiency Window',
-          desc:  `Output density peaks at ${peakHour.hour} — ${peakHour.density} ops/hr. Schedule deep-work blocks here.`,
-          Icon:  Flame,
+          desc: `Output density peaks at ${peakHour.hour} — ${peakHour.density} ops/hr. Schedule deep-work blocks here.`,
+          Icon: Flame,
           color: COLORS.emeraldGreen,
-          bg:    isDark ? 'bg-emerald-900/20 border-emerald-800' : 'bg-emerald-50 border-emerald-100',
+          bg: isDark ? 'bg-emerald-900/20 border-emerald-800' : 'bg-emerald-50 border-emerald-100',
         },
         {
           title: 'Idle Ratio Alert',
-          desc:  topIdler
+          desc: topIdler
             ? `${idleStats.idlePct}% of tracked time shows no input. Highest: ${topIdler.user_name} at ${topIdler.idlePct}%.`
             : `Overall idle ratio is ${idleStats.idlePct}%. No activity data yet.`,
-          Icon:  Mouse,
+          Icon: Mouse,
           color: COLORS.coral,
-          bg:    isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-100',
+          bg: isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-100',
         },
         {
           title: 'Velocity Projection',
-          desc:  `Task-completion vectors project +8.4% next week. Top driver: ${topApp?.name || 'No app data yet'}.`,
-          Icon:  TrendingUp,
+          desc: `Task-completion vectors project +8.4% next week. Top driver: ${topApp?.name || 'No app data yet'}.`,
+          Icon: TrendingUp,
           color: COLORS.mediumBlue,
-          bg:    isDark ? 'bg-blue-900/20 border-blue-800' : 'bg-blue-50 border-blue-100',
+          bg: isDark ? 'bg-blue-900/20 border-blue-800' : 'bg-blue-50 border-blue-100',
         },
       ]);
       setIsAuditing(false);
       toast.success('Executive Intelligence Audit complete.');
     }, 2000);
   };
-
   // ── Status badge ──────────────────────────────────────────────────────────
   function statusBadge(avgHoursPerDay) {
     const n = Number(avgHoursPerDay) || 0;
@@ -441,20 +454,17 @@ export default function StaffActivity() {
       </span>
     );
   }
-
-  const metricCardCls     = 'rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border';
+  const metricCardCls = 'rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border';
   const metricCardDefault = isDark
     ? 'bg-slate-800 border-slate-700 hover:border-slate-600'
     : 'bg-white border-slate-200/80 hover:border-slate-300';
-
   const TABS = [
-    { value: 'activity_log', label: 'Activity Log', Icon: Activity        },
-    { value: 'idle_tracker', label: 'Idle Tracker', Icon: Mouse           },
-    { value: 'attendance',   label: 'Attendance',   Icon: Users           },
-    { value: 'task_list',    label: 'Task Audit',   Icon: LayoutDashboard },
-    { value: 'comparison',   label: 'Comparison',   Icon: GitCompare      },
+    { value: 'activity_log', label: 'Activity Log', Icon: Activity },
+    { value: 'idle_tracker', label: 'Idle Tracker', Icon: Mouse },
+    { value: 'attendance', label: 'Attendance', Icon: Users },
+    { value: 'task_list', label: 'Task Audit', Icon: LayoutDashboard },
+    { value: 'comparison', label: 'Comparison', Icon: GitCompare },
   ];
-
   // ── Guard ─────────────────────────────────────────────────────────────────
   if (!canViewActivity) {
     return (
@@ -484,11 +494,9 @@ export default function StaffActivity() {
       </motion.div>
     );
   }
-
   // ════════════════════════════════════════════════════════════════════════════
   return (
     <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
-
       {/* ── BANNER ─────────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
         <div
@@ -559,10 +567,8 @@ export default function StaffActivity() {
           </div>
         </div>
       </motion.div>
-
       {/* ── KEY METRICS ────────────────────────────────────────────────────── */}
       <motion.div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3" variants={itemVariants}>
-
         {/* 1. Active Personnel */}
         <motion.div
           whileHover={{ y: -3, transition: springPhysics.card }}
@@ -588,7 +594,6 @@ export default function StaffActivity() {
             </div>
           </CardContent>
         </motion.div>
-
         {/* 2. Total Hours Logged */}
         <motion.div
           whileHover={{ y: -3, transition: springPhysics.card }}
@@ -614,7 +619,6 @@ export default function StaffActivity() {
             </div>
           </CardContent>
         </motion.div>
-
         {/* 3. Avg Productivity */}
         <motion.div
           whileHover={{ y: -3, transition: springPhysics.card }}
@@ -651,7 +655,6 @@ export default function StaffActivity() {
             </div>
           </CardContent>
         </motion.div>
-
         {/* 4. Peak Intensity */}
         <motion.div
           whileHover={{ y: -3, transition: springPhysics.card }}
@@ -677,7 +680,6 @@ export default function StaffActivity() {
             </div>
           </CardContent>
         </motion.div>
-
         {/* 5. Idle Time */}
         <motion.div
           whileHover={{ y: -3, transition: springPhysics.card }}
@@ -715,12 +717,9 @@ export default function StaffActivity() {
             </div>
           </CardContent>
         </motion.div>
-
       </motion.div>
-
       {/* ── INTENSITY MAP + COMPARISON RADAR ───────────────────────────────── */}
       <motion.div className="grid grid-cols-1 lg:grid-cols-5 gap-3" variants={itemVariants}>
-
         <SectionCard isDark={isDark} className="lg:col-span-3">
           <CardHeaderRow
             isDark={isDark}
@@ -743,7 +742,7 @@ export default function StaffActivity() {
               <AreaChart data={intensityMap} margin={{ top: 5, right: 8, left: -24, bottom: 0 }}>
                 <defs>
                   <linearGradient id="intensityGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor={COLORS.amber} stopOpacity={0.6} />
+                    <stop offset="5%" stopColor={COLORS.amber} stopOpacity={0.6} />
                     <stop offset="95%" stopColor={COLORS.amber} stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
@@ -773,7 +772,6 @@ export default function StaffActivity() {
             </ResponsiveContainer>
           </div>
         </SectionCard>
-
         <SectionCard isDark={isDark} className="lg:col-span-2">
           <CardHeaderRow
             isDark={isDark}
@@ -797,7 +795,7 @@ export default function StaffActivity() {
             <div className="grid grid-cols-2 gap-2">
               {[
                 { label: 'Alpha', val: unitAlpha, set: setUnitAlpha },
-                { label: 'Beta',  val: unitBeta,  set: setUnitBeta  },
+                { label: 'Beta', val: unitBeta, set: setUnitBeta },
               ].map(({ label, val, set }) => (
                 <div key={label}>
                   <p className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
@@ -876,7 +874,6 @@ export default function StaffActivity() {
           </div>
         </SectionCard>
       </motion.div>
-
       {/* ── TABS ──────────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
         <div className={`inline-flex gap-0.5 rounded-xl p-1 mb-4 ${isDark ? 'bg-slate-800 border border-slate-700' : 'bg-white border border-slate-200/80 shadow-sm'}`}>
@@ -894,9 +891,7 @@ export default function StaffActivity() {
             </button>
           ))}
         </div>
-
         <AnimatePresence mode="wait">
-
           {/* ─── TAB 1: ACTIVITY LOG ─────────────────────────────────────── */}
           {activeTab === 'activity_log' && (
             <motion.div
@@ -909,7 +904,6 @@ export default function StaffActivity() {
             >
               {/* Row 1: Application Usage + Category Breakdown (equal halves) */}
               <motion.div variants={listItem} className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-
                 {/* Application Usage */}
                 <SectionCard isDark={isDark}>
                   <CardHeaderRow
@@ -974,7 +968,6 @@ export default function StaffActivity() {
                     )}
                   </div>
                 </SectionCard>
-
                 {/* Category Breakdown */}
                 <SectionCard isDark={isDark}>
                   <CardHeaderRow
@@ -1018,10 +1011,8 @@ export default function StaffActivity() {
                   </div>
                 </SectionCard>
               </motion.div>
-
               {/* Row 2: Website Activity + Executive Intelligence (equal halves, same height) */}
               <motion.div variants={listItem} className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-
                 {/* Website Activity */}
                 <SectionCard isDark={isDark} className="flex flex-col">
                   <CardHeaderRow
@@ -1093,7 +1084,6 @@ export default function StaffActivity() {
                     )}
                   </div>
                 </SectionCard>
-
                 {/* Executive Intelligence */}
                 <SectionCard isDark={isDark} className="flex flex-col">
                   <CardHeaderRow
@@ -1172,7 +1162,6 @@ export default function StaffActivity() {
               </motion.div>
             </motion.div>
           )}
-
           {/* ─── TAB 2: IDLE TRACKER ─────────────────────────────────────── */}
           {activeTab === 'idle_tracker' && (
             <motion.div
@@ -1185,10 +1174,10 @@ export default function StaffActivity() {
             >
               <motion.div variants={listItem} className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
-                  { label: 'Total Tracked',      value: secondsToHM(idleStats.totalDur),  Icon: Clock,    color: COLORS.deepBlue,                                            sub: 'All sessions' },
-                  { label: 'Active Time',         value: secondsToHM(idleStats.activeDur), Icon: Zap,      color: COLORS.emeraldGreen,                                        sub: `${idleStats.activePct}% of total` },
-                  { label: 'Idle (No Input)',     value: secondsToHM(idleStats.idleDur),   Icon: Mouse,    color: idleStats.idlePct > 30 ? COLORS.coral : COLORS.amber,       sub: `${idleStats.idlePct}% of total` },
-                  { label: 'Keyboard/Mouse Rate', value: `${100 - idleStats.idlePct}%`,    Icon: Keyboard, color: COLORS.mediumBlue,                                          sub: 'Input activity rate' },
+                  { label: 'Total Tracked', value: secondsToHM(idleStats.totalDur), Icon: Clock, color: COLORS.deepBlue, sub: 'All sessions' },
+                  { label: 'Active Time', value: secondsToHM(idleStats.activeDur), Icon: Zap, color: COLORS.emeraldGreen, sub: `${idleStats.activePct}% of total` },
+                  { label: 'Idle (No Input)', value: secondsToHM(idleStats.idleDur), Icon: Mouse, color: idleStats.idlePct > 30 ? COLORS.coral : COLORS.amber, sub: `${idleStats.idlePct}% of total` },
+                  { label: 'Keyboard/Mouse Rate', value: `${100 - idleStats.idlePct}%`, Icon: Keyboard, color: COLORS.mediumBlue, sub: 'Input activity rate' },
                 ].map(({ label, value, Icon, color, sub }) => (
                   <motion.div
                     key={label}
@@ -1210,7 +1199,6 @@ export default function StaffActivity() {
                   </motion.div>
                 ))}
               </motion.div>
-
               {!loading && idleStats.totalDur === 0 && (
                 <motion.div variants={listItem}>
                   <div className={`flex items-start gap-3 p-4 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-amber-50 border-amber-100'}`}>
@@ -1226,7 +1214,6 @@ export default function StaffActivity() {
                   </div>
                 </motion.div>
               )}
-
               <motion.div variants={listItem} className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 <SectionCard isDark={isDark}>
                   <CardHeaderRow
@@ -1267,7 +1254,7 @@ export default function StaffActivity() {
                       <div className="flex justify-between mt-2">
                         {[
                           { col: COLORS.emeraldGreen, label: `Active · ${secondsToHM(idleStats.activeDur)}` },
-                          { col: COLORS.coral,        label: `Idle · ${secondsToHM(idleStats.idleDur)}` },
+                          { col: COLORS.coral, label: `Idle · ${secondsToHM(idleStats.idleDur)}` },
                         ].map(({ col, label }) => (
                           <div key={label} className="flex items-center gap-1.5">
                             <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: col }} />
@@ -1289,7 +1276,6 @@ export default function StaffActivity() {
                     )}
                   </div>
                 </SectionCard>
-
                 <SectionCard isDark={isDark}>
                   <CardHeaderRow
                     isDark={isDark}
@@ -1306,11 +1292,11 @@ export default function StaffActivity() {
                     ) : idleStats.perUser.length > 0 ? (
                       <div className="space-y-3 max-h-[260px] overflow-y-auto pr-1">
                         {idleStats.perUser.map((u, idx) => {
-                          const barCol  = u.idlePct > 40 ? COLORS.coral : u.idlePct > 25 ? COLORS.amber : COLORS.emeraldGreen;
+                          const barCol = u.idlePct > 40 ? COLORS.coral : u.idlePct > 25 ? COLORS.amber : COLORS.emeraldGreen;
                           const badgeCl = u.idlePct > 40
-                            ? isDark ? 'bg-red-900/40 text-red-400'         : 'bg-red-100 text-red-600'
+                            ? isDark ? 'bg-red-900/40 text-red-400' : 'bg-red-100 text-red-600'
                             : u.idlePct > 25
-                            ? isDark ? 'bg-amber-900/40 text-amber-400'     : 'bg-amber-100 text-amber-600'
+                            ? isDark ? 'bg-amber-900/40 text-amber-400' : 'bg-amber-100 text-amber-600'
                             : isDark ? 'bg-emerald-900/40 text-emerald-400' : 'bg-emerald-100 text-emerald-700';
                           return (
                             <div key={u.user_id || idx}>
@@ -1353,7 +1339,6 @@ export default function StaffActivity() {
               </motion.div>
             </motion.div>
           )}
-
           {/* ─── TAB 3: ATTENDANCE ───────────────────────────────────────── */}
           {activeTab === 'attendance' && (
             <motion.div
@@ -1494,7 +1479,6 @@ export default function StaffActivity() {
               </motion.div>
             </motion.div>
           )}
-
           {/* ─── TAB 4: TASK AUDIT ───────────────────────────────────────── */}
           {activeTab === 'task_list' && (
             <motion.div
@@ -1557,7 +1541,7 @@ export default function StaffActivity() {
                                 className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] flex-shrink-0 ${
                                   task.is_completed
                                     ? isDark ? 'bg-emerald-900/40 text-emerald-400' : 'bg-emerald-100 text-emerald-600'
-                                    : isDark ? 'bg-amber-900/40 text-amber-400'     : 'bg-amber-100 text-amber-600'
+                                    : isDark ? 'bg-amber-900/40 text-amber-400' : 'bg-amber-100 text-amber-600'
                                 }`}
                               >
                                 {task.is_completed ? '✓' : '·'}
@@ -1566,7 +1550,7 @@ export default function StaffActivity() {
                                 className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                                   task.is_completed
                                     ? isDark ? 'bg-emerald-900/30 text-emerald-400' : 'bg-emerald-100 text-emerald-600'
-                                    : isDark ? 'bg-amber-900/30 text-amber-400'     : 'bg-amber-100 text-amber-600'
+                                    : isDark ? 'bg-amber-900/30 text-amber-400' : 'bg-amber-100 text-amber-600'
                                 }`}
                               >
                                 {task.is_completed ? 'Done' : 'Active'}
@@ -1601,7 +1585,6 @@ export default function StaffActivity() {
                   </div>
                 </SectionCard>
               </motion.div>
-
               <motion.div variants={listItem} className="lg:col-span-4 space-y-3">
                 <SectionCard isDark={isDark}>
                   <CardHeaderRow
@@ -1660,10 +1643,9 @@ export default function StaffActivity() {
                     )}
                   </div>
                 </SectionCard>
-
                 {selectedUnit !== 'all' && (() => {
                   const person = activePersonnel.find((u) => u.id === selectedUnit);
-                  const att    = attendanceRegister.find((a) => a.user_id === selectedUnit);
+                  const att = attendanceRegister.find((a) => a.user_id === selectedUnit);
                   if (!person) return null;
                   return (
                     <SectionCard isDark={isDark}>
@@ -1684,7 +1666,7 @@ export default function StaffActivity() {
                           <div className="grid grid-cols-2 gap-2">
                             {[
                               { label: 'Days Present', value: att.days_present || 0 },
-                              { label: 'Hours',        value: att.total_hours || minutesToHM(att.total_minutes || 0) },
+                              { label: 'Hours', value: att.total_hours || minutesToHM(att.total_minutes || 0) },
                             ].map(({ label, value }) => (
                               <div key={label} className={`p-2.5 rounded-xl ${isDark ? 'bg-slate-700' : 'bg-slate-50'}`}>
                                 <p className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{label}</p>
@@ -1700,7 +1682,6 @@ export default function StaffActivity() {
               </motion.div>
             </motion.div>
           )}
-
           {/* ─── TAB 5: COMPARISON ───────────────────────────────────────── */}
           {activeTab === 'comparison' && (
             <motion.div
@@ -1723,7 +1704,7 @@ export default function StaffActivity() {
                   <div className="p-4 space-y-4">
                     {[
                       { label: 'Unit Alpha', val: unitAlpha, set: setUnitAlpha },
-                      { label: 'Unit Beta',  val: unitBeta,  set: setUnitBeta  },
+                      { label: 'Unit Beta', val: unitBeta, set: setUnitBeta },
                     ].map(({ label, val, set }, i) => (
                       <div key={label}>
                         <p className={`text-[10px] font-semibold uppercase tracking-wider mb-2 ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
@@ -1753,12 +1734,11 @@ export default function StaffActivity() {
                         )}
                       </div>
                     ))}
-
                     {unitAlpha && unitBeta && (
                       <div className={`p-3 rounded-xl space-y-2 ${isDark ? 'bg-slate-700/60' : 'bg-slate-50'}`}>
                         {[
                           { col: COLORS.mediumBlue, name: activePersonnel.find((u) => u.id === unitAlpha)?.full_name || 'Alpha' },
-                          { col: COLORS.amber,      name: activePersonnel.find((u) => u.id === unitBeta)?.full_name  || 'Beta'  },
+                          { col: COLORS.amber, name: activePersonnel.find((u) => u.id === unitBeta)?.full_name || 'Beta' },
                         ].map(({ col, name }) => (
                           <div key={name} className="flex items-center gap-2">
                             <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: col }} />
@@ -1767,7 +1747,6 @@ export default function StaffActivity() {
                         ))}
                       </div>
                     )}
-
                     <Button
                       onClick={runAudit}
                       disabled={isAuditing || !unitAlpha || !unitBeta}
@@ -1778,7 +1757,6 @@ export default function StaffActivity() {
                         ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Auditing…</>
                         : 'Run Comparative Audit'}
                     </Button>
-
                     <AnimatePresence>
                       {auditInsights.length > 0 && (
                         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-2">
@@ -1802,7 +1780,6 @@ export default function StaffActivity() {
                   </div>
                 </SectionCard>
               </motion.div>
-
               <motion.div variants={listItem} className="lg:col-span-2">
                 <SectionCard isDark={isDark}>
                   <CardHeaderRow
@@ -1884,10 +1861,8 @@ export default function StaffActivity() {
               </motion.div>
             </motion.div>
           )}
-
         </AnimatePresence>
       </motion.div>
-
       {/* ── FOOTER HUD ──────────────────────────────────────────────────────── */}
       <motion.div
         variants={itemVariants}
@@ -1914,7 +1889,6 @@ export default function StaffActivity() {
           <FileDown className="h-3.5 w-3.5" />Export Telemetry
         </Button>
       </motion.div>
-
     </motion.div>
   );
 }
