@@ -64,7 +64,7 @@ const extractBlobError = async (error) => {
     return 'PDF generation failed due to an unknown error.';
   }
 };
-#======================Invocing========================
+//======================Invoicing========================
   
 const handleConvertToInvoice = async (qtnId) => {
   const r = await api.post(`/invoices/from-quotation/${qtnId}`);
