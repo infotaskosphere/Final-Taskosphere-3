@@ -7,6 +7,8 @@ import {
   Users, LogOut, Menu, Calendar, Activity, ChevronDown,
   PanelLeftClose, PanelLeftOpen, Target, Sun, Moon, MapPin,
   Settings, Mail, Receipt, X, KeyRound,
+  // ── NEW: Invoicing & Billing nav icon ──────────────────────────────
+  IndianRupee,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -24,6 +26,17 @@ const COLORS = {
 const SIDEBAR_EXPANDED  = 280;
 const SIDEBAR_COLLAPSED = 80;
 
+/*
+ * NAV_GROUPS — defines every sidebar link.
+ *
+ * `permission` can be:
+ *   • a string  → user must have that single permission (existing behaviour)
+ *   • an array  → user must have ANY of those permissions (OR logic)
+ *                 used for items accessible via multiple permission paths
+ *
+ * NEW: Invoicing & Billing added to the 'proposals' group.
+ * Visible when user holds can_manage_invoices OR can_create_quotations.
+ */
 const NAV_GROUPS = [
   {
     id: 'core',
@@ -50,18 +63,27 @@ const NAV_GROUPS = [
     id: 'proposals',
     dividerLabel: 'Client Proposals',
     items: [
-      { path: '/leads',      icon: Target,  label: 'Lead Management', permission: 'can_view_all_leads'    },
-      { path: '/quotations', icon: Receipt, label: 'Quotations',      permission: 'can_create_quotations' },
+      { path: '/leads',      icon: Target,       label: 'Lead Management', permission: 'can_view_all_leads'    },
+      { path: '/quotations', icon: Receipt,      label: 'Quotations',      permission: 'can_create_quotations' },
+      // ── NEW: Invoicing & Billing ──────────────────────────────────────
+      // Array permission = OR logic (handled in checkNavPermission below).
+      // Mirrors AppRoutes.jsx Permission guard and invoicing backend _perm().
+      {
+        path:       '/invoicing',
+        icon:       IndianRupee,
+        label:      'Invoicing',
+        permission: ['can_manage_invoices', 'can_create_quotations'],
+      },
     ],
   },
   {
     id: 'admin',
     dividerLabel: 'Admin',
     items: [
-      { path: '/staff-activity', icon: Activity, label: 'Staff Activity',  permission: 'can_view_staff_activity' },
-      { path: '/reports',        icon: BarChart3, label: 'Reports' },
-      { path: '/task-audit',     icon: Activity,  label: 'Task Audit Log',  permission: 'can_view_audit_logs'     },
-      { path: '/users',          icon: Users,     label: 'Users',           permission: 'can_view_user_page'      },
+      { path: '/staff-activity', icon: Activity,  label: 'Staff Activity',  permission: 'can_view_staff_activity' },
+      { path: '/reports',        icon: BarChart3,  label: 'Reports' },
+      { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log',  permission: 'can_view_audit_logs'     },
+      { path: '/users',          icon: Users,      label: 'Users',           permission: 'can_view_user_page'      },
     ],
   },
   {
@@ -207,8 +229,26 @@ const DashboardLayout = ({ children }) => {
     navigate('/login', { replace: true });
   };
 
+  /*
+   * ── Permission helper for nav items ─────────────────────────────────
+   * NEW: supports both string and array permission values.
+   *   string → single permission check (original behaviour, unchanged)
+   *   array  → OR check: visible if user holds ANY listed permission
+   *
+   * Admin role always returns true regardless of permission value,
+   * matching the same logic in AppRoutes.jsx and the backend.
+   */
+  const checkNavPermission = (permission) => {
+    if (!permission) return true;
+    if (user?.role === 'admin') return true;
+    if (Array.isArray(permission)) {
+      return permission.some(p => hasPermission(p));
+    }
+    return hasPermission(permission);
+  };
+
   const allNavItems     = NAV_GROUPS.flatMap(g => g.items);
-  const visibleNavItems = allNavItems.filter(i => !i.permission || hasPermission(i.permission));
+  const visibleNavItems = allNavItems.filter(i => checkNavPermission(i.permission));
   const activeLabel     = visibleNavItems.find(i => i.path === location.pathname)?.label || 'Dashboard';
 
   const sidebarPx = collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED;
@@ -216,7 +256,9 @@ const DashboardLayout = ({ children }) => {
 
   /* ── Nav Item ─────────────────────────────────────────────────────── */
   const NavItem = ({ item }) => {
-    if (item.permission && !hasPermission(item.permission)) return null;
+    // ── UPDATED: delegates to checkNavPermission (string OR array) ────
+    if (!checkNavPermission(item.permission)) return null;
+
     const isActive = location.pathname === item.path;
     const Icon = item.icon;
 
@@ -313,7 +355,7 @@ const DashboardLayout = ({ children }) => {
           fixed top-0 left-0 h-full z-50 flex flex-col
           transition-all duration-300 ease-in-out
           ${isDesktop
-            ? 'translate-x-0'                                   /* always visible on desktop */
+            ? 'translate-x-0'                                      /* always visible on desktop */
             : sidebarOpen ? 'translate-x-0' : '-translate-x-full' /* slide on mobile */
           }
         `}
