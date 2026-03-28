@@ -2582,85 +2582,228 @@ async def update_dsc_movement(
         record_id=dsc_id, old_data=existing, new_data={"movement_log": movement_log}
     )
     return {"message": "Movement updated successfully", "movement_log": movement_log}
-# DOCUMENT REGISTER ROUTES
+    
+#============================================================================
+# DOCUMENT MODULE (FINAL FIXED)
+# ===========================================================================
+
+def normalize_doc(doc):
+    """Convert Mongo _id → id and remove ObjectId"""
+    if not doc:
+        return doc
+    doc = dict(doc)
+    if "_id" in doc:
+        doc["id"] = str(doc["_id"])
+        doc.pop("_id")
+    return doc
+
+
+# ================= CREATE DOCUMENT =================
 @api_router.post("/documents", response_model=Document)
-async def create_document(document_data: DocumentCreate, current_user: User = Depends(get_current_user)):
-    document = Document(**document_data.model_dump(), created_by=current_user.id)
-    doc = document.model_dump()
-    doc["created_at"] = doc["created_at"].isoformat()
-    if doc.get("issue_date"):
-        doc["issue_date"] = doc["issue_date"].isoformat()
-    if doc.get("valid_upto"):
-        doc["valid_upto"] = doc["valid_upto"].isoformat()
-    await db.documents.insert_one(doc)
-    return document
+async def create_document(
+    document_data: DocumentCreate,
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        document = Document(
+            **document_data.model_dump(),
+            created_by=current_user.id
+        )
 
+        doc = document.model_dump()
+
+        # Ensure ID
+        if not doc.get("id"):
+            doc["id"] = str(uuid.uuid4())
+
+        # Convert datetime → string
+        if isinstance(doc.get("created_at"), datetime):
+            doc["created_at"] = doc["created_at"].isoformat()
+
+        if doc.get("issue_date"):
+            if isinstance(doc["issue_date"], datetime):
+                doc["issue_date"] = doc["issue_date"].isoformat()
+
+        if doc.get("valid_upto"):
+            if isinstance(doc["valid_upto"], datetime):
+                doc["valid_upto"] = doc["valid_upto"].isoformat()
+
+        await db.documents.insert_one(doc)
+
+        doc.pop("_id", None)
+
+        return doc
+
+    except Exception as e:
+        logger.error(f"CREATE DOCUMENT ERROR: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ================= GET DOCUMENTS =================
 @api_router.get("/documents", response_model=List[Document])
-async def get_documents(current_user: User = Depends(check_permission("can_view_documents"))):
-    documents = await db.documents.find({}, {"_id": 0}).to_list(1000)
-    for d in documents:
-        if isinstance(d["created_at"], str):
-            d["created_at"] = datetime.fromisoformat(d["created_at"])
-        if d.get("issue_date") and isinstance(d["issue_date"], str):
-            d["issue_date"] = datetime.fromisoformat(d["issue_date"])
-        if d.get("valid_upto") and isinstance(d["valid_upto"], str):
-            d["valid_upto"] = datetime.fromisoformat(d["valid_upto"])
-    return documents
+async def get_documents(
+    current_user: User = Depends(check_permission("can_view_documents"))
+):
+    try:
+        documents = await db.documents.find().to_list(1000)
 
+        cleaned_docs = []
+
+        for d in documents:
+            d = normalize_doc(d)
+
+            # Convert string → datetime (for response model)
+            if isinstance(d.get("created_at"), str):
+                d["created_at"] = datetime.fromisoformat(d["created_at"])
+
+            if d.get("issue_date") and isinstance(d["issue_date"], str):
+                d["issue_date"] = datetime.fromisoformat(d["issue_date"])
+
+            if d.get("valid_upto") and isinstance(d["valid_upto"], str):
+                d["valid_upto"] = datetime.fromisoformat(d["valid_upto"])
+
+            cleaned_docs.append(d)
+
+        return cleaned_docs
+
+    except Exception as e:
+        logger.error(f"GET DOCUMENT ERROR: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch documents")
+
+
+# ================= UPDATE DOCUMENT =================
 @api_router.put("/documents/{document_id}", response_model=Document)
-async def update_document(document_id: str, document_data: DocumentCreate, current_user: User = Depends(check_permission("can_edit_documents"))):
-    existing = await db.documents.find_one({"id": document_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Document not found")
-    update_data = document_data.model_dump()
-    if update_data.get("issue_date"):
-        update_data["issue_date"] = update_data["issue_date"].isoformat()
-    if update_data.get("valid_upto"):
-        update_data["valid_upto"] = update_data["valid_upto"].isoformat()
-    await db.documents.update_one({"id": document_id}, {"$set": update_data})
-    await create_audit_log(current_user, action="UPDATE_DOCUMENT", module="document", record_id=document_id, old_data=existing, new_data=update_data)
-    updated = await db.documents.find_one({"id": document_id}, {"_id": 0})
-    if isinstance(updated["created_at"], str):
-        updated["created_at"] = datetime.fromisoformat(updated["created_at"])
-    return Document(**updated)
+async def update_document(
+    document_id: str,
+    document_data: DocumentCreate,
+    current_user: User = Depends(check_permission("can_edit_documents"))
+):
+    try:
+        existing = await db.documents.find_one({"id": document_id})
 
+        if not existing:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        update_data = document_data.model_dump()
+
+        if update_data.get("issue_date") and isinstance(update_data["issue_date"], datetime):
+            update_data["issue_date"] = update_data["issue_date"].isoformat()
+
+        if update_data.get("valid_upto") and isinstance(update_data["valid_upto"], datetime):
+            update_data["valid_upto"] = update_data["valid_upto"].isoformat()
+
+        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+        await db.documents.update_one(
+            {"id": document_id},
+            {"$set": update_data}
+        )
+
+        await create_audit_log(
+            current_user,
+            action="UPDATE_DOCUMENT",
+            module="document",
+            record_id=document_id,
+            old_data=existing,
+            new_data=update_data
+        )
+
+        updated = await db.documents.find_one({"id": document_id})
+
+        updated = normalize_doc(updated)
+
+        if isinstance(updated.get("created_at"), str):
+            updated["created_at"] = datetime.fromisoformat(updated["created_at"])
+
+        return updated
+
+    except Exception as e:
+        logger.error(f"UPDATE DOCUMENT ERROR: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ================= DELETE DOCUMENT =================
 @api_router.delete("/documents/{document_id}")
-async def delete_document(document_id: str, current_user: User = Depends(check_permission("can_edit_documents"))):
-    existing = await db.documents.find_one({"id": document_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Document not found")
-    await create_audit_log(current_user, action="DELETE_DOCUMENT", module="document", record_id=document_id, old_data=existing)
-    result = await db.documents.delete_one({"id": document_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Document not found")
-    return {"message": "Document deleted successfully"}
+async def delete_document(
+    document_id: str,
+    current_user: User = Depends(check_permission("can_edit_documents"))
+):
+    try:
+        existing = await db.documents.find_one({"id": document_id})
 
+        if not existing:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        await create_audit_log(
+            current_user,
+            action="DELETE_DOCUMENT",
+            module="document",
+            record_id=document_id,
+            old_data=existing
+        )
+
+        result = await db.documents.delete_one({"id": document_id})
+
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        return {"message": "Document deleted successfully"}
+
+    except Exception as e:
+        logger.error(f"DELETE DOCUMENT ERROR: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Delete failed")
+
+
+# ================= ADD MOVEMENT =================
 @api_router.post("/documents/{document_id}/movement")
 async def record_document_movement(
     document_id: str,
     movement_data: DocumentMovementRequest,
     current_user: User = Depends(get_current_user)
 ):
-    document = await db.documents.find_one({"id": document_id}, {"_id": 0})
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    movement = {
-        "id": str(uuid.uuid4()),
-        "movement_type": movement_data.movement_type,
-        "person_name": movement_data.person_name,
-        "timestamp": datetime.now(IST).isoformat(),
-        "notes": movement_data.notes,
-        "recorded_by": current_user.full_name
-    }
-    movement_log = document.get("movement_log", [])
-    movement_log.append(movement)
-    await db.documents.update_one(
-        {"id": document_id},
-        {"$set": {"current_status": movement_data.movement_type, "movement_log": movement_log}}
-    )
-    await create_audit_log(current_user, action="UPDATE_DOCUMENT", module="document", record_id=document_id, old_data=document, new_data={"movement_log": movement_log})
-    return {"message": "Movement recorded successfully"}
+    try:
+        document = await db.documents.find_one({"id": document_id})
 
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        movement = {
+            "id": str(uuid.uuid4()),
+            "movement_type": movement_data.movement_type,
+            "person_name": movement_data.person_name,
+            "timestamp": datetime.now(IST).isoformat(),
+            "notes": movement_data.notes,
+            "recorded_by": current_user.full_name
+        }
+
+        movement_log = document.get("movement_log", [])
+        movement_log.append(movement)
+
+        await db.documents.update_one(
+            {"id": document_id},
+            {"$set": {
+                "current_status": movement_data.movement_type,
+                "movement_log": movement_log
+            }}
+        )
+
+        await create_audit_log(
+            current_user,
+            action="UPDATE_DOCUMENT",
+            module="document",
+            record_id=document_id,
+            old_data=document,
+            new_data={"movement_log": movement_log}
+        )
+
+        return {"message": "Movement recorded successfully"}
+
+    except Exception as e:
+        logger.error(f"MOVEMENT ERROR: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ================= UPDATE MOVEMENT =================
 @api_router.put("/documents/{document_id}/movement/{movement_id}")
 async def update_document_movement(
     document_id: str,
@@ -2668,31 +2811,55 @@ async def update_document_movement(
     update_data: DocumentMovementRequest,
     current_user: User = Depends(get_current_user)
 ):
-    document = await db.documents.find_one({"id": document_id}, {"_id": 0})
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    movement_log = document.get("movement_log", [])
-    movement_found = False
-    for i, movement in enumerate(movement_log):
-        if movement.get("id") == movement_id:
-            movement_log[i]["movement_type"] = update_data.movement_type
-            movement_log[i]["person_name"] = update_data.person_name
-            movement_log[i]["notes"] = update_data.notes
-            movement_log[i]["edited_by"] = current_user.full_name
-            movement_log[i]["edited_at"] = datetime.now(timezone.utc).isoformat()
-            movement_found = True
-            break
-    if not movement_found:
-        raise HTTPException(status_code=404, detail="Movement entry not found")
-    new_status = movement_log[-1]["movement_type"] if movement_log else "IN"
-    await db.documents.update_one(
-        {"id": document_id},
-        {"$set": {"current_status": new_status, "movement_log": movement_log}}
-    )
-    await create_audit_log(current_user, action="UPDATE_DOCUMENT", module="document", record_id=document_id, old_data=document, new_data={"movement_log": movement_log})
-    return {"message": "Movement updated successfully"}
+    try:
+        document = await db.documents.find_one({"id": document_id})
 
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        movement_log = document.get("movement_log", [])
+        found = False
+
+        for i, m in enumerate(movement_log):
+            if m.get("id") == movement_id:
+                movement_log[i]["movement_type"] = update_data.movement_type
+                movement_log[i]["person_name"] = update_data.person_name
+                movement_log[i]["notes"] = update_data.notes
+                movement_log[i]["edited_by"] = current_user.full_name
+                movement_log[i]["edited_at"] = datetime.now(timezone.utc).isoformat()
+                found = True
+                break
+
+        if not found:
+            raise HTTPException(status_code=404, detail="Movement entry not found")
+
+        new_status = movement_log[-1]["movement_type"] if movement_log else "IN"
+
+        await db.documents.update_one(
+            {"id": document_id},
+            {"$set": {
+                "current_status": new_status,
+                "movement_log": movement_log
+            }}
+        )
+
+        await create_audit_log(
+            current_user,
+            action="UPDATE_DOCUMENT",
+            module="document",
+            record_id=document_id,
+            old_data=document,
+            new_data={"movement_log": movement_log}
+        )
+
+        return {"message": "Movement updated successfully"}
+
+    except Exception as e:
+        logger.error(f"MOVEMENT UPDATE ERROR: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+#=========================================================================
 # DUE DATE ROUTES
+#=========================================================================
 COMPLIANCE_RULES = [
     {"keywords": ["gstr-1", "gstr1", "outward supply"],                                "category": "GST",        "department": "GST"},
     {"keywords": ["gstr-3b", "gstr3b", "summary return"],                              "category": "GST",        "department": "GST"},
