@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '../contexts/AuthContext';
 import { useActivityTracker } from '@/hooks/useActivityTracker';
 import {
   LayoutDashboard, CheckSquare, FileText, Clock, BarChart3,
@@ -143,7 +143,7 @@ const DashboardLayout = ({ children }) => {
   /* ── FIX 1: Scroll main content to top on every route change ──────── */
   useEffect(() => {
     if (mainRef.current) {
-      mainRef.current.scrollTo({ top: 0, behavior: 'instant' });
+      mainRef.current.scrollTo({ top: 0, behavior: 'auto' });
     }
   }, [location.pathname]);
 
