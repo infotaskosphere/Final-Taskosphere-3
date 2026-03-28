@@ -17,12 +17,12 @@ const getBaseUrl = () => {
   // Remove trailing slash if present
   url = url.replace(/\/$/, "");
 
-  // If the URL doesn't end in /api, append it to match backend router
-  if (!sanitizedUrl.endsWith("/api")) {
-    return `${sanitizedUrl}/api`;
+  // FIX: Use 'url' instead of 'sanitizedUrl'
+  if (!url.endsWith("/api")) {
+    return `${url}/api`;
   }
   
-  return sanitizedUrl;
+  return url;
 };
 
 const BASE_URL = getBaseUrl();
