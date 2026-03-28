@@ -1231,9 +1231,6 @@ export default function Dashboard() {
 
         {/* ════════════════════════════════════════════════════════════════════
             WELCOME BANNER
-            - Shows only upcoming deadline pills (no Total Tasks / Overdue /
-              Pending Todos pills)
-            - Subtitle is just the greeting — no overdue task message
         ════════════════════════════════════════════════════════════════════ */}
         <motion.div variants={itemVariants}>
           <div
@@ -1263,7 +1260,6 @@ export default function Dashboard() {
                   <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">
                     {getGreeting()}, {user?.full_name?.split(' ')[0] || 'User'}!
                   </h1>
-                  {/* ── CHANGED: no subtitle message about overdue tasks ── */}
                   {todayIsHoliday && (
                     <p className="text-white/55 text-sm mt-1 max-w-md leading-relaxed">
                       Today is a holiday{todayHolidayName ? ` — ${todayHolidayName}` : ''}. Office closed.
@@ -1295,7 +1291,7 @@ export default function Dashboard() {
                 )}
               </div>
 
-              {/* ── Row 2: ONLY deadline pills — no task/todo/overdue pills ── */}
+              {/* ── Row 2: deadline pills ── */}
               {sortedDueDates.length > 0 && (
                 <div className="mt-4 flex items-center gap-2 flex-wrap">
                   {sortedDueDates.slice(0, 4).map(due => {
@@ -1336,148 +1332,184 @@ export default function Dashboard() {
           </div>
         </motion.div>
 
-        {/* ── KEY METRICS — 5 equal cards, all same size ────────────────────── */}
-        {/* CHANGED: grid uses minmax(0,1fr) to force equal sizing on all 5 cards */}
-        <motion.div
-          className="grid gap-3"
-          style={{ gridTemplateColumns: 'repeat(2, minmax(0,1fr))' }}
-          variants={itemVariants}
-        >
-          {/* Render all 5 as a flat list so CSS grid handles wrapping uniformly */}
-          {/* On xl screens we override to 5 columns via a wrapper trick below */}
-        </motion.div>
-
+        {/* ════════════════════════════════════════════════════════════════════
+            KEY METRICS — 5 EQUAL CARDS
+            Cards: Total Tasks | Pending Todos | Overdue | Completion | DSC Alerts
+            All cards use identical padding, flex layout, and min-h to stay same size.
+        ════════════════════════════════════════════════════════════════════ */}
         <motion.div
           className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 [&>*]:min-w-0"
           variants={itemVariants}
         >
-          {/* ── Total Tasks (with Pending Todos sub-badge) ── */}
+
+          {/* ── 1. Total Tasks ── */}
           <motion.div
-            whileHover={{ y:-3, transition:springPhysics.card }}
-            whileTap={{ scale:0.985 }}
+            whileHover={{ y: -3, transition: springPhysics.card }}
+            whileTap={{ scale: 0.985 }}
             onClick={() => navigate('/tasks')}
             className={`${metricCardCls} ${metricCardDefault}`}
           >
-            <CardContent className="p-4">
+            <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
               <div className="flex items-start justify-between">
                 <div className="min-w-0 flex-1 mr-2">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Total Tasks</p>
                   <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
                     {stats?.total_tasks || 0}
                   </p>
-                  {/* ── ADDED: Pending Todos sub-badge ── */}
-                  {pendingTodos.length > 0 && (
-                    <p className="text-[10px] mt-1.5 font-semibold px-2 py-0.5 rounded-md inline-block"
-                      style={{
-                        background: isDark ? 'rgba(31,111,178,0.2)' : `${COLORS.mediumBlue}12`,
-                        color: COLORS.mediumBlue,
-                      }}>
-                      {pendingTodos.length} pending todos
-                    </p>
-                  )}
                 </div>
-                <div className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
-                  style={{ backgroundColor: isDark ? 'rgba(96,165,250,0.12)' : `${COLORS.deepBlue}12` }}>
+                <div
+                  className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
+                  style={{ backgroundColor: isDark ? 'rgba(96,165,250,0.12)' : `${COLORS.deepBlue}12` }}
+                >
                   <Briefcase className="h-4 w-4" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }} />
                 </div>
               </div>
               <div className={`flex items-center gap-1 mt-3 text-xs font-medium group-hover:text-blue-500 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                <span>View all</span><ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
+                <span>View all</span>
+                <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
               </div>
             </CardContent>
           </motion.div>
 
-          {/* ── Overdue ── */}
+          {/* ── 2. Pending Todos ── */}
           <motion.div
-            whileHover={{ y:-3, transition:springPhysics.card }}
-            whileTap={{ scale:0.985 }}
-            onClick={() => navigate('/tasks?filter=overdue')}
-            className={`${metricCardCls} ${stats?.overdue_tasks > 0 ? isDark ? 'bg-red-900/20 border-red-800 hover:border-red-700' : 'bg-red-50/60 border-red-200 hover:border-red-300' : metricCardDefault}`}
+            whileHover={{ y: -3, transition: springPhysics.card }}
+            whileTap={{ scale: 0.985 }}
+            onClick={() => navigate('/todos')}
+            className={`${metricCardCls} ${
+              pendingTodos.length > 0
+                ? isDark
+                  ? 'bg-blue-900/20 border-blue-800 hover:border-blue-700'
+                  : 'bg-blue-50/60 border-blue-200 hover:border-blue-300'
+                : metricCardDefault
+            }`}
           >
-            <CardContent className="p-4">
+            <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
+              <div className="flex items-start justify-between">
+                <div className="min-w-0 flex-1 mr-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Pending Todos</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: isDark ? '#93c5fd' : COLORS.mediumBlue }}>
+                    {pendingTodos.length}
+                  </p>
+                </div>
+                <div
+                  className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
+                  style={{ backgroundColor: isDark ? 'rgba(31,111,178,0.2)' : `${COLORS.mediumBlue}12` }}
+                >
+                  <CheckSquare className="h-4 w-4" style={{ color: isDark ? '#93c5fd' : COLORS.mediumBlue }} />
+                </div>
+              </div>
+              <div className={`flex items-center gap-1 mt-3 text-xs font-medium group-hover:text-blue-500 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                <span>View all</span>
+                <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
+              </div>
+            </CardContent>
+          </motion.div>
+
+          {/* ── 3. Overdue ── */}
+          <motion.div
+            whileHover={{ y: -3, transition: springPhysics.card }}
+            whileTap={{ scale: 0.985 }}
+            onClick={() => navigate('/tasks?filter=overdue')}
+            className={`${metricCardCls} ${
+              stats?.overdue_tasks > 0
+                ? isDark
+                  ? 'bg-red-900/20 border-red-800 hover:border-red-700'
+                  : 'bg-red-50/60 border-red-200 hover:border-red-300'
+                : metricCardDefault
+            }`}
+          >
+            <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Overdue</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.coral }}>{stats?.overdue_tasks || 0}</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.coral }}>
+                    {stats?.overdue_tasks || 0}
+                  </p>
                 </div>
-                <div className="p-2 rounded-xl group-hover:scale-110 transition-transform" style={{ backgroundColor: `${COLORS.coral}18` }}>
+                <div
+                  className="p-2 rounded-xl group-hover:scale-110 transition-transform"
+                  style={{ backgroundColor: `${COLORS.coral}18` }}
+                >
                   <AlertCircle className="h-4 w-4" style={{ color: COLORS.coral }} />
                 </div>
               </div>
               <div className={`flex items-center gap-1 mt-3 text-xs font-medium group-hover:text-red-500 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                <span>View all</span><ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
+                <span>View all</span>
+                <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
               </div>
             </CardContent>
           </motion.div>
 
-          {/* ── Completion ── */}
+          {/* ── 4. Completion ── */}
           <motion.div
-            whileHover={{ y:-3, transition:springPhysics.card }}
-            whileTap={{ scale:0.985 }}
+            whileHover={{ y: -3, transition: springPhysics.card }}
+            whileTap={{ scale: 0.985 }}
             onClick={() => navigate('/tasks')}
             className={`${metricCardCls} ${metricCardDefault}`}
           >
-            <CardContent className="p-4">
+            <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Completion</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.emeraldGreen }}>{completionRate}%</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.emeraldGreen }}>
+                    {completionRate}%
+                  </p>
                 </div>
-                <div className="p-2 rounded-xl group-hover:scale-110 transition-transform" style={{ backgroundColor: `${COLORS.emeraldGreen}12` }}>
+                <div
+                  className="p-2 rounded-xl group-hover:scale-110 transition-transform"
+                  style={{ backgroundColor: `${COLORS.emeraldGreen}12` }}
+                >
                   <TrendingUp className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />
                 </div>
               </div>
               <div className={`mt-2.5 h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                <div className="h-full rounded-full transition-all duration-700"
-                  style={{ width:`${completionRate}%`, background:`linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})` }} />
+                <div
+                  className="h-full rounded-full transition-all duration-700"
+                  style={{
+                    width: `${completionRate}%`,
+                    background: `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`,
+                  }}
+                />
               </div>
             </CardContent>
           </motion.div>
 
-          {/* ── DSC Alerts ── */}
+          {/* ── 5. DSC Alerts ── */}
           <motion.div
-            whileHover={{ y:-3, transition:springPhysics.card }}
-            whileTap={{ scale:0.985 }}
+            whileHover={{ y: -3, transition: springPhysics.card }}
+            whileTap={{ scale: 0.985 }}
             onClick={() => navigate('/dsc?tab=expired')}
-            className={`${metricCardCls} ${stats?.expiring_dsc_count > 0 ? isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50/50 border-red-200' : metricCardDefault}`}
+            className={`${metricCardCls} ${
+              stats?.expiring_dsc_count > 0
+                ? isDark
+                  ? 'bg-red-900/20 border-red-800'
+                  : 'bg-red-50/50 border-red-200'
+                : metricCardDefault
+            }`}
           >
-            <CardContent className="p-4">
+            <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">DSC Alerts</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight text-red-500">{(stats?.expiring_dsc_count || 0) + (stats?.expired_dsc_count || 0)}</p>
-                  <p className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{stats?.expired_dsc_count || 0} expired · {stats?.expiring_dsc_count || 0} expiring</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight text-red-500">
+                    {(stats?.expiring_dsc_count || 0) + (stats?.expired_dsc_count || 0)}
+                  </p>
+                  <p className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    {stats?.expired_dsc_count || 0} expired · {stats?.expiring_dsc_count || 0} expiring
+                  </p>
                 </div>
                 <div className={`p-2 rounded-xl group-hover:scale-110 transition-transform ${isDark ? 'bg-red-900/40' : 'bg-red-100'}`}>
                   <Key className="h-4 w-4 text-red-500" />
                 </div>
               </div>
-            </CardContent>
-          </motion.div>
-
-          {/* ── Today ── */}
-          <motion.div
-            whileHover={{ y:-3, transition:springPhysics.card }}
-            whileTap={{ scale:0.985 }}
-            onClick={() => navigate('/attendance')}
-            className={`${metricCardCls} ${metricCardDefault}`}
-          >
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Today</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: isDark ? '#fbbf24' : COLORS.deepBlue }}>{todayIsHoliday ? 'Holiday' : getTodayDuration()}</p>
-                </div>
-                <div className="p-2 rounded-xl group-hover:scale-110 transition-transform" style={{ backgroundColor: `${COLORS.amber}18` }}>
-                  <Clock className="h-4 w-4" style={{ color: COLORS.amber }} />
-                </div>
-              </div>
-              <div className={`flex items-center gap-1 mt-3 text-xs font-medium group-hover:text-amber-500 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                <span>{todayIsHoliday ? todayHolidayName || 'Holiday today' : 'View details'}</span>
+              <div className={`flex items-center gap-1 mt-3 text-xs font-medium group-hover:text-red-500 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                <span>View all</span>
                 <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
               </div>
             </CardContent>
           </motion.div>
+
         </motion.div>
 
         {/* ── RECENT TASKS + DEADLINES + ATTENDANCE ─────────────────────────── */}
