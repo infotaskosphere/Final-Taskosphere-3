@@ -3,14 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+
   "engines": {
-    "node": "20.x"
+    "node": "18.x"
   },
+
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build --force",
     "preview": "vite preview"
   },
+
   "dependencies": {
     "@hookform/resolvers": "^5.0.1",
     "@hello-pangea/dnd": "^16.2.0",
@@ -75,26 +78,18 @@
     "xlsx": "^0.18.5",
     "zod": "^3.24.4"
   },
+
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
-    "vite": "^6.0.0",
+
+    // 🔴 DOWNGRADE (IMPORTANT)
+    "vite": "^5.4.10",
+
     "eslint": "8.57.0",
     "eslint-plugin-react": "7.37.4",
     "eslint-plugin-react-hooks": "4.6.2"
-  },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
   }
 }
