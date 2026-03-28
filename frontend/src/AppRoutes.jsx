@@ -23,7 +23,7 @@ const VisitsPage        = lazy(() => import("@/pages/VisitsPage.jsx"));
 const EmailSettings     = lazy(() => import("@/components/EmailSettings.jsx"));
 const Quotations        = lazy(() => import("@/pages/Quotations.jsx"));
 const GeneralSettings   = lazy(() => import("@/pages/GeneralSettings.jsx"));
-const PasswordRepository = lazy(() => import("@/pages/PasswordRepository.jsx"));
+const PasswordRepository = lazy(() => import("@/pages/PassVault.jsx"));
 // ── NEW: Invoicing & Billing ────────────────────────────────────────────────
 const Invoicing         = lazy(() => import("@/pages/Invoicing.jsx"));
 
