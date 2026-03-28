@@ -3030,9 +3030,10 @@ async def create_due_date(
             parsed_date = raw_due_date
 
         # ✅ FIX 2: Build document safely
+        data["due_date"] = parsed_date
+
         due_date = DueDate(
             **data,
-            due_date=parsed_date,
             created_by=current_user.id
         )
 
