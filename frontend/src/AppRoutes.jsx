@@ -2,7 +2,6 @@ import React, { Suspense, lazy } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext.jsx";
 import DashboardLayout from "@/components/layout/DashboardLayout.jsx";
-import PasswordRepository from "@/pages/PasswordRepository.jsx";
 
 /* ── Lazy Loaded Pages ──────────────────────────────────────────────────── */
 const Login             = lazy(() => import("@/pages/Login.jsx"));
@@ -24,6 +23,7 @@ const VisitsPage        = lazy(() => import("@/pages/VisitsPage.jsx"));
 const EmailSettings     = lazy(() => import("@/components/EmailSettings.jsx"));
 const Quotations        = lazy(() => import("@/pages/Quotations.jsx"));
 const GeneralSettings   = lazy(() => import("@/pages/GeneralSettings.jsx"));
+const PasswordRepository = lazy(() => import("@/pages/PasswordRepository.jsx"));
 // ── NEW: Invoicing & Billing ────────────────────────────────────────────────
 const Invoicing         = lazy(() => import("@/pages/Invoicing.jsx"));
 
