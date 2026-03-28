@@ -46,6 +46,14 @@ async def startup_event():
         await db.staff_activity.create_index("type")
         await db.staff_activity.create_index("domain")
         await db.staff_activity.create_index([("user_id", 1), ("type", 1)])
+        await db.invoices.create_index([("created_by", 1), ("created_at", -1)])
+        await db.invoices.create_index("client_id")
+        await db.invoices.create_index("lead_id")
+        await db.invoices.create_index("status")
+        await db.invoices.create_index("invoice_date")
+        await db.products.create_index([("created_by", 1), ("name", 1)])
+        await db.payments.create_index("invoice_id")
+        await db.payments.create_index([("created_by", 1), ("payment_date", -1)])
 
         # ✅ EMAIL FIX
         try:
