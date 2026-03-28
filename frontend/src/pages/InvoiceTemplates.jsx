@@ -2375,9 +2375,9 @@ const TemplateThumb = ({ tpl, selected, onClick, primary, secondary, light, acce
 
 /**
  * Full picker UI:
- *   Left panel  → template grid + colour swatches + custom colour input
- *   Right panel → live A4-sized iframe preview
- *   Header bar  → styled with active theme gradient
+ * Left panel  → template grid + colour swatches + custom colour input
+ * Right panel → live A4-sized iframe preview
+ * Header bar  → styled with active theme gradient
  */
 export const InvoiceDesignModal = ({
   open,
@@ -2393,14 +2393,14 @@ export const InvoiceDesignModal = ({
   isDark,
 }) => {
   const [previewHtml, setPreviewHtml] = useState('');
-  const iframeRef                     = useRef(null);
-  const activeTheme                   = getThemeColor(selectedTheme, customColor);
+  const iframeRef = useRef(null);
+  const activeTheme = getThemeColor(selectedTheme, customColor);
 
   /* Regenerate preview HTML whenever any picker setting changes */
   useEffect(() => {
     if (!open) return;
     const inv = sampleInvoice || makeSampleInvoice();
-    const co  = sampleCompany || makeSampleCompany();
+    const co = sampleCompany || makeSampleCompany();
     setPreviewHtml(
       generateInvoiceHTML(inv, co, selectedTemplate, selectedTheme, customColor),
     );
@@ -2408,7 +2408,7 @@ export const InvoiceDesignModal = ({
 
   const handlePrint = useCallback(() => {
     const inv = sampleInvoice || makeSampleInvoice();
-    const co  = sampleCompany || makeSampleCompany();
+    const co = sampleCompany || makeSampleCompany();
     openInvoicePrint(inv, co, selectedTemplate, selectedTheme, customColor);
   }, [sampleInvoice, sampleCompany, selectedTemplate, selectedTheme, customColor]);
 
@@ -2512,20 +2512,20 @@ export const InvoiceDesignModal = ({
                     onClick={() => onThemeChange(t.id)}
                     title={t.name}
                     style={{
-                      width:        '100%',
-                      aspectRatio:  '1',
+                      width: '100%',
+                      aspectRatio: '1',
                       borderRadius: 8,
-                      background:   `linear-gradient(135deg, ${t.primary}, ${t.secondary})`,
-                      border:       selectedTheme === t.id
+                      background: `linear-gradient(135deg, ${t.primary}, ${t.secondary})`,
+                      border: selectedTheme === t.id
                         ? `3px solid ${t.secondary}`
                         : '3px solid transparent',
-                      boxShadow:    selectedTheme === t.id
+                      boxShadow: selectedTheme === t.id
                         ? `0 0 0 2px white, 0 0 0 4px ${t.primary}`
                         : 'none',
-                      cursor:     'pointer',
+                      cursor: 'pointer',
                       transition: 'all 0.15s',
-                      position:   'relative',
-                      display:    'flex',
+                      position: 'relative',
+                      display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                     }}
@@ -2582,8 +2582,8 @@ export const InvoiceDesignModal = ({
                 <div
                   className="mx-4 mb-4 rounded-xl p-3 border"
                   style={{
-                    background:   activeTheme.light,
-                    borderColor:  activeTheme.accent,
+                    background: activeTheme.light,
+                    borderColor: activeTheme.accent,
                   }}
                 >
                   <p className="text-xs font-bold" style={{ color: activeTheme.primary }}>
@@ -2645,11 +2645,11 @@ export const InvoiceDesignModal = ({
             >
               <div
                 style={{
-                  maxWidth:   794,
-                  margin:     '0 auto',
-                  boxShadow:  '0 8px 32px rgba(0,0,0,0.18)',
+                  maxWidth: 794,
+                  margin: '0 auto',
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
                   borderRadius: 4,
-                  overflow:   'hidden',
+                  overflow: 'hidden',
                   background: 'white',
                 }}
               >
@@ -2663,9 +2663,9 @@ export const InvoiceDesignModal = ({
               </div>
             </div>
 
-          </div><!-- /right preview -->
+          </div>{/* /right preview */}
 
-        </div><!-- /flex row -->
+        </div>{/* /flex row */}
       </DialogContent>
     </Dialog>
   );
