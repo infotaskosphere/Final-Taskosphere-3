@@ -21,15 +21,15 @@ import {
   ArrowUpRight, Activity, Zap, Shield, Star, Filter,
   IndianRupee, CalendarDays, FileCheck, ArrowRightLeft, Layers,
   Upload, Database, FileUp, CheckSquare, AlertTriangle, Phone, Mail,
-  FileSpreadsheet, Briefcase, PieChart, Palette, Printer,
+  FileSpreadsheet, Briefcase, PieChart, Palette, Printer, BookOpen,
 } from 'lucide-react';
-
 import {
   InvoiceDesignModal,
   openInvoicePrint,
   COLOR_THEMES,
   INVOICE_TEMPLATES,
 } from './InvoiceTemplates';
+import PartyLedger from './PartyLedger';
 
 // ─── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
@@ -464,7 +464,7 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
           0,
         ]),
         [],
-        ['TOTALS','','','', 
+        ['TOTALS','','','',
           gstr1.b2b.reduce((s,i)=>s+(i.grand_total||0),0),'','',
           gstr1.b2b.reduce((s,i)=>s+(i.total_taxable||0),0),
           gstr1.b2b.reduce((s,i)=>s+(i.total_igst||0),0),
@@ -916,7 +916,7 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-emerald-400" />
             <p className="text-xs text-slate-400">
-              Based on <span className="font-semibold">{monthInvoices.length}</span> invoice{monthInvoices.length !== 1 ? 's' : ''} · 
+              Based on <span className="font-semibold">{monthInvoices.length}</span> invoice{monthInvoices.length !== 1 ? 's' : ''} ·
               Period: <span className="font-semibold">{format(new Date(month + '-01'), 'MMMM yyyy')}</span>
             </p>
           </div>
@@ -1063,7 +1063,7 @@ const PaymentModal = ({ invoice, open, onClose, onSuccess, isDark }) => {
   useEffect(()=>{if(open&&invoice)setForm(p=>({...p,amount:invoice.amount_due?.toFixed(2)||''}));},[open,invoice]);
   const handleSubmit=async(e)=>{e.preventDefault();if(!form.amount||parseFloat(form.amount)<=0){toast.error('Enter a valid amount');return;}setLoading(true);try{await api.post('/payments',{invoice_id:invoice.id,amount:parseFloat(form.amount),payment_date:form.payment_date,payment_mode:form.payment_mode,reference_no:form.reference_no,notes:form.notes});toast.success('Payment recorded!');onSuccess?.();onClose();}catch(err){toast.error(err.response?.data?.detail||'Failed to record payment');}finally{setLoading(false);}};
   if(!invoice)return null;
-  return(<Dialog open={open} onOpenChange={onClose}><DialogContent className="max-w-md rounded-2xl p-0 overflow-hidden"><DialogTitle className="sr-only">Record Payment</DialogTitle><DialogDescription className="sr-only">Record payment</DialogDescription><div className="px-6 py-5" style={{background:`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}}><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center"><IndianRupee className="h-5 w-5 text-white"/></div><div><p className="text-white/60 text-[10px] uppercase tracking-widest">Record Payment</p><h2 className="text-white font-bold text-lg">{invoice.invoice_no}</h2></div></div><div className="mt-4 flex gap-4">{[['Invoice Total',invoice.grand_total,'text-white'],['Paid So Far',invoice.amount_paid,'text-emerald-300'],['Balance Due',invoice.amount_due,'text-amber-300']].map(([l,v,cls])=>(<div key={l} className="flex-1 bg-white/10 rounded-xl px-3 py-2"><p className="text-white/50 text-[9px] uppercase tracking-wider">{l}</p><p className={`font-bold text-sm ${cls}`}>{fmtC(v)}</p></div>))}</div></div><form onSubmit={handleSubmit} className="p-6 space-y-4"><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Amount (₹) *</label><div className="relative"><span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span><Input type="number" step="0.01" min="0.01" className="pl-8 h-11 rounded-xl" value={form.amount} onChange={e=>setForm(p=>({...p,amount:e.target.value}))} required/></div></div><div className="grid grid-cols-2 gap-3"><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Date *</label><Input type="date" className="h-11 rounded-xl" value={form.payment_date} onChange={e=>setForm(p=>({...p,payment_date:e.target.value}))} required/></div><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Mode</label><Select value={form.payment_mode} onValueChange={v=>setForm(p=>({...p,payment_mode:v}))}><SelectTrigger className="h-11 rounded-xl"><SelectValue/></SelectTrigger><SelectContent>{PAY_MODES.map(m=><SelectItem key={m} value={m}>{m.toUpperCase()}</SelectItem>)}</SelectContent></Select></div></div><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Reference / UTR No.</label><Input className="h-11 rounded-xl" placeholder="Transaction / cheque reference" value={form.reference_no} onChange={e=>setForm(p=>({...p,reference_no:e.target.value}))}/></div><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Notes</label><Textarea className="rounded-xl text-sm min-h-[70px] resize-none" value={form.notes} onChange={e=>setForm(p=>({...p,notes:e.target.value}))}/></div><div className="flex gap-3 pt-2"><Button type="button" variant="ghost" onClick={onClose} className="flex-1 h-11 rounded-xl">Cancel</Button><Button type="submit" disabled={loading} className="flex-1 h-11 rounded-xl text-white font-semibold" style={{background:`linear-gradient(135deg, ${COLORS.emeraldGreen}, #15803d)`}}>{loading?'Recording…':'✓ Record Payment'}</Button></div></form></DialogContent></Dialog>);
+  return(<Dialog open={open} onOpenChange={onClose}><DialogContent className="max-w-md rounded-2xl p-0 overflow-hidden"><DialogTitle className="sr-only">Record Payment</DialogTitle><DialogDescription className="sr-only">Record payment</DialogDescription><div className="px-6 py-5" style={{background:`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}}><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center"><IndianRupee className="h-5 w-5 text-white"/></div><div><p className="text-white/60 text-[10px] uppercase tracking-widest">Record Payment</p><h2 className="text-white font-bold text-lg">{invoice.invoice_no}</h2></div></div><div className="mt-4 flex gap-4">{[['Invoice Total',invoice.grand_total,'text-white'],['Paid So Far',invoice.amount_paid,'text-emerald-300'],['Balance Due',invoice.amount_due,'text-amber-300']].map(([l,v,cls])=>(<div key={l} className="flex-1 bg-white/10 rounded-xl px-3 py-2"><p className="text-white/50 text-[9px] uppercase tracking-wider">{l}</p><p className={`font-bold text-sm ${cls}`}>{fmtC(v)}</p></div>))}</div></div><form onSubmit={handleSubmit} className="p-6 space-y-4"><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Amount (₹) *</label><div className="relative"><span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span><Input type="number" step="0.01" min="0.01" className="pl-8 h-11 rounded-xl" value={form.amount} onChange={e=>setForm(p=>({...p,amount:e.target.value}))} required/></div></div><div className="grid grid-cols-2 gap-3"><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Date *</label><Input type="date" className="h-11 rounded-xl" value={form.payment_date} onChange={e=>setForm(p=({...p,payment_date:e.target.value}))} required/></div><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Mode</label><Select value={form.payment_mode} onValueChange={v=>setForm(p=({...p,payment_mode:v}))}><SelectTrigger className="h-11 rounded-xl"><SelectValue/></SelectTrigger><SelectContent>{PAY_MODES.map(m=><SelectItem key={m} value={m}>{m.toUpperCase()}</SelectItem>)}</SelectContent></Select></div></div><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Reference / UTR No.</label><Input className="h-11 rounded-xl" placeholder="Transaction / cheque reference" value={form.reference_no} onChange={e=>setForm(p=({...p,reference_no:e.target.value}))}/></div><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Notes</label><Textarea className="rounded-xl text-sm min-h-[70px] resize-none" value={form.notes} onChange={e=>setForm(p=({...p,notes:e.target.value}))}/></div><div className="flex gap-3 pt-2"><Button type="button" variant="ghost" onClick={onClose} className="flex-1 h-11 rounded-xl">Cancel</Button><Button type="submit" disabled={loading} className="flex-1 h-11 rounded-xl text-white font-semibold" style={{background:`linear-gradient(135deg, ${COLORS.emeraldGreen}, #15803d)`}}>{loading?'Recording…':'✓ Record Payment'}</Button></div></form></DialogContent></Dialog>);
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1092,9 +1092,9 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
 
   const totals=useMemo(()=>computeTotals(form.items,form.is_interstate,form.discount_amount,form.shipping_charges,form.other_charges),[form.items,form.is_interstate,form.discount_amount,form.shipping_charges,form.other_charges]);
   const setField=useCallback((k,v)=>setForm(p=>({...p,[k]:v})),[]);
-  const updateItem=useCallback((idx,k,val)=>setForm(p=>({...p,items:p.items.map((it,i)=>i!==idx?it:{...it,[k]:val})})),[]);
-  const addItem=useCallback(()=>setForm(p=>({...p,items:[...p.items,emptyItem()]})),[]);
-  const removeItem=useCallback((idx)=>setForm(p=>({...p,items:p.items.filter((_,i)=>i!==idx)})),[]);
+  const updateItem=useCallback((idx,k,val)=>setForm(p=(({...p,items:p.items.map((it,i)=>i!==idx?it:{...it,[k]:val})}))),[]);
+  const addItem=useCallback(()=>setForm(p=({...p,items:[...p.items,emptyItem()]})),[]);
+  const removeItem=useCallback((idx)=>setForm(p=({...p,items:p.items.filter((_,i)=>i!==idx)})),[]);
 
   // ── Smart client select — auto-populates all fields ───────────────────────
   const handleClientSelect = useCallback((client) => {
@@ -1103,7 +1103,6 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       return;
     }
     const addressParts = [client.address, client.city, client.state].filter(Boolean).join(', ');
-    // GSTIN from client's own field OR from contact persons if available
     const gstin = client.client_gstin || client.gstin || '';
     setForm(p => ({
       ...p,
@@ -1114,13 +1113,12 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       client_address: addressParts,
       client_state: client.state || '',
       client_gstin: gstin,
-      // auto-detect interstate if supply_state is set
       is_interstate: p.supply_state ? (p.supply_state.toLowerCase() !== (client.state || '').toLowerCase()) : p.is_interstate,
     }));
     toast.success(`Auto-filled from "${client.company_name}"`, { duration: 1500 });
   }, []);
 
-  const fillFromProduct=useCallback((idx,productId)=>{if(productId==='__none__')return;const prod=products.find(x=>x.id===productId);if(!prod)return;setForm(p=>({...p,items:p.items.map((it,i)=>i!==idx?it:{...it,product_id:productId,description:prod.name,hsn_sac:prod.hsn_sac||'',unit:prod.unit||'service',unit_price:prod.unit_price||0,gst_rate:prod.gst_rate||18})}));},[products]);
+  const fillFromProduct=useCallback((idx,productId)=>{if(productId==='__none__')return;const prod=products.find(x=>x.id===productId);if(!prod)return;setForm(p=({...p,items:p.items.map((it,i)=>i!==idx?it:{...it,product_id:productId,description:prod.name,hsn_sac:prod.hsn_sac||'',unit:prod.unit||'service',unit_price:prod.unit_price||0,gst_rate:prod.gst_rate||18})}));},[products]);
 
   const handleSubmit=async(e)=>{e.preventDefault();if(!form.company_id){toast.error('Please select a company profile');return;}if(!form.client_name?.trim()){toast.error('Client name is required');return;}if(!form.items.some(it=>it.description?.trim())){toast.error('Add at least one item');return;}setLoading(true);try{const payload={...form,...totals};if(editingInv)await api.put(`/invoices/${editingInv.id}`,payload);else await api.post('/invoices',payload);toast.success(editingInv?'Invoice updated!':'Invoice created!');onSuccess?.();onClose();}catch(err){toast.error(err.response?.data?.detail||'Failed to save invoice');}finally{setLoading(false);}};
 
@@ -1393,7 +1391,7 @@ const ProductModal = ({ open, onClose, isDark, onSaved }) => {
   const handleSave=async(e)=>{e.preventDefault();setLoading(true);try{if(editing)await api.put(`/products/${editing.id}`,form);else await api.post('/products',form);toast.success(editing?'Product updated!':'Product created!');const r=await api.get('/products');setProducts(r.data||[]);setForm({name:'',description:'',hsn_sac:'',unit:'service',unit_price:0,gst_rate:18,category:'',is_service:true});setEditing(null);onSaved?.();}catch{toast.error('Failed to save product');}finally{setLoading(false);}};
   const handleDelete=async(id)=>{try{await api.delete(`/products/${id}`);setProducts(p=>p.filter(x=>x.id!==id));toast.success('Deleted');}catch{toast.error('Failed');}};
   const inputCls=`h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 focus:border-blue-400 ${isDark?'bg-slate-700 text-slate-100':'bg-white'}`;
-  return(<Dialog open={open} onOpenChange={onClose}><DialogContent className={`max-w-3xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark?'bg-slate-800 border-slate-700':'bg-white'}`}><DialogTitle className="sr-only">Product Catalog</DialogTitle><DialogDescription className="sr-only">Manage products and services</DialogDescription><div className="px-6 py-5 border-b border-slate-100 dark:border-slate-700"><div className="flex items-center gap-3"><div className="w-9 h-9 rounded-xl flex items-center justify-center text-white" style={{background:`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}}><Package className="h-5 w-5"/></div><div><h2 className={`font-bold text-lg ${isDark?'text-slate-100':'text-slate-900'}`}>Product / Service Catalog</h2><p className="text-xs text-slate-400">Reusable items for quick invoice creation</p></div></div></div><div className="flex-1 overflow-hidden flex"><div className={`w-72 flex-shrink-0 p-5 border-r overflow-y-auto ${isDark?'border-slate-700 bg-slate-800':'border-slate-100 bg-slate-50/40'}`}><h4 className={`text-xs font-bold uppercase tracking-widest mb-3 ${isDark?'text-slate-400':'text-slate-500'}`}>{editing?'Edit Item':'New Item'}</h4><form onSubmit={handleSave} className="space-y-3"><Input className={inputCls} placeholder="Name *" value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} required/><Input className={inputCls} placeholder="Description" value={form.description} onChange={e=>setForm(p=({...p,description:e.target.value}))}/><div className="grid grid-cols-2 gap-2"><Input className={inputCls} placeholder="HSN/SAC" value={form.hsn_sac} onChange={e=>setForm(p=({...p,hsn_sac:e.target.value}))}/><Select value={form.unit} onValueChange={v=>setForm(p=({...p,unit:v}))}><SelectTrigger className={inputCls}><SelectValue/></SelectTrigger><SelectContent>{UNITS.map(u=><SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent></Select></div><div className="grid grid-cols-2 gap-2"><Input type="number" className={inputCls} placeholder="Unit Price" value={form.unit_price} onChange={e=>setForm(p=({...p,unit_price:parseFloat(e.target.value)||0}))}/><Select value={String(form.gst_rate)} onValueChange={v=>setForm(p=({...p,gst_rate:parseFloat(v)}))}><SelectTrigger className={inputCls}><SelectValue/></SelectTrigger><SelectContent>{GST_RATES.map(r=><SelectItem key={r} value={String(r)}>{r}% GST</SelectItem>)}</SelectContent></Select></div><Input className={inputCls} placeholder="Category (optional)" value={form.category} onChange={e=>setForm(p=({...p,category:e.target.value}))}/><div className="flex gap-2"><Button type="submit" disabled={loading} size="sm" className="flex-1 h-9 rounded-xl text-white text-xs font-semibold" style={{background:`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}}>{loading?'Saving…':editing?'Update':'Add Item'}</Button>{editing&&<Button type="button" variant="ghost" size="sm" className="h-9 rounded-xl text-xs" onClick={()=>{setEditing(null);setForm({name:'',description:'',hsn_sac:'',unit:'service',unit_price:0,gst_rate:18,category:'',is_service:true});}}>Cancel</Button>}</div></form></div><div className="flex-1 overflow-y-auto">{products.length===0?(<div className="flex flex-col items-center justify-center h-full py-16 text-slate-400"><Package className="h-10 w-10 mb-3 opacity-30"/><p className="text-sm">No products yet — add one!</p></div>):products.map(p=>(<div key={p.id} className={`flex items-center gap-3 px-5 py-3.5 border-b group transition-colors ${isDark?'border-slate-700 hover:bg-slate-700/30':'border-slate-100 hover:bg-slate-50'}`}><div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-xs font-bold" style={{background:p.is_service?`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`:'linear-gradient(135deg, #065f46, #059669)'}}>{p.is_service?'S':'P'}</div><div className="flex-1 min-w-0"><p className={`text-sm font-semibold truncate ${isDark?'text-slate-100':'text-slate-800'}`}>{p.name}</p><p className="text-xs text-slate-400">{p.unit} · {fmtC(p.unit_price)} · GST {p.gst_rate}%{p.hsn_sac&&` · HSN ${p.hsn_sac}`}</p></div><div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={()=>{setEditing(p);setForm({name:p.name,description:p.description||'',hsn_sac:p.hsn_sac||'',unit:p.unit||'service',unit_price:p.unit_price||0,gst_rate:p.gst_rate||18,category:p.category||'',is_service:p.is_service!==false});}} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-500 hover:bg-blue-50 transition-colors"><Edit className="h-3.5 w-3.5"/></button><button onClick={()=>handleDelete(p.id)} className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors"><Trash2 className="h-3.5 w-3.5"/></button></div></div>))}</div></div></DialogContent></Dialog>);
+  return(<Dialog open={open} onOpenChange={onClose}><DialogContent className={`max-w-3xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark?'bg-slate-800 border-slate-700':'bg-white'}`}><DialogTitle className="sr-only">Product Catalog</DialogTitle><DialogDescription className="sr-only">Manage products and services</DialogDescription><div className="px-6 py-5 border-b border-slate-100 dark:border-slate-700"><div className="flex items-center gap-3"><div className="w-9 h-9 rounded-xl flex items-center justify-center text-white" style={{background:`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}}><Package className="h-5 w-5"/></div><div><h2 className={`font-bold text-lg ${isDark?'text-slate-100':'text-slate-900'}`}>Product / Service Catalog</h2><p className="text-xs text-slate-400">Reusable items for quick invoice creation</p></div></div></div><div className="flex-1 overflow-hidden flex"><div className={`w-72 flex-shrink-0 p-5 border-r overflow-y-auto ${isDark?'border-slate-700 bg-slate-800':'border-slate-100 bg-slate-50/40'}`}><h4 className={`text-xs font-bold uppercase tracking-widest mb-3 ${isDark?'text-slate-400':'text-slate-500'}`}>{editing?'Edit Item':'New Item'}</h4><form onSubmit={handleSave} className="space-y-3"><Input className={inputCls} placeholder="Name *" value={form.name} onChange={e=>setForm(p=({...p,name:e.target.value}))} required/><Input className={inputCls} placeholder="Description" value={form.description} onChange={e=>setForm(p=({...p,description:e.target.value}))}/><div className="grid grid-cols-2 gap-2"><Input className={inputCls} placeholder="HSN/SAC" value={form.hsn_sac} onChange={e=>setForm(p=({...p,hsn_sac:e.target.value}))}/><Select value={form.unit} onValueChange={v=>setForm(p=({...p,unit:v}))}><SelectTrigger className={inputCls}><SelectValue/></SelectTrigger><SelectContent>{UNITS.map(u=><SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent></Select></div><div className="grid grid-cols-2 gap-2"><Input type="number" className={inputCls} placeholder="Unit Price" value={form.unit_price} onChange={e=>setForm(p=({...p,unit_price:parseFloat(e.target.value)||0}))}/><Select value={String(form.gst_rate)} onValueChange={v=>setForm(p=({...p,gst_rate:parseFloat(v)}))}><SelectTrigger className={inputCls}><SelectValue/></SelectTrigger><SelectContent>{GST_RATES.map(r=><SelectItem key={r} value={String(r)}>{r}% GST</SelectItem>)}</SelectContent></Select></div><Input className={inputCls} placeholder="Category (optional)" value={form.category} onChange={e=>setForm(p=({...p,category:e.target.value}))}/><div className="flex gap-2"><Button type="submit" disabled={loading} size="sm" className="flex-1 h-9 rounded-xl text-white text-xs font-semibold" style={{background:`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}}>{loading?'Saving…':editing?'Update':'Add Item'}</Button>{editing&&<Button type="button" variant="ghost" size="sm" className="h-9 rounded-xl text-xs" onClick={()=>{setEditing(null);setForm({name:'',description:'',hsn_sac:'',unit:'service',unit_price:0,gst_rate:18,category:'',is_service:true});}}>Cancel</Button>}</div></form></div><div className="flex-1 overflow-y-auto">{products.length===0?(<div className="flex flex-col items-center justify-center h-full py-16 text-slate-400"><Package className="h-10 w-10 mb-3 opacity-30"/><p className="text-sm">No products yet — add one!</p></div>):products.map(p=>(<div key={p.id} className={`flex items-center gap-3 px-5 py-3.5 border-b group transition-colors ${isDark?'border-slate-700 hover:bg-slate-700/30':'border-slate-100 hover:bg-slate-50'}`}><div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-xs font-bold" style={{background:p.is_service?`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`:'linear-gradient(135deg, #065f46, #059669)'}}>{p.is_service?'S':'P'}</div><div className="flex-1 min-w-0"><p className={`text-sm font-semibold truncate ${isDark?'text-slate-100':'text-slate-800'}`}>{p.name}</p><p className="text-xs text-slate-400">{p.unit} · {fmtC(p.unit_price)} · GST {p.gst_rate}%{p.hsn_sac&&` · HSN ${p.hsn_sac}`}</p></div><div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={()=>{setEditing(p);setForm({name:p.name,description:p.description||'',hsn_sac:p.hsn_sac||'',unit:p.unit||'service',unit_price:p.unit_price||0,gst_rate:p.gst_rate||18,category:p.category||'',is_service:p.is_service!==false});}} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-500 hover:bg-blue-50 transition-colors"><Edit className="h-3.5 w-3.5"/></button><button onClick={()=>handleDelete(p.id)} className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors"><Trash2 className="h-3.5 w-3.5"/></button></div></div>))}</div></div></DialogContent></Dialog>);
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1432,6 +1430,10 @@ export default function Invoicing() {
   const [customColor, setCustomColor] = useState(() => {
     try { return localStorage.getItem('inv_custom_color') || '#0D3B66'; } catch { return '#0D3B66'; }
   });
+
+  // ── NEW: Party Ledger state ────────────────────────────────────────────────
+  const [ledgerOpen, setLedgerOpen] = useState(false);
+  const [ledgerClient, setLedgerClient] = useState(null);
 
   // Persist preferences
   useEffect(() => {
@@ -1493,10 +1495,16 @@ export default function Invoicing() {
               <FileSpreadsheet className="h-4 w-4"/> GST Returns
             </Button>
 
-            {/* ── CHANGE 4: Design button ── */}
+            {/* ── Design button ── */}
             <Button variant="outline" onClick={() => setDesignOpen(true)}
               className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold">
               <Palette className="h-4 w-4" /> Design
+            </Button>
+
+            {/* ── NEW: Party Ledger button ── */}
+            <Button onClick={() => { setLedgerClient(null); setLedgerOpen(true); }}
+              className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold">
+              <BookOpen className="h-4 w-4" /> Party Ledger
             </Button>
 
             <Button variant="outline" onClick={()=>setVypOpen(true)}
@@ -1654,7 +1662,7 @@ export default function Invoicing() {
       <GSTReportsModal open={gstOpen} onClose={()=>setGstOpen(false)}
         invoices={invoices} isDark={isDark}/>
 
-      {/* ── CHANGE 5: InvoiceDesignModal ── */}
+      {/* ── InvoiceDesignModal ── */}
       <InvoiceDesignModal
         open={designOpen}
         onClose={() => setDesignOpen(false)}
@@ -1666,6 +1674,17 @@ export default function Invoicing() {
         onCustomColorChange={setCustomColor}
         sampleInvoice={invoices[0] || null}
         sampleCompany={companies[0] || null}
+        isDark={isDark}
+      />
+
+      {/* ── NEW: PartyLedger Dialog ── */}
+      <PartyLedger
+        open={ledgerOpen}
+        onClose={() => setLedgerOpen(false)}
+        invoices={invoices}
+        clients={clients}
+        companies={companies}
+        preselectedClientName={ledgerClient}
         isDark={isDark}
       />
     </div>
