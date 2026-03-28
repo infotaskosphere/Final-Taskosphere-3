@@ -410,23 +410,26 @@ const PermToggleRow = ({ permKey, label, desc, icon: Icon, permissions, setPermi
 const ModuleAccessCard = ({ icon: Icon, title, desc, permKey, permissions, setPermissions, accentColor, badge }) => {
   const isEnabled = !!permissions[permKey];
   const accent    = accentColor || COLORS.mediumBlue;
+  const toggle    = () => setPermissions(p => ({ ...p, [permKey]: !p[permKey] }));
   return (
     <motion.div
       whileHover={{ y: -2, transition: springPhysics.lift }}
       whileTap={{ scale: 0.99 }}
-      onClick={() => setPermissions(p => ({ ...p, [permKey]: !p[permKey] }))}
+      onClick={toggle}
       className={`flex gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all hover:shadow-md ${
         isEnabled ? 'shadow-sm' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
       }`}
       style={isEnabled ? { borderColor: `${accent}40`, background: `${accent}06` } : {}}>
+      {/* Icon */}
       <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-all ${
         isEnabled ? 'text-white shadow-md' : 'bg-slate-100 dark:bg-slate-700 text-slate-400'
       }`}
         style={isEnabled ? { background: `linear-gradient(135deg, ${accent}, ${accent}cc)` } : {}}>
         <Icon className="h-5 w-5" />
       </div>
+      {/* Label + desc */}
       <div className="flex-1 min-w-0 pt-0.5">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <p className={`font-semibold text-sm ${isEnabled ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>{title}</p>
           {badge && (
             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md"
@@ -435,10 +438,12 @@ const ModuleAccessCard = ({ icon: Icon, title, desc, permKey, permissions, setPe
         </div>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">{desc}</p>
       </div>
-      <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-sm font-black transition-all flex-shrink-0 mt-0.5 ${
-        isEnabled ? 'text-white shadow-sm' : 'bg-slate-100 dark:bg-slate-700 text-slate-300'
-      }`} style={isEnabled ? { background: COLORS.emeraldGreen } : {}}>
-        {isEnabled ? '✓' : '✕'}
+      {/* Toggle — stop propagation so card click & switch click don't double-fire */}
+      <div className="flex-shrink-0 flex items-center" onClick={e => e.stopPropagation()}>
+        <Switch
+          checked={isEnabled}
+          onCheckedChange={toggle}
+        />
       </div>
     </motion.div>
   );
