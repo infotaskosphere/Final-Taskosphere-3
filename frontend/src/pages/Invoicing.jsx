@@ -21,8 +21,9 @@ import {
   ArrowUpRight, Activity, Zap, Shield, Star, Filter,
   IndianRupee, CalendarDays, FileCheck, ArrowRightLeft, Layers,
   Upload, Database, FileUp, CheckSquare, AlertTriangle, Phone, Mail,
-  FileSpreadsheet, Briefcase, PieChart,
+  FileSpreadsheet, Briefcase, PieChart, Settings,
 } from 'lucide-react';
+import InvoiceSettings, { getInvSettings, getNextInvoiceNumber } from './InvoiceSettings';
 
 // ─── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
@@ -1410,9 +1411,10 @@ export default function Invoicing() {
   const [detailOpen,setDetailOpen]= useState(false);
   const [payInv,    setPayInv]    = useState(null);
   const [payOpen,   setPayOpen]   = useState(false);
-  const [catOpen,   setCatOpen]   = useState(false);
-  const [vypOpen,   setVypOpen]   = useState(false);
-  const [gstOpen,   setGstOpen]   = useState(false);   // ← NEW
+  const [catOpen,       setCatOpen]       = useState(false);
+  const [vypOpen,       setVypOpen]       = useState(false);
+  const [gstOpen,       setGstOpen]       = useState(false);
+  const [settingsOpen,  setSettingsOpen]  = useState(false);
 
   const [searchInput,   setSearchInput]   = useState('');
   const [searchTerm,    setSearchTerm]    = useState('');
@@ -1531,6 +1533,11 @@ export default function Invoicing() {
             <Button variant="outline" onClick={()=>setGstOpen(true)}
               className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold">
               <FileSpreadsheet className="h-4 w-4"/> GST Returns
+            </Button>
+            {/* ── INVOICE SETTINGS ── */}
+            <Button variant="outline" onClick={() => setSettingsOpen(true)}
+              className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold">
+              <Settings className="h-4 w-4" /> Settings
             </Button>
             <Button variant="outline" onClick={()=>setVypOpen(true)}
               className="h-9 px-4 text-sm bg-emerald-500/20 border-emerald-300/40 text-white hover:bg-emerald-500/30 rounded-xl gap-2 backdrop-blur-sm font-semibold">
@@ -1700,6 +1707,14 @@ export default function Invoicing() {
       {/* ── GST RETURNS MODAL ── */}
       <GSTReportsModal open={gstOpen} onClose={()=>setGstOpen(false)}
         invoices={invoices} isDark={isDark}/>
+
+      {/* ── INVOICE SETTINGS ── */}
+      <InvoiceSettings
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        companies={companies}
+        isDark={isDark}
+      />
     </div>
   );
 }
