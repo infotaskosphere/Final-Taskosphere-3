@@ -2,34 +2,41 @@
  * lib/api.js
  * ─────────────────────────────────────────────────────────────────────────────
  * Axios instance for all API calls.
- *
- * Exports:
- *   default  api          — configured axios instance
- *   named    useLoading   — React hook: returns true while any request is in flight
- *   named    getToken     — returns the stored JWT (used by other utilities)
- *   named    setToken     — stores JWT after login
- *   named    clearToken   — removes JWT (logout)
  */
 
 import axios from "axios";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 
-// ─── Base URL ──────────────────────────────────────────────────────────────────
-const BASE_URL =
-  import.meta.env.VITE_API_URL ||
-  import.meta.env.VITE_BACKEND_URL ||
-  "http://localhost:8000/api";
+// ─── Base URL Normalizer ──────────────────────────────────────────────────────
+const getBaseUrl = () => {
+  let url =
+    import.meta.env.VITE_API_URL ||
+    import.meta.env.VITE_BACKEND_URL ||
+    "http://localhost:8000/api";
+
+  // Remove trailing slash if present
+  url = url.replace(/\/$/, "");
+
+  // If the URL doesn't end in /api, append it to match backend router
+  if (!url.endsWith("/api")) {
+    url = `${url}/api`;
+  }
+  
+  return url;
+};
+
+const BASE_URL = getBaseUrl();
 
 // ─── Token Helpers ─────────────────────────────────────────────────────────────
 const TOKEN_KEY = "taskosphere_token";
 
-export const getToken  = ()    => localStorage.getItem(TOKEN_KEY);
-export const setToken  = (tok) => localStorage.setItem(TOKEN_KEY, tok);
-export const clearToken = ()   => localStorage.removeItem(TOKEN_KEY);
+export const getToken = () => localStorage.getItem(TOKEN_KEY);
+export const setToken = (tok) => localStorage.setItem(TOKEN_KEY, tok);
+export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
 
 // ─── Global Loading State (pub/sub) ───────────────────────────────────────────
 let _activeRequests = 0;
-const _subscribers  = new Set();
+const _subscribers = new Set();
 
 function _setLoading(delta) {
   _activeRequests = Math.max(0, _activeRequests + delta);
@@ -37,11 +44,6 @@ function _setLoading(delta) {
   _subscribers.forEach((fn) => fn(isLoading));
 }
 
-/**
- * useLoading()
- * Returns true while one or more API requests are in flight.
- * Used by BottomLoadingBar in App.jsx.
- */
 export function useLoading() {
   const [loading, setLoading] = useState(false);
 
@@ -55,22 +57,20 @@ export function useLoading() {
 
 // ─── Axios Instance ───────────────────────────────────────────────────────────
 const api = axios.create({
-  baseURL:         BASE_URL,
-  timeout:         30_000,
-  headers:         { "Content-Type": "application/json" },
+  baseURL: BASE_URL,
+  timeout: 30000,
+  headers: { "Content-Type": "application/json" },
   withCredentials: false,
 });
 
 // ── Request Interceptor ──────────────────────────────────────────────────────
 api.interceptors.request.use(
   (config) => {
-    // Attach Bearer token if available
     const token = getToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
 
-    // Only count non-silent requests in the loading bar
     if (!config._silent) {
       _setLoading(+1);
     }
@@ -95,13 +95,12 @@ api.interceptors.response.use(
     // 401 → token expired or invalid → force logout
     if (error.response?.status === 401) {
       clearToken();
-      // Avoid redirect loop if already on /login
       if (!window.location.pathname.startsWith("/login")) {
         window.location.href = "/login";
       }
     }
 
-    // 422 validation errors — normalise detail array into a readable string
+    // 422 validation errors
     if (error.response?.status === 422) {
       const detail = error.response.data?.detail;
       if (Array.isArray(detail)) {
@@ -119,36 +118,23 @@ api.interceptors.response.use(
   }
 );
 
-// ─── Convenience Wrappers ─────────────────────────────────────────────────────
-/**
- * Silent GET — does not show the loading bar.
- * Useful for background polling or badge counts.
- */
 export const silentGet = (url, config = {}) =>
   api.get(url, { ...config, _silent: true });
 
-/**
- * Upload helper — sets Content-Type to multipart automatically.
- */
 export const upload = (url, formData, config = {}) =>
   api.post(url, formData, {
     ...config,
     headers: { "Content-Type": "multipart/form-data", ...config.headers },
   });
 
-// ─── Error Message Extractor ──────────────────────────────────────────────────
-/**
- * getErrorMessage(error)
- * Returns a human-readable error string from an axios error object.
- */
 export function getErrorMessage(error) {
   if (!error) return "An unknown error occurred";
   const data = error.response?.data;
   if (!data) return error.message || "Network error";
-  if (data._normalised)                    return data._normalised;
-  if (typeof data.detail === "string")     return data.detail;
-  if (Array.isArray(data.detail))          return data.detail.map((e) => e.msg).join(", ");
-  if (typeof data.message === "string")    return data.message;
+  if (data._normalised) return data._normalised;
+  if (typeof data.detail === "string") return data.detail;
+  if (Array.isArray(data.detail)) return data.detail.map((e) => e.msg).join(", ");
+  if (typeof data.message === "string") return data.message;
   return "Request failed";
 }
 
