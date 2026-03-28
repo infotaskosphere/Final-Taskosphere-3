@@ -67,7 +67,7 @@ const STORAGE_KEY = 'taskosphere_inv_settings';
 export const DEFAULT_INV_SETTINGS = {
   // ── Numbering ──────────────────────────────────────────────────────────────
   prefix:          'INV',
-  separator:       '/',
+  separator:       '/',        // '/' | '-' | '_' | '.' | 'none'
   include_fy:      true,
   fy_format:       'short',        // 'short' = 25-26 | 'long' = 2025-2026
   include_month:   false,          // include month for monthly reset (e.g. 03)
@@ -180,7 +180,7 @@ export function getNextInvoiceNumber(companyId, type = 'invoice', increment = fa
   const month = String(now.getMonth() + 1).padStart(2, '0');
 
   const num = String(s.current_number).padStart(s.number_padding, '0');
-  const sep = s.separator || '/';
+  const sep = (!s.separator || s.separator === 'none') ? '' : s.separator;
 
   const parts = [prefix];
   if (s.include_fy)    parts.push(fyStr);
@@ -211,7 +211,7 @@ function previewNumber(s, type = 'invoice') {
     : `${String(fy.start).slice(2)}-${String(fy.end).slice(2)}`;
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const num   = String(s.current_number || 1).padStart(s.number_padding || 3, '0');
-  const sep   = s.separator || '/';
+  const sep   = (!s.separator || s.separator === 'none') ? '' : s.separator;
   const parts = [prefix];
   if (s.include_fy)    parts.push(fyStr);
   if (s.include_month) parts.push(month);
@@ -439,7 +439,7 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                                 <SelectItem value="-">Hyphen ( - )</SelectItem>
                                 <SelectItem value="_">Underscore ( _ )</SelectItem>
                                 <SelectItem value=".">Dot ( . )</SelectItem>
-                                <SelectItem value="">No separator</SelectItem>
+                                <SelectItem value="none">No separator</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
