@@ -3106,7 +3106,7 @@ async def get_upcoming_due_dates(
             results.append(dd)
 
     # Sort: overdue first (most-negative days_remaining), then by closest due date
-    return sorted(results, key=lambda x: x["days_remaining"])["days_remaining"])
+    return sorted(results, key=lambda x: x["days_remaining"])
 
 
 @api_router.get("/duedates", response_model=List[DueDate])
