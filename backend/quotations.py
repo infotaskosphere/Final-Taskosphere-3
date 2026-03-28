@@ -1,15 +1,12 @@
-
 """
 backend/quotations.py
 ─────────────────────────────────────────────────────────────────────────────
 Quotation Module — FastAPI Router
 
-PDF FIX (v5 - Enhanced Rewrite):
-  - Ensured fpdf2 is installed and used consistently.
-  - Simplified _safe_pdf_output to directly use BytesIO for fpdf2 output.
-  - Removed redundant error handling for fpdf versions, assuming fpdf2.
-  - Added more robust error logging for PDF generation failures.
-  - Ensured all text content is properly encoded for fpdf2.
+PDF FIX (v6 - fpdf2 output fix):
+  - Fixed _safe_pdf_output to use pdf.output() which returns bytes in fpdf2,
+    then write into BytesIO. The old dest=BytesIO pattern is not valid in fpdf2.
+  - All other logic preserved.
 """
 
 import uuid
@@ -34,12 +31,10 @@ from pydantic import BaseModel, Field
 from backend.dependencies import db, get_current_user, require_admin
 from backend.models import User
 
-# Ensure fpdf2 is installed
 try:
     from fpdf import FPDF
     from fpdf.enums import Align, XPos, YPos
 except ImportError:
-    # Attempt to install fpdf2 if not found
     import subprocess
     import sys
     subprocess.check_call([sys.executable, "-m", "pip", "install", "fpdf2"])
@@ -266,6 +261,7 @@ class QuotationItem(BaseModel):
 class QuotationCreate(BaseModel):
     company_id: str
     lead_id: Optional[str] = None
+    client_id: Optional[str] = None          # NEW: link to clients collection
     client_name: str
     client_address: str = ""
     client_email: str = ""
@@ -309,15 +305,9 @@ class EmailSendRequest(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _safe_str(value: Any, max_len: int = 0) -> str:
-    """Convert value to string, strip non-latin-1 chars to prevent fpdf crashes."""
     if value is None:
         return ""
     text = str(value)
-    # fpdf2 handles UTF-8 well, but older fpdf might need latin-1. 
-    # For maximum compatibility and to prevent issues, we'll ensure it's valid for fpdf2.
-    # fpdf2 expects UTF-8 by default for add_font, but cell/multi_cell can handle various encodings.
-    # The original code used latin-1 replace, which is fine for basic text.
-    # Let's stick to the original logic to avoid introducing new font issues unless necessary.
     text = text.encode("latin-1", errors="replace").decode("latin-1")
     if max_len and len(text) > max_len:
         text = text[:max_len]
@@ -421,16 +411,17 @@ def _darken(color: tuple, factor: float = 0.6) -> tuple:
 def _safe_pdf_output(pdf: FPDF) -> BytesIO:
     """
     Return BytesIO object containing raw PDF bytes for fpdf2.
-    fpdf2's output() method returns bytes directly when no destination is specified.
+    fpdf2's output() method returns bytes directly.
+    We write those bytes into a BytesIO buffer.
     """
     output_buffer = BytesIO()
     try:
-        # The correct way for fpdf2 is to output to a BytesIO object.
-        pdf.output(dest=output_buffer)
+        pdf_bytes = pdf.output()          # fpdf2 returns bytes
+        output_buffer.write(pdf_bytes)
         output_buffer.seek(0)
         return output_buffer
     except Exception as e:
-        logger.error(f"Error during PDF output to BytesIO: {e}")
+        logger.error(f"Error during PDF output: {e}")
         raise RuntimeError(f"PDF output failed: {e}")
 
 
@@ -457,24 +448,11 @@ def _embed_logo(pdf, logo_b64: str, x: float, y: float, h: float) -> None:
                 pass
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# UNIVERSAL CELL HELPERS
-# ─────────────────────────────────────────────────────────────────────────────
-# Use ln=1 (next line) or ln=0 (same line) as positional-safe integer arg.
-# Never pass new_x / new_y — not supported on fpdf1 / old fpdf2 builds.
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def _cell(pdf, w, h, txt="", border=0, align="L", fill=False, nl=False):
-    """
-    Universal cell wrapper.
-    nl=True  → ln=1 (move to next line at left margin)
-    nl=False → ln=0 (stay on same line)
-    """
     pdf.cell(w, h, txt, border, 1 if nl else 0, align, fill)
 
 
 def _mcell(pdf, w, h, txt, border=0, align="L", fill=False):
-    """Universal multi_cell — always advances to next line."""
     pdf.multi_cell(w, h, txt, border, align, fill)
 
 
@@ -490,7 +468,6 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
     MUTED      = (100, 116, 139)
     WHITE      = (255, 255, 255)
 
-    # Capture q/MUTED in closure for footer
     _q     = q
     _MUTED = MUTED
 
@@ -502,7 +479,6 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
             self.set_y(-12)
             self.set_font("Helvetica", "I", 7)
             self.set_text_color(*_MUTED)
-            # Use _cell wrapper for consistent positional arguments
             _cell(self, 0, 5, _safe_str(f"Quotation No: {_q.get('quotation_no', '')}  |  Page {self.page_no()}"), align="C", nl=True)
 
     pdf = PDF(orientation="P", unit="mm", format="A4")
@@ -759,7 +735,7 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PDF BUILDER – CHECKLIST
-# ════════════════════════════════─────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
     BRAND      = _extract_dominant_color_from_b64(company.get("logo_base64", ""))
@@ -1186,7 +1162,7 @@ async def export_quotation_pdf(
         logger.error(f"Quotation PDF build failed for {quotation_id}: {e}", exc_info=True)
         raise HTTPException(500, f"PDF generation failed: {str(e)}")
 
-    pdf_bytes = pdf_buf.getvalue() # Use getvalue() to get the full bytes from BytesIO
+    pdf_bytes = pdf_buf.getvalue()
     filename = f"quotation_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
     return StreamingResponse(
         iter([pdf_bytes]),
@@ -1223,7 +1199,7 @@ async def export_checklist_pdf(
         logger.error(f"Checklist PDF build failed for {quotation_id}: {e}", exc_info=True)
         raise HTTPException(500, f"PDF generation failed: {str(e)}")
 
-    pdf_bytes = pdf_buf.getvalue() # Use getvalue() to get the full bytes from BytesIO
+    pdf_bytes = pdf_buf.getvalue()
     filename = f"checklist_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
     return StreamingResponse(
         iter([pdf_bytes]),
@@ -1299,7 +1275,7 @@ async def send_quotation_email(
             to_email=req.to_email,
             subject=subject,
             body=body,
-            pdf_bytes=pdf_buf.getvalue(), # Use getvalue() here as well
+            pdf_bytes=pdf_buf.getvalue(),
             filename=filename,
         )
     except smtplib.SMTPAuthenticationError:
