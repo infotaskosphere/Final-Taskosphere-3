@@ -19,8 +19,8 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
     assetsDir: 'assets',
-    // Removed manualChunks to prevent build-time resolution errors
-    chunkSizeWarningLimit: 2000, 
+    // Removed strict manualChunks to let Vite resolve paths automatically
+    chunkSizeWarningLimit: 2000,
   },
 
   server: {
