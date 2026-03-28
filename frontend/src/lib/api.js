@@ -18,11 +18,11 @@ const getBaseUrl = () => {
   url = url.replace(/\/$/, "");
 
   // If the URL doesn't end in /api, append it to match backend router
-  if (!url.endsWith("/api")) {
-    url = `${url}/api`;
+  if (!sanitizedUrl.endsWith("/api")) {
+    return `${sanitizedUrl}/api`;
   }
   
-  return url;
+  return sanitizedUrl;
 };
 
 const BASE_URL = getBaseUrl();
