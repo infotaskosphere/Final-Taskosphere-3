@@ -1,7 +1,6 @@
 // =============================================================================
-// GeneralSettings.jsx — with full light/dark theme support
+// GeneralSettings.jsx — Aligned with Dashboard Layout
 // =============================================================================
-
 import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDark } from "@/hooks/useDark";
@@ -9,11 +8,41 @@ import api from "@/lib/api";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import {
-  User, Camera, Phone, Calendar,
+  User, Camera, Phone, Calendar as CalendarIcon,
   Save, Loader2, CheckCircle2, Mail, Shield,
+  Settings, ChevronRight
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
-const C = { deepBlue: "#0D3B66", mediumBlue: "#1F6FB2" };
+const COLORS = {
+  deepBlue: "#0D3B66",
+  mediumBlue: "#1F6FB2",
+  emeraldGreen: "#1FAF5A",
+};
+
+// -- Shared Card Components (Aligned with Dashboard) --
+function SectionCard({ children, className = "" }) {
+  return (
+    <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+function CardHeaderRow({ iconBg, icon, title, subtitle }) {
+  return (
+    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-700">
+      <div className="flex items-center gap-3">
+        <div className={`p-2 rounded-xl ${iconBg}`}>{icon}</div>
+        <div>
+          <h3 className="font-bold text-base text-slate-800 dark:text-slate-100">{title}</h3>
+          <p className="text-xs text-slate-400 dark:text-slate-500">{subtitle}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function GeneralSettings() {
   const { user, refreshUser } = useAuth();
@@ -24,14 +53,14 @@ export default function GeneralSettings() {
     full_name: "", phone: "", birthday: "", profile_picture: "",
   });
   const [loading, setSaving] = useState(false);
-  const [saved,   setSaved]  = useState(false);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     if (!user) return;
     setProfile({
-      full_name:       user.full_name       || "",
-      phone:           user.phone           || "",
-      birthday:        user.birthday ? user.birthday.slice(0, 10) : "",
+      full_name: user.full_name || "",
+      phone: user.phone || "",
+      birthday: user.birthday ? user.birthday.slice(0, 10) : "",
       profile_picture: user.profile_picture || "",
     });
   }, [user]);
@@ -50,9 +79,9 @@ export default function GeneralSettings() {
     setSaving(true);
     try {
       await api.put(`/users/${user.id}`, {
-        full_name:       profile.full_name.trim(),
-        phone:           profile.phone    || null,
-        birthday:        profile.birthday || null,
+        full_name: profile.full_name.trim(),
+        phone: profile.phone || null,
+        birthday: profile.birthday || null,
         profile_picture: profile.profile_picture || null,
       });
       await refreshUser();
@@ -66,160 +95,174 @@ export default function GeneralSettings() {
     }
   };
 
-  const pageBg     = isDark ? "#0f172a"  : "#f8fafc";
-  const cardBg     = isDark ? "#1e293b"  : "#ffffff";
-  const cardBorder = isDark ? "#334155"  : "#f1f5f9";
-  const headingClr = isDark ? "#f1f5f9"  : "#1e293b";
-  const subClr     = isDark ? "#94a3b8"  : "#64748b";
-  const labelClr   = isDark ? "#94a3b8"  : "#64748b";
-  const iconClr    = isDark ? "#475569"  : "#cbd5e1";
-  const inputBg    = isDark ? "#0f172a"  : "#ffffff";
-  const inputBdr   = isDark ? "#334155"  : "#e2e8f0";
-  const inputTxt   = isDark ? "#e2e8f0"  : "#1e293b";
-  const inputDisBg = isDark ? "#1e293b"  : "#f8fafc";
-  const inputDisTx = isDark ? "#475569"  : "#94a3b8";
-  const infoBg     = isDark ? "rgba(37,99,235,0.12)" : "#eff6ff";
-  const infoBdr    = isDark ? "#1d4ed8"  : "#bfdbfe";
-  const infoTxt    = isDark ? "#93c5fd"  : "#1d4ed8";
-  const stripBg    = isDark
-    ? "linear-gradient(135deg,rgba(13,59,102,0.18),rgba(31,111,178,0.10))"
-    : `linear-gradient(135deg,${C.deepBlue}08,${C.mediumBlue}05)`;
+  // -- Style Tokens --
+  const inputBg = isDark ? "#0f172a" : "#f8fafc";
+  const inputBdr = isDark ? "#334155" : "#e2e8f0";
+  const labelClr = isDark ? "#94a3b8" : "#64748b";
+  const bannerGradient = `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`;
 
   return (
-    <div style={{ minHeight: "100vh", background: pageBg }} className="transition-colors duration-200">
-      <div className="max-w-xl mx-auto py-8 px-4">
-        <div className="mb-6">
-          <h1 style={{ color: headingClr }} className="text-2xl font-bold">General Settings</h1>
-          <p style={{ color: subClr }} className="text-sm mt-0.5">Update your personal profile information</p>
-        </div>
-
-        <motion.form
-          onSubmit={handleSave}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          style={{ background: cardBg, border: `1px solid ${cardBorder}` }}
-          className="rounded-2xl shadow-sm overflow-hidden"
-        >
-          {/* Avatar strip */}
-          <div
-            className="flex items-center gap-5 p-6"
-            style={{ background: stripBg, borderBottom: `1px solid ${cardBorder}` }}
-          >
-            <div className="relative">
-              <div
-                style={{ background: isDark ? "#334155" : "#f1f5f9", ring: "none" }}
-                className="w-20 h-20 rounded-2xl overflow-hidden shadow-md ring-4"
-                style={{ boxShadow: `0 0 0 4px ${isDark ? "#1e293b" : "#ffffff"}` }}
-              >
-                {profile.profile_picture ? (
-                  <img src={profile.profile_picture} alt={profile.full_name} className="w-full h-full object-cover" />
-                ) : (
-                  <div
-                    className="w-full h-full flex items-center justify-center text-white text-2xl font-black"
-                    style={{ background: `linear-gradient(135deg,${C.deepBlue},${C.mediumBlue})` }}
-                  >
-                    {user?.full_name?.[0]?.toUpperCase() || "U"}
-                  </div>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                style={{ background: cardBg, border: `1px solid ${inputBdr}` }}
-                className="absolute -bottom-1.5 -right-1.5 w-8 h-8 rounded-xl shadow-lg flex items-center justify-center hover:opacity-80 transition-opacity"
-              >
-                <Camera style={{ color: subClr }} className="w-3.5 h-3.5" />
-              </button>
-              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
+    <div className="p-4 md:p-6 space-y-6 max-w-4xl mx-auto transition-colors duration-200">
+      {/* ── Page Header (Dashboard Style) ── */}
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
+        <div className="relative overflow-hidden rounded-2xl px-6 py-5" 
+             style={{ background: bannerGradient, boxShadow: "0 8px 32px rgba(13,59,102,0.2)" }}>
+          <div className="absolute right-0 top-0 w-48 h-48 rounded-full -mr-16 -mt-16 opacity-10"
+               style={{ background: "radial-gradient(circle, white 0%, transparent 70%)" }} />
+          <div className="relative flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-white/15 flex items-center justify-center shadow-inner">
+              <Settings className="h-6 w-6 text-white" />
             </div>
             <div>
-              <p style={{ color: headingClr }} className="font-bold text-lg leading-tight">{user?.full_name}</p>
-              <p style={{ color: subClr }} className="text-sm mt-0.5">{user?.email}</p>
-              <span
-                className="inline-block mt-1.5 px-2.5 py-0.5 text-[10px] font-bold rounded-lg capitalize"
-                style={{ background: `${C.deepBlue}${isDark ? "25" : "12"}`, color: isDark ? "#93c5fd" : C.deepBlue }}
-              >
-                {user?.role}
-              </span>
+              <h1 className="text-2xl font-bold text-white tracking-tight">Account Settings</h1>
+              <p className="text-white/60 text-xs font-medium uppercase tracking-widest mt-0.5">Manage your identity and preferences</p>
             </div>
           </div>
+        </div>
+      </motion.div>
 
-          {/* Fields */}
-          <div className="p-6 space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* ── Left Sidebar: Photo & Stats ── */}
+        <div className="lg:col-span-1 space-y-6">
+          <SectionCard>
+            <div className="p-6 flex flex-col items-center text-center">
+              <div className="relative group">
+                {/* FIXED: Merged duplicate style attributes into one object */}
+                <div 
+                  className="w-28 h-28 rounded-3xl overflow-hidden shadow-2xl ring-4 transition-transform group-hover:scale-[1.02]"
+                  style={{ 
+                    background: isDark ? "#334155" : "#f1f5f9",
+                    boxShadow: `0 0 0 4px ${isDark ? "#1e293b" : "#ffffff"}` 
+                  }}
+                >
+                  {profile.profile_picture ? (
+                    <img src={profile.profile_picture} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-white text-3xl font-black"
+                         style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                      {user?.full_name?.[0]?.toUpperCase()}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  className="absolute -bottom-2 -right-2 w-10 h-10 rounded-2xl bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 shadow-xl flex items-center justify-center hover:scale-110 transition-all active:scale-95"
+                >
+                  <Camera className="w-4 h-4 text-blue-500" />
+                </button>
+                <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
+              </div>
+              
+              <div className="mt-5">
+                <h2 className="font-bold text-lg text-slate-800 dark:text-slate-100 leading-tight">{user?.full_name}</h2>
+                <p className="text-sm text-slate-400 font-medium mt-1">{user?.email}</p>
+                <Badge variant="secondary" className="mt-3 px-3 py-1 rounded-lg capitalize bg-blue-500/10 text-blue-500 border-0 font-bold">
+                  {user?.role}
+                </Badge>
+              </div>
+            </div>
+            
+            <div className="px-6 pb-6 pt-2 border-t border-slate-100 dark:border-slate-700">
+              <div className="flex items-center justify-between text-xs py-2">
+                <span className="text-slate-400 font-medium">Account ID</span>
+                <span className="text-slate-500 dark:text-slate-300 font-mono">#{user?.id?.slice(-6)}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs py-2">
+                <span className="text-slate-400 font-medium">Status</span>
+                <span className="text-emerald-500 font-bold flex items-center gap-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Active
+                </span>
+              </div>
+            </div>
+          </SectionCard>
 
-            {[
-              { label: "Full Name", icon: User, key: "full_name", type: "text", placeholder: "Your full name", disabled: false },
-              { label: "Phone", icon: Phone, key: "phone", type: "tel", placeholder: "+91 00000 00000", disabled: false },
-              { label: "Birthday", icon: Calendar, key: "birthday", type: "date", placeholder: "", disabled: false },
-            ].map(({ label, icon: Icon, key, type, placeholder, disabled }) => (
-              <div key={key} className="space-y-1.5">
-                <label style={{ color: labelClr }} className="block text-xs font-bold uppercase tracking-wider">
-                  {label}
-                </label>
-                <div className="relative">
-                  <Icon style={{ color: iconClr }} className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" />
-                  <input
-                    type={type}
-                    value={profile[key]}
-                    onChange={e => setProfile(p => ({ ...p, [key]: e.target.value }))}
-                    placeholder={placeholder}
-                    disabled={disabled}
-                    style={{ background: inputBg, border: `1px solid ${inputBdr}`, color: inputTxt }}
-                    className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl outline-none focus:ring-2 focus:ring-blue-400/30 transition-all"
+          <SectionCard className="p-4 bg-blue-500/5 dark:bg-blue-500/10 border-blue-200 dark:border-blue-900">
+            <div className="flex items-start gap-3">
+              <Shield className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+              <p className="text-xs leading-relaxed text-blue-700 dark:text-blue-400">
+                To update your password, system access, or department permissions, please contact your administrator.
+              </p>
+            </div>
+          </SectionCard>
+        </div>
+
+        {/* ── Right Panel: Profile Form ── */}
+        <div className="lg:col-span-2">
+          <SectionCard>
+            <CardHeaderRow 
+              iconBg="bg-blue-50 dark:bg-blue-900/30"
+              icon={<User className="h-4 w-4 text-blue-500" />}
+              title="Personal Information"
+              subtitle="Keep your contact details up to date"
+            />
+            
+            <form onSubmit={handleSave} className="p-6 space-y-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Full Name</Label>
+                  <Input 
+                    value={profile.full_name}
+                    onChange={e => setProfile(p => ({ ...p, full_name: e.target.value }))}
+                    style={{ background: inputBg, borderColor: inputBdr }}
+                    className="rounded-xl h-11 focus:ring-blue-500/20"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Phone Number</Label>
+                  <Input 
+                    type="tel"
+                    value={profile.phone}
+                    onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))}
+                    style={{ background: inputBg, borderColor: inputBdr }}
+                    className="rounded-xl h-11 focus:ring-blue-500/20"
+                    placeholder="+91 00000 00000"
                   />
                 </div>
               </div>
-            ))}
 
-            {/* Email — read-only */}
-            <div className="space-y-1.5">
-              <label style={{ color: labelClr }} className="block text-xs font-bold uppercase tracking-wider">
-                Email <span className="normal-case font-normal opacity-60">(cannot be changed)</span>
-              </label>
-              <div className="relative">
-                <Mail style={{ color: iconClr }} className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" />
-                <input
-                  type="email"
-                  value={user?.email || ""}
-                  disabled
-                  style={{ background: inputDisBg, border: `1px solid ${inputBdr}`, color: inputDisTx }}
-                  className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl outline-none cursor-not-allowed"
-                />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Birth Date</Label>
+                  <Input 
+                    type="date"
+                    value={profile.birthday}
+                    onChange={e => setProfile(p => ({ ...p, birthday: e.target.value }))}
+                    style={{ background: inputBg, borderColor: inputBdr }}
+                    className="rounded-xl h-11 focus:ring-blue-500/20"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Email Address</Label>
+                  <Input 
+                    value={user?.email || ""}
+                    disabled
+                    className="rounded-xl h-11 opacity-60 cursor-not-allowed bg-slate-100 dark:bg-slate-900 border-slate-200 dark:border-slate-800"
+                  />
+                </div>
               </div>
-            </div>
 
-            {/* Info note */}
-            <div
-              style={{ background: infoBg, border: `1px solid ${infoBdr}` }}
-              className="flex items-start gap-2.5 p-3 rounded-xl"
-            >
-              <Shield style={{ color: isDark ? "#60a5fa" : "#3b82f6" }} className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              <p style={{ color: infoTxt }} className="text-xs">
-                To update password, attendance times, Telegram ID, or access permissions —
-                contact your admin or visit the <strong>Users</strong> section.
-              </p>
-            </div>
-
-            {/* Save button */}
-            <div className="flex justify-end pt-1">
-              <motion.button
-                type="submit"
-                disabled={loading}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.97 }}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold text-white shadow-md transition-all disabled:opacity-60"
-                style={{ background: `linear-gradient(135deg,${C.deepBlue},${C.mediumBlue})` }}
-              >
-                {loading
-                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
-                  : saved
-                  ? <><CheckCircle2 className="w-4 h-4" /> Saved!</>
-                  : <><Save className="w-4 h-4" /> Save Changes</>
-                }
-              </motion.button>
-            </div>
-          </div>
-        </motion.form>
+              <div className="pt-4 flex items-center justify-end border-t border-slate-100 dark:border-slate-700">
+                <motion.button
+                  type="submit"
+                  disabled={loading}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="flex items-center gap-2 px-8 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg transition-all disabled:opacity-50"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+                >
+                  {loading ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Updating...</>
+                  ) : saved ? (
+                    <><CheckCircle2 className="w-4 h-4" /> Changes Saved</>
+                  ) : (
+                    <><Save className="w-4 h-4" /> Update Profile</>
+                  )}
+                </motion.button>
+              </div>
+            </form>
+          </SectionCard>
+        </div>
       </div>
     </div>
   );
