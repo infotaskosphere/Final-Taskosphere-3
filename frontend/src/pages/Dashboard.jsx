@@ -26,6 +26,7 @@ import {
   Briefcase, ArrowUpRight, Building2, ChevronRight, Target,
   Activity, MapPin, Repeat, Plus,
   X, CheckCircle2, User as UserIcon, Tag, Layers, Star,
+  Zap, Shield, BarChart2, Sun, Moon, Sunset,
 } from 'lucide-react';
 
 // ── Timezone ──────────────────────────────────────────────────────────────────
@@ -126,8 +127,16 @@ const sortNewestFirst = (arr) =>
     return db - da;
   });
 
+// ── Deadline urgency colour (shared) ─────────────────────────────────────────
+const deadlineUrgency = (daysLeft) => {
+  if (daysLeft <= 0)  return { bg:'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/30',   badge:'bg-red-500 text-white',    text:'text-red-600',    pill:'bg-red-500/20 text-red-300',    hex: COLORS.coral   };
+  if (daysLeft <= 7)  return { bg:'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800 hover:bg-orange-100',              badge:'bg-orange-500 text-white', text:'text-orange-600', pill:'bg-orange-500/20 text-orange-300', hex: '#EA580C'       };
+  if (daysLeft <= 15) return { bg:'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800 hover:bg-yellow-100',              badge:'bg-yellow-500 text-white', text:'text-yellow-600', pill:'bg-amber-500/20 text-amber-300',   hex: COLORS.amber    };
+  return { bg:'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 hover:bg-green-100', badge:'bg-green-600 text-white', text:'text-green-700', pill:'bg-emerald-500/20 text-emerald-300', hex: COLORS.emeraldGreen };
+};
+
 // ══════════════════════════════════════════════════════════════════════════════
-// LIVE CLOCK (moved from Attendance)
+// LIVE CLOCK
 // ══════════════════════════════════════════════════════════════════════════════
 function LiveClock({ compact = false }) {
   const [time, setTime] = useState(new Date());
@@ -375,7 +384,7 @@ function DeadlineDetailModal({ due, onClose, navigate, isDark }) {
           onClick={() => { onClose(); navigate('/duedates'); }} />
       }>
       <div className="flex flex-wrap gap-2">
-        <Chip label={daysLeft <= 0 ? 'Overdue' : `${daysLeft} days left`} color={chipColor} />
+        <Chip label={daysLeft <= 0 ? `${Math.abs(daysLeft)}d overdue` : `${daysLeft} days left`} color={chipColor} />
         {due.category   && <Chip label={due.category}   color={COLORS.mediumBlue} />}
         {due.department && <Chip label={due.department} color={COLORS.amber} />}
         {due.status     && <Chip label={due.status}     color="#94A3B8" />}
@@ -742,7 +751,6 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit }) {
               </div>
             </div>
             <p className={`text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Visit module not connected yet</p>
-            <p className={`text-xs ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>Add the visits router to your backend</p>
           </div>
         ) : visits.length === 0 ? (
           <div className="text-center py-7 space-y-3">
@@ -829,6 +837,34 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit }) {
         </div>
       )}
     </SectionCard>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BANNER QUICK-STAT PILL
+// ══════════════════════════════════════════════════════════════════════════════
+function BannerStat({ icon: Icon, label, value, color = 'white', onClick, warning }) {
+  return (
+    <motion.button
+      whileHover={{ scale: 1.04, y: -1, transition: springPhysics.card }}
+      whileTap={{ scale: 0.97 }}
+      onClick={onClick}
+      className="flex items-center gap-2 px-3 py-2 rounded-xl transition-all text-left"
+      style={{
+        background: warning ? 'rgba(255,107,107,0.18)' : 'rgba(255,255,255,0.1)',
+        border: warning ? '1px solid rgba(255,107,107,0.35)' : '1px solid rgba(255,255,255,0.15)',
+        backdropFilter: 'blur(6px)',
+      }}
+    >
+      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
+        style={{ background: warning ? 'rgba(255,107,107,0.25)' : 'rgba(255,255,255,0.15)' }}>
+        <Icon className="h-3.5 w-3.5" style={{ color: warning ? '#fca5a5' : 'rgba(255,255,255,0.9)' }} />
+      </div>
+      <div>
+        <p className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.5)' }}>{label}</p>
+        <p className="text-sm font-bold leading-none mt-0.5" style={{ color: warning ? '#fca5a5' : 'white' }}>{value}</p>
+      </div>
+    </motion.button>
   );
 }
 
@@ -926,14 +962,41 @@ export default function Dashboard() {
     return sortNewestFirst(filtered).slice(0, 5);
   }, [tasks]);
 
+  // ── FIX: sortedDueDates — overdue first (most-negative days_remaining),
+  //         then ascending by days remaining for upcoming items
   const sortedDueDates = useMemo(() => {
     return [...upcomingDueDates].sort((a, b) => {
-      const aOD = (a.days_remaining ?? 0) <= 0 ? 0 : 1;
-      const bOD = (b.days_remaining ?? 0) <= 0 ? 0 : 1;
-      if (aOD !== bOD) return aOD - bOD;
+      const aOD = (a.days_remaining ?? 0) <= 0;
+      const bOD = (b.days_remaining ?? 0) <= 0;
+      if (aOD && !bOD) return -1;   // overdue before upcoming
+      if (!aOD && bOD) return 1;
       return (a.days_remaining ?? 0) - (b.days_remaining ?? 0);
     });
   }, [upcomingDueDates]);
+
+  // ── FIX: nextDeadline — pick the CLOSEST upcoming (days_remaining >= 0),
+  //         fallback to the LEAST overdue item if all are overdue.
+  //         The original code used .reduce() on the raw array with no memoisation
+  //         and could pick the most-overdue item as "next deadline".
+  const nextDeadline = useMemo(() => {
+    if (!upcomingDueDates.length) return null;
+    const upcoming = upcomingDueDates.filter(d => (d.days_remaining ?? 0) >= 0);
+    if (upcoming.length > 0) {
+      return upcoming.reduce((prev, curr) =>
+        (prev.days_remaining ?? 0) <= (curr.days_remaining ?? 0) ? prev : curr
+      );
+    }
+    // All overdue — surface the least-overdue (days_remaining closest to 0)
+    return upcomingDueDates.reduce((prev, curr) =>
+      (prev.days_remaining ?? -Infinity) > (curr.days_remaining ?? -Infinity) ? prev : curr
+    );
+  }, [upcomingDueDates]);
+
+  // overdue deadline count shown in banner
+  const overdueDeadlineCount = useMemo(
+    () => upcomingDueDates.filter(d => (d.days_remaining ?? 0) < 0).length,
+    [upcomingDueDates]
+  );
 
   useEffect(() => {
     async function fetchRankings() {
@@ -1038,10 +1101,6 @@ export default function Dashboard() {
   const completionRate = stats?.total_tasks > 0
     ? Math.round((stats.completed_tasks / stats.total_tasks) * 100) : 0;
 
-  const nextDeadline = upcomingDueDates.length > 0
-    ? upcomingDueDates.reduce((prev, curr) => prev.days_remaining < curr.days_remaining ? prev : curr)
-    : null;
-
   const isAdmin        = user?.role === 'admin';
   const showTaskSection = isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
   const isOverdue = (dueDate) => dueDate && new Date(dueDate) < new Date();
@@ -1064,13 +1123,6 @@ export default function Dashboard() {
     return styles[priority?.toLowerCase()] || styles.medium;
   };
 
-  const getDeadlineColor = (daysLeft) => {
-    if (daysLeft <= 0)  return { bg:'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/30',     badge:'bg-red-500 text-white',    text:'text-red-600'    };
-    if (daysLeft <= 7)  return { bg:'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800 hover:bg-orange-100',                 badge:'bg-orange-500 text-white', text:'text-orange-600' };
-    if (daysLeft <= 15) return { bg:'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800 hover:bg-yellow-100',                 badge:'bg-yellow-500 text-white', text:'text-yellow-600' };
-    return { bg:'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 hover:bg-green-100', badge:'bg-green-600 text-white', text:'text-green-700' };
-  };
-
   const formatToLocalTime = (dateString) => {
     if (!dateString) return '--:--';
     const d = new Date(dateString.endsWith('Z') ? dateString : dateString + 'Z');
@@ -1083,6 +1135,23 @@ export default function Dashboard() {
     if (h < 17) return 'Good Afternoon';
     if (h < 21) return 'Good Evening';
     return 'Working Late';
+  };
+
+  const getGreetingIcon = () => {
+    const h = new Date().getHours();
+    if (h < 12) return Sun;
+    if (h < 17) return Sun;
+    if (h < 21) return Sunset;
+    return Moon;
+  };
+
+  // Banner sub-message
+  const getBannerSubtitle = () => {
+    if (todayIsHoliday) return `Today is a holiday${todayHolidayName ? ` — ${todayHolidayName}` : ''}. Office closed.`;
+    if (overdueDeadlineCount > 0) return `You have ${overdueDeadlineCount} overdue deadline${overdueDeadlineCount > 1 ? 's' : ''} that need attention.`;
+    if (stats?.overdue_tasks > 0) return `${stats.overdue_tasks} task${stats.overdue_tasks > 1 ? 's are' : ' is'} past due — let's clear the backlog.`;
+    if (completionRate >= 80) return 'Great work! Your task completion rate is on point.';
+    return "Here's your business overview for today.";
   };
 
   // ── Ranking Item ──────────────────────────────────────────────────────────
@@ -1161,6 +1230,8 @@ export default function Dashboard() {
   const metricCardCls     = 'rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border';
   const metricCardDefault = isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200/80 hover:border-slate-300';
 
+  const GreetIcon = getGreetingIcon();
+
   // ══════════════════════════════════════════════════════════════════════════
   // RENDER
   // ══════════════════════════════════════════════════════════════════════════
@@ -1203,62 +1274,141 @@ export default function Dashboard() {
 
       <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
 
-        {/* ── WELCOME BANNER (with LiveClock) ───────────────────────────────── */}
+        {/* ════════════════════════════════════════════════════════════════════
+            WELCOME BANNER  (improved)
+            Layout:
+              Row 1 — greeting text + clock (desktop) + punch status pill
+              Row 2 — quick stat pills: Tasks · Overdue · Pending Todos · Next Deadline
+            Changes vs old banner:
+              • nextDeadline now uses the memoised, correctly-sorted value
+              • urgency colour on the deadline pill matches days_remaining
+              • quick-stat row gives an at-a-glance snapshot without needing
+                to scroll to the metric cards
+              • GreetIcon (Sun/Sunset/Moon) alongside greeting text
+              • overdue-deadline count shown with a red pill when > 0
+        ════════════════════════════════════════════════════════════════════ */}
         <motion.div variants={itemVariants}>
           <div
-            className="relative overflow-hidden rounded-2xl px-6 py-5"
+            className="relative overflow-hidden rounded-2xl px-6 pt-5 pb-4"
             style={{
-              background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
+              background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`,
               boxShadow: `0 8px 32px rgba(13,59,102,0.28)`,
             }}
           >
-            {/* Decorative circles */}
-            <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
+            {/* Decorative blobs */}
+            <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10"
               style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
-            <div className="absolute right-24 bottom-0 w-32 h-32 rounded-full mb-[-30px] opacity-5"
+            <div className="absolute right-28 bottom-0 w-40 h-40 rounded-full mb-[-40px] opacity-5"
+              style={{ background: 'white' }} />
+            <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5"
               style={{ background: 'white' }} />
 
-            <div className="relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-5">
-              {/* Left: greeting */}
-              <div className="flex-1 min-w-0">
-                <p className="text-white/60 text-xs font-medium uppercase tracking-widest mb-1">
-                  {format(new Date(), 'EEEE, MMMM d, yyyy')}
-                </p>
-                <h1 className="text-2xl font-bold text-white tracking-tight">
-                  Welcome back, {user?.full_name?.split(' ')[0] || 'User'}
-                </h1>
-                <p className="text-white/60 text-sm mt-1">
-                  {todayIsHoliday
-                    ? `Today is a holiday${todayHolidayName ? ` — ${todayHolidayName}` : ''}. Office closed.`
-                    : "Here's your business overview for today."}
-                </p>
+            <div className="relative">
+              {/* ── Row 1: greeting · clock · punch pill ── */}
+              <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                {/* Greeting */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                    <GreetIcon className="h-3 w-3" />
+                    {format(new Date(), 'EEEE, MMMM d, yyyy')}
+                  </p>
+                  <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">
+                    {getGreeting()}, {user?.full_name?.split(' ')[0] || 'User'}!
+                  </h1>
+                  <p className="text-white/55 text-sm mt-1 max-w-md leading-relaxed">
+                    {getBannerSubtitle()}
+                  </p>
+                </div>
+
+                {/* Clock (hidden on mobile, shown md+) */}
+                <div className="hidden md:block flex-shrink-0">
+                  <LiveClock compact />
+                </div>
+
+                {/* Punch status pill */}
+                {!todayIsHoliday && todayAttendance?.punch_in && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl flex-shrink-0"
+                    style={{ background: 'rgba(31,175,90,0.18)', border: '1px solid rgba(31,175,90,0.3)' }}
+                  >
+                    <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <div>
+                      <p className="text-[9px] font-semibold uppercase tracking-wider text-emerald-300">Clocked In</p>
+                      <p className="text-sm font-bold text-white leading-none mt-0.5">
+                        {formatToLocalTime(todayAttendance.punch_in)}
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
               </div>
 
-              {/* Center: clock */}
-              <div className="hidden md:block">
-                <LiveClock compact />
-              </div>
+              {/* ── Row 2: quick-stat pills ── */}
+              <div className="mt-4 flex items-center gap-2 flex-wrap">
+                <BannerStat
+                  icon={Briefcase}
+                  label="Total Tasks"
+                  value={stats?.total_tasks ?? '—'}
+                  onClick={() => navigate('/tasks')}
+                />
+                <BannerStat
+                  icon={AlertCircle}
+                  label="Overdue"
+                  value={stats?.overdue_tasks ?? 0}
+                  warning={(stats?.overdue_tasks ?? 0) > 0}
+                  onClick={() => navigate('/tasks?filter=overdue')}
+                />
+                <BannerStat
+                  icon={CheckSquare}
+                  label="Pending Todos"
+                  value={pendingTodos.length}
+                  onClick={() => navigate('/todos')}
+                />
+                {overdueDeadlineCount > 0 && (
+                  <BannerStat
+                    icon={CalendarIcon}
+                    label="Overdue Deadlines"
+                    value={overdueDeadlineCount}
+                    warning
+                    onClick={() => navigate('/duedates')}
+                  />
+                )}
 
-              {/* Right: next deadline */}
-              {nextDeadline && (
-                <motion.div
-                  whileHover={{ scale: 1.03, y: -2, transition: springPhysics.card }}
-                  className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all flex-shrink-0"
-                  style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.18)', backdropFilter: 'blur(8px)' }}
-                  onClick={() => setSelectedDeadline(nextDeadline)}
-                >
-                  <div className="p-2 rounded-lg bg-white/15">
-                    <CalendarIcon className="h-4 w-4 text-white" />
-                  </div>
-                  <div>
-                    <p className="text-white/60 text-xs font-medium uppercase tracking-wider">Next Deadline</p>
-                    <p className="font-bold text-white text-sm mt-0.5">
-                      {format(new Date(nextDeadline.due_date), 'MMM d')} · {nextDeadline.title?.slice(0, 18) || 'Deadline'}
-                    </p>
-                  </div>
-                  <ChevronRight className="h-4 w-4 text-white/40 ml-1" />
-                </motion.div>
-              )}
+                {/* Next deadline pill — now uses correctly-memoised nextDeadline */}
+                {nextDeadline && (() => {
+                  const dl = nextDeadline.days_remaining ?? 0;
+                  const urg = deadlineUrgency(dl);
+                  return (
+                    <motion.button
+                      whileHover={{ scale: 1.04, y: -1, transition: springPhysics.card }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => setSelectedDeadline(nextDeadline)}
+                      className="flex items-center gap-2.5 px-3.5 py-2 rounded-xl transition-all"
+                      style={{
+                        background: dl <= 0 ? 'rgba(255,107,107,0.18)' : dl <= 7 ? 'rgba(234,88,12,0.18)' : 'rgba(255,255,255,0.1)',
+                        border: dl <= 0 ? '1px solid rgba(255,107,107,0.35)' : dl <= 7 ? '1px solid rgba(234,88,12,0.35)' : '1px solid rgba(255,255,255,0.18)',
+                        backdropFilter: 'blur(6px)',
+                      }}
+                    >
+                      <div className="p-1.5 rounded-lg"
+                        style={{ background: dl <= 0 ? 'rgba(255,107,107,0.25)' : dl <= 7 ? 'rgba(234,88,12,0.2)' : 'rgba(255,255,255,0.12)' }}>
+                        <CalendarIcon className="h-3.5 w-3.5 text-white" />
+                      </div>
+                      <div className="text-left">
+                        <p className="text-[9px] font-semibold uppercase tracking-wider"
+                          style={{ color: dl <= 0 ? '#fca5a5' : dl <= 7 ? '#fdba74' : 'rgba(255,255,255,0.5)' }}>
+                          {dl <= 0 ? `${Math.abs(dl)}d overdue` : dl === 0 ? 'Due today' : `Due in ${dl}d`}
+                        </p>
+                        <p className="text-sm font-bold text-white leading-none mt-0.5 max-w-[160px] truncate">
+                          {nextDeadline.title?.slice(0, 22) || 'Deadline'}
+                        </p>
+                      </div>
+                      <ChevronRight className="h-3.5 w-3.5 text-white/40 flex-shrink-0" />
+                    </motion.button>
+                  );
+                })()}
+              </div>
             </div>
           </div>
         </motion.div>
@@ -1410,14 +1560,18 @@ export default function Dashboard() {
             </div>
           </SectionCard>
 
-          {/* Upcoming Deadlines */}
+          {/* ── Upcoming Deadlines ─────────────────────────────────────────────
+              FIX: uses sortedDueDates (memoised, correctly sorted with overdue
+              items first).  The backend change (see backend_patch.py) ensures
+              overdue pending items are returned by /duedates/upcoming.
+          ────────────────────────────────────────────────────────────────── */}
           <SectionCard>
             <CardHeaderRow
               iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
               icon={<CalendarIcon className="h-4 w-4 text-orange-500" />}
               title="Upcoming Deadlines"
               subtitle="Overdue pinned · Next 30 days"
-              badge={sortedDueDates.filter(d => (d.days_remaining ?? 0) <= 0).length || undefined}
+              badge={overdueDeadlineCount || undefined}
               action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-orange-400 hover:text-orange-300' : 'text-orange-500'}`} onClick={() => navigate('/duedates')}>View All</Button>}
             />
             <div className="p-3">
@@ -1427,7 +1581,8 @@ export default function Dashboard() {
                   <div className="slim-scroll space-y-2 max-h-[220px]" style={slimScroll}>
                     <AnimatePresence>
                       {sortedDueDates.map(due => {
-                        const color = getDeadlineColor(due.days_remaining || 0);
+                        const dl    = due.days_remaining ?? 0;
+                        const color = deadlineUrgency(dl);
                         return (
                           <motion.div key={due.id} variants={itemVariants} layout whileHover={{ y:-1 }}
                             className={`py-2.5 px-3 rounded-xl border cursor-pointer hover:shadow-sm transition-all ${color.bg}`}
@@ -1435,12 +1590,13 @@ export default function Dashboard() {
                             <div className="flex items-center justify-between mb-1">
                               <p className={`font-medium text-sm truncate flex-1 mr-2 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{due.title || 'Untitled Deadline'}</p>
                               <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${color.badge} whitespace-nowrap`}>
-                                {due.days_remaining > 0 ? `${due.days_remaining}d left` : 'Overdue'}
+                                {dl < 0 ? `${Math.abs(dl)}d overdue` : dl === 0 ? 'Due today' : `${dl}d left`}
                               </span>
                             </div>
                             <div className={`flex items-center gap-1.5 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                               <CalendarIcon className="h-3 w-3" />
-                              {format(new Date(due.due_date), 'MMM d, yyyy')}
+                              {due.due_date ? format(new Date(due.due_date), 'MMM d, yyyy') : '—'}
+                              {due.category && <span className="ml-auto text-[10px] font-semibold" style={{ color: COLORS.mediumBlue }}>{due.category}</span>}
                             </div>
                           </motion.div>
                         );
@@ -1796,7 +1952,6 @@ export default function Dashboard() {
                   <div className="w-14 h-14 bg-white/15 rounded-2xl flex items-center justify-center mx-auto mb-4">
                     <Clock className="h-7 w-7 text-white" />
                   </div>
-                  {/* Clock in the modal */}
                   <div className="mb-3">
                     <LiveClock />
                   </div>
