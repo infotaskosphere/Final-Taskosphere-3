@@ -3,6 +3,9 @@ invoicing.py
 ──────────────────────────────────────────────────────────────────────────────
 Full Invoicing & Billing Module — FastAPI Router
 
+PDF FIX: Use pdf.output() which returns bytes in fpdf2,
+         then buf.write(bytes). The old dest=BytesIO is not valid in fpdf2.
+
 Features:
   - Product / Service catalog with HSN/SAC codes
   - GST-compliant invoices (CGST+SGST or IGST)
@@ -14,10 +17,6 @@ Features:
   - Revenue dashboard stats
   - PDF export (Indian GST invoice format)
   - Deep integration with Clients, Leads, Quotations
-
-Register in main.py:
-    from backend.invoicing import router as invoicing_router
-    api_router.include_router(invoicing_router)
 """
 
 import uuid
@@ -60,7 +59,6 @@ _ONES = ["","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten"
 _TENS = ["","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"]
 
 def _amount_in_words(n: float) -> str:
-    """Convert amount to Indian English words (rupees and paise)."""
     try:
         rupees = int(n)
         paise  = round((n - rupees) * 100)
@@ -189,7 +187,7 @@ class InvoiceCreate(BaseModel):
 
     invoice_date:       str        = ""
     due_date:           str        = ""
-    supply_state:       str        = ""   # if same as company state → CGST+SGST else IGST
+    supply_state:       str        = ""
     is_interstate:      bool       = False
 
     items:              List[InvoiceItem] = []
@@ -623,8 +621,9 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
     pdf.set_font("Helvetica", "I", 7.5)
     _cell(pdf, 0, 4, "This is a computer generated invoice.", nl=True)
 
+    # ── FIX: use pdf.output() which returns bytes in fpdf2 ──────────────────────
     buf = BytesIO()
-    pdf.output(dest=buf)
+    buf.write(pdf.output())
     buf.seek(0)
     return buf
 
@@ -690,7 +689,6 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(get_c
     raw = _compute_invoice_totals(raw)
     raw["amount_due"] = raw["grand_total"]
     await db.invoices.insert_one(raw); raw.pop("_id", None)
-    # update lead status if linked
     if data.lead_id:
         from bson import ObjectId
         try:
@@ -733,7 +731,6 @@ async def invoice_stats(
     month: Optional[int]  = None,
     current_user: User = Depends(get_current_user)
 ):
-    """Revenue dashboard statistics."""
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     q: dict = {"invoice_type": "tax_invoice", "status": {"$ne": "cancelled"}}
     if current_user.role != "admin": q["created_by"] = current_user.id
@@ -763,7 +760,6 @@ async def invoice_stats(
     mon_rev   = sum(i["grand_total"] for i in mon_inv)
     mon_col   = sum(i["amount_paid"] for i in mon_inv)
 
-    # Monthly trend (last 12 months)
     trend = []
     for offset in range(11, -1, -1):
         dt = (date(today.year, today.month, 1) - timedelta(days=offset * 28))
@@ -775,7 +771,6 @@ async def invoice_stats(
                        "collected": sum(i["amount_paid"] for i in month_inv),
                        "count": len(month_inv)})
 
-    # Top clients
     from collections import defaultdict
     client_rev: dict = defaultdict(float)
     for i in all_inv:
@@ -842,7 +837,6 @@ async def convert_quotation(qtn_id: str, current_user: User = Depends(get_curren
     company = await db.companies.find_one({"id": q.get("company_id")}, {"_id": 0})
     if not company: raise HTTPException(404, "Company not found")
 
-    # Map quotation items → invoice items
     inv_items = []
     for it in q.get("items", []):
         inv_items.append(InvoiceItem(
@@ -858,6 +852,7 @@ async def convert_quotation(qtn_id: str, current_user: User = Depends(get_curren
         company_id     = q.get("company_id", ""),
         quotation_id   = qtn_id,
         lead_id        = q.get("lead_id"),
+        client_id      = q.get("client_id"),
         client_name    = q.get("client_name", ""),
         client_address = q.get("client_address", ""),
         client_email   = q.get("client_email", ""),
@@ -887,7 +882,6 @@ async def record_payment(data: PaymentCreate, current_user: User = Depends(get_c
            "created_by": current_user.id, "created_at": now}
     await db.payments.insert_one(pmt); pmt.pop("_id", None)
 
-    # Update invoice paid/due amounts and status
     total_paid = inv.get("amount_paid", 0) + data.amount
     grand      = inv["grand_total"]
     new_due    = round(grand - total_paid, 2)
@@ -925,7 +919,6 @@ async def delete_payment(pid: str, current_user: User = Depends(get_current_user
     if not pmt: raise HTTPException(404, "Payment not found")
     if current_user.role != "admin" and pmt.get("created_by") != current_user.id:
         raise HTTPException(403, "Not authorized")
-    # Reverse-update invoice
     inv = await db.invoices.find_one({"id": pmt["invoice_id"]}, {"_id": 0})
     if inv:
         new_paid = max(0, inv.get("amount_paid", 0) - pmt["amount"])
@@ -964,7 +957,6 @@ async def create_credit_note(data: CreditNoteCreate, current_user: User = Depend
     raw = _compute_invoice_totals(raw)
     raw["amount_due"] = raw["grand_total"]
     await db.invoices.insert_one(raw); raw.pop("_id", None)
-    # Mark original invoice as credit_noted
     await db.invoices.update_one({"id": data.original_invoice_id},
         {"$set": {"status": "credit_note", "updated_at": now}})
     return raw
