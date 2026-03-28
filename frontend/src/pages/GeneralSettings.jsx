@@ -12,8 +12,11 @@ import {
   Save, Loader2, CheckCircle2, Mail, Shield,
   Settings, ChevronRight
 } from "lucide-react";
+
+// --- CRITICAL FIX: ADDED MISSING IMPORTS ---
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge"; 
 
 const COLORS = {
   deepBlue: "#0D3B66",
@@ -98,12 +101,11 @@ export default function GeneralSettings() {
   // -- Style Tokens --
   const inputBg = isDark ? "#0f172a" : "#f8fafc";
   const inputBdr = isDark ? "#334155" : "#e2e8f0";
-  const labelClr = isDark ? "#94a3b8" : "#64748b";
   const bannerGradient = `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`;
 
   return (
-    <div className="p-4 md:p-6 space-y-6 max-w-4xl mx-auto transition-colors duration-200">
-      {/* ── Page Header (Dashboard Style) ── */}
+    <div className="p-4 md:p-6 space-y-4 max-w-4xl mx-auto transition-colors duration-200">
+      {/* ── Page Header ── */}
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
         <div className="relative overflow-hidden rounded-2xl px-6 py-5" 
              style={{ background: bannerGradient, boxShadow: "0 8px 32px rgba(13,59,102,0.2)" }}>
@@ -115,19 +117,18 @@ export default function GeneralSettings() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-white tracking-tight">Account Settings</h1>
-              <p className="text-white/60 text-xs font-medium uppercase tracking-widest mt-0.5">Manage your identity and preferences</p>
+              <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest mt-0.5">Manage identity & preferences</p>
             </div>
           </div>
         </div>
       </motion.div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* ── Left Sidebar: Photo & Stats ── */}
-        <div className="lg:col-span-1 space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* ── Left Sidebar ── */}
+        <div className="lg:col-span-1 space-y-4">
           <SectionCard>
             <div className="p-6 flex flex-col items-center text-center">
               <div className="relative group">
-                {/* FIXED: Merged duplicate style attributes into one object */}
                 <div 
                   className="w-28 h-28 rounded-3xl overflow-hidden shadow-2xl ring-4 transition-transform group-hover:scale-[1.02]"
                   style={{ 
@@ -157,6 +158,7 @@ export default function GeneralSettings() {
               <div className="mt-5">
                 <h2 className="font-bold text-lg text-slate-800 dark:text-slate-100 leading-tight">{user?.full_name}</h2>
                 <p className="text-sm text-slate-400 font-medium mt-1">{user?.email}</p>
+                {/* Badge component is now properly defined */}
                 <Badge variant="secondary" className="mt-3 px-3 py-1 rounded-lg capitalize bg-blue-500/10 text-blue-500 border-0 font-bold">
                   {user?.role}
                 </Badge>
@@ -181,20 +183,20 @@ export default function GeneralSettings() {
             <div className="flex items-start gap-3">
               <Shield className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
               <p className="text-xs leading-relaxed text-blue-700 dark:text-blue-400">
-                To update your password, system access, or department permissions, please contact your administrator.
+                Contact Admin to change passwords or system permissions.
               </p>
             </div>
           </SectionCard>
         </div>
 
-        {/* ── Right Panel: Profile Form ── */}
+        {/* ── Right Panel ── */}
         <div className="lg:col-span-2">
           <SectionCard>
             <CardHeaderRow 
               iconBg="bg-blue-50 dark:bg-blue-900/30"
               icon={<User className="h-4 w-4 text-blue-500" />}
               title="Personal Information"
-              subtitle="Keep your contact details up to date"
+              subtitle="Update your contact and profile details"
             />
             
             <form onSubmit={handleSave} className="p-6 space-y-5">
@@ -205,7 +207,7 @@ export default function GeneralSettings() {
                     value={profile.full_name}
                     onChange={e => setProfile(p => ({ ...p, full_name: e.target.value }))}
                     style={{ background: inputBg, borderColor: inputBdr }}
-                    className="rounded-xl h-11 focus:ring-blue-500/20"
+                    className="rounded-xl h-11"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -215,7 +217,7 @@ export default function GeneralSettings() {
                     value={profile.phone}
                     onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))}
                     style={{ background: inputBg, borderColor: inputBdr }}
-                    className="rounded-xl h-11 focus:ring-blue-500/20"
+                    className="rounded-xl h-11"
                     placeholder="+91 00000 00000"
                   />
                 </div>
@@ -229,7 +231,7 @@ export default function GeneralSettings() {
                     value={profile.birthday}
                     onChange={e => setProfile(p => ({ ...p, birthday: e.target.value }))}
                     style={{ background: inputBg, borderColor: inputBdr }}
-                    className="rounded-xl h-11 focus:ring-blue-500/20"
+                    className="rounded-xl h-11"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -237,7 +239,7 @@ export default function GeneralSettings() {
                   <Input 
                     value={user?.email || ""}
                     disabled
-                    className="rounded-xl h-11 opacity-60 cursor-not-allowed bg-slate-100 dark:bg-slate-900 border-slate-200 dark:border-slate-800"
+                    className="rounded-xl h-11 opacity-60 bg-slate-100 dark:bg-slate-900 border-slate-200 dark:border-slate-800"
                   />
                 </div>
               </div>
@@ -246,17 +248,16 @@ export default function GeneralSettings() {
                 <motion.button
                   type="submit"
                   disabled={loading}
-                  whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
-                  className="flex items-center gap-2 px-8 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg transition-all disabled:opacity-50"
+                  className="flex items-center gap-2 px-8 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg disabled:opacity-50"
                   style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
                 >
                   {loading ? (
                     <><Loader2 className="w-4 h-4 animate-spin" /> Updating...</>
                   ) : saved ? (
-                    <><CheckCircle2 className="w-4 h-4" /> Changes Saved</>
+                    <><CheckCircle2 className="w-4 h-4" /> Profile Updated</>
                   ) : (
-                    <><Save className="w-4 h-4" /> Update Profile</>
+                    <><Save className="w-4 h-4" /> Save Changes</>
                   )}
                 </motion.button>
               </div>
