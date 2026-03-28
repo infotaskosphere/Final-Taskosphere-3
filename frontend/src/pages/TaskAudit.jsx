@@ -36,13 +36,13 @@ export default function TaskAudit() {
 
   const getActionStyles = (action) => {
     const base = isDark ? {
-      DELETE_TASK:         { color: "text-red-400",     bg: isDark ? "bg-red-900/30"     : "bg-red-50",     icon: <Trash2 className="h-4 w-4" />,      label: "Deleted"           },
-      TASK_COMPLETED:      { color: "text-emerald-400", bg: isDark ? "bg-emerald-900/30" : "bg-emerald-50", icon: <CheckCircle2 className="h-4 w-4" />, label: "Completed"         },
-      TASK_STATUS_CHANGED: { color: "text-blue-400",    bg: isDark ? "bg-blue-900/30"    : "bg-blue-50",    icon: <RefreshCcw className="h-4 w-4" />,   label: "Status Transition" },
-      CREATE_TASK:         { color: "text-indigo-400",  bg: isDark ? "bg-indigo-900/30"  : "bg-indigo-50",  icon: <PlusCircle className="h-4 w-4" />,   label: "Registration"      },
-      UPDATE_TASK:         { color: "text-amber-400",   bg: isDark ? "bg-amber-900/30"   : "bg-amber-50",   icon: <History className="h-4 w-4" />,      label: "Modification"      },
+      DELETE_TASK:         { color: "text-red-400",      bg: "bg-red-900/30",      icon: <Trash2 className="h-4 w-4" />,      label: "Deleted"           },
+      TASK_COMPLETED:      { color: "text-emerald-400", bg: "bg-emerald-900/30", icon: <CheckCircle2 className="h-4 w-4" />, label: "Completed"         },
+      TASK_STATUS_CHANGED: { color: "text-blue-400",    bg: "bg-blue-900/30",    icon: <RefreshCcw className="h-4 w-4" />,   label: "Status Transition" },
+      CREATE_TASK:         { color: "text-indigo-400",  bg: "bg-indigo-900/30",  icon: <PlusCircle className="h-4 w-4" />,   label: "Registration"      },
+      UPDATE_TASK:         { color: "text-amber-400",   bg: "bg-amber-900/30",   icon: <History className="h-4 w-4" />,      label: "Modification"      },
     } : {
-      DELETE_TASK:         { color: "text-red-600",     bg: "bg-red-50",     icon: <Trash2 className="h-4 w-4" />,      label: "Deleted"           },
+      DELETE_TASK:         { color: "text-red-600",      bg: "bg-red-50",      icon: <Trash2 className="h-4 w-4" />,      label: "Deleted"           },
       TASK_COMPLETED:      { color: "text-emerald-600", bg: "bg-emerald-50", icon: <CheckCircle2 className="h-4 w-4" />, label: "Completed"         },
       TASK_STATUS_CHANGED: { color: "text-blue-600",    bg: "bg-blue-50",    icon: <RefreshCcw className="h-4 w-4" />,   label: "Status Transition" },
       CREATE_TASK:         { color: "text-indigo-600",  bg: "bg-indigo-50",  icon: <PlusCircle className="h-4 w-4" />,   label: "Registration"      },
@@ -51,7 +51,7 @@ export default function TaskAudit() {
     const defaults = isDark
       ? { color: "text-slate-400", bg: "bg-slate-700/50", icon: <History className="h-4 w-4" />, label: action }
       : { color: "text-slate-600", bg: "bg-slate-50",     icon: <History className="h-4 w-4" />, label: action };
-    return (isDark ? base : base)[action] || defaults;
+    return base[action] || defaults;
   };
 
   const handleExportPDF = async (taskId) => {
@@ -75,11 +75,9 @@ export default function TaskAudit() {
   const hdrBg    = isDark ? "linear-gradient(to right,#1e293b,#1e293b)" : "linear-gradient(to right,#f8fafc,#ffffff)";
   const headTxt  = isDark ? "#e2e8f0"  : C.deepBlue;
   const subTxt   = isDark ? "#94a3b8"  : "#64748b";
-  const divLine  = isDark ? "#1e293b"  : "#f1f5f9";
   const logCard  = isDark ? "#263348"  : "#ffffff";
   const logBdr   = isDark ? "#334155"  : "#f1f5f9";
-  const logHov   = isDark ? "#2d3f55"  : "#f8fafc";
-  const metaTxt  = isDark ? "#94a3b8"  : "#94a3b8";
+  const metaTxt  = "#94a3b8";
   const metaBg   = isDark ? "rgba(255,255,255,0.04)" : "#f8fafc";
   const taskTitleClr = isDark ? "#93c5fd" : C.deepBlue;
   const idTxt    = isDark ? "#475569"  : "#94a3b8";
@@ -116,7 +114,7 @@ export default function TaskAudit() {
               </div>
               <div>
                 <h1 style={{ color: headTxt }} className="text-2xl md:text-3xl font-bold">Task Audit Trail</h1>
-                <p style={{ color: subTxt }} className="font-medium text-sm mt-0.5">Compliance-ready record of every system modification</p>
+                <p style={{ color: subTxt }} className="font-medium text-sm mt-0.5">Compliance-ready record of modifications</p>
               </div>
             </div>
 
@@ -150,7 +148,7 @@ export default function TaskAudit() {
 
           {/* Timeline */}
           <div className="p-6 md:p-8">
-            <div className="relative space-y-8" style={{ "--line-color": isDark ? "#1e293b" : "#f1f5f9" }}>
+            <div className="relative space-y-8">
               <div
                 className="absolute inset-0 ml-6 -translate-x-px h-full w-0.5"
                 style={{ background: isDark ? "#1e293b" : "#f1f5f9" }}
@@ -169,7 +167,6 @@ export default function TaskAudit() {
 
                   return (
                     <div key={index} className="relative flex items-start gap-8 group">
-                      {/* Node */}
                       <div className={`absolute left-0 mt-1 w-12 h-12 rounded-2xl border-4 flex items-center justify-center z-10 transition-all group-hover:rotate-12 ${styles.bg} ${styles.color}`}
                         style={{ borderColor: isDark ? "#1e293b" : "#ffffff", boxShadow: "0 4px 12px rgba(0,0,0,0.15)" }}>
                         {styles.icon}
@@ -216,7 +213,6 @@ export default function TaskAudit() {
                           <p style={{ color: idTxt }} className="text-[10px] font-mono mt-1 uppercase">ID: {taskId}</p>
                         </div>
 
-                        {/* Changes */}
                         <div className="space-y-3">
                           {log.action === "TASK_STATUS_CHANGED" && (
                             <div
@@ -224,7 +220,7 @@ export default function TaskAudit() {
                               className="inline-flex items-center gap-3 p-2 px-4 rounded-2xl shadow-inner"
                             >
                               <span style={{ color: metaTxt }} className="text-xs font-medium line-through lowercase">{log.old_data?.status}</span>
-                              <ArrowRight style={{ color: isDark ? "#60a5fa" : "#60a5fa" }} className="h-4 w-4" />
+                              <ArrowRight className="h-4 w-4 text-blue-400" />
                               <span style={{ color: isDark ? "#93c5fd" : "#1d4ed8" }} className="text-xs font-black uppercase tracking-tighter">{log.new_data?.status}</span>
                             </div>
                           )}
@@ -250,9 +246,12 @@ export default function TaskAudit() {
 
                           {log.action === "DELETE_TASK" && (
                             <div
-                              style={{ background: isDark ? "rgba(239,68,68,0.1)" : "#fef2f2", border: `1px solid ${isDark ? "#7f1d1d" : "#fecaca"}` }}
                               className="p-3 rounded-xl text-xs font-bold flex items-center gap-2"
-                              style={{ color: isDark ? "#f87171" : "#dc2626" }}
+                              style={{ 
+                                background: isDark ? "rgba(239,68,68,0.1)" : "#fef2f2", 
+                                border: `1px solid ${isDark ? "#7f1d1d" : "#fecaca"}`,
+                                color: isDark ? "#f87171" : "#dc2626"
+                              }}
                             >
                               <Trash2 className="h-4 w-4" />
                               This record has been wiped from the active database.
