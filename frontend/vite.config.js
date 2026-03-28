@@ -15,28 +15,9 @@ export default defineConfig({
     },
   },
 
-  // ❌ FIX 1: REMOVE forcing .js → JSX (this breaks node_modules on Render)
-  // optimizeDeps: {
-  //   esbuildOptions: {
-  //     loader: {
-  //       '.js': 'jsx',
-  //     },
-  //   },
-  // },
-
-  // ✅ FIX 2: Restrict JSX handling ONLY to .jsx files
-  esbuild: {
-    loader: 'jsx',
-    include: /src\/.*\.jsx$/, // changed from .jsx?$
-    // exclude: [], // ❌ not needed
-  },
-
   build: {
     outDir: 'dist',
-
-    // ✅ FIX 3: keep this (good for memory)
     sourcemap: false,
-
     assetsDir: 'assets',
 
     rollupOptions: {
@@ -56,7 +37,6 @@ export default defineConfig({
       },
     },
 
-    // ✅ FIX 4: keep this as-is
     chunkSizeWarningLimit: 1000,
   },
 
