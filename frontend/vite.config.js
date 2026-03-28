@@ -19,25 +19,8 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
     assetsDir: 'assets',
-
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom'],
-          ui: [
-            '@radix-ui/react-dialog',
-            '@radix-ui/react-dropdown-menu',
-            '@radix-ui/react-select',
-            '@radix-ui/react-tabs',
-            '@radix-ui/react-toast',
-          ],
-          charts: ['chart.js', 'recharts'],
-          motion: ['framer-motion'],
-        },
-      },
-    },
-
-    chunkSizeWarningLimit: 1000,
+    // Removed manualChunks to prevent build-time resolution errors
+    chunkSizeWarningLimit: 2000, 
   },
 
   server: {
