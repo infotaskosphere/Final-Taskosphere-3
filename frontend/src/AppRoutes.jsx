@@ -24,34 +24,64 @@ const VisitsPage        = lazy(() => import("@/pages/VisitsPage.jsx"));
 const EmailSettings     = lazy(() => import("@/components/EmailSettings.jsx"));
 const Quotations        = lazy(() => import("@/pages/Quotations.jsx"));
 const GeneralSettings   = lazy(() => import("@/pages/GeneralSettings.jsx"));
+// ── NEW: Invoicing & Billing ────────────────────────────────────────────────
+const Invoicing         = lazy(() => import("@/pages/Invoicing.jsx"));
 
 /* ── Route Guards ───────────────────────────────────────────────────────── */
 
+/**
+ * Protected — requires login only (no specific permission).
+ */
 const Protected = ({ children }) => {
   const { user, loading } = useAuth();
-
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
-
   return <DashboardLayout>{children}</DashboardLayout>;
 };
 
+/**
+ * Public — redirects logged-in users away to dashboard.
+ */
 const Public = ({ children }) => {
   const { user, loading } = useAuth();
-
   if (loading) return null;
   if (user) return <Navigate to="/dashboard" replace />;
-
   return children;
 };
 
+/**
+ * Permission — requires login AND one (or more) permissions.
+ *
+ * NEW: `permission` now accepts either a string OR an array of strings.
+ * When an array is supplied the check is OR-based — access is granted if
+ * the user holds ANY of the listed permissions (plus admin always passes).
+ *
+ * Usage examples:
+ *   <Permission permission="can_view_all_leads">          (single)
+ *   <Permission permission={["can_manage_invoices",       (array / OR)
+ *                             "can_create_quotations"]}>
+ */
 const Permission = ({ permission, children }) => {
   const { user, loading, hasPermission } = useAuth();
 
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
 
-  if (permission && !hasPermission(permission)) {
+  // Admin always passes — no permission check needed.
+  if (user.role === "admin") {
+    return <DashboardLayout>{children}</DashboardLayout>;
+  }
+
+  // No permission constraint supplied → treat as Protected.
+  if (!permission) {
+    return <DashboardLayout>{children}</DashboardLayout>;
+  }
+
+  // Normalise to array and evaluate OR logic.
+  const perms = Array.isArray(permission) ? permission : [permission];
+  const hasAccess = perms.some((p) => hasPermission(p));
+
+  if (!hasAccess) {
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -59,7 +89,6 @@ const Permission = ({ permission, children }) => {
 };
 
 /* ── Page Loader Wrapper ───────────────────────────────────────────────── */
-
 const PageLoader = ({ children }) => (
   <Suspense fallback={<div className="page-loader">Loading...</div>}>
     {children}
@@ -67,18 +96,15 @@ const PageLoader = ({ children }) => (
 );
 
 /* ── App Routes ───────────────────────────────────────────────────────── */
-
 function AppRoutes() {
   return (
     <Routes>
-      {/* Public */}
+      {/* ── Public ────────────────────────────────────────────────────── */}
       <Route
         path="/"
         element={
           <Public>
-            <PageLoader>
-              <Login />
-            </PageLoader>
+            <PageLoader><Login /></PageLoader>
           </Public>
         }
       />
@@ -87,9 +113,7 @@ function AppRoutes() {
         path="/login"
         element={
           <Public>
-            <PageLoader>
-              <Login />
-            </PageLoader>
+            <PageLoader><Login /></PageLoader>
           </Public>
         }
       />
@@ -98,33 +122,27 @@ function AppRoutes() {
         path="/register"
         element={
           <Public>
-            <PageLoader>
-              <Register />
-            </PageLoader>
+            <PageLoader><Register /></PageLoader>
           </Public>
         }
       />
 
-      {/* Dashboard */}
+      {/* ── Dashboard ─────────────────────────────────────────────────── */}
       <Route
         path="/dashboard"
         element={
           <Protected>
-            <PageLoader>
-              <Dashboard />
-            </PageLoader>
+            <PageLoader><Dashboard /></PageLoader>
           </Protected>
         }
       />
 
-      {/* Operations */}
+      {/* ── Operations ────────────────────────────────────────────────── */}
       <Route
         path="/tasks"
         element={
           <Protected>
-            <PageLoader>
-              <Tasks />
-            </PageLoader>
+            <PageLoader><Tasks /></PageLoader>
           </Protected>
         }
       />
@@ -133,9 +151,7 @@ function AppRoutes() {
         path="/todos"
         element={
           <Protected>
-            <PageLoader>
-              <TodoDashboard />
-            </PageLoader>
+            <PageLoader><TodoDashboard /></PageLoader>
           </Protected>
         }
       />
@@ -144,9 +160,7 @@ function AppRoutes() {
         path="/attendance"
         element={
           <Protected>
-            <PageLoader>
-              <Attendance />
-            </PageLoader>
+            <PageLoader><Attendance /></PageLoader>
           </Protected>
         }
       />
@@ -155,9 +169,7 @@ function AppRoutes() {
         path="/visits"
         element={
           <Protected>
-            <PageLoader>
-              <VisitsPage />
-            </PageLoader>
+            <PageLoader><VisitsPage /></PageLoader>
           </Protected>
         }
       />
@@ -166,9 +178,7 @@ function AppRoutes() {
         path="/duedates"
         element={
           <Protected>
-            <PageLoader>
-              <DueDates />
-            </PageLoader>
+            <PageLoader><DueDates /></PageLoader>
           </Protected>
         }
       />
@@ -177,21 +187,17 @@ function AppRoutes() {
         path="/reports"
         element={
           <Protected>
-            <PageLoader>
-              <Reports />
-            </PageLoader>
+            <PageLoader><Reports /></PageLoader>
           </Protected>
         }
       />
 
-      {/* Gated Registers */}
+      {/* ── Gated Registers ───────────────────────────────────────────── */}
       <Route
         path="/dsc"
         element={
           <Permission permission="can_view_all_dsc">
-            <PageLoader>
-              <DSCRegister />
-            </PageLoader>
+            <PageLoader><DSCRegister /></PageLoader>
           </Permission>
         }
       />
@@ -200,9 +206,7 @@ function AppRoutes() {
         path="/documents"
         element={
           <Permission permission="can_view_documents">
-            <PageLoader>
-              <DocumentsRegister />
-            </PageLoader>
+            <PageLoader><DocumentsRegister /></PageLoader>
           </Permission>
         }
       />
@@ -211,9 +215,7 @@ function AppRoutes() {
         path="/clients"
         element={
           <Protected>
-            <PageLoader>
-              <Clients />
-            </PageLoader>
+            <PageLoader><Clients /></PageLoader>
           </Protected>
         }
       />
@@ -222,21 +224,17 @@ function AppRoutes() {
         path="/passwords"
         element={
           <Protected>
-            <PageLoader>
-              <PasswordRepository />
-            </PageLoader>
+            <PageLoader><PasswordRepository /></PageLoader>
           </Protected>
         }
       />
 
-      {/* Admin */}
+      {/* ── Admin ─────────────────────────────────────────────────────── */}
       <Route
         path="/users"
         element={
           <Permission permission="can_view_user_page">
-            <PageLoader>
-              <Users />
-            </PageLoader>
+            <PageLoader><Users /></PageLoader>
           </Permission>
         }
       />
@@ -245,20 +243,37 @@ function AppRoutes() {
         path="/leads"
         element={
           <Permission permission="can_view_all_leads">
-            <PageLoader>
-              <LeadsPage />
-            </PageLoader>
+            <PageLoader><LeadsPage /></PageLoader>
           </Permission>
         }
       />
 
+      {/*
+        Quotations — requires can_create_quotations.
+        Users with can_manage_invoices but NOT can_create_quotations should
+        still be able to reach Quotations for reference; widen the gate here
+        using OR logic.
+      */}
       <Route
         path="/quotations"
         element={
-          <Permission permission="can_create_quotations">
-            <PageLoader>
-              <Quotations />
-            </PageLoader>
+          <Permission permission={["can_create_quotations", "can_manage_invoices"]}>
+            <PageLoader><Quotations /></PageLoader>
+          </Permission>
+        }
+      />
+
+      {/*
+        Invoicing & Billing — NEW ROUTE
+        Access granted if user holds can_manage_invoices OR can_create_quotations.
+        Admin always passes (handled in Permission component).
+        The page itself enforces row-level security via the backend.
+      */}
+      <Route
+        path="/invoicing"
+        element={
+          <Permission permission={["can_manage_invoices", "can_create_quotations"]}>
+            <PageLoader><Invoicing /></PageLoader>
           </Permission>
         }
       />
@@ -267,9 +282,7 @@ function AppRoutes() {
         path="/staff-activity"
         element={
           <Permission permission="can_view_staff_activity">
-            <PageLoader>
-              <StaffActivity />
-            </PageLoader>
+            <PageLoader><StaffActivity /></PageLoader>
           </Permission>
         }
       />
@@ -278,21 +291,17 @@ function AppRoutes() {
         path="/task-audit"
         element={
           <Permission permission="can_view_audit_logs">
-            <PageLoader>
-              <TaskAudit />
-            </PageLoader>
+            <PageLoader><TaskAudit /></PageLoader>
           </Permission>
         }
       />
 
-      {/* Settings */}
+      {/* ── Settings ──────────────────────────────────────────────────── */}
       <Route
         path="/settings/email"
         element={
           <Protected>
-            <PageLoader>
-              <EmailSettings />
-            </PageLoader>
+            <PageLoader><EmailSettings /></PageLoader>
           </Protected>
         }
       />
@@ -301,9 +310,7 @@ function AppRoutes() {
         path="/settings/general"
         element={
           <Protected>
-            <PageLoader>
-              <GeneralSettings />
-            </PageLoader>
+            <PageLoader><GeneralSettings /></PageLoader>
           </Protected>
         }
       />
@@ -313,7 +320,7 @@ function AppRoutes() {
         element={<Navigate to="/settings/general" replace />}
       />
 
-      {/* Fallback */}
+      {/* ── Fallback ──────────────────────────────────────────────────── */}
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );
