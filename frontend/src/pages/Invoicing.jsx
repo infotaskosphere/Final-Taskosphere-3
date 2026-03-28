@@ -21,51 +21,44 @@ import {
   ArrowUpRight, Activity, Zap, Shield, Star, Filter,
   IndianRupee, CalendarDays, FileCheck, ArrowRightLeft, Layers,
   Upload, Database, FileUp, CheckSquare, AlertTriangle, Phone, Mail,
-  FileSpreadsheet, Briefcase, PieChart, Palette, Printer, BookOpen,
+  FileSpreadsheet, Briefcase, PieChart,
 } from 'lucide-react';
-import {
-  InvoiceDesignModal,
-  openInvoicePrint,
-  COLOR_THEMES,
-  INVOICE_TEMPLATES,
-} from './InvoiceTemplates';
-import PartyLedger from './PartyLedger';
 
 // ─── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
-  deepBlue: '#0D3B66',
-  mediumBlue: '#1F6FB2',
+  deepBlue:     '#0D3B66',
+  mediumBlue:   '#1F6FB2',
   emeraldGreen: '#1FAF5A',
-  lightGreen: '#5CCB5F',
-  coral: '#FF6B6B',
-  amber: '#F59E0B',
-  purple: '#7C3AED',
-  teal: '#0D9488',
+  lightGreen:   '#5CCB5F',
+  coral:        '#FF6B6B',
+  amber:        '#F59E0B',
+  purple:       '#7C3AED',
+  teal:         '#0D9488',
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const GST_RATES = [0, 5, 12, 18, 28];
-const UNITS = ['service','nos','kg','ltr','mtr','sqft','hr','day','month','year','set','lot','pcs','box'];
-const PAY_MODES = ['cash','cheque','neft','rtgs','imps','upi','card','other'];
-const INV_TYPES = [
+const GST_RATES   = [0, 5, 12, 18, 28];
+const UNITS       = ['service','nos','kg','ltr','mtr','sqft','hr','day','month','year','set','lot','pcs','box'];
+const PAY_MODES   = ['cash','cheque','neft','rtgs','imps','upi','card','other'];
+const INV_TYPES   = [
   { value: 'tax_invoice', label: 'Tax Invoice' },
-  { value: 'proforma', label: 'Proforma Invoice' },
-  { value: 'estimate', label: 'Estimate' },
+  { value: 'proforma',    label: 'Proforma Invoice' },
+  { value: 'estimate',    label: 'Estimate' },
   { value: 'credit_note', label: 'Credit Note' },
-  { value: 'debit_note', label: 'Debit Note' },
+  { value: 'debit_note',  label: 'Debit Note' },
 ];
 const STATUS_META = {
-  draft: { label: 'Draft', bg: 'bg-slate-100 dark:bg-slate-700', text: 'text-slate-600 dark:text-slate-300', dot: 'bg-slate-400', hex: '#94A3B8' },
-  sent: { label: 'Sent', bg: 'bg-blue-50 dark:bg-blue-900/30', text: 'text-blue-600 dark:text-blue-400', dot: 'bg-blue-500', hex: COLORS.mediumBlue },
-  partially_paid: { label: 'Partial', bg: 'bg-amber-50 dark:bg-amber-900/20', text: 'text-amber-600 dark:text-amber-400', dot: 'bg-amber-400', hex: COLORS.amber },
-  paid: { label: 'Paid', bg: 'bg-emerald-50 dark:bg-emerald-900/20', text: 'text-emerald-700 dark:text-emerald-400', dot: 'bg-emerald-500', hex: COLORS.emeraldGreen },
-  overdue: { label: 'Overdue', bg: 'bg-red-50 dark:bg-red-900/20', text: 'text-red-600 dark:text-red-400', dot: 'bg-red-500', hex: COLORS.coral },
-  cancelled: { label: 'Cancelled', bg: 'bg-slate-100 dark:bg-slate-700', text: 'text-slate-500 dark:text-slate-400', dot: 'bg-slate-400', hex: '#94A3B8' },
-  credit_note: { label: 'Credit Note', bg: 'bg-purple-50 dark:bg-purple-900/20', text: 'text-purple-600 dark:text-purple-400', dot: 'bg-purple-500', hex: COLORS.purple },
+  draft:          { label: 'Draft',       bg: 'bg-slate-100 dark:bg-slate-700',      text: 'text-slate-600 dark:text-slate-300',   dot: 'bg-slate-400',   hex: '#94A3B8' },
+  sent:           { label: 'Sent',        bg: 'bg-blue-50 dark:bg-blue-900/30',       text: 'text-blue-600 dark:text-blue-400',     dot: 'bg-blue-500',    hex: COLORS.mediumBlue },
+  partially_paid: { label: 'Partial',     bg: 'bg-amber-50 dark:bg-amber-900/20',     text: 'text-amber-600 dark:text-amber-400',   dot: 'bg-amber-400',   hex: COLORS.amber },
+  paid:           { label: 'Paid',        bg: 'bg-emerald-50 dark:bg-emerald-900/20', text: 'text-emerald-700 dark:text-emerald-400', dot: 'bg-emerald-500', hex: COLORS.emeraldGreen },
+  overdue:        { label: 'Overdue',     bg: 'bg-red-50 dark:bg-red-900/20',         text: 'text-red-600 dark:text-red-400',       dot: 'bg-red-500',     hex: COLORS.coral },
+  cancelled:      { label: 'Cancelled',   bg: 'bg-slate-100 dark:bg-slate-700',      text: 'text-slate-500 dark:text-slate-400',   dot: 'bg-slate-400',   hex: '#94A3B8' },
+  credit_note:    { label: 'Credit Note', bg: 'bg-purple-50 dark:bg-purple-900/20',  text: 'text-purple-600 dark:text-purple-400', dot: 'bg-purple-500',  hex: COLORS.purple },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const fmt = (n) => new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n ?? 0);
+const fmt  = (n) => new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n ?? 0);
 const fmtC = (n) => `₹${fmt(n)}`;
 
 const getStatusMeta = (inv) => {
@@ -83,7 +76,7 @@ const emptyItem = () => ({
 });
 
 const computeItem = (item, isInter) => {
-  const disc = item.unit_price * item.quantity * (item.discount_pct / 100);
+  const disc    = item.unit_price * item.quantity * (item.discount_pct / 100);
   const taxable = Math.round((item.unit_price * item.quantity - disc) * 100) / 100;
   const g = item.gst_rate;
   if (isInter) {
@@ -102,23 +95,23 @@ const computeItem = (item, isInter) => {
 };
 
 const computeTotals = (items, isInter, discAmt = 0, shipping = 0, other = 0) => {
-  const comp = items.map(it => computeItem(it, isInter));
+  const comp     = items.map(it => computeItem(it, isInter));
   const subtotal = comp.reduce((s, i) => s + i.unit_price * i.quantity, 0);
-  const totDisc = comp.reduce((s, i) => s + i.unit_price * i.quantity * i.discount_pct / 100, 0) + discAmt;
-  const totTax = comp.reduce((s, i) => s + i.taxable_value, 0);
-  const totCGST = comp.reduce((s, i) => s + i.cgst_amount, 0);
-  const totSGST = comp.reduce((s, i) => s + i.sgst_amount, 0);
-  const totIGST = comp.reduce((s, i) => s + i.igst_amount, 0);
-  const totGST = Math.round((totCGST + totSGST + totIGST) * 100) / 100;
-  const grand = Math.round((totTax + totGST + shipping + other - discAmt) * 100) / 100;
+  const totDisc  = comp.reduce((s, i) => s + i.unit_price * i.quantity * i.discount_pct / 100, 0) + discAmt;
+  const totTax   = comp.reduce((s, i) => s + i.taxable_value, 0);
+  const totCGST  = comp.reduce((s, i) => s + i.cgst_amount, 0);
+  const totSGST  = comp.reduce((s, i) => s + i.sgst_amount, 0);
+  const totIGST  = comp.reduce((s, i) => s + i.igst_amount, 0);
+  const totGST   = Math.round((totCGST + totSGST + totIGST) * 100) / 100;
+  const grand    = Math.round((totTax + totGST + shipping + other - discAmt) * 100) / 100;
   return {
     items: comp,
-    subtotal: Math.round(subtotal * 100) / 100,
+    subtotal:       Math.round(subtotal * 100) / 100,
     total_discount: Math.round(totDisc * 100) / 100,
-    total_taxable: Math.round(totTax * 100) / 100,
-    total_cgst: Math.round(totCGST * 100) / 100,
-    total_sgst: Math.round(totSGST * 100) / 100,
-    total_igst: Math.round(totIGST * 100) / 100,
+    total_taxable:  Math.round(totTax * 100) / 100,
+    total_cgst:     Math.round(totCGST * 100) / 100,
+    total_sgst:     Math.round(totSGST * 100) / 100,
+    total_igst:     Math.round(totIGST * 100) / 100,
     total_gst: totGST,
     grand_total: grand,
   };
@@ -150,15 +143,15 @@ const Hl = ({ text = '', query = '' }) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// CLIENT SEARCH COMBOBOX — replaces the plain Select for client selection
+// CLIENT SEARCH COMBOBOX  — replaces the plain Select for client selection
 // ════════════════════════════════════════════════════════════════════════════════
 const ClientSearchCombobox = ({ clients = [], value, onSelect, onAddNew, isDark }) => {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
+  const [open,    setOpen]    = useState(false);
+  const [query,   setQuery]   = useState('');
   const [focused, setFocused] = useState(-1);
-  const wrapRef = useRef(null);
+  const wrapRef  = useRef(null);
   const inputRef = useRef(null);
-  const listRef = useRef(null);
+  const listRef  = useRef(null);
 
   const selected = clients.find(c => c.id === value) || null;
 
@@ -167,8 +160,8 @@ const ClientSearchCombobox = ({ clients = [], value, onSelect, onAddNew, isDark 
     if (!q) return clients.slice(0, 50);
     return clients.filter(c =>
       (c.company_name || '').toLowerCase().includes(q) ||
-      (c.email || '').toLowerCase().includes(q) ||
-      (c.phone || '').includes(q) ||
+      (c.email  || '').toLowerCase().includes(q) ||
+      (c.phone  || '').includes(q) ||
       (c.client_gstin || '').toLowerCase().includes(q)
     ).slice(0, 40);
   }, [clients, query]);
@@ -199,10 +192,10 @@ const ClientSearchCombobox = ({ clients = [], value, onSelect, onAddNew, isDark 
   const onKeyDown = (e) => {
     if (!open) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDrop(); } return; }
     const total = filtered.length + 1;
-    if (e.key === 'ArrowDown') { e.preventDefault(); setFocused(f => Math.min(f + 1, total - 1)); }
-    if (e.key === 'ArrowUp') { e.preventDefault(); setFocused(f => Math.max(f - 1, -1)); }
-    if (e.key === 'Escape') { setOpen(false); setQuery(''); setFocused(-1); }
-    if (e.key === 'Enter') {
+    if (e.key === 'ArrowDown')  { e.preventDefault(); setFocused(f => Math.min(f + 1, total - 1)); }
+    if (e.key === 'ArrowUp')    { e.preventDefault(); setFocused(f => Math.max(f - 1, -1)); }
+    if (e.key === 'Escape')     { setOpen(false); setQuery(''); setFocused(-1); }
+    if (e.key === 'Enter')      {
       e.preventDefault();
       if (focused === filtered.length) { setOpen(false); onAddNew?.(); return; }
       if (focused >= 0 && filtered[focused]) pick(filtered[focused]);
@@ -276,7 +269,7 @@ const ClientSearchCombobox = ({ clients = [], value, onSelect, onAddNew, isDark 
                 <p className="text-xs font-medium">No matches for "{query}"</p>
               </div>
             ) : filtered.map((c, i) => {
-              const isActive = i === focused;
+              const isActive   = i === focused;
               const isSelected = c.id === value;
               return (
                 <div key={c.id} data-idx={i} role="option" aria-selected={isSelected}
@@ -347,10 +340,10 @@ const ClientSearchCombobox = ({ clients = [], value, onSelect, onAddNew, isDark 
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// GST REPORTS MODAL — GSTR-1 · GSTR-3B · GSTR-2B
+// GST REPORTS MODAL  — GSTR-1 · GSTR-3B · GSTR-2B
 // ════════════════════════════════════════════════════════════════════════════════
 const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
-  const [tab, setTab] = useState('gstr1');
+  const [tab,   setTab]   = useState('gstr1');
   const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
 
   // filter invoices to selected month
@@ -363,17 +356,17 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
 
   // ── GSTR-1 data structures ─────────────────────────────────────────────────
   const gstr1 = useMemo(() => {
-    const b2b = []; // with GSTIN (registered)
-    const b2cL = []; // > 2.5L without GSTIN (large)
-    const b2cS = []; // ≤ 2.5L without GSTIN (small) — aggregate
-    const cdnr = []; // credit / debit notes with GSTIN
-    const hsnMap = {}; // HSN/SAC summary
+    const b2b    = [];   // with GSTIN (registered)
+    const b2cL   = [];   // > 2.5L without GSTIN (large)
+    const b2cS   = [];   // ≤ 2.5L without GSTIN (small) — aggregate
+    const cdnr   = [];   // credit / debit notes with GSTIN
+    const hsnMap = {};   // HSN/SAC summary
 
     for (const inv of monthInvoices) {
-      const hasGstin = !!(inv.client_gstin?.trim());
-      const isCredit = inv.invoice_type === 'credit_note';
-      const isDebit = inv.invoice_type === 'debit_note';
-      const isCDN = isCredit || isDebit;
+      const hasGstin  = !!(inv.client_gstin?.trim());
+      const isCredit  = inv.invoice_type === 'credit_note';
+      const isDebit   = inv.invoice_type === 'debit_note';
+      const isCDN     = isCredit || isDebit;
       const grandTotal = inv.grand_total || 0;
 
       if (isCDN && hasGstin) {
@@ -390,20 +383,20 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
       for (const item of inv.items || []) {
         const hsn = item.hsn_sac || 'UNKNOWN';
         if (!hsnMap[hsn]) hsnMap[hsn] = { hsn_sac: hsn, description: item.description || '', quantity: 0, taxable: 0, igst: 0, cgst: 0, sgst: 0, total_tax: 0 };
-        hsnMap[hsn].quantity += item.quantity || 0;
-        hsnMap[hsn].taxable += item.taxable_value || 0;
-        hsnMap[hsn].igst += item.igst_amount || 0;
-        hsnMap[hsn].cgst += item.cgst_amount || 0;
-        hsnMap[hsn].sgst += item.sgst_amount || 0;
+        hsnMap[hsn].quantity  += item.quantity || 0;
+        hsnMap[hsn].taxable   += item.taxable_value || 0;
+        hsnMap[hsn].igst      += item.igst_amount  || 0;
+        hsnMap[hsn].cgst      += item.cgst_amount  || 0;
+        hsnMap[hsn].sgst      += item.sgst_amount  || 0;
         hsnMap[hsn].total_tax += (item.igst_amount || 0) + (item.cgst_amount || 0) + (item.sgst_amount || 0);
       }
     }
 
     const b2cSTotal = b2cS.reduce((acc, inv) => ({
       taxable: acc.taxable + (inv.total_taxable || 0),
-      igst: acc.igst + (inv.total_igst || 0),
-      cgst: acc.cgst + (inv.total_cgst || 0),
-      sgst: acc.sgst + (inv.total_sgst || 0),
+      igst:    acc.igst    + (inv.total_igst    || 0),
+      cgst:    acc.cgst    + (inv.total_cgst    || 0),
+      sgst:    acc.sgst    + (inv.total_sgst    || 0),
     }), { taxable: 0, igst: 0, cgst: 0, sgst: 0 });
 
     return { b2b, b2cL, b2cS, b2cSTotal, cdnr, hsnSummary: Object.values(hsnMap) };
@@ -415,18 +408,18 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
       if (inv.invoice_type !== 'tax_invoice') return acc;
       return {
         taxable: acc.taxable + (inv.total_taxable || 0),
-        igst: acc.igst + (inv.total_igst || 0),
-        cgst: acc.cgst + (inv.total_cgst || 0),
-        sgst: acc.sgst + (inv.total_sgst || 0),
-        cess: 0,
+        igst:    acc.igst    + (inv.total_igst    || 0),
+        cgst:    acc.cgst    + (inv.total_cgst    || 0),
+        sgst:    acc.sgst    + (inv.total_sgst    || 0),
+        cess:    0,
       };
     }, { taxable: 0, igst: 0, cgst: 0, sgst: 0, cess: 0 });
 
     const credits = monthInvoices.filter(i => i.invoice_type === 'credit_note').reduce((acc, inv) => ({
       taxable: acc.taxable + (inv.total_taxable || 0),
-      igst: acc.igst + (inv.total_igst || 0),
-      cgst: acc.cgst + (inv.total_cgst || 0),
-      sgst: acc.sgst + (inv.total_sgst || 0),
+      igst:    acc.igst    + (inv.total_igst    || 0),
+      cgst:    acc.cgst    + (inv.total_cgst    || 0),
+      sgst:    acc.sgst    + (inv.total_sgst    || 0),
     }), { taxable: 0, igst: 0, cgst: 0, sgst: 0 });
 
     const netIGST = outward.igst - credits.igst;
@@ -451,16 +444,16 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
         ['GSTIN/UIN of Recipient','Receiver Name','Invoice No.','Invoice Date','Invoice Value (₹)','Place of Supply','Reverse Charge','Taxable Value (₹)','IGST (₹)','CGST (₹)','SGST/UTGST (₹)','Cess (₹)'],
         ...gstr1.b2b.map(inv => [
           inv.client_gstin || '',
-          inv.client_name || '',
-          inv.invoice_no || '',
+          inv.client_name  || '',
+          inv.invoice_no   || '',
           inv.invoice_date || '',
-          inv.grand_total || 0,
+          inv.grand_total  || 0,
           inv.client_state || '',
           'N',
           inv.total_taxable || 0,
-          inv.total_igst || 0,
-          inv.total_cgst || 0,
-          inv.total_sgst || 0,
+          inv.total_igst    || 0,
+          inv.total_cgst    || 0,
+          inv.total_sgst    || 0,
           0,
         ]),
         [],
@@ -486,14 +479,14 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
           inv.client_state || '',
           '',
           inv.total_taxable || 0,
-          inv.total_igst || 0,
-          inv.total_cgst || 0,
-          inv.total_sgst || 0,
+          inv.total_igst    || 0,
+          inv.total_cgst    || 0,
+          inv.total_sgst    || 0,
           0,
-          inv.client_name || '',
-          inv.invoice_no || '',
+          inv.client_name  || '',
+          inv.invoice_no   || '',
           inv.invoice_date || '',
-          inv.grand_total || 0,
+          inv.grand_total  || 0,
         ]),
       ];
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'B2CL');
@@ -525,18 +518,18 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
         ['GSTIN/UIN of Recipient','Receiver Name','Note No.','Note Date','Note Type','Place of Supply','Reverse Charge','Note Supply Type','Note Value (₹)','Taxable Value (₹)','IGST (₹)','CGST (₹)','SGST (₹)','Cess (₹)'],
         ...gstr1.cdnr.map(inv => [
           inv.client_gstin || '',
-          inv.client_name || '',
-          inv.invoice_no || '',
+          inv.client_name  || '',
+          inv.invoice_no   || '',
           inv.invoice_date || '',
           inv.invoice_type === 'credit_note' ? 'C' : 'D',
           inv.client_state || '',
           'N',
           'Regular',
-          inv.grand_total || 0,
+          inv.grand_total  || 0,
           inv.total_taxable || 0,
-          inv.total_igst || 0,
-          inv.total_cgst || 0,
-          inv.total_sgst || 0,
+          inv.total_igst    || 0,
+          inv.total_cgst    || 0,
+          inv.total_sgst    || 0,
           0,
         ]),
       ];
@@ -593,11 +586,11 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
       [],
       ['4. ELIGIBLE ITC (INPUT TAX CREDIT)'],
       ['(A) ITC Available', '', '', '', '', ''],
-      [' (1) Import of goods', '0.00', '0.00', '0.00', '0.00', '0.00'],
-      [' (2) Import of services', '0.00', '0.00', '0.00', '0.00', '0.00'],
-      [' (3) Inward supplies liable to reverse charge', '0.00', '0.00', '0.00', '0.00', '0.00'],
-      [' (4) Inward supplies from ISD', '0.00', '0.00', '0.00', '0.00', '0.00'],
-      [' (5) All other ITC', '0.00', '0.00', '0.00', '0.00', '0.00'],
+      ['  (1) Import of goods', '0.00', '0.00', '0.00', '0.00', '0.00'],
+      ['  (2) Import of services', '0.00', '0.00', '0.00', '0.00', '0.00'],
+      ['  (3) Inward supplies liable to reverse charge', '0.00', '0.00', '0.00', '0.00', '0.00'],
+      ['  (4) Inward supplies from ISD', '0.00', '0.00', '0.00', '0.00', '0.00'],
+      ['  (5) All other ITC', '0.00', '0.00', '0.00', '0.00', '0.00'],
       [],
       ['5. VALUES OF EXEMPT, NIL-RATED AND NON-GST INWARD SUPPLIES'],
       ['Nature', 'Inter-State (₹)', 'Intra-State (₹)'],
@@ -609,8 +602,8 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
       ['6. PAYMENT OF TAX'],
       ['Description', 'Tax Payable (₹)', 'Paid Through ITC IGST (₹)', 'Paid Through ITC CGST (₹)', 'Paid Through ITC SGST/UTGST (₹)', 'Tax Paid in Cash (₹)'],
       ['Integrated Tax (IGST)', fmt(gstr3b.netIGST), '', '', '', fmt(gstr3b.netIGST)],
-      ['Central Tax (CGST)', fmt(gstr3b.netCGST), '', '', '', fmt(gstr3b.netCGST)],
-      ['State/UT Tax (SGST)', fmt(gstr3b.netSGST), '', '', '', fmt(gstr3b.netSGST)],
+      ['Central Tax (CGST)',    fmt(gstr3b.netCGST), '', '', '', fmt(gstr3b.netCGST)],
+      ['State/UT Tax (SGST)',   fmt(gstr3b.netSGST), '', '', '', fmt(gstr3b.netSGST)],
       ['Cess', '0.00', '', '', '', '0.00'],
       [],
       ['NET TAX PAYABLE', fmt(gstr3b.netTotal), '', '', '', fmt(gstr3b.netTotal)],
@@ -623,20 +616,20 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
   }, [gstr3b, month]);
 
   const labelCls = "text-[10px] font-bold uppercase tracking-widest text-slate-400";
-  const rowCls = (isDark ? 'border-slate-700' : 'border-slate-100') + ' border-b last:border-0';
-  const cellCls = `px-4 py-3 text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`;
-  const numCls = `px-4 py-3 text-sm font-semibold text-right ${isDark ? 'text-slate-200' : 'text-slate-800'}`;
-  const thCls = `px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400 bg-slate-700/50' : 'text-slate-400 bg-slate-50'}`;
+  const rowCls   = (isDark ? 'border-slate-700' : 'border-slate-100') + ' border-b last:border-0';
+  const cellCls  = `px-4 py-3 text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`;
+  const numCls   = `px-4 py-3 text-sm font-semibold text-right ${isDark ? 'text-slate-200' : 'text-slate-800'}`;
+  const thCls    = `px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400 bg-slate-700/50' : 'text-slate-400 bg-slate-50'}`;
 
   const TABS = [
-    { id: 'gstr1', label: 'GSTR-1', sub: 'Outward Supplies', icon: FileSpreadsheet },
-    { id: 'gstr3b', label: 'GSTR-3B', sub: 'Summary Return', icon: BarChart3 },
-    { id: 'gstr2b', label: 'GSTR-2B', sub: 'ITC Statement', icon: ArrowRightLeft },
+    { id: 'gstr1',  label: 'GSTR-1',  sub: 'Outward Supplies',    icon: FileSpreadsheet },
+    { id: 'gstr3b', label: 'GSTR-3B', sub: 'Summary Return',       icon: BarChart3 },
+    { id: 'gstr2b', label: 'GSTR-2B', sub: 'ITC Statement',        icon: ArrowRightLeft },
   ];
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className={`max-w-5xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+      <DialogContent className={`max-w-5xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 [&>button.absolute]:hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <DialogTitle className="sr-only">GST Returns</DialogTitle>
         <DialogDescription className="sr-only">Generate GSTR-1, GSTR-3B, GSTR-2B reports</DialogDescription>
 
@@ -703,10 +696,10 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
                   {/* Summary cards */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     {[
-                      { label: 'B2B Invoices', val: gstr1.b2b.length, sub: fmtC(gstr1.b2b.reduce((s,i)=>s+(i.grand_total||0),0)), color: COLORS.mediumBlue },
-                      { label: 'B2C Large', val: gstr1.b2cL.length, sub: fmtC(gstr1.b2cL.reduce((s,i)=>s+(i.grand_total||0),0)), color: COLORS.amber },
-                      { label: 'B2C Small', val: gstr1.b2cS.length, sub: fmtC(gstr1.b2cSTotal.taxable), color: COLORS.teal },
-                      { label: 'Credit / Debit', val: gstr1.cdnr.length, sub: 'Registered parties', color: COLORS.purple },
+                      { label: 'B2B Invoices',    val: gstr1.b2b.length,    sub: fmtC(gstr1.b2b.reduce((s,i)=>s+(i.grand_total||0),0)),  color: COLORS.mediumBlue },
+                      { label: 'B2C Large',       val: gstr1.b2cL.length,   sub: fmtC(gstr1.b2cL.reduce((s,i)=>s+(i.grand_total||0),0)), color: COLORS.amber },
+                      { label: 'B2C Small',       val: gstr1.b2cS.length,   sub: fmtC(gstr1.b2cSTotal.taxable),                          color: COLORS.teal },
+                      { label: 'Credit / Debit',  val: gstr1.cdnr.length,   sub: 'Registered parties',                                    color: COLORS.purple },
                     ].map(c => (
                       <div key={c.label} className={`rounded-xl border p-4 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
                         <p className="text-2xl font-black" style={{ color: c.color }}>{c.val}</p>
@@ -840,9 +833,9 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {[
                       { label: 'Total Taxable Value', val: gstr3b.outward.taxable, color: COLORS.deepBlue },
-                      { label: 'IGST Payable', val: gstr3b.netIGST, color: COLORS.mediumBlue },
-                      { label: 'CGST Payable', val: gstr3b.netCGST, color: COLORS.teal },
-                      { label: 'SGST Payable', val: gstr3b.netSGST, color: COLORS.purple },
+                      { label: 'IGST Payable',        val: gstr3b.netIGST,         color: COLORS.mediumBlue },
+                      { label: 'CGST Payable',        val: gstr3b.netCGST,         color: COLORS.teal },
+                      { label: 'SGST Payable',        val: gstr3b.netSGST,         color: COLORS.purple },
                     ].map(c => (
                       <div key={c.label} className={`rounded-2xl border p-5 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-white border-slate-200'}`}>
                         <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{c.label}</p>
@@ -884,7 +877,7 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
               <div>
                 <p className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>GSTR-2B — Auto-Drafted ITC Statement</p>
                 <p className="text-sm text-slate-400 mt-2 max-w-md">
-                  GSTR-2B is auto-generated by the GST portal based on your suppliers' filings.<br />
+                  GSTR-2B is auto-generated by the GST portal based on your suppliers' filings.
                   It cannot be filed or edited manually.
                 </p>
               </div>
@@ -944,9 +937,9 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// VYP IMPORT MODAL (unchanged — kept from original)
+// VYP IMPORT MODAL  (unchanged — kept from original)
 // ════════════════════════════════════════════════════════════════════════════════
-const KB_TXN_TYPE = { 1:'sale', 2:'sale_return', 3:'payment_in', 4:'payment_out', 7:'purchase', 21:'expense', 27:'credit_note', 65:'debit_note' };
+const KB_TXN_TYPE  = { 1:'sale', 2:'sale_return', 3:'payment_in', 4:'payment_out', 7:'purchase', 21:'expense', 27:'credit_note', 65:'debit_note' };
 const KB_PAY_STATUS = { 1:'sent', 2:'partially_paid', 3:'paid' };
 
 async function parseVypFile(file) {
@@ -965,10 +958,10 @@ async function parseVypFile(file) {
         } catch { reject(new Error('sql.js could not be loaded.')); return; }
         const db = new SQL.Database(uint8);
         const q = (sql, params = []) => { try { const stmt = db.prepare(sql); stmt.bind(params); const rows = []; while (stmt.step()) rows.push(stmt.getAsObject()); stmt.free(); return rows; } catch { return []; } };
-        const firms = q(`SELECT firm_id,firm_name,firm_email,firm_phone,firm_address,firm_gstin_number,firm_state FROM kb_firms`);
-        const clients = q(`SELECT name_id,full_name,phone_number,email,address,name_gstin_number,name_state,name_type FROM kb_names ORDER BY full_name`);
-        const items = q(`SELECT item_id,item_name,item_sale_unit_price,item_hsn_sac_code,item_description,item_type FROM kb_items WHERE item_is_active=1`);
-        const txns = q(`SELECT t.txn_id,t.txn_date,t.txn_type,t.txn_cash_amount,t.txn_balance_amount,t.txn_tax_amount,t.txn_discount_amount,t.txn_payment_status,t.txn_ref_number_char,t.txn_description,t.txn_due_date,t.txn_billing_address,t.txn_firm_id,n.full_name AS client_name,n.email AS client_email,n.phone_number AS client_phone,n.name_gstin_number AS client_gstin,n.address AS client_address FROM kb_transactions t LEFT JOIN kb_names n ON t.txn_name_id=n.name_id ORDER BY t.txn_date DESC`);
+        const firms    = q(`SELECT firm_id,firm_name,firm_email,firm_phone,firm_address,firm_gstin_number,firm_state FROM kb_firms`);
+        const clients  = q(`SELECT name_id,full_name,phone_number,email,address,name_gstin_number,name_state,name_type FROM kb_names ORDER BY full_name`);
+        const items    = q(`SELECT item_id,item_name,item_sale_unit_price,item_hsn_sac_code,item_description,item_type FROM kb_items WHERE item_is_active=1`);
+        const txns     = q(`SELECT t.txn_id,t.txn_date,t.txn_type,t.txn_cash_amount,t.txn_balance_amount,t.txn_tax_amount,t.txn_discount_amount,t.txn_payment_status,t.txn_ref_number_char,t.txn_description,t.txn_due_date,t.txn_billing_address,t.txn_firm_id,n.full_name AS client_name,n.email AS client_email,n.phone_number AS client_phone,n.name_gstin_number AS client_gstin,n.address AS client_address FROM kb_transactions t LEFT JOIN kb_names n ON t.txn_name_id=n.name_id ORDER BY t.txn_date DESC`);
         const lineitems = q(`SELECT li.lineitem_txn_id,li.item_id,li.quantity,li.priceperunit,li.total_amount,li.lineitem_tax_amount,li.lineitem_discount_amount,li.lineitem_description,i.item_name,i.item_hsn_sac_code FROM kb_lineitems li LEFT JOIN kb_items i ON li.item_id=i.item_id`);
         db.close();
         const liMap = {};
@@ -1063,7 +1056,7 @@ const PaymentModal = ({ invoice, open, onClose, onSuccess, isDark }) => {
   useEffect(()=>{if(open&&invoice)setForm(p=>({...p,amount:invoice.amount_due?.toFixed(2)||''}));},[open,invoice]);
   const handleSubmit=async(e)=>{e.preventDefault();if(!form.amount||parseFloat(form.amount)<=0){toast.error('Enter a valid amount');return;}setLoading(true);try{await api.post('/payments',{invoice_id:invoice.id,amount:parseFloat(form.amount),payment_date:form.payment_date,payment_mode:form.payment_mode,reference_no:form.reference_no,notes:form.notes});toast.success('Payment recorded!');onSuccess?.();onClose();}catch(err){toast.error(err.response?.data?.detail||'Failed to record payment');}finally{setLoading(false);}};
   if(!invoice)return null;
-  return(<Dialog open={open} onOpenChange={onClose}><DialogContent className="max-w-md rounded-2xl p-0 overflow-hidden"><DialogTitle className="sr-only">Record Payment</DialogTitle><DialogDescription className="sr-only">Record payment</DialogDescription><div className="px-6 py-5" style={{background:`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}}><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center"><IndianRupee className="h-5 w-5 text-white"/></div><div><p className="text-white/60 text-[10px] uppercase tracking-widest">Record Payment</p><h2 className="text-white font-bold text-lg">{invoice.invoice_no}</h2></div></div><div className="mt-4 flex gap-4">{[['Invoice Total',invoice.grand_total,'text-white'],['Paid So Far',invoice.amount_paid,'text-emerald-300'],['Balance Due',invoice.amount_due,'text-amber-300']].map(([l,v,cls])=>(<div key={l} className="flex-1 bg-white/10 rounded-xl px-3 py-2"><p className="text-white/50 text-[9px] uppercase tracking-wider">{l}</p><p className={`font-bold text-sm ${cls}`}>{fmtC(v)}</p></div>))}</div></div><form onSubmit={handleSubmit} className="p-6 space-y-4"><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Amount (₹) *</label><div className="relative"><span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span><Input type="number" step="0.01" min="0.01" className="pl-8 h-11 rounded-xl" value={form.amount} onChange={e=>setForm(p=>({...p,amount:e.target.value}))} required/></div></div><div className="grid grid-cols-2 gap-3"><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Date *</label><Input type="date" className="h-11 rounded-xl" value={form.payment_date} onChange={e=>setForm(p=({...p,payment_date:e.target.value}))} required/></div><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Mode</label><Select value={form.payment_mode} onValueChange={v=>setForm(p=({...p,payment_mode:v}))}><SelectTrigger className="h-11 rounded-xl"><SelectValue/></SelectTrigger><SelectContent>{PAY_MODES.map(m=><SelectItem key={m} value={m}>{m.toUpperCase()}</SelectItem>)}</SelectContent></Select></div></div><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Reference / UTR No.</label><Input className="h-11 rounded-xl" placeholder="Transaction / cheque reference" value={form.reference_no} onChange={e=>setForm(p=({...p,reference_no:e.target.value}))}/></div><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Notes</label><Textarea className="rounded-xl text-sm min-h-[70px] resize-none" value={form.notes} onChange={e=>setForm(p=({...p,notes:e.target.value}))}/></div><div className="flex gap-3 pt-2"><Button type="button" variant="ghost" onClick={onClose} className="flex-1 h-11 rounded-xl">Cancel</Button><Button type="submit" disabled={loading} className="flex-1 h-11 rounded-xl text-white font-semibold" style={{background:`linear-gradient(135deg, ${COLORS.emeraldGreen}, #15803d)`}}>{loading?'Recording…':'✓ Record Payment'}</Button></div></form></DialogContent></Dialog>);
+  return(<Dialog open={open} onOpenChange={onClose}><DialogContent className="max-w-md rounded-2xl p-0 overflow-hidden"><DialogTitle className="sr-only">Record Payment</DialogTitle><DialogDescription className="sr-only">Record payment</DialogDescription><div className="px-6 py-5" style={{background:`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}}><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center"><IndianRupee className="h-5 w-5 text-white"/></div><div><p className="text-white/60 text-[10px] uppercase tracking-widest">Record Payment</p><h2 className="text-white font-bold text-lg">{invoice.invoice_no}</h2></div></div><div className="mt-4 flex gap-4">{[['Invoice Total',invoice.grand_total,'text-white'],['Paid So Far',invoice.amount_paid,'text-emerald-300'],['Balance Due',invoice.amount_due,'text-amber-300']].map(([l,v,cls])=>(<div key={l} className="flex-1 bg-white/10 rounded-xl px-3 py-2"><p className="text-white/50 text-[9px] uppercase tracking-wider">{l}</p><p className={`font-bold text-sm ${cls}`}>{fmtC(v)}</p></div>))}</div></div><form onSubmit={handleSubmit} className="p-6 space-y-4"><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Amount (₹) *</label><div className="relative"><span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span><Input type="number" step="0.01" min="0.01" className="pl-8 h-11 rounded-xl" value={form.amount} onChange={e=>setForm(p=>({...p,amount:e.target.value}))} required/></div></div><div className="grid grid-cols-2 gap-3"><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Date *</label><Input type="date" className="h-11 rounded-xl" value={form.payment_date} onChange={e=>setForm(p=>({...p,payment_date:e.target.value}))} required/></div><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Mode</label><Select value={form.payment_mode} onValueChange={v=>setForm(p=>({...p,payment_mode:v}))}><SelectTrigger className="h-11 rounded-xl"><SelectValue/></SelectTrigger><SelectContent>{PAY_MODES.map(m=><SelectItem key={m} value={m}>{m.toUpperCase()}</SelectItem>)}</SelectContent></Select></div></div><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Reference / UTR No.</label><Input className="h-11 rounded-xl" placeholder="Transaction / cheque reference" value={form.reference_no} onChange={e=>setForm(p=>({...p,reference_no:e.target.value}))}/></div><div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Notes</label><Textarea className="rounded-xl text-sm min-h-[70px] resize-none" value={form.notes} onChange={e=>setForm(p=>({...p,notes:e.target.value}))}/></div><div className="flex gap-3 pt-2"><Button type="button" variant="ghost" onClick={onClose} className="flex-1 h-11 rounded-xl">Cancel</Button><Button type="submit" disabled={loading} className="flex-1 h-11 rounded-xl text-white font-semibold" style={{background:`linear-gradient(135deg, ${COLORS.emeraldGreen}, #15803d)`}}>{loading?'Recording…':'✓ Record Payment'}</Button></div></form></DialogContent></Dialog>);
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1092,9 +1085,9 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
 
   const totals=useMemo(()=>computeTotals(form.items,form.is_interstate,form.discount_amount,form.shipping_charges,form.other_charges),[form.items,form.is_interstate,form.discount_amount,form.shipping_charges,form.other_charges]);
   const setField=useCallback((k,v)=>setForm(p=>({...p,[k]:v})),[]);
-  const updateItem=useCallback((idx,k,val)=>setForm(p=(({...p,items:p.items.map((it,i)=>i!==idx?it:{...it,[k]:val})}))),[]);
-  const addItem=useCallback(()=>setForm(p=({...p,items:[...p.items,emptyItem()]})),[]);
-  const removeItem=useCallback((idx)=>setForm(p=({...p,items:p.items.filter((_,i)=>i!==idx)})),[]);
+  const updateItem=useCallback((idx,k,val)=>setForm(p=>({...p,items:p.items.map((it,i)=>i!==idx?it:{...it,[k]:val})})),[]);
+  const addItem=useCallback(()=>setForm(p=>({...p,items:[...p.items,emptyItem()]})),[]);
+  const removeItem=useCallback((idx)=>setForm(p=>({...p,items:p.items.filter((_,i)=>i!==idx)})),[]);
 
   // ── Smart client select — auto-populates all fields ───────────────────────
   const handleClientSelect = useCallback((client) => {
@@ -1103,27 +1096,29 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       return;
     }
     const addressParts = [client.address, client.city, client.state].filter(Boolean).join(', ');
+    // GSTIN from client's own field OR from contact persons if available
     const gstin = client.client_gstin || client.gstin || '';
     setForm(p => ({
       ...p,
-      client_id: client.id,
-      client_name: client.company_name || '',
-      client_email: client.email || '',
-      client_phone: client.phone || '',
+      client_id:      client.id,
+      client_name:    client.company_name || '',
+      client_email:   client.email        || '',
+      client_phone:   client.phone        || '',
       client_address: addressParts,
-      client_state: client.state || '',
-      client_gstin: gstin,
+      client_state:   client.state        || '',
+      client_gstin:   gstin,
+      // auto-detect interstate if supply_state is set
       is_interstate: p.supply_state ? (p.supply_state.toLowerCase() !== (client.state || '').toLowerCase()) : p.is_interstate,
     }));
     toast.success(`Auto-filled from "${client.company_name}"`, { duration: 1500 });
   }, []);
 
-  const fillFromProduct=useCallback((idx,productId)=>{if(productId==='__none__')return;const prod=products.find(x=>x.id===productId);if(!prod)return;setForm(p=({...p,items:p.items.map((it,i)=>i!==idx?it:{...it,product_id:productId,description:prod.name,hsn_sac:prod.hsn_sac||'',unit:prod.unit||'service',unit_price:prod.unit_price||0,gst_rate:prod.gst_rate||18})}));},[products]);
+  const fillFromProduct=useCallback((idx,productId)=>{if(productId==='__none__')return;const prod=products.find(x=>x.id===productId);if(!prod)return;setForm(p=>({...p,items:p.items.map((it,i)=>i!==idx?it:{...it,product_id:productId,description:prod.name,hsn_sac:prod.hsn_sac||'',unit:prod.unit||'service',unit_price:prod.unit_price||0,gst_rate:prod.gst_rate||18})}));},[products]);
 
   const handleSubmit=async(e)=>{e.preventDefault();if(!form.company_id){toast.error('Please select a company profile');return;}if(!form.client_name?.trim()){toast.error('Client name is required');return;}if(!form.items.some(it=>it.description?.trim())){toast.error('Add at least one item');return;}setLoading(true);try{const payload={...form,...totals};if(editingInv)await api.put(`/invoices/${editingInv.id}`,payload);else await api.post('/invoices',payload);toast.success(editingInv?'Invoice updated!':'Invoice created!');onSuccess?.();onClose();}catch(err){toast.error(err.response?.data?.detail||'Failed to save invoice');}finally{setLoading(false);}};
 
   const labelCls ="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block";
-  const inputCls =`h-11 rounded-xl text-sm border-slate-200 dark:border-slate-600 focus:border-blue-400 ${isDark?'bg-slate-700 text-slate-100':'bg-white'}`;
+  const inputCls  =`h-11 rounded-xl text-sm border-slate-200 dark:border-slate-600 focus:border-blue-400 ${isDark?'bg-slate-700 text-slate-100':'bg-white'}`;
   const sectionCls=`border rounded-2xl p-5 ${isDark?'bg-slate-800/60 border-slate-700':'bg-slate-50/60 border-slate-100'}`;
   const tabs=[{id:'details',label:'Details',icon:FileText},{id:'items',label:'Items',icon:Package},{id:'totals',label:'Totals',icon:IndianRupee},{id:'settings',label:'Settings',icon:Layers}];
 
@@ -1391,7 +1386,7 @@ const ProductModal = ({ open, onClose, isDark, onSaved }) => {
   const handleSave=async(e)=>{e.preventDefault();setLoading(true);try{if(editing)await api.put(`/products/${editing.id}`,form);else await api.post('/products',form);toast.success(editing?'Product updated!':'Product created!');const r=await api.get('/products');setProducts(r.data||[]);setForm({name:'',description:'',hsn_sac:'',unit:'service',unit_price:0,gst_rate:18,category:'',is_service:true});setEditing(null);onSaved?.();}catch{toast.error('Failed to save product');}finally{setLoading(false);}};
   const handleDelete=async(id)=>{try{await api.delete(`/products/${id}`);setProducts(p=>p.filter(x=>x.id!==id));toast.success('Deleted');}catch{toast.error('Failed');}};
   const inputCls=`h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 focus:border-blue-400 ${isDark?'bg-slate-700 text-slate-100':'bg-white'}`;
-  return(<Dialog open={open} onOpenChange={onClose}><DialogContent className={`max-w-3xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark?'bg-slate-800 border-slate-700':'bg-white'}`}><DialogTitle className="sr-only">Product Catalog</DialogTitle><DialogDescription className="sr-only">Manage products and services</DialogDescription><div className="px-6 py-5 border-b border-slate-100 dark:border-slate-700"><div className="flex items-center gap-3"><div className="w-9 h-9 rounded-xl flex items-center justify-center text-white" style={{background:`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}}><Package className="h-5 w-5"/></div><div><h2 className={`font-bold text-lg ${isDark?'text-slate-100':'text-slate-900'}`}>Product / Service Catalog</h2><p className="text-xs text-slate-400">Reusable items for quick invoice creation</p></div></div></div><div className="flex-1 overflow-hidden flex"><div className={`w-72 flex-shrink-0 p-5 border-r overflow-y-auto ${isDark?'border-slate-700 bg-slate-800':'border-slate-100 bg-slate-50/40'}`}><h4 className={`text-xs font-bold uppercase tracking-widest mb-3 ${isDark?'text-slate-400':'text-slate-500'}`}>{editing?'Edit Item':'New Item'}</h4><form onSubmit={handleSave} className="space-y-3"><Input className={inputCls} placeholder="Name *" value={form.name} onChange={e=>setForm(p=({...p,name:e.target.value}))} required/><Input className={inputCls} placeholder="Description" value={form.description} onChange={e=>setForm(p=({...p,description:e.target.value}))}/><div className="grid grid-cols-2 gap-2"><Input className={inputCls} placeholder="HSN/SAC" value={form.hsn_sac} onChange={e=>setForm(p=({...p,hsn_sac:e.target.value}))}/><Select value={form.unit} onValueChange={v=>setForm(p=({...p,unit:v}))}><SelectTrigger className={inputCls}><SelectValue/></SelectTrigger><SelectContent>{UNITS.map(u=><SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent></Select></div><div className="grid grid-cols-2 gap-2"><Input type="number" className={inputCls} placeholder="Unit Price" value={form.unit_price} onChange={e=>setForm(p=({...p,unit_price:parseFloat(e.target.value)||0}))}/><Select value={String(form.gst_rate)} onValueChange={v=>setForm(p=({...p,gst_rate:parseFloat(v)}))}><SelectTrigger className={inputCls}><SelectValue/></SelectTrigger><SelectContent>{GST_RATES.map(r=><SelectItem key={r} value={String(r)}>{r}% GST</SelectItem>)}</SelectContent></Select></div><Input className={inputCls} placeholder="Category (optional)" value={form.category} onChange={e=>setForm(p=({...p,category:e.target.value}))}/><div className="flex gap-2"><Button type="submit" disabled={loading} size="sm" className="flex-1 h-9 rounded-xl text-white text-xs font-semibold" style={{background:`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}}>{loading?'Saving…':editing?'Update':'Add Item'}</Button>{editing&&<Button type="button" variant="ghost" size="sm" className="h-9 rounded-xl text-xs" onClick={()=>{setEditing(null);setForm({name:'',description:'',hsn_sac:'',unit:'service',unit_price:0,gst_rate:18,category:'',is_service:true});}}>Cancel</Button>}</div></form></div><div className="flex-1 overflow-y-auto">{products.length===0?(<div className="flex flex-col items-center justify-center h-full py-16 text-slate-400"><Package className="h-10 w-10 mb-3 opacity-30"/><p className="text-sm">No products yet — add one!</p></div>):products.map(p=>(<div key={p.id} className={`flex items-center gap-3 px-5 py-3.5 border-b group transition-colors ${isDark?'border-slate-700 hover:bg-slate-700/30':'border-slate-100 hover:bg-slate-50'}`}><div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-xs font-bold" style={{background:p.is_service?`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`:'linear-gradient(135deg, #065f46, #059669)'}}>{p.is_service?'S':'P'}</div><div className="flex-1 min-w-0"><p className={`text-sm font-semibold truncate ${isDark?'text-slate-100':'text-slate-800'}`}>{p.name}</p><p className="text-xs text-slate-400">{p.unit} · {fmtC(p.unit_price)} · GST {p.gst_rate}%{p.hsn_sac&&` · HSN ${p.hsn_sac}`}</p></div><div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={()=>{setEditing(p);setForm({name:p.name,description:p.description||'',hsn_sac:p.hsn_sac||'',unit:p.unit||'service',unit_price:p.unit_price||0,gst_rate:p.gst_rate||18,category:p.category||'',is_service:p.is_service!==false});}} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-500 hover:bg-blue-50 transition-colors"><Edit className="h-3.5 w-3.5"/></button><button onClick={()=>handleDelete(p.id)} className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors"><Trash2 className="h-3.5 w-3.5"/></button></div></div>))}</div></div></DialogContent></Dialog>);
+  return(<Dialog open={open} onOpenChange={onClose}><DialogContent className={`max-w-3xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark?'bg-slate-800 border-slate-700':'bg-white'}`}><DialogTitle className="sr-only">Product Catalog</DialogTitle><DialogDescription className="sr-only">Manage products and services</DialogDescription><div className="px-6 py-5 border-b border-slate-100 dark:border-slate-700"><div className="flex items-center gap-3"><div className="w-9 h-9 rounded-xl flex items-center justify-center text-white" style={{background:`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}}><Package className="h-5 w-5"/></div><div><h2 className={`font-bold text-lg ${isDark?'text-slate-100':'text-slate-900'}`}>Product / Service Catalog</h2><p className="text-xs text-slate-400">Reusable items for quick invoice creation</p></div></div></div><div className="flex-1 overflow-hidden flex"><div className={`w-72 flex-shrink-0 p-5 border-r overflow-y-auto ${isDark?'border-slate-700 bg-slate-800':'border-slate-100 bg-slate-50/40'}`}><h4 className={`text-xs font-bold uppercase tracking-widest mb-3 ${isDark?'text-slate-400':'text-slate-500'}`}>{editing?'Edit Item':'New Item'}</h4><form onSubmit={handleSave} className="space-y-3"><Input className={inputCls} placeholder="Name *" value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} required/><Input className={inputCls} placeholder="Description" value={form.description} onChange={e=>setForm(p=>({...p,description:e.target.value}))}/><div className="grid grid-cols-2 gap-2"><Input className={inputCls} placeholder="HSN/SAC" value={form.hsn_sac} onChange={e=>setForm(p=>({...p,hsn_sac:e.target.value}))}/><Select value={form.unit} onValueChange={v=>setForm(p=>({...p,unit:v}))}><SelectTrigger className={inputCls}><SelectValue/></SelectTrigger><SelectContent>{UNITS.map(u=><SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent></Select></div><div className="grid grid-cols-2 gap-2"><Input type="number" className={inputCls} placeholder="Unit Price" value={form.unit_price} onChange={e=>setForm(p=>({...p,unit_price:parseFloat(e.target.value)||0}))}/><Select value={String(form.gst_rate)} onValueChange={v=>setForm(p=>({...p,gst_rate:parseFloat(v)}))}><SelectTrigger className={inputCls}><SelectValue/></SelectTrigger><SelectContent>{GST_RATES.map(r=><SelectItem key={r} value={String(r)}>{r}% GST</SelectItem>)}</SelectContent></Select></div><Input className={inputCls} placeholder="Category (optional)" value={form.category} onChange={e=>setForm(p=>({...p,category:e.target.value}))}/><div className="flex gap-2"><Button type="submit" disabled={loading} size="sm" className="flex-1 h-9 rounded-xl text-white text-xs font-semibold" style={{background:`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}}>{loading?'Saving…':editing?'Update':'Add Item'}</Button>{editing&&<Button type="button" variant="ghost" size="sm" className="h-9 rounded-xl text-xs" onClick={()=>{setEditing(null);setForm({name:'',description:'',hsn_sac:'',unit:'service',unit_price:0,gst_rate:18,category:'',is_service:true});}}>Cancel</Button>}</div></form></div><div className="flex-1 overflow-y-auto">{products.length===0?(<div className="flex flex-col items-center justify-center h-full py-16 text-slate-400"><Package className="h-10 w-10 mb-3 opacity-30"/><p className="text-sm">No products yet — add one!</p></div>):products.map(p=>(<div key={p.id} className={`flex items-center gap-3 px-5 py-3.5 border-b group transition-colors ${isDark?'border-slate-700 hover:bg-slate-700/30':'border-slate-100 hover:bg-slate-50'}`}><div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-xs font-bold" style={{background:p.is_service?`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`:'linear-gradient(135deg, #065f46, #059669)'}}>{p.is_service?'S':'P'}</div><div className="flex-1 min-w-0"><p className={`text-sm font-semibold truncate ${isDark?'text-slate-100':'text-slate-800'}`}>{p.name}</p><p className="text-xs text-slate-400">{p.unit} · {fmtC(p.unit_price)} · GST {p.gst_rate}%{p.hsn_sac&&` · HSN ${p.hsn_sac}`}</p></div><div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={()=>{setEditing(p);setForm({name:p.name,description:p.description||'',hsn_sac:p.hsn_sac||'',unit:p.unit||'service',unit_price:p.unit_price||0,gst_rate:p.gst_rate||18,category:p.category||'',is_service:p.is_service!==false});}} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-500 hover:bg-blue-50 transition-colors"><Edit className="h-3.5 w-3.5"/></button><button onClick={()=>handleDelete(p.id)} className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors"><Trash2 className="h-3.5 w-3.5"/></button></div></div>))}</div></div></DialogContent></Dialog>);
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1399,57 +1394,34 @@ const ProductModal = ({ open, onClose, isDark, onSaved }) => {
 // ════════════════════════════════════════════════════════════════════════════════
 export default function Invoicing() {
   const { user } = useAuth();
-  const isDark = useDark();
+  const isDark   = useDark();
   const navigate = useNavigate();
 
-  const [invoices, setInvoices] = useState([]);
+  const [invoices,  setInvoices]  = useState([]);
   const [companies, setCompanies] = useState([]);
-  const [clients, setClients] = useState([]);
-  const [leads, setLeads] = useState([]);
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [clients,   setClients]   = useState([]);
+  const [leads,     setLeads]     = useState([]);
+  const [stats,     setStats]     = useState(null);
+  const [loading,   setLoading]   = useState(true);
 
-  const [formOpen, setFormOpen] = useState(false);
+  const [formOpen,  setFormOpen]  = useState(false);
   const [editingInv,setEditingInv]= useState(null);
   const [detailInv, setDetailInv] = useState(null);
   const [detailOpen,setDetailOpen]= useState(false);
-  const [payInv, setPayInv] = useState(null);
-  const [payOpen, setPayOpen] = useState(false);
-  const [catOpen, setCatOpen] = useState(false);
-  const [vypOpen, setVypOpen] = useState(false);
-  const [gstOpen, setGstOpen] = useState(false);
+  const [payInv,    setPayInv]    = useState(null);
+  const [payOpen,   setPayOpen]   = useState(false);
+  const [catOpen,   setCatOpen]   = useState(false);
+  const [vypOpen,   setVypOpen]   = useState(false);
+  const [gstOpen,   setGstOpen]   = useState(false);   // ← NEW
 
-  // ── CHANGE 2: New template/theme state ─────────────────────────────────────
-  const [designOpen, setDesignOpen] = useState(false);
-  const [selectedTemplate, setSelectedTemplate] = useState(() => {
-    try { return localStorage.getItem('inv_template') || 'classic'; } catch { return 'classic'; }
-  });
-  const [selectedTheme, setSelectedTheme] = useState(() => {
-    try { return localStorage.getItem('inv_theme') || 'ocean'; } catch { return 'ocean'; }
-  });
-  const [customColor, setCustomColor] = useState(() => {
-    try { return localStorage.getItem('inv_custom_color') || '#0D3B66'; } catch { return '#0D3B66'; }
-  });
-
-  // ── NEW: Party Ledger state ────────────────────────────────────────────────
-  const [ledgerOpen, setLedgerOpen] = useState(false);
-  const [ledgerClient, setLedgerClient] = useState(null);
-
-  // Persist preferences
-  useEffect(() => {
-    try {
-      localStorage.setItem('inv_template', selectedTemplate);
-      localStorage.setItem('inv_theme', selectedTheme);
-      localStorage.setItem('inv_custom_color', customColor);
-    } catch {}
-  }, [selectedTemplate, selectedTheme, customColor]);
-
-  const [searchInput, setSearchInput] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter,setStatusFilter]= useState('all');
-  const [typeFilter, setTypeFilter] = useState('all');
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
+  const [searchInput,   setSearchInput]   = useState('');
+  const [searchTerm,    setSearchTerm]    = useState('');
+  const [statusFilter,  setStatusFilter]  = useState('all');
+  const [typeFilter,    setTypeFilter]    = useState('all');
+  const [companyFilter, setCompanyFilter] = useState('all');
+  const [yearFilter,    setYearFilter]    = useState('all');
+  const [fromDate,      setFromDate]      = useState('');
+  const [toDate,        setToDate]        = useState('');
   const searchRef = useRef(null);
 
   useEffect(()=>{const t=setTimeout(()=>setSearchTerm(searchInput),250);return()=>clearTimeout(t);},[searchInput]);
@@ -1458,18 +1430,84 @@ export default function Invoicing() {
   const fetchAll = useCallback(async()=>{setLoading(true);try{const[invR,compR,clientR,leadR,statR]=await Promise.all([api.get('/invoices'),api.get('/companies'),api.get('/clients'),api.get('/leads'),api.get('/invoices/stats')]);setInvoices(invR.data||[]);setCompanies(compR.data||[]);setClients(clientR.data||[]);setLeads(leadR.data||[]);setStats(statR.data||null);}catch{toast.error('Failed to load invoicing data');}finally{setLoading(false);}}, []);
   useEffect(()=>{fetchAll();},[fetchAll]);
 
-  const filtered=useMemo(()=>invoices.filter(inv=>{if(searchTerm&&!inv.invoice_no?.toLowerCase().includes(searchTerm.toLowerCase())&&!inv.client_name?.toLowerCase().includes(searchTerm.toLowerCase()))return false;if(statusFilter!=='all'&&inv.status!==statusFilter)return false;if(typeFilter!=='all'&&inv.invoice_type!==typeFilter)return false;if(fromDate&&inv.invoice_date<fromDate)return false;if(toDate&&inv.invoice_date>toDate)return false;return true;}),[invoices,searchTerm,statusFilter,typeFilter,fromDate,toDate]);
+  // Available FY years derived from invoice dates
+  const availableYears = useMemo(() => {
+    const years = new Set(invoices.map(i => i.invoice_date?.slice(0, 4)).filter(Boolean));
+    return Array.from(years).sort().reverse();
+  }, [invoices]);
+
+  // FY range helper  (e.g. "2025" → Apr 2025 – Mar 2026)
+  const fyRange = (year) => {
+    if (!year || year === 'all') return null;
+    const y = parseInt(year);
+    return { from: `${y}-04-01`, to: `${y + 1}-03-31` };
+  };
+
+  // Local stats computed from company + year filtered invoices (always accurate)
+  const localStats = useMemo(() => {
+    const now = new Date();
+    const curMonth = format(now, 'yyyy-MM');
+    const fy = fyRange(yearFilter === 'all' ? null : yearFilter);
+
+    const base = invoices.filter(inv => {
+      if (companyFilter !== 'all' && inv.company_id !== companyFilter) return false;
+      if (fy && (inv.invoice_date < fy.from || inv.invoice_date > fy.to)) return false;
+      return true;
+    });
+
+    const total_revenue     = base.reduce((s, i) => s + (i.grand_total || 0), 0);
+    const total_outstanding = base.reduce((s, i) => s + (i.amount_due  || 0), 0);
+    const total_gst         = base.reduce((s, i) => s + (i.total_gst   || 0), 0);
+    const total_invoices    = base.length;
+    const month_revenue     = base.filter(i => i.invoice_date?.startsWith(curMonth)).reduce((s, i) => s + (i.grand_total || 0), 0);
+    const month_invoices    = base.filter(i => i.invoice_date?.startsWith(curMonth)).length;
+    const overdue_count     = base.filter(i => i.amount_due > 0 && i.due_date && differenceInDays(parseISO(i.due_date), now) < 0).length;
+    const paid_count        = base.filter(i => i.status === 'paid').length;
+    const draft_count       = base.filter(i => i.status === 'draft').length;
+
+    // Monthly trend for chart (last 12 months from base)
+    const monthly_trend = Array.from({ length: 12 }, (_, i) => {
+      const d = subMonths(now, 11 - i);
+      const key = format(d, 'yyyy-MM');
+      const monthInvs = base.filter(inv => inv.invoice_date?.startsWith(key));
+      return {
+        label: format(d, 'MMM yy'),
+        revenue:   monthInvs.reduce((s, inv) => s + (inv.grand_total || 0), 0),
+        collected: monthInvs.reduce((s, inv) => s + (inv.amount_paid  || 0), 0),
+      };
+    });
+
+    // Top clients from base
+    const clientMap = {};
+    base.forEach(inv => {
+      if (!inv.client_name) return;
+      clientMap[inv.client_name] = (clientMap[inv.client_name] || 0) + (inv.grand_total || 0);
+    });
+    const top_clients = Object.entries(clientMap)
+      .map(([name, revenue]) => ({ name, revenue }))
+      .sort((a, b) => b.revenue - a.revenue).slice(0, 5);
+
+    return { total_revenue, total_outstanding, total_gst, total_invoices, month_revenue, month_invoices, overdue_count, paid_count, draft_count, monthly_trend, top_clients };
+  }, [invoices, companyFilter, yearFilter]);
+
+  const filtered=useMemo(()=>{
+    const fy = fyRange(yearFilter === 'all' ? null : yearFilter);
+    return invoices.filter(inv=>{
+      if(companyFilter!=='all'&&inv.company_id!==companyFilter)return false;
+      if(fy&&(inv.invoice_date<fy.from||inv.invoice_date>fy.to))return false;
+      if(searchTerm&&!inv.invoice_no?.toLowerCase().includes(searchTerm.toLowerCase())&&!inv.client_name?.toLowerCase().includes(searchTerm.toLowerCase()))return false;
+      if(statusFilter!=='all'&&inv.status!==statusFilter)return false;
+      if(typeFilter!=='all'&&inv.invoice_type!==typeFilter)return false;
+      if(fromDate&&inv.invoice_date<fromDate)return false;
+      if(toDate&&inv.invoice_date>toDate)return false;
+      return true;
+    });
+  },[invoices,companyFilter,yearFilter,searchTerm,statusFilter,typeFilter,fromDate,toDate]);
   const enrichedFiltered=useMemo(()=>filtered.map(inv=>{if(inv.status==='sent'&&inv.amount_due>0&&inv.due_date&&differenceInDays(parseISO(inv.due_date),new Date())<0)return{...inv,status:'overdue'};return inv;}),[filtered]);
 
   const handleEdit=useCallback((inv)=>{setEditingInv(inv);setFormOpen(true);},[]);
   const handleDelete=useCallback(async(inv)=>{if(!window.confirm(`Delete invoice ${inv.invoice_no}?`))return;try{await api.delete(`/invoices/${inv.id}`);toast.success('Invoice deleted');fetchAll();setDetailOpen(false);}catch{toast.error('Failed to delete');}},[fetchAll]);
-
-  // ── CHANGE 3: Updated handleDownloadPdf (now uses template print) ───────────
-  const handleDownloadPdf = useCallback((inv) => {
-    const company = companies.find(c => c.id === inv.company_id) || companies[0];
-    openInvoicePrint(inv, company, selectedTemplate, selectedTheme, customColor);
-  }, [companies, selectedTemplate, selectedTheme, customColor]);
-
+  const handleDownloadPdf=useCallback(async(inv)=>{try{const r=await api.get(`/invoices/${inv.id}/pdf`,{responseType:'blob'});const url=URL.createObjectURL(r.data);const link=document.createElement('a');link.href=url;link.download=`invoice_${inv.invoice_no?.replace('/','_')}.pdf`;document.body.appendChild(link);link.click();document.body.removeChild(link);URL.revokeObjectURL(url);}catch{toast.error('PDF generation failed');}},[]);
   const handleMarkSent=useCallback(async(inv)=>{try{await api.post(`/invoices/${inv.id}/mark-sent`);fetchAll();toast.success('Marked as sent');}catch{toast.error('Failed');}},[fetchAll]);
   const handleExport=useCallback(()=>{if(!enrichedFiltered.length){toast.error('No invoices to export');return;}const rows=[['Invoice No','Type','Client','Date','Due Date','Taxable','GST','Total','Paid','Balance','Status'],...enrichedFiltered.map(inv=>[inv.invoice_no,INV_TYPES.find(t=>t.value===inv.invoice_type)?.label||inv.invoice_type,inv.client_name,inv.invoice_date,inv.due_date,inv.total_taxable,inv.total_gst,inv.grand_total,inv.amount_paid,inv.amount_due,inv.status])];const ws=XLSX.utils.aoa_to_sheet(rows);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Invoices');XLSX.writeFile(wb,`invoices_${format(new Date(),'dd-MMM-yyyy')}.xlsx`);toast.success(`Exported ${enrichedFiltered.length} invoices`);},[enrichedFiltered]);
 
@@ -1485,7 +1523,7 @@ export default function Invoicing() {
             <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-white/15 backdrop-blur-sm border border-white/20 flex-shrink-0"><Receipt className="h-6 w-6 text-white"/></div>
             <div>
               <h1 className="text-2xl font-bold text-white tracking-tight">Invoicing & Billing</h1>
-              <p className="text-sm text-blue-200 mt-0.5">GST-compliant · Smart client search · GSTR reports · <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white/20 font-mono">Ctrl+K</kbd> · <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white/20 font-mono">N</kbd> new</p>
+              <p className="text-sm text-blue-200 mt-0.5">GST-compliant · Smart client search · GSTR reports · <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white/20 font-mono">Ctrl+K</kbd> · <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white/20 font-mono">N</kbd> new{companyFilter!=='all'&&<span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white">📋 {companies.find(c=>c.id===companyFilter)?.name}</span>}</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1494,19 +1532,6 @@ export default function Invoicing() {
               className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold">
               <FileSpreadsheet className="h-4 w-4"/> GST Returns
             </Button>
-
-            {/* ── Design button ── */}
-            <Button variant="outline" onClick={() => setDesignOpen(true)}
-              className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold">
-              <Palette className="h-4 w-4" /> Design
-            </Button>
-
-            {/* ── NEW: Party Ledger button ── */}
-            <Button onClick={() => { setLedgerClient(null); setLedgerOpen(true); }}
-              className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold">
-              <BookOpen className="h-4 w-4" /> Party Ledger
-            </Button>
-
             <Button variant="outline" onClick={()=>setVypOpen(true)}
               className="h-9 px-4 text-sm bg-emerald-500/20 border-emerald-300/40 text-white hover:bg-emerald-500/30 rounded-xl gap-2 backdrop-blur-sm font-semibold">
               <Database className="h-4 w-4"/> Import KhataBook
@@ -1518,26 +1543,24 @@ export default function Invoicing() {
         </div>
       </div>
 
-      {/* STATS */}
-      {stats&&(
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Total Revenue" value={fmtC(stats.total_revenue)} sub={`${stats.total_invoices} invoices`} icon={IndianRupee} color={COLORS.mediumBlue} bg={`${COLORS.mediumBlue}12`} isDark={isDark} onClick={()=>setStatusFilter('all')}/>
-          <StatCard label="Outstanding" value={fmtC(stats.total_outstanding)} sub={`${stats.overdue_count} overdue`} icon={AlertCircle} color={COLORS.coral} bg={`${COLORS.coral}15`} isDark={isDark} onClick={()=>setStatusFilter('overdue')}/>
-          <StatCard label="This Month" value={fmtC(stats.month_revenue)} sub={`${stats.month_invoices} invoices`} icon={TrendingUp} color={COLORS.emeraldGreen} bg={`${COLORS.emeraldGreen}12`} isDark={isDark}/>
-          <StatCard label="Total GST" value={fmtC(stats.total_gst)} sub={`${stats.paid_count} paid · ${stats.draft_count} draft`} icon={Shield} color={COLORS.amber} bg={`${COLORS.amber}12`} isDark={isDark} onClick={()=>setGstOpen(true)}/>
-        </div>
-      )}
+      {/* STATS — always computed from filtered invoices */}
+      {(localStats.total_invoices > 0 || invoices.length > 0) && (<div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard label="Total Revenue"  value={fmtC(localStats.total_revenue)}     sub={`${localStats.total_invoices} invoices`}   icon={IndianRupee} color={COLORS.mediumBlue}   bg={`${COLORS.mediumBlue}12`}   isDark={isDark} onClick={()=>setStatusFilter('all')}/>
+        <StatCard label="Outstanding"    value={fmtC(localStats.total_outstanding)} sub={`${localStats.overdue_count} overdue`}     icon={AlertCircle} color={COLORS.coral}        bg={`${COLORS.coral}15`}        isDark={isDark} onClick={()=>setStatusFilter('overdue')}/>
+        <StatCard label="This Month"     value={fmtC(localStats.month_revenue)}     sub={`${localStats.month_invoices} invoices`}   icon={TrendingUp}  color={COLORS.emeraldGreen} bg={`${COLORS.emeraldGreen}12`} isDark={isDark}/>
+        <StatCard label="Total GST"      value={fmtC(localStats.total_gst)}         sub={`${localStats.paid_count} paid · ${localStats.draft_count} draft`} icon={Shield} color={COLORS.amber} bg={`${COLORS.amber}12`} isDark={isDark} onClick={()=>setGstOpen(true)}/>
+      </div>)}
 
-      {stats?.monthly_trend?.length>0&&(
+      {localStats.monthly_trend?.some(d => d.revenue > 0) && (
         <div className={`rounded-2xl border p-5 ${isDark?'bg-slate-800 border-slate-700':'bg-white border-slate-200/80'}`}>
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2.5"><div className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/40"><BarChart3 className="h-4 w-4 text-blue-500"/></div><div><h3 className={`font-semibold text-sm ${isDark?'text-slate-100':'text-slate-800'}`}>Revenue Trend</h3><p className="text-xs text-slate-400">Last 12 months</p></div></div>
+            <div className="flex items-center gap-2.5"><div className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/40"><BarChart3 className="h-4 w-4 text-blue-500"/></div><div><h3 className={`font-semibold text-sm ${isDark?'text-slate-100':'text-slate-800'}`}>Revenue Trend</h3><p className="text-xs text-slate-400">Last 12 months{companyFilter!=='all'?` · ${companies.find(c=>c.id===companyFilter)?.name||''}`:''}</p></div></div>
             <div className="flex items-center gap-4 text-xs">
               <span className="flex items-center gap-1.5"><span className="w-4 h-0.5 inline-block rounded" style={{background:COLORS.mediumBlue}}/> Revenue</span>
               <span className="flex items-center gap-1.5"><span className="w-4 h-px inline-block rounded border-t-2 border-dashed" style={{borderColor:COLORS.emeraldGreen}}/> Collected</span>
             </div>
           </div>
-          <RevenueChart trend={stats.monthly_trend} isDark={isDark}/>
+          <RevenueChart trend={localStats.monthly_trend} isDark={isDark}/>
         </div>
       )}
 
@@ -1556,10 +1579,36 @@ export default function Invoicing() {
           </div>
         </div>
         <div className="flex items-center gap-2 px-3.5 py-2.5 overflow-x-auto scrollbar-none flex-wrap">
+          {/* Company filter */}
+          {companies.length > 1 && (
+            <Select value={companyFilter} onValueChange={setCompanyFilter}>
+              <SelectTrigger className={`h-9 w-[160px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark?'bg-slate-700 text-slate-100':'bg-blue-50 text-blue-700'}`}>
+                <Building2 className="h-3.5 w-3.5 mr-1.5 flex-shrink-0"/>
+                <SelectValue/>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Companies</SelectItem>
+                {companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+          {/* Financial Year filter */}
+          <Select value={yearFilter} onValueChange={setYearFilter}>
+            <SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark?'bg-slate-700 text-slate-100':'bg-slate-50'}`}>
+              <CalendarDays className="h-3.5 w-3.5 mr-1.5 flex-shrink-0"/>
+              <SelectValue/>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Years</SelectItem>
+              {availableYears.map(y => (
+                <SelectItem key={y} value={y}>FY {y}-{String(parseInt(y)+1).slice(2)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Select value={statusFilter} onValueChange={setStatusFilter}><SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 ${isDark?'bg-slate-700 text-slate-100':'bg-slate-50'}`}><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">All Status</SelectItem>{Object.entries(STATUS_META).map(([k,v])=><SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent></Select>
           <Select value={typeFilter} onValueChange={setTypeFilter}><SelectTrigger className={`h-9 w-[145px] border-none rounded-xl text-xs flex-shrink-0 ${isDark?'bg-slate-700 text-slate-100':'bg-slate-50'}`}><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">All Types</SelectItem>{INV_TYPES.map(t=><SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent></Select>
           <div className="flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5 text-slate-400"/><Input type="date" className={`h-9 w-36 border-none rounded-xl text-xs ${isDark?'bg-slate-700 text-slate-100':'bg-slate-50'}`} value={fromDate} onChange={e=>setFromDate(e.target.value)}/><span className="text-slate-400 text-xs">to</span><Input type="date" className={`h-9 w-36 border-none rounded-xl text-xs ${isDark?'bg-slate-700 text-slate-100':'bg-slate-50'}`} value={toDate} onChange={e=>setToDate(e.target.value)}/></div>
-          {(statusFilter!=='all'||typeFilter!=='all'||fromDate||toDate||searchInput)&&(<button onClick={()=>{setStatusFilter('all');setTypeFilter('all');setFromDate('');setToDate('');setSearchInput('');}} className="flex items-center gap-1 text-xs font-semibold text-red-500 hover:text-red-700 px-2.5 py-1 rounded-xl hover:bg-red-50 transition-colors"><X className="h-3 w-3"/> Clear</button>)}
+          {(companyFilter!=='all'||yearFilter!=='all'||statusFilter!=='all'||typeFilter!=='all'||fromDate||toDate||searchInput)&&(<button onClick={()=>{setCompanyFilter('all');setYearFilter('all');setStatusFilter('all');setTypeFilter('all');setFromDate('');setToDate('');setSearchInput('');}} className="flex items-center gap-1 text-xs font-semibold text-red-500 hover:text-red-700 px-2.5 py-1 rounded-xl hover:bg-red-50 transition-colors"><X className="h-3 w-3"/> Clear</button>)}
         </div>
       </div>
 
@@ -1599,17 +1648,7 @@ export default function Invoicing() {
                   <p className={`text-sm font-semibold ${inv.amount_due>0?(isOverdue?'text-red-500':'text-amber-600'):'text-slate-300'}`}>{fmtC(inv.amount_due)}</p>
                   <StatusPill inv={inv}/>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e=>e.stopPropagation()}>
-                    {/* ── OPTIONAL per-invoice print button (replaces old PDF) ── */}
-                    <button
-                      onClick={() => {
-                        const company = companies.find(c => c.id === inv.company_id) || companies[0];
-                        openInvoicePrint(inv, company, selectedTemplate, selectedTheme, customColor);
-                      }}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
-                      title="Print Invoice"
-                    >
-                      <Printer className="h-3.5 w-3.5" />
-                    </button>
+                    <button onClick={()=>handleDownloadPdf(inv)} className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="PDF"><Download className="h-3.5 w-3.5"/></button>
                     {inv.amount_due>0&&(<button onClick={()=>{setPayInv(inv);setPayOpen(true);}} className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors" title="Payment"><IndianRupee className="h-3.5 w-3.5"/></button>)}
                     {inv.status==='draft'&&(<button onClick={()=>handleMarkSent(inv)} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="Mark Sent"><Send className="h-3.5 w-3.5"/></button>)}
                     <button onClick={()=>handleEdit(inv)} className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="Edit"><Edit className="h-3.5 w-3.5"/></button>
@@ -1638,10 +1677,10 @@ export default function Invoicing() {
       </div>
 
       {/* TOP CLIENTS */}
-      {stats?.top_clients?.length>0&&(
+      {localStats?.top_clients?.length>0&&(
         <div className={`rounded-2xl border p-5 ${isDark?'bg-slate-800 border-slate-700':'bg-white border-slate-200/80'}`}>
-          <div className="flex items-center gap-2.5 mb-4"><div className="p-1.5 rounded-lg bg-yellow-50 dark:bg-yellow-900/40"><Star className="h-4 w-4 text-yellow-500"/></div><div><h3 className={`font-semibold text-sm ${isDark?'text-slate-100':'text-slate-800'}`}>Top Clients by Revenue</h3><p className="text-xs text-slate-400">Based on all invoices</p></div></div>
-          <div className="space-y-3">{stats.top_clients.map((c,i)=>{const pct=stats.total_revenue>0?(c.revenue/stats.total_revenue)*100:0;return(<div key={c.name} className="flex items-center gap-3"><div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" style={{background:i===0?'linear-gradient(135deg, #b45309, #d97706)':`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}}>{i+1}</div><div className="flex-1 min-w-0"><div className="flex items-center justify-between mb-1"><p className={`text-sm font-semibold truncate ${isDark?'text-slate-100':'text-slate-800'}`}>{c.name}</p><p className="text-sm font-bold flex-shrink-0 ml-3" style={{color:COLORS.mediumBlue}}>{fmtC(c.revenue)}</p></div><div className={`h-1.5 rounded-full overflow-hidden ${isDark?'bg-slate-700':'bg-slate-100'}`}><div className="h-full rounded-full transition-all duration-700" style={{width:`${pct}%`,background:`linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}}/></div></div></div>);})}</div>
+          <div className="flex items-center gap-2.5 mb-4"><div className="p-1.5 rounded-lg bg-yellow-50 dark:bg-yellow-900/40"><Star className="h-4 w-4 text-yellow-500"/></div><div><h3 className={`font-semibold text-sm ${isDark?'text-slate-100':'text-slate-800'}`}>Top Clients by Revenue</h3><p className="text-xs text-slate-400">{companyFilter!=='all'?`${companies.find(c=>c.id===companyFilter)?.name||''} · `:''}Based on {yearFilter!=='all'?`FY ${yearFilter}-${String(parseInt(yearFilter)+1).slice(2)}`:'all invoices'}</p></div></div>
+          <div className="space-y-3">{localStats.top_clients.map((c,i)=>{const pct=localStats.total_revenue>0?(c.revenue/localStats.total_revenue)*100:0;return(<div key={c.name} className="flex items-center gap-3"><div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" style={{background:i===0?'linear-gradient(135deg, #b45309, #d97706)':`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}}>{i+1}</div><div className="flex-1 min-w-0"><div className="flex items-center justify-between mb-1"><p className={`text-sm font-semibold truncate ${isDark?'text-slate-100':'text-slate-800'}`}>{c.name}</p><p className="text-sm font-bold flex-shrink-0 ml-3" style={{color:COLORS.mediumBlue}}>{fmtC(c.revenue)}</p></div><div className={`h-1.5 rounded-full overflow-hidden ${isDark?'bg-slate-700':'bg-slate-100'}`}><div className="h-full rounded-full transition-all duration-700" style={{width:`${pct}%`,background:`linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`}}/></div></div></div>);})}</div>
         </div>
       )}
 
@@ -1661,32 +1700,6 @@ export default function Invoicing() {
       {/* ── GST RETURNS MODAL ── */}
       <GSTReportsModal open={gstOpen} onClose={()=>setGstOpen(false)}
         invoices={invoices} isDark={isDark}/>
-
-      {/* ── InvoiceDesignModal ── */}
-      <InvoiceDesignModal
-        open={designOpen}
-        onClose={() => setDesignOpen(false)}
-        selectedTemplate={selectedTemplate}
-        onTemplateChange={setSelectedTemplate}
-        selectedTheme={selectedTheme}
-        onThemeChange={setSelectedTheme}
-        customColor={customColor}
-        onCustomColorChange={setCustomColor}
-        sampleInvoice={invoices[0] || null}
-        sampleCompany={companies[0] || null}
-        isDark={isDark}
-      />
-
-      {/* ── NEW: PartyLedger Dialog ── */}
-      <PartyLedger
-        open={ledgerOpen}
-        onClose={() => setLedgerOpen(false)}
-        invoices={invoices}
-        clients={clients}
-        companies={companies}
-        preselectedClientName={ledgerClient}
-        isDark={isDark}
-      />
     </div>
   );
 }
