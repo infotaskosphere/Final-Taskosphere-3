@@ -15,29 +15,30 @@ export default defineConfig({
     },
   },
 
-  // ✅ FIX 1: Tell esbuild to treat .js files as JSX during dep optimization
-  // This is the #1 cause of Rollup parseAst crashes after CRA → Vite migration
-  optimizeDeps: {
-    esbuildOptions: {
-      loader: {
-        '.js': 'jsx',
-      },
-    },
-  },
+  // ❌ FIX 1: REMOVE forcing .js → JSX (this breaks node_modules on Render)
+  // optimizeDeps: {
+  //   esbuildOptions: {
+  //     loader: {
+  //       '.js': 'jsx',
+  //     },
+  //   },
+  // },
 
-  // ✅ FIX 2: Tell esbuild to treat .js files as JSX during the actual build
+  // ✅ FIX 2: Restrict JSX handling ONLY to .jsx files
   esbuild: {
     loader: 'jsx',
-    include: /src\/.*\.jsx?$/,
-    exclude: [],
+    include: /src\/.*\.jsx$/, // changed from .jsx?$
+    // exclude: [], // ❌ not needed
   },
 
   build: {
     outDir: 'dist',
-    // ✅ FIX 3: Disable sourcemaps in prod — they consume a lot of memory
-    // on Render's free tier and can cause OOM build failures
+
+    // ✅ FIX 3: keep this (good for memory)
     sourcemap: false,
+
     assetsDir: 'assets',
+
     rollupOptions: {
       output: {
         manualChunks: {
@@ -54,7 +55,8 @@ export default defineConfig({
         },
       },
     },
-    // ✅ FIX 4: Raise chunk size warning limit (you have many large deps)
+
+    // ✅ FIX 4: keep this as-is
     chunkSizeWarningLimit: 1000,
   },
 
