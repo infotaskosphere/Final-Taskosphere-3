@@ -392,9 +392,12 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                         ? (D ? 'bg-blue-900/40 border-r-2 border-blue-400' : 'bg-blue-50 border-r-2 border-blue-500')
                         : (D ? 'hover:bg-slate-700/40' : 'hover:bg-slate-50'),
                     ].join(' ')}>
-                    <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                      style={{ background: avatarGrad(c.name) }}>
-                      {(c.name || '?').charAt(0).toUpperCase()}
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0 overflow-hidden"
+                      style={{ background: c.logo_base64 ? 'transparent' : avatarGrad(c.name) }}>
+                      {c.logo_base64
+                        ? <img src={c.logo_base64} alt={c.name} className="w-full h-full object-contain" />
+                        : (c.name || '?').charAt(0).toUpperCase()
+                      }
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className={`text-xs font-semibold truncate ${active ? 'text-blue-600 dark:text-blue-400' : (D ? 'text-slate-200' : 'text-slate-800')}`}>
@@ -593,6 +596,71 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                 ════════════════════════════════════════════════════════ */}
                 {tab === 'identity' && (
                   <>
+                    {/* Company identity preview */}
+                    <div className={`rounded-2xl p-4 border ${D ? 'bg-slate-800/50 border-slate-700/60' : 'bg-white border-slate-200/80'} shadow-sm`}>
+                      <p className={`text-[9px] font-bold uppercase tracking-widest mb-3 ${D ? 'text-slate-400' : 'text-slate-500'}`}>
+                        Company Identity Preview
+                      </p>
+                      <div className="flex items-center gap-4">
+                        {/* Logo box */}
+                        <div className={`w-16 h-16 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden border-2 ${D ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-slate-50'}`}>
+                          {selectedCompany?.logo_base64 ? (
+                            <img
+                              src={selectedCompany.logo_base64}
+                              alt="Company logo"
+                              className="w-full h-full object-contain p-1"
+                            />
+                          ) : (
+                            <div className="flex flex-col items-center gap-1">
+                              <Building2 className={`h-6 w-6 ${D ? 'text-slate-500' : 'text-slate-300'}`} />
+                              <p className={`text-[8px] ${D ? 'text-slate-500' : 'text-slate-400'}`}>No logo</p>
+                            </div>
+                          )}
+                        </div>
+                        {/* Company info */}
+                        <div className="flex-1 min-w-0">
+                          <p className={`font-bold text-base truncate ${D ? 'text-slate-100' : 'text-slate-800'}`}>
+                            {selectedCompany?.name || '—'}
+                          </p>
+                          {selectedCompany?.gstin && (
+                            <p className="font-mono text-xs text-slate-400 mt-0.5">
+                              GSTIN: {selectedCompany.gstin}
+                            </p>
+                          )}
+                          {selectedCompany?.address && (
+                            <p className="text-xs text-slate-400 mt-0.5 truncate">{selectedCompany.address}</p>
+                          )}
+                          {(selectedCompany?.phone || selectedCompany?.email) && (
+                            <p className="text-xs text-slate-400 mt-0.5 truncate">
+                              {[selectedCompany.phone, selectedCompany.email].filter(Boolean).join('  ·  ')}
+                            </p>
+                          )}
+                        </div>
+                        {/* Badges */}
+                        <div className="flex flex-col gap-1.5 flex-shrink-0">
+                          {selectedCompany?.logo_base64 ? (
+                            <span className="text-[9px] font-bold px-2 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400">
+                              ✓ Logo Set
+                            </span>
+                          ) : (
+                            <span className="text-[9px] font-bold px-2 py-1 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400">
+                              No Logo
+                            </span>
+                          )}
+                          {selectedCompany?.signature_base64 && (
+                            <span className="text-[9px] font-bold px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400">
+                              ✓ Signature
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {!selectedCompany?.logo_base64 && (
+                        <p className={`text-[10px] mt-3 pt-3 border-t ${D ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-400'}`}>
+                          Upload a logo in <strong>Manage Companies</strong> on the Quotations page. The logo is stored on the company profile and automatically used on all invoices and PDFs.
+                        </p>
+                      )}
+                    </div>
+
                     <div className={card}>
                       {secH('Document Titles', 'Heading printed at the top of each document type')}
                       <div className="grid grid-cols-2 gap-3.5">
@@ -832,6 +900,32 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                 ════════════════════════════════════════════════════════ */}
                 {tab === 'design' && (
                   <>
+                    {/* Logo + color preview strip */}
+                    <div className={`rounded-2xl p-4 border flex items-center gap-4 ${D ? 'bg-slate-800/50 border-slate-700/60' : 'bg-white border-slate-200/80'} shadow-sm`}>
+                      <div className={`w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden border-2 ${D ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-slate-50'}`}>
+                        {selectedCompany?.logo_base64 ? (
+                          <img src={selectedCompany.logo_base64} alt="logo" className="w-full h-full object-contain p-1" />
+                        ) : (
+                          <Building2 className={`h-5 w-5 ${D ? 'text-slate-500' : 'text-slate-300'}`} />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`font-semibold text-sm truncate ${D ? 'text-slate-200' : 'text-slate-700'}`}>{selectedCompany?.name}</p>
+                        <p className="text-xs text-slate-400 mt-0.5">Template and theme below apply to this company's invoices</p>
+                      </div>
+                      {/* Active theme color swatch */}
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <div className="w-8 h-8 rounded-lg shadow-sm"
+                          style={{ background: form.theme === 'custom' ? form.custom_color : ((COLOR_THEMES || []).find(t => t.id === form.theme)?.primary || '#0D3B66') }} />
+                        <div>
+                          <p className={`text-[9px] font-bold uppercase tracking-wide ${D ? 'text-slate-400' : 'text-slate-500'}`}>Active Theme</p>
+                          <p className={`text-xs font-semibold ${D ? 'text-slate-200' : 'text-slate-700'}`}>
+                            {form.theme === 'custom' ? 'Custom' : ((COLOR_THEMES || []).find(t => t.id === form.theme)?.name || form.theme)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
                     <div className={card}>
                       {secH('Invoice Template', 'Default template when printing for this company')}
                       <div className="flex flex-wrap gap-3">
