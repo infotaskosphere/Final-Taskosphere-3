@@ -1397,160 +1397,118 @@ async def update_user_permissions(
 #====================================================================================
 # ATTENDANCE ROUTES
 #=====================================================================================
-def get_real_client_ip(request: Request):
-    x_forwarded_for = request.headers.get("x-forwarded-for")
-    if x_forwarded_for:
-        return x_forwarded_for.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return None
 
-def check_is_late(user: dict, punch_in_ist: datetime) -> bool:
-    try:
-        pit = datetime.strptime(user.get("punch_in_time", "10:30"), "%H:%M")
-        if user.get("late_grace_minutes") is not None:
-            grace_minutes = int(user["late_grace_minutes"])
-        else:
-            raw = str(user.get("grace_time", "00:15"))
-            gt = datetime.strptime(raw, "%H:%M")
-            grace_minutes = gt.hour * 60 + gt.minute
-        deadline = punch_in_ist.replace(
-            hour=pit.hour, minute=pit.minute, second=0, microsecond=0
-        ) + timedelta(minutes=grace_minutes)
-        return punch_in_ist > deadline
-    except Exception:
-        return False
+def serialize_doc(doc):
+    if not doc:
+        return doc
+    doc = dict(doc)
+    if "_id" in doc:
+        doc["id"] = str(doc["_id"])
+        doc.pop("_id")
+    for k, v in doc.items():
+        if isinstance(v, datetime):
+            doc[k] = v.isoformat()
+    return doc
 
-def check_punched_out_early(user: dict, punch_out_ist: datetime) -> bool:
-    try:
-        pot = datetime.strptime(user.get("punch_out_time", "19:00"), "%H:%M")
-        expected_out = punch_out_ist.replace(
-            hour=pot.hour, minute=pot.minute, second=0, microsecond=0
-        )
-        return punch_out_ist < expected_out
-    except Exception:
-        return False
 
+# ================= HANDLE ATTENDANCE =================
 @api_router.post("/attendance")
 async def handle_attendance(
     data: dict,
     current_user: User = Depends(get_current_user)
 ):
-    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
-    today_str = today.isoformat()
-    # Note: We do NOT block punch-in on holidays.
-    # Users who choose to work on holidays can still punch in/out freely.
-    # The frontend suppresses the auto-popup on holidays but keeps the button visible.
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
     action = data.get("action")
+
     if action not in ["punch_in", "punch_out"]:
         raise HTTPException(status_code=400, detail="Invalid action")
-    attendance = await db.attendance.find_one(
-        {"user_id": current_user.id, "date": today_str},
-        {"_id": 0}
-    )
+
+    attendance = await db.attendance.find_one({"user_id": current_user.id, "date": today})
+
+    # -------- PUNCH IN --------
     if action == "punch_in":
         if attendance and attendance.get("punch_in"):
             raise HTTPException(status_code=400, detail="Already punched in")
+
         user_doc = await db.users.find_one({"id": current_user.id}, {"_id": 0})
+
         punch_in_utc = datetime.now(timezone.utc)
         punch_in_ist = punch_in_utc.astimezone(ZoneInfo("Asia/Kolkata"))
+
         is_late = check_is_late(user_doc or {}, punch_in_ist)
-        location_data = data.get("location")
+
         update_fields = {
             "status": "present",
             "punch_in": punch_in_utc,
             "is_late": is_late,
             "leave_reason": None,
-            # Clear auto_absent flag if user punches in manually
             "auto_marked": False,
-        }
-        if location_data:
-            update_fields["location"] = location_data
-        await db.attendance.update_one(
-            {"user_id": current_user.id, "date": today_str},
-            {"$set": update_fields},
-            upsert=True
-        )
-        return {"message": "Punched in successfully", "is_late": is_late}
-
-    # PUNCH_OUT_BLOCK
-    if action == "punch_out":
-        if not attendance or not attendance.get("punch_in"):
-            raise HTTPException(status_code=400, detail="Not punched in yet")
-
-        if attendance.get("punch_out"):
-            raise HTTPException(status_code=400, detail="Already punched out")
-
-        punch_in_dt = attendance.get("punch_in")
-        punch_out_utc = datetime.now(timezone.utc)
-        punch_out_ist = punch_out_utc.astimezone(ZoneInfo("Asia/Kolkata"))
-
-        user_doc = await db.users.find_one({"id": current_user.id}, {"_id": 0})
-        punched_out_early = check_punched_out_early(user_doc or {}, punch_out_ist)
-
-        # FIX: MongoDB may return punch_in as a naive datetime (no tzinfo).
-        # Treat naive datetimes as UTC before computing the delta.
-        if isinstance(punch_in_dt, datetime):
-            if punch_in_dt.tzinfo is None:
-                punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
-        else:
-            # Fallback: parse from string if stored as ISO string
-            try:
-                punch_in_dt = datetime.fromisoformat(str(punch_in_dt))
-                if punch_in_dt.tzinfo is None:
-                    punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
-            except Exception:
-                punch_in_dt = punch_out_utc  # safeguard: 0-minute duration
-
-        delta = punch_out_utc - punch_in_dt.astimezone(timezone.utc)
-        duration_minutes = int(delta.total_seconds() / 60)
-
-        update_fields = {
-            "punch_out": punch_out_utc,
-            "punched_out_early": punched_out_early,
-            "duration_minutes": max(0, duration_minutes)
         }
 
         if data.get("location"):
-            update_fields["punch_out_location"] = data.get("location")
+            update_fields["location"] = data.get("location")
 
         await db.attendance.update_one(
-            {"user_id": current_user.id, "date": today_str},
-            {"$set": update_fields}
+            {"user_id": current_user.id, "date": today},
+            {"$set": update_fields},
+            upsert=True
         )
 
-        return {
-            "message": "Punched out successfully",
-            "duration": duration_minutes,
-            "punched_out_early": punched_out_early
-        }
+        return {"message": "Punched in successfully", "is_late": is_late}
 
-@api_router.post("/attendance/mark-leave-today")
-async def mark_leave_today(current_user: User = Depends(get_current_user)):
-    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
-    today_str = today.isoformat()
+    # -------- PUNCH OUT --------
+    if not attendance or not attendance.get("punch_in"):
+        raise HTTPException(status_code=400, detail="Not punched in yet")
+
+    if attendance.get("punch_out"):
+        raise HTTPException(status_code=400, detail="Already punched out")
+
+    punch_in_dt = attendance.get("punch_in")
+
+    if isinstance(punch_in_dt, str):
+        punch_in_dt = datetime.fromisoformat(punch_in_dt)
+
+    if punch_in_dt and punch_in_dt.tzinfo is None:
+        punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
+
+    punch_out_utc = datetime.now(timezone.utc)
+    punch_out_ist = punch_out_utc.astimezone(ZoneInfo("Asia/Kolkata"))
+
+    user_doc = await db.users.find_one({"id": current_user.id}, {"_id": 0})
+    early = check_punched_out_early(user_doc or {}, punch_out_ist)
+
+    delta = punch_out_utc - punch_in_dt
+    duration_minutes = int(delta.total_seconds() / 60)
+
+    update_fields = {
+        "punch_out": punch_out_utc,
+        "punched_out_early": early,
+        "duration_minutes": max(0, duration_minutes)
+    }
+
+    if data.get("location"):
+        update_fields["punch_out_location"] = data.get("location")
+
     await db.attendance.update_one(
-        {"user_id": current_user.id, "date": today_str},
-        {
-            "$set": {
-                "status": "leave",
-                "punch_in": None,
-                "punch_out": None,
-                "leave_reason": "Marked on leave today"
-            }
-        },
-        upsert=True
+        {"user_id": current_user.id, "date": today},
+        {"$set": update_fields}
     )
-    return {"message": "Marked on leave today"}
 
+    return {
+        "message": "Punched out successfully",
+        "duration": duration_minutes,
+        "punched_out_early": early
+    }
+
+
+# ================= TODAY =================
 @api_router.get("/attendance/today")
 async def get_today_attendance(current_user: User = Depends(get_current_user)):
-    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
-    today_str = today.isoformat()
-    # FIX: Added {"_id": 0} projection — without it ObjectId leaks into JSON response
-    # and causes ValueError: 'ObjectId' object is not iterable (500 error)
-    holiday = await db.holidays.find_one({"date": today_str}, {"_id": 0})
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+
+    holiday = await db.holidays.find_one({"date": today})
     if holiday:
+        holiday = serialize_doc(holiday)
         return {
             "status": "holiday",
             "holiday": holiday,
@@ -1558,10 +1516,9 @@ async def get_today_attendance(current_user: User = Depends(get_current_user)):
             "punch_out": None,
             "leave_reason": None
         }
-    attendance = await db.attendance.find_one(
-        {"user_id": current_user.id, "date": today_str},
-        {"_id": 0}
-    )
+
+    attendance = await db.attendance.find_one({"user_id": current_user.id, "date": today})
+
     if not attendance:
         return {
             "status": "absent",
@@ -1569,269 +1526,103 @@ async def get_today_attendance(current_user: User = Depends(get_current_user)):
             "punch_out": None,
             "leave_reason": None
         }
+
+    attendance = serialize_doc(attendance)
+
     if "status" not in attendance:
-        attendance["status"] = (
-            "present" if attendance.get("punch_in") else "absent"
-        )
+        attendance["status"] = "present" if attendance.get("punch_in") else "absent"
+
     return attendance
 
-@api_router.post("/attendance/apply-leave")
-async def apply_leave(
-    data: dict,
-    current_user: User = Depends(get_current_user)
-):
-    try:
-        from_date = datetime.fromisoformat(data["from_date"]).date()
-        to_date = datetime.fromisoformat(data.get("to_date", data["from_date"])).date()
-        reason = data.get("reason", "Leave Applied")
-        if to_date < from_date:
-            raise HTTPException(status_code=400, detail="Invalid date range")
-        current = from_date
-        while current <= to_date:
-            await db.attendance.update_one(
-                {
-                    "user_id": current_user.id,
-                    "date": current.isoformat()
-                },
-                {
-                    "$set": {
-                        "status": "leave",
-                        "leave_reason": reason,
-                        "punch_in": None,
-                        "punch_out": None
-                    }
-                },
-                upsert=True
-            )
-            current += timedelta(days=1)
-        return {"message": "Leave applied successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
+# ================= HISTORY =================
 @api_router.get("/attendance/history", response_model=List[Attendance])
 async def get_attendance_history(
     user_id: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
     query = {}
+
     if current_user.role == "admin":
         if user_id:
             query["user_id"] = user_id
-        # No user_id from admin = return ALL records (aggregate view)
-    elif current_user.role == "manager":
-        permissions_mgr = get_user_permissions(current_user)
-        allowed_users = permissions_mgr.get("view_other_attendance", [])
-        if user_id:
-            if user_id == current_user.id:
-                query["user_id"] = user_id
-            else:
-                if not permissions_mgr.get("can_view_attendance", False):
-                    raise HTTPException(
-                        status_code=403,
-                        detail="You do not have permission to view other users' attendance"
-                    )
-                if user_id not in allowed_users:
-                    raise HTTPException(
-                        status_code=403,
-                        detail="This user is outside your cross-visibility scope"
-                    )
-                query["user_id"] = user_id
-        else:
-            if permissions_mgr.get("can_view_attendance", False) and allowed_users:
-                query["user_id"] = {"$in": allowed_users + [current_user.id]}
-            else:
-                query["user_id"] = current_user.id
-    else:
-        if user_id and user_id != current_user.id:
-            permissions = get_user_permissions(current_user)
-            allowed_users = permissions.get("view_other_attendance", [])
-            if user_id not in allowed_users:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Not authorized to view other users' attendance"
-                )
-        query["user_id"] = user_id if user_id else current_user.id
-    attendance_list = await db.attendance.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
-    for attendance in attendance_list:
-        attendance["punch_in"] = safe_dt(attendance.get("punch_in"))
-        attendance["punch_out"] = safe_dt(attendance.get("punch_out"))
-        if "status" not in attendance:
-            attendance["status"] = (
-                "present" if attendance.get("punch_in") else "absent"
-            )
-    return attendance_list
 
+    else:
+        query["user_id"] = user_id if user_id else current_user.id
+
+    attendance_list = await db.attendance.find(query).sort("date", -1).to_list(1000)
+
+    cleaned = []
+    for att in attendance_list:
+        att = serialize_doc(att)
+
+        if "status" not in att:
+            att["status"] = "present" if att.get("punch_in") else "absent"
+
+        cleaned.append(att)
+
+    return cleaned
+
+
+# ================= SUMMARY =================
 @api_router.get("/attendance/my-summary")
-async def get_my_attendance_summary(
-    current_user: User = Depends(get_current_user)
-):
-    now = datetime.now(IST)
-    current_month = now.strftime("%Y-%m")
-    attendance_list = await db.attendance.find(
-        {"user_id": current_user.id},
-        {"_id": 0}
-    ).sort("date", -1).to_list(1000)
-    monthly_data = {}
-    total_minutes_all = 0
+async def get_my_attendance_summary(current_user: User = Depends(get_current_user)):
+    records = await db.attendance.find({"user_id": current_user.id}).to_list(1000)
+
+    total_minutes = 0
     total_days = 0
-    for attendance in attendance_list:
-        month = attendance["date"][:7]
-        if month not in monthly_data:
-            monthly_data[month] = {
-                "total_minutes": 0,
-                "days_present": 0
-            }
-        duration = attendance.get("duration_minutes")
-        if isinstance(duration, (int, float)):
-            monthly_data[month]["total_minutes"] += duration
-            total_minutes_all += duration
-            monthly_data[month]["days_present"] += 1
+
+    for r in records:
+        total_minutes += r.get("duration_minutes", 0)
+        if r.get("status") == "present":
             total_days += 1
-    formatted_data = []
-    for month, data in monthly_data.items():
-        minutes = data["total_minutes"]
-        hours = minutes // 60
-        mins = minutes % 60
-        formatted_data.append({
-            "month": month,
-            "total_minutes": minutes,
-            "total_hours": f"{hours}h {mins}m",
-            "days_present": data["days_present"]
-        })
+
     return {
-        "current_month": current_month,
         "total_days": total_days,
-        "total_minutes": total_minutes_all,
-        "monthly_summary": formatted_data
+        "total_minutes": total_minutes,
+        "total_hours": f"{total_minutes // 60}h {total_minutes % 60}m"
     }
 
+
+# ================= STAFF REPORT =================
 @api_router.get("/attendance/staff-report")
-async def get_staff_attendance_report(
-    month: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
+async def get_staff_attendance_report(current_user: User = Depends(get_current_user)):
     if current_user.role != "admin":
-        permissions = get_user_permissions(current_user)
-        if not permissions.get("can_view_attendance"):
-            raise HTTPException(status_code=403, detail="Not allowed")
-    now = datetime.now(IST)
-    target_month = month or now.strftime("%Y-%m")
-    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
-    user_map = {u["id"]: u for u in users}
-    attendance_list = await db.attendance.find(
-        {"date": {"$regex": f"^{target_month}"}},
-        {"_id": 0}
-    ).to_list(5000)
-    staff_report = {}
-    for attendance in attendance_list:
-        uid = attendance["user_id"]
-        if uid not in staff_report:
-            user_info = user_map.get(uid, {})
-            staff_report[uid] = {
-                "user_id": uid,
-                "user_name": user_info.get("full_name", "Unknown"),
-                "role": user_info.get("role", "staff"),
-                "total_minutes": 0,
-                "days_present": 0,
-                "days_absent": 0,
-                "late_days": 0,
-                "early_out_days": 0,
-                "records": []
-            }
-        # count absent days separately
-        if attendance.get("status") == "absent":
-            staff_report[uid]["days_absent"] += 1
-        duration = attendance.get("duration_minutes")
-        if isinstance(duration, (int, float)) and attendance.get("status") == "present":
-            staff_report[uid]["total_minutes"] += duration
-            staff_report[uid]["days_present"] += 1
-        if attendance.get("is_late"):
-            staff_report[uid]["late_days"] += 1
-        if attendance.get("punched_out_early"):
-            staff_report[uid]["early_out_days"] += 1
-        staff_report[uid]["records"].append({
-            "date": attendance["date"],
-            "status": attendance.get("status", "absent"),
-            "punch_in": attendance.get("punch_in"),
-            "punch_out": attendance.get("punch_out"),
-            "duration_minutes": duration,
-            "is_late": attendance.get("is_late", False),
-            "punched_out_early": attendance.get("punched_out_early", False)
-        })
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    attendance_list = await db.attendance.find().to_list(5000)
+
     result = []
-    for uid, data in staff_report.items():
-        total_minutes = data["total_minutes"]
-        hours = total_minutes // 60
-        minutes = total_minutes % 60
-        data["total_hours"] = f"{hours}h {minutes}m"
-        if data["days_present"] > 0:
-            data["avg_hours_per_day"] = round(
-                (total_minutes / data["days_present"]) / 60, 1
-            )
-        else:
-            data["avg_hours_per_day"] = 0
-        user_data = user_map.get(uid, {})
-        year, month_val = map(int, target_month.split("-"))
-        _, last_day = calendar.monthrange(year, month_val)
-        expected_hours = await calculate_expected_hours(
-            f"{target_month}-01",
-            f"{target_month}-{last_day}",
-            user_data.get("punch_in_time", "10:30"),
-            user_data.get("punch_out_time", "19:00")
-        )
-        data["expected_hours"] = expected_hours
-        result.append(data)
-    result.sort(key=lambda x: x["total_minutes"], reverse=True)
+    for att in attendance_list:
+        result.append(serialize_doc(att))
+
     return result
 
+
+# ================= EXPORT PDF =================
 @api_router.get("/attendance/export-pdf")
 async def export_attendance_pdf(
     user_id: str,
     current_user: User = Depends(get_current_user)
 ):
-    if user_id != current_user.id:
-        permissions = get_user_permissions(current_user)
-        if current_user.role != "admin" and not permissions.get("can_view_attendance"):
-            raise HTTPException(status_code=403, detail="Not authorized to export other users' attendance")
-    records = await db.attendance.find(
-        {"user_id": user_id},
-        {"_id": 0}
-    ).sort("date", 1).to_list(1000)
+    records = await db.attendance.find({"user_id": user_id}).to_list(1000)
+
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(200, 10, txt="Attendance Report", ln=True, align="C")
-    pdf.ln(5)
-    pdf.set_font("Arial", size=10)
+
     for rec in records:
-        status = rec.get("status", "unknown")
-        late_flag = " [LATE]" if rec.get("is_late") else ""
-        early_flag = " [EARLY OUT]" if rec.get("punched_out_early") else ""
-        if status == "absent":
-            pdf.multi_cell(
-                0, 8,
-                f"Date: {rec.get('date')} | Status: ABSENT"
-                f"{' [AUTO-MARKED 7PM]' if rec.get('auto_marked') else ''}"
-            )
-        else:
-            pdf.multi_cell(
-                0,
-                8,
-                f"Date: {rec.get('date')} | In: {rec.get('punch_in')} | "
-                f"Out: {rec.get('punch_out')} | Duration: {rec.get('duration_minutes')} mins"
-                f"{late_flag}{early_flag}"
-            )
-        pdf.ln(2)
+        rec = serialize_doc(rec)
+        pdf.cell(0, 10, f"{rec.get('date')} - {rec.get('status')}", ln=True)
+
     output = BytesIO()
     output.write(pdf.output(dest="S").encode("latin1"))
     output.seek(0)
+
     return StreamingResponse(
         output,
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=attendance_{user_id}.pdf"}
     )
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # MANUAL ABSENT MARKING ENDPOINT (Admin only)
 # POST /api/attendance/mark-absent-bulk
