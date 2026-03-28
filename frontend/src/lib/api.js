@@ -1,140 +1,117 @@
+/**
+ * lib/api.js
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Axios instance for all API calls.
+ *
+ * Exports:
+ *   default  api          — configured axios instance
+ *   named    useLoading   — React hook: returns true while any request is in flight
+ *   named    getToken     — returns the stored JWT (used by other utilities)
+ *   named    setToken     — stores JWT after login
+ *   named    clearToken   — removes JWT (logout)
+ */
+
 import axios from "axios";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
-/* ============================================================
-   CONFIG
-   ============================================================ */
-const BACKEND_URL =
+// ─── Base URL ──────────────────────────────────────────────────────────────────
+const BASE_URL =
   import.meta.env.VITE_API_URL ||
-  "https://final-taskosphere-backend.onrender.com";
+  import.meta.env.VITE_BACKEND_URL ||
+  "http://localhost:8000/api";
 
-// ⚠️ IMPORTANT: change only if backend does NOT use /api
-const BASE_URL = `${BACKEND_URL.replace(/\/$/, "")}/api`;
+// ─── Token Helpers ─────────────────────────────────────────────────────────────
+const TOKEN_KEY = "taskosphere_token";
 
-const getToken = () =>
-  localStorage.getItem("token") || sessionStorage.getItem("token");
+export const getToken  = ()    => localStorage.getItem(TOKEN_KEY);
+export const setToken  = (tok) => localStorage.setItem(TOKEN_KEY, tok);
+export const clearToken = ()   => localStorage.removeItem(TOKEN_KEY);
 
-/* ============================================================
-   GLOBAL LOADING STATE
-   ============================================================ */
-const listeners = new Set();
-let activeRequests = 0;
+// ─── Global Loading State (pub/sub) ───────────────────────────────────────────
+let _activeRequests = 0;
+const _subscribers  = new Set();
 
-export const onLoadingChange = (fn) => {
-  listeners.add(fn);
-  return () => listeners.delete(fn);
-};
+function _setLoading(delta) {
+  _activeRequests = Math.max(0, _activeRequests + delta);
+  const isLoading = _activeRequests > 0;
+  _subscribers.forEach((fn) => fn(isLoading));
+}
 
-const setLoading = (isLoading) => {
-  listeners.forEach((fn) => fn(isLoading));
-};
+/**
+ * useLoading()
+ * Returns true while one or more API requests are in flight.
+ * Used by BottomLoadingBar in App.jsx.
+ */
+export function useLoading() {
+  const [loading, setLoading] = useState(false);
 
-/* ============================================================
-   AXIOS INSTANCE
-   ============================================================ */
+  useEffect(() => {
+    _subscribers.add(setLoading);
+    return () => _subscribers.delete(setLoading);
+  }, []);
+
+  return loading;
+}
+
+// ─── Axios Instance ───────────────────────────────────────────────────────────
 const api = axios.create({
-  baseURL: BASE_URL,
-  timeout: 120000,
-  headers: { "Content-Type": "application/json" },
+  baseURL:         BASE_URL,
+  timeout:         30_000,
+  headers:         { "Content-Type": "application/json" },
+  withCredentials: false,
 });
 
-/* ============================================================
-   REQUEST INTERCEPTOR (FIXED PROPERLY)
-   ============================================================ */
+// ── Request Interceptor ──────────────────────────────────────────────────────
 api.interceptors.request.use(
   (config) => {
+    // Attach Bearer token if available
     const token = getToken();
-
-    // ✅ PUBLIC ROUTES (NO TOKEN REQUIRED)
-    const publicRoutes = [
-      "/auth/login",
-      "/auth/register",
-      "/auth/signup",
-      "/auth/forgot-password",
-      "/auth/reset-password",
-    ];
-
-    const isPublic = publicRoutes.some((route) =>
-      config.url?.includes(route)
-    );
-
-    // 🚫 BLOCK ONLY PROTECTED ROUTES
-    if (!token && !isPublic) {
-      return Promise.reject({
-        message: "No auth token — request blocked",
-        __CANCEL__: true,
-      });
-    }
-
-    activeRequests++;
-    if (activeRequests === 1) setLoading(true);
-
-    // ✅ ATTACH TOKEN IF EXISTS
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
 
-    // DEBUG LOGIN (optional)
-    if (import.meta.env.DEV && config.url?.includes("/auth/login")) {
-      console.log("LOGIN REQUEST:", config.data);
-    }
-
-    if (import.meta.env.DEV) {
-      console.log(
-        `API ${config.method?.toUpperCase()} -> ${config.baseURL}${config.url}`
-      );
+    // Only count non-silent requests in the loading bar
+    if (!config._silent) {
+      _setLoading(+1);
     }
 
     return config;
   },
   (error) => {
-    activeRequests = Math.max(0, activeRequests - 1);
-    if (activeRequests === 0) setLoading(false);
+    _setLoading(-1);
     return Promise.reject(error);
   }
 );
 
-/* ============================================================
-   RESPONSE INTERCEPTOR
-   ============================================================ */
+// ── Response Interceptor ─────────────────────────────────────────────────────
 api.interceptors.response.use(
   (response) => {
-    activeRequests = Math.max(0, activeRequests - 1);
-    if (activeRequests === 0) setLoading(false);
+    if (!response.config._silent) _setLoading(-1);
     return response;
   },
   (error) => {
-    // ✅ IGNORE BLOCKED REQUESTS
-    if (error.__CANCEL__) {
-      return Promise.reject(error);
-    }
+    if (!error.config?._silent) _setLoading(-1);
 
-    activeRequests = Math.max(0, activeRequests - 1);
-    if (activeRequests === 0) setLoading(false);
-
-    const status = error.response?.status;
-    const contentType = error.response?.headers["content-type"];
-
-    if (contentType?.includes("text/html")) {
-      console.error("Received HTML instead of JSON. Check API URL.");
-    }
-
-    if (!error.response) {
-      console.error("Network error or backend unreachable.");
-      return Promise.reject(error);
-    }
-
-    // 🔐 AUTO LOGOUT ONLY ON 401
-    if (status === 401) {
-      console.warn("Session expired — logging out.");
-
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
-      sessionStorage.removeItem("token");
-      sessionStorage.removeItem("user");
-
-      if (window.location.pathname !== "/login") {
+    // 401 → token expired or invalid → force logout
+    if (error.response?.status === 401) {
+      clearToken();
+      // Avoid redirect loop if already on /login
+      if (!window.location.pathname.startsWith("/login")) {
         window.location.href = "/login";
+      }
+    }
+
+    // 422 validation errors — normalise detail array into a readable string
+    if (error.response?.status === 422) {
+      const detail = error.response.data?.detail;
+      if (Array.isArray(detail)) {
+        const msg = detail
+          .map((e) => {
+            const field = e.loc?.slice(-1)[0] ?? "field";
+            return `${field}: ${e.msg}`;
+          })
+          .join(" · ");
+        error.response.data._normalised = msg;
       }
     }
 
@@ -142,94 +119,37 @@ api.interceptors.response.use(
   }
 );
 
-/* ============================================================
-   HOOK — useLoading()
-   ============================================================ */
-export function useLoading() {
-  const [loading, setLoadingState] = useState(false);
+// ─── Convenience Wrappers ─────────────────────────────────────────────────────
+/**
+ * Silent GET — does not show the loading bar.
+ * Useful for background polling or badge counts.
+ */
+export const silentGet = (url, config = {}) =>
+  api.get(url, { ...config, _silent: true });
 
-  useEffect(() => {
-    const unsub = onLoadingChange(setLoadingState);
-    return unsub;
-  }, []);
+/**
+ * Upload helper — sets Content-Type to multipart automatically.
+ */
+export const upload = (url, formData, config = {}) =>
+  api.post(url, formData, {
+    ...config,
+    headers: { "Content-Type": "multipart/form-data", ...config.headers },
+  });
 
-  return loading;
+// ─── Error Message Extractor ──────────────────────────────────────────────────
+/**
+ * getErrorMessage(error)
+ * Returns a human-readable error string from an axios error object.
+ */
+export function getErrorMessage(error) {
+  if (!error) return "An unknown error occurred";
+  const data = error.response?.data;
+  if (!data) return error.message || "Network error";
+  if (data._normalised)                    return data._normalised;
+  if (typeof data.detail === "string")     return data.detail;
+  if (Array.isArray(data.detail))          return data.detail.map((e) => e.msg).join(", ");
+  if (typeof data.message === "string")    return data.message;
+  return "Request failed";
 }
 
-/* ============================================================
-   SKELETON COMPONENTS
-   ============================================================ */
-const shimmerKeyframe = `
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-  }
-`;
-
-const skBase = {
-  borderRadius: "8px",
-  background:
-    "linear-gradient(90deg, #e0e0e0 25%, #f5f5f5 50%, #e0e0e0 75%)",
-  backgroundSize: "200% 100%",
-  animation: "shimmer 1.4s infinite",
-};
-
-export function SkeletonLine({ width = "100%", height = "14px", style = {} }) {
-  return (
-    <>
-      <style>{shimmerKeyframe}</style>
-      <div style={{ width, height, ...skBase, ...style }} />
-    </>
-  );
-}
-
-export function SkeletonCard({ rows = 3, style = {} }) {
-  return (
-    <>
-      <style>{shimmerKeyframe}</style>
-      <div
-        style={{
-          background: "#fff",
-          border: "0.5px solid #eee",
-          borderRadius: "12px",
-          padding: "16px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "10px",
-          ...style,
-        }}
-      >
-        <div style={{ width: "50%", height: "16px", ...skBase }} />
-        {Array.from({ length: rows }).map((_, i) => (
-          <div
-            key={i}
-            style={{
-              width: i === rows - 1 ? "70%" : "100%",
-              height: "12px",
-              ...skBase,
-            }}
-          />
-        ))}
-      </div>
-    </>
-  );
-}
-
-export function SkeletonPage({ cards = 4 }) {
-  return (
-    <>
-      <style>{shimmerKeyframe}</style>
-      <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "12px" }}>
-        <div style={{ width: "180px", height: "24px", marginBottom: "8px", ...skBase }} />
-        {Array.from({ length: cards }).map((_, i) => (
-          <SkeletonCard key={i} rows={3} />
-        ))}
-      </div>
-    </>
-  );
-}
-
-/* ============================================================
-   EXPORT
-   ============================================================ */
 export default api;
