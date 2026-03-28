@@ -13,17 +13,24 @@ import requests
 import httpx
 import pandas as pd
 from datetime import datetime, date, timezone, timedelta
+
+# --- FIXED ROUTER IMPORTS ---
+# Added 'backend.' to invoicing to match the others
 from backend.quotations import router as quotation_router
 from backend.website_tracking import router as website_tracking_router
-from invoicing import router as invoicing_router
+from backend.invoicing import router as invoicing_router
+from backend.visits import router as visits_router
+from backend.leads import router as leads_router
+from backend.telegram import router as telegram_router
+from backend.notifications import router as notification_router, create_notification
+from backend.email_integration import router as email_router  
+
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from io import StringIO, BytesIO
 from typing import List, Optional, Dict, Any
 from dateutil import parser
 from contextlib import asynccontextmanager
-from backend.visits import router as visits_router
-
 
 # Single logger definition
 logger = logging.getLogger(__name__)
@@ -36,11 +43,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.gzip import GZipMiddleware
 from passlib.context import CryptContext
+
 # Validation
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator, ValidationError
 from bson import ObjectId
 from dotenv import load_dotenv
-# Backend Modules
+
+# --- BACKEND MODULE IMPORTS ---
 import backend.models as models
 from backend.models import (
     Token, User, UserCreate, UserLogin, UserPermissions,
@@ -67,10 +76,7 @@ from backend.dependencies import (
     verify_client_access,
     get_team_user_ids
 )
-from backend.leads import router as leads_router
-from backend.telegram import router as telegram_router
-from backend.notifications import router as notification_router, create_notification
-from backend.email_integration import router as email_router  # ← NEW: email integration
+
 # External Services
 from fpdf import FPDF
 from sendgrid import SendGridAPIClient
