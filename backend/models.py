@@ -53,6 +53,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_connect_email": True,
         "can_view_own_data": True,
         "can_create_quotations": True,
+        # ── Invoicing Module ─────────────────────────────────────────────────
+        "can_manage_invoices": True,
         # ── Password Repository ──────────────────────────────────────────────
         "can_view_passwords": True,
         "can_edit_passwords": True,
@@ -103,6 +105,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_connect_email": True,
         "can_view_own_data": True,
         "can_create_quotations": False,
+        # ── Invoicing Module ─────────────────────────────────────────────────
+        "can_manage_invoices": False,
         # ── Password Repository ──────────────────────────────────────────────
         "can_view_passwords": True,
         "can_edit_passwords": False,
@@ -153,6 +157,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_connect_email": True,
         "can_view_own_data": True,
         "can_create_quotations": False,
+        # ── Invoicing Module ─────────────────────────────────────────────────
+        "can_manage_invoices": False,
         # ── Password Repository ──────────────────────────────────────────────
         "can_view_passwords": False,
         "can_edit_passwords": False,
@@ -208,6 +214,11 @@ class UserPermissions(BaseModel):
     can_connect_email: bool = True
     can_view_own_data: bool = True
     can_create_quotations: bool = False
+    # ── Invoicing & Billing ──────────────────────────────────────────────────
+    # Grants access to: create/edit/delete invoices, record payments,
+    # download PDFs, manage product catalog.
+    # Admin always has this regardless of the flag.
+    can_manage_invoices: bool = False
     # ── Password Repository ──────────────────────────────────────────────────
     can_view_passwords: bool = False
     can_edit_passwords: bool = False
@@ -365,15 +376,12 @@ class Task(TaskBase):
 # ======================
 # ATTENDANCE
 # FIX: status is a plain str with no enum constraint.
-# The DB stores 'present', 'absent', 'leave', 'holiday', etc.
-# Removing any Literal/Enum restriction so 'leave' passes validation.
 # ======================
 class Attendance(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
     date: str
-    # FIX: plain str — no Literal/Enum — accepts 'leave', 'present', 'absent', etc.
     status: str = "absent"
     punch_in: Optional[Any] = None
     punch_out: Optional[Any] = None
@@ -385,12 +393,6 @@ class Attendance(BaseModel):
     @field_validator("status", mode="before")
     @classmethod
     def normalise_status(cls, v: Any) -> str:
-        """
-        FIX: Normalise legacy 'leave' → keep as 'leave'.
-        Accept any string that the DB may store.
-        This validator intentionally does NOT restrict values —
-        it only ensures the field is always a non-empty string.
-        """
         if v is None or v == "":
             return "absent"
         return str(v)
@@ -398,7 +400,6 @@ class Attendance(BaseModel):
     @field_validator("duration_minutes", mode="before")
     @classmethod
     def coerce_duration(cls, v: Any) -> int:
-        """FIX: duration_minutes may be None in old records; default to 0."""
         if v is None:
             return 0
         try:
@@ -548,8 +549,6 @@ class Reminder(BaseModel):
 
 # ======================
 # DOCUMENT MANAGEMENT
-# FIX: All date fields are Optional[Any] to avoid fromisoformat failures
-# on None / empty string values coming from MongoDB.
 # ======================
 class DocumentBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -568,10 +567,6 @@ class DocumentBase(BaseModel):
     @field_validator("issue_date", "valid_upto", mode="before")
     @classmethod
     def coerce_date_fields(cls, v: Any) -> Any:
-        """
-        FIX: Accept None, empty string, datetime, date, or ISO string.
-        Returns None for empty/invalid values so Pydantic never crashes.
-        """
         if v is None or v == "" or v == "null":
             return None
         if isinstance(v, (datetime, date)):
@@ -597,7 +592,6 @@ class Document(DocumentBase):
     @field_validator("created_at", mode="before")
     @classmethod
     def coerce_created_at(cls, v: Any) -> Any:
-        """FIX: Safely parse created_at from string or return None."""
         if v is None or v == "":
             return None
         if isinstance(v, datetime):
@@ -793,8 +787,6 @@ class Lead(LeadBase):
 
 # ======================
 # DUE DATES & REMINDERS
-# FIX: due_date and created_at validators added to handle
-# string/datetime/None safely and prevent 500 on creation.
 # ======================
 class DueDateBase(BaseModel):
     title: str
@@ -810,10 +802,6 @@ class DueDateBase(BaseModel):
     @field_validator("due_date", mode="before")
     @classmethod
     def coerce_due_date(cls, v: Any) -> Any:
-        """
-        FIX: Accept date, datetime, or ISO string.
-        Prevents 500 when frontend sends string dates.
-        """
         if v is None or v == "":
             raise ValueError("due_date is required")
         if isinstance(v, (date, datetime)):
@@ -823,7 +811,6 @@ class DueDateBase(BaseModel):
                 return datetime.fromisoformat(v)
             except ValueError:
                 pass
-            # Try date-only format
             try:
                 return date.fromisoformat(v)
             except ValueError:
@@ -843,7 +830,6 @@ class DueDateBase(BaseModel):
     @field_validator("department", mode="before")
     @classmethod
     def coerce_department(cls, v: Any) -> str:
-        """FIX: department must not be empty."""
         if v is None or str(v).strip() == "":
             raise ValueError("department is required")
         return str(v).strip()
