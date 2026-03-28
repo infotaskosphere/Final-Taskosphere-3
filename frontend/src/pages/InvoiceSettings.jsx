@@ -44,7 +44,7 @@ import { toast } from 'sonner';
 import {
   Settings, Building2, Hash, FileText, CreditCard, Palette,
   X, Save, RefreshCw, ChevronRight, Check, Copy, Landmark,
-  StickyNote, AlertCircle, Eye, EyeOff, RotateCcw,
+  StickyNote, AlertCircle, Eye, RotateCcw,
   Banknote, Smartphone, Shield, Pen, ChevronDown,
 } from 'lucide-react';
 import { COLOR_THEMES, INVOICE_TEMPLATES } from './InvoiceTemplates';
@@ -232,6 +232,7 @@ const TABS = [
   { id: 'defaults',  label: 'Defaults',   icon: StickyNote,sub: 'Terms & notes'     },
   { id: 'bank',      label: 'Bank / UPI', icon: Landmark,  sub: 'Payment details'   },
   { id: 'design',    label: 'Design',     icon: Palette,   sub: 'Template & theme'  },
+  { id: 'preview',   label: 'Preview',    icon: Eye,        sub: 'Live invoice mock' },
 ];
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -997,6 +998,268 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                     </div>
                   </>
                 )}
+
+                {/* ═══════════════════════════════════════════════════════
+                    TAB: PREVIEW
+                ════════════════════════════════════════════════════════ */}
+                {tab === 'preview' && (() => {
+                  // Resolve active brand color
+                  const activeTheme = (COLOR_THEMES || []).find(t => t.id === form.theme);
+                  const brandColor  = form.theme === 'custom'
+                    ? form.custom_color
+                    : (activeTheme?.primary || '#0D3B66');
+                  const brandLight  = form.theme === 'custom'
+                    ? form.custom_color + '18'
+                    : (activeTheme?.primary || '#0D3B66') + '18';
+                  const invoiceNum  = previewNumber(form, 'invoice');
+                  const today       = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+                  const dueDate     = new Date(Date.now() + (form.default_due_days || 30) * 86400000)
+                    .toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
+                  // Sample line items
+                  const sampleItems = [
+                    { desc: 'GST Return Filing (Monthly)',     qty: 1, unit: 'month',   price: 2500,  amt: 2500 },
+                    { desc: 'Income Tax Return — Individual',  qty: 1, unit: 'service', price: 3500,  amt: 3500 },
+                    { desc: 'Bookkeeping & Accounting',        qty: 3, unit: 'month',   price: 1500,  amt: 4500 },
+                  ];
+                  const subtotal  = sampleItems.reduce((s, i) => s + i.amt, 0);
+                  const gstAmt    = Math.round(subtotal * (form.default_gst_rate || 18) / 100);
+                  const total     = subtotal + gstAmt;
+                  const half      = form.default_gst_rate <= 18;  // CGST+SGST split if same state
+
+                  return (
+                    <div className="space-y-3">
+                      {/* Toolbar */}
+                      <div className={`flex items-center justify-between px-1`}>
+                        <p className={`text-xs font-semibold ${D ? 'text-slate-300' : 'text-slate-600'}`}>
+                          Live invoice mock — reflects your current settings
+                        </p>
+                        <span className={`text-[10px] px-2.5 py-1 rounded-full font-medium ${D ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-50 text-blue-600'}`}>
+                          Sample data only
+                        </span>
+                      </div>
+
+                      {/* A4 paper mock */}
+                      <div
+                        className="rounded-2xl overflow-hidden shadow-xl border mx-auto"
+                        style={{
+                          maxWidth: 640,
+                          background: '#fff',
+                          color: '#1e293b',
+                          fontFamily: 'system-ui, sans-serif',
+                          fontSize: 12,
+                          borderColor: D ? '#334155' : '#e2e8f0',
+                        }}
+                      >
+                        {/* ── Invoice header band ── */}
+                        <div style={{ background: brandColor, padding: '18px 24px 14px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            {/* Logo + company */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                              {selectedCompany?.logo_base64 ? (
+                                <img
+                                  src={selectedCompany.logo_base64}
+                                  alt="logo"
+                                  style={{ height: 48, maxWidth: 80, objectFit: 'contain', background: 'white', borderRadius: 8, padding: 4 }}
+                                />
+                              ) : (
+                                <div style={{ width: 48, height: 48, borderRadius: 8, background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <Building2 style={{ width: 22, height: 22, color: 'white', opacity: 0.7 }} />
+                                </div>
+                              )}
+                              <div>
+                                <div style={{ color: 'white', fontWeight: 700, fontSize: 15, lineHeight: 1.2 }}>
+                                  {selectedCompany?.name || 'Your Company Name'}
+                                </div>
+                                {selectedCompany?.gstin && (
+                                  <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: 10, marginTop: 2, fontFamily: 'monospace' }}>
+                                    GSTIN: {selectedCompany.gstin}
+                                  </div>
+                                )}
+                                {selectedCompany?.address && (
+                                  <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, marginTop: 1 }}>
+                                    {selectedCompany.address}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            {/* Document title */}
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ color: 'white', fontWeight: 800, fontSize: 18, letterSpacing: 1 }}>
+                                {form.invoice_title || 'Tax Invoice'}
+                              </div>
+                              <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: 11, marginTop: 4, fontFamily: 'monospace' }}>
+                                {invoiceNum}
+                              </div>
+                              <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, marginTop: 2 }}>
+                                Date: {today}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* ── Bill to / Due date row ── */}
+                        <div style={{ display: 'flex', gap: 0, borderBottom: `1px solid #e2e8f0` }}>
+                          <div style={{ flex: 1, padding: '12px 24px', borderRight: '1px solid #e2e8f0', background: brandLight }}>
+                            <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: brandColor, marginBottom: 4 }}>
+                              Bill To
+                            </div>
+                            <div style={{ fontWeight: 700, fontSize: 13 }}>Sample Client Pvt. Ltd.</div>
+                            <div style={{ color: '#64748b', fontSize: 10, marginTop: 2 }}>24 Business Park, Surat, Gujarat</div>
+                            <div style={{ color: '#64748b', fontSize: 10 }}>GSTIN: 24ABCDE1234F1Z5</div>
+                          </div>
+                          {form.show_due_date && (
+                            <div style={{ padding: '12px 24px', background: '#f8fafc', minWidth: 140 }}>
+                              <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: '#94a3b8', marginBottom: 4 }}>
+                                Due Date
+                              </div>
+                              <div style={{ fontWeight: 700, color: brandColor, fontSize: 13 }}>{dueDate}</div>
+                              <div style={{ color: '#94a3b8', fontSize: 10, marginTop: 2 }}>{form.default_payment_terms || 'Due within 30 days'}</div>
+                              {form.show_po_number && (
+                                <div style={{ color: '#94a3b8', fontSize: 10, marginTop: 4 }}>PO: PO-2025-001</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* ── Items table ── */}
+                        <div style={{ padding: '0 24px' }}>
+                          {/* Table header */}
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: form.show_hsn_column
+                              ? (form.show_discount_column ? '1fr 70px 60px 60px 70px 70px' : '1fr 70px 60px 70px 70px')
+                              : (form.show_discount_column ? '1fr 70px 60px 70px 70px' : '1fr 70px 60px 70px'),
+                            gap: 0,
+                            background: brandColor,
+                            marginLeft: -24, marginRight: -24,
+                            padding: '7px 24px',
+                            marginTop: 0,
+                          }}>
+                            {['Description', ...(form.show_hsn_column ? ['HSN/SAC'] : []), 'Qty', ...(form.show_discount_column ? ['Disc%'] : []), 'Rate', 'Amount'].map((h, i) => (
+                              <div key={h} style={{ color: 'white', fontWeight: 700, fontSize: 10, textAlign: i === 0 ? 'left' : 'right' }}>{h}</div>
+                            ))}
+                          </div>
+
+                          {/* Rows */}
+                          {sampleItems.map((item, idx) => (
+                            <div key={idx} style={{
+                              display: 'grid',
+                              gridTemplateColumns: form.show_hsn_column
+                                ? (form.show_discount_column ? '1fr 70px 60px 60px 70px 70px' : '1fr 70px 60px 70px 70px')
+                                : (form.show_discount_column ? '1fr 70px 60px 70px 70px' : '1fr 70px 60px 70px'),
+                              gap: 0,
+                              padding: '7px 0',
+                              borderBottom: '1px solid #f1f5f9',
+                              background: idx % 2 === 1 ? brandLight : 'white',
+                              marginLeft: -24, marginRight: -24,
+                              paddingLeft: 24, paddingRight: 24,
+                            }}>
+                              <div>
+                                <div style={{ fontWeight: 600, fontSize: 11 }}>{item.desc}</div>
+                                <div style={{ color: '#94a3b8', fontSize: 10 }}>{item.qty} {item.unit}</div>
+                              </div>
+                              {form.show_hsn_column && <div style={{ textAlign: 'right', color: '#64748b', fontSize: 10, paddingTop: 2 }}>998311</div>}
+                              <div style={{ textAlign: 'right', fontSize: 11, paddingTop: 2 }}>{item.qty}</div>
+                              {form.show_discount_column && <div style={{ textAlign: 'right', color: '#64748b', fontSize: 10, paddingTop: 2 }}>0%</div>}
+                              <div style={{ textAlign: 'right', fontSize: 11, paddingTop: 2 }}>₹{item.price.toLocaleString()}</div>
+                              <div style={{ textAlign: 'right', fontWeight: 600, fontSize: 11, paddingTop: 2 }}>₹{item.amt.toLocaleString()}</div>
+                            </div>
+                          ))}
+
+                          {/* Totals */}
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '12px 0 0' }}>
+                            <div style={{ minWidth: 220 }}>
+                              {[
+                                { label: 'Subtotal', val: `₹${subtotal.toLocaleString()}`, bold: false },
+                                ...(half
+                                  ? [
+                                      { label: `CGST @ ${(form.default_gst_rate || 18) / 2}%`, val: `₹${(gstAmt / 2).toLocaleString()}`, bold: false },
+                                      { label: `SGST @ ${(form.default_gst_rate || 18) / 2}%`, val: `₹${(gstAmt / 2).toLocaleString()}`, bold: false },
+                                    ]
+                                  : [{ label: `IGST @ ${form.default_gst_rate || 18}%`, val: `₹${gstAmt.toLocaleString()}`, bold: false }]
+                                ),
+                              ].map(row => (
+                                <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', gap: 24, padding: '3px 0', fontSize: 11, color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>
+                                  <span>{row.label}</span><span>{row.val}</span>
+                                </div>
+                              ))}
+                              {/* Grand total */}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24, padding: '8px 12px', marginTop: 4, background: brandColor, borderRadius: 8, color: 'white', fontWeight: 700, fontSize: 13 }}>
+                                <span>Total Payable</span>
+                                <span>₹{total.toLocaleString()}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* ── Bank details ── */}
+                        {form.show_bank_details && (form.bank_name || form.bank_account_no) && (
+                          <div style={{ margin: '16px 24px 0', padding: '10px 14px', background: brandLight, borderRadius: 10, borderLeft: `3px solid ${brandColor}` }}>
+                            <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: brandColor, marginBottom: 6 }}>Bank Details</div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 16px', fontSize: 10 }}>
+                              {[
+                                ['Account Name', form.bank_account_holder],
+                                ['Bank', form.bank_name],
+                                ['Account No.', form.bank_account_no],
+                                ['IFSC', form.bank_ifsc],
+                                ...(form.upi_id ? [['UPI', form.upi_id]] : []),
+                              ].filter(([, v]) => v).map(([label, val]) => (
+                                <div key={label} style={{ display: 'flex', gap: 4 }}>
+                                  <span style={{ color: '#94a3b8', minWidth: 70 }}>{label}:</span>
+                                  <span style={{ fontWeight: 600, fontFamily: 'monospace' }}>{val}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ── Notes ── */}
+                        {form.default_notes && (
+                          <div style={{ margin: '12px 24px 0', padding: '8px 12px', background: '#fffbeb', borderRadius: 8, fontSize: 10, color: '#92400e', borderLeft: '3px solid #fbbf24' }}>
+                            <strong>Note:</strong> {form.default_notes}
+                          </div>
+                        )}
+
+                        {/* ── Signature + footer ── */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', padding: '16px 24px 16px', marginTop: 12 }}>
+                          {/* Terms snippet */}
+                          <div style={{ fontSize: 9, color: '#94a3b8', maxWidth: 260 }}>
+                            {form.default_terms
+                              ? form.default_terms.slice(0, 120) + (form.default_terms.length > 120 ? '…' : '')
+                              : 'Goods once sold will not be taken back. Subject to local jurisdiction.'}
+                          </div>
+                          {/* Signature box */}
+                          {form.show_signature_box && (
+                            <div style={{ textAlign: 'center', minWidth: 140 }}>
+                              {selectedCompany?.signature_base64 ? (
+                                <img src={selectedCompany.signature_base64} alt="sig" style={{ height: 36, objectFit: 'contain', marginBottom: 4 }} />
+                              ) : (
+                                <div style={{ height: 36, borderBottom: `1.5px solid ${brandColor}`, marginBottom: 4, width: 130 }} />
+                              )}
+                              <div style={{ fontSize: 10, fontWeight: 700, color: '#1e293b' }}>
+                                {form.signatory_name || `For ${selectedCompany?.name || 'Company'}`}
+                              </div>
+                              <div style={{ fontSize: 9, color: '#94a3b8' }}>{form.signatory_label || 'Authorised Signatory'}</div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* ── Footer band ── */}
+                        <div style={{ background: brandColor, padding: '8px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: 10, fontStyle: 'italic' }}>
+                            {form.footer_line || 'Thank you for your business!'}
+                          </span>
+                          <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 9 }}>Page 1 of 1</span>
+                        </div>
+                      </div>
+
+                      <p className={`text-center text-[10px] ${D ? 'text-slate-500' : 'text-slate-400'}`}>
+                        Preview uses sample data. Actual invoice will use real client & item details.
+                      </p>
+                    </div>
+                  );
+                })()}
 
               </div>
               {/* ── END scrollable content ─────────────────────────────── */}
