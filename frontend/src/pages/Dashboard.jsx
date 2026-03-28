@@ -3,8 +3,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format, parseISO, isToday, isTomorrow, startOfDay } from 'date-fns';
+import { formatInTimeZone } from 'date-fns-tz';
 import { toast } from 'sonner';
-import RoleGuard from "@/RoleGuard";
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
 import { cn } from "@/lib/utils";
@@ -28,15 +28,47 @@ import {
   X, CheckCircle2, User as UserIcon, Tag, Layers, Star,
 } from 'lucide-react';
 
+// ── Timezone ──────────────────────────────────────────────────────────────────
+const IST_TIMEZONE = 'Asia/Kolkata';
+
 // ── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
-  deepBlue:    '#0D3B66',
-  mediumBlue:  '#1F6FB2',
-  emeraldGreen:'#1FAF5A',
-  lightGreen:  '#5CCB5F',
-  coral:       '#FF6B6B',
-  amber:       '#F59E0B',
+  deepBlue:     '#0D3B66',
+  mediumBlue:   '#1F6FB2',
+  emeraldGreen: '#1FAF5A',
+  lightGreen:   '#5CCB5F',
+  coral:        '#FF6B6B',
+  amber:        '#F59E0B',
 };
+
+// ── Inject Roboto Mono for clock ──────────────────────────────────────────────
+if (typeof document !== 'undefined' && !document.getElementById('roboto-mono-font')) {
+  const link = document.createElement('link');
+  link.id   = 'roboto-mono-font';
+  link.rel  = 'stylesheet';
+  link.href = 'https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;400;500;600;700&display=swap';
+  document.head.appendChild(link);
+}
+
+// ── Slim scrollbar ────────────────────────────────────────────────────────────
+const slimScroll = {
+  overflowY:      'auto',
+  scrollbarWidth: 'thin',
+  scrollbarColor: '#cbd5e1 transparent',
+};
+if (typeof document !== 'undefined' && !document.getElementById('dash-slim-scroll')) {
+  const s = document.createElement('style');
+  s.id = 'dash-slim-scroll';
+  s.textContent = `
+    .slim-scroll::-webkit-scrollbar { width: 3px; height: 3px; }
+    .slim-scroll::-webkit-scrollbar-track { background: transparent; }
+    .slim-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+    .slim-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    .dark .slim-scroll::-webkit-scrollbar-thumb { background: #475569; }
+    .dark .slim-scroll::-webkit-scrollbar-thumb:hover { background: #64748b; }
+  `;
+  document.head.appendChild(s);
+}
 
 // ── Spring Physics ────────────────────────────────────────────────────────────
 const springPhysics = {
@@ -70,48 +102,23 @@ const getPriorityStripeClass = (priority) => {
 
 // ── Visit Status meta ─────────────────────────────────────────────────────────
 const VISIT_STATUS_COLORS = {
-  scheduled:   { bg:'bg-blue-50 dark:bg-blue-900/30',    text:'text-blue-600 dark:text-blue-400',    dot:'bg-blue-500'    },
+  scheduled:   { bg:'bg-blue-50 dark:bg-blue-900/30',     text:'text-blue-600 dark:text-blue-400',     dot:'bg-blue-500'    },
   completed:   { bg:'bg-emerald-50 dark:bg-emerald-900/30',text:'text-emerald-600 dark:text-emerald-400',dot:'bg-emerald-500'},
-  missed:      { bg:'bg-orange-50 dark:bg-orange-900/20', text:'text-orange-500 dark:text-orange-400', dot:'bg-orange-400'  },
-  cancelled:   { bg:'bg-red-50 dark:bg-red-900/20',      text:'text-red-500 dark:text-red-400',      dot:'bg-red-500'     },
-  rescheduled: { bg:'bg-purple-50 dark:bg-purple-900/20', text:'text-purple-500 dark:text-purple-400', dot:'bg-purple-500'  },
+  missed:      { bg:'bg-orange-50 dark:bg-orange-900/20',  text:'text-orange-500 dark:text-orange-400', dot:'bg-orange-400'  },
+  cancelled:   { bg:'bg-red-50 dark:bg-red-900/20',        text:'text-red-500 dark:text-red-400',       dot:'bg-red-500'     },
+  rescheduled: { bg:'bg-purple-50 dark:bg-purple-900/20',  text:'text-purple-500 dark:text-purple-400', dot:'bg-purple-500'  },
 };
 
-// ── Slim scrollbar ────────────────────────────────────────────────────────────
-const slimScroll = {
-  overflowY:      'auto',
-  scrollbarWidth: 'thin',
-  scrollbarColor: '#cbd5e1 transparent',
-};
-if (typeof document !== 'undefined' && !document.getElementById('dash-slim-scroll')) {
-  const s = document.createElement('style');
-  s.id = 'dash-slim-scroll';
-  s.textContent = `
-    .slim-scroll::-webkit-scrollbar { width: 3px; height: 3px; }
-    .slim-scroll::-webkit-scrollbar-track { background: transparent; }
-    .slim-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
-    .slim-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-    .dark .slim-scroll::-webkit-scrollbar-thumb { background: #475569; }
-    .dark .slim-scroll::-webkit-scrollbar-thumb:hover { background: #64748b; }
-  `;
-  document.head.appendChild(s);
-}
-
-// ── Helper: is a task "visibly completed today or before" ────────────────────
-// A task should be hidden from the dashboard strips if:
-//  1. Its status is 'completed'  AND
-//  2. It was completed on a previous day (updated_at < start of today)
-//     OR we have no updated_at (treat as same-day, keep visible)
-// Tasks completed TODAY remain visible so the user gets feedback.
+// ── isTaskHiddenAsCompleted ───────────────────────────────────────────────────
 const isTaskHiddenAsCompleted = (task) => {
   if (task.status !== 'completed') return false;
-  if (!task.updated_at) return false; // no timestamp → keep visible
+  if (!task.updated_at) return false;
   const completedAt = new Date(task.updated_at);
   const todayStart  = startOfDay(new Date());
-  return completedAt < todayStart; // completed on a previous day → hide
+  return completedAt < todayStart;
 };
 
-// ── Sort tasks newest-first by created_at ─────────────────────────────────────
+// ── Sort tasks newest-first ───────────────────────────────────────────────────
 const sortNewestFirst = (arr) =>
   [...arr].sort((a, b) => {
     const da = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -120,11 +127,56 @@ const sortNewestFirst = (arr) =>
   });
 
 // ══════════════════════════════════════════════════════════════════════════════
+// LIVE CLOCK (moved from Attendance)
+// ══════════════════════════════════════════════════════════════════════════════
+function LiveClock({ compact = false }) {
+  const [time, setTime] = useState(new Date());
+  useEffect(() => {
+    const id = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const timeStr = formatInTimeZone(time, IST_TIMEZONE, 'hh:mm:ss');
+  const ampm    = formatInTimeZone(time, IST_TIMEZONE, 'a');
+  const dateStr = formatInTimeZone(time, IST_TIMEZONE, 'EEEE, MMM d');
+
+  if (compact) {
+    return (
+      <div className="flex flex-col items-end select-none">
+        <div className="flex items-end gap-1.5">
+          <span
+            className="font-black leading-none tracking-tight text-white"
+            style={{ fontSize: '1.75rem', fontFamily: "'Roboto Mono', monospace" }}
+          >
+            {timeStr}
+          </span>
+          <span className="text-blue-200 font-bold text-sm mb-0.5">{ampm}</span>
+        </div>
+        <p className="text-blue-200/70 text-xs font-medium mt-0.5">{dateStr} · IST</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-center justify-center text-white select-none">
+      <div className="flex items-end gap-2">
+        <span
+          className="font-black leading-none tracking-tight"
+          style={{ fontSize: '2.8rem', fontFamily: "'Roboto Mono', monospace" }}
+        >
+          {timeStr}
+        </span>
+        <span className="text-blue-200 font-bold text-xl mb-1.5">{ampm}</span>
+      </div>
+      <p className="text-blue-200/80 text-sm font-medium mt-1">{dateStr} · IST</p>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // DETAIL MODAL PRIMITIVES
 // ══════════════════════════════════════════════════════════════════════════════
-
 function DetailModal({ onClose, headerGradient, headerIcon, headerEyebrow, headerTitle, children, footer, isDark }) {
-  // Close on Escape key
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', handler);
@@ -150,7 +202,6 @@ function DetailModal({ onClose, headerGradient, headerIcon, headerEyebrow, heade
         }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="px-6 py-5 relative overflow-hidden" style={{ background: headerGradient }}>
           <div className="absolute right-0 top-0 w-48 h-48 rounded-full -mr-16 -mt-16 opacity-10"
             style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
@@ -170,13 +221,9 @@ function DetailModal({ onClose, headerGradient, headerIcon, headerEyebrow, heade
             </button>
           </div>
         </div>
-
-        {/* Body */}
         <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto slim-scroll" style={slimScroll}>
           {children}
         </div>
-
-        {/* Footer */}
         {footer && (
           <div className="px-6 py-4 flex items-center gap-2 flex-wrap"
             style={{ borderTop: isDark ? '1px solid #334155' : '1px solid #f1f5f9', background: isDark ? 'rgba(255,255,255,0.02)' : '#fafafa' }}>
@@ -200,8 +247,7 @@ function Chip({ label, color }) {
 function MetaRow({ iconBg, iconColor, icon: Icon, label, value, valueColor, isDark }) {
   return (
     <div className="flex items-center gap-3">
-      <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-        style={{ background: iconBg }}>
+      <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: iconBg }}>
         <Icon size={13} style={{ color: iconColor }} />
       </div>
       <div>
@@ -241,7 +287,7 @@ function FooterBtn({ onClick, color, icon: Icon, label, muted, isDark }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// 1. TASK DETAIL MODAL
+// DETAIL MODALS
 // ══════════════════════════════════════════════════════════════════════════════
 function TaskDetailModal({ task, onClose, onUpdateStatus, navigate, isDark }) {
   if (!task) return null;
@@ -280,11 +326,9 @@ function TaskDetailModal({ task, onClose, onUpdateStatus, navigate, isDark }) {
         {task.priority && <Chip label={task.priority} color={pColor} />}
         {task.category && <Chip label={task.category} color={COLORS.amber} />}
       </div>
-
       <NoteBlock isDark={isDark} label="Description" text={task.description} />
-
       <div className="space-y-3">
-        {(task.assigned_to_name || task.assigned_by_name) && (
+        {task.assigned_to_name && (
           <MetaRow isDark={isDark} icon={UserIcon} iconBg={isDark ? 'rgba(31,111,178,0.2)' : `${COLORS.mediumBlue}12`} iconColor={COLORS.mediumBlue}
             label="Assigned To" value={task.assigned_to_name || task.assigned_to} />
         )}
@@ -309,9 +353,6 @@ function TaskDetailModal({ task, onClose, onUpdateStatus, navigate, isDark }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// 2. DEADLINE DETAIL MODAL
-// ══════════════════════════════════════════════════════════════════════════════
 function DeadlineDetailModal({ due, onClose, navigate, isDark }) {
   if (!due) return null;
   const daysLeft = due.days_remaining ?? 0;
@@ -339,9 +380,7 @@ function DeadlineDetailModal({ due, onClose, navigate, isDark }) {
         {due.department && <Chip label={due.department} color={COLORS.amber} />}
         {due.status     && <Chip label={due.status}     color="#94A3B8" />}
       </div>
-
       <NoteBlock isDark={isDark} text={due.description} />
-
       <div className="space-y-3">
         {due.due_date && (
           <MetaRow isDark={isDark} icon={CalendarIcon}
@@ -365,9 +404,6 @@ function DeadlineDetailModal({ due, onClose, navigate, isDark }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// 3. VISIT DETAIL MODAL
-// ══════════════════════════════════════════════════════════════════════════════
 function VisitDetailModal({ visit, onClose, navigate, isDark }) {
   if (!visit) return null;
   const sc  = VISIT_STATUS_COLORS[visit.status] || VISIT_STATUS_COLORS.scheduled;
@@ -394,10 +430,8 @@ function VisitDetailModal({ visit, onClose, navigate, isDark }) {
         {isT && <Chip label="Today" color={COLORS.emeraldGreen} />}
         {visit.recurrence && visit.recurrence !== 'none' && <Chip label={visit.recurrence} color="#8B5CF6" />}
       </div>
-
       <NoteBlock isDark={isDark} label="Purpose" text={visit.purpose} />
       {visit.notes && <NoteBlock isDark={isDark} label="Notes" text={visit.notes} />}
-
       <div className="space-y-3">
         {visit.visit_date && (
           <MetaRow isDark={isDark} icon={CalendarIcon}
@@ -429,9 +463,6 @@ function VisitDetailModal({ visit, onClose, navigate, isDark }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// 4. TODO DETAIL MODAL
-// ══════════════════════════════════════════════════════════════════════════════
 function TodoDetailModal({ todo, onClose, onToggle, onDelete, isDark }) {
   if (!todo) return null;
   const isCompleted = todo.completed || todo.is_completed === true || todo.status === 'completed';
@@ -465,7 +496,6 @@ function TodoDetailModal({ todo, onClose, onToggle, onDelete, isDark }) {
           color={isCompleted ? COLORS.emeraldGreen : isOD ? COLORS.coral : '#94A3B8'} />
         {todo.due_date && <Chip label={isOD ? 'Overdue' : `Due ${safeDate(todo.due_date)}`} color={isOD ? COLORS.coral : COLORS.amber} />}
       </div>
-
       <div className="space-y-3">
         {todo.due_date && (
           <MetaRow isDark={isDark} icon={CalendarIcon}
@@ -483,9 +513,6 @@ function TodoDetailModal({ todo, onClose, onToggle, onDelete, isDark }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// 5. PERFORMER DETAIL MODAL
-// ══════════════════════════════════════════════════════════════════════════════
 function PerformerDetailModal({ member, index, period, onClose, isDark }) {
   if (!member) return null;
   const isGold   = index === 0;
@@ -524,9 +551,7 @@ function PerformerDetailModal({ member, index, period, onClose, isDark }) {
         <Chip label={member.badge || 'Good Performer'} color={isGold ? '#D97706' : isSilver ? '#6B7280' : isBronze ? '#92400E' : COLORS.mediumBlue} />
         <Chip label={`Score: ${member.overall_score}%`} color={COLORS.emeraldGreen} />
       </div>
-
-      <div className="rounded-xl overflow-hidden border"
-        style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+      <div className="rounded-xl overflow-hidden border" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
         <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400"
           style={{ background: isDark ? 'rgba(255,255,255,0.03)' : '#f8fafc' }}>
           Performance Breakdown
@@ -551,8 +576,6 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate, onSel
   const status       = task.status || 'pending';
   const isCompleted  = status === 'completed';
   const isInProgress = status === 'in_progress';
-
-  // Badge for "New" — created within last 24 hours
   const isNew = task.created_at && (Date.now() - new Date(task.created_at).getTime()) < 86_400_000;
 
   return (
@@ -570,7 +593,6 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate, onSel
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0 flex items-start gap-1.5">
-          {/* "New" badge */}
           {isNew && !isCompleted && (
             <span className="flex-shrink-0 mt-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-blue-500 text-white leading-none">
               NEW
@@ -621,9 +643,7 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate, onSel
         {task.due_date && (
           <span>· Due: <span className="text-amber-600 dark:text-amber-400 font-medium">{format(new Date(task.due_date), 'MMM d, yyyy')}</span></span>
         )}
-        {isCompleted && (
-          <span className="text-emerald-500 font-medium">· ✓ Completed today</span>
-        )}
+        {isCompleted && <span className="text-emerald-500 font-medium">· ✓ Completed today</span>}
       </div>
     </motion.div>
   );
@@ -647,7 +667,6 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
         <div>
           <div className="flex items-center gap-2">
             <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">{title}</h3>
-            {/* Count badge */}
             {badge !== undefined && badge > 0 && (
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500 text-white leading-none">
                 {badge}
@@ -675,7 +694,6 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit }) {
     onError: () => {},
   });
 
-  // Sort: today's visits first, then by date
   const visits = useMemo(() => {
     const filtered = allVisits.filter(v => v.assigned_to === currentUserId);
     return [...filtered].sort((a, b) => {
@@ -718,13 +736,21 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit }) {
           </div>
         ) : isError ? (
           <div className="text-center py-7 space-y-3">
-            <div className="flex justify-center"><div className={`p-3 rounded-xl ${isDark ? 'bg-slate-700' : 'bg-slate-50'}`}><MapPin className="h-6 w-6 text-slate-300 dark:text-slate-500" /></div></div>
+            <div className="flex justify-center">
+              <div className={`p-3 rounded-xl ${isDark ? 'bg-slate-700' : 'bg-slate-50'}`}>
+                <MapPin className="h-6 w-6 text-slate-300 dark:text-slate-500" />
+              </div>
+            </div>
             <p className={`text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Visit module not connected yet</p>
             <p className={`text-xs ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>Add the visits router to your backend</p>
           </div>
         ) : visits.length === 0 ? (
           <div className="text-center py-7 space-y-3">
-            <div className="flex justify-center"><div className={`p-3 rounded-xl ${isDark ? 'bg-slate-700' : 'bg-slate-50'}`}><MapPin className="h-6 w-6 text-slate-300 dark:text-slate-500" /></div></div>
+            <div className="flex justify-center">
+              <div className={`p-3 rounded-xl ${isDark ? 'bg-slate-700' : 'bg-slate-50'}`}>
+                <MapPin className="h-6 w-6 text-slate-300 dark:text-slate-500" />
+              </div>
+            </div>
             <p className={`text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No visits in next 7 days</p>
             <Button size="sm" onClick={() => navigate('/visits?action=new')} className="rounded-xl text-white text-xs"
               style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
@@ -751,7 +777,6 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit }) {
                         : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 hover:border-slate-300 dark:hover:border-slate-600'
                     }`}
                   >
-                    {/* Date column */}
                     <div className="flex-shrink-0 w-12 text-center">
                       <div className={`rounded-lg overflow-hidden border ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
                         <div className="py-0.5 text-[8px] font-bold text-white uppercase"
@@ -765,7 +790,6 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit }) {
                         </div>
                       </div>
                     </div>
-                    {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-1">
                         <p className={`font-semibold text-sm truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{v.client_name || '—'}</p>
@@ -792,8 +816,12 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit }) {
       {visits.length > 0 && (
         <div className={`px-4 py-2 border-t flex items-center justify-between ${isDark ? 'border-slate-700 bg-slate-800/50' : 'border-slate-100 bg-slate-50/50'}`}>
           <div className="flex items-center gap-3">
-            {visits.filter(v => v.status === 'scheduled').length > 0 && <span className="text-xs font-semibold text-blue-500">{visits.filter(v => v.status === 'scheduled').length} Scheduled</span>}
-            {visits.filter(v => v.status === 'completed').length > 0 && <span className="text-xs font-semibold text-emerald-500">{visits.filter(v => v.status === 'completed').length} Completed</span>}
+            {visits.filter(v => v.status === 'scheduled').length > 0 && (
+              <span className="text-xs font-semibold text-blue-500">{visits.filter(v => v.status === 'scheduled').length} Scheduled</span>
+            )}
+            {visits.filter(v => v.status === 'completed').length > 0 && (
+              <span className="text-xs font-semibold text-emerald-500">{visits.filter(v => v.status === 'completed').length} Completed</span>
+            )}
           </div>
           <button onClick={() => navigate('/visits')} className={`text-xs font-semibold flex items-center gap-0.5 hover:underline ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>
             Full Plan <ChevronRight className="h-3 w-3" />
@@ -805,7 +833,7 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MAIN DASHBOARD COMPONENT
+// MAIN DASHBOARD
 // ══════════════════════════════════════════════════════════════════════════════
 export default function Dashboard() {
   const { user, hasPermission } = useAuth();
@@ -821,7 +849,6 @@ export default function Dashboard() {
   const [mustPunchIn,       setMustPunchIn]       = useState(false);
   const [actionDone,        setActionDone]        = useState(false);
 
-  // Modal state
   const [selectedTask,      setSelectedTask]      = useState(null);
   const [selectedDeadline,  setSelectedDeadline]  = useState(null);
   const [selectedVisit,     setSelectedVisit]     = useState(null);
@@ -880,44 +907,25 @@ export default function Dashboard() {
   );
   const pendingTodos = useMemo(() => todos.filter(todo => !todo.completed), [todos]);
 
-  // ── TASK FILTERING — newest first, completed-yesterday+ tasks hidden ──────
-  //
-  // "Tasks Assigned to Me" strip:
-  //   - exclude tasks hidden as completed (completed before today)
-  //   - tasks completed TODAY remain visible with a "✓ Completed today" label
-  //   - sort newest created_at first
-  //   - cap at 6
   const tasksAssignedToMe = useMemo(() => {
     const filtered = tasks.filter(t =>
-      t.assigned_to === user?.id &&
-      !isTaskHiddenAsCompleted(t)          // hide if completed before today
+      t.assigned_to === user?.id && !isTaskHiddenAsCompleted(t)
     );
     return sortNewestFirst(filtered).slice(0, 6);
   }, [tasks, user?.id]);
 
-  // "Tasks Assigned by Me" strip:
-  //   - same hidden-completed rule
-  //   - exclude tasks assigned to self (those appear above)
-  //   - newest first, cap at 6
   const tasksAssignedByMe = useMemo(() => {
     const filtered = tasks.filter(t =>
-      t.created_by === user?.id &&
-      t.assigned_to !== user?.id &&
-      !isTaskHiddenAsCompleted(t)
+      t.created_by === user?.id && t.assigned_to !== user?.id && !isTaskHiddenAsCompleted(t)
     );
     return sortNewestFirst(filtered).slice(0, 6);
   }, [tasks, user?.id]);
 
-  // "Recent Tasks" card (top-center panel):
-  //   - ALL tasks (not filtered by user), newest first
-  //   - exclude tasks completed before today
-  //   - cap at 5
   const recentTasks = useMemo(() => {
     const filtered = tasks.filter(t => !isTaskHiddenAsCompleted(t));
     return sortNewestFirst(filtered).slice(0, 5);
   }, [tasks]);
 
-  // Overdue deadlines float to top
   const sortedDueDates = useMemo(() => {
     return [...upcomingDueDates].sort((a, b) => {
       const aOD = (a.days_remaining ?? 0) <= 0 ? 0 : 1;
@@ -1004,7 +1012,9 @@ export default function Dashboard() {
     try {
       await api.post('/attendance', { action });
       toast.success(action === 'punch_in' ? 'Punched in successfully!' : 'Punched out successfully!');
-      if (action === 'punch_in') { setActionDone(true); setMustPunchIn(false); document.body.style.overflow = 'auto'; }
+      if (action === 'punch_in') {
+        setActionDone(true); setMustPunchIn(false); document.body.style.overflow = 'auto';
+      }
       await queryClient.refetchQueries({ queryKey: ['todayAttendance'] });
       await queryClient.refetchQueries({ queryKey: ['holidays'] });
     } catch (err) {
@@ -1012,7 +1022,7 @@ export default function Dashboard() {
     } finally { setLoading(false); }
   };
 
-  // ── Utility helpers ───────────────────────────────────────────────────────
+  // ── Utilities ─────────────────────────────────────────────────────────────
   const getTodayDuration = () => {
     if (!todayAttendance?.punch_in) return '0h 0m';
     if (todayAttendance.punch_out) {
@@ -1065,6 +1075,14 @@ export default function Dashboard() {
     if (!dateString) return '--:--';
     const d = new Date(dateString.endsWith('Z') ? dateString : dateString + 'Z');
     return format(d, 'hh:mm a');
+  };
+
+  const getGreeting = () => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good Morning';
+    if (h < 17) return 'Good Afternoon';
+    if (h < 21) return 'Good Evening';
+    return 'Working Late';
   };
 
   // ── Ranking Item ──────────────────────────────────────────────────────────
@@ -1127,14 +1145,7 @@ export default function Dashboard() {
     );
   });
 
-  const getGreeting = () => {
-    const h = new Date().getHours();
-    if (h < 12) return 'Good Morning ☀️';
-    if (h < 17) return 'Good Afternoon 🌤️';
-    if (h < 21) return 'Good Evening 🌆';
-    return 'Working Late? 🌙';
-  };
-
+  // ── Punch gate effect ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!todayAttendance) { setMustPunchIn(false); document.body.style.overflow = 'auto'; return; }
     if (actionDone)                             { setMustPunchIn(false); document.body.style.overflow = 'auto'; return; }
@@ -1150,10 +1161,12 @@ export default function Dashboard() {
   const metricCardCls     = 'rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border';
   const metricCardDefault = isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200/80 hover:border-slate-300';
 
-  // ── JSX ───────────────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════════
+  // RENDER
+  // ══════════════════════════════════════════════════════════════════════════
   return (
     <>
-      {/* ── DETAIL MODALS ─────────────────────────────────────────────────── */}
+      {/* ── DETAIL MODALS ──────────────────────────────────────────────────── */}
       <AnimatePresence>
         {selectedTask && (
           <TaskDetailModal isDark={isDark} task={selectedTask}
@@ -1190,29 +1203,53 @@ export default function Dashboard() {
 
       <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
 
-        {/* ── Welcome Banner ────────────────────────────────────────────────── */}
+        {/* ── WELCOME BANNER (with LiveClock) ───────────────────────────────── */}
         <motion.div variants={itemVariants}>
-          <div className="relative overflow-hidden rounded-2xl px-6 py-5"
-            style={{ background:`linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow:`0 8px 32px rgba(13,59,102,0.28)` }}>
+          <div
+            className="relative overflow-hidden rounded-2xl px-6 py-5"
+            style={{
+              background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
+              boxShadow: `0 8px 32px rgba(13,59,102,0.28)`,
+            }}
+          >
+            {/* Decorative circles */}
             <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
-              style={{ background:'radial-gradient(circle, white 0%, transparent 70%)' }} />
-            <div className="absolute right-24 bottom-0 w-32 h-32 rounded-full mb-[-30px] opacity-5" style={{ background:'white' }} />
-            <div className="relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-              <div>
-                <p className="text-white/60 text-xs font-medium uppercase tracking-widest mb-1">{format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
+              style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+            <div className="absolute right-24 bottom-0 w-32 h-32 rounded-full mb-[-30px] opacity-5"
+              style={{ background: 'white' }} />
+
+            <div className="relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-5">
+              {/* Left: greeting */}
+              <div className="flex-1 min-w-0">
+                <p className="text-white/60 text-xs font-medium uppercase tracking-widest mb-1">
+                  {format(new Date(), 'EEEE, MMMM d, yyyy')}
+                </p>
                 <h1 className="text-2xl font-bold text-white tracking-tight">
-                  Welcome back, {user?.full_name?.split(' ')[0] || 'User'} 👋
+                  Welcome back, {user?.full_name?.split(' ')[0] || 'User'}
                 </h1>
                 <p className="text-white/60 text-sm mt-1">
-                  {todayIsHoliday ? `🎉 Today is a holiday${todayHolidayName ? ` — ${todayHolidayName}` : ''}. Have a great day!` : "Here's your business overview for today."}
+                  {todayIsHoliday
+                    ? `Today is a holiday${todayHolidayName ? ` — ${todayHolidayName}` : ''}. Office closed.`
+                    : "Here's your business overview for today."}
                 </p>
               </div>
+
+              {/* Center: clock */}
+              <div className="hidden md:block">
+                <LiveClock compact />
+              </div>
+
+              {/* Right: next deadline */}
               {nextDeadline && (
-                <motion.div whileHover={{ scale:1.03, y:-2, transition:springPhysics.card }}
-                  className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all"
-                  style={{ background:'rgba(255,255,255,0.12)', border:'1px solid rgba(255,255,255,0.18)', backdropFilter:'blur(8px)' }}
-                  onClick={() => setSelectedDeadline(nextDeadline)}>
-                  <div className="p-2 rounded-lg bg-white/15"><CalendarIcon className="h-4 w-4 text-white" /></div>
+                <motion.div
+                  whileHover={{ scale: 1.03, y: -2, transition: springPhysics.card }}
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all flex-shrink-0"
+                  style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.18)', backdropFilter: 'blur(8px)' }}
+                  onClick={() => setSelectedDeadline(nextDeadline)}
+                >
+                  <div className="p-2 rounded-lg bg-white/15">
+                    <CalendarIcon className="h-4 w-4 text-white" />
+                  </div>
                   <div>
                     <p className="text-white/60 text-xs font-medium uppercase tracking-wider">Next Deadline</p>
                     <p className="font-bold text-white text-sm mt-0.5">
@@ -1226,8 +1263,10 @@ export default function Dashboard() {
           </div>
         </motion.div>
 
-        {/* ── Key Metrics ───────────────────────────────────────────────────── */}
+        {/* ── KEY METRICS ───────────────────────────────────────────────────── */}
         <motion.div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3" variants={itemVariants}>
+
+          {/* Total Tasks */}
           <motion.div whileHover={{ y:-3, transition:springPhysics.card }} whileTap={{ scale:0.985 }} onClick={() => navigate('/tasks')} className={`${metricCardCls} ${metricCardDefault}`}>
             <CardContent className="p-4">
               <div className="flex items-start justify-between">
@@ -1245,16 +1284,17 @@ export default function Dashboard() {
             </CardContent>
           </motion.div>
 
+          {/* Overdue */}
           <motion.div whileHover={{ y:-3, transition:springPhysics.card }} whileTap={{ scale:0.985 }} onClick={() => navigate('/tasks?filter=overdue')}
             className={`${metricCardCls} ${stats?.overdue_tasks > 0 ? isDark ? 'bg-red-900/20 border-red-800 hover:border-red-700' : 'bg-red-50/60 border-red-200 hover:border-red-300' : metricCardDefault}`}>
             <CardContent className="p-4">
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Overdue</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color:COLORS.coral }}>{stats?.overdue_tasks || 0}</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.coral }}>{stats?.overdue_tasks || 0}</p>
                 </div>
-                <div className="p-2 rounded-xl group-hover:scale-110 transition-transform" style={{ backgroundColor:`${COLORS.coral}18` }}>
-                  <AlertCircle className="h-4 w-4" style={{ color:COLORS.coral }} />
+                <div className="p-2 rounded-xl group-hover:scale-110 transition-transform" style={{ backgroundColor: `${COLORS.coral}18` }}>
+                  <AlertCircle className="h-4 w-4" style={{ color: COLORS.coral }} />
                 </div>
               </div>
               <div className={`flex items-center gap-1 mt-3 text-xs font-medium group-hover:text-red-500 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -1263,23 +1303,26 @@ export default function Dashboard() {
             </CardContent>
           </motion.div>
 
+          {/* Completion */}
           <motion.div whileHover={{ y:-3, transition:springPhysics.card }} whileTap={{ scale:0.985 }} onClick={() => navigate('/tasks')} className={`${metricCardCls} ${metricCardDefault}`}>
             <CardContent className="p-4">
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Completion</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color:COLORS.emeraldGreen }}>{completionRate}%</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.emeraldGreen }}>{completionRate}%</p>
                 </div>
-                <div className="p-2 rounded-xl group-hover:scale-110 transition-transform" style={{ backgroundColor:`${COLORS.emeraldGreen}12` }}>
-                  <TrendingUp className="h-4 w-4" style={{ color:COLORS.emeraldGreen }} />
+                <div className="p-2 rounded-xl group-hover:scale-110 transition-transform" style={{ backgroundColor: `${COLORS.emeraldGreen}12` }}>
+                  <TrendingUp className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />
                 </div>
               </div>
               <div className={`mt-2.5 h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                <div className="h-full rounded-full transition-all duration-700" style={{ width:`${completionRate}%`, background:`linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})` }} />
+                <div className="h-full rounded-full transition-all duration-700"
+                  style={{ width:`${completionRate}%`, background:`linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})` }} />
               </div>
             </CardContent>
           </motion.div>
 
+          {/* DSC Alerts */}
           <motion.div whileHover={{ y:-3, transition:springPhysics.card }} whileTap={{ scale:0.985 }} onClick={() => navigate('/dsc?tab=expired')}
             className={`${metricCardCls} ${stats?.expiring_dsc_count > 0 ? isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50/50 border-red-200' : metricCardDefault}`}>
             <CardContent className="p-4">
@@ -1296,15 +1339,16 @@ export default function Dashboard() {
             </CardContent>
           </motion.div>
 
+          {/* Today */}
           <motion.div whileHover={{ y:-3, transition:springPhysics.card }} whileTap={{ scale:0.985 }} onClick={() => navigate('/attendance')} className={`${metricCardCls} ${metricCardDefault}`}>
             <CardContent className="p-4">
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Today</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: isDark ? '#fbbf24' : COLORS.deepBlue }}>{todayIsHoliday ? '🎉' : getTodayDuration()}</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: isDark ? '#fbbf24' : COLORS.deepBlue }}>{todayIsHoliday ? 'Holiday' : getTodayDuration()}</p>
                 </div>
-                <div className="p-2 rounded-xl group-hover:scale-110 transition-transform" style={{ backgroundColor:`${COLORS.amber}18` }}>
-                  <Clock className="h-4 w-4" style={{ color:COLORS.amber }} />
+                <div className="p-2 rounded-xl group-hover:scale-110 transition-transform" style={{ backgroundColor: `${COLORS.amber}18` }}>
+                  <Clock className="h-4 w-4" style={{ color: COLORS.amber }} />
                 </div>
               </div>
               <div className={`flex items-center gap-1 mt-3 text-xs font-medium group-hover:text-amber-500 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -1315,7 +1359,7 @@ export default function Dashboard() {
           </motion.div>
         </motion.div>
 
-        {/* ── Recent Tasks + Deadlines + Attendance ─────────────────────────── */}
+        {/* ── RECENT TASKS + DEADLINES + ATTENDANCE ─────────────────────────── */}
         <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-3" variants={itemVariants}>
 
           {/* Recent Tasks */}
@@ -1366,7 +1410,7 @@ export default function Dashboard() {
             </div>
           </SectionCard>
 
-          {/* Upcoming Deadlines — overdue floated to top */}
+          {/* Upcoming Deadlines */}
           <SectionCard>
             <CardHeaderRow
               iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
@@ -1419,10 +1463,13 @@ export default function Dashboard() {
             <div className="p-3">
               {todayIsHoliday ? (
                 <div className="rounded-xl px-4 py-4 text-center"
-                  style={{ background: isDark ? 'linear-gradient(135deg, rgba(245,158,11,0.15), rgba(245,158,11,0.05))' : 'linear-gradient(135deg, #FFFBEB, #FEF3C7)', border: isDark ? '1px solid rgba(245,158,11,0.25)' : '1px solid #FDE68A' }}>
-                  <p className="text-2xl mb-1">🎉</p>
+                  style={{
+                    background: isDark ? 'linear-gradient(135deg, rgba(245,158,11,0.15), rgba(245,158,11,0.05))' : 'linear-gradient(135deg, #FFFBEB, #FEF3C7)',
+                    border: isDark ? '1px solid rgba(245,158,11,0.25)' : '1px solid #FDE68A',
+                  }}>
+                  <p className="text-2xl mb-1">—</p>
                   <p className={`font-bold text-sm ${isDark ? 'text-amber-300' : 'text-amber-800'}`}>{todayHolidayName || 'Holiday Today'}</p>
-                  <p className={`text-xs mt-1 ${isDark ? 'text-amber-400/70' : 'text-amber-600'}`}>Office is closed. Enjoy your day!</p>
+                  <p className={`text-xs mt-1 ${isDark ? 'text-amber-400/70' : 'text-amber-600'}`}>Office is closed today.</p>
                   {!todayAttendance?.punch_in && (
                     <button onClick={() => handlePunchAction('punch_in')} disabled={loading}
                       className={`mt-3 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${isDark ? 'text-amber-300 border border-amber-700 hover:bg-amber-900/30' : 'text-amber-700 border border-amber-300 hover:bg-amber-50'}`}>
@@ -1442,25 +1489,38 @@ export default function Dashboard() {
                   {todayAttendance?.punch_in ? (
                     <>
                       <div className={`flex items-center justify-between px-3 py-2.5 rounded-xl border ${isDark ? 'bg-emerald-900/20 border-emerald-800' : 'bg-green-50 border-green-200'}`}>
-                        <div className={`flex items-center gap-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}><LogIn className="h-4 w-4 text-green-500" /><span className="font-medium">Punch In</span></div>
+                        <div className={`flex items-center gap-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                          <LogIn className="h-4 w-4 text-green-500" />
+                          <span className="font-medium">Punch In</span>
+                        </div>
                         <span className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{formatToLocalTime(todayAttendance.punch_in)}</span>
                       </div>
                       {todayAttendance.punch_out ? (
                         <div className={`flex items-center justify-between px-3 py-2.5 rounded-xl border ${isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-200'}`}>
-                          <div className={`flex items-center gap-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}><LogOut className="h-4 w-4 text-red-500" /><span className="font-medium">Punch Out</span></div>
+                          <div className={`flex items-center gap-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                            <LogOut className="h-4 w-4 text-red-500" />
+                            <span className="font-medium">Punch Out</span>
+                          </div>
                           <span className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{formatToLocalTime(todayAttendance.punch_out)}</span>
                         </div>
                       ) : (
-                        <Button onClick={() => handlePunchAction('punch_out')} className="w-full bg-red-500 hover:bg-red-600 rounded-xl h-9 text-sm font-semibold" disabled={loading}>Punch Out</Button>
+                        <Button onClick={() => handlePunchAction('punch_out')} className="w-full bg-red-500 hover:bg-red-600 rounded-xl h-9 text-sm font-semibold" disabled={loading}>
+                          Punch Out
+                        </Button>
                       )}
                       <div className="text-center py-3 rounded-xl"
-                        style={{ background: isDark ? 'rgba(96,165,250,0.08)' : `linear-gradient(135deg, ${COLORS.deepBlue}08, ${COLORS.mediumBlue}12)`, border: isDark ? '1px solid rgba(96,165,250,0.15)' : `1px solid ${COLORS.deepBlue}15` }}>
+                        style={{
+                          background: isDark ? 'rgba(96,165,250,0.08)' : `linear-gradient(135deg, ${COLORS.deepBlue}08, ${COLORS.mediumBlue}12)`,
+                          border: isDark ? '1px solid rgba(96,165,250,0.15)' : `1px solid ${COLORS.deepBlue}15`,
+                        }}>
                         <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>Total Today</p>
                         <p className="text-2xl font-bold mt-0.5 tracking-tight" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>{getTodayDuration()}</p>
                       </div>
                     </>
                   ) : (
-                    <Button onClick={() => handlePunchAction('punch_in')} className="w-full bg-emerald-600 hover:bg-emerald-700 rounded-xl h-10 text-sm font-semibold" disabled={loading}>Punch In</Button>
+                    <Button onClick={() => handlePunchAction('punch_in')} className="w-full bg-emerald-600 hover:bg-emerald-700 rounded-xl h-10 text-sm font-semibold" disabled={loading}>
+                      Punch In
+                    </Button>
                   )}
                 </div>
               )}
@@ -1468,10 +1528,9 @@ export default function Dashboard() {
           </SectionCard>
         </motion.div>
 
-        {/* ── Assigned Tasks ────────────────────────────────────────────────── */}
+        {/* ── ASSIGNED TASKS ─────────────────────────────────────────────────── */}
         {showTaskSection && (
           <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-            {/* Tasks Assigned to Me */}
             <SectionCard className="hover:shadow-md transition">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
@@ -1499,7 +1558,6 @@ export default function Dashboard() {
               </div>
             </SectionCard>
 
-            {/* Tasks Assigned by Me */}
             <SectionCard className="hover:shadow-md transition">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
@@ -1529,7 +1587,7 @@ export default function Dashboard() {
           </motion.div>
         )}
 
-        {/* ── Star Performers + To-Do + Visits ──────────────────────────────── */}
+        {/* ── STAR PERFORMERS + TO-DO + VISITS ──────────────────────────────── */}
         <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
 
           {/* Star Performers */}
@@ -1577,12 +1635,16 @@ export default function Dashboard() {
             />
             <div className="p-3">
               <div className="flex gap-2 mb-3">
-                <input type="text" value={newTodo} onChange={e => setNewTodo(e.target.value)} placeholder="Add new task..."
+                <input
+                  type="text" value={newTodo} onChange={e => setNewTodo(e.target.value)}
+                  placeholder="Add new task..."
                   onKeyDown={e => e.key === 'Enter' && addTodo()}
-                  className={`flex-1 px-3 py-2 text-sm border rounded-xl focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400 focus:ring-blue-900/40' : 'bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400'}`} />
+                  className={`flex-1 px-3 py-2 text-sm border rounded-xl focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400 focus:ring-blue-900/40' : 'bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400'}`}
+                />
                 <Popover open={showDueDatePicker} onOpenChange={setShowDueDatePicker}>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" size="icon" className={cn('h-9 w-9 rounded-xl flex-shrink-0', isDark ? 'border-slate-600 bg-slate-700 text-slate-300' : 'border-slate-200', !selectedDueDate && 'text-slate-400')}>
+                    <Button variant="outline" size="icon"
+                      className={cn('h-9 w-9 rounded-xl flex-shrink-0', isDark ? 'border-slate-600 bg-slate-700 text-slate-300' : 'border-slate-200', !selectedDueDate && 'text-slate-400')}>
                       <CalendarIcon className="h-4 w-4" />
                     </Button>
                   </PopoverTrigger>
@@ -1591,12 +1653,15 @@ export default function Dashboard() {
                   </PopoverContent>
                 </Popover>
                 <Button onClick={addTodo} disabled={!newTodo.trim()} className="px-4 rounded-xl h-9 text-sm font-semibold flex-shrink-0"
-                  style={{ background:`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
                   Add
                 </Button>
               </div>
-              {selectedDueDate && <p className="text-xs text-amber-500 font-medium mb-2 -mt-1 ml-1">📅 Due: {format(selectedDueDate, 'MMM d, yyyy')}</p>}
-
+              {selectedDueDate && (
+                <p className="text-xs text-amber-500 font-medium mb-2 -mt-1 ml-1">
+                  📅 Due: {format(selectedDueDate, 'MMM d, yyyy')}
+                </p>
+              )}
               {pendingTodos.length === 0
                 ? <div className={`text-center py-8 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No todos yet</div>
                 : (
@@ -1606,9 +1671,11 @@ export default function Dashboard() {
                         <motion.div key={todo._id || todo.id} variants={itemVariants} layout
                           onClick={() => setSelectedTodo(todo)}
                           className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border transition-all cursor-pointer ${
-                            todo.completed ? isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'
-                            : !todo.completed && isOverdue(todo.due_date) ? isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50/70 border-red-200'
-                            : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'
+                            todo.completed
+                              ? isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'
+                              : !todo.completed && isOverdue(todo.due_date)
+                                ? isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50/70 border-red-200'
+                              : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'
                           }`}>
                           <div className="flex items-center gap-3 flex-1 min-w-0">
                             <input type="checkbox" checked={todo.completed}
@@ -1641,23 +1708,48 @@ export default function Dashboard() {
             </div>
           </SectionCard>
 
-          {/* Visits Card */}
+          {/* Visits */}
           <VisitsCard isDark={isDark} navigate={navigate} currentUserId={user?.id} onSelectVisit={setSelectedVisit} />
-
         </motion.div>
 
-        {/* ── Quick Access Tiles ─────────────────────────────────────────────── */}
+        {/* ── QUICK ACCESS TILES ─────────────────────────────────────────────── */}
         <motion.div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3" variants={itemVariants}>
           {[
-            { path:'/leads',    icon:<Target className="h-4 w-4" style={{ color:COLORS.mediumBlue }} />,    iconBg: isDark ? 'rgba(31,111,178,0.2)'  : `${COLORS.mediumBlue}12`,    label:String(openLeadsCount),              sub:'Open Leads'   },
-            { path:'/clients',  icon:<Building2 className="h-4 w-4" style={{ color:COLORS.emeraldGreen }}/>, iconBg: isDark ? 'rgba(31,175,90,0.2)'   : `${COLORS.emeraldGreen}12`,  label:String(stats?.total_clients || 0),   sub:'Clients'      },
-            { path:'/dsc',      icon:<Key className={`h-4 w-4 ${stats?.expiring_dsc_count > 0 ? 'text-red-500' : isDark ? 'text-slate-400' : 'text-slate-400'}`} />, iconBg: stats?.expiring_dsc_count > 0 ? isDark ? 'rgba(239,68,68,0.2)' : '#fef2f2' : isDark ? 'rgba(255,255,255,0.06)' : '#f8fafc', label:String(stats?.total_dsc || 0), sub:'DSC Certs' },
-            { path:'/duedates', icon:<CalendarIcon className={`h-4 w-4 ${stats?.upcoming_due_dates > 0 ? 'text-amber-500' : isDark ? 'text-slate-400' : 'text-slate-400'}`} />, iconBg: stats?.upcoming_due_dates > 0 ? isDark ? 'rgba(245,158,11,0.2)' : '#fffbeb' : isDark ? 'rgba(255,255,255,0.06)' : '#f8fafc', label:String(stats?.upcoming_due_dates || 0), sub:'Compliance' },
+            {
+              path:'/leads',
+              icon:<Target className="h-4 w-4" style={{ color:COLORS.mediumBlue }} />,
+              iconBg: isDark ? 'rgba(31,111,178,0.2)' : `${COLORS.mediumBlue}12`,
+              label:String(openLeadsCount),
+              sub:'Open Leads',
+            },
+            {
+              path:'/clients',
+              icon:<Building2 className="h-4 w-4" style={{ color:COLORS.emeraldGreen }} />,
+              iconBg: isDark ? 'rgba(31,175,90,0.2)' : `${COLORS.emeraldGreen}12`,
+              label:String(stats?.total_clients || 0),
+              sub:'Clients',
+            },
+            {
+              path:'/dsc',
+              icon:<Key className={`h-4 w-4 ${stats?.expiring_dsc_count > 0 ? 'text-red-500' : isDark ? 'text-slate-400' : 'text-slate-400'}`} />,
+              iconBg: stats?.expiring_dsc_count > 0 ? isDark ? 'rgba(239,68,68,0.2)' : '#fef2f2' : isDark ? 'rgba(255,255,255,0.06)' : '#f8fafc',
+              label:String(stats?.total_dsc || 0),
+              sub:'DSC Certs',
+            },
+            {
+              path:'/duedates',
+              icon:<CalendarIcon className={`h-4 w-4 ${stats?.upcoming_due_dates > 0 ? 'text-amber-500' : isDark ? 'text-slate-400' : 'text-slate-400'}`} />,
+              iconBg: stats?.upcoming_due_dates > 0 ? isDark ? 'rgba(245,158,11,0.2)' : '#fffbeb' : isDark ? 'rgba(255,255,255,0.06)' : '#f8fafc',
+              label:String(stats?.upcoming_due_dates || 0),
+              sub:'Compliance',
+            },
           ].map(tile => (
             <motion.div key={tile.path} whileHover={{ y:-3, transition:springPhysics.card }} whileTap={{ scale:0.97 }}
               onClick={() => navigate(tile.path)} className={`${metricCardCls} ${metricCardDefault}`}>
               <CardContent className="p-3.5 flex items-center gap-3">
-                <div className="p-2.5 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0" style={{ backgroundColor:tile.iconBg }}>{tile.icon}</div>
+                <div className="p-2.5 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0" style={{ backgroundColor:tile.iconBg }}>
+                  {tile.icon}
+                </div>
                 <div className="min-w-0">
                   <p className="text-xl font-bold tracking-tight" style={{ color: isDark ? '#e2e8f0' : COLORS.deepBlue }}>{tile.label}</p>
                   <p className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{tile.sub}</p>
@@ -1665,12 +1757,14 @@ export default function Dashboard() {
               </CardContent>
             </motion.div>
           ))}
+
           {isAdmin && (
             <motion.div whileHover={{ y:-3, transition:springPhysics.card }} whileTap={{ scale:0.97 }}
               onClick={() => navigate('/users')} className={`${metricCardCls} ${metricCardDefault}`}>
               <CardContent className="p-3.5 flex items-center gap-3">
-                <div className="p-2.5 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0" style={{ backgroundColor: isDark ? 'rgba(31,111,178,0.2)' : `${COLORS.mediumBlue}12` }}>
-                  <Users className="h-4 w-4" style={{ color:COLORS.mediumBlue }} />
+                <div className="p-2.5 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
+                  style={{ backgroundColor: isDark ? 'rgba(31,111,178,0.2)' : `${COLORS.mediumBlue}12` }}>
+                  <Users className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
                 </div>
                 <div className="min-w-0">
                   <p className="text-xl font-bold tracking-tight" style={{ color: isDark ? '#e2e8f0' : COLORS.deepBlue }}>{stats?.team_workload?.length || 0}</p>
@@ -1681,34 +1775,57 @@ export default function Dashboard() {
           )}
         </motion.div>
 
-        {/* ── Punch-In Gate Overlay ─────────────────────────────────────────── */}
+        {/* ── PUNCH-IN GATE OVERLAY ──────────────────────────────────────────── */}
         <AnimatePresence>
           {mustPunchIn && !todayIsHoliday && (
-            <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center"
-              style={{ background:'rgba(7,15,30,0.75)', backdropFilter:'blur(10px)' }}
-              initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}>
-              <motion.div initial={{ scale:0.88, y:48 }} animate={{ scale:1, y:0 }} exit={{ scale:0.88, y:48 }}
-                transition={{ type:'spring', stiffness:160, damping:18 }}
+            <motion.div
+              className="fixed inset-0 z-[9999] flex items-center justify-center"
+              style={{ background: 'rgba(7,15,30,0.75)', backdropFilter: 'blur(10px)' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            >
+              <motion.div
+                initial={{ scale: 0.88, y: 48 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.88, y: 48 }}
+                transition={{ type: 'spring', stiffness: 160, damping: 18 }}
                 className={`w-full max-w-sm mx-4 rounded-3xl overflow-hidden ${isDark ? 'bg-slate-900' : 'bg-white'}`}
-                style={{ boxShadow:'0 32px 80px rgba(0,0,0,0.45)' }}>
-                <div className="px-8 pt-8 pb-6 text-center" style={{ background:`linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-                  <div className="w-14 h-14 bg-white/15 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                style={{ boxShadow: '0 32px 80px rgba(0,0,0,0.45)' }}
+              >
+                <div
+                  className="px-8 pt-8 pb-6 text-center"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+                >
+                  <div className="w-14 h-14 bg-white/15 rounded-2xl flex items-center justify-center mx-auto mb-4">
                     <Clock className="h-7 w-7 text-white" />
                   </div>
-                  <motion.h2 className="text-2xl font-bold text-white" initial={{ scale:0.95 }} animate={{ scale:1 }} transition={{ type:'spring', stiffness:220, damping:14 }}>
+                  {/* Clock in the modal */}
+                  <div className="mb-3">
+                    <LiveClock />
+                  </div>
+                  <motion.h2
+                    className="text-2xl font-bold text-white"
+                    initial={{ scale: 0.95 }} animate={{ scale: 1 }}
+                    transition={{ type: 'spring', stiffness: 220, damping: 14 }}
+                  >
                     {getGreeting()}
                   </motion.h2>
-                  <p className="text-white/70 text-sm mt-1.5">{format(new Date(), 'EEEE, MMMM d')}</p>
                 </div>
                 <div className="px-7 py-6 space-y-3">
-                  <p className={`text-center text-sm mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Please punch in to begin your workday.</p>
-                  <motion.div initial={{ y:0 }} animate={{ y:[0,-2,0] }} transition={{ duration:3, repeat:Infinity, ease:'easeInOut' }} whileHover={{ y:0 }}>
-                    <Button onClick={() => handlePunchAction('punch_in')} disabled={loading}
-                      className="w-full h-12 text-base font-semibold bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-lg hover:shadow-emerald-200 transition-all">
+                  <p className={`text-center text-sm mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    Please punch in to begin your workday.
+                  </p>
+                  <motion.div
+                    initial={{ y: 0 }} animate={{ y: [0,-2,0] }}
+                    transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                    whileHover={{ y: 0 }}
+                  >
+                    <Button
+                      onClick={() => handlePunchAction('punch_in')} disabled={loading}
+                      className="w-full h-12 text-base font-semibold bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-lg hover:shadow-emerald-200 transition-all"
+                    >
                       {loading ? 'Punching In…' : 'Punch In Now'}
                     </Button>
                   </motion.div>
-                  <Button variant="ghost"
+                  <Button
+                    variant="ghost"
                     className={`w-full h-10 rounded-xl text-sm ${isDark ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-700'}`}
                     onClick={async () => {
                       setLoading(true);
@@ -1718,9 +1835,11 @@ export default function Dashboard() {
                         setActionDone(true); setMustPunchIn(false); document.body.style.overflow = 'auto';
                         await queryClient.refetchQueries({ queryKey: ['todayAttendance'] });
                         await queryClient.refetchQueries({ queryKey: ['holidays'] });
-                      } catch (err) { toast.error(err.response?.data?.detail || 'Failed to mark leave'); }
-                      finally { setLoading(false); }
-                    }}>
+                      } catch (err) {
+                        toast.error(err.response?.data?.detail || 'Failed to mark leave');
+                      } finally { setLoading(false); }
+                    }}
+                  >
                     On Leave Today
                   </Button>
                 </div>
@@ -1728,6 +1847,7 @@ export default function Dashboard() {
             </motion.div>
           )}
         </AnimatePresence>
+
       </motion.div>
     </>
   );
