@@ -7,8 +7,8 @@ import {
   Users, LogOut, Menu, Calendar, Activity, ChevronDown,
   PanelLeftClose, PanelLeftOpen, Target, Sun, Moon, MapPin,
   Settings, Mail, Receipt, X, KeyRound,
-  // ── NEW: Invoicing & Billing nav icon ──────────────────────────────
-  IndianRupee,
+  // ── NEW: Invoicing & Billing nav icon (CreditCard — in all lucide versions)
+  CreditCard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -70,7 +70,7 @@ const NAV_GROUPS = [
       // Mirrors AppRoutes.jsx Permission guard and invoicing backend _perm().
       {
         path:       '/invoicing',
-        icon:       IndianRupee,
+        icon:       CreditCard,
         label:      'Invoicing',
         permission: ['can_manage_invoices', 'can_create_quotations'],
       },
