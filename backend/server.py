@@ -5006,5 +5006,5 @@ api_router.include_router(quotation_router)
 api_router.include_router(telegram_router)
 api_router.include_router(leads_router)
 api_router.include_router(notification_router)
-api_router.include_router(email_router)   # ← NEW: email integration router
+api_router.include_router(email_router)
 app.include_router(api_router)
