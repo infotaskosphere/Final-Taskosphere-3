@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
-import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,12 +20,12 @@ import {
   AlertCircle, KeyRound, Receipt, Target, Zap, Lock, ChevronRight,
   Activity, BarChart2, Star, Layers, FileText, Bell,
   Hash, ArrowUpRight, SlidersHorizontal, ShieldCheck,
-  ShieldOff, Fingerprint, Download, Pencil, Inbox,
+  ShieldOff, Fingerprint, Download, Pencil, Inbox, X,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// ── Color Palette ─────────────────────────────────────────────────────────────
+// ── Brand Colors (mirrors Dashboard) ─────────────────────────────────────────
 const COLORS = {
   deepBlue:     '#0D3B66',
   mediumBlue:   '#1F6FB2',
@@ -36,13 +35,54 @@ const COLORS = {
   violet:       '#7C3AED',
   teal:         '#0F766E',
   amber:        '#B45309',
+  coral:        '#FF6B6B',
   slate:        '#475569',
 };
 
 const GRADIENT   = `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`;
 const GRAD_GREEN = `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)`;
 
-// ── Department Configuration ───────────────────────────────────────────────────
+// ── Slim scrollbar (mirrors Dashboard) ────────────────────────────────────────
+const slimScroll = {
+  overflowY:      'auto',
+  scrollbarWidth: 'thin',
+  scrollbarColor: '#cbd5e1 transparent',
+};
+if (typeof document !== 'undefined' && !document.getElementById('users-slim-scroll')) {
+  const s = document.createElement('style');
+  s.id = 'users-slim-scroll';
+  s.textContent = `
+    .users-slim::-webkit-scrollbar { width: 3px; }
+    .users-slim::-webkit-scrollbar-track { background: transparent; }
+    .users-slim::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+    .dark .users-slim::-webkit-scrollbar-thumb { background: #475569; }
+  `;
+  document.head.appendChild(s);
+}
+
+// ── Spring Physics (mirrors Dashboard) ────────────────────────────────────────
+const springPhysics = {
+  card:   { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
+  lift:   { type: 'spring', stiffness: 320, damping: 24, mass: 0.9  },
+  button: { type: 'spring', stiffness: 400, damping: 28 },
+  tap:    { type: 'spring', stiffness: 500, damping: 30 },
+};
+
+// ── Animation Variants (mirrors Dashboard) ────────────────────────────────────
+const containerVariants = {
+  hidden:  { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.05 } },
+};
+const itemVariants = {
+  hidden:  { opacity: 0, y: 24 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] } },
+};
+const slideIn = {
+  hidden:  { opacity: 0, x: -16 },
+  visible: { opacity: 1, x: 0, transition: { duration: 0.35, ease: 'easeOut' } },
+};
+
+// ── Department Config ─────────────────────────────────────────────────────────
 const DEPARTMENTS = [
   { value: 'GST',   label: 'GST',   color: '#1E3A8A', bg: '#EFF6FF' },
   { value: 'IT',    label: 'IT',    color: '#374151', bg: '#F9FAFB' },
@@ -56,14 +96,14 @@ const DEPARTMENTS = [
   { value: 'OTHER', label: 'OTHER', color: '#475569', bg: '#F8FAFC' },
 ];
 
-// ── Role Configuration ─────────────────────────────────────────────────────────
+// ── Role Config ───────────────────────────────────────────────────────────────
 const ROLE_CONFIG = {
-  admin:   { gradient: 'from-violet-600 to-indigo-600', textColor: 'text-white', icon: Crown,    label: 'Admin'   },
-  manager: { gradient: 'from-blue-500 to-cyan-500',     textColor: 'text-white', icon: Briefcase, label: 'Manager' },
-  staff:   { gradient: 'from-slate-400 to-slate-500',   textColor: 'text-white', icon: UserIcon,  label: 'Staff'   },
+  admin:   { gradient: 'from-violet-600 to-indigo-600', hex: '#7C3AED', icon: Crown,     label: 'Admin'   },
+  manager: { gradient: 'from-blue-500 to-cyan-500',     hex: '#1F6FB2', icon: Briefcase, label: 'Manager' },
+  staff:   { gradient: 'from-slate-400 to-slate-500',   hex: '#475569', icon: UserIcon,  label: 'Staff'   },
 };
 
-// ── Default Permissions (mirrors models.py DEFAULT_ROLE_PERMISSIONS) ────────────
+// ── Default Role Permissions ──────────────────────────────────────────────────
 const DEFAULT_ROLE_PERMISSIONS = {
   admin: {
     can_view_all_tasks: true, can_view_all_clients: true, can_view_all_dsc: true,
@@ -77,13 +117,9 @@ const DEFAULT_ROLE_PERMISSIONS = {
     can_view_all_leads: true, can_manage_settings: true, can_assign_clients: true,
     can_view_staff_rankings: true, can_delete_data: true, can_delete_tasks: true,
     can_connect_email: true, can_view_own_data: true, can_create_quotations: true,
-    // ── Invoicing ──────────────────────────────────────────────────────────
-    can_manage_invoices: true,
-    // ── Password Vault ─────────────────────────────────────────────────────
-    can_view_passwords: true, can_edit_passwords: true,
-    view_password_departments: [],
-    assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
-    view_other_reports: [], view_other_todos: [], view_other_activity: [],
+    can_manage_invoices: true, can_view_passwords: true, can_edit_passwords: true,
+    view_password_departments: [], assigned_clients: [], view_other_tasks: [],
+    view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
   },
   manager: {
     can_view_all_tasks: false, can_view_all_clients: false, can_view_all_dsc: false,
@@ -97,13 +133,9 @@ const DEFAULT_ROLE_PERMISSIONS = {
     can_view_all_leads: false, can_manage_settings: false, can_assign_clients: false,
     can_view_staff_rankings: true, can_delete_data: false, can_delete_tasks: false,
     can_connect_email: true, can_view_own_data: true, can_create_quotations: false,
-    // ── Invoicing ──────────────────────────────────────────────────────────
-    can_manage_invoices: false,
-    // ── Password Vault ─────────────────────────────────────────────────────
-    can_view_passwords: true, can_edit_passwords: false,
-    view_password_departments: [],
-    assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
-    view_other_reports: [], view_other_todos: [], view_other_activity: [],
+    can_manage_invoices: false, can_view_passwords: true, can_edit_passwords: false,
+    view_password_departments: [], assigned_clients: [], view_other_tasks: [],
+    view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
   },
   staff: {
     can_view_all_tasks: false, can_view_all_clients: false, can_view_all_dsc: false,
@@ -117,17 +149,12 @@ const DEFAULT_ROLE_PERMISSIONS = {
     can_view_all_leads: false, can_manage_settings: false, can_assign_clients: false,
     can_view_staff_rankings: true, can_delete_data: false, can_delete_tasks: false,
     can_connect_email: true, can_view_own_data: true, can_create_quotations: false,
-    // ── Invoicing ──────────────────────────────────────────────────────────
-    can_manage_invoices: false,
-    // ── Password Vault ─────────────────────────────────────────────────────
-    can_view_passwords: false, can_edit_passwords: false,
-    view_password_departments: [],
-    assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
-    view_other_reports: [], view_other_todos: [], view_other_activity: [],
+    can_manage_invoices: false, can_view_passwords: false, can_edit_passwords: false,
+    view_password_departments: [], assigned_clients: [], view_other_tasks: [],
+    view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
   },
 };
 
-// ── Empty Permissions (all false / empty) ─────────────────────────────────────
 const EMPTY_PERMISSIONS = {
   can_view_all_tasks: false, can_view_all_clients: false, can_view_all_dsc: false,
   can_view_documents: false, can_view_all_duedates: false, can_view_reports: false,
@@ -140,76 +167,129 @@ const EMPTY_PERMISSIONS = {
   can_view_all_leads: false, can_manage_settings: false, can_assign_clients: false,
   can_view_staff_rankings: false, can_delete_data: false, can_delete_tasks: false,
   can_connect_email: false, can_view_own_data: false, can_create_quotations: false,
-  // ── Invoicing ────────────────────────────────────────────────────────────
-  can_manage_invoices: false,
-  // ── Password Vault ───────────────────────────────────────────────────────
-  can_view_passwords: false, can_edit_passwords: false,
-  view_password_departments: [],
-  assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
-  view_other_reports: [], view_other_todos: [], view_other_activity: [],
+  can_manage_invoices: false, can_view_passwords: false, can_edit_passwords: false,
+  view_password_departments: [], assigned_clients: [], view_other_tasks: [],
+  view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
 };
 
 // ── Permission Definitions ────────────────────────────────────────────────────
 const GLOBAL_PERMS = [
-  { key: 'can_view_all_tasks',               label: 'Universal Task Access',        desc: 'See tasks assigned to any user or department',             icon: Layers      },
-  { key: 'can_view_all_clients',             label: 'Master Client List',           desc: 'View all company legal entities',                          icon: Briefcase   },
-  { key: 'can_view_all_dsc',                 label: 'DSC Vault Access',             desc: 'View all Digital Signature Certificates',                  icon: Fingerprint },
-  { key: 'can_view_documents',               label: 'Document Library',             desc: 'Access physical document register',                        icon: FileText    },
-  { key: 'can_view_all_duedates',            label: 'Compliance Roadmap',           desc: 'View all upcoming statutory due dates',                    icon: Calendar    },
-  { key: 'can_view_reports',                 label: 'Analytics Dashboard',          desc: 'View performance and system-wide reports',                 icon: BarChart2   },
-  { key: 'can_view_todo_dashboard',          label: 'Todo Dashboard',               desc: 'Access global team todo overview',                         icon: CheckCircle },
-  { key: 'can_view_audit_logs',              label: 'System Audit Trail',           desc: 'View activity logs and record histories',                  icon: Activity    },
-  { key: 'can_view_all_leads',              label: 'Leads Pipeline',               desc: 'View the global leads dashboard',                          icon: Target      },
-  { key: 'can_view_user_page',               label: 'User Directory',               desc: 'View team members directory',                              icon: UsersIcon   },
-  { key: 'can_view_selected_users_reports',  label: 'Team Reports Access',         desc: 'View reports for selected users',                          icon: Eye         },
-  { key: 'can_view_staff_rankings',          label: 'Staff Rankings',               desc: 'View performance leaderboard',                             icon: Star        },
-  { key: 'can_view_own_data',                label: 'View Own Data',                desc: 'Access own attendance, tasks and reports',                 icon: UserIcon    },
-  { key: 'can_create_quotations',            label: 'Quotations Module',            desc: 'Create, edit, export and share quotations',                icon: Receipt     },
+  { key: 'can_view_all_tasks',              label: 'Universal Task Access',       desc: 'See tasks assigned to any user or department',            icon: Layers      },
+  { key: 'can_view_all_clients',            label: 'Master Client List',          desc: 'View all company legal entities',                         icon: Briefcase   },
+  { key: 'can_view_all_dsc',               label: 'DSC Vault Access',            desc: 'View all Digital Signature Certificates',                 icon: Fingerprint },
+  { key: 'can_view_documents',             label: 'Document Library',            desc: 'Access physical document register',                       icon: FileText    },
+  { key: 'can_view_all_duedates',          label: 'Compliance Roadmap',          desc: 'View all upcoming statutory due dates',                   icon: Calendar    },
+  { key: 'can_view_reports',              label: 'Analytics Dashboard',          desc: 'View performance and system-wide reports',                icon: BarChart2   },
+  { key: 'can_view_todo_dashboard',        label: 'Todo Dashboard',              desc: 'Access global team todo overview',                        icon: CheckCircle },
+  { key: 'can_view_audit_logs',            label: 'System Audit Trail',          desc: 'View activity logs and record histories',                 icon: Activity    },
+  { key: 'can_view_all_leads',            label: 'Leads Pipeline',              desc: 'View the global leads dashboard',                         icon: Target      },
+  { key: 'can_view_user_page',             label: 'User Directory',              desc: 'View team members directory',                             icon: UsersIcon   },
+  { key: 'can_view_selected_users_reports',label: 'Team Reports Access',        desc: 'View reports for selected users',                         icon: Eye         },
+  { key: 'can_view_staff_rankings',        label: 'Staff Rankings',              desc: 'View performance leaderboard',                            icon: Star        },
+  { key: 'can_view_own_data',              label: 'View Own Data',               desc: 'Access own attendance, tasks and reports',                icon: UserIcon    },
+  { key: 'can_create_quotations',          label: 'Quotations Module',           desc: 'Create, edit, export and share quotations',               icon: Receipt     },
 ];
 
 const OPS_PERMS = [
-  { key: 'can_assign_tasks',                label: 'Task Delegation',              desc: 'Assign tasks to other staff members',                      icon: ArrowUpRight },
-  { key: 'can_assign_clients',              label: 'Client Assignment',            desc: 'Assign and reassign staff to clients',                     icon: Briefcase    },
-  { key: 'can_manage_users',               label: 'User Governance',              desc: 'Manage team members and roles',                            icon: UsersIcon    },
-  { key: 'can_view_attendance',            label: 'Attendance Management',        desc: 'Review punch timings and late reports',                    icon: Clock        },
-  { key: 'can_view_staff_activity',        label: 'Staff Monitoring',             desc: 'View app usage and screen activity',                       icon: Activity     },
-  { key: 'can_send_reminders',             label: 'Automated Reminders',          desc: 'Trigger email/notification reminders',                     icon: Bell         },
-  { key: 'can_download_reports',           label: 'Export Data',                  desc: 'Download CSV/PDF versions of reports',                     icon: Download     },
-  { key: 'can_manage_settings',            label: 'System Settings',              desc: 'Modify global system configuration',                       icon: Settings     },
-  { key: 'can_delete_data',                label: 'Delete Records',               desc: 'Permanently delete data entries',                          icon: Trash2       },
-  { key: 'can_delete_tasks',               label: 'Delete Tasks',                 desc: 'Delete any task regardless of ownership',                  icon: XCircle      },
-  { key: 'can_connect_email',              label: 'Connect Email Accounts',       desc: 'Link personal email via IMAP integration',                 icon: Inbox        },
+  { key: 'can_assign_tasks',     label: 'Task Delegation',        desc: 'Assign tasks to other staff members',          icon: ArrowUpRight },
+  { key: 'can_assign_clients',   label: 'Client Assignment',      desc: 'Assign and reassign staff to clients',         icon: Briefcase    },
+  { key: 'can_manage_users',     label: 'User Governance',        desc: 'Manage team members and roles',                icon: UsersIcon    },
+  { key: 'can_view_attendance',  label: 'Attendance Management',  desc: 'Review punch timings and late reports',        icon: Clock        },
+  { key: 'can_view_staff_activity', label: 'Staff Monitoring',   desc: 'View app usage and screen activity',           icon: Activity     },
+  { key: 'can_send_reminders',   label: 'Automated Reminders',    desc: 'Trigger email/notification reminders',         icon: Bell         },
+  { key: 'can_download_reports', label: 'Export Data',            desc: 'Download CSV/PDF versions of reports',         icon: Download     },
+  { key: 'can_manage_settings',  label: 'System Settings',        desc: 'Modify global system configuration',          icon: Settings     },
+  { key: 'can_delete_data',      label: 'Delete Records',         desc: 'Permanently delete data entries',             icon: Trash2       },
+  { key: 'can_delete_tasks',     label: 'Delete Tasks',           desc: 'Delete any task regardless of ownership',     icon: XCircle      },
+  { key: 'can_connect_email',    label: 'Connect Email Accounts', desc: 'Link personal email via IMAP integration',    icon: Inbox        },
 ];
 
 const EDIT_PERMS = [
-  { key: 'can_edit_tasks',       label: 'Modify Tasks',       desc: 'Update and delete task definitions',          icon: Pencil      },
-  { key: 'can_edit_clients',     label: 'Modify Clients',     desc: 'Update client master data records',           icon: Edit        },
-  { key: 'can_edit_dsc',         label: 'Modify DSC',         desc: 'Update certificate details and metadata',     icon: Fingerprint },
-  { key: 'can_edit_documents',   label: 'Modify Documents',   desc: 'Change document records',                     icon: FileText    },
-  { key: 'can_edit_due_dates',   label: 'Modify Due Dates',   desc: 'Edit statutory compliance timelines',         icon: Calendar    },
-  { key: 'can_edit_users',       label: 'Modify Users',       desc: 'Update user profiles and settings',           icon: UserIcon    },
+  { key: 'can_edit_tasks',     label: 'Modify Tasks',     desc: 'Update and delete task definitions',        icon: Pencil      },
+  { key: 'can_edit_clients',   label: 'Modify Clients',   desc: 'Update client master data records',         icon: Edit        },
+  { key: 'can_edit_dsc',       label: 'Modify DSC',       desc: 'Update certificate details and metadata',   icon: Fingerprint },
+  { key: 'can_edit_documents', label: 'Modify Documents', desc: 'Change document records',                   icon: FileText    },
+  { key: 'can_edit_due_dates', label: 'Modify Due Dates', desc: 'Edit statutory compliance timelines',       icon: Calendar    },
+  { key: 'can_edit_users',     label: 'Modify Users',     desc: 'Update user profiles and settings',        icon: UserIcon    },
 ];
 
-// ── Animation Variants ─────────────────────────────────────────────────────────
-const containerVariants = {
-  hidden:  { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.06 } },
-};
-const itemVariants = {
-  hidden:  { opacity: 0, y: 24, scale: 0.97 },
-  visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.35, ease: 'easeOut' } },
-};
-const slideIn = {
-  hidden:  { opacity: 0, x: -16 },
-  visible: { opacity: 1, x: 0, transition: { duration: 0.3 } },
-};
+const permTabs = [
+  { id: 'modules', label: 'Modules',     icon: Zap       },
+  { id: 'view',    label: 'View',         icon: Eye       },
+  { id: 'ops',     label: 'Operations',   icon: Settings  },
+  { id: 'edit',    label: 'Edit',         icon: Pencil    },
+  { id: 'cross',   label: 'Cross-User',   icon: UsersIcon },
+  { id: 'clients', label: 'Clients',      icon: Briefcase },
+];
 
-// ── Department Pill ────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════════
+// SHARED PRIMITIVES (Dashboard-aligned)
+// ════════════════════════════════════════════════════════════════════════════════
+
+// ── Section Card Shell ────────────────────────────────────────────────────────
+function SectionCard({ children, className = '' }) {
+  return (
+    <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+// ── Card Header Row ───────────────────────────────────────────────────────────
+function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
+  return (
+    <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
+      <div className="flex items-center gap-2.5">
+        <div className={`p-1.5 rounded-lg ${iconBg}`}>{icon}</div>
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">{title}</h3>
+            {badge !== undefined && badge > 0 && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500 text-white leading-none">{badge}</span>
+            )}
+          </div>
+          {subtitle && <p className="text-xs text-slate-400 dark:text-slate-500">{subtitle}</p>}
+        </div>
+      </div>
+      {action && <div>{action}</div>}
+    </div>
+  );
+}
+
+// ── Dialog Gradient Header ─────────────────────────────────────────────────────
+function DialogGradHeader({ gradient, icon: Icon, eyebrow, title, subtitle, onClose }) {
+  return (
+    <div className="relative overflow-hidden rounded-t-2xl" style={{ background: gradient }}>
+      <div className="absolute right-0 top-0 w-56 h-56 rounded-full -mr-20 -mt-20 opacity-10"
+        style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+      <div className="relative px-7 py-6 flex items-start justify-between gap-4">
+        <div className="flex items-start gap-4 flex-1 min-w-0">
+          <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center flex-shrink-0 mt-0.5">
+            <Icon className="h-5 w-5 text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            {eyebrow && <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1">{eyebrow}</p>}
+            <h2 className="text-xl font-bold text-white leading-snug tracking-tight">{title}</h2>
+            {subtitle && <p className="text-white/55 text-sm mt-1">{subtitle}</p>}
+          </div>
+        </div>
+        {onClose && (
+          <button onClick={onClose}
+            className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center flex-shrink-0 transition-all active:scale-90 mt-0.5">
+            <X className="h-4 w-4 text-white" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Department Pill ───────────────────────────────────────────────────────────
 const DeptPill = ({ dept }) => {
   const info = DEPARTMENTS.find(d => d.value === dept);
   if (!info) return null;
   return (
-    <span className="inline-flex items-center font-bold rounded-xl px-3 py-1 text-xs tracking-wide shadow-sm"
+    <span className="inline-flex items-center font-bold rounded-xl px-2.5 py-1 text-[11px] tracking-wide"
       style={{ background: info.bg, color: info.color, border: `1px solid ${info.color}30` }}>
       {info.label}
     </span>
@@ -220,60 +300,46 @@ const DeptPill = ({ dept }) => {
 const StatusBadge = ({ status, isActive }) => {
   const resolved = status || (isActive !== false ? 'active' : 'inactive');
   const cfg = {
-    active:           { label: 'Active',   cls: 'bg-emerald-100 text-emerald-700 border-emerald-200',    dot: 'bg-emerald-500' },
-    pending_approval: { label: 'Pending',  cls: 'bg-amber-100 text-amber-700 border-amber-200',          dot: 'bg-amber-500'   },
-    rejected:         { label: 'Rejected', cls: 'bg-red-100 text-red-700 border-red-200',                dot: 'bg-red-500'     },
-    inactive:         { label: 'Inactive', cls: 'bg-slate-100 text-slate-600 border-slate-200',          dot: 'bg-slate-400'   },
-  }[resolved] || { label: 'Inactive', cls: 'bg-slate-100 text-slate-600 border-slate-200', dot: 'bg-slate-400' };
+    active:           { label: 'Active',   cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400', dot: 'bg-emerald-500' },
+    pending_approval: { label: 'Pending',  cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',         dot: 'bg-amber-500'   },
+    rejected:         { label: 'Rejected', cls: 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400',                  dot: 'bg-red-500'     },
+    inactive:         { label: 'Inactive', cls: 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400',             dot: 'bg-slate-400'   },
+  }[resolved] || { label: 'Inactive', cls: 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400', dot: 'bg-slate-400' };
 
   return (
-    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-semibold ${cfg.cls}`}>
-      <span className={`w-2 h-2 rounded-full ${cfg.dot} ${resolved === 'active' ? 'animate-pulse' : ''}`} />
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold ${cfg.cls}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot} ${resolved === 'active' ? 'animate-pulse' : ''}`} />
       {cfg.label}
     </span>
   );
 };
 
-// ── Module Access Badges (shown on each user card) ─────────────────────────────
+// ── Module Access Badges ──────────────────────────────────────────────────────
 const ModuleAccessBadges = ({ userData }) => {
   if (userData.role === 'admin') return null;
-
-  const hasLeads    = !!userData.permissions?.can_view_all_leads;
-  const hasQuotes   = !!userData.permissions?.can_create_quotations;
-  const hasInvoice  = !!userData.permissions?.can_manage_invoices;
-  const hasPassView = !!userData.permissions?.can_view_passwords;
-  const hasPassEdit = !!userData.permissions?.can_edit_passwords;
-
+  const p = userData.permissions || {};
   const badges = [
-    { label: 'Leads',    active: hasLeads,    color: 'blue',   icon: Target   },
-    { label: 'Quotes',   active: hasQuotes,   color: 'violet', icon: Receipt  },
-    // Show "Invoicing" badge — distinguishes from Quotes
+    { label: 'Leads',    active: !!p.can_view_all_leads,    color: '#1F6FB2', icon: Target   },
+    { label: 'Quotes',   active: !!p.can_create_quotations, color: '#7C3AED', icon: Receipt  },
+    { label: 'Invoicing',active: !!p.can_manage_invoices,   color: '#1FAF5A', icon: FileText },
     {
-      label:  hasInvoice ? 'Invoicing' : 'Invoicing',
-      active: hasInvoice,
-      color:  'emerald',
-      icon:   FileText,
-    },
-    {
-      label:  !hasPassView ? 'Vault' : hasPassEdit ? 'Vault R/W' : 'Vault R',
-      active: hasPassView,
-      color:  hasPassEdit ? 'amber' : 'teal',
-      icon:   KeyRound,
+      label: !p.can_view_passwords ? 'Vault' : p.can_edit_passwords ? 'Vault R/W' : 'Vault R',
+      active: !!p.can_view_passwords,
+      color:  p.can_edit_passwords ? '#B45309' : '#0F766E',
+      icon: KeyRound,
     },
   ];
-
   return (
-    <div className="flex flex-wrap gap-2 mt-3">
-      {badges.map((b, idx) => {
+    <div className="flex flex-wrap gap-1.5 mt-3">
+      {badges.map((b, i) => {
         const Icon = b.icon;
         return (
-          <span key={idx}
-            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-medium border transition-all ${
-              b.active
-                ? `bg-${b.color}-50 text-${b.color}-700 border-${b.color}-200 dark:bg-${b.color}-900/30 dark:text-${b.color}-300`
-                : 'bg-slate-100 text-slate-400 border-slate-200 dark:bg-slate-800 dark:text-slate-500'
-            }`}>
-            <Icon className="h-3.5 w-3.5" />
+          <span key={i}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold border transition-all"
+            style={b.active
+              ? { background: `${b.color}12`, color: b.color, borderColor: `${b.color}30` }
+              : { background: 'transparent', color: '#94a3b8', borderColor: '#e2e8f0' }}>
+            <Icon className="h-3 w-3" />
             {b.label}
           </span>
         );
@@ -282,164 +348,34 @@ const ModuleAccessBadges = ({ userData }) => {
   );
 };
 
-// ── Pending User Card ─────────────────────────────────────────────────────────
-const PendingUserCard = ({ userData, onApprove, onReject, approving }) => (
-  <motion.div variants={itemVariants} layout
-    className="group relative bg-white dark:bg-slate-900 rounded-3xl overflow-hidden border border-amber-200 shadow-lg hover:shadow-2xl hover:-translate-y-1 transition-all duration-300">
-    <div className="h-2 w-full bg-gradient-to-r from-amber-400 to-orange-500" />
-    <div className="p-6">
-      <div className="flex items-start gap-5">
-        <div className="relative flex-shrink-0">
-          <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-md ring-1 ring-amber-200">
-            {userData.profile_picture
-              ? <img src={userData.profile_picture} alt={userData.full_name} className="w-full h-full object-cover" />
-              : <div className="w-full h-full flex items-center justify-center text-white text-2xl font-black" style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)' }}>
-                  {userData.full_name?.charAt(0)?.toUpperCase()}
-                </div>}
-          </div>
-          <div className="absolute -bottom-1 -right-1 bg-amber-100 text-amber-600 rounded-full p-1 border-2 border-white">
-            <Clock className="h-4 w-4" />
-          </div>
-        </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-lg text-slate-900 dark:text-white tracking-tight truncate">{userData.full_name}</h3>
-          <p className="text-sm text-slate-500 dark:text-slate-400 truncate mt-0.5">{userData.email}</p>
-          <div className="flex flex-wrap gap-2 mt-4">
-            <Badge variant="secondary" className="capitalize text-xs font-medium">{userData.role}</Badge>
-            <StatusBadge status={userData.status} />
-          </div>
-        </div>
-      </div>
-      {(userData.departments || []).length > 0 && (
-        <div className="flex flex-wrap gap-2 mt-5">{userData.departments.map(d => <DeptPill key={d} dept={d} />)}</div>
-      )}
-      <div className="mt-6 space-y-2 text-sm text-slate-500 dark:text-slate-400">
-        <div className="flex items-center gap-3"><Phone className="h-4 w-4 text-slate-400" />{userData.phone || '—'}</div>
-        <div className="flex items-center gap-3"><Calendar className="h-4 w-4 text-slate-400" />Registered {userData.created_at ? format(new Date(userData.created_at), 'dd MMM yyyy') : 'N/A'}</div>
-      </div>
-      <div className="flex gap-3 mt-8">
-        <Button onClick={() => onApprove(userData)} disabled={approving === userData.id} className="flex-1 h-11 rounded-2xl font-semibold text-sm shadow-md hover:shadow-lg transition-all" style={{ background: COLORS.emeraldGreen, color: 'white' }}>
-          <UserCheck className="h-4 w-4 mr-2" />{approving === userData.id ? 'Approving...' : 'Approve'}
-        </Button>
-        <Button onClick={() => onReject(userData)} disabled={approving === userData.id} variant="outline" className="flex-1 h-11 rounded-2xl border-red-200 text-red-600 hover:bg-red-50 font-semibold text-sm">
-          <UserX className="h-4 w-4 mr-2" />Reject
-        </Button>
-      </div>
-    </div>
-  </motion.div>
-);
-
-// ── User Card ─────────────────────────────────────────────────────────────────
-const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReject, currentUserId, isAdmin, canEditUsers, canManagePermissions, approving }) => {
-  const [hovered, setHovered] = useState(false);
-  const isPending = userData.status === 'pending_approval';
-  const roleCfg   = ROLE_CONFIG[userData.role?.toLowerCase()] || ROLE_CONFIG.staff;
-  const RoleIcon  = roleCfg.icon;
-
-  const permCount = useMemo(() =>
-    userData.permissions
-      ? Object.entries(userData.permissions).filter(([k, v]) => k.startsWith('can_') && v === true).length
-      : 0
-  , [userData.permissions]);
+// ── Permission Matrix Summary ─────────────────────────────────────────────────
+const PermissionMatrixSummary = ({ permissions }) => {
+  const allPerms = [...GLOBAL_PERMS, ...OPS_PERMS, ...EDIT_PERMS];
+  const granted  = allPerms.filter(p => permissions[p.key]).length;
+  const total    = allPerms.length;
+  const pct      = Math.round((granted / total) * 100);
 
   return (
-    <motion.div variants={itemVariants} layout
-      className={`group relative bg-white dark:bg-slate-900 rounded-3xl overflow-hidden border shadow-md hover:shadow-2xl transition-all duration-300 ${
-        isPending ? 'border-amber-300'
-        : hovered ? 'border-blue-200 -translate-y-1 scale-[1.015]'
-        : 'border-slate-200 dark:border-slate-700'}`}
-      onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-      <div className={`h-2 w-full bg-gradient-to-r ${roleCfg.gradient}`} />
-
-      <AnimatePresence>
-        {hovered && !isPending && (
-          <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
-            className="absolute top-4 right-4 flex gap-2 z-20">
-            {canManagePermissions && userData.role !== 'admin' && (
-              <button onClick={() => onPermissions(userData)} title="Manage Permissions"
-                className="w-9 h-9 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center shadow-sm border border-emerald-100 hover:border-emerald-200 transition-all dark:bg-emerald-900 dark:text-emerald-300">
-                <Shield className="h-4 w-4" />
-              </button>
-            )}
-            {(isAdmin || (canEditUsers && !isPending)) && (
-              <button onClick={() => onEdit(userData)} title="Edit User"
-                className="w-9 h-9 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center shadow-sm border border-blue-100 hover:border-blue-200 transition-all dark:bg-blue-900 dark:text-blue-300">
-                <Pencil className="h-4 w-4" />
-              </button>
-            )}
-            {(isAdmin || canEditUsers) && userData.id !== currentUserId && (
-              <button onClick={() => onDelete(userData.id)} title="Delete User"
-                className="w-9 h-9 bg-red-50 hover:bg-red-100 text-red-600 rounded-2xl flex items-center justify-center shadow-sm border border-red-100 hover:border-red-200 transition-all dark:bg-red-900 dark:text-red-300">
-                <Trash2 className="h-4 w-4" />
-              </button>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <div className="p-6">
-        <div className="flex items-start gap-5">
-          <div className="relative flex-shrink-0">
-            <div className="w-[68px] h-[68px] rounded-2xl overflow-hidden shadow-md ring-1 ring-slate-100 dark:ring-slate-700">
-              {userData.profile_picture
-                ? <img src={userData.profile_picture} alt={userData.full_name} className="w-full h-full object-cover" />
-                : <div className={`w-full h-full flex items-center justify-center text-white text-3xl font-black bg-gradient-to-br ${roleCfg.gradient}`}>
-                    {userData.full_name?.charAt(0)?.toUpperCase()}
-                  </div>}
-            </div>
-            <div className={`absolute -bottom-1.5 -right-1.5 w-7 h-7 rounded-2xl bg-gradient-to-br ${roleCfg.gradient} flex items-center justify-center ring-2 ring-white dark:ring-slate-900 shadow`}>
-              <RoleIcon className="h-3.5 w-3.5 text-white" />
-            </div>
-          </div>
-          <div className="flex-1 min-w-0 pt-1">
-            <h3 className="font-semibold text-lg tracking-tight text-slate-900 dark:text-white truncate">{userData.full_name}</h3>
-            <div className="flex items-center gap-3 mt-3">
-              <div className={`inline-flex items-center gap-1.5 px-4 py-1 rounded-2xl text-xs font-bold text-white bg-gradient-to-r ${roleCfg.gradient}`}>
-                <RoleIcon className="h-3.5 w-3.5" />{roleCfg.label}
-              </div>
-              <StatusBadge status={userData.status} isActive={userData.is_active} />
-            </div>
-          </div>
-        </div>
-
-        {(userData.departments || []).length > 0 && (
-          <div className="flex flex-wrap gap-2 mt-6">{userData.departments.map(d => <DeptPill key={d} dept={d} />)}</div>
-        )}
-
-        <ModuleAccessBadges userData={userData} />
-
-        <div className="mt-6 space-y-2.5 text-sm text-slate-500 dark:text-slate-400">
-          <div className="flex items-center gap-3 truncate"><Mail className="h-4 w-4 text-slate-400 flex-shrink-0" /><span className="truncate">{userData.email}</span></div>
-          <div className="flex items-center gap-3"><Phone className="h-4 w-4 text-slate-400 flex-shrink-0" />{userData.phone || '—'}</div>
-          {(userData.punch_in_time || userData.punch_out_time) && (
-            <div className="flex items-center gap-3"><Clock className="h-4 w-4 text-slate-400 flex-shrink-0" />{userData.punch_in_time || '—'} → {userData.punch_out_time || '—'}</div>
-          )}
-          <div className="flex items-center gap-3"><Calendar className="h-4 w-4 text-slate-400 flex-shrink-0" />Joined {userData.created_at ? format(new Date(userData.created_at), 'dd MMM yyyy') : 'N/A'}</div>
-        </div>
-
-        {userData.role !== 'admin' && (
-          <div className="mt-6 pt-5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-            <span className="text-xs text-slate-400 font-medium">Permissions</span>
-            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full text-xs font-semibold text-slate-600 dark:text-slate-300">
-              <ShieldCheck className="h-3.5 w-3.5" />{permCount}
-            </div>
-          </div>
-        )}
-
-        {isPending && isAdmin && (
-          <div className="flex gap-3 mt-8">
-            <Button onClick={() => onApprove(userData)} disabled={approving === userData.id}
-              className="flex-1 h-11 rounded-2xl font-semibold text-sm shadow-md" style={{ background: COLORS.emeraldGreen, color: 'white' }}>
-              <UserCheck className="h-4 w-4 mr-2" />Approve
-            </Button>
-            <Button onClick={() => onReject(userData)} disabled={approving === userData.id}
-              variant="outline" className="flex-1 h-11 rounded-2xl border-red-200 text-red-600 hover:bg-red-50 font-semibold text-sm">
-              <UserX className="h-4 w-4 mr-2" />Reject
-            </Button>
-          </div>
-        )}
+    <div className="flex gap-5 p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700">
+      <div className="relative w-18 h-18 flex-shrink-0" style={{ width: 72, height: 72 }}>
+        <svg className="w-full h-full -rotate-90" viewBox="0 0 48 48">
+          <circle cx="24" cy="24" r="20" fill="none" stroke="#e2e8f0" strokeWidth="5" />
+          <circle cx="24" cy="24" r="20" fill="none" stroke={COLORS.emeraldGreen} strokeWidth="5"
+            strokeDasharray={`${2 * Math.PI * 20}`}
+            strokeDashoffset={`${2 * Math.PI * 20 * (1 - pct / 100)}`}
+            strokeLinecap="round" />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center font-black text-xl text-slate-700 dark:text-slate-100">{pct}%</div>
       </div>
-    </motion.div>
+      <div className="flex-1">
+        <p className="font-bold text-xl tracking-tight text-slate-900 dark:text-white">Permission Coverage</p>
+        <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">{granted} of {total} permissions enabled</p>
+        <div className="mt-3 h-1.5 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700">
+          <div className="h-full rounded-full transition-all duration-700"
+            style={{ width: `${pct}%`, background: GRAD_GREEN }} />
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -447,12 +383,16 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
 const PermToggleRow = ({ permKey, label, desc, icon: Icon, permissions, setPermissions }) => {
   const isOn = !!permissions[permKey];
   return (
-    <div className={`flex items-center justify-between px-5 py-4 rounded-3xl border transition-all ${isOn
-      ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800'
-      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'}`}>
-      <div className="flex items-center gap-4 pr-6 flex-1 min-w-0">
+    <div className={`flex items-center justify-between px-4 py-3.5 rounded-xl border transition-all ${
+      isOn
+        ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800'
+        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+    }`}>
+      <div className="flex items-center gap-3.5 pr-4 flex-1 min-w-0">
         {Icon && (
-          <div className={`w-9 h-9 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all ${isOn ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-600' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'}`}>
+          <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 transition-all ${
+            isOn ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-600' : 'bg-slate-100 dark:bg-slate-700 text-slate-400'
+          }`}>
             <Icon className="h-4 w-4" />
           </div>
         )}
@@ -471,79 +411,252 @@ const ModuleAccessCard = ({ icon: Icon, title, desc, permKey, permissions, setPe
   const isEnabled = !!permissions[permKey];
   const accent    = accentColor || COLORS.mediumBlue;
   return (
-    <div onClick={() => setPermissions(p => ({ ...p, [permKey]: !p[permKey] }))}
-      className={`group relative flex gap-5 p-5 rounded-3xl border-2 cursor-pointer transition-all hover:shadow-xl ${isEnabled ? 'shadow-md' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'}`}
-      style={isEnabled ? { borderColor: `${accent}40`, background: `${accent}08` } : {}}>
-      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all ${isEnabled ? 'text-white shadow-lg' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'}`}
+    <motion.div
+      whileHover={{ y: -2, transition: springPhysics.lift }}
+      whileTap={{ scale: 0.99 }}
+      onClick={() => setPermissions(p => ({ ...p, [permKey]: !p[permKey] }))}
+      className={`flex gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all hover:shadow-md ${
+        isEnabled ? 'shadow-sm' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+      }`}
+      style={isEnabled ? { borderColor: `${accent}40`, background: `${accent}06` } : {}}>
+      <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-all ${
+        isEnabled ? 'text-white shadow-md' : 'bg-slate-100 dark:bg-slate-700 text-slate-400'
+      }`}
         style={isEnabled ? { background: `linear-gradient(135deg, ${accent}, ${accent}cc)` } : {}}>
-        <Icon className="h-6 w-6" />
+        <Icon className="h-5 w-5" />
       </div>
-      <div className="flex-1 min-w-0 pt-1">
+      <div className="flex-1 min-w-0 pt-0.5">
         <div className="flex items-center gap-2">
-          <p className={`font-semibold text-base ${isEnabled ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>{title}</p>
-          {badge && <Badge variant="secondary" className="text-[10px]">{badge}</Badge>}
+          <p className={`font-semibold text-sm ${isEnabled ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>{title}</p>
+          {badge && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md"
+              style={{ background: `${accent}15`, color: accent }}>{badge}</span>
+          )}
         </div>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{desc}</p>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">{desc}</p>
       </div>
-      <div className={`w-8 h-8 rounded-2xl flex items-center justify-center text-lg font-black transition-all flex-shrink-0 ${isEnabled ? 'bg-emerald-500 text-white shadow' : 'bg-slate-100 dark:bg-slate-800 text-slate-300'}`}>
+      <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-sm font-black transition-all flex-shrink-0 mt-0.5 ${
+        isEnabled ? 'text-white shadow-sm' : 'bg-slate-100 dark:bg-slate-700 text-slate-300'
+      }`} style={isEnabled ? { background: COLORS.emeraldGreen } : {}}>
         {isEnabled ? '✓' : '✕'}
       </div>
-    </div>
+    </motion.div>
   );
 };
 
-// ── Section Header ────────────────────────────────────────────────────────────
+// ── Section Header ─────────────────────────────────────────────────────────────
 const SectionHeader = ({ icon: Icon, title, count, color }) => (
-  <div className="flex items-center gap-4 mb-6">
-    <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: `${color}15` }}>
-      <Icon className="h-5 w-5" style={{ color }} />
+  <div className="flex items-center gap-3 mb-5">
+    <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: `${color}15` }}>
+      <Icon className="h-4 w-4" style={{ color }} />
     </div>
-    <div>
-      <p className="font-bold text-xl tracking-tight text-slate-900 dark:text-white">{title}</p>
-    </div>
+    <p className="font-bold text-base tracking-tight text-slate-900 dark:text-white">{title}</p>
     {count !== undefined && (
-      <div className="ml-auto text-xs font-bold px-4 py-1.5 rounded-full" style={{ background: `${color}15`, color }}>
+      <span className="ml-auto text-xs font-bold px-3 py-1 rounded-full" style={{ background: `${color}15`, color }}>
         {count} enabled
-      </div>
+      </span>
     )}
   </div>
 );
 
-// ── Permission Matrix Summary ─────────────────────────────────────────────────
-const PermissionMatrixSummary = ({ permissions }) => {
-  const allPerms = [...GLOBAL_PERMS, ...OPS_PERMS, ...EDIT_PERMS];
-  const granted  = allPerms.filter(p => permissions[p.key]).length;
-  const total    = allPerms.length;
-  const pct      = Math.round((granted / total) * 100);
-  return (
-    <div className="flex gap-6 p-6 bg-slate-50 dark:bg-slate-800/50 rounded-3xl border border-slate-200 dark:border-slate-700">
-      <div className="relative w-20 h-20 flex-shrink-0">
-        <svg className="w-20 h-20 -rotate-90" viewBox="0 0 48 48">
-          <circle cx="24" cy="24" r="20" fill="none" stroke="#e2e8f0" strokeWidth="6" />
-          <circle cx="24" cy="24" r="20" fill="none" stroke={COLORS.emeraldGreen} strokeWidth="6"
-            strokeDasharray={`${2 * Math.PI * 20}`}
-            strokeDashoffset={`${2 * Math.PI * 20 * (1 - pct / 100)}`}
-            strokeLinecap="round" />
-        </svg>
-        <div className="absolute inset-0 flex items-center justify-center font-black text-2xl text-slate-700 dark:text-slate-100">{pct}%</div>
+// ── Pending User Card ─────────────────────────────────────────────────────────
+const PendingUserCard = ({ userData, onApprove, onReject, approving }) => (
+  <motion.div
+    variants={itemVariants}
+    whileHover={{ y: -3, transition: springPhysics.lift }}
+    layout
+    className="bg-white dark:bg-slate-800 rounded-2xl overflow-hidden border border-amber-200 dark:border-amber-800 shadow-sm hover:shadow-xl transition-all duration-300">
+    <div className="h-1.5 w-full" style={{ background: 'linear-gradient(90deg, #f59e0b, #f97316)' }} />
+    <div className="p-5">
+      <div className="flex items-start gap-4">
+        <div className="relative flex-shrink-0">
+          <div className="w-14 h-14 rounded-xl overflow-hidden shadow-sm ring-1 ring-amber-100 dark:ring-amber-900">
+            {userData.profile_picture
+              ? <img src={userData.profile_picture} alt={userData.full_name} className="w-full h-full object-cover" />
+              : <div className="w-full h-full flex items-center justify-center text-white text-xl font-black"
+                  style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)' }}>
+                  {userData.full_name?.charAt(0)?.toUpperCase()}
+                </div>}
+          </div>
+          <div className="absolute -bottom-1 -right-1 bg-amber-100 dark:bg-amber-900 text-amber-600 dark:text-amber-300 rounded-full p-1 border-2 border-white dark:border-slate-800">
+            <Clock className="h-3 w-3" />
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-base text-slate-900 dark:text-white tracking-tight truncate">{userData.full_name}</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">{userData.email}</p>
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 capitalize">{userData.role}</span>
+            <StatusBadge status={userData.status} />
+          </div>
+        </div>
       </div>
-      <div className="flex-1">
-        <p className="font-bold text-2xl tracking-tight">Permission Coverage</p>
-        <p className="text-slate-500 mt-1">{granted} of {total} permissions enabled</p>
+
+      {(userData.departments || []).length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-4">{userData.departments.map(d => <DeptPill key={d} dept={d} />)}</div>
+      )}
+
+      <div className="mt-4 space-y-2 text-xs text-slate-500 dark:text-slate-400">
+        <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5 text-slate-400" />{userData.phone || '—'}</div>
+        <div className="flex items-center gap-2"><Calendar className="h-3.5 w-3.5 text-slate-400" />
+          Registered {userData.created_at ? format(new Date(userData.created_at), 'dd MMM yyyy') : 'N/A'}
+        </div>
+      </div>
+
+      <div className="flex gap-2.5 mt-5">
+        <Button onClick={() => onApprove(userData)} disabled={approving === userData.id}
+          className="flex-1 h-10 rounded-xl font-semibold text-sm shadow-sm hover:shadow-md transition-all"
+          style={{ background: COLORS.emeraldGreen, color: 'white' }}>
+          <UserCheck className="h-4 w-4 mr-1.5" />{approving === userData.id ? 'Approving…' : 'Approve'}
+        </Button>
+        <Button onClick={() => onReject(userData)} disabled={approving === userData.id}
+          variant="outline" className="flex-1 h-10 rounded-xl border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 font-semibold text-sm">
+          <UserX className="h-4 w-4 mr-1.5" />Reject
+        </Button>
       </div>
     </div>
+  </motion.div>
+);
+
+// ── User Card ─────────────────────────────────────────────────────────────────
+const UserCard = ({
+  userData, onEdit, onDelete, onPermissions, onApprove, onReject,
+  currentUserId, isAdmin, canEditUsers, canManagePermissions, approving,
+}) => {
+  const [hovered, setHovered] = useState(false);
+  const isPending = userData.status === 'pending_approval';
+  const roleCfg   = ROLE_CONFIG[userData.role?.toLowerCase()] || ROLE_CONFIG.staff;
+  const RoleIcon  = roleCfg.icon;
+
+  const permCount = useMemo(() =>
+    userData.permissions
+      ? Object.entries(userData.permissions).filter(([k, v]) => k.startsWith('can_') && v === true).length
+      : 0
+  , [userData.permissions]);
+
+  return (
+    <motion.div
+      variants={itemVariants}
+      layout
+      whileHover={{ y: -4, transition: springPhysics.lift }}
+      whileTap={{ scale: 0.99 }}
+      className={`relative bg-white dark:bg-slate-800 rounded-2xl overflow-hidden border shadow-sm transition-all duration-200 ${
+        isPending
+          ? 'border-amber-200 dark:border-amber-800 hover:shadow-xl'
+          : hovered
+          ? 'border-blue-200 dark:border-blue-700 hover:shadow-xl'
+          : 'border-slate-200/80 dark:border-slate-700 hover:shadow-lg'
+      }`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}>
+      {/* Role color stripe */}
+      <div className={`h-1.5 w-full bg-gradient-to-r ${roleCfg.gradient}`} />
+
+      {/* Hover actions */}
+      <AnimatePresence>
+        {hovered && !isPending && (
+          <motion.div
+            initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.18 }}
+            className="absolute top-4 right-4 flex gap-1.5 z-20">
+            {canManagePermissions && userData.role !== 'admin' && (
+              <button onClick={() => onPermissions(userData)} title="Manage Permissions"
+                className="w-8 h-8 bg-emerald-50 dark:bg-emerald-900/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center border border-emerald-100 dark:border-emerald-800 shadow-sm transition-all">
+                <Shield className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {(isAdmin || (canEditUsers && !isPending)) && (
+              <button onClick={() => onEdit(userData)} title="Edit User"
+                className="w-8 h-8 bg-blue-50 dark:bg-blue-900/40 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-600 dark:text-blue-400 rounded-xl flex items-center justify-center border border-blue-100 dark:border-blue-800 shadow-sm transition-all">
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {(isAdmin || canEditUsers) && userData.id !== currentUserId && (
+              <button onClick={() => onDelete(userData.id)} title="Delete User"
+                className="w-8 h-8 bg-red-50 dark:bg-red-900/40 hover:bg-red-100 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 rounded-xl flex items-center justify-center border border-red-100 dark:border-red-800 shadow-sm transition-all">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="p-5">
+        {/* Avatar + Name */}
+        <div className="flex items-start gap-4">
+          <div className="relative flex-shrink-0">
+            <div className="w-[60px] h-[60px] rounded-xl overflow-hidden shadow-sm ring-1 ring-slate-100 dark:ring-slate-700">
+              {userData.profile_picture
+                ? <img src={userData.profile_picture} alt={userData.full_name} className="w-full h-full object-cover" />
+                : <div className={`w-full h-full flex items-center justify-center text-white text-2xl font-black bg-gradient-to-br ${roleCfg.gradient}`}>
+                    {userData.full_name?.charAt(0)?.toUpperCase()}
+                  </div>}
+            </div>
+            <div className={`absolute -bottom-1.5 -right-1.5 w-6 h-6 rounded-xl bg-gradient-to-br ${roleCfg.gradient} flex items-center justify-center ring-2 ring-white dark:ring-slate-800 shadow-sm`}>
+              <RoleIcon className="h-3 w-3 text-white" />
+            </div>
+          </div>
+
+          <div className="flex-1 min-w-0 pt-0.5">
+            <h3 className="font-semibold text-base tracking-tight text-slate-900 dark:text-white truncate">{userData.full_name}</h3>
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
+              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-bold text-white bg-gradient-to-r ${roleCfg.gradient}`}>
+                <RoleIcon className="h-3 w-3" />{roleCfg.label}
+              </span>
+              <StatusBadge status={userData.status} isActive={userData.is_active} />
+            </div>
+          </div>
+        </div>
+
+        {/* Departments */}
+        {(userData.departments || []).length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-4">{userData.departments.map(d => <DeptPill key={d} dept={d} />)}</div>
+        )}
+
+        {/* Module Badges */}
+        <ModuleAccessBadges userData={userData} />
+
+        {/* Meta info */}
+        <div className="mt-4 space-y-2 text-xs text-slate-500 dark:text-slate-400">
+          <div className="flex items-center gap-2 truncate"><Mail className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" /><span className="truncate">{userData.email}</span></div>
+          <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />{userData.phone || '—'}</div>
+          {(userData.punch_in_time || userData.punch_out_time) && (
+            <div className="flex items-center gap-2"><Clock className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />{userData.punch_in_time || '—'} → {userData.punch_out_time || '—'}</div>
+          )}
+          <div className="flex items-center gap-2"><Calendar className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+            Joined {userData.created_at ? format(new Date(userData.created_at), 'dd MMM yyyy') : 'N/A'}
+          </div>
+        </div>
+
+        {/* Permission count */}
+        {userData.role !== 'admin' && (
+          <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
+            <span className="text-[11px] text-slate-400 font-medium">Permissions</span>
+            <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold"
+              style={{ background: `${COLORS.mediumBlue}10`, color: COLORS.mediumBlue }}>
+              <ShieldCheck className="h-3 w-3" />{permCount} active
+            </div>
+          </div>
+        )}
+
+        {/* Pending actions */}
+        {isPending && isAdmin && (
+          <div className="flex gap-2.5 mt-5 pt-4 border-t border-amber-100 dark:border-amber-900">
+            <Button onClick={() => onApprove(userData)} disabled={approving === userData.id}
+              className="flex-1 h-10 rounded-xl font-semibold text-sm"
+              style={{ background: COLORS.emeraldGreen, color: 'white' }}>
+              <UserCheck className="h-4 w-4 mr-1.5" />Approve
+            </Button>
+            <Button onClick={() => onReject(userData)} disabled={approving === userData.id}
+              variant="outline" className="flex-1 h-10 rounded-xl border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 font-semibold text-sm">
+              <UserX className="h-4 w-4 mr-1.5" />Reject
+            </Button>
+          </div>
+        )}
+      </div>
+    </motion.div>
   );
 };
-
-// ── Permission Tab Config ─────────────────────────────────────────────────────
-const permTabs = [
-  { id: 'modules', label: 'Modules',      icon: Zap        },
-  { id: 'view',    label: 'View',          icon: Eye        },
-  { id: 'ops',     label: 'Operations',    icon: Settings   },
-  { id: 'edit',    label: 'Edit',          icon: Pencil     },
-  { id: 'cross',   label: 'Cross-User',    icon: UsersIcon  },
-  { id: 'clients', label: 'Clients',       icon: Briefcase  },
-];
 
 // ════════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
@@ -551,11 +664,11 @@ const permTabs = [
 export default function Users() {
   const { user, refreshUser } = useAuth();
   const isDark = useDark();
-  const isAdmin               = user?.role === 'admin';
-  const perms                 = user?.permissions || {};
-  const canViewUserPage       = isAdmin || !!perms.can_view_user_page;
-  const canEditUsers          = isAdmin || !!perms.can_manage_users;
-  const canManagePermissions  = isAdmin;
+  const isAdmin              = user?.role === 'admin';
+  const perms                = user?.permissions || {};
+  const canViewUserPage      = isAdmin || !!perms.can_view_user_page;
+  const canEditUsers         = isAdmin || !!perms.can_manage_users;
+  const canManagePermissions = isAdmin;
 
   const [users,                setUsers]                = useState([]);
   const [clients,              setClients]              = useState([]);
@@ -592,8 +705,10 @@ export default function Users() {
   }, []);
 
   const fetchClients = useCallback(async () => {
-    try { const res = await api.get('/clients'); setClients(Array.isArray(res.data) ? res.data : (res.data?.data || [])); }
-    catch {}
+    try {
+      const res = await api.get('/clients');
+      setClients(Array.isArray(res.data) ? res.data : (res.data?.data || []));
+    } catch {}
   }, []);
 
   const fetchPermissions = useCallback(async (userId) => {
@@ -606,10 +721,12 @@ export default function Users() {
     }
   }, []);
 
-  const handleInput       = useCallback((e) => { const { name, value } = e.target; setFormData(p => ({ ...p, [name]: value })); }, []);
-  const handleRoleChange  = useCallback((v)  => setFormData(p => ({ ...p, role: v })), []);
-  const toggleDept        = useCallback((d)  => setFormData(p => ({ ...p, departments: p.departments.includes(d) ? p.departments.filter(x => x !== d) : [...p.departments, d] })), []);
-  const handlePhoto       = useCallback((e)  => {
+  const handleInput      = useCallback((e) => { const { name, value } = e.target; setFormData(p => ({ ...p, [name]: value })); }, []);
+  const handleRoleChange = useCallback((v) => setFormData(p => ({ ...p, role: v })), []);
+  const toggleDept       = useCallback((d) => setFormData(p => ({
+    ...p, departments: p.departments.includes(d) ? p.departments.filter(x => x !== d) : [...p.departments, d],
+  })), []);
+  const handlePhoto = useCallback((e) => {
     const file = e.target.files?.[0]; if (!file) return;
     const reader = new FileReader();
     reader.onloadend = () => setFormData(p => ({ ...p, profile_picture: reader.result }));
@@ -619,40 +736,40 @@ export default function Users() {
   const handleEdit = useCallback((userData) => {
     setSelectedUser(userData);
     setFormData({
-      full_name:      userData.full_name || '',
-      email:          userData.email || '',
-      password:       '',
-      role:           userData.role || 'staff',
-      departments:    userData.departments || [],
-      phone:          userData.phone || '',
-      birthday:       userData.birthday && userData.birthday !== '' ? format(new Date(userData.birthday), 'yyyy-MM-dd') : '',
+      full_name:       userData.full_name || '',
+      email:           userData.email || '',
+      password:        '',
+      role:            userData.role || 'staff',
+      departments:     userData.departments || [],
+      phone:           userData.phone || '',
+      birthday:        userData.birthday && userData.birthday !== '' ? format(new Date(userData.birthday), 'yyyy-MM-dd') : '',
       profile_picture: userData.profile_picture || '',
-      punch_in_time:  userData.punch_in_time || '10:30',
-      grace_time:     userData.grace_time || '00:10',
-      punch_out_time: userData.punch_out_time || '19:00',
-      telegram_id:    userData.telegram_id != null ? String(userData.telegram_id) : '',
-      is_active:      userData.is_active !== false,
-      status:         userData.status || 'active',
+      punch_in_time:   userData.punch_in_time || '10:30',
+      grace_time:      userData.grace_time || '00:10',
+      punch_out_time:  userData.punch_out_time || '19:00',
+      telegram_id:     userData.telegram_id != null ? String(userData.telegram_id) : '',
+      is_active:       userData.is_active !== false,
+      status:          userData.status || 'active',
     });
     setDialogOpen(true);
   }, []);
 
   const handleSubmit = useCallback(async () => {
-    if (!formData.full_name.trim())          { toast.error('Full name is required'); return; }
+    if (!formData.full_name.trim())              { toast.error('Full name is required'); return; }
     if (!selectedUser && !formData.email.trim()) { toast.error('Email is required');     return; }
     setLoading(true);
     try {
       if (selectedUser) {
         const payload = {
-          full_name:      formData.full_name.trim(),
-          phone:          formData.phone || null,
-          birthday:       formData.birthday || null,
+          full_name:       formData.full_name.trim(),
+          phone:           formData.phone || null,
+          birthday:        formData.birthday || null,
           profile_picture: formData.profile_picture || null,
-          punch_in_time:  formData.punch_in_time || null,
-          grace_time:     formData.grace_time || null,
-          punch_out_time: formData.punch_out_time || null,
-          telegram_id:    formData.telegram_id !== '' ? Number(formData.telegram_id) : null,
-          is_active:      formData.is_active,
+          punch_in_time:   formData.punch_in_time || null,
+          grace_time:      formData.grace_time || null,
+          punch_out_time:  formData.punch_out_time || null,
+          telegram_id:     formData.telegram_id !== '' ? Number(formData.telegram_id) : null,
+          is_active:       formData.is_active,
           ...(isAdmin && { email: formData.email.trim(), role: formData.role, status: formData.status, departments: formData.departments }),
           ...(isAdmin && formData.password.trim() && { password: formData.password.trim() }),
         };
@@ -661,19 +778,19 @@ export default function Users() {
         toast.success('✓ User updated successfully');
       } else {
         await api.post('/auth/register', {
-          full_name:    formData.full_name.trim(),
-          email:        formData.email.trim(),
-          password:     formData.password,
-          role:         formData.role,
-          departments:  formData.departments,
-          phone:        formData.phone || null,
-          birthday:     formData.birthday || null,
-          punch_in_time: formData.punch_in_time,
-          grace_time:   formData.grace_time,
+          full_name:      formData.full_name.trim(),
+          email:          formData.email.trim(),
+          password:       formData.password,
+          role:           formData.role,
+          departments:    formData.departments,
+          phone:          formData.phone || null,
+          birthday:       formData.birthday || null,
+          punch_in_time:  formData.punch_in_time,
+          grace_time:     formData.grace_time,
           punch_out_time: formData.punch_out_time,
-          telegram_id:  formData.telegram_id !== '' ? Number(formData.telegram_id) : null,
-          is_active:    false,
-          status:       'pending_approval',
+          telegram_id:    formData.telegram_id !== '' ? Number(formData.telegram_id) : null,
+          is_active:      false,
+          status:         'pending_approval',
         });
         toast.success('✓ Member registered — awaiting approval');
       }
@@ -718,8 +835,9 @@ export default function Users() {
       if (selectedUserForPerms?.id === user?.id) await refreshUser();
       toast.success('✓ Permissions saved');
       setPermDialogOpen(false); fetchUsers();
-    } catch (err) { toast.error(err.response?.data?.detail || 'Failed to update permissions'); }
-    finally { setLoading(false); }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to update permissions');
+    } finally { setLoading(false); }
   }, [canManagePermissions, permissions, selectedUserForPerms?.id, user?.id, refreshUser, fetchUsers]);
 
   const resetPermissionsToRole = useCallback((role) => {
@@ -760,160 +878,313 @@ export default function Users() {
   }), [users, searchQuery, activeTab]);
 
   const stats = useMemo(() => [
-    { label: 'Total Members', value: users.length,                                             icon: UsersIcon, color: COLORS.mediumBlue   },
-    { label: 'Admins',        value: users.filter(u => u.role === 'admin').length,              icon: Crown,     color: COLORS.indigo       },
-    { label: 'Pending',       value: pendingUsers.length,                                       icon: Clock,     color: '#D97706'           },
-    { label: 'Active',        value: users.filter(u => u.is_active).length,                     icon: CheckCircle, color: COLORS.emeraldGreen },
+    { label: 'Total Members', value: users.length,                                icon: UsersIcon,  color: COLORS.mediumBlue   },
+    { label: 'Admins',        value: users.filter(u => u.role === 'admin').length, icon: Crown,      color: COLORS.indigo       },
+    { label: 'Pending',       value: pendingUsers.length,                          icon: Clock,      color: '#D97706'           },
+    { label: 'Active',        value: users.filter(u => u.is_active).length,        icon: CheckCircle, color: COLORS.emeraldGreen },
   ], [users, pendingUsers.length]);
 
+  const enabledPermCount = Object.entries(permissions).filter(([k, v]) => k.startsWith('can_') && v === true).length;
+
+  // ── Access Denied ─────────────────────────────────────────────────────────
   if (!canViewUserPage) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-950 p-8">
+      <div className="flex items-center justify-center min-h-screen bg-slate-50 dark:bg-[#0a0f1c] p-8">
         <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-center max-w-sm">
-          <div className="w-24 h-24 rounded-3xl bg-red-100 dark:bg-red-950 flex items-center justify-center mx-auto mb-8">
-            <ShieldOff className="h-12 w-12 text-red-500" />
+          <div className="w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-6"
+            style={{ background: 'rgba(239,68,68,0.1)' }}>
+            <ShieldOff className="h-10 w-10 text-red-500" />
           </div>
-          <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-3">Access Restricted</h2>
-          <p className="text-slate-600 dark:text-slate-400">
-            You need the <span className="font-semibold">View User Directory</span> permission to access this page.
+          <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Access Restricted</h2>
+          <p className="text-slate-500 dark:text-slate-400 text-sm leading-relaxed">
+            You need the <span className="font-semibold text-slate-700 dark:text-slate-200">View User Directory</span> permission to access this page.
           </p>
         </motion.div>
       </div>
     );
   }
 
+  // ── Tab config ────────────────────────────────────────────────────────────
+  const tabs = [
+    { id: 'all',      label: 'All',      count: users.length },
+    { id: 'admin',    label: 'Admins',   count: users.filter(u => u.role === 'admin').length },
+    { id: 'manager',  label: 'Managers', count: users.filter(u => u.role === 'manager').length },
+    { id: 'staff',    label: 'Staff',    count: users.filter(u => u.role === 'staff').length },
+    { id: 'rejected', label: 'Rejected', count: users.filter(u => u.status === 'rejected').length },
+  ];
+
   return (
-    <motion.div className={`space-y-10 p-6 md:p-10 min-h-screen ${isDark ? 'bg-[#0a0f1c]' : 'bg-slate-50'}`}
+    <motion.div
+      className={`space-y-5 p-5 md:p-8 min-h-screen ${isDark ? 'bg-[#0a0f1c]' : 'bg-slate-50'}`}
       initial="hidden" animate="visible" variants={containerVariants}>
 
-      {/* Page Header */}
-      <motion.div variants={slideIn} className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div className="flex items-center gap-5">
-          <div className="w-14 h-14 rounded-3xl flex items-center justify-center shadow-xl" style={{ background: GRADIENT }}>
-            <UsersIcon className="h-7 w-7 text-white" />
-          </div>
-          <div>
-            <h1 className="text-4xl font-bold tracking-tighter text-slate-900 dark:text-white">User Directory</h1>
-            <p className="text-slate-500 dark:text-slate-400 mt-1">Manage team members and permissions</p>
-          </div>
-        </div>
-        {isAdmin && (
-          <Button onClick={() => {
-            setSelectedUser(null);
-            setFormData({ full_name:'',email:'',password:'',role:'staff',departments:[],phone:'',birthday:'',profile_picture:'',punch_in_time:'10:30',grace_time:'00:10',punch_out_time:'19:00',telegram_id:'',is_active:true,status:'active' });
-            setDialogOpen(true);
-          }} className="h-12 px-8 rounded-2xl font-semibold shadow-lg hover:shadow-xl transition-all text-base" style={{ background: GRADIENT, color: 'white' }}>
-            <Plus className="h-5 w-5 mr-3" />Add New Member
-          </Button>
-        )}
-      </motion.div>
-
-      {/* Stats */}
-      <motion.div variants={containerVariants} className="grid grid-cols-2 md:grid-cols-4 gap-6">
-        {stats.map((s, i) => { const Icon = s.icon; return (
-          <motion.div key={i} variants={itemVariants} className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-xl transition-all">
+      {/* ── Page Header ──────────────────────────────────────────────────── */}
+      <motion.div variants={slideIn}>
+        <div className="relative overflow-hidden rounded-2xl px-6 py-5"
+          style={{ background: GRADIENT, boxShadow: `0 8px 32px rgba(13,59,102,0.22)` }}>
+          <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
+            style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+          <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5"
+            style={{ background: 'white' }} />
+          <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: `${s.color}15` }}>
-                <Icon className="h-6 w-6" style={{ color: s.color }} />
+              <div className="w-12 h-12 rounded-2xl bg-white/15 flex items-center justify-center flex-shrink-0">
+                <UsersIcon className="h-6 w-6 text-white" />
               </div>
               <div>
-                <p className="text-4xl font-bold text-slate-900 dark:text-white tracking-tighter">{s.value}</p>
-                <p className="text-sm text-slate-500 font-medium mt-1">{s.label}</p>
+                <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-0.5">Team Management</p>
+                <h1 className="text-2xl font-bold text-white tracking-tight">User Directory</h1>
               </div>
             </div>
-          </motion.div>
-        ); })}
+            {isAdmin && (
+              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}>
+                <Button
+                  onClick={() => {
+                    setSelectedUser(null);
+                    setFormData({ full_name:'',email:'',password:'',role:'staff',departments:[],phone:'',birthday:'',profile_picture:'',punch_in_time:'10:30',grace_time:'00:10',punch_out_time:'19:00',telegram_id:'',is_active:true,status:'active' });
+                    setDialogOpen(true);
+                  }}
+                  className="h-10 px-6 rounded-xl font-semibold text-sm shadow-lg bg-white/20 hover:bg-white/30 text-white border border-white/20 hover:border-white/30 transition-all">
+                  <Plus className="h-4 w-4 mr-2" />Add New Member
+                </Button>
+              </motion.div>
+            )}
+          </div>
+        </div>
       </motion.div>
 
-      {/* Create / Edit Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto rounded-3xl p-0 border-0 shadow-2xl">
-          <div className="sticky top-0 z-10 bg-white dark:bg-slate-900 rounded-t-3xl">
-            <div className="h-2 w-full" style={{ background: GRADIENT }} />
-            <div className="px-8 py-6 border-b dark:border-slate-700">
-              <DialogTitle className="text-2xl font-bold text-slate-900 dark:text-white">
-                {selectedUser ? `Edit — ${selectedUser.full_name}` : 'Add New Team Member'}
-              </DialogTitle>
-              <DialogDescription className="text-sm text-slate-500 mt-1">
-                {isAdmin ? 'Full administrative control' : 'Update your personal information'}
-              </DialogDescription>
-            </div>
-          </div>
+      {/* ── Stats ────────────────────────────────────────────────────────── */}
+      <motion.div variants={containerVariants} className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {stats.map((s, i) => {
+          const Icon = s.icon;
+          return (
+            <motion.div key={i} variants={itemVariants}
+              whileHover={{ y: -3, transition: springPhysics.card }}
+              whileTap={{ scale: 0.985 }}
+              className={`bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700 shadow-sm hover:shadow-lg transition-all cursor-default`}>
+              <div className="p-4 flex items-start justify-between">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{s.label}</p>
+                  <p className="text-3xl font-bold mt-1 tracking-tight" style={{ color: s.color }}>{s.value}</p>
+                </div>
+                <div className="p-2 rounded-xl" style={{ background: `${s.color}12` }}>
+                  <Icon className="h-4 w-4" style={{ color: s.color }} />
+                </div>
+              </div>
+            </motion.div>
+          );
+        })}
+      </motion.div>
 
-          <div className="p-8 space-y-10">
+      {/* ── Pending Approvals ─────────────────────────────────────────────── */}
+      {pendingUsers.length > 0 && isAdmin && (
+        <motion.div variants={itemVariants} className="space-y-4">
+          <SectionCard>
+            <CardHeaderRow
+              iconBg={isDark ? 'bg-amber-900/40' : 'bg-amber-50'}
+              icon={<Clock className="h-4 w-4 text-amber-500" />}
+              title="Pending Approvals"
+              subtitle={`${pendingUsers.length} awaiting review`}
+              badge={pendingUsers.length}
+            />
+            <div className="p-4">
+              <motion.div variants={containerVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {pendingUsers.map(u => (
+                  <PendingUserCard key={u.id} userData={u} onApprove={handleApprove} onReject={handleReject} approving={approvingId} />
+                ))}
+              </motion.div>
+            </div>
+          </SectionCard>
+        </motion.div>
+      )}
+
+      {/* ── Tabs + Search ────────────────────────────────────────────────── */}
+      <motion.div variants={itemVariants} className="space-y-3">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          {tabs.map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm transition-all whitespace-nowrap ${
+                activeTab === tab.id
+                  ? 'text-white shadow-md'
+                  : isDark
+                  ? 'bg-slate-800 text-slate-400 border border-slate-700 hover:border-slate-600 hover:text-slate-200'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:border-slate-300'
+              }`}
+              style={activeTab === tab.id ? { background: GRADIENT } : {}}>
+              {tab.label}
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md leading-none ${
+                activeTab === tab.id ? 'bg-white/20 text-white' : isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'
+              }`}>{tab.count}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="relative">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <Input
+            placeholder="Search by name or email…"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            className={`pl-11 h-11 rounded-xl text-sm border ${
+              isDark
+                ? 'bg-slate-800 border-slate-700 text-slate-100 placeholder:text-slate-500 focus:border-blue-600'
+                : 'bg-white border-slate-200 placeholder:text-slate-400 focus:border-blue-400'
+            }`}
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')}
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </motion.div>
+
+      {/* ── Users Grid ───────────────────────────────────────────────────── */}
+      <motion.div variants={containerVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {filteredUsers.length > 0
+          ? filteredUsers.map(u => (
+              <UserCard key={u.id} userData={u}
+                onEdit={handleEdit} onDelete={handleDelete}
+                onPermissions={openPermissionsDialog}
+                onApprove={handleApprove} onReject={handleReject}
+                currentUserId={user?.id || ''} isAdmin={isAdmin}
+                canEditUsers={canEditUsers} canManagePermissions={canManagePermissions}
+                approving={approvingId} />
+            ))
+          : (
+            <motion.div variants={itemVariants} className="col-span-full">
+              <div className={`flex flex-col items-center justify-center py-20 rounded-2xl border border-dashed ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                <div className={`p-4 rounded-2xl mb-4 ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                  <UsersIcon className="h-8 w-8 text-slate-400" />
+                </div>
+                <p className="text-slate-500 dark:text-slate-400 font-semibold">No users found</p>
+                <p className="text-slate-400 dark:text-slate-500 text-sm mt-1">Try adjusting your search or filter</p>
+              </div>
+            </motion.div>
+          )}
+      </motion.div>
+
+      {/* ════════════════════════════════════════════════════════════════════
+          CREATE / EDIT DIALOG
+      ════════════════════════════════════════════════════════════════════ */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto users-slim rounded-2xl p-0 border-0 shadow-2xl gap-0">
+
+          <DialogGradHeader
+            gradient={GRADIENT}
+            icon={selectedUser ? Pencil : Plus}
+            eyebrow={selectedUser ? 'Edit Member' : 'New Member'}
+            title={selectedUser ? selectedUser.full_name : 'Add Team Member'}
+            subtitle={isAdmin ? 'Full administrative control' : 'Update your personal information'}
+          />
+
+          <div className="p-6 space-y-6 bg-white dark:bg-slate-900">
+
             {/* Profile Picture */}
             <div className="flex justify-center">
               <label className="relative group cursor-pointer">
-                <div className="w-28 h-28 rounded-3xl overflow-hidden border-4 border-white dark:border-slate-800 shadow-xl">
+                <div className="w-24 h-24 rounded-2xl overflow-hidden border-4 border-white dark:border-slate-800 shadow-lg ring-1 ring-slate-200 dark:ring-slate-700">
                   {formData.profile_picture
                     ? <img src={formData.profile_picture} alt="Profile" className="w-full h-full object-cover" />
-                    : <div className="w-full h-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center"><UserIcon className="h-14 w-14 text-slate-300" /></div>}
+                    : <div className="w-full h-full flex items-center justify-center"
+                        style={{ background: GRADIENT }}>
+                        <UserIcon className="h-10 w-10 text-white/60" />
+                      </div>}
                 </div>
-                <div className="absolute bottom-1 right-1 bg-white dark:bg-slate-700 rounded-full p-3 shadow-lg border border-slate-200 dark:border-slate-600">
-                  <Camera className="h-5 w-5 text-blue-600" />
+                <div className="absolute bottom-1 right-1 w-8 h-8 bg-white dark:bg-slate-700 rounded-xl flex items-center justify-center shadow-md border border-slate-200 dark:border-slate-600 group-hover:scale-110 transition-transform">
+                  <Camera className="h-4 w-4 text-blue-600" />
                 </div>
                 <input type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
               </label>
             </div>
 
             {/* Basic Info */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block">FULL NAME</Label>
-                <Input name="full_name" value={formData.full_name} onChange={handleInput} placeholder="Full Name" className="h-12 rounded-2xl" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase">Full Name</Label>
+                <Input name="full_name" value={formData.full_name} onChange={handleInput}
+                  placeholder="Full Name" className="h-11 rounded-xl" />
               </div>
-              <div>
-                <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block">EMAIL ADDRESS</Label>
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase">Email Address</Label>
                 <Input type="email" name="email" value={formData.email} onChange={handleInput}
                   disabled={!isAdmin || (selectedUser && selectedUser.id === user?.id)}
-                  placeholder="name@company.com" className="h-12 rounded-2xl" />
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block">PHONE NUMBER</Label>
-                <Input name="phone" value={formData.phone} onChange={handleInput} placeholder="+91 98765 43210" className="h-12 rounded-2xl" />
-              </div>
-              <div>
-                <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block flex items-center gap-2">
-                  <KeyRound className="h-4 w-4" />{selectedUser ? 'NEW PASSWORD' : 'INITIAL PASSWORD'}
-                </Label>
-                <Input type="password" name="password" value={formData.password} onChange={handleInput}
-                  placeholder={selectedUser ? 'Leave blank to keep current' : 'Secure password'} className="h-12 rounded-2xl" />
+                  placeholder="name@company.com" className="h-11 rounded-xl" />
               </div>
             </div>
 
-            {/* Shift */}
-            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900 rounded-3xl p-8">
-              <div className="flex items-center gap-3 mb-6"><Clock className="h-5 w-5 text-blue-600" /><h3 className="font-semibold text-blue-700 dark:text-blue-400">WORK SHIFT SCHEDULE</h3></div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {[{ label:'Punch In', name:'punch_in_time' }, { label:'Grace Period', name:'grace_time' }, { label:'Punch Out', name:'punch_out_time' }].map(f => (
-                  <div key={f.name}><Label className="text-xs font-medium text-blue-600 mb-2 block">{f.label}</Label><Input type="time" name={f.name} value={formData[f.name]} onChange={handleInput} className="h-12 rounded-2xl" /></div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase">Phone Number</Label>
+                <Input name="phone" value={formData.phone} onChange={handleInput}
+                  placeholder="+91 98765 43210" className="h-11 rounded-xl" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase flex items-center gap-1.5">
+                  <KeyRound className="h-3.5 w-3.5" />{selectedUser ? 'New Password' : 'Initial Password'}
+                </Label>
+                <Input type="password" name="password" value={formData.password} onChange={handleInput}
+                  placeholder={selectedUser ? 'Leave blank to keep current' : 'Secure password'}
+                  className="h-11 rounded-xl" />
+              </div>
+            </div>
+
+            {/* Shift Schedule */}
+            <div className={`rounded-xl p-5 border ${isDark ? 'bg-blue-950/20 border-blue-900/50' : 'bg-blue-50 border-blue-100'}`}>
+              <div className="flex items-center gap-2 mb-4">
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${isDark ? 'bg-blue-900/60' : 'bg-blue-100'}`}>
+                  <Clock className="h-3.5 w-3.5 text-blue-600" />
+                </div>
+                <span className="font-semibold text-sm text-blue-700 dark:text-blue-400 uppercase tracking-wider">Work Shift Schedule</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {[
+                  { label: 'Punch In',     name: 'punch_in_time'  },
+                  { label: 'Grace Period', name: 'grace_time'      },
+                  { label: 'Punch Out',    name: 'punch_out_time' },
+                ].map(f => (
+                  <div key={f.name} className="space-y-1.5">
+                    <Label className="text-xs font-medium text-blue-600 dark:text-blue-400">{f.label}</Label>
+                    <Input type="time" name={f.name} value={formData[f.name]} onChange={handleInput}
+                      className="h-11 rounded-xl" />
+                  </div>
                 ))}
               </div>
             </div>
 
             {/* Birthday + Telegram */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div><Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block">BIRTHDAY</Label><Input type="date" name="birthday" value={formData.birthday} onChange={handleInput} className="h-12 rounded-2xl" /></div>
-              <div><Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block">TELEGRAM ID</Label><Input type="number" name="telegram_id" value={formData.telegram_id} onChange={handleInput} placeholder="123456789" className="h-12 rounded-2xl" /></div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase">Birthday</Label>
+                <Input type="date" name="birthday" value={formData.birthday} onChange={handleInput} className="h-11 rounded-xl" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase">Telegram ID</Label>
+                <Input type="number" name="telegram_id" value={formData.telegram_id} onChange={handleInput}
+                  placeholder="123456789" className="h-11 rounded-xl" />
+              </div>
             </div>
 
-            {/* Admin-only */}
+            {/* Admin-only fields */}
             {isAdmin && (
               <>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block">ROLE</Label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase">Role</Label>
                     <Select value={formData.role} onValueChange={handleRoleChange}>
-                      <SelectTrigger className="h-12 rounded-2xl"><SelectValue /></SelectTrigger>
-                      <SelectContent><SelectItem value="staff">Staff</SelectItem><SelectItem value="manager">Manager</SelectItem><SelectItem value="admin">Admin</SelectItem></SelectContent>
+                      <SelectTrigger className="h-11 rounded-xl"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="staff">Staff</SelectItem>
+                        <SelectItem value="manager">Manager</SelectItem>
+                        <SelectItem value="admin">Admin</SelectItem>
+                      </SelectContent>
                     </Select>
                   </div>
-                  <div>
-                    <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-2 block">ACCOUNT STATUS</Label>
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase">Account Status</Label>
                     <Select value={formData.status} onValueChange={v => setFormData(p => ({ ...p, status: v, is_active: v === 'active' }))}>
-                      <SelectTrigger className="h-12 rounded-2xl"><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="h-11 rounded-xl"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="active">Active</SelectItem>
                         <SelectItem value="pending_approval">Pending Approval</SelectItem>
@@ -923,15 +1194,18 @@ export default function Users() {
                     </Select>
                   </div>
                 </div>
-                <div>
-                  <Label className="text-xs font-semibold tracking-widest text-slate-500 mb-4 block">ASSIGNED DEPARTMENTS</Label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+
+                <div className="space-y-2.5">
+                  <Label className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase">Assigned Departments</Label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
                     {DEPARTMENTS.map(dept => {
                       const active = formData.departments.includes(dept.value);
                       return (
                         <button key={dept.value} type="button" onClick={() => toggleDept(dept.value)}
-                          className={`h-12 rounded-2xl text-sm font-semibold border-2 transition-all ${active ? 'text-white border-transparent shadow' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'}`}
-                          style={{ background: active ? dept.color : undefined }}>
+                          className="h-10 rounded-xl text-xs font-bold border-2 transition-all hover:shadow-sm"
+                          style={active
+                            ? { background: dept.color, color: 'white', borderColor: dept.color }
+                            : { background: dept.bg, color: dept.color, borderColor: `${dept.color}30` }}>
                           {dept.label}
                         </button>
                       );
@@ -942,133 +1216,90 @@ export default function Users() {
             )}
           </div>
 
-          <DialogFooter className="px-8 py-6 border-t dark:border-slate-700 bg-slate-50 dark:bg-slate-900 rounded-b-3xl flex justify-end gap-4">
-            <Button variant="outline" onClick={() => setDialogOpen(false)} className="h-12 px-8 rounded-2xl">Cancel</Button>
-            <Button onClick={handleSubmit} disabled={loading} className="h-12 px-10 rounded-2xl font-semibold text-base" style={{ background: GRAD_GREEN }}>
-              {loading ? 'Saving...' : selectedUser ? 'Save Changes' : 'Create Member'}
+          <div className={`px-6 py-4 border-t flex justify-end gap-3 rounded-b-2xl ${isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-100 bg-slate-50'}`}>
+            <Button variant="outline" onClick={() => setDialogOpen(false)} className="h-10 px-6 rounded-xl text-sm">Cancel</Button>
+            <Button onClick={handleSubmit} disabled={loading}
+              className="h-10 px-8 rounded-xl font-semibold text-sm text-white"
+              style={{ background: GRAD_GREEN }}>
+              {loading ? 'Saving…' : selectedUser ? 'Save Changes' : 'Create Member'}
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 
-      {/* Pending Users */}
-      {pendingUsers.length > 0 && isAdmin && (
-        <motion.div variants={itemVariants} className="space-y-6">
-          <div className="flex items-center gap-4">
-            <div className="w-10 h-10 rounded-2xl bg-amber-100 dark:bg-amber-950 flex items-center justify-center"><Clock className="h-5 w-5 text-amber-600" /></div>
-            <div>
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Pending Approvals</h2>
-              <p className="text-sm text-slate-500 mt-0.5">{pendingUsers.length} awaiting review</p>
-            </div>
-          </div>
-          <motion.div variants={containerVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {pendingUsers.map(u => <PendingUserCard key={u.id} userData={u} onApprove={handleApprove} onReject={handleReject} approving={approvingId} />)}
-          </motion.div>
-        </motion.div>
-      )}
-
-      {/* Tabs */}
-      <motion.div variants={itemVariants} className="flex gap-2 overflow-x-auto pb-2">
-        {[{ id:'all',label:'All' },{ id:'admin',label:'Admins' },{ id:'manager',label:'Managers' },{ id:'staff',label:'Staff' },{ id:'rejected',label:'Rejected' }].map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-            className={`px-6 py-2.5 rounded-2xl font-semibold text-sm transition-all whitespace-nowrap ${activeTab === tab.id ? 'text-white shadow-md' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-slate-300'}`}
-            style={activeTab === tab.id ? { background: GRADIENT } : {}}>
-            {tab.label}
-          </button>
-        ))}
-      </motion.div>
-
-      {/* Search */}
-      <motion.div variants={itemVariants} className="relative">
-        <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-        <Input placeholder="Search by name or email..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-14 h-14 rounded-3xl text-base" />
-      </motion.div>
-
-      {/* Users Grid */}
-      <motion.div variants={containerVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredUsers.length > 0
-          ? filteredUsers.map(u => (
-              <UserCard key={u.id} userData={u} onEdit={handleEdit} onDelete={handleDelete}
-                onPermissions={openPermissionsDialog} onApprove={handleApprove} onReject={handleReject}
-                currentUserId={user?.id || ''} isAdmin={isAdmin} canEditUsers={canEditUsers}
-                canManagePermissions={canManagePermissions} approving={approvingId} />
-            ))
-          : <motion.div variants={itemVariants} className="col-span-full flex items-center justify-center py-20">
-              <div className="text-center"><UsersIcon className="h-16 w-16 text-slate-300 dark:text-slate-700 mx-auto mb-4" /><p className="text-slate-500 dark:text-slate-400 text-lg font-medium">No users found</p></div>
-            </motion.div>
-        }
-      </motion.div>
-
-      {/* Permissions Dialog */}
+      {/* ════════════════════════════════════════════════════════════════════
+          PERMISSIONS DIALOG
+      ════════════════════════════════════════════════════════════════════ */}
       <Dialog open={permDialogOpen} onOpenChange={setPermDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto rounded-3xl p-0 border-0 shadow-2xl">
-          <div className="sticky top-0 z-10 bg-white dark:bg-slate-900 rounded-t-3xl">
-            <div className="h-2 w-full" style={{ background: GRADIENT }} />
-            <div className="px-8 py-6 border-b dark:border-slate-700">
-              <DialogTitle className="text-2xl font-bold text-slate-900 dark:text-white">
-                Permissions — {selectedUserForPerms?.full_name}
-              </DialogTitle>
-              <DialogDescription className="text-sm text-slate-500 mt-1">
-                Configure access levels and module permissions
-              </DialogDescription>
-            </div>
-          </div>
+        <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto users-slim rounded-2xl p-0 border-0 shadow-2xl gap-0">
 
-          <div className="p-8 space-y-8">
+          <DialogGradHeader
+            gradient={GRADIENT}
+            icon={Shield}
+            eyebrow="Access Governance"
+            title={`Permissions — ${selectedUserForPerms?.full_name || ''}`}
+            subtitle="Configure access levels and module permissions"
+          />
+
+          <div className="p-6 space-y-5 bg-white dark:bg-slate-900">
+
+            {/* Summary */}
             <PermissionMatrixSummary permissions={permissions} />
 
             {/* Quick Reset */}
-            <div className="flex flex-wrap gap-3">
-              {['staff','manager','admin'].map(role => (
-                <Button key={role} variant="outline" size="sm" onClick={() => resetPermissionsToRole(role)} className="rounded-2xl capitalize">
-                  {role} Template
-                </Button>
-              ))}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Quick Reset:</span>
+              {['staff', 'manager', 'admin'].map(role => {
+                const cfg = ROLE_CONFIG[role];
+                const RIcon = cfg.icon;
+                return (
+                  <button key={role} onClick={() => resetPermissionsToRole(role)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border-2 transition-all hover:shadow-sm capitalize`}
+                    style={{ borderColor: `${cfg.hex}40`, color: cfg.hex, background: `${cfg.hex}08` }}>
+                    <RIcon className="h-3 w-3" />{role} Template
+                  </button>
+                );
+              })}
             </div>
 
             {/* Permission Tabs */}
-            <div className="flex gap-2 overflow-x-auto pb-2">
-              {permTabs.map(tab => { const TabIcon = tab.icon; return (
-                <button key={tab.id} onClick={() => setActivePermTab(tab.id)}
-                  className={`px-5 py-2.5 rounded-2xl font-semibold text-sm transition-all whitespace-nowrap flex items-center gap-2 ${activePermTab === tab.id ? 'text-white shadow-md' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-slate-300'}`}
-                  style={activePermTab === tab.id ? { background: GRADIENT } : {}}>
-                  <TabIcon className="h-4 w-4" />{tab.label}
-                </button>
-              ); })}
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
+              {permTabs.map(tab => {
+                const TabIcon = tab.icon;
+                return (
+                  <button key={tab.id} onClick={() => setActivePermTab(tab.id)}
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-xl font-semibold text-xs transition-all whitespace-nowrap ${
+                      activePermTab === tab.id
+                        ? 'text-white shadow-md'
+                        : isDark
+                        ? 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-slate-200 hover:border-slate-600'
+                        : 'bg-white text-slate-600 border border-slate-200 hover:border-slate-300'
+                    }`}
+                    style={activePermTab === tab.id ? { background: GRADIENT } : {}}>
+                    <TabIcon className="h-3.5 w-3.5" />{tab.label}
+                  </button>
+                );
+              })}
             </div>
 
             {/* ── MODULES TAB ── */}
             {activePermTab === 'modules' && (
-              <div className="space-y-6">
+              <div className="space-y-4">
                 <SectionHeader icon={Zap} title="Module Access" color={COLORS.violet} />
-                <div className="grid grid-cols-1 gap-4">
+                <div className="grid grid-cols-1 gap-3">
 
-                  {/* Leads Pipeline */}
                   <ModuleAccessCard
                     icon={Target} title="Leads Pipeline"
                     desc="Access and manage the global leads dashboard"
                     permKey="can_view_all_leads" permissions={permissions} setPermissions={setPermissions}
                     accentColor="#3B82F6" />
 
-                  {/* Quotations */}
                   <ModuleAccessCard
                     icon={Receipt} title="Quotations"
                     desc="Create, edit, export and send quotations to clients"
                     permKey="can_create_quotations" permissions={permissions} setPermissions={setPermissions}
                     accentColor="#8B5CF6" />
 
-                  {/*
-                    ── INVOICING & BILLING ────────────────────────────────────
-                    New module — controlled by can_manage_invoices.
-                    Admin always has access regardless of this flag.
-                    When enabled, the user can:
-                      • Create / edit / delete all invoice types (Tax, Proforma, Estimate, Credit Note)
-                      • Record payments and download PDF invoices
-                      • Manage the product/service catalog
-                      • View revenue stats and export invoice data
-                    If the user also has can_create_quotations, they can additionally
-                    convert quotations directly to invoices.
-                  */}
                   <ModuleAccessCard
                     icon={FileText} title="Invoicing & Billing"
                     desc="Create GST invoices, record payments, manage product catalog and view revenue analytics"
@@ -1076,7 +1307,6 @@ export default function Users() {
                     accentColor={COLORS.emeraldGreen}
                     badge={permissions.can_manage_invoices ? 'Full Access' : undefined} />
 
-                  {/* Password Vault */}
                   <ModuleAccessCard
                     icon={KeyRound} title="Password Vault"
                     desc="Access the secure portal credentials repository"
@@ -1084,9 +1314,8 @@ export default function Users() {
                     accentColor="#F59E0B"
                     badge={permissions.can_edit_passwords ? 'Read / Write' : permissions.can_view_passwords ? 'Read Only' : undefined} />
 
-                  {/* Password Vault Edit (sub-toggle — only shown when vault is on) */}
                   {permissions.can_view_passwords && (
-                    <div className="ml-6">
+                    <div className="ml-5">
                       <PermToggleRow
                         permKey="can_edit_passwords"
                         label="Vault Write Access"
@@ -1096,7 +1325,6 @@ export default function Users() {
                         setPermissions={setPermissions} />
                     </div>
                   )}
-
                 </div>
               </div>
             )}
@@ -1104,9 +1332,13 @@ export default function Users() {
             {/* ── VIEW TAB ── */}
             {activePermTab === 'view' && (
               <div>
-                <SectionHeader icon={Eye} title="View Permissions" color="#3B82F6" count={GLOBAL_PERMS.filter(p => permissions[p.key]).length} />
-                <div className="space-y-3">
-                  {GLOBAL_PERMS.map(p => <PermToggleRow key={p.key} permKey={p.key} label={p.label} desc={p.desc} icon={p.icon} permissions={permissions} setPermissions={setPermissions} />)}
+                <SectionHeader icon={Eye} title="View Permissions" color="#3B82F6"
+                  count={GLOBAL_PERMS.filter(p => permissions[p.key]).length} />
+                <div className="space-y-2">
+                  {GLOBAL_PERMS.map(p => (
+                    <PermToggleRow key={p.key} permKey={p.key} label={p.label} desc={p.desc} icon={p.icon}
+                      permissions={permissions} setPermissions={setPermissions} />
+                  ))}
                 </div>
               </div>
             )}
@@ -1114,9 +1346,13 @@ export default function Users() {
             {/* ── OPS TAB ── */}
             {activePermTab === 'ops' && (
               <div>
-                <SectionHeader icon={Settings} title="Operational Controls" color="#8B5CF6" count={OPS_PERMS.filter(p => permissions[p.key]).length} />
-                <div className="space-y-3">
-                  {OPS_PERMS.map(p => <PermToggleRow key={p.key} permKey={p.key} label={p.label} desc={p.desc} icon={p.icon} permissions={permissions} setPermissions={setPermissions} />)}
+                <SectionHeader icon={Settings} title="Operational Controls" color="#8B5CF6"
+                  count={OPS_PERMS.filter(p => permissions[p.key]).length} />
+                <div className="space-y-2">
+                  {OPS_PERMS.map(p => (
+                    <PermToggleRow key={p.key} permKey={p.key} label={p.label} desc={p.desc} icon={p.icon}
+                      permissions={permissions} setPermissions={setPermissions} />
+                  ))}
                 </div>
               </div>
             )}
@@ -1124,41 +1360,41 @@ export default function Users() {
             {/* ── EDIT TAB ── */}
             {activePermTab === 'edit' && (
               <div>
-                <SectionHeader icon={Pencil} title="Modification Rights" color="#F59E0B" count={EDIT_PERMS.filter(p => permissions[p.key]).length} />
-                <div className="space-y-3">
-                  {EDIT_PERMS.map(p => <PermToggleRow key={p.key} permKey={p.key} label={p.label} desc={p.desc} icon={p.icon} permissions={permissions} setPermissions={setPermissions} />)}
+                <SectionHeader icon={Pencil} title="Modification Rights" color="#F59E0B"
+                  count={EDIT_PERMS.filter(p => permissions[p.key]).length} />
+                <div className="space-y-2">
+                  {EDIT_PERMS.map(p => (
+                    <PermToggleRow key={p.key} permKey={p.key} label={p.label} desc={p.desc} icon={p.icon}
+                      permissions={permissions} setPermissions={setPermissions} />
+                  ))}
                 </div>
               </div>
             )}
 
             {/* ── CROSS-USER TAB ── */}
             {activePermTab === 'cross' && (
-              <div className="space-y-8">
+              <div className="space-y-5">
                 <SectionHeader icon={UsersIcon} title="Cross-User Data Access" color={COLORS.emeraldGreen} />
-                <p className="text-slate-500 text-sm -mt-3">Select team members whose data this user can view</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400 -mt-2">Select team members whose data this user can view</p>
                 {[
-                  { key: 'view_other_tasks',      label: 'Tasks',      icon: Layers,    color: '#3B82F6' },
-                  { key: 'view_other_attendance', label: 'Attendance', icon: Clock,     color: '#8B5CF6' },
-                  { key: 'view_other_reports',    label: 'Reports',    icon: BarChart2, color: '#F59E0B' },
-                  { key: 'view_other_todos',      label: 'Todos',      icon: CheckCircle, color: '#10B981' },
-                  { key: 'view_other_activity',   label: 'Activity',   icon: Activity,  color: '#EF4444' },
+                  { key: 'view_other_tasks',      label: 'Tasks',      icon: Layers,     color: '#3B82F6' },
+                  { key: 'view_other_attendance', label: 'Attendance', icon: Clock,      color: '#8B5CF6' },
+                  { key: 'view_other_reports',    label: 'Reports',    icon: BarChart2,  color: '#F59E0B' },
+                  { key: 'view_other_todos',      label: 'Todos',      icon: CheckCircle,color: '#10B981' },
+                  { key: 'view_other_activity',   label: 'Activity',   icon: Activity,   color: '#EF4444' },
                 ].map(section => {
                   const SIcon = section.icon;
                   const selectedCount = (permissions[section.key] || []).length;
                   return (
-                    <div key={section.key} className="border rounded-3xl overflow-hidden bg-white dark:bg-slate-900">
-                      <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800 border-b flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-2xl flex items-center justify-center" style={{ background: `${section.color}15` }}>
-                            <SIcon className="h-5 w-5" style={{ color: section.color }} />
-                          </div>
-                          <span className="font-semibold text-base">{section.label}</span>
-                        </div>
-                        <div className="text-sm font-medium px-4 py-1 rounded-full" style={{ background: `${section.color}15`, color: section.color }}>
-                          {selectedCount} selected
-                        </div>
-                      </div>
-                      <div className="p-6 flex flex-wrap gap-2">
+                    <SectionCard key={section.key}>
+                      <CardHeaderRow
+                        iconBg={isDark ? 'bg-slate-700' : 'bg-slate-50'}
+                        icon={<SIcon className="h-4 w-4" style={{ color: section.color }} />}
+                        title={section.label}
+                        subtitle={`${selectedCount} member${selectedCount !== 1 ? 's' : ''} selected`}
+                        badge={selectedCount || undefined}
+                      />
+                      <div className="p-4 flex flex-wrap gap-2">
                         {users.filter(u => u.id !== selectedUserForPerms?.id).map(u => {
                           const isSel = (permissions[section.key] || []).includes(u.id);
                           return (
@@ -1169,14 +1405,18 @@ export default function Users() {
                                   ? (prev[section.key] || []).filter(id => id !== u.id)
                                   : [...(prev[section.key] || []), u.id],
                               }))}
-                              className={`px-5 py-2.5 rounded-2xl text-sm font-medium border-2 transition-all ${isSel ? 'text-white border-transparent shadow-md' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'}`}
-                              style={isSel ? { background: section.color } : {}}>
+                              className="px-3.5 py-2 rounded-xl text-xs font-semibold border-2 transition-all hover:shadow-sm"
+                              style={isSel
+                                ? { background: section.color, color: 'white', borderColor: section.color }
+                                : isDark
+                                ? { background: '#1e293b', color: '#94a3b8', borderColor: '#334155' }
+                                : { background: '#f8fafc', color: '#475569', borderColor: '#e2e8f0' }}>
                               {isSel ? '✓ ' : ''}{u.full_name}
                             </button>
                           );
                         })}
                       </div>
-                    </div>
+                    </SectionCard>
                   );
                 })}
               </div>
@@ -1184,57 +1424,89 @@ export default function Users() {
 
             {/* ── CLIENTS TAB ── */}
             {activePermTab === 'clients' && (
-              <div className="space-y-6">
-                <SectionHeader icon={Briefcase} title="Client Portfolio" color={COLORS.teal} />
-                <div className="flex justify-between items-center">
-                  <p className="text-lg font-semibold">{(permissions.assigned_clients || []).length} clients assigned</p>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <SectionHeader icon={Briefcase} title="Client Portfolio" color={COLORS.teal} />
                   {(permissions.assigned_clients || []).length > 0 && (
-                    <Button variant="ghost" size="sm" onClick={() => setPermissions(p => ({ ...p, assigned_clients: [] }))} className="text-red-600 hover:text-red-700">Clear All</Button>
+                    <button onClick={() => setPermissions(p => ({ ...p, assigned_clients: [] }))}
+                      className="text-xs font-semibold text-red-500 hover:text-red-600 dark:text-red-400 transition-colors -mt-5">
+                      Clear All
+                    </button>
                   )}
                 </div>
-                <div className="relative">
-                  <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-                  <Input placeholder="Search clients by name..." value={clientSearch} onChange={e => setClientSearch(e.target.value)} className="pl-14 h-14 rounded-3xl text-base" />
+
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                  <span className="text-sm font-semibold" style={{ color: COLORS.teal }}>
+                    {(permissions.assigned_clients || []).length}
+                  </span>
+                  <span className="text-sm text-slate-500 dark:text-slate-400">clients assigned</span>
                 </div>
-                <div className="max-h-[460px] overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-3 pr-2">
-                  {clients.filter(c => (c.company_name || '').toLowerCase().includes(clientSearch.toLowerCase())).map(client => {
-                    const isAssigned = (permissions.assigned_clients || []).includes(client.id);
-                    return (
-                      <button key={client.id}
-                        onClick={() => setPermissions(prev => ({
-                          ...prev,
-                          assigned_clients: isAssigned
-                            ? (prev.assigned_clients || []).filter(id => id !== client.id)
-                            : [...(prev.assigned_clients || []), client.id],
-                        }))}
-                        className={`flex items-center gap-4 p-5 rounded-3xl border-2 text-left transition-all hover:shadow-md ${isAssigned ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'}`}>
-                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 ${isAssigned ? 'bg-emerald-500 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'}`}>
-                          {isAssigned ? <CheckCircle className="h-5 w-5" /> : <Briefcase className="h-5 w-5" />}
-                        </div>
-                        <span className={`font-medium leading-tight ${isAssigned ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-700 dark:text-slate-200'}`}>{client.company_name}</span>
-                      </button>
-                    );
-                  })}
+
+                <div className="relative">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <Input
+                    placeholder="Search clients…"
+                    value={clientSearch}
+                    onChange={e => setClientSearch(e.target.value)}
+                    className="pl-11 h-11 rounded-xl"
+                  />
+                </div>
+
+                <div className="users-slim max-h-[400px] overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-2 pr-1" style={slimScroll}>
+                  {clients
+                    .filter(c => (c.company_name || '').toLowerCase().includes(clientSearch.toLowerCase()))
+                    .map(client => {
+                      const isAssigned = (permissions.assigned_clients || []).includes(client.id);
+                      return (
+                        <button key={client.id}
+                          onClick={() => setPermissions(prev => ({
+                            ...prev,
+                            assigned_clients: isAssigned
+                              ? (prev.assigned_clients || []).filter(id => id !== client.id)
+                              : [...(prev.assigned_clients || []), client.id],
+                          }))}
+                          className="flex items-center gap-3 p-3.5 rounded-xl border-2 text-left transition-all hover:shadow-sm"
+                          style={isAssigned
+                            ? { borderColor: '#1FAF5A', background: isDark ? 'rgba(31,175,90,0.12)' : '#f0fdf4' }
+                            : isDark
+                            ? { borderColor: '#334155', background: '#1e293b' }
+                            : { borderColor: '#e2e8f0', background: '#f8fafc' }}>
+                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                            isAssigned ? 'bg-emerald-500 text-white' : isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-200 text-slate-500'
+                          }`}>
+                            {isAssigned ? <CheckCircle className="h-4 w-4" /> : <Briefcase className="h-4 w-4" />}
+                          </div>
+                          <span className={`font-medium text-sm leading-tight ${isAssigned
+                            ? 'text-emerald-700 dark:text-emerald-300'
+                            : 'text-slate-700 dark:text-slate-200'}`}>
+                            {client.company_name}
+                          </span>
+                        </button>
+                      );
+                    })}
                 </div>
               </div>
             )}
           </div>
 
           {/* Perm Footer */}
-          <DialogFooter className="px-8 py-6 bg-slate-50 dark:bg-slate-900 border-t dark:border-slate-700 rounded-b-3xl flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-              <SlidersHorizontal className="h-4 w-4" />
-              <span>{Object.entries(permissions).filter(([k,v]) => k.startsWith('can_') && v === true).length} permissions enabled</span>
+          <div className={`px-6 py-4 border-t flex items-center justify-between gap-4 rounded-b-2xl ${isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-100 bg-slate-50'}`}>
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              <span>{enabledPermCount} permissions enabled</span>
             </div>
-            <div className="flex gap-4">
-              <Button variant="outline" onClick={() => setPermDialogOpen(false)} className="h-12 px-8 rounded-2xl">Cancel</Button>
-              <Button onClick={handleSavePermissions} disabled={loading} className="h-12 px-10 rounded-2xl font-semibold" style={{ background: GRAD_GREEN, color: 'white' }}>
-                {loading ? 'Saving Changes...' : 'Save Permissions'}
+            <div className="flex gap-3">
+              <Button variant="outline" onClick={() => setPermDialogOpen(false)} className="h-10 px-6 rounded-xl text-sm">Cancel</Button>
+              <Button onClick={handleSavePermissions} disabled={loading}
+                className="h-10 px-8 rounded-xl font-semibold text-sm text-white"
+                style={{ background: GRAD_GREEN }}>
+                {loading ? 'Saving…' : 'Save Permissions'}
               </Button>
             </div>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
+
     </motion.div>
   );
 }
