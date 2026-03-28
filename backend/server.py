@@ -3059,6 +3059,19 @@ async def create_due_date(
         raise HTTPException(status_code=500, detail="Failed to save due date")
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# PATCH 1 of 1  —  GET /api/duedates/upcoming
+# File: main.py  (replace the entire get_upcoming_due_dates function)
+#
+# ROOT CAUSE: the old guard `if now <= dd_date <= future_date` excluded every
+# overdue item (dd_date < now).  The Dashboard welcome banner and Deadlines card
+# therefore showed nothing when ALL pending items were already past due.
+#
+# FIX: drop the `now <=` lower bound so overdue items are included.
+#       days_remaining is already negative for overdue items via
+#       `(dd_date - now).days`, which is correct.
+# ──────────────────────────────────────────────────────────────────────────────
+
 @api_router.get("/duedates/upcoming")
 async def get_upcoming_due_dates(
     days: int = Query(30),
@@ -3066,25 +3079,34 @@ async def get_upcoming_due_dates(
 ):
     now = datetime.now(IST)
     future_date = now + timedelta(days=days)
+
     query = {"status": "pending"}
     if current_user.role != "admin":
         if current_user.departments:
             query["department"] = {"$in": current_user.departments}
         else:
             return []
+
     due_dates = await db.due_dates.find(query, {"_id": 0}).to_list(1000)
-    upcoming = []
+    results = []
+
     for dd in due_dates:
         dd_date = (
             datetime.fromisoformat(dd["due_date"])
             if isinstance(dd["due_date"], str)
             else dd["due_date"]
         )
-        if now <= dd_date <= future_date:
+
+        # ── FIX: include overdue items (dd_date < now) AND upcoming items ──
+        # Old code: if now <= dd_date <= future_date   ← excluded overdue
+        # New code: if dd_date <= future_date           ← includes overdue
+        if dd_date <= future_date:
             dd["due_date"] = dd_date
-            dd["days_remaining"] = (dd_date - now).days
-            upcoming.append(dd)
-    return sorted(upcoming, key=lambda x: x["days_remaining"])
+            dd["days_remaining"] = (dd_date - now).days   # negative = overdue
+            results.append(dd)
+
+    # Sort: overdue first (most-negative days_remaining), then by closest due date
+    return sorted(results, key=lambda x: x["days_remaining"])["days_remaining"])
 
 
 @api_router.get("/duedates", response_model=List[DueDate])
