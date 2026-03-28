@@ -3012,14 +3012,50 @@ async def create_due_date(
     due_date_data: DueDateCreate,
     current_user: User = Depends(get_current_user)
 ):
-    if not due_date_data.department:
-        raise HTTPException(status_code=400, detail="Department required")
-    due_date = DueDate(**due_date_data.model_dump(), created_by=current_user.id)
-    doc = due_date.model_dump()
-    doc["created_at"] = doc["created_at"].isoformat()
-    doc["due_date"] = doc["due_date"].isoformat()
-    await db.due_dates.insert_one(doc)
-    return due_date
+    try:
+        if not due_date_data.department:
+            raise HTTPException(status_code=400, detail="Department required")
+
+        data = due_date_data.model_dump()
+
+        # ✅ FIX 1: Safe date parsing
+        raw_due_date = data.get("due_date")
+
+        if isinstance(raw_due_date, str):
+            try:
+                parsed_date = datetime.fromisoformat(raw_due_date)
+            except:
+                parsed_date = datetime.strptime(raw_due_date, "%m/%d/%Y")
+        else:
+            parsed_date = raw_due_date
+
+        # ✅ FIX 2: Build document safely
+        due_date = DueDate(
+            **data,
+            due_date=parsed_date,
+            created_by=current_user.id
+        )
+
+        doc = due_date.model_dump()
+
+        # ✅ FIX 3: Safe datetime conversion
+        if isinstance(doc.get("created_at"), datetime):
+            doc["created_at"] = doc["created_at"].isoformat()
+
+        if isinstance(doc.get("due_date"), datetime):
+            doc["due_date"] = doc["due_date"].isoformat()
+
+        # ✅ INSERT
+        await db.due_dates.insert_one(doc)
+
+        # ✅ FIX 4: REMOVE ObjectId if added
+        doc.pop("_id", None)
+
+        return doc
+
+    except Exception as e:
+        logger.error(f"DueDate creation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to save due date")
 
 
 @api_router.get("/duedates/upcoming")
