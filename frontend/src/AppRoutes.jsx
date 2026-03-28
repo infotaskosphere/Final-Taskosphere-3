@@ -23,7 +23,7 @@ const VisitsPage        = lazy(() => import("@/pages/VisitsPage.jsx"));
 const EmailSettings     = lazy(() => import("@/components/EmailSettings.jsx"));
 const Quotations        = lazy(() => import("@/pages/Quotations.jsx"));
 const GeneralSettings   = lazy(() => import("@/pages/GeneralSettings.jsx"));
-const PasswordRepository = lazy(() => import("@/pages/PassVault.jsx"));
+const Passvault         = lazy(() => import("@/pages/Passvault.jsx"));
 // ── NEW: Invoicing & Billing ────────────────────────────────────────────────
 const Invoicing         = lazy(() => import("@/pages/Invoicing.jsx"));
 
@@ -51,15 +51,6 @@ const Public = ({ children }) => {
 
 /**
  * Permission — requires login AND one (or more) permissions.
- *
- * NEW: `permission` now accepts either a string OR an array of strings.
- * When an array is supplied the check is OR-based — access is granted if
- * the user holds ANY of the listed permissions (plus admin always passes).
- *
- * Usage examples:
- *   <Permission permission="can_view_all_leads">          (single)
- *   <Permission permission={["can_manage_invoices",       (array / OR)
- *                             "can_create_quotations"]}>
  */
 const Permission = ({ permission, children }) => {
   const { user, loading, hasPermission } = useAuth();
@@ -67,17 +58,14 @@ const Permission = ({ permission, children }) => {
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
 
-  // Admin always passes — no permission check needed.
   if (user.role === "admin") {
     return <DashboardLayout>{children}</DashboardLayout>;
   }
 
-  // No permission constraint supplied → treat as Protected.
   if (!permission) {
     return <DashboardLayout>{children}</DashboardLayout>;
   }
 
-  // Normalise to array and evaluate OR logic.
   const perms = Array.isArray(permission) ? permission : [permission];
   const hasAccess = perms.some((p) => hasPermission(p));
 
@@ -224,7 +212,7 @@ function AppRoutes() {
         path="/passwords"
         element={
           <Protected>
-            <PageLoader><PasswordRepository /></PageLoader>
+            <PageLoader><Passvault /></PageLoader>
           </Protected>
         }
       />
@@ -248,12 +236,6 @@ function AppRoutes() {
         }
       />
 
-      {/*
-        Quotations — requires can_create_quotations.
-        Users with can_manage_invoices but NOT can_create_quotations should
-        still be able to reach Quotations for reference; widen the gate here
-        using OR logic.
-      */}
       <Route
         path="/quotations"
         element={
@@ -263,12 +245,6 @@ function AppRoutes() {
         }
       />
 
-      {/*
-        Invoicing & Billing — NEW ROUTE
-        Access granted if user holds can_manage_invoices OR can_create_quotations.
-        Admin always passes (handled in Permission component).
-        The page itself enforces row-level security via the backend.
-      */}
       <Route
         path="/invoicing"
         element={
