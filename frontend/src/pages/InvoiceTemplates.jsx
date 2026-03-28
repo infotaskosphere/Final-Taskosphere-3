@@ -2594,7 +2594,7 @@ export const InvoiceDesignModal = ({
               ) : null;
             })()}
 
-          </div><!-- /left panel -->
+          </div>{/* /left panel */}
 
           {/* ── Right live-preview panel ── */}
           <div className="flex-1 flex flex-col overflow-hidden">
