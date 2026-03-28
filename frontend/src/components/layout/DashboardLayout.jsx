@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { something } from '../../contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthContext.jsx';
 import { useActivityTracker } from '@/hooks/useActivityTracker';
 import {
   LayoutDashboard, CheckSquare, FileText, Clock, BarChart3,
