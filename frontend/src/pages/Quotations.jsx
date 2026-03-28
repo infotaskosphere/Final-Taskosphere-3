@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
@@ -64,6 +63,13 @@ const extractBlobError = async (error) => {
     console.error("Error extracting blob error:", e);
     return 'PDF generation failed due to an unknown error.';
   }
+};
+#======================Invocing========================
+  
+const handleConvertToInvoice = async (qtnId) => {
+  const r = await api.post(`/invoices/from-quotation/${qtnId}`);
+  toast.success('Converted to invoice!');
+  navigate('/invoicing');
 };
 
 /* ─── WhatsApp share helper ──────────────────────────────────────────────── */
