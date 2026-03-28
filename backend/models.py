@@ -1343,6 +1343,58 @@ class PaginatedResponse(BaseModel):
         if self.limit > 0:
             self.pages = math.ceil(self.total / self.limit)
         return self
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DUE DATE (COMPLIANCE CALENDAR)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class DueDate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    title: str
+    description: Optional[str] = None
+
+    due_date: datetime
+    reminder_days: int = 30
+
+    category: str
+    department: str
+
+    assigned_to: Optional[str] = None
+    client_id: Optional[str] = None
+
+    status: str = "pending"
+
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class DueDateCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    due_date: datetime
+    reminder_days: Optional[int] = 30
+    category: str
+    department: str
+    assigned_to: Optional[str] = None
+    client_id: Optional[str] = None
+    status: Optional[str] = "pending"
+
+
+class DueDateUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    due_date: Optional[datetime] = None
+    reminder_days: Optional[int] = None
+    category: Optional[str] = None
+    department: Optional[str] = None
+    assigned_to: Optional[str] = None
+    client_id: Optional[str] = None
+    status: Optional[str] = None
+    
 # ─────────────────────────────────────────────────────────────────────────────
 # BACKEND PERMISSION GUARD HELPERS
 # Use these in route handlers to enforce access control cleanly.
