@@ -14,7 +14,7 @@ import { useNavigate } from 'react-router-dom';
 import { format, parseISO, differenceInDays, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import * as XLSX from 'xlsx';
 import {
-  Plus, Edit, Trash2, FileText, Search, Download, X, ChevronRight,
+  Plus, Edit, Trash2, FileText, Search, Download, X, ChevronRight, Check, Eye, Printer, Layout,
   CheckCircle2, Clock, AlertCircle, TrendingUp, DollarSign, BarChart3,
   Building2, Users, Receipt, CreditCard, RefreshCw, Eye, Send, Copy,
   Repeat, Package, Tag, ChevronDown, ChevronUp, Percent, Truck,
@@ -25,6 +25,7 @@ import {
   ExternalLink 
 } from 'lucide-react';
 import InvoiceSettings, { getInvSettings, getNextInvoiceNumber } from './InvoiceSettings';
+import { COLOR_THEMES, INVOICE_TEMPLATES, generateInvoiceHTML, openInvoicePrint } from './InvoiceTemplates';
 import PartyLedger from './PartyLedger';
 // ─── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
@@ -37,6 +38,17 @@ const COLORS = {
   purple: '#7C3AED',
   teal: '#0D9488',
 };
+// ─── Invoice Themes ───────────────────────────────────────────────────────────
+const INVOICE_THEMES = [
+  { id: 'classic_blue',   label: 'Classic Blue',   primary: '#0D3B66', accent: '#1F6FB2', bg: '#EFF6FF', headerGrad: 'linear-gradient(135deg,#0D3B66,#1F6FB2)', tag: 'Default' },
+  { id: 'emerald',        label: 'Emerald',         primary: '#065f46', accent: '#059669', bg: '#ECFDF5', headerGrad: 'linear-gradient(135deg,#065f46,#059669)', tag: 'Fresh' },
+  { id: 'purple',         label: 'Royal Purple',    primary: '#4c1d95', accent: '#7c3aed', bg: '#F5F3FF', headerGrad: 'linear-gradient(135deg,#4c1d95,#7c3aed)', tag: 'Premium' },
+  { id: 'coral',          label: 'Coral Sunrise',   primary: '#7c2d12', accent: '#ea580c', bg: '#FFF7ED', headerGrad: 'linear-gradient(135deg,#7c2d12,#ea580c)', tag: 'Bold' },
+  { id: 'teal',           label: 'Deep Teal',       primary: '#134e4a', accent: '#0d9488', bg: '#F0FDFA', headerGrad: 'linear-gradient(135deg,#134e4a,#0d9488)', tag: 'Calm' },
+  { id: 'slate',          label: 'Slate Pro',       primary: '#1e293b', accent: '#475569', bg: '#F8FAFC', headerGrad: 'linear-gradient(135deg,#1e293b,#475569)', tag: 'Minimal' },
+  { id: 'rose',           label: 'Rose Gold',       primary: '#881337', accent: '#e11d48', bg: '#FFF1F2', headerGrad: 'linear-gradient(135deg,#881337,#e11d48)', tag: 'Elegant' },
+  { id: 'amber',          label: 'Amber Gold',      primary: '#78350f', accent: '#d97706', bg: '#FFFBEB', headerGrad: 'linear-gradient(135deg,#78350f,#d97706)', tag: 'Warm' },
+];
 // ─── Constants ────────────────────────────────────────────────────────────────
 const GST_RATES = [0, 5, 12, 18, 28];
 const UNITS = ['service','nos','kg','ltr','mtr','sqft','hr','day','month','year','set','lot','pcs','box'];
@@ -71,7 +83,23 @@ const emptyItem = () => ({
   unit_price: 0, discount_pct: 0, gst_rate: 18,
   taxable_value: 0, cgst_rate: 9, sgst_rate: 9, igst_rate: 0,
   cgst_amount: 0, sgst_amount: 0, igst_amount: 0, total_amount: 0,
+  item_details: '',
 });
+// ─── Item Memory (localStorage) ───────────────────────────────────────────────
+const getItemMemory = () => {
+  try { return JSON.parse(localStorage.getItem('inv_item_memory') || '{}'); }
+  catch { return {}; }
+};
+const saveItemMemory = (items = []) => {
+  try {
+    const mem = getItemMemory();
+    items.forEach(it => {
+      const key = (it.description || '').trim().toLowerCase();
+      if (key) mem[key] = { description: it.description, unit_price: it.unit_price, gst_rate: it.gst_rate, unit: it.unit, hsn_sac: it.hsn_sac };
+    });
+    localStorage.setItem('inv_item_memory', JSON.stringify(mem));
+  } catch {}
+};
 const computeItem = (item, isInter) => {
   const disc = item.unit_price * item.quantity * (item.discount_pct / 100);
   const taxable = Math.round((item.unit_price * item.quantity - disc) * 100) / 100;
@@ -1171,6 +1199,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     gst_rate: 18, discount_amount: 0, shipping_charges: 0, other_charges: 0,
     payment_terms: 'Due on receipt', notes: '', terms_conditions: '', reference_no: '',
     is_recurring: false, recurrence_pattern: 'monthly', status: 'draft',
+    invoice_template: 'prestige', invoice_theme: 'classic_blue', invoice_custom_color: '#0D3B66',
   };
   const [form, setForm] = useState(defaultForm);
   const [loading, setLoading] = useState(false);
@@ -1216,6 +1245,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
           ? '✅ Invoice updated & saved to Google Drive' 
           : '✅ Invoice created & saved to Google Drive'
       );
+      saveItemMemory(form.items);
       onSuccess?.(); 
       onClose();
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to save invoice'); }
@@ -1224,7 +1254,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   const labelCls = "text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block";
   const inputCls = `h-11 rounded-xl text-sm border-slate-200 dark:border-slate-600 focus:border-blue-400 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
   const sectionCls = `border rounded-2xl p-5 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`;
-  const tabs = [{ id: 'details', label: 'Details', icon: FileText }, { id: 'items', label: 'Items', icon: Package }, { id: 'totals', label: 'Totals', icon: IndianRupee }, { id: 'settings', label: 'Settings', icon: Layers }];
+  const tabs = [{ id: 'details', label: 'Details', icon: FileText }, { id: 'items', label: 'Items', icon: Package }, { id: 'totals', label: 'Totals', icon: IndianRupee }, { id: 'settings', label: 'Settings', icon: Layers }, { id: 'theme', label: 'Theme', icon: Star }, { id: 'design', label: 'Design & Preview', icon: Palette }];
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className={`max-w-5xl max-h-[96vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -1334,7 +1364,43 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                           {form.items.length > 1 && (<button type="button" onClick={() => removeItem(idx)} className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>)}
                         </div>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                          <div className="md:col-span-2"><label className={labelCls}>Description *</label><Input className={inputCls} value={item.description} onChange={e => updateItem(idx, 'description', e.target.value)} /></div>
+                          <div className="md:col-span-2">
+                            <label className={labelCls}>Description *</label>
+                            <Input
+                              className={inputCls}
+                              value={item.description}
+                              list={`item-mem-${idx}`}
+                              onChange={e => updateItem(idx, 'description', e.target.value)}
+                              onBlur={e => {
+                                const key = e.target.value.trim().toLowerCase();
+                                if (!key) return;
+                                const saved = getItemMemory()[key];
+                                if (saved) {
+                                  setForm(p => ({ ...p, items: p.items.map((it, i) => i !== idx ? it : {
+                                    ...it,
+                                    unit_price: it.unit_price === 0 ? saved.unit_price : it.unit_price,
+                                    gst_rate: saved.gst_rate ?? it.gst_rate,
+                                    unit: it.unit === 'service' ? (saved.unit || it.unit) : it.unit,
+                                    hsn_sac: it.hsn_sac || saved.hsn_sac || '',
+                                  })}));
+                                }
+                              }}
+                            />
+                            <datalist id={`item-mem-${idx}`}>
+                              {Object.values(getItemMemory()).map((m, mi) => (
+                                <option key={mi} value={m.description} />
+                              ))}
+                            </datalist>
+                          </div>
+                          <div className="md:col-span-2">
+                            <label className={labelCls}>Details</label>
+                            <Textarea
+                              className={`rounded-xl text-sm min-h-[60px] resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}
+                              placeholder="Additional details for this line item…"
+                              value={item.item_details || ''}
+                              onChange={e => updateItem(idx, 'item_details', e.target.value)}
+                            />
+                          </div>
                           <div><label className={labelCls}>HSN / SAC</label><Input className={inputCls} placeholder="e.g. 9983" value={item.hsn_sac} onChange={e => updateItem(idx, 'hsn_sac', e.target.value)} /></div>
                           <div><label className={labelCls}>Unit</label><Select value={item.unit} onValueChange={v => updateItem(idx, 'unit', v)}><SelectTrigger className={inputCls}><SelectValue /></SelectTrigger><SelectContent>{UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent></Select></div>
                           <div><label className={labelCls}>Quantity</label><Input type="number" min="0" step="0.01" className={inputCls} value={item.quantity} onChange={e => updateItem(idx, 'quantity', parseFloat(e.target.value) || 0)} /></div>
@@ -1373,6 +1439,92 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                 </div>
               </div>
             )}
+            {activeTab === 'theme' && (
+              <div className="space-y-5">
+                <div className={sectionCls}>
+                  <div className="flex items-center gap-2 mb-5">
+                    <div className="w-7 h-7 rounded-xl flex items-center justify-center text-white text-xs font-bold" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}><Star className="h-4 w-4" /></div>
+                    <div>
+                      <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Invoice Theme</h3>
+                      <p className="text-xs text-slate-400 mt-0.5">Choose how your invoice looks when printed or viewed as PDF</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {INVOICE_THEMES.map(theme => {
+                      const isSelected = form.invoice_theme === theme.id;
+                      return (
+                        <button key={theme.id} type="button"
+                          onClick={() => setField('invoice_theme', theme.id)}
+                          className={`relative rounded-2xl border-2 overflow-hidden transition-all text-left hover:shadow-md hover:-translate-y-0.5
+                            ${isSelected ? 'border-blue-500 shadow-lg scale-[1.02]' : (isDark ? 'border-slate-600 hover:border-slate-500' : 'border-slate-200 hover:border-slate-300')}`}>
+                          <div className="h-20 flex flex-col" style={{ background: theme.headerGrad }}>
+                            <div className="flex items-center gap-1.5 px-3 pt-3">
+                              <div className="w-5 h-5 rounded bg-white/20 flex-shrink-0" />
+                              <div className="flex-1 space-y-1">
+                                <div className="h-1.5 rounded-full bg-white/60 w-3/4" />
+                                <div className="h-1 rounded-full bg-white/30 w-1/2" />
+                              </div>
+                            </div>
+                            <div className="flex-1 mx-3 mt-2 mb-2 rounded-lg bg-white/10 px-2 py-1.5 space-y-1">
+                              <div className="h-1 rounded bg-white/40 w-full" />
+                              <div className="h-1 rounded bg-white/25 w-4/5" />
+                              <div className="h-1 rounded bg-white/25 w-3/5" />
+                            </div>
+                          </div>
+                          <div className="px-3 py-2" style={{ backgroundColor: isDark ? '#1e293b' : theme.bg }}>
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className={`text-[10px] font-bold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{theme.label}</p>
+                                <span className="text-[8px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: `${theme.accent}20`, color: theme.accent }}>{theme.tag}</span>
+                              </div>
+                              {isSelected && (
+                                <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: theme.accent }}>
+                                  <CheckCircle2 className="h-3 w-3 text-white" />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          {isSelected && (
+                            <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-white flex items-center justify-center shadow">
+                              <CheckCircle2 className="h-3 w-3" style={{ color: theme.accent }} />
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {(() => {
+                    const t = INVOICE_THEMES.find(x => x.id === form.invoice_theme) || INVOICE_THEMES[0];
+                    return (
+                      <div className={`mt-5 rounded-2xl overflow-hidden border ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+                        <div className="px-6 py-4 flex items-center justify-between" style={{ background: t.headerGrad }}>
+                          <div>
+                            <p className="text-white font-black text-lg tracking-tight">TAX INVOICE</p>
+                            <p className="text-white/60 text-xs">{form.client_name || 'Client Name'} · {form.invoice_date || 'Date'}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-white/60 text-[10px] uppercase tracking-widest">Amount Due</p>
+                            <p className="text-white font-black text-xl">{fmtC(totals.grand_total)}</p>
+                          </div>
+                        </div>
+                        <div className="px-6 py-4" style={{ backgroundColor: isDark ? '#1e293b' : t.bg }}>
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: t.accent }}>Theme Preview</span>
+                                <span className="text-[9px] font-bold px-2 py-0.5 rounded-full text-white" style={{ background: t.accent }}>{t.tag}</span>
+                              </div>
+                              <p className="text-xs text-slate-500">This is how your invoice header will look</p>
+                            </div>
+                            <div className="w-8 h-8 rounded-xl" style={{ background: t.headerGrad }} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
             {activeTab === 'settings' && (
               <div className="space-y-5">
                 <div className={sectionCls}>
@@ -1398,17 +1550,144 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                 </div>
               </div>
             )}
+            {activeTab === 'design' && (
+              <div className="space-y-5">
+                {/* ── Template Picker ── */}
+                <div className={sectionCls}>
+                  <h3 className={`text-sm font-semibold mb-4 flex items-center gap-2 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                    <Layout className="h-4 w-4" /> Invoice Template
+                  </h3>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    {INVOICE_TEMPLATES.map(t => (
+                      <button key={t.id} type="button"
+                        onClick={() => setField('invoice_template', t.id)}
+                        className={`relative p-4 rounded-xl border-2 text-left transition-all hover:shadow-md ${form.invoice_template === t.id ? 'border-blue-500 shadow-md' : (isDark ? 'border-slate-600 hover:border-slate-500' : 'border-slate-200 hover:border-slate-300')}`}>
+                        {form.invoice_template === t.id && (
+                          <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center">
+                            <Check className="h-3 w-3 text-white" />
+                          </div>
+                        )}
+                        {t.badge && (
+                          <span className="inline-block text-[9px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 mb-2">{t.badge}</span>
+                        )}
+                        <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{t.name}</p>
+                        <p className={`text-[10px] mt-1 leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{t.desc}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ── Color Theme Picker ── */}
+                <div className={sectionCls}>
+                  <h3 className={`text-sm font-semibold mb-4 flex items-center gap-2 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                    <Palette className="h-4 w-4" /> Color Theme
+                  </h3>
+                  <div className="grid grid-cols-4 md:grid-cols-8 gap-3">
+                    {COLOR_THEMES.map(theme => (
+                      <button key={theme.id} type="button"
+                        onClick={() => setField('invoice_theme', theme.id)}
+                        className={`flex flex-col items-center gap-1.5 p-2 rounded-xl border-2 transition-all ${form.invoice_theme === theme.id ? 'border-blue-500 shadow-md' : (isDark ? 'border-slate-600 hover:border-slate-500' : 'border-slate-200 hover:border-slate-300')}`}>
+                        <div className="relative w-8 h-8 rounded-lg overflow-hidden flex-shrink-0">
+                          <div className="absolute inset-0" style={{ background: theme.primary }} />
+                          <div className="absolute bottom-0 right-0 w-4 h-4" style={{ background: theme.secondary }} />
+                          {form.invoice_theme === theme.id && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                              <Check className="h-3 w-3 text-white" />
+                            </div>
+                          )}
+                        </div>
+                        <p className={`text-[9px] font-semibold text-center leading-tight ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{theme.name}</p>
+                      </button>
+                    ))}
+                    {/* Custom color */}
+                    <div className="flex flex-col items-center gap-1.5 p-2 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600">
+                      <label className="cursor-pointer">
+                        <div className="w-8 h-8 rounded-lg overflow-hidden border border-slate-300">
+                          <input type="color" value={form.invoice_custom_color}
+                            onChange={e => { setField('invoice_custom_color', e.target.value); setField('invoice_theme', 'custom'); }}
+                            className="w-12 h-12 -ml-1 -mt-1 cursor-pointer border-0 p-0" />
+                        </div>
+                      </label>
+                      <p className={`text-[9px] font-semibold text-center leading-tight ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Custom</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Live Preview ── */}
+                <div className={sectionCls}>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className={`text-sm font-semibold flex items-center gap-2 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                      <Eye className="h-4 w-4" /> Live Preview
+                    </h3>
+                    <Button type="button" size="sm" variant="outline"
+                      onClick={() => {
+                        const company = companies.find(c => c.id === form.company_id) || {};
+                        const previewInv = { ...form, ...totals,
+                          invoice_no: 'PREVIEW-001',
+                          invoice_date: form.invoice_date || format(new Date(), 'yyyy-MM-dd'),
+                          due_date: form.due_date || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
+                        };
+                        openInvoicePrint(previewInv, company, form.invoice_template, form.invoice_theme, form.invoice_custom_color);
+                      }}
+                      className="h-8 px-3 text-xs rounded-xl gap-1.5">
+                      <Printer className="h-3.5 w-3.5" /> Open Print Preview
+                    </Button>
+                  </div>
+                  <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-200'}`} style={{ height: 420 }}>
+                    <iframe
+                      key={`${form.invoice_template}-${form.invoice_theme}-${form.invoice_custom_color}`}
+                      srcDoc={(() => {
+                        try {
+                          const company = companies.find(c => c.id === form.company_id) || { name: 'Your Company', gstin: 'GSTIN', address: 'Company Address' };
+                          const previewInv = { ...form, ...totals,
+                            invoice_no: editingInv?.invoice_no || 'PREVIEW-001',
+                            invoice_date: form.invoice_date || format(new Date(), 'yyyy-MM-dd'),
+                            due_date: form.due_date || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
+                            client_name: form.client_name || 'Client Name',
+                            items: form.items.filter(it => it.description?.trim()).length > 0
+                              ? form.items : [{ description: 'Sample Service', quantity: 1, unit: 'service', unit_price: 10000, gst_rate: 18, taxable_value: 10000, cgst_rate: 9, sgst_rate: 9, cgst_amount: 900, sgst_amount: 900, igst_amount: 0, total_amount: 11800 }],
+                          };
+                          return generateInvoiceHTML(previewInv, company, form.invoice_template, form.invoice_theme, form.invoice_custom_color);
+                        } catch { return '<p style="padding:20px;color:#999">Preview not available — fill in invoice details first</p>'; }
+                      })()}
+                      className="w-full h-full border-0"
+                      title="Invoice Preview"
+                      sandbox="allow-same-origin"
+                    />
+                  </div>
+                  <p className={`text-[10px] mt-2 text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    Preview updates live as you change template or theme · Actual invoice may vary slightly
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </form>
         <div className={`flex-shrink-0 flex items-center justify-between gap-3 px-7 py-4 border-t ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
-          <Button type="button" variant="ghost" onClick={onClose} className="h-10 px-5 text-sm rounded-xl text-slate-500">Cancel</Button>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="ghost" onClick={onClose} className="h-10 px-5 text-sm rounded-xl text-slate-500">Cancel</Button>
+            <Button type="button" variant="outline" size="sm"
+              onClick={() => setActiveTab('design')}
+              className="h-10 px-4 text-xs rounded-xl gap-1.5 border-purple-200 text-purple-600 hover:bg-purple-50">
+              <Palette className="h-3.5 w-3.5" /> Design & Preview
+            </Button>
+          </div>
           <div className="flex items-center gap-3">
             {totals.grand_total > 0 && (<span className={`text-sm font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Total: <span style={{ color: COLORS.mediumBlue }}>{fmtC(totals.grand_total)}</span></span>)}
-            <Button type="button" onClick={handleSubmit} disabled={loading}
-              className="h-10 px-7 text-sm rounded-xl text-white font-semibold shadow-sm"
-              style={{ background: loading ? '#94a3b8' : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-              {loading ? 'Saving…' : editingInv ? '✓ Update Invoice' : '✓ Create Invoice'}
-            </Button>
+            {activeTab !== 'design' ? (
+              <Button type="button"
+                onClick={() => { const order = ['details','items','totals','settings','theme','design']; const next = order[order.indexOf(activeTab) + 1]; if (next) setActiveTab(next); }}
+                className="h-10 px-7 text-sm rounded-xl text-white font-semibold shadow-sm gap-2"
+                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                Next <ChevronRight className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button type="button" onClick={handleSubmit} disabled={loading}
+                className="h-10 px-7 text-sm rounded-xl text-white font-semibold shadow-sm"
+                style={{ background: loading ? '#94a3b8' : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                {loading ? 'Saving…' : editingInv ? '✓ Update Invoice' : '✓ Create Invoice'}
+              </Button>
+            )}
           </div>
         </div>
       </DialogContent>
@@ -1721,26 +2000,37 @@ export default function Invoicing() {
     catch { toast.error('Failed to delete'); }
   }, [fetchAll]);
   const handleDownloadPdf = useCallback(async (inv) => {
-      // NEW: Prefer direct Google Drive link (already returned by backend)
-      if (inv.webViewLink && inv.webViewLink !== '#') {
-        window.open(inv.webViewLink, '_blank');
+      // 1st: Use stored Drive PDF link (fastest)
+      if (inv.pdf_drive_link && inv.pdf_drive_link !== '#') {
+        window.open(inv.pdf_drive_link, '_blank');
         toast.success('Opened PDF from Google Drive');
         return;
       }
-      // Fallback for old invoices (generates PDF normally)
+      // 2nd: Call backend — it generates PDF on-the-fly or returns Drive link
       try {
-        const r = await api.get(`/invoices/${inv.id}/pdf`, { responseType: 'blob' });
-        const url = URL.createObjectURL(r.data);
-        const link = document.createElement('a');
-        link.href = url; 
-        link.download = `invoice_${inv.invoice_no?.replace('/', '_')}.pdf`;
-        document.body.appendChild(link); 
-        link.click(); 
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        toast.success('PDF downloaded');
-      } catch { 
-        toast.error('PDF generation failed'); 
+        const r = await api.get(`/invoices/${inv.id}/pdf`);
+        if (r.data?.download_link) {
+          window.open(r.data.download_link, '_blank');
+          toast.success('Opened PDF from Google Drive');
+        } else {
+          toast.error('PDF not available');
+        }
+      } catch {
+        // Final fallback: stream PDF blob directly
+        try {
+          const r = await api.get(`/invoices/${inv.id}/pdf`, { responseType: 'blob' });
+          const url = URL.createObjectURL(r.data);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `invoice_${(inv.invoice_no || inv.id).replace(/\//g, '_')}.pdf`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          toast.success('PDF downloaded');
+        } catch {
+          toast.error('PDF generation failed');
+        }
       }
     }, []);
   const handleMarkSent = useCallback(async (inv) => {
@@ -1940,17 +2230,20 @@ export default function Invoicing() {
                     <button onClick={(e) => { e.stopPropagation(); setLedgerClient(inv.client_name); setLedgerOpen(true); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors" title="Party Ledger"><BookOpen className="h-3.5 w-3.5" /></button>
                     <button onClick={() => handleDownloadPdf(inv)} className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="PDF"><Download className="h-3.5 w-3.5" /></button>
 
-                    {/* NEW: Open in Google Drive button */}
-                    <a
-                      href={inv.webViewLink || "#"}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
-                      title="Open in Google Drive"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                      Drive
-                    </a>
+                    {/* Open PDF in Google Drive */}
+                    {(inv.pdf_drive_link && inv.pdf_drive_link !== '#') && (
+                      <a
+                        href={inv.pdf_drive_link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors"
+                        title="Open PDF in Google Drive"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        Drive
+                      </a>
+                    )}
 
                     {inv.client_email && (<button onClick={(e) => { e.stopPropagation(); handleSendEmail(inv); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="Send Email"><Send className="h-3.5 w-3.5" /></button>)}
                     {inv.amount_due > 0 && (<button onClick={(e) => { e.stopPropagation(); setPayInv(inv); setPayOpen(true); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors" title="Payment"><IndianRupee className="h-3.5 w-3.5" /></button>)}
