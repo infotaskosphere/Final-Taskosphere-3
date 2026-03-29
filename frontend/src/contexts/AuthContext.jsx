@@ -68,15 +68,18 @@ export const AuthProvider = ({ children }) => {
 
         api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
 
-        await api.get("/auth/me");
+        // ✅ FIXED PATH
+        await api.get("/api/auth/me");
 
         setUser(parsedUser);
 
       } catch (error) {
         if (error.message === "Network Error") {
           console.warn("Backend unreachable, keeping stored session.");
+
           const parsedUser = JSON.parse(storedUser);
           parsedUser.permissions = normalizePermissions(parsedUser.permissions);
+
           setUser(parsedUser);
 
         } else if (error.response && error.response.status === 401) {
@@ -144,7 +147,8 @@ export const AuthProvider = ({ children }) => {
 
   const refreshUser = useCallback(async () => {
     try {
-      const response = await api.get("/auth/me");
+      // ✅ FIXED PATH
+      const response = await api.get("/api/auth/me");
       const updatedUser = response.data;
 
       updatedUser.permissions = normalizePermissions(updatedUser.permissions);
