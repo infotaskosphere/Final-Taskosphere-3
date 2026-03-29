@@ -61,7 +61,7 @@ export default function App() {
           {/* ✅ Bottom loader */}
           <BottomLoadingBar />
 
-          <Suspense fallback={null}>
+          <Suspense fallback={<div style={{padding: 20}}>Loading...</div>}>
             <AnimatedRoutes />
           </Suspense>
 
