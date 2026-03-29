@@ -86,11 +86,17 @@ def _get_drive_service():
         SERVICE_ACCOUNT_FILE, scopes=['https://www.googleapis.com/auth/drive.file'])
     return build('drive', 'v3', credentials=creds)
 
-def upload_to_drive(content_bytes: bytes, filename: str, folder_key: str, mime_type: str):
+def upload_to_drive(content_bytes: bytes, filename: str, folder_key: str, mime_type: str, custom_parent_id: str = None):
+    """Updated: can now accept custom_parent_id for client-specific folders"""
     service = _get_drive_service()
-    file_metadata = {'name': filename, 'parents': [DRIVE_FOLDERS[folder_key]]}
+    
+    # Use custom client folder if provided, else fall back to normal folder_key
+    parent_id = custom_parent_id if custom_parent_id else DRIVE_FOLDERS[folder_key]
+    
+    file_metadata = {'name': filename, 'parents': [parent_id]}
     media = MediaIoBaseUpload(io.BytesIO(content_bytes), mimetype=mime_type, resumable=True)
     file = service.files().create(body=file_metadata, media_body=media, fields='id,webViewLink,name').execute()
+    
     logger.info(f"✅ Uploaded to Drive → {filename}")
     return file.get('webViewLink')
 
@@ -99,6 +105,33 @@ def list_drive_files(folder_key: str):
     q = f"'{DRIVE_FOLDERS[folder_key]}' in parents and trashed=false"
     results = service.files().list(q=q, fields="files(id,name,webViewLink,createdTime)", orderBy="createdTime desc").execute()
     return results.get('files', [])
+  
+# ─── NEW: Auto-create client folder in Drive ─────────────────────────────────
+def _get_or_create_client_folder(client_name: str) -> str:
+    """Returns folder ID inside Invoices/ for the client. Creates folder if it doesn't exist."""
+    if not client_name or client_name.strip() == "":
+        return DRIVE_FOLDERS["invoices"]  # fallback to root
+
+    service = _get_drive_service()
+    client_name = client_name.strip()
+
+    # Search for existing folder
+    q = f"'{DRIVE_FOLDERS['invoices']}' in parents and name='{client_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    results = service.files().list(q=q, fields="files(id,name)").execute()
+    existing = results.get('files', [])
+
+    if existing:
+        return existing[0]['id']  # return existing folder ID
+
+    # Create new folder
+    folder_metadata = {
+        'name': client_name,
+        'mimeType': 'application/vnd.google-apps.folder',
+        'parents': [DRIVE_FOLDERS['invoices']]
+    }
+    folder = service.files().create(body=folder_metadata, fields='id').execute()
+    logger.info(f"✅ Created new client folder in Drive: {client_name}")
+    return folder['id']
 # =================================================================
 
 logger = logging.getLogger(__name__)
@@ -1743,21 +1776,34 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(get_c
     inv_no = await _next_invoice_no(prefix)
     inv_date = data.invoice_date or date.today().isoformat()
     due_date = data.due_date or (date.today() + timedelta(days=30)).isoformat()
+
     raw = {"id": str(uuid.uuid4()), "invoice_no": inv_no, "invoice_date": inv_date,
            "due_date": due_date, **data.model_dump(),
            "amount_paid": 0.0, "amount_due": 0.0,
            "created_by": current_user.id, "created_at": now, "updated_at": now}
+
     raw = _compute_invoice_totals(raw)
     raw["amount_due"] = raw["grand_total"]
-    # Save PDF and JSON to Google Drive — no MongoDB insert
+
+    # ── NEW: Auto-create client folder and save inside it ─────────────────────
+    client_name = raw.get("client_name", "").strip()
+    client_folder_id = _get_or_create_client_folder(client_name)
+
+    # Save PDF + JSON inside the client's own folder
     company = await db.companies.find_one({"id": raw.get("company_id")})
     pdf_buf = _build_invoice_pdf(raw, company)
     pdf_bytes = pdf_buf.getvalue()
     json_bytes = json.dumps(raw, default=str).encode()
-    upload_to_drive(pdf_bytes, f"Invoice_{inv_no}.pdf", "invoices", "application/pdf")
-    upload_to_drive(json_bytes, f"Invoice_{inv_no}.json", "invoices", "application/json")
-    return {"status": "success", "invoice_no": inv_no, "message": "Invoice saved to Google Drive only"}
 
+    upload_to_drive(pdf_bytes, f"Invoice_{inv_no}.pdf", "invoices", "application/pdf", custom_parent_id=client_folder_id)
+    upload_to_drive(json_bytes, f"Invoice_{inv_no}.json", "invoices", "application/json", custom_parent_id=client_folder_id)
+
+    return {
+        "status": "success",
+        "invoice_no": inv_no,
+        "client_folder": client_name,
+        "message": f"Invoice saved inside client folder → {client_name}"
+    }
 
 @router.get("/invoices")
 async def list_invoices(current_user: User = Depends(get_current_user)):
