@@ -10,7 +10,7 @@ import { useState, useEffect } from "react";
 // ✅ BASE URL — NO /api HERE
 const BASE_URL =
   import.meta.env.VITE_API_URL ||
-  "https://final-taskosphere-backend.onrender.com";
+  "https://final-taskosphere-backend.onrender.com/api";
 
 // ─── Token Helpers ───────────────────────────────────────────
 const TOKEN_KEY = "taskosphere_token";
