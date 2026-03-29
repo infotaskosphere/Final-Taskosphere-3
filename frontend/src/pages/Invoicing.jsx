@@ -21,10 +21,10 @@ import {
   ArrowUpRight, Activity, Zap, Shield, Star, Filter,
   IndianRupee, CalendarDays, FileCheck, ArrowRightLeft, Layers,
   Upload, Database, FileUp, CheckSquare, AlertTriangle, Phone, Mail,
-  FileSpreadsheet, Briefcase, PieChart, Settings, Table, FileDown,
+  FileSpreadsheet, Briefcase, PieChart, Settings, Table, FileDown, BookOpen,
 } from 'lucide-react';
 import InvoiceSettings, { getInvSettings, getNextInvoiceNumber } from './InvoiceSettings';
-
+import PartyLedger from './PartyLedger';
 // ─── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -36,7 +36,6 @@ const COLORS = {
   purple: '#7C3AED',
   teal: '#0D9488',
 };
-
 // ─── Constants ────────────────────────────────────────────────────────────────
 const GST_RATES = [0, 5, 12, 18, 28];
 const UNITS = ['service','nos','kg','ltr','mtr','sqft','hr','day','month','year','set','lot','pcs','box'];
@@ -57,7 +56,6 @@ const STATUS_META = {
   cancelled: { label: 'Cancelled', bg: 'bg-slate-100 dark:bg-slate-700', text: 'text-slate-500 dark:text-slate-400', dot: 'bg-slate-400', hex: '#94A3B8' },
   credit_note: { label: 'Credit Note', bg: 'bg-purple-50 dark:bg-purple-900/20', text: 'text-purple-600 dark:text-purple-400', dot: 'bg-purple-500', hex: COLORS.purple },
 };
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmt = (n) => new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n ?? 0);
 const fmtC = (n) => `₹${fmt(n)}`;
@@ -135,7 +133,6 @@ const Hl = ({ text = '', query = '' }) => {
     </>
   );
 };
-
 // ════════════════════════════════════════════════════════════════════════════════
 // CLIENT SEARCH COMBOBOX
 // ════════════════════════════════════════════════════════════════════════════════
@@ -313,7 +310,6 @@ const ClientSearchCombobox = ({ clients = [], value, onSelect, onAddNew, isDark 
     </div>
   );
 };
-
 // ════════════════════════════════════════════════════════════════════════════════
 // GST REPORTS MODAL
 // ════════════════════════════════════════════════════════════════════════════════
@@ -666,7 +662,6 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
     </Dialog>
   );
 };
-
 // ════════════════════════════════════════════════════════════════════════════════
 // EXCEL IMPORT — parse Excel/CSV invoice template
 // ════════════════════════════════════════════════════════════════════════════════
@@ -739,7 +734,6 @@ function parseExcelInvoices(file) {
     reader.readAsArrayBuffer(file);
   });
 }
-
 // Download ready-made Excel template
 function downloadInvoiceTemplate() {
   const wb = XLSX.utils.book_new();
@@ -803,15 +797,13 @@ function downloadInvoiceTemplate() {
   XLSX.writeFile(wb, 'Invoice_Import_Template.xlsx');
   toast.success('Template downloaded! Fill it and import back.');
 }
-
 // ════════════════════════════════════════════════════════════════════════════════
-// UNIFIED IMPORT MODAL — .vyp KhataBook + Excel/CSV
+// UNIFIED IMPORT MODAL — .vyp KhataBook + Excel/CSV + Tally + Vyapar/JSON
 // ════════════════════════════════════════════════════════════════════════════════
 const KB_PAY_STATUS = { 1: 'sent', 2: 'partially_paid', 3: 'paid' };
-
 const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => {
   const [step, setStep] = useState('choose'); // choose | upload | preview | importing | done
-  const [importMode, setImportMode] = useState(''); // 'vyp' | 'excel'
+  const [importMode, setImportMode] = useState(''); // 'vyp' | 'tally' | 'json' | 'excel'
   const [file, setFile] = useState(null);
   const [parsed, setParsed] = useState(null);
   const [error, setError] = useState('');
@@ -823,7 +815,6 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
   const [importInvoices, setImportInvoices] = useState(true);
   const [selectedCompanyId, setSelectedCompanyId] = useState('__none__');
   const dropRef = useRef(null);
-
   const reset = () => {
     setStep('choose'); setImportMode(''); setFile(null); setParsed(null);
     setError(''); setLoading(false); setProgress(0);
@@ -831,47 +822,51 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
     setSelectedFirm('__none__'); setSelectedCompanyId('__none__');
   };
   const handleClose = () => { reset(); onClose(); };
-
   const handleFileDrop = useCallback((e) => {
     e.preventDefault();
     const f = e.dataTransfer?.files?.[0] || e.target?.files?.[0];
     if (!f) return;
     const name = f.name.toLowerCase();
-    if (importMode === 'vyp' && !name.endsWith('.vyp') && !name.endsWith('.db')) {
-      setError('Please upload a KhataBook .vyp backup file'); return;
-    }
-    if (importMode === 'excel' && !name.endsWith('.xlsx') && !name.endsWith('.xls') && !name.endsWith('.csv')) {
-      setError('Please upload an Excel (.xlsx/.xls) or CSV file'); return;
+    const ALLOWED_EXTS = {
+      vyp:   ['.vyp', '.db'],
+      tally: ['.xml', '.tbk'],
+      excel: ['.xlsx', '.xls', '.csv'],
+      json:  ['.json', '.vyb'],
+    };
+    const allowed = ALLOWED_EXTS[importMode] || [];
+    if (allowed.length > 0 && !allowed.some(ext => name.endsWith(ext))) {
+      setError(`Please upload one of: ${allowed.join(', ')}`); return;
     }
     setFile(f); setError('');
   }, [importMode]);
-
-  // ── VYP Parse via server-side API ──────────────────────────────────────────
-  const parseVypViaAPI = async (f) => {
+  // ── Universal server-side parser for .vyp / .xml / .json / .vyb / .tbk ──
+  const parseBackupViaAPI = async (f) => {
     const formData = new FormData();
     formData.append('file', f);
     try {
-      const resp = await api.post('/invoices/parse-vyp', formData, {
+      const resp = await api.post('/invoices/parse-backup', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       return resp.data;
     } catch (err) {
-      throw new Error(err.response?.data?.detail || 'Server could not parse .vyp file');
+      throw new Error(err.response?.data?.detail || 'Server could not parse backup file');
     }
   };
-
   const handleParse = async () => {
     if (!file) return;
     setLoading(true); setError('');
     try {
-      if (importMode === 'vyp') {
-        const data = await parseVypViaAPI(file);
-        setParsed({ ...data, mode: 'vyp' });
-        if (data.firms?.length > 0) setSelectedFirm(String(data.firms[0].firm_id));
-      } else {
+      if (importMode === 'excel') {
+        // Client-side Excel parse for our template format
         const invoices = await parseExcelInvoices(file);
         if (!invoices.length) throw new Error('No valid invoice rows found. Check the template format.');
-        setParsed({ invoices, firms: [], clients: [], mode: 'excel' });
+        setParsed({ invoices, firms: [], clients: [], items: [], mode: 'excel', source_label: 'Excel/CSV' });
+      } else {
+        // Server-side universal parser for .vyp, .xml, .json, .vyb, .tbk
+        const data = await parseBackupViaAPI(file);
+        const mode = importMode === 'vyp' ? 'vyp' : importMode;
+        setParsed({ ...data, mode });
+        if (data.firms?.length > 0) setSelectedFirm(String(data.firms[0].firm_id));
       }
       setStep('preview');
     } catch (err) {
@@ -880,15 +875,13 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
       setLoading(false);
     }
   };
-
   const handleImport = async () => {
     if (!parsed) return;
     setStep('importing'); setProgress(0);
     const res = { imported: 0, clients: 0, skipped: 0, errors: [] };
     const companyId = selectedCompanyId === '__none__' ? '' : selectedCompanyId;
-
-    // Import clients (VYP only)
-    if (parsed.mode === 'vyp' && importClients && parsed.clients?.length > 0) {
+    // Import clients (server-parsed modes: vyp, tally, json)
+    if (parsed.mode !== 'excel' && importClients && parsed.clients?.length > 0) {
       const clientsToImport = parsed.clients.slice(0, 500);
       let done = 0;
       for (const c of clientsToImport) {
@@ -898,7 +891,7 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
             email: c.email || null,
             phone: c.phone_number || null,
             address: c.address || '',
-            notes: `Imported from KhataBook. GSTIN: ${c.name_gstin_number || 'N/A'}`,
+            notes: `Imported from ${parsed.mode.toUpperCase()}. GSTIN: ${c.name_gstin_number || 'N/A'}`,
             client_type: 'other', status: 'active', assigned_to: null,
           });
           res.clients++;
@@ -907,12 +900,10 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
         setProgress(Math.round((done / clientsToImport.length) * 40));
       }
     }
-
     // Import invoices
     const invToImport = parsed.mode === 'excel'
       ? parsed.invoices
       : (selectedFirm === '__none__' ? parsed.invoices : parsed.invoices.filter(i => String(i.company_id) === selectedFirm));
-
     let done = 0;
     for (const inv of (invToImport || [])) {
       try {
@@ -927,23 +918,19 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
         res.imported++;
       } catch { res.skipped++; }
       done++;
-      const base = parsed.mode === 'vyp' && importClients ? 40 : 0;
+      const base = parsed.mode !== 'excel' && importClients ? 40 : 0;
       setProgress(base + Math.round((done / (invToImport?.length || 1)) * (100 - base)));
     }
-
     setProgress(100); setResults(res); setStep('done');
     onImportComplete?.();
   };
-
   const inputCls = `h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
-
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className={`w-full max-w-xl rounded-2xl border shadow-2xl p-0 overflow-hidden flex flex-col ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
         style={{ maxHeight: '90vh' }}>
         <DialogTitle className="sr-only">Import Invoices</DialogTitle>
         <DialogDescription className="sr-only">Import invoices from KhataBook .vyp or Excel file</DialogDescription>
-
         {/* ── Header ── */}
         <div className="px-6 py-5 relative overflow-hidden flex-shrink-0"
           style={{ background: 'linear-gradient(135deg, #065f46, #059669)' }}>
@@ -956,7 +943,7 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
               </div>
               <div>
                 <h2 className="text-white font-bold text-lg leading-tight">Import Invoices</h2>
-                <p className="text-emerald-200 text-xs mt-0.5">KhataBook .vyp · Excel · CSV</p>
+                <p className="text-emerald-200 text-xs mt-0.5">KhataBook · Tally · Vyapar · Excel</p>
               </div>
             </div>
             <button onClick={handleClose} className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-all flex-shrink-0">
@@ -984,10 +971,8 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
             </div>
           )}
         </div>
-
         {/* ── Body ── */}
         <div className="flex-1 overflow-y-auto p-6">
-
           {/* CHOOSE MODE */}
           {step === 'choose' && (
             <div className="space-y-4">
@@ -1022,17 +1007,33 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
                     mode: 'vyp',
                     icon: Database,
                     title: 'KhataBook Backup (.vyp)',
-                    desc: 'Import clients & invoices from KhataBook .vyp backup file',
+                    desc: 'Import clients, items & invoices from KhataBook .vyp backup file',
                     color: 'from-emerald-600 to-emerald-700',
                     badge: 'Recommended',
                   },
                   {
+                    mode: 'tally',
+                    icon: FileSpreadsheet,
+                    title: 'Tally Export (.xml)',
+                    desc: 'Import from TallyPrime / Tally.ERP 9 XML export or .tbk backup',
+                    color: 'from-purple-600 to-purple-700',
+                    badge: 'Tally',
+                  },
+                  {
+                    mode: 'json',
+                    icon: FileText,
+                    title: 'Vyapar / JSON (.vyb, .json)',
+                    desc: 'Import from Vyapar backup (.vyb) or any JSON formatted export',
+                    color: 'from-amber-600 to-amber-700',
+                    badge: 'Vyapar',
+                  },
+                  {
                     mode: 'excel',
                     icon: Table,
-                    title: 'Excel / CSV File (.xlsx, .csv)',
-                    desc: 'Import invoices from our template or your own spreadsheet',
+                    title: 'Excel / CSV (.xlsx, .xls, .csv)',
+                    desc: 'Import from any spreadsheet — Sage, myBillBook, Zoho, Xero, or our template',
                     color: 'from-blue-600 to-blue-700',
-                    badge: 'Template available',
+                    badge: 'Universal',
                   },
                 ].map(opt => (
                   <button key={opt.mode} type="button"
@@ -1055,7 +1056,6 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
               </div>
             </div>
           )}
-
           {/* UPLOAD */}
           {step === 'upload' && (
             <div className="space-y-4">
@@ -1068,7 +1068,12 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
                 className={`relative border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all
                   ${file ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : (isDark ? 'border-slate-600 hover:border-emerald-500 bg-slate-700/40' : 'border-slate-200 hover:border-emerald-400 bg-slate-50')}`}>
                 <input type="file"
-                  accept={importMode === 'vyp' ? '.vyp,.db' : '.xlsx,.xls,.csv'}
+                  accept={{
+                    vyp: '.vyp,.db',
+                    tally: '.xml,.tbk',
+                    json: '.json,.vyb',
+                    excel: '.xlsx,.xls,.csv',
+                  }[importMode] || '*'}
                   className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
                   onChange={handleFileDrop} />
                 {file ? (
@@ -1089,11 +1094,21 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
                     </div>
                     <div>
                       <p className={`font-semibold text-sm ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-                        {importMode === 'vyp' ? 'Drop your .vyp file here' : 'Drop your Excel or CSV file here'}
+                        {{
+                          vyp: 'Drop your KhataBook .vyp file here',
+                          tally: 'Drop your Tally XML export here',
+                          json: 'Drop your Vyapar .vyb or JSON file here',
+                          excel: 'Drop your Excel or CSV file here',
+                        }[importMode] || 'Drop your backup file here'}
                       </p>
                       <p className="text-xs text-slate-400 mt-1">or click to browse</p>
                       <p className="text-xs text-slate-400 mt-1">
-                        {importMode === 'vyp' ? 'KhataBook .vyp backup files only' : '.xlsx, .xls, .csv files'}
+                        {{
+                          vyp: 'KhataBook .vyp or .db backup files',
+                          tally: 'Tally .xml export or .tbk backup files',
+                          json: 'Vyapar .vyb backup or .json export files',
+                          excel: '.xlsx, .xls, .csv files',
+                        }[importMode] || 'Any supported format'}
                       </p>
                     </div>
                     <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
@@ -1129,13 +1144,12 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
               </div>
             </div>
           )}
-
           {/* PREVIEW */}
           {step === 'preview' && parsed && (
             <div className="space-y-4">
               <div className="grid grid-cols-3 gap-3">
                 {[
-                  { label: 'Firms', val: parsed.firms?.length || 1, icon: Building2, color: COLORS.deepBlue },
+                  { label: 'Firms', val: parsed.firms?.length || (parsed.mode === 'excel' ? 0 : 1), icon: Building2, color: COLORS.deepBlue },
                   { label: 'Clients', val: parsed.clients?.length || 0, icon: Users, color: COLORS.emeraldGreen },
                   { label: 'Invoices', val: parsed.invoices?.length || 0, icon: Receipt, color: COLORS.mediumBlue },
                 ].map(s => (
@@ -1146,7 +1160,16 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
                   </div>
                 ))}
               </div>
-              {parsed.mode === 'vyp' && parsed.firms?.length > 0 && (
+              {parsed.source_label && (
+                <div className={`rounded-xl border p-3 flex items-center gap-2 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-blue-50 border-blue-200'}`}>
+                  <Database className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                  <p className={`text-xs ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
+                    Source: <span className="font-semibold">{parsed.source_label}</span>
+                    {parsed.items?.length > 0 && ` · ${parsed.items.length} products/items detected`}
+                  </p>
+                </div>
+              )}
+              {parsed.mode !== 'excel' && parsed.firms?.length > 0 && (
                 <div>
                   <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Filter by Firm</label>
                   <Select value={selectedFirm} onValueChange={setSelectedFirm}>
@@ -1168,7 +1191,7 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
                   </SelectContent>
                 </Select>
               </div>
-              {parsed.mode === 'vyp' && (
+              {parsed.mode !== 'excel' && (
                 <div className={`space-y-3 p-4 rounded-xl border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
                   {[
                     { label: 'Import Clients', sub: `${parsed.clients?.length || 0} contacts`, val: importClients, set: setImportClients },
@@ -1210,7 +1233,6 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
               </div>
             </div>
           )}
-
           {/* IMPORTING */}
           {step === 'importing' && (
             <div className="py-8 flex flex-col items-center gap-6">
@@ -1230,7 +1252,6 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
               </div>
             </div>
           )}
-
           {/* DONE */}
           {step === 'done' && (
             <div className="py-6 flex flex-col items-center gap-5">
@@ -1263,7 +1284,6 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
     </Dialog>
   );
 };
-
 // ════════════════════════════════════════════════════════════════════════════════
 // STATUS PILL
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1275,7 +1295,6 @@ const StatusPill = ({ inv }) => {
     </span>
   );
 };
-
 // ════════════════════════════════════════════════════════════════════════════════
 // STAT CARD
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1292,7 +1311,6 @@ const StatCard = ({ label, value, sub, icon: Icon, color, bg, onClick, isDark, t
     {sub && <p className={`text-xs pl-2 mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{sub}</p>}
   </div>
 );
-
 // ════════════════════════════════════════════════════════════════════════════════
 // MINI REVENUE CHART
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1317,7 +1335,6 @@ const RevenueChart = ({ trend = [], isDark }) => {
     </svg>
   );
 };
-
 // ════════════════════════════════════════════════════════════════════════════════
 // PAYMENT MODAL
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1366,7 +1383,6 @@ const PaymentModal = ({ invoice, open, onClose, onSuccess, isDark }) => {
     </Dialog>
   );
 };
-
 // ════════════════════════════════════════════════════════════════════════════════
 // INVOICE FORM
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1621,7 +1637,6 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     </Dialog>
   );
 };
-
 // ════════════════════════════════════════════════════════════════════════════════
 // INVOICE DETAIL PANEL
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1698,7 +1713,6 @@ const InvoiceDetailPanel = ({ invoice, open, onClose, onPayment, onEdit, onDelet
     </Dialog>
   );
 };
-
 // ════════════════════════════════════════════════════════════════════════════════
 // PRODUCT MODAL
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1776,7 +1790,6 @@ const ProductModal = ({ open, onClose, isDark, onSaved }) => {
     </Dialog>
   );
 };
-
 // ════════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1800,6 +1813,8 @@ export default function Invoicing() {
   const [importOpen, setImportOpen] = useState(false);
   const [gstOpen, setGstOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [ledgerOpen, setLedgerOpen] = useState(false);
+  const [ledgerClient, setLedgerClient] = useState(null);
   const [searchInput, setSearchInput] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -1809,12 +1824,10 @@ export default function Invoicing() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const searchRef = useRef(null);
-
   useEffect(() => {
     const t = setTimeout(() => setSearchTerm(searchInput), 250);
     return () => clearTimeout(t);
   }, [searchInput]);
-
   useEffect(() => {
     const h = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); searchRef.current?.focus(); }
@@ -1823,7 +1836,6 @@ export default function Invoicing() {
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, [formOpen, detailOpen, payOpen, gstOpen]);
-
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
@@ -1835,20 +1847,16 @@ export default function Invoicing() {
     } catch { toast.error('Failed to load invoicing data'); }
     finally { setLoading(false); }
   }, []);
-
   useEffect(() => { fetchAll(); }, [fetchAll]);
-
   const availableYears = useMemo(() => {
     const years = new Set(invoices.map(i => i.invoice_date?.slice(0, 4)).filter(Boolean));
     return Array.from(years).sort().reverse();
   }, [invoices]);
-
   const fyRange = (year) => {
     if (!year || year === 'all') return null;
     const y = parseInt(year);
     return { from: `${y}-04-01`, to: `${y + 1}-03-31` };
   };
-
   const localStats = useMemo(() => {
     const now = new Date();
     const curMonth = format(now, 'yyyy-MM');
@@ -1878,7 +1886,6 @@ export default function Invoicing() {
     const top_clients = Object.entries(clientMap).map(([name, revenue]) => ({ name, revenue })).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
     return { total_revenue, total_outstanding, total_gst, total_invoices, month_revenue, month_invoices, overdue_count, paid_count, draft_count, monthly_trend, top_clients };
   }, [invoices, companyFilter, yearFilter]);
-
   const filtered = useMemo(() => {
     const fy = fyRange(yearFilter === 'all' ? null : yearFilter);
     return invoices.filter(inv => {
@@ -1892,12 +1899,10 @@ export default function Invoicing() {
       return true;
     });
   }, [invoices, companyFilter, yearFilter, searchTerm, statusFilter, typeFilter, fromDate, toDate]);
-
   const enrichedFiltered = useMemo(() => filtered.map(inv => {
     if (inv.status === 'sent' && inv.amount_due > 0 && inv.due_date && differenceInDays(parseISO(inv.due_date), new Date()) < 0) return { ...inv, status: 'overdue' };
     return inv;
   }), [filtered]);
-
   const handleEdit = useCallback((inv) => { setEditingInv(inv); setFormOpen(true); }, []);
   const handleDelete = useCallback(async (inv) => {
     if (!window.confirm(`Delete invoice ${inv.invoice_no}?`)) return;
@@ -1934,7 +1939,6 @@ export default function Invoicing() {
     XLSX.writeFile(wb, `invoices_${format(new Date(), 'dd-MMM-yyyy')}.xlsx`);
     toast.success(`Exported ${enrichedFiltered.length} invoices`);
   }, [enrichedFiltered]);
-
   return (
     <div className={`min-h-screen p-5 md:p-7 space-y-5 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
       {/* PAGE HEADER */}
@@ -1955,6 +1959,10 @@ export default function Invoicing() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => { setLedgerClient(null); setLedgerOpen(true); }}
+              className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold">
+              <BookOpen className="h-4 w-4" /> Party Ledger
+            </Button>
             <Button variant="outline" onClick={() => setGstOpen(true)}
               className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold">
               <FileSpreadsheet className="h-4 w-4" /> GST Returns
@@ -1987,7 +1995,6 @@ export default function Invoicing() {
           </div>
         </div>
       </div>
-
       {/* STATS */}
       {(localStats.total_invoices > 0 || invoices.length > 0) && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1997,7 +2004,6 @@ export default function Invoicing() {
           <StatCard label="Total GST" value={fmtC(localStats.total_gst)} sub={`${localStats.paid_count} paid · ${localStats.draft_count} draft`} icon={Shield} color={COLORS.amber} bg={`${COLORS.amber}12`} isDark={isDark} onClick={() => setGstOpen(true)} />
         </div>
       )}
-
       {localStats.monthly_trend?.some(d => d.revenue > 0) && (
         <div className={`rounded-2xl border p-5 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`}>
           <div className="flex items-center justify-between mb-4">
@@ -2013,7 +2019,6 @@ export default function Invoicing() {
           <RevenueChart trend={localStats.monthly_trend} isDark={isDark} />
         </div>
       )}
-
       {/* FILTERS */}
       <div className={`rounded-2xl border shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
         <div className={`flex items-center gap-3 px-3.5 py-3 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
@@ -2065,7 +2070,6 @@ export default function Invoicing() {
           )}
         </div>
       </div>
-
       {/* INVOICE TABLE */}
       <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`}>
         <div className={`grid border-b px-5 py-3 ${isDark ? 'bg-slate-700/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}
@@ -2108,6 +2112,7 @@ export default function Invoicing() {
                   <p className={`text-sm font-semibold ${inv.amount_due > 0 ? (isOverdue ? 'text-red-500' : 'text-amber-600') : 'text-slate-300'}`}>{fmtC(inv.amount_due)}</p>
                   <StatusPill inv={inv} />
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                    <button onClick={(e) => { e.stopPropagation(); setLedgerClient(inv.client_name); setLedgerOpen(true); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors" title="Party Ledger"><BookOpen className="h-3.5 w-3.5" /></button>
                     <button onClick={() => handleDownloadPdf(inv)} className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="PDF"><Download className="h-3.5 w-3.5" /></button>
                     {inv.client_email && (<button onClick={(e) => { e.stopPropagation(); handleSendEmail(inv); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="Send Email"><Send className="h-3.5 w-3.5" /></button>)}
                     {inv.amount_due > 0 && (<button onClick={(e) => { e.stopPropagation(); setPayInv(inv); setPayOpen(true); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors" title="Payment"><IndianRupee className="h-3.5 w-3.5" /></button>)}
@@ -2135,7 +2140,6 @@ export default function Invoicing() {
           </div>
         )}
       </div>
-
       {/* TOP CLIENTS */}
       {localStats?.top_clients?.length > 0 && (
         <div className={`rounded-2xl border p-5 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`}>
@@ -2159,7 +2163,6 @@ export default function Invoicing() {
           </div>
         </div>
       )}
-
       {/* ─── DIALOGS ─────────────────────────────────────────────────────────── */}
       <InvoiceForm open={formOpen} onClose={() => { setFormOpen(false); setEditingInv(null); }}
         editingInv={editingInv} companies={companies} clients={clients} leads={leads}
@@ -2181,6 +2184,15 @@ export default function Invoicing() {
       <InvoiceSettings
         open={settingsOpen} onClose={() => setSettingsOpen(false)}
         companies={companies} isDark={isDark} />
+      <PartyLedger
+        open={ledgerOpen}
+        onClose={() => setLedgerOpen(false)}
+        invoices={invoices}
+        clients={clients}
+        companies={companies}
+        preselectedClientName={ledgerClient}
+        isDark={isDark}
+      />
     </div>
   );
 }
