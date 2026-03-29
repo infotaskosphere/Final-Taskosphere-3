@@ -1,25 +1,25 @@
 /**
  * lib/api.js
- * ─────────────────────────────────────────────────────────────────────────────
- * Axios instance for all API calls (FIXED VERSION)
+ * ─────────────────────────────────────────────────────────────
+ * FINAL VERSION — MATCHED WITH BACKEND (/api prefix)
  */
 
 import axios from "axios";
 import { useState, useEffect } from "react";
 
-// ─── FINAL BASE URL (FIXED — NO AUTO LOGIC) ───────────────────────────────────
+// ✅ BASE URL — NO /api HERE
 const BASE_URL =
   import.meta.env.VITE_API_URL ||
-  "https://final-taskosphere-backend.onrender.com/api";
+  "https://final-taskosphere-backend.onrender.com";
 
-// ─── Token Helpers ────────────────────────────────────────────────────────────
+// ─── Token Helpers ───────────────────────────────────────────
 const TOKEN_KEY = "taskosphere_token";
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY);
 export const setToken = (tok) => localStorage.setItem(TOKEN_KEY, tok);
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
 
-// ─── Global Loading State (pub/sub) ───────────────────────────────────────────
+// ─── Global Loading State ─────────────────────────────────────
 let _activeRequests = 0;
 const _subscribers = new Set();
 
@@ -40,15 +40,14 @@ export function useLoading() {
   return loading;
 }
 
-// ─── Axios Instance ───────────────────────────────────────────────────────────
+// ─── Axios Instance ───────────────────────────────────────────
 const api = axios.create({
   baseURL: BASE_URL,
   timeout: 60000,
   headers: { "Content-Type": "application/json" },
-  withCredentials: false,
 });
 
-// ── Request Interceptor ──────────────────────────────────────────────────────
+// ─── Request Interceptor ──────────────────────────────────────
 api.interceptors.request.use(
   (config) => {
     const token = getToken();
@@ -68,7 +67,7 @@ api.interceptors.request.use(
   }
 );
 
-// ── Response Interceptor ─────────────────────────────────────────────────────
+// ─── Response Interceptor ─────────────────────────────────────
 api.interceptors.response.use(
   (response) => {
     if (!response.config._silent) _setLoading(-1);
@@ -77,7 +76,7 @@ api.interceptors.response.use(
   (error) => {
     if (!error.config?._silent) _setLoading(-1);
 
-    // 401 → logout
+    // 🔐 401 → logout
     if (error.response?.status === 401) {
       clearToken();
       if (!window.location.pathname.startsWith("/login")) {
@@ -85,7 +84,7 @@ api.interceptors.response.use(
       }
     }
 
-    // 422 validation errors
+    // ⚠️ 422 validation
     if (error.response?.status === 422) {
       const detail = error.response.data?.detail;
       if (Array.isArray(detail)) {
@@ -103,7 +102,7 @@ api.interceptors.response.use(
   }
 );
 
-// ─── Helper Methods ──────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────
 export const silentGet = (url, config = {}) =>
   api.get(url, { ...config, _silent: true });
 
@@ -113,9 +112,10 @@ export const upload = (url, formData, config = {}) =>
     headers: { "Content-Type": "multipart/form-data", ...config.headers },
   });
 
-// ─── Error Formatter ─────────────────────────────────────────────────────────
+// ─── Error Formatter ─────────────────────────────────────────
 export function getErrorMessage(error) {
   if (!error) return "An unknown error occurred";
+
   const data = error.response?.data;
 
   if (!data) return error.message || "Network error";
