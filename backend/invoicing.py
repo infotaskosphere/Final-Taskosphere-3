@@ -2,8 +2,16 @@
 invoicing.py
 ──────────────────────────────────────────────────────────────────────────────
 Full Invoicing & Billing Module — FastAPI Router
-PDF FIX: Use pdf.output() which returns bytes in fpdf2,
-         then buf.write(bytes). The old dest=BytesIO is not valid in fpdf2.
+
+CHANGELOG v3.0:
+  - FIXED: /invoices/parse-vyp now accepts UploadFile (was returning 405)
+  - NEW:   Universal backup import — parses .vyp (KhataBook), .xml (Tally),
+           .xlsx/.xls/.csv (Vyapar, myBillBook, generic), .json (Vyapar)
+  - NEW:   /invoices/parse-backup — single endpoint for all formats
+  - NEW:   Proper SQLite parsing for .vyp files with firms, clients, items,
+           transactions, line items, tax codes, payment types
+  - FIXED: PDF uses fpdf2's pdf.output() for bytes
+
 Features:
   - Product / Service catalog with HSN/SAC codes
   - GST-compliant invoices (CGST+SGST or IGST)
@@ -16,44 +24,82 @@ Features:
   - PDF export (Indian GST invoice format)
   - Deep integration with Clients, Leads, Quotations
   - Email invoice sending with PDF attachment (SMTP)
+  - Universal backup import from other accounting software
 """
 import uuid
-import sqlite3  # Add this near 'import uuid'
+import sqlite3
 import logging
 import re
 import base64
 import tempfile
 import os
 import smtplib
+import json
+import csv
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 from datetime import datetime, timezone, date, timedelta
-from io import BytesIO
+from io import BytesIO, StringIO
 from typing import List, Optional, Literal, Any, Dict
-from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from backend.dependencies import db, get_current_user
 from backend.models import User
+
 try:
     from fpdf import FPDF
 except ImportError:
     import subprocess, sys
     subprocess.check_call([sys.executable, "-m", "pip", "install", "fpdf2"])
     from fpdf import FPDF
+
+try:
+    import openpyxl
+except ImportError:
+    import subprocess, sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl"])
+    import openpyxl
+
+try:
+    import xml.etree.ElementTree as ET
+except ImportError:
+    pass
+
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Invoicing"])
+
 # ─── Constants ────────────────────────────────────────────────────────────────
 GST_RATES = [0.0, 5.0, 12.0, 18.0, 28.0]
 UNITS = ["service","nos","kg","ltr","mtr","sqft","hr","day","month","year","set","lot","pcs","box"]
 PAYMENT_MODES = ["cash","cheque","neft","rtgs","imps","upi","card","other"]
 INV_STATUS = ["draft","sent","partially_paid","paid","overdue","cancelled","credit_note"]
+
+# ─── KhataBook transaction type mapping ────────────────────────────────────────
+KB_TXN_TYPES = {
+    1: "tax_invoice",       # Sale
+    2: "purchase",          # Purchase (we skip these for import)
+    3: "payment_received",  # Payment In
+    4: "payment_made",      # Payment Out
+    7: "credit_note",       # Credit Note / Sales Return
+    21: "estimate",         # Estimate / Quotation
+    27: "delivery_challan", # Delivery Challan
+    65: "proforma",         # Proforma Invoice
+}
+
+KB_PAY_STATUS = {
+    1: "sent",
+    2: "partially_paid",
+    3: "paid",
+}
+
 # ─── Number formatters ─────────────────────────────────────────────────────────
 _ONES = ["","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten",
          "Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen",
          "Eighteen","Nineteen"]
 _TENS = ["","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"]
+
 def _amount_in_words(n: float) -> str:
     try:
         rupees = int(n)
@@ -80,12 +126,14 @@ def _amount_in_words(n: float) -> str:
         return f"Rupees {r}{p} Only"
     except Exception:
         return f"Rupees {n:.2f} Only"
+
 # ─── Permission helper ─────────────────────────────────────────────────────────
 def _perm(user: User) -> bool:
     if user.role == "admin": return True
     perms = user.permissions if isinstance(user.permissions, dict) else (
         user.permissions.model_dump() if user.permissions else {})
     return bool(perms.get("can_create_quotations", False) or perms.get("can_manage_invoices", False))
+
 # ─── Next invoice number ────────────────────────────────────────────────────────
 async def _next_invoice_no(prefix: str = "INV") -> str:
     today = date.today()
@@ -95,45 +143,9 @@ async def _next_invoice_no(prefix: str = "INV") -> str:
         {"invoice_no": {"$regex": f"^{prefix}-"}}
     )
     return f"{prefix}-{count + 1:04d}/{fy_label}"
-async def _load_firm_from_vyp(file_path: str):
-    """
-    Parses the SQLite .vyp file to extract firm/company details.
-    """
-    try:
-        conn = sqlite3.connect(file_path)
-        conn.row_factory = sqlite3.Row  # This allows accessing columns by name
-        cursor = conn.cursor()
-        
-        # Query the table found in your snippet
-        cursor.execute("SELECT * FROM kb_firms LIMIT 1")
-        row = cursor.fetchone()
-        
-        if row:
-            # Mapping your database columns to the ERP's company format
-            firm_data = {
-                "name": row["firm_name"],
-                "email": row["firm_email"],
-                "phone": row["firm_phone"],
-                "address": row["firm_address"],
-                "gstin": row["firm_gstin_number"],
-                "bank_name": row["firm_bank_name"],
-                "bank_account_no": row["firm_bank_account_number"],
-                "bank_ifsc": row["firm_bank_ifsc_code"],
-                "bank_account_name": row["firm_name"] # Usually same as firm name
-            }
-            conn.close()
-            return firm_data
-        conn.close()
-    except Exception as e:
-        logger.error(f"Failed to parse .vyp file: {e}")
-    return None
+
 # ─── Email invoice sender ─────────────────────────────────────────────────────
 def _send_email(to_email: str, subject: str, html_body: str, pdf_bytes: bytes, filename: str, company_email: str):
-    """
-    Sends invoice PDF as email attachment via SMTP (TLS).
-    Configuration via environment variables:
-      SMTP_SERVER, SMTP_PORT (default 587), SMTP_USER, SMTP_PASSWORD
-    """
     smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
     smtp_port = int(os.getenv("SMTP_PORT", 587))
     smtp_user = os.getenv("SMTP_USER")
@@ -148,7 +160,6 @@ def _send_email(to_email: str, subject: str, html_body: str, pdf_bytes: bytes, f
     msg["From"] = from_email
     msg["To"] = to_email
     msg["Subject"] = subject
-
     msg.attach(MIMEText(html_body, "html"))
 
     attachment = MIMEApplication(pdf_bytes, _subtype="pdf")
@@ -165,15 +176,19 @@ def _send_email(to_email: str, subject: str, html_body: str, pdf_bytes: bytes, f
     except Exception as e:
         logger.error(f"Failed to send email to {to_email}: {e}")
         raise HTTPException(500, f"Email sending failed: {str(e)}")
+
 # ─── Safe PDF string ────────────────────────────────────────────────────────────
 def _s(v, maxl=0):
     if v is None: return ""
     t = str(v).encode("latin-1", errors="replace").decode("latin-1")
     return t[:maxl] if maxl and len(t) > maxl else t
+
 def _cell(pdf, w, h, txt="", border=0, align="L", fill=False, nl=False):
     pdf.cell(w, h, txt, border, 1 if nl else 0, align, fill)
+
 def _mcell(pdf, w, h, txt, border=0, align="L", fill=False):
     pdf.multi_cell(w, h, txt, border, align, fill)
+
 def _embed_logo(pdf, logo_b64, x, y, h):
     if not logo_b64: return
     tmp_path = None
@@ -190,11 +205,873 @@ def _embed_logo(pdf, logo_b64, x, y, h):
         if tmp_path and os.path.exists(tmp_path):
             try: os.unlink(tmp_path)
             except: pass
+
 def _lighten(c, f=0.88): return tuple(int(x + (255 - x) * f) for x in c)
 def _darken(c, f=0.65): return tuple(int(x * f) for x in c)
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# UNIVERSAL BACKUP PARSER
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _safe_float(val, default=0.0):
+    """Safely convert value to float."""
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+def _safe_str(val, default=""):
+    """Safely convert value to string."""
+    if val is None:
+        return default
+    return str(val).strip()
+
+def _safe_date(val, default=None):
+    """Extract date string from various datetime formats."""
+    if not val:
+        return default or date.today().isoformat()
+    s = str(val).strip()
+    # Handle "2021-02-04 00:00:00" format
+    if " " in s:
+        s = s.split(" ")[0]
+    # Validate date format
+    try:
+        datetime.strptime(s, "%Y-%m-%d")
+        return s
+    except ValueError:
+        pass
+    # Try DD/MM/YYYY
+    try:
+        dt = datetime.strptime(s, "%d/%m/%Y")
+        return dt.strftime("%Y-%m-%d")
+    except ValueError:
+        pass
+    # Try DD-MM-YYYY
+    try:
+        dt = datetime.strptime(s, "%d-%m-%Y")
+        return dt.strftime("%Y-%m-%d")
+    except ValueError:
+        pass
+    return default or date.today().isoformat()
+
+
+# ─── VYP (KhataBook) Parser ─────────────────────────────────────────────────
+
+def _parse_vyp_file(file_path: str) -> dict:
+    """
+    Parses a KhataBook .vyp SQLite backup file.
+    Returns structured data: firms, clients, items, invoices, payments.
+    """
+    try:
+        conn = sqlite3.connect(file_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        result = {
+            "source": "khatabook",
+            "source_label": "KhataBook (.vyp)",
+            "firms": [],
+            "clients": [],
+            "items": [],
+            "invoices": [],
+            "payments": [],
+            "stats": {},
+        }
+
+        # ── Parse firms ──────────────────────────────────────────────────────
+        try:
+            cursor.execute("SELECT * FROM kb_firms")
+            for row in cursor.fetchall():
+                result["firms"].append({
+                    "firm_id": row["firm_id"],
+                    "firm_name": _safe_str(row["firm_name"]),
+                    "firm_email": _safe_str(row["firm_email"]),
+                    "firm_phone": _safe_str(row["firm_phone"]),
+                    "firm_address": _safe_str(row["firm_address"]),
+                    "firm_gstin": _safe_str(row["firm_gstin_number"]),
+                    "firm_state": _safe_str(row["firm_state"]),
+                    "firm_bank_name": _safe_str(row["firm_bank_name"]),
+                    "firm_bank_account": _safe_str(row["firm_bank_account_number"]),
+                    "firm_bank_ifsc": _safe_str(row["firm_bank_ifsc_code"]),
+                    "firm_business_category": _safe_str(row["firm_business_category"]),
+                })
+        except Exception as e:
+            logger.warning(f"VYP firms parse error: {e}")
+
+        # ── Parse tax codes (for GST rate lookup) ────────────────────────────
+        tax_map = {}
+        try:
+            cursor.execute("SELECT tax_code_id, tax_rate, tax_code_type, tax_rate_type FROM kb_tax_code")
+            for row in cursor.fetchall():
+                tax_map[row["tax_code_id"]] = {
+                    "rate": _safe_float(row["tax_rate"]),
+                    "type": row["tax_code_type"],     # 0=individual, 1=combined
+                    "rate_type": row["tax_rate_type"], # 1=SGST, 2=CGST, 3=IGST
+                }
+        except Exception as e:
+            logger.warning(f"VYP tax codes parse error: {e}")
+
+        # ── Parse clients (kb_names) ─────────────────────────────────────────
+        name_map = {}  # name_id → client data
+        try:
+            cursor.execute("""
+                SELECT name_id, full_name, phone_number, email, address,
+                       name_gstin_number, name_state, amount, name_type,
+                       name_customer_type, name_shipping_address,
+                       party_billing_name
+                FROM kb_names
+                WHERE name_type IN (1, 2)
+            """)
+            for row in cursor.fetchall():
+                client = {
+                    "name_id": row["name_id"],
+                    "full_name": _safe_str(row["full_name"]),
+                    "phone_number": _safe_str(row["phone_number"]),
+                    "email": _safe_str(row["email"]),
+                    "address": _safe_str(row["address"]),
+                    "name_gstin_number": _safe_str(row["name_gstin_number"]),
+                    "name_state": _safe_str(row["name_state"]),
+                    "balance": _safe_float(row["amount"]),
+                    "name_type": row["name_type"],     # 1=customer, 2=supplier
+                    "customer_type": row["name_customer_type"],
+                    "billing_name": _safe_str(row["party_billing_name"]),
+                    "shipping_address": _safe_str(row["name_shipping_address"]),
+                }
+                name_map[row["name_id"]] = client
+                result["clients"].append(client)
+        except Exception as e:
+            logger.warning(f"VYP clients parse error: {e}")
+
+        # ── Parse items (kb_items) ───────────────────────────────────────────
+        item_map = {}
+        try:
+            cursor.execute("""
+                SELECT item_id, item_name, item_sale_unit_price,
+                       item_purchase_unit_price, item_hsn_sac_code,
+                       item_tax_id, item_code, item_description,
+                       item_type, item_stock_quantity
+                FROM kb_items
+                WHERE item_is_active = 1 OR item_is_active IS NULL
+            """)
+            for row in cursor.fetchall():
+                gst_rate = 0.0
+                tid = row["item_tax_id"]
+                if tid and tid in tax_map:
+                    tc = tax_map[tid]
+                    if tc["type"] == 1:
+                        gst_rate = tc["rate"]
+                    else:
+                        gst_rate = tc["rate"] * 2  # CGST/SGST → combined
+
+                item = {
+                    "item_id": row["item_id"],
+                    "name": _safe_str(row["item_name"]),
+                    "sale_price": _safe_float(row["item_sale_unit_price"]),
+                    "purchase_price": _safe_float(row["item_purchase_unit_price"]),
+                    "hsn_sac": _safe_str(row["item_hsn_sac_code"]),
+                    "gst_rate": gst_rate,
+                    "item_code": _safe_str(row["item_code"]),
+                    "description": _safe_str(row["item_description"]),
+                    "stock_qty": _safe_float(row["item_stock_quantity"]),
+                }
+                item_map[row["item_id"]] = item
+                result["items"].append(item)
+        except Exception as e:
+            logger.warning(f"VYP items parse error: {e}")
+
+        # ── Parse line items (for invoice detail) ────────────────────────────
+        lineitem_map = {}  # txn_id → [lineitems]
+        try:
+            cursor.execute("""
+                SELECT lineitem_id, lineitem_txn_id, item_id, quantity,
+                       priceperunit, total_amount, lineitem_tax_amount,
+                       lineitem_discount_amount, lineitem_description,
+                       lineitem_discount_percent
+                FROM kb_lineitems
+            """)
+            for row in cursor.fetchall():
+                txn_id = row["lineitem_txn_id"]
+                if txn_id not in lineitem_map:
+                    lineitem_map[txn_id] = []
+
+                item_data = item_map.get(row["item_id"], {})
+                lineitem_map[txn_id].append({
+                    "description": _safe_str(row["lineitem_description"]) or item_data.get("name", "Item"),
+                    "hsn_sac": item_data.get("hsn_sac", ""),
+                    "quantity": _safe_float(row["quantity"], 1),
+                    "unit_price": _safe_float(row["priceperunit"]),
+                    "total_amount": _safe_float(row["total_amount"]),
+                    "tax_amount": _safe_float(row["lineitem_tax_amount"]),
+                    "discount_amount": _safe_float(row["lineitem_discount_amount"]),
+                    "discount_pct": _safe_float(row["lineitem_discount_percent"]),
+                    "gst_rate": item_data.get("gst_rate", 18.0),
+                })
+        except Exception as e:
+            logger.warning(f"VYP lineitems parse error: {e}")
+
+        # ── Parse transactions ───────────────────────────────────────────────
+        try:
+            cursor.execute("""
+                SELECT txn_id, txn_date_created, txn_date_modified,
+                       txn_name_id, txn_cash_amount, txn_balance_amount,
+                       txn_type, txn_date, txn_discount_percent,
+                       txn_tax_percent, txn_discount_amount, txn_tax_amount,
+                       txn_due_date, txn_description, txn_ref_number_char,
+                       txn_status, txn_firm_id, txn_sub_type,
+                       txn_invoice_prefix, txn_payment_status,
+                       txn_tax_inclusive, txn_billing_address,
+                       txn_shipping_address, txn_place_of_supply,
+                       txn_round_off_amount, txn_po_ref_number,
+                       txn_eway_bill_number, txn_payment_type_id,
+                       txn_payment_reference
+                FROM kb_transactions
+                WHERE txn_status != 0
+                ORDER BY txn_date ASC
+            """)
+            for row in cursor.fetchall():
+                txn_type_code = row["txn_type"]
+                txn_type = KB_TXN_TYPES.get(txn_type_code)
+
+                if not txn_type:
+                    continue
+
+                client = name_map.get(row["txn_name_id"], {})
+                txn_date = _safe_date(row["txn_date"])
+                due_date = _safe_date(row["txn_due_date"], txn_date)
+
+                # Build invoice number
+                prefix = _safe_str(row["txn_invoice_prefix"]) or "KB"
+                ref_num = _safe_str(row["txn_ref_number_char"])
+                invoice_no = f"{prefix}-{ref_num}" if ref_num else f"KB-{row['txn_id']}"
+
+                # Get line items for this transaction
+                items_list = lineitem_map.get(row["txn_id"], [])
+
+                # Calculate totals from line items
+                subtotal = sum(li["total_amount"] for li in items_list)
+                total_tax = sum(li["tax_amount"] for li in items_list)
+                total_discount = sum(li["discount_amount"] for li in items_list)
+
+                # If no line items, use transaction-level amounts
+                if not items_list and _safe_float(row["txn_cash_amount"]) > 0:
+                    cash_amt = _safe_float(row["txn_cash_amount"])
+                    tax_amt = _safe_float(row["txn_tax_amount"])
+                    subtotal = cash_amt
+                    total_tax = tax_amt
+                    items_list = [{
+                        "description": _safe_str(row["txn_description"]) or "Imported Service/Product",
+                        "hsn_sac": "",
+                        "quantity": 1,
+                        "unit_price": cash_amt,
+                        "total_amount": cash_amt + tax_amt,
+                        "tax_amount": tax_amt,
+                        "discount_amount": _safe_float(row["txn_discount_amount"]),
+                        "discount_pct": _safe_float(row["txn_discount_percent"]),
+                        "gst_rate": _safe_float(row["txn_tax_percent"]) or 18.0,
+                    }]
+
+                grand_total = subtotal + total_tax - total_discount + _safe_float(row["txn_round_off_amount"])
+
+                # Payment received transactions
+                if txn_type == "payment_received":
+                    result["payments"].append({
+                        "_kb_id": row["txn_id"],
+                        "client_name": client.get("full_name", "Unknown"),
+                        "amount": _safe_float(row["txn_cash_amount"]),
+                        "payment_date": txn_date,
+                        "payment_mode": "other",
+                        "reference_no": _safe_str(row["txn_payment_reference"]),
+                        "notes": _safe_str(row["txn_description"]) or "Imported from KhataBook",
+                        "company_id": row["txn_firm_id"],
+                    })
+                    continue
+
+                if txn_type == "payment_made":
+                    continue  # Skip payment-out for invoice import
+
+                if txn_type == "purchase":
+                    continue  # Skip purchases
+
+                # Determine invoice type
+                inv_type = "tax_invoice"
+                if txn_type == "credit_note":
+                    inv_type = "credit_note"
+                elif txn_type == "estimate":
+                    inv_type = "estimate"
+                elif txn_type == "proforma":
+                    inv_type = "proforma"
+                elif txn_type == "delivery_challan":
+                    inv_type = "tax_invoice"  # Map to regular invoice
+
+                # Determine payment status
+                pay_status = KB_PAY_STATUS.get(row["txn_payment_status"], "draft")
+
+                # Determine interstate
+                is_interstate = False
+                firm = next((f for f in result["firms"] if f["firm_id"] == row["txn_firm_id"]), None)
+                if firm and client.get("name_state"):
+                    is_interstate = firm.get("firm_state", "").lower() != client.get("name_state", "").lower()
+
+                # Build items in our format
+                formatted_items = []
+                for li in items_list:
+                    gst_rate = li.get("gst_rate", 18.0) or 18.0
+                    taxable = li["total_amount"] - li.get("tax_amount", 0)
+                    if taxable <= 0:
+                        taxable = li["total_amount"]
+
+                    half = gst_rate / 2
+                    if is_interstate:
+                        igst = round(taxable * gst_rate / 100, 2) if li.get("tax_amount", 0) == 0 else li["tax_amount"]
+                        formatted_items.append({
+                            "description": li["description"],
+                            "hsn_sac": li.get("hsn_sac", ""),
+                            "quantity": li["quantity"],
+                            "unit": "service",
+                            "unit_price": li["unit_price"],
+                            "discount_pct": li.get("discount_pct", 0),
+                            "gst_rate": gst_rate,
+                            "taxable_value": taxable,
+                            "cgst_rate": 0, "sgst_rate": 0, "igst_rate": gst_rate,
+                            "cgst_amount": 0, "sgst_amount": 0, "igst_amount": igst,
+                            "total_amount": taxable + igst,
+                        })
+                    else:
+                        tax_half = round(taxable * half / 100, 2) if li.get("tax_amount", 0) == 0 else round(li["tax_amount"] / 2, 2)
+                        formatted_items.append({
+                            "description": li["description"],
+                            "hsn_sac": li.get("hsn_sac", ""),
+                            "quantity": li["quantity"],
+                            "unit": "service",
+                            "unit_price": li["unit_price"],
+                            "discount_pct": li.get("discount_pct", 0),
+                            "gst_rate": gst_rate,
+                            "taxable_value": taxable,
+                            "cgst_rate": half, "sgst_rate": half, "igst_rate": 0,
+                            "cgst_amount": tax_half, "sgst_amount": tax_half, "igst_amount": 0,
+                            "total_amount": taxable + tax_half * 2,
+                        })
+
+                total_taxable = sum(i["taxable_value"] for i in formatted_items)
+                total_cgst = sum(i["cgst_amount"] for i in formatted_items)
+                total_sgst = sum(i["sgst_amount"] for i in formatted_items)
+                total_igst = sum(i["igst_amount"] for i in formatted_items)
+                total_gst = total_cgst + total_sgst + total_igst
+                computed_grand = round(total_taxable + total_gst, 2)
+
+                # Use KhataBook's balance for amount_due
+                balance_amt = _safe_float(row["txn_balance_amount"])
+                amount_paid = max(0, computed_grand - balance_amt) if balance_amt >= 0 else computed_grand
+
+                invoice = {
+                    "_kb_id": row["txn_id"],
+                    "invoice_type": inv_type,
+                    "invoice_no": invoice_no,
+                    "invoice_date": txn_date,
+                    "due_date": due_date,
+                    "client_name": client.get("full_name", "Unknown"),
+                    "client_email": client.get("email", ""),
+                    "client_phone": client.get("phone_number", ""),
+                    "client_gstin": client.get("name_gstin_number", ""),
+                    "client_address": _safe_str(row["txn_billing_address"]) or client.get("address", ""),
+                    "client_state": client.get("name_state", ""),
+                    "is_interstate": is_interstate,
+                    "items": formatted_items,
+                    "subtotal": round(subtotal, 2),
+                    "total_discount": round(total_discount, 2),
+                    "total_taxable": round(total_taxable, 2),
+                    "total_cgst": round(total_cgst, 2),
+                    "total_sgst": round(total_sgst, 2),
+                    "total_igst": round(total_igst, 2),
+                    "total_gst": round(total_gst, 2),
+                    "grand_total": computed_grand if computed_grand > 0 else round(grand_total, 2),
+                    "amount_paid": round(amount_paid, 2),
+                    "amount_due": round(balance_amt if balance_amt >= 0 else 0, 2),
+                    "status": pay_status,
+                    "payment_terms": "Imported from KhataBook",
+                    "notes": _safe_str(row["txn_description"]),
+                    "reference_no": _safe_str(row["txn_po_ref_number"]),
+                    "company_id": row["txn_firm_id"],
+                }
+                result["invoices"].append(invoice)
+
+        except Exception as e:
+            logger.error(f"VYP transactions parse error: {e}", exc_info=True)
+
+        # ── Stats ────────────────────────────────────────────────────────────
+        result["stats"] = {
+            "firms": len(result["firms"]),
+            "clients": len(result["clients"]),
+            "items": len(result["items"]),
+            "invoices": len(result["invoices"]),
+            "payments": len(result["payments"]),
+        }
+
+        conn.close()
+        return result
+
+    except Exception as e:
+        logger.error(f"VYP parse failed: {e}", exc_info=True)
+        raise HTTPException(400, f"Failed to parse .vyp file: {str(e)}")
+
+
+# ─── Excel/CSV Parser ─────────────────────────────────────────────────────────
+
+def _parse_excel_file(file_path: str, filename: str) -> dict:
+    """
+    Parses Excel (.xlsx/.xls) or CSV files.
+    Supports: Vyapar, myBillBook, generic Excel, and our own template.
+    """
+    result = {
+        "source": "excel",
+        "source_label": f"Excel/CSV ({filename})",
+        "firms": [],
+        "clients": [],
+        "items": [],
+        "invoices": [],
+        "payments": [],
+        "stats": {},
+    }
+
+    try:
+        if filename.lower().endswith('.csv'):
+            # CSV parsing
+            with open(file_path, 'r', encoding='utf-8-sig') as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+        else:
+            # Excel parsing
+            wb = openpyxl.load_workbook(file_path, data_only=True)
+            ws = wb.active
+            headers = [str(cell.value or '').strip() for cell in ws[1]]
+            rows = []
+            for row_cells in ws.iter_rows(min_row=2, values_only=True):
+                row_dict = {}
+                for i, val in enumerate(row_cells):
+                    if i < len(headers) and headers[i]:
+                        row_dict[headers[i]] = val
+                if any(v for v in row_dict.values() if v):
+                    rows.append(row_dict)
+
+        # Detect format by checking column headers
+        all_keys = set()
+        for r in rows[:5]:
+            all_keys.update(k.lower().replace(' ', '_') for k in r.keys() if r.get(k))
+
+        # Map columns flexibly
+        def _get(row, *keys, default=""):
+            for k in keys:
+                for rk in row.keys():
+                    if rk.lower().replace(' ', '_') == k.lower().replace(' ', '_'):
+                        val = row[rk]
+                        if val is not None and str(val).strip():
+                            return str(val).strip()
+            return default
+
+        for row in rows:
+            client_name = _get(row, 'Client Name', 'client_name', 'Customer Name',
+                             'customer_name', 'Party Name', 'party_name', 'Buyer Name',
+                             'buyer_name', 'Bill To', 'bill_to', 'Name', 'name')
+            if not client_name:
+                continue
+
+            desc = _get(row, 'Description', 'description', 'Item Description',
+                       'item_description', 'Particulars', 'particulars',
+                       'Item Name', 'item_name', 'Product', 'product', default='Service')
+            qty = _safe_float(_get(row, 'Quantity', 'quantity', 'Qty', 'qty', default='1'), 1)
+            rate = _safe_float(_get(row, 'Rate', 'rate', 'Unit Price', 'unit_price',
+                                   'Price', 'price', 'Amount', 'amount', default='0'))
+            gst_rate = _safe_float(_get(row, 'GST Rate', 'gst_rate', 'GST%', 'gst',
+                                       'Tax Rate', 'tax_rate', 'Tax%', default='18'), 18)
+            discount_pct = _safe_float(_get(row, 'Discount%', 'discount_pct',
+                                           'Discount', 'discount', default='0'))
+
+            inv_date = _safe_date(_get(row, 'Invoice Date', 'invoice_date', 'Date', 'date',
+                                      'Bill Date', 'bill_date'))
+            due_date = _safe_date(_get(row, 'Due Date', 'due_date', 'Payment Due', 'payment_due'),
+                                (datetime.strptime(inv_date, "%Y-%m-%d") + timedelta(days=30)).strftime("%Y-%m-%d"))
+
+            taxable = qty * rate * (1 - discount_pct / 100)
+            half = gst_rate / 2
+            cgst = round(taxable * half / 100, 2)
+            sgst = round(taxable * half / 100, 2)
+            total = round(taxable + cgst + sgst, 2)
+
+            invoice = {
+                "invoice_type": "tax_invoice",
+                "client_name": client_name,
+                "client_email": _get(row, 'Email', 'client_email', 'email'),
+                "client_phone": _get(row, 'Phone', 'client_phone', 'phone',
+                                    'Mobile', 'mobile', 'Contact', 'contact'),
+                "client_gstin": _get(row, 'GSTIN', 'client_gstin', 'gstin',
+                                    'GST No', 'gst_no', 'GST Number', 'gst_number'),
+                "client_address": _get(row, 'Address', 'client_address', 'address',
+                                      'Billing Address', 'billing_address'),
+                "client_state": _get(row, 'State', 'client_state', 'state',
+                                    'Place of Supply', 'place_of_supply'),
+                "invoice_date": inv_date,
+                "due_date": due_date,
+                "reference_no": _get(row, 'Reference No', 'reference_no', 'Ref No',
+                                    'ref_no', 'PO No', 'po_no', 'Invoice No', 'invoice_no'),
+                "notes": _get(row, 'Notes', 'notes', 'Remarks', 'remarks'),
+                "is_interstate": False,
+                "items": [{
+                    "description": desc,
+                    "hsn_sac": _get(row, 'HSN/SAC', 'hsn_sac', 'HSN', 'hsn',
+                                   'SAC', 'sac', 'HSN Code', 'hsn_code'),
+                    "quantity": qty,
+                    "unit": _get(row, 'Unit', 'unit', 'UOM', 'uom', default='service'),
+                    "unit_price": rate,
+                    "discount_pct": discount_pct,
+                    "gst_rate": gst_rate,
+                    "taxable_value": round(taxable, 2),
+                    "cgst_rate": half, "sgst_rate": half, "igst_rate": 0,
+                    "cgst_amount": cgst, "sgst_amount": sgst, "igst_amount": 0,
+                    "total_amount": total,
+                }],
+                "subtotal": round(qty * rate, 2),
+                "total_taxable": round(taxable, 2),
+                "total_cgst": cgst,
+                "total_sgst": sgst,
+                "total_igst": 0,
+                "total_gst": round(cgst + sgst, 2),
+                "grand_total": total,
+                "amount_paid": 0,
+                "amount_due": total,
+                "status": "draft",
+                "payment_terms": "Due on receipt",
+            }
+            result["invoices"].append(invoice)
+
+    except Exception as e:
+        logger.error(f"Excel/CSV parse failed: {e}", exc_info=True)
+        raise HTTPException(400, f"Failed to parse file: {str(e)}")
+
+    result["stats"] = {
+        "firms": 0,
+        "clients": len(set(inv["client_name"] for inv in result["invoices"])),
+        "items": 0,
+        "invoices": len(result["invoices"]),
+        "payments": 0,
+    }
+    return result
+
+
+# ─── XML (Tally) Parser ─────────────────────────────────────────────────────
+
+def _parse_tally_xml(file_path: str) -> dict:
+    """
+    Parses Tally XML export files.
+    Supports TallyPrime/Tally.ERP 9 standard XML export format.
+    """
+    result = {
+        "source": "tally",
+        "source_label": "Tally XML",
+        "firms": [],
+        "clients": [],
+        "items": [],
+        "invoices": [],
+        "payments": [],
+        "stats": {},
+    }
+
+    try:
+        tree = ET.parse(file_path)
+        root = tree.getroot()
+
+        # Try to find vouchers (Tally standard XML structure)
+        # Tally exports vouchers under TALLYMESSAGE > VOUCHER
+        vouchers = root.findall('.//VOUCHER') or root.findall('.//Voucher')
+
+        # Also check for ledger entries
+        ledgers = root.findall('.//LEDGER') or root.findall('.//Ledger')
+
+        # Parse ledgers as clients
+        for ledger in ledgers:
+            name = ledger.findtext('NAME') or ledger.findtext('Name') or ''
+            parent = ledger.findtext('PARENT') or ledger.findtext('Parent') or ''
+            if parent.lower() in ('sundry debtors', 'sundry creditors', 'trade receivables', 'trade payables'):
+                addr_elem = ledger.find('.//ADDRESS') or ledger.find('.//Address')
+                address = ''
+                if addr_elem is not None:
+                    address_lines = addr_elem.findall('.//ADDRESS.LIST') or [addr_elem]
+                    address = ', '.join(a.text or '' for a in address_lines if a.text)
+
+                result["clients"].append({
+                    "full_name": name,
+                    "address": address,
+                    "phone_number": ledger.findtext('.//PHONE') or ledger.findtext('.//Phone') or '',
+                    "email": ledger.findtext('.//EMAIL') or ledger.findtext('.//Email') or '',
+                    "name_gstin_number": ledger.findtext('.//GSTIN') or ledger.findtext('.//Gstin') or '',
+                    "name_state": ledger.findtext('.//STATENAME') or '',
+                })
+
+        # Parse vouchers as invoices
+        for voucher in vouchers:
+            v_type = (voucher.findtext('VOUCHERTYPENAME') or
+                     voucher.findtext('VoucherTypeName') or
+                     voucher.get('VCHTYPE', '')).lower()
+
+            if v_type not in ('sales', 'sale', 'invoice', 'credit note', 'debit note'):
+                continue
+
+            v_date = voucher.findtext('DATE') or voucher.findtext('Date') or ''
+            v_no = (voucher.findtext('VOUCHERNUMBER') or
+                    voucher.findtext('VoucherNumber') or
+                    voucher.findtext('NUMBER') or '')
+            party_name = (voucher.findtext('PARTYLEDGERNAME') or
+                         voucher.findtext('PartyLedgerName') or '')
+
+            # Parse line items from inventory entries
+            items_list = []
+            inv_entries = (voucher.findall('.//INVENTORYENTRIES.LIST') or
+                         voucher.findall('.//ALLINVENTORYENTRIES.LIST') or
+                         voucher.findall('.//InventoryEntries'))
+
+            for entry in inv_entries:
+                stock_name = (entry.findtext('STOCKITEMNAME') or
+                             entry.findtext('StockItemName') or 'Item')
+                qty = abs(_safe_float(entry.findtext('.//ACTUALQTY') or
+                                     entry.findtext('.//BILLEDQTY') or
+                                     entry.findtext('Quantity') or '1', 1))
+                rate = abs(_safe_float(entry.findtext('.//RATE') or
+                                      entry.findtext('Rate') or '0'))
+                amount = abs(_safe_float(entry.findtext('.//AMOUNT') or
+                                        entry.findtext('Amount') or str(qty * rate)))
+
+                items_list.append({
+                    "description": stock_name,
+                    "hsn_sac": "",
+                    "quantity": qty,
+                    "unit": "nos",
+                    "unit_price": rate if rate > 0 else (amount / qty if qty > 0 else amount),
+                    "discount_pct": 0,
+                    "gst_rate": 18,
+                    "taxable_value": amount,
+                    "cgst_rate": 9, "sgst_rate": 9, "igst_rate": 0,
+                    "cgst_amount": round(amount * 0.09, 2),
+                    "sgst_amount": round(amount * 0.09, 2),
+                    "igst_amount": 0,
+                    "total_amount": round(amount * 1.18, 2),
+                })
+
+            if not items_list:
+                # Fallback: use ledger entries
+                ledger_entries = voucher.findall('.//ALLLEDGERENTRIES.LIST') or voucher.findall('.//LEDGERENTRIES.LIST')
+                total_amount = 0
+                for le in ledger_entries:
+                    amt = _safe_float(le.findtext('AMOUNT') or le.findtext('Amount') or '0')
+                    if amt < 0:  # Debit entries (sales)
+                        total_amount = abs(amt)
+                        break
+
+                if total_amount > 0:
+                    items_list.append({
+                        "description": f"Imported from Tally - {v_no}",
+                        "hsn_sac": "", "quantity": 1, "unit": "service",
+                        "unit_price": total_amount, "discount_pct": 0,
+                        "gst_rate": 18, "taxable_value": total_amount,
+                        "cgst_rate": 9, "sgst_rate": 9, "igst_rate": 0,
+                        "cgst_amount": round(total_amount * 0.09, 2),
+                        "sgst_amount": round(total_amount * 0.09, 2),
+                        "igst_amount": 0,
+                        "total_amount": round(total_amount * 1.18, 2),
+                    })
+
+            if not items_list:
+                continue
+
+            total_taxable = sum(i["taxable_value"] for i in items_list)
+            total_cgst = sum(i["cgst_amount"] for i in items_list)
+            total_sgst = sum(i["sgst_amount"] for i in items_list)
+            grand_total = total_taxable + total_cgst + total_sgst
+
+            inv_type = "tax_invoice"
+            if 'credit' in v_type:
+                inv_type = "credit_note"
+            elif 'debit' in v_type:
+                inv_type = "debit_note"
+
+            result["invoices"].append({
+                "invoice_type": inv_type,
+                "invoice_no": v_no or f"TALLY-{len(result['invoices'])+1:04d}",
+                "invoice_date": _safe_date(v_date),
+                "due_date": _safe_date(v_date, (date.today() + timedelta(days=30)).isoformat()),
+                "client_name": party_name or "Unknown",
+                "client_email": "", "client_phone": "",
+                "client_gstin": "", "client_address": "", "client_state": "",
+                "is_interstate": False,
+                "items": items_list,
+                "subtotal": round(total_taxable, 2),
+                "total_taxable": round(total_taxable, 2),
+                "total_cgst": round(total_cgst, 2),
+                "total_sgst": round(total_sgst, 2),
+                "total_igst": 0,
+                "total_gst": round(total_cgst + total_sgst, 2),
+                "grand_total": round(grand_total, 2),
+                "amount_paid": 0,
+                "amount_due": round(grand_total, 2),
+                "status": "draft",
+                "payment_terms": "Imported from Tally",
+                "notes": "",
+            })
+
+    except ET.ParseError as e:
+        raise HTTPException(400, f"Invalid XML file: {str(e)}")
+    except Exception as e:
+        logger.error(f"Tally XML parse failed: {e}", exc_info=True)
+        raise HTTPException(400, f"Failed to parse Tally XML: {str(e)}")
+
+    result["stats"] = {
+        "firms": 0,
+        "clients": len(result["clients"]),
+        "items": 0,
+        "invoices": len(result["invoices"]),
+        "payments": 0,
+    }
+    return result
+
+
+# ─── JSON (Vyapar) Parser ─────────────────────────────────────────────────────
+
+def _parse_json_file(file_path: str) -> dict:
+    """
+    Parses JSON backup files (Vyapar .vyb/.json format).
+    """
+    result = {
+        "source": "json",
+        "source_label": "JSON Backup",
+        "firms": [],
+        "clients": [],
+        "items": [],
+        "invoices": [],
+        "payments": [],
+        "stats": {},
+    }
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # Handle different JSON structures
+        invoices_data = []
+        if isinstance(data, list):
+            invoices_data = data
+        elif isinstance(data, dict):
+            invoices_data = (data.get("invoices") or data.get("bills") or
+                           data.get("transactions") or data.get("data") or [])
+            if data.get("customers") or data.get("parties"):
+                for c in (data.get("customers") or data.get("parties") or []):
+                    result["clients"].append({
+                        "full_name": c.get("name") or c.get("company_name") or "",
+                        "phone_number": c.get("phone") or c.get("mobile") or "",
+                        "email": c.get("email") or "",
+                        "address": c.get("address") or "",
+                        "name_gstin_number": c.get("gstin") or c.get("gst_number") or "",
+                    })
+
+        for inv in invoices_data:
+            if not isinstance(inv, dict):
+                continue
+
+            client_name = (inv.get("customer_name") or inv.get("party_name") or
+                          inv.get("client_name") or inv.get("buyer_name") or "Unknown")
+            if not client_name or client_name == "Unknown":
+                continue
+
+            items_list = []
+            for item in (inv.get("items") or inv.get("line_items") or inv.get("products") or []):
+                qty = _safe_float(item.get("quantity") or item.get("qty"), 1)
+                price = _safe_float(item.get("price") or item.get("rate") or item.get("unit_price"))
+                gst = _safe_float(item.get("gst_rate") or item.get("tax_rate"), 18)
+                taxable = qty * price
+                half = gst / 2
+                cgst = round(taxable * half / 100, 2)
+                sgst = round(taxable * half / 100, 2)
+
+                items_list.append({
+                    "description": item.get("name") or item.get("description") or "Item",
+                    "hsn_sac": item.get("hsn") or item.get("hsn_sac") or "",
+                    "quantity": qty, "unit": item.get("unit") or "nos",
+                    "unit_price": price, "discount_pct": _safe_float(item.get("discount")),
+                    "gst_rate": gst, "taxable_value": round(taxable, 2),
+                    "cgst_rate": half, "sgst_rate": half, "igst_rate": 0,
+                    "cgst_amount": cgst, "sgst_amount": sgst, "igst_amount": 0,
+                    "total_amount": round(taxable + cgst + sgst, 2),
+                })
+
+            if not items_list:
+                total = _safe_float(inv.get("total") or inv.get("amount") or inv.get("grand_total"))
+                if total > 0:
+                    items_list.append({
+                        "description": "Imported item", "hsn_sac": "",
+                        "quantity": 1, "unit": "service", "unit_price": total,
+                        "discount_pct": 0, "gst_rate": 18, "taxable_value": total,
+                        "cgst_rate": 9, "sgst_rate": 9, "igst_rate": 0,
+                        "cgst_amount": round(total * 0.09, 2),
+                        "sgst_amount": round(total * 0.09, 2),
+                        "igst_amount": 0,
+                        "total_amount": round(total * 1.18, 2),
+                    })
+
+            if not items_list:
+                continue
+
+            total_taxable = sum(i["taxable_value"] for i in items_list)
+            total_cgst = sum(i["cgst_amount"] for i in items_list)
+            total_sgst = sum(i["sgst_amount"] for i in items_list)
+            grand_total = total_taxable + total_cgst + total_sgst
+
+            result["invoices"].append({
+                "invoice_type": "tax_invoice",
+                "invoice_no": inv.get("invoice_no") or inv.get("bill_no") or f"IMP-{len(result['invoices'])+1:04d}",
+                "invoice_date": _safe_date(inv.get("date") or inv.get("invoice_date")),
+                "due_date": _safe_date(inv.get("due_date"), (date.today() + timedelta(days=30)).isoformat()),
+                "client_name": client_name,
+                "client_email": inv.get("email") or "",
+                "client_phone": inv.get("phone") or "",
+                "client_gstin": inv.get("gstin") or "",
+                "client_address": inv.get("address") or "",
+                "client_state": inv.get("state") or "",
+                "is_interstate": False,
+                "items": items_list,
+                "subtotal": round(total_taxable, 2),
+                "total_taxable": round(total_taxable, 2),
+                "total_cgst": round(total_cgst, 2),
+                "total_sgst": round(total_sgst, 2),
+                "total_igst": 0,
+                "total_gst": round(total_cgst + total_sgst, 2),
+                "grand_total": round(grand_total, 2),
+                "amount_paid": _safe_float(inv.get("amount_paid")),
+                "amount_due": round(grand_total - _safe_float(inv.get("amount_paid")), 2),
+                "status": "draft",
+                "payment_terms": "Imported",
+                "notes": inv.get("notes") or "",
+            })
+
+    except json.JSONDecodeError as e:
+        raise HTTPException(400, f"Invalid JSON file: {str(e)}")
+    except Exception as e:
+        logger.error(f"JSON parse failed: {e}", exc_info=True)
+        raise HTTPException(400, f"Failed to parse JSON: {str(e)}")
+
+    result["stats"] = {
+        "firms": 0,
+        "clients": len(result["clients"]),
+        "items": 0,
+        "invoices": len(result["invoices"]),
+        "payments": 0,
+    }
+    return result
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # PYDANTIC MODELS
 # ════════════════════════════════════════════════════════════════════════════════
+
 class ProductCreate(BaseModel):
     name: str
     description: Optional[str] = None
@@ -204,10 +1081,12 @@ class ProductCreate(BaseModel):
     gst_rate: float = 18.0
     category: Optional[str] = None
     is_service: bool = True
+
 class Product(ProductCreate):
     id: str
     created_by: str
     created_at: str
+
 class InvoiceItem(BaseModel):
     product_id: Optional[str] = None
     description: str
@@ -225,6 +1104,7 @@ class InvoiceItem(BaseModel):
     sgst_amount: float = 0.0
     igst_amount: float = 0.0
     total_amount: float = 0.0
+
 class InvoiceCreate(BaseModel):
     invoice_type: Literal["tax_invoice","proforma","estimate","credit_note","debit_note"] = "tax_invoice"
     company_id: str
@@ -255,10 +1135,12 @@ class InvoiceCreate(BaseModel):
     recurrence_end: Optional[str] = None
     next_invoice_date: Optional[str] = None
     status: str = "draft"
+
     @field_validator("client_id", "lead_id", "quotation_id", mode="before")
     @classmethod
     def empty_to_none(cls, v):
         return None if v in ("", None) else v
+
 class Invoice(InvoiceCreate):
     id: str
     invoice_no: str
@@ -275,6 +1157,7 @@ class Invoice(InvoiceCreate):
     created_by: str
     created_at: str
     updated_at: str
+
 class PaymentCreate(BaseModel):
     invoice_id: str
     amount: float
@@ -282,10 +1165,12 @@ class PaymentCreate(BaseModel):
     payment_mode: str = "neft"
     reference_no: str = ""
     notes: str = ""
+
 class Payment(PaymentCreate):
     id: str
     created_by: str
     created_at: str
+
 class CreditNoteCreate(BaseModel):
     original_invoice_id: str
     company_id: str
@@ -293,9 +1178,12 @@ class CreditNoteCreate(BaseModel):
     reason: str
     items: List[InvoiceItem] = []
     notes: str = ""
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # CALCULATION ENGINE
 # ════════════════════════════════════════════════════════════════════════════════
+
 def _compute_item(item: InvoiceItem, is_interstate: bool) -> InvoiceItem:
     discount = round(item.unit_price * item.quantity * item.discount_pct / 100, 2)
     taxable = round(item.unit_price * item.quantity - discount, 2)
@@ -315,6 +1203,7 @@ def _compute_item(item: InvoiceItem, is_interstate: bool) -> InvoiceItem:
         item.total_amount = round(taxable + cgst_amt + sgst_amt, 2)
     item.taxable_value = taxable
     return item
+
 def _compute_invoice_totals(inv_data: dict) -> dict:
     items = inv_data.get("items", [])
     interstate = inv_data.get("is_interstate", False)
@@ -347,9 +1236,12 @@ def _compute_invoice_totals(inv_data: dict) -> dict:
     inv_data["total_gst"] = total_gst
     inv_data["grand_total"] = grand_total
     return inv_data
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # PDF BUILDER — GST TAX INVOICE
 # ════════════════════════════════════════════════════════════════════════════════
+
 def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
     BRAND = (13, 59, 102)
     BL = _lighten(BRAND, 0.90)
@@ -361,6 +1253,7 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
     GREEN = (22, 163, 74)
     _inv = inv
     _MUTED = MUTED
+
     inv_type_labels = {
         "tax_invoice": "TAX INVOICE",
         "proforma": "PROFORMA INVOICE",
@@ -370,6 +1263,7 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
     }
     title_label = inv_type_labels.get(inv.get("invoice_type", "tax_invoice"), "TAX INVOICE")
     is_cn = inv.get("invoice_type") == "credit_note"
+
     class PDF(FPDF):
         def header(self): pass
         def footer(self):
@@ -377,11 +1271,13 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
             self.set_font("Helvetica", "I", 7)
             self.set_text_color(*_MUTED)
             _cell(self, 0, 5, _s(f"{title_label} · {_inv.get('invoice_no','')} · Page {self.page_no()}"), align="C", nl=True)
+
     pdf = PDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.add_page()
-    W = pdf.w - 28 # 14mm margins
-    # ── Header: logo + company + title band ───────────────────────────────────
+    W = pdf.w - 28
+
+    # ── Header ───────────────────────────────────────────────────────────
     _embed_logo(pdf, company.get("logo_base64", ""), x=14, y=11, h=18)
     pdf.set_xy(14, 31)
     pdf.set_font("Helvetica", "B", 13)
@@ -404,6 +1300,7 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
         pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(*MUTED)
         _cell(pdf, 0, 4, _s(f"PAN: {company['pan']}"), nl=True)
+
     # Title band
     band_y = 65
     band_c = RED if is_cn else BRAND
@@ -413,7 +1310,8 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
     pdf.set_font("Helvetica", "B", 12)
     pdf.set_text_color(*WHITE)
     _cell(pdf, W, 7, title_label, align="C", nl=True)
-    # ── Invoice meta ───────────────────────────────────────────────────────────
+
+    # ── Invoice meta ───────────────────────────────────────────────────────
     pdf.set_xy(14, band_y + 13)
     half = W / 2
     pdf.set_font("Helvetica", "B", 8); pdf.set_text_color(*DARK)
@@ -424,6 +1322,7 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
     _cell(pdf, half * 0.40, 5, "Invoice Date:", nl=False)
     pdf.set_font("Helvetica", "", 8)
     _cell(pdf, half * 0.60, 5, _s(inv.get("invoice_date", "")), nl=True)
+
     pdf.set_x(14)
     pdf.set_font("Helvetica", "B", 8)
     _cell(pdf, half * 0.40, 5, "Due Date:", nl=False)
@@ -433,13 +1332,15 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
     _cell(pdf, half * 0.40, 5, "Supply Type:", nl=False)
     pdf.set_font("Helvetica", "", 8)
     _cell(pdf, half * 0.60, 5, "Interstate (IGST)" if inv.get("is_interstate") else "Intrastate (CGST+SGST)", nl=True)
+
     if inv.get("reference_no"):
         pdf.set_x(14)
         pdf.set_font("Helvetica", "B", 8)
         _cell(pdf, half * 0.40, 5, "Reference No:", nl=False)
         pdf.set_font("Helvetica", "", 8)
         _cell(pdf, half * 0.60, 5, _s(inv.get("reference_no", "")), nl=True)
-    # ── Buyer details block ────────────────────────────────────────────────────
+
+    # ── Buyer details ────────────────────────────────────────────────────
     bl_y = pdf.get_y() + 4
     pdf.set_fill_color(*BL)
     pdf.rect(14, bl_y, W, 24, "F")
@@ -460,43 +1361,35 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
     if inv.get("client_gstin"):
         pdf.set_x(16); pdf.set_font("Helvetica", "B", 8); pdf.set_text_color(*DARK)
         _cell(pdf, 0, 4, _s(f"GSTIN: {inv['client_gstin']}"), nl=True)
-    # ── Items table ────────────────────────────────────────────────────────────
+
+    # ── Items table ────────────────────────────────────────────────────────
     pdf.set_xy(14, bl_y + 28)
     pdf.set_font("Helvetica", "B", 9); pdf.set_text_color(*BRAND)
     _cell(pdf, 0, 6, "Items / Services", nl=True)
     pdf.set_draw_color(*BRAND)
     pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
     pdf.ln(1)
+
     is_inter = inv.get("is_interstate", False)
-    sr_w = 8
-    hsn_w = 22
-    qty_w = 14
-    unit_w= 16
-    rate_w= 26
-    tax_w = 18
-    amt_w = 26
+    sr_w = 8; hsn_w = 22; qty_w = 14; unit_w = 16; rate_w = 26; tax_w = 18; amt_w = 26
     desc_w = W - sr_w - hsn_w - qty_w - unit_w - rate_w - (0 if is_inter else tax_w * 2) - (tax_w if is_inter else 0) - amt_w
+
     def _th(txt, w, a="C"):
         pdf.set_fill_color(*BRAND); pdf.set_text_color(*WHITE)
         pdf.set_font("Helvetica", "B", 7)
         _cell(pdf, w, 7, txt, align=a, fill=True, nl=False)
-    _th("Sr", sr_w)
-    _th("Description", desc_w, "L")
-    _th("HSN/SAC", hsn_w)
-    _th("Qty", qty_w)
-    _th("Unit", unit_w)
-    _th("Rate", rate_w, "R")
+
+    _th("Sr", sr_w); _th("Description", desc_w, "L"); _th("HSN/SAC", hsn_w)
+    _th("Qty", qty_w); _th("Unit", unit_w); _th("Rate", rate_w, "R")
     if is_inter:
-        _th("IGST%", tax_w)
-        _th("IGST Amt", amt_w, "R")
+        _th("IGST%", tax_w); _th("IGST Amt", amt_w, "R")
     else:
-        _th("CGST%", tax_w)
-        _th("CGST Amt", tax_w, "R")
-        _th("SGST%", tax_w)
-        _th("SGST Amt", tax_w, "R")
+        _th("CGST%", tax_w); _th("CGST Amt", tax_w, "R")
+        _th("SGST%", tax_w); _th("SGST Amt", tax_w, "R")
     _th("Amount", amt_w, "R")
     pdf.ln(0)
     _cell(pdf, 0, 0, "", nl=True)
+
     items = inv.get("items", [])
     for idx, it in enumerate(items, 1):
         fc = BL if idx % 2 == 0 else WHITE
@@ -508,7 +1401,7 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
         _cell(pdf, hsn_w, 7, _s(it.get("hsn_sac","")[:10]), align="C", fill=True, nl=False)
         _cell(pdf, qty_w, 7, f"{it.get('quantity',1):.2f}", align="C", fill=True, nl=False)
         _cell(pdf, unit_w, 7, _s(it.get("unit","")[:6]), align="C", fill=True, nl=False)
-        _cell(pdf, rate_w, 7, f"{it.get('unit_price',0):,.2f}",align="R", fill=True, nl=False)
+        _cell(pdf, rate_w, 7, f"{it.get('unit_price',0):,.2f}", align="R", fill=True, nl=False)
         if is_inter:
             _cell(pdf, tax_w, 7, f"{it.get('igst_rate',0):.1f}%", align="C", fill=True, nl=False)
             _cell(pdf, amt_w, 7, f"{it.get('igst_amount',0):,.2f}", align="R", fill=True, nl=False)
@@ -518,9 +1411,11 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
             _cell(pdf, tax_w, 7, f"{it.get('sgst_rate',0):.1f}%", align="C", fill=True, nl=False)
             _cell(pdf, tax_w, 7, f"{it.get('sgst_amount',0):,.2f}", align="R", fill=True, nl=False)
         _cell(pdf, amt_w, 7, f"{it.get('total_amount',0):,.2f}", align="R", fill=True, nl=True)
-    # ── Totals block ───────────────────────────────────────────────────────────
+
+    # ── Totals ─────────────────────────────────────────────────────────────
     lbl_w = W - amt_w
     pdf.set_font("Helvetica", "", 8); pdf.set_fill_color(*BL); pdf.set_text_color(*DARK)
+
     def _trow(label, value, bold=False, color=None):
         fc = BRAND if bold else BL
         tc = WHITE if bold else (color or DARK)
@@ -528,6 +1423,7 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
         pdf.set_font("Helvetica", "B" if bold else "", 8 if not bold else 9)
         _cell(pdf, lbl_w, 7, label, align="R", fill=True, nl=False)
         _cell(pdf, amt_w, 7, f"Rs. {float(value):,.2f}", align="R", fill=True, nl=True)
+
     _trow("Subtotal:", inv.get("subtotal", 0))
     if inv.get("total_discount", 0): _trow("Discount:", inv.get("total_discount", 0))
     _trow("Taxable Value:", inv.get("total_taxable", 0))
@@ -539,16 +1435,18 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
     if inv.get("shipping_charges", 0): _trow("Shipping:", inv.get("shipping_charges", 0))
     if inv.get("other_charges", 0): _trow("Other Charges:", inv.get("other_charges", 0))
     _trow("GRAND TOTAL:", inv.get("grand_total", 0), bold=True)
-    # Amount in words
+
     pdf.ln(2)
     pdf.set_font("Helvetica", "I", 8); pdf.set_text_color(*MUTED)
     _cell(pdf, 0, 5, _s(_amount_in_words(float(inv.get("grand_total", 0)))), nl=True)
-    # ── GST summary table ───────────────────────────────────────────────────────
+
+    # ── GST summary ───────────────────────────────────────────────────────
     pdf.ln(4)
     pdf.set_font("Helvetica", "B", 9); pdf.set_text_color(*BRAND)
     _cell(pdf, 0, 5, "GST Summary", nl=True)
     pdf.set_draw_color(*BRAND)
     pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y()); pdf.ln(1)
+
     gst_sum: Dict[float, Dict[str, float]] = {}
     for it in items:
         r = float(it.get("gst_rate", 18))
@@ -557,11 +1455,13 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
         gst_sum[r]["cgst"] += float(it.get("cgst_amount", 0))
         gst_sum[r]["sgst"] += float(it.get("sgst_amount", 0))
         gst_sum[r]["igst"] += float(it.get("igst_amount", 0))
+
     g_w = W / 5
     pdf.set_fill_color(*BRAND); pdf.set_text_color(*WHITE); pdf.set_font("Helvetica", "B", 7.5)
     for h in ["GST Rate", "Taxable Amt", "CGST", "SGST / IGST", "Total GST"]:
         _cell(pdf, g_w, 6, h, align="C", fill=True, nl=False)
     _cell(pdf, 0, 0, "", nl=True)
+
     pdf.set_font("Helvetica", "", 7.5)
     for i, (rate, row) in enumerate(sorted(gst_sum.items())):
         pdf.set_fill_color(*(BL if i % 2 == 0 else WHITE)); pdf.set_text_color(*DARK)
@@ -571,7 +1471,8 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
         _cell(pdf, g_w, 6, f"{row['cgst']:,.2f}", align="C", fill=True, nl=False)
         _cell(pdf, g_w, 6, f"{row['sgst'] or row['igst']:,.2f}", align="C", fill=True, nl=False)
         _cell(pdf, g_w, 6, f"{gst_tot:,.2f}", align="C", fill=True, nl=True)
-    # ── Bank details ────────────────────────────────────────────────────────────
+
+    # ── Bank details ────────────────────────────────────────────────────────
     if company.get("bank_account_no") or company.get("bank_name"):
         pdf.ln(4)
         pdf.set_font("Helvetica", "B", 9); pdf.set_text_color(*BRAND)
@@ -590,7 +1491,8 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
             _cell(pdf, h2 * 0.42, 5, _s(f"{label}:"), nl=False)
             pdf.set_font("Helvetica", "", 8)
             _cell(pdf, h2 * 0.58, 5, _s(val), nl=True)
-    # ── Payment status stamp ────────────────────────────────────────────────────
+
+    # ── Payment status stamp ────────────────────────────────────────────────
     paid_status = inv.get("status", "")
     if paid_status == "paid":
         stamp_y = pdf.get_y() + 2
@@ -598,7 +1500,8 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
         pdf.set_draw_color(*GREEN); pdf.set_font("Helvetica", "B", 18)
         pdf.set_text_color(*GREEN)
         pdf.cell(50, 12, "PAID", border=1, align="C")
-    # ── Notes / T&C ────────────────────────────────────────────────────────────
+
+    # ── Notes / T&C ────────────────────────────────────────────────────────
     if inv.get("notes") or inv.get("terms_conditions"):
         pdf.ln(5)
         pdf.set_font("Helvetica", "B", 9); pdf.set_text_color(*BRAND)
@@ -609,7 +1512,8 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
         if inv.get("payment_terms"): _mcell(pdf, W, 4, _s(f"Payment: {inv['payment_terms']}"))
         if inv.get("terms_conditions"): _mcell(pdf, W, 4, _s(inv["terms_conditions"]))
         if inv.get("notes"): _mcell(pdf, W, 4, _s(f"Note: {inv['notes']}"))
-    # ── Signature ──────────────────────────────────────────────────────────────
+
+    # ── Signature ──────────────────────────────────────────────────────────
     pdf.ln(8)
     sig_b64 = company.get("signature_base64", "")
     if sig_b64:
@@ -626,14 +1530,136 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
     pdf.ln(4)
     pdf.set_font("Helvetica", "I", 7.5)
     _cell(pdf, 0, 4, "This is a computer generated invoice.", nl=True)
-    # ── FIX: use pdf.output() which returns bytes in fpdf2 ──────────────────────
+
     buf = BytesIO()
     buf.write(pdf.output())
     buf.seek(0)
     return buf
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# UNIVERSAL BACKUP IMPORT ENDPOINTS
+# ════════════════════════════════════════════════════════════════════════════════
+
+@router.post("/invoices/parse-vyp")
+async def parse_vyp_file(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Parse a KhataBook .vyp backup file.
+    Accepts multipart/form-data with a 'file' field.
+    Returns structured data: firms, clients, items, invoices, payments.
+    """
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+
+    # Save uploaded file to temp
+    tmp_path = None
+    try:
+        suffix = ".vyp"
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        content = await file.read()
+        tmp.write(content)
+        tmp.close()
+        tmp_path = tmp.name
+
+        # Parse
+        result = _parse_vyp_file(tmp_path)
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"VYP upload parse failed: {e}", exc_info=True)
+        raise HTTPException(400, f"Failed to parse .vyp file: {str(e)}")
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
+
+
+@router.post("/invoices/parse-backup")
+async def parse_backup_file(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Universal backup parser. Detects file format and routes to the appropriate parser.
+
+    Supported formats:
+      - .vyp, .db     → KhataBook SQLite backup
+      - .xml          → Tally XML export
+      - .xlsx, .xls   → Excel (Vyapar, myBillBook, generic)
+      - .csv          → CSV (any accounting software export)
+      - .json, .vyb   → JSON (Vyapar backup)
+
+    Returns structured data: { source, firms, clients, items, invoices, payments, stats }
+    """
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+
+    filename = file.filename or "unknown"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    # Determine parser based on extension
+    supported = {
+        "vyp": "vyp", "db": "vyp",
+        "xml": "xml", "tbk": "xml",
+        "xlsx": "excel", "xls": "excel", "csv": "excel",
+        "json": "json", "vyb": "json",
+    }
+
+    parser_type = supported.get(ext)
+    if not parser_type:
+        raise HTTPException(
+            400,
+            f"Unsupported file format: .{ext}. "
+            f"Supported: .vyp, .db, .xml, .tbk, .xlsx, .xls, .csv, .json, .vyb"
+        )
+
+    # Save to temp file
+    tmp_path = None
+    try:
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}")
+        content = await file.read()
+        tmp.write(content)
+        tmp.close()
+        tmp_path = tmp.name
+
+        # Route to parser
+        if parser_type == "vyp":
+            result = _parse_vyp_file(tmp_path)
+        elif parser_type == "xml":
+            result = _parse_tally_xml(tmp_path)
+        elif parser_type == "excel":
+            result = _parse_excel_file(tmp_path, filename)
+        elif parser_type == "json":
+            result = _parse_json_file(tmp_path)
+        else:
+            raise HTTPException(400, f"No parser available for .{ext}")
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Backup parse failed ({filename}): {e}", exc_info=True)
+        raise HTTPException(400, f"Failed to parse backup file: {str(e)}")
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # PRODUCT CATALOG ENDPOINTS
 # ════════════════════════════════════════════════════════════════════════════════
+
 @router.post("/products", response_model=Product)
 async def create_product(data: ProductCreate, current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
@@ -642,6 +1668,7 @@ async def create_product(data: ProductCreate, current_user: User = Depends(get_c
            "created_by": current_user.id, "created_at": now}
     await db.products.insert_one(doc); doc.pop("_id", None)
     return doc
+
 @router.get("/products")
 async def list_products(
     search: Optional[str] = None, category: Optional[str] = None,
@@ -655,6 +1682,7 @@ async def list_products(
     if category: q["category"] = category
     items = await db.products.find(q, {"_id": 0}).sort("name", 1).to_list(500)
     return items
+
 @router.put("/products/{pid}")
 async def update_product(pid: str, data: ProductCreate, current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
@@ -664,14 +1692,18 @@ async def update_product(pid: str, data: ProductCreate, current_user: User = Dep
         raise HTTPException(403, "Not authorized")
     await db.products.update_one({"id": pid}, {"$set": data.model_dump()})
     return await db.products.find_one({"id": pid}, {"_id": 0})
+
 @router.delete("/products/{pid}")
 async def delete_product(pid: str, current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     await db.products.delete_one({"id": pid})
     return {"message": "Product deleted"}
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # INVOICE ENDPOINTS
 # ════════════════════════════════════════════════════════════════════════════════
+
 @router.post("/invoices", response_model=Invoice)
 async def create_invoice(data: InvoiceCreate, current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
@@ -696,6 +1728,7 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(get_c
             )
         except Exception: pass
     return raw
+
 @router.get("/invoices")
 async def list_invoices(
     status: Optional[str] = None,
@@ -721,6 +1754,7 @@ async def list_invoices(
                     {"client_name": {"$regex": search, "$options": "i"}}]
     docs = await db.invoices.find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
     return docs
+
 @router.get("/invoices/stats")
 async def invoice_stats(
     year: Optional[int] = None,
@@ -780,6 +1814,7 @@ async def invoice_stats(
         "draft_count": sum(1 for i in all_inv if i["status"] == "draft"),
         "total_gst": round(sum(i.get("total_gst", 0) for i in all_inv), 2),
     }
+
 @router.get("/invoices/{inv_id}")
 async def get_invoice(inv_id: str, current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
@@ -788,6 +1823,7 @@ async def get_invoice(inv_id: str, current_user: User = Depends(get_current_user
     if current_user.role != "admin" and doc.get("created_by") != current_user.id:
         raise HTTPException(403, "Not authorized")
     return doc
+
 @router.put("/invoices/{inv_id}")
 async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
@@ -803,6 +1839,7 @@ async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(g
     merged["amount_due"] = round(merged["grand_total"] - merged.get("amount_paid", 0), 2)
     await db.invoices.update_one({"id": inv_id}, {"$set": merged})
     return await db.invoices.find_one({"id": inv_id}, {"_id": 0})
+
 @router.delete("/invoices/{inv_id}")
 async def delete_invoice(inv_id: str, current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
@@ -813,6 +1850,7 @@ async def delete_invoice(inv_id: str, current_user: User = Depends(get_current_u
     await db.invoices.delete_one({"id": inv_id})
     await db.payments.delete_many({"invoice_id": inv_id})
     return {"message": "Invoice deleted"}
+
 # ── Convert quotation to invoice ───────────────────────────────────────────────
 @router.post("/invoices/from-quotation/{qtn_id}")
 async def convert_quotation(qtn_id: str, current_user: User = Depends(get_current_user)):
@@ -824,46 +1862,31 @@ async def convert_quotation(qtn_id: str, current_user: User = Depends(get_curren
     inv_items = []
     for it in q.get("items", []):
         inv_items.append(InvoiceItem(
-            description = it.get("description", ""),
-            quantity = float(it.get("quantity", 1)),
-            unit = it.get("unit", "service"),
-            unit_price = float(it.get("unit_price", 0)),
-            gst_rate = float(q.get("gst_rate", 18)),
+            description=it.get("description", ""),
+            quantity=float(it.get("quantity", 1)),
+            unit=it.get("unit", "service"),
+            unit_price=float(it.get("unit_price", 0)),
+            gst_rate=float(q.get("gst_rate", 18)),
         ))
     create_data = InvoiceCreate(
-        invoice_type = "tax_invoice",
-        company_id = q.get("company_id", ""),
-        quotation_id = qtn_id,
-        lead_id = q.get("lead_id"),
-        client_id = q.get("client_id"),
-        client_name = q.get("client_name", ""),
-        client_address = q.get("client_address", ""),
-        client_email = q.get("client_email", ""),
-        client_phone = q.get("client_phone", ""),
-        items = inv_items,
-        gst_rate = q.get("gst_rate", 18),
-        payment_terms = q.get("payment_terms", ""),
-        notes = q.get("notes", ""),
-        status = "draft",
+        invoice_type="tax_invoice",
+        company_id=q.get("company_id", ""),
+        quotation_id=qtn_id,
+        lead_id=q.get("lead_id"),
+        client_id=q.get("client_id"),
+        client_name=q.get("client_name", ""),
+        client_address=q.get("client_address", ""),
+        client_email=q.get("client_email", ""),
+        client_phone=q.get("client_phone", ""),
+        items=inv_items,
+        gst_rate=q.get("gst_rate", 18),
+        payment_terms=q.get("payment_terms", ""),
+        notes=q.get("notes", ""),
+        status="draft",
     )
     return await create_invoice(create_data, current_user)
-# ── Import firm data from .vyp SQLite file (auto-fill company profile) ───────
-@router.post("/invoices/import-firm-data")
-async def import_firm_data(file_path: str, current_user: User = Depends(get_current_user)):
-    if not _perm(current_user): raise HTTPException(403, "Access denied")
-    
-    firm_info = await _load_firm_from_vyp(file_path)
-    if not firm_info:
-        raise HTTPException(400, "Could not extract data from file")
-        
-    # Update the company profile in your MongoDB/Database
-    await db.companies.update_one(
-        {"created_by": current_user.id}, 
-        {"$set": firm_info}, 
-        upsert=True
-    )
-    return {"message": "Firm data updated from .vyp file", "data": firm_info}
-# ── Send invoice via email (PDF attachment) ─────────────────────────────────
+
+# ── Send invoice via email ─────────────────────────────────────────────────
 @router.post("/invoices/{inv_id}/send-email")
 async def send_invoice_email(
     inv_id: str,
@@ -877,21 +1900,15 @@ async def send_invoice_email(
         raise HTTPException(403, "Not authorized")
     if not inv.get("client_email"):
         raise HTTPException(400, "Client email address is missing")
-
     company = await db.companies.find_one({"id": inv.get("company_id")}, {"_id": 0})
     if not company: raise HTTPException(404, "Company profile not found")
-
-    # Generate PDF in background-friendly way
     try:
         buf = _build_invoice_pdf(inv, company)
         pdf_bytes = buf.getvalue()
     except Exception as e:
         logger.error(f"PDF build failed {inv_id}: {e}", exc_info=True)
         raise HTTPException(500, f"PDF generation failed: {e}")
-
     fname = f"invoice_{inv.get('invoice_no','').replace('/','_')}.pdf"
-
-    # HTML email body
     html_body = f"""
     <html>
     <body style="font-family: Arial, sans-serif;">
@@ -906,8 +1923,6 @@ async def send_invoice_email(
     </body>
     </html>
     """
-
-    # Send email (sync helper, wrapped in background task for non-blocking)
     background_tasks.add_task(
         _send_email,
         to_email=inv["client_email"],
@@ -917,18 +1932,18 @@ async def send_invoice_email(
         filename=fname,
         company_email=company.get("email")
     )
-
-    # Mark invoice as sent
     if inv.get("status") == "draft":
         await db.invoices.update_one(
             {"id": inv_id},
             {"$set": {"status": "sent", "updated_at": datetime.now(timezone.utc).isoformat()}}
         )
-
     return {"message": "Invoice email queued and will be sent shortly", "invoice_no": inv.get("invoice_no")}
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # PAYMENT ENDPOINTS
 # ════════════════════════════════════════════════════════════════════════════════
+
 @router.post("/payments", response_model=Payment)
 async def record_payment(data: PaymentCreate, current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
@@ -956,6 +1971,7 @@ async def record_payment(data: PaymentCreate, current_user: User = Depends(get_c
         "updated_at": now,
     }})
     return pmt
+
 @router.get("/payments")
 async def list_payments(
     invoice_id: Optional[str] = None,
@@ -967,6 +1983,7 @@ async def list_payments(
     if current_user.role != "admin": q["created_by"] = current_user.id
     docs = await db.payments.find(q, {"_id": 0}).sort("payment_date", -1).to_list(2000)
     return docs
+
 @router.delete("/payments/{pid}")
 async def delete_payment(pid: str, current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
@@ -985,9 +2002,12 @@ async def delete_payment(pid: str, current_user: User = Depends(get_current_user
         }})
     await db.payments.delete_one({"id": pid})
     return {"message": "Payment deleted"}
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # CREDIT NOTE ENDPOINTS
 # ════════════════════════════════════════════════════════════════════════════════
+
 @router.post("/credit-notes")
 async def create_credit_note(data: CreditNoteCreate, current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
@@ -1012,9 +2032,12 @@ async def create_credit_note(data: CreditNoteCreate, current_user: User = Depend
     await db.invoices.update_one({"id": data.original_invoice_id},
         {"$set": {"status": "credit_note", "updated_at": now}})
     return raw
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # PDF EXPORT
 # ════════════════════════════════════════════════════════════════════════════════
+
 @router.get("/invoices/{inv_id}/pdf")
 async def download_invoice_pdf(inv_id: str, current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
@@ -1034,6 +2057,7 @@ async def download_invoice_pdf(inv_id: str, current_user: User = Depends(get_cur
     return StreamingResponse(iter([data]), media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{fname}"',
                  "Content-Length": str(len(data))})
+
 # ── Mark sent ───────────────────────────────────────────────────────────────────
 @router.post("/invoices/{inv_id}/mark-sent")
 async def mark_invoice_sent(inv_id: str, current_user: User = Depends(get_current_user)):
@@ -1044,6 +2068,7 @@ async def mark_invoice_sent(inv_id: str, current_user: User = Depends(get_curren
         await db.invoices.update_one({"id": inv_id}, {"$set": {
             "status": "sent", "updated_at": datetime.now(timezone.utc).isoformat()}})
     return {"message": "Marked as sent"}
+
 # ── Recurring invoice generator ─────────────────────────────────────────────────
 @router.post("/invoices/{inv_id}/generate-recurring")
 async def generate_recurring(inv_id: str, current_user: User = Depends(get_current_user)):
