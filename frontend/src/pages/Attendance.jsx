@@ -3,6 +3,8 @@
 // • Layout, fonts, card shells, header rows match Dashboard exactly
 // • Holiday safe-parsing: all parseISO wrapped in try/catch
 // • All v8 bug-fixes preserved (triple-fallback id, normalizeReminder, etc.)
+// • v9: Apply for Leave moved to dedicated card below calendar detail
+// • v9: Feature enhancements — streak counter, avg hours, weekly summary, overtime alert
 
 import { useDark } from '@/hooks/useDark';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -30,6 +32,10 @@ import {
   addMinutes,
   isPast,
   differenceInMinutes,
+  startOfWeek,
+  endOfWeek,
+  eachDayOfInterval,
+  subDays,
 } from 'date-fns';
 import {
   Calendar as CalendarIcon,
@@ -59,6 +65,10 @@ import {
   Info,
   Mail,
   Activity,
+  Flame,
+  BarChart3,
+  Zap,
+  Send,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1617,6 +1627,94 @@ export default function Attendance() {
     return hLeft > 0 ? `${hLeft}h ${mLeft}m until auto-absent at 7:00 PM` : `${mLeft} minute(s) until auto-absent at 7:00 PM`;
   }, [todayAttendance, isViewingOther, isEveryoneView, todayIsHoliday]);
 
+  // ── FEATURE ENHANCEMENT: Attendance Streak ──────────────────────────────────
+  const attendanceStreak = useMemo(() => {
+    const safeHistory = Array.isArray(attendanceHistory) ? attendanceHistory : [];
+    const presentDates = safeHistory
+      .filter(a => a.punch_in && a.status === 'present')
+      .map(a => a.date)
+      .sort()
+      .reverse();
+    if (presentDates.length === 0) return 0;
+    let streak = 0;
+    let checkDate = new Date();
+    // If today has attendance or is ongoing, count it
+    const todayStr = format(checkDate, 'yyyy-MM-dd');
+    const hasTodayRecord = displayTodayAttendance?.punch_in && displayTodayAttendance?.status === 'present';
+    if (hasTodayRecord) {
+      streak = 1;
+      checkDate = subDays(checkDate, 1);
+    }
+    // Walk backward
+    for (let i = 0; i < 365; i++) {
+      const dateStr = format(checkDate, 'yyyy-MM-dd');
+      const dayOfWeek = checkDate.getDay();
+      // Skip Sundays (or holidays)
+      const isHolidayDate = (Array.isArray(holidays) ? holidays : []).some(h => h.date === dateStr);
+      if (dayOfWeek === 0 || isHolidayDate) {
+        checkDate = subDays(checkDate, 1);
+        continue;
+      }
+      if (presentDates.includes(dateStr)) {
+        streak++;
+        checkDate = subDays(checkDate, 1);
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }, [attendanceHistory, displayTodayAttendance, holidays]);
+
+  // ── FEATURE ENHANCEMENT: Average Daily Hours ───────────────────────────────
+  const avgDailyHours = useMemo(() => {
+    const presentDays = monthAttendance.filter(a => a.punch_in && a.status === 'present' && a.duration_minutes > 0);
+    if (presentDays.length === 0) return '0.0';
+    const totalMins = presentDays.reduce((sum, a) => sum + (a.duration_minutes || 0), 0);
+    return (totalMins / presentDays.length / 60).toFixed(1);
+  }, [monthAttendance]);
+
+  // ── FEATURE ENHANCEMENT: This Week's Summary ──────────────────────────────
+  const weekSummary = useMemo(() => {
+    const today = new Date();
+    const weekStart = startOfWeek(today, { weekStartsOn: 1 }); // Monday
+    const weekEnd = endOfWeek(today, { weekStartsOn: 1 });
+    const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd });
+    const safeHistory = Array.isArray(attendanceHistory) ? attendanceHistory : [];
+
+    return weekDays.map(day => {
+      const dateStr = format(day, 'yyyy-MM-dd');
+      const record = safeHistory.find(a => a.date === dateStr)
+        || (displayTodayAttendance?.date === dateStr ? displayTodayAttendance : null);
+      const isHol = (Array.isArray(holidays) ? holidays : []).some(h => h.date === dateStr);
+      const isFuture = isAfter(day, today);
+      const isToday = dateFnsIsToday(day);
+
+      let status = 'none';
+      if (isHol) status = 'holiday';
+      else if (record?.status === 'absent') status = 'absent';
+      else if (record?.status === 'leave') status = 'leave';
+      else if (record?.punch_in) status = 'present';
+      else if (isFuture) status = 'future';
+
+      return {
+        day: format(day, 'EEE'),
+        dateStr,
+        status,
+        isToday,
+        hours: record?.duration_minutes ? (record.duration_minutes / 60).toFixed(1) : null,
+      };
+    });
+  }, [attendanceHistory, displayTodayAttendance, holidays]);
+
+  // ── FEATURE ENHANCEMENT: Overtime detection ─────────────────────────────────
+  const overtimeToday = useMemo(() => {
+    if (!displayTodayAttendance?.punch_in) return null;
+    const hrs = parseDurationToHours(displayLiveDuration);
+    if (hrs > 10) return { hours: hrs, level: 'high' };
+    if (hrs > 8.5) return { hours: hrs, level: 'mild' };
+    return null;
+  }, [displayTodayAttendance, displayLiveDuration]);
+
   // ── Shared input styles ────────────────────────────────────────────────────
   const inputStyle = {
     backgroundColor: isDark ? D.raised : '#ffffff',
@@ -1632,6 +1730,20 @@ export default function Attendance() {
     }),
     [holidays, selectedDate]
   );
+
+  // Count upcoming leaves from attendance history
+  const upcomingLeaves = useMemo(() => {
+    const safe = Array.isArray(attendanceHistory) ? attendanceHistory : [];
+    return safe.filter(a => {
+      if (a.status !== 'leave') return false;
+      const d = safeParseISO(a.date);
+      return d && (dateFnsIsToday(d) || isAfter(d, new Date()));
+    }).sort((a, b) => {
+      const da = safeParseISO(a.date) || new Date(0);
+      const db = safeParseISO(b.date) || new Date(0);
+      return da - db;
+    });
+  }, [attendanceHistory]);
 
   // ════════════════════════════════════════════════════════════════════════════
   // RENDER
@@ -1819,6 +1931,31 @@ export default function Attendance() {
           </motion.div>
         )}
 
+        {/* ══ OVERTIME ALERT (Feature Enhancement) ═════════════════════════════ */}
+        {overtimeToday && !isViewingOther && !isEveryoneView && (
+          <motion.div variants={itemVariants}
+            className="flex items-center gap-3 px-4 py-3 rounded-xl border text-sm"
+            style={{
+              borderColor: overtimeToday.level === 'high'
+                ? isDark ? '#7f1d1d' : '#fecaca'
+                : isDark ? 'rgba(245,158,11,0.35)' : '#fde68a',
+              backgroundColor: overtimeToday.level === 'high'
+                ? isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2'
+                : isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb',
+            }}>
+            <Zap className="w-4 h-4 flex-shrink-0" style={{ color: overtimeToday.level === 'high' ? COLORS.red : COLORS.amber }} />
+            <span className="font-semibold flex-1" style={{
+              color: overtimeToday.level === 'high'
+                ? isDark ? '#f87171' : '#991b1b'
+                : isDark ? '#fbbf24' : '#92400e',
+            }}>
+              {overtimeToday.level === 'high'
+                ? `You've been working for ${overtimeToday.hours.toFixed(1)}h — consider wrapping up!`
+                : `${overtimeToday.hours.toFixed(1)}h logged — you've exceeded the 8.5h daily goal`}
+            </span>
+          </motion.div>
+        )}
+
         {/* ══ TODAY STATUS ═════════════════════════════════════════════════════ */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants}>
@@ -1927,7 +2064,7 @@ export default function Attendance() {
                     </div>
                   </div>
 
-                  {/* Punch controls */}
+                  {/* Punch controls — "Apply for Leave" REMOVED from here */}
                   <div className="space-y-3">
                     {displayTodayAttendance?.punch_in && (
                       <>
@@ -1965,25 +2102,18 @@ export default function Attendance() {
                     {!isViewingOther && (
                       <div className="flex flex-col gap-2 pt-1">
                         {!displayTodayAttendance?.punch_in && displayTodayAttendance?.status !== 'absent' ? (
-                          <>
-                            {isTodaySelected && (
-                              <motion.button
-                                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                                onClick={() => handlePunchAction('punch_in')} disabled={loading}
-                                className={`flex items-center justify-center gap-2 w-full h-11 rounded-xl text-sm font-bold text-white transition-all ${!loading ? 'punch-in-pulse' : ''}`}
-                                style={{ backgroundColor: COLORS.emeraldGreen }}
-                              >
-                                {loading
-                                  ? <><Loader2 className="w-4 h-4 animate-spin" />Punching In…</>
-                                  : <><LogIn className="w-4 h-4" />Punch In</>}
-                              </motion.button>
-                            )}
-                            <button onClick={() => setShowLeaveForm(true)}
-                              className="flex items-center justify-center gap-2 w-full h-10 rounded-xl text-sm font-semibold border-2 transition-all active:scale-97"
-                              style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.muted : '#475569', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
-                              <CalendarX className="w-4 h-4" /> Apply for Leave
-                            </button>
-                          </>
+                          isTodaySelected && (
+                            <motion.button
+                              whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                              onClick={() => handlePunchAction('punch_in')} disabled={loading}
+                              className={`flex items-center justify-center gap-2 w-full h-11 rounded-xl text-sm font-bold text-white transition-all ${!loading ? 'punch-in-pulse' : ''}`}
+                              style={{ backgroundColor: COLORS.emeraldGreen }}
+                            >
+                              {loading
+                                ? <><Loader2 className="w-4 h-4 animate-spin" />Punching In…</>
+                                : <><LogIn className="w-4 h-4" />Punch In</>}
+                            </motion.button>
+                          )
                         ) : !displayTodayAttendance?.punch_out && displayTodayAttendance?.punch_in && isTodaySelected ? (
                           <motion.button
                             whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
@@ -2003,6 +2133,48 @@ export default function Attendance() {
                         ) : null}
                       </div>
                     )}
+
+                    {/* FEATURE ENHANCEMENT: Weekly mini-bar chart */}
+                    <div className="pt-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">This Week</p>
+                      <div className="flex items-end gap-1.5 h-12">
+                        {weekSummary.map((d) => {
+                          const barHeight = d.hours ? Math.min(100, (parseFloat(d.hours) / 10) * 100) : 0;
+                          const barColor = d.status === 'present' ? COLORS.emeraldGreen
+                            : d.status === 'absent' ? COLORS.red
+                            : d.status === 'leave' ? COLORS.orange
+                            : d.status === 'holiday' ? COLORS.amber
+                            : isDark ? D.border : '#e2e8f0';
+
+                          return (
+                            <Tooltip key={d.dateStr}>
+                              <TooltipTrigger asChild>
+                                <div className="flex-1 flex flex-col items-center gap-0.5">
+                                  <motion.div
+                                    className="w-full rounded-t-md"
+                                    style={{
+                                      backgroundColor: barColor,
+                                      opacity: d.status === 'future' ? 0.25 : d.status === 'none' ? 0.3 : 0.85,
+                                      minHeight: 3,
+                                    }}
+                                    initial={{ height: 0 }}
+                                    animate={{ height: `${Math.max(6, barHeight)}%` }}
+                                    transition={{ duration: 0.6, delay: 0.1 }}
+                                  />
+                                  <span className={`text-[9px] font-bold ${d.isToday ? 'text-blue-500' : 'text-slate-400 dark:text-slate-500'}`}>
+                                    {d.day}
+                                  </span>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-xs">
+                                <p className="font-bold">{d.day}</p>
+                                <p>{d.status === 'present' ? `${d.hours}h` : d.status === 'future' ? 'Upcoming' : d.status.charAt(0).toUpperCase() + d.status.slice(1)}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2078,9 +2250,9 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ══ STAT CARDS ════════════════════════════════════════════════════════ */}
+        {/* ══ STAT CARDS (Enhanced with Streak + Avg Hours) ═════════════════════ */}
         <motion.div
-          className={`grid gap-3 ${canViewRankings ? 'grid-cols-2 lg:grid-cols-5' : 'grid-cols-2 lg:grid-cols-4'}`}
+          className={`grid gap-3 ${canViewRankings ? 'grid-cols-2 md:grid-cols-3 lg:grid-cols-6' : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-5'}`}
           variants={itemVariants}
         >
           <StatCard isDark={isDark} icon={Timer}
@@ -2096,11 +2268,15 @@ export default function Attendance() {
           <StatCard isDark={isDark} icon={UserX}
             label="Days Absent" value={monthDaysAbsent} unit="this month" color={COLORS.red}
             trend={monthDaysAbsent > 0 ? 'Auto-marked at 7 PM' : 'Perfect attendance'} />
+          {/* FEATURE ENHANCEMENT: Streak + Avg Hours cards */}
+          <StatCard isDark={isDark} icon={Flame}
+            label="Streak" value={attendanceStreak} unit="consecutive days" color="#f59e0b"
+            trend={attendanceStreak >= 5 ? 'Keep it up!' : 'Build momentum'} />
           {canViewRankings && !isEveryoneView && (
             <StatCard isDark={isDark} icon={TrendingUp}
               label={isViewingOther ? 'Their Rank' : 'Your Rank'}
               value={myRank} unit="overall" color={COLORS.mediumBlue}
-              trend=" " />
+              trend={`Avg ${avgDailyHours}h/day`} />
           )}
         </motion.div>
 
@@ -2265,7 +2441,7 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ══ CALENDAR + RECENT ATTENDANCE ═════════════════════════════════════ */}
+        {/* ══ CALENDAR + APPLY LEAVE + RECENT ATTENDANCE ═══════════════════════ */}
         <motion.div
           className={`grid gap-5 items-start ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-3'}`}
           variants={itemVariants}
@@ -2376,6 +2552,98 @@ export default function Attendance() {
                   )}
                 </div>
               </SectionCard>
+
+              {/* ══ APPLY FOR LEAVE CARD — Always visible, below calendar detail ══ */}
+              {!isViewingOther && (
+                <SectionCard>
+                  <CardHeaderRow
+                    iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
+                    icon={<CalendarX className="h-4 w-4" style={{ color: COLORS.orange }} />}
+                    title="Apply for Leave"
+                    subtitle={upcomingLeaves.length > 0 ? `${upcomingLeaves.length} upcoming leave${upcomingLeaves.length !== 1 ? 's' : ''}` : 'Request time off'}
+                  />
+                  <div className="p-4 space-y-3">
+                    {/* Upcoming leaves preview */}
+                    {upcomingLeaves.length > 0 && (
+                      <div className="space-y-1.5 mb-1">
+                        {upcomingLeaves.slice(0, 3).map(leave => {
+                          const leaveDate = safeParseISO(leave.date);
+                          return (
+                            <div key={leave.date}
+                              className="flex items-center justify-between px-3 py-2 rounded-lg border text-xs"
+                              style={{
+                                backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed',
+                                borderColor: isDark ? '#7c2d12' : '#fed7aa',
+                              }}>
+                              <div className="flex items-center gap-2">
+                                <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: COLORS.orange }} />
+                                <span className="font-semibold" style={{ color: isDark ? D.text : '#1e293b' }}>
+                                  {leaveDate ? format(leaveDate, 'EEE, MMM d') : leave.date}
+                                </span>
+                              </div>
+                              {leave.leave_reason && (
+                                <span className="text-[10px] truncate max-w-[100px]" style={{ color: isDark ? D.muted : '#78716c' }}>
+                                  {leave.leave_reason}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {upcomingLeaves.length > 3 && (
+                          <p className="text-[11px] font-medium text-center" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                            +{upcomingLeaves.length - 3} more upcoming
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Apply button */}
+                    <motion.button
+                      whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                      onClick={() => setShowLeaveForm(true)}
+                      className="flex items-center justify-center gap-2.5 w-full py-3 rounded-xl text-sm font-bold transition-all border-2"
+                      style={{
+                        borderColor: isDark ? 'rgba(249,115,22,0.4)' : `${COLORS.orange}40`,
+                        color: isDark ? '#fb923c' : COLORS.orange,
+                        backgroundColor: isDark ? 'rgba(249,115,22,0.08)' : `${COLORS.orange}06`,
+                      }}
+                    >
+                      <Send className="w-4 h-4" />
+                      Request Leave
+                    </motion.button>
+
+                    {/* Quick leave chips */}
+                    <div className="flex gap-2 flex-wrap">
+                      {[
+                        { label: 'Tomorrow', days: 1 },
+                        { label: '3 Days', days: 3 },
+                        { label: '1 Week', days: 7 },
+                      ].map(({ label, days }) => (
+                        <button
+                          key={label}
+                          onClick={() => {
+                            const from = new Date();
+                            from.setDate(from.getDate() + (label === 'Tomorrow' ? 1 : 0));
+                            const to = new Date(from);
+                            to.setDate(from.getDate() + days - 1);
+                            setLeaveFrom(from);
+                            setLeaveTo(to);
+                            setShowLeaveForm(true);
+                          }}
+                          className="text-[11px] font-semibold px-3 py-1.5 rounded-lg border transition-all hover:shadow-sm active:scale-95"
+                          style={{
+                            borderColor: isDark ? D.border : '#e2e8f0',
+                            color: isDark ? D.muted : '#64748b',
+                            backgroundColor: isDark ? D.raised : '#f8fafc',
+                          }}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </SectionCard>
+              )}
             </div>
           )}
 
