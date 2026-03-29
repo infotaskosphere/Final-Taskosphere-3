@@ -2113,8 +2113,22 @@ export default function Invoicing() {
                   <p className={`text-sm font-semibold ${inv.amount_due > 0 ? (isOverdue ? 'text-red-500' : 'text-amber-600') : 'text-slate-300'}`}>{fmtC(inv.amount_due)}</p>
                   <StatusPill inv={inv} />
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                    {/* Existing buttons stay the same */}
                     <button onClick={(e) => { e.stopPropagation(); setLedgerClient(inv.client_name); setLedgerOpen(true); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors" title="Party Ledger"><BookOpen className="h-3.5 w-3.5" /></button>
                     <button onClick={() => handleDownloadPdf(inv)} className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="PDF"><Download className="h-3.5 w-3.5" /></button>
+
+                    {/* NEW: Open in Google Drive button */}
+                    <a
+                      href={inv.webViewLink || "#"}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+                      title="Open in Google Drive"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      Drive
+                    </a>
+
                     {inv.client_email && (<button onClick={(e) => { e.stopPropagation(); handleSendEmail(inv); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="Send Email"><Send className="h-3.5 w-3.5" /></button>)}
                     {inv.amount_due > 0 && (<button onClick={(e) => { e.stopPropagation(); setPayInv(inv); setPayOpen(true); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors" title="Payment"><IndianRupee className="h-3.5 w-3.5" /></button>)}
                     {inv.status === 'draft' && (<button onClick={(e) => { e.stopPropagation(); handleMarkSent(inv); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="Mark Sent"><Send className="h-3.5 w-3.5" /></button>)}
