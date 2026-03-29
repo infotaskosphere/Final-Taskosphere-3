@@ -720,7 +720,7 @@ export default function StaffActivity() {
       </motion.div>
       {/* ── INTENSITY MAP + COMPARISON RADAR ───────────────────────────────── */}
       <motion.div className="grid grid-cols-1 lg:grid-cols-5 gap-3" variants={itemVariants}>
-        <SectionCard isDark={isDark} className="lg:col-span-3">
+        <SectionCard isDark={isDark} className="lg:col-span-3 flex flex-col">
           <CardHeaderRow
             isDark={isDark}
             iconBg={isDark ? 'bg-amber-900/40' : 'bg-amber-50'}
@@ -737,8 +737,8 @@ export default function StaffActivity() {
             }
           />
           {/* FIX: explicit height on the wrapper div, not relying on auto-sizing */}
-          <div className="p-4" style={{ height: 220 }}>
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="p-4 flex-1 min-h-[220px]">
+            <ResponsiveContainer width="100%" height={220}>
               <AreaChart data={intensityMap} margin={{ top: 5, right: 8, left: -24, bottom: 0 }}>
                 <defs>
                   <linearGradient id="intensityGradient" x1="0" y1="0" x2="0" y2="1">
@@ -815,7 +815,7 @@ export default function StaffActivity() {
               ))}
             </div>
             {/* FIX: explicit height to avoid ResponsiveContainer -1 error */}
-            <div style={{ height: 148 }}>
+            <div className="min-h-[148px]">
               <AnimatePresence mode="wait">
                 {unitAlpha && unitBeta && radarMetrics.length > 0 ? (
                   <motion.div
