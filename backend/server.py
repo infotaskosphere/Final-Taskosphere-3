@@ -23,7 +23,8 @@ from backend.visits import router as visits_router
 from backend.leads import router as leads_router
 from backend.telegram import router as telegram_router
 from backend.notifications import router as notification_router, create_notification
-from backend.email_integration import router as email_router  
+from backend.email_integration import router as email_router
+from backend.passwords import router as passwords_router
 
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -5000,6 +5001,7 @@ async def universal_exception_handler(request: Request, exc: Exception):
 
 # Api Router
 api_router.include_router(invoicing_router)
+app.include_router(passwords_router, prefix="/api")
 api_router.include_router(visits_router)
 api_router.include_router(website_tracking_router)
 api_router.include_router(quotation_router)
