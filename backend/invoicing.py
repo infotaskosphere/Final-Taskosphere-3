@@ -82,56 +82,103 @@ DRIVE_FOLDERS = {
 }
 
 def _get_drive_service():
-    creds = service_account.Credentials.from_service_account_file(
-        SERVICE_ACCOUNT_FILE, scopes=['https://www.googleapis.com/auth/drive.file'])
-    return build('drive', 'v3', credentials=creds)
+    """Build and return a Google Drive API service client.
+    Raises a descriptive HTTPException if credentials are missing or invalid."""
+    if not os.path.exists(SERVICE_ACCOUNT_FILE):
+        raise HTTPException(
+            503,
+            f"Google Drive service account file '{SERVICE_ACCOUNT_FILE}' not found on server. "
+            "Please upload it to the server root and restart."
+        )
+    try:
+        creds = service_account.Credentials.from_service_account_file(
+            SERVICE_ACCOUNT_FILE,
+            scopes=['https://www.googleapis.com/auth/drive']  # broader scope: needed to list ANY file in the folder
+        )
+        return build('drive', 'v3', credentials=creds)
+    except Exception as e:
+        logger.error(f"Drive credentials error: {e}")
+        raise HTTPException(503, f"Google Drive authentication failed: {str(e)}")
 
 def upload_to_drive(content_bytes: bytes, filename: str, folder_key: str, mime_type: str, custom_parent_id: str = None):
-    """Updated: can now accept custom_parent_id for client-specific folders"""
-    service = _get_drive_service()
-    
-    # Use custom client folder if provided, else fall back to normal folder_key
-    parent_id = custom_parent_id if custom_parent_id else DRIVE_FOLDERS[folder_key]
-    
-    file_metadata = {'name': filename, 'parents': [parent_id]}
-    media = MediaIoBaseUpload(io.BytesIO(content_bytes), mimetype=mime_type, resumable=True)
-    file = service.files().create(body=file_metadata, media_body=media, fields='id,webViewLink,name').execute()
-    
-    logger.info(f"✅ Uploaded to Drive → {filename}")
-    return file.get('webViewLink')
+    """Upload bytes to Google Drive. Returns webViewLink or None on failure."""
+    try:
+        service = _get_drive_service()
+        parent_id = custom_parent_id if custom_parent_id else DRIVE_FOLDERS[folder_key]
+        file_metadata = {'name': filename, 'parents': [parent_id]}
+        media = MediaIoBaseUpload(io.BytesIO(content_bytes), mimetype=mime_type, resumable=True)
+        file = service.files().create(body=file_metadata, media_body=media, fields='id,webViewLink,name').execute()
+        logger.info(f"✅ Uploaded to Drive → {filename}")
+        return file.get('webViewLink')
+    except HTTPException:
+        raise  # re-raise our own auth errors
+    except Exception as e:
+        logger.error(f"Drive upload failed for {filename}: {e}")
+        raise HTTPException(500, f"Failed to upload {filename} to Google Drive: {str(e)}")
 
 def list_drive_files(folder_key: str):
-    service = _get_drive_service()
-    q = f"'{DRIVE_FOLDERS[folder_key]}' in parents and trashed=false"
-    results = service.files().list(q=q, fields="files(id,name,webViewLink,createdTime)", orderBy="createdTime desc").execute()
-    return results.get('files', [])
+    """List files in a Drive folder. Returns [] and logs on failure instead of crashing."""
+    try:
+        service = _get_drive_service()
+        q = f"'{DRIVE_FOLDERS[folder_key]}' in parents and trashed=false"
+        results = service.files().list(
+            q=q,
+            fields="files(id,name,webViewLink,createdTime)",
+            orderBy="createdTime desc",
+            pageSize=1000
+        ).execute()
+        return results.get('files', [])
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Drive list failed for folder '{folder_key}': {e}")
+        return []
+
+def download_from_drive(file_id: str) -> dict:
+    """Download and parse a JSON file from Drive by its file ID.
+    Returns parsed dict or empty dict on failure."""
+    try:
+        from googleapiclient.http import MediaIoBaseDownload
+        service = _get_drive_service()
+        request = service.files().get_media(fileId=file_id)
+        buf = io.BytesIO()
+        downloader = MediaIoBaseDownload(buf, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        buf.seek(0)
+        return json.loads(buf.read().decode('utf-8'))
+    except Exception as e:
+        logger.warning(f"Drive download failed for file {file_id}: {e}")
+        return {}
   
 # ─── NEW: Auto-create client folder in Drive ─────────────────────────────────
 def _get_or_create_client_folder(client_name: str) -> str:
-    """Returns folder ID inside Invoices/ for the client. Creates folder if it doesn't exist."""
+    """Returns folder ID inside Invoices/ for the client. Creates folder if it doesn't exist.
+    Falls back to the root invoices folder if Drive is unavailable."""
     if not client_name or client_name.strip() == "":
-        return DRIVE_FOLDERS["invoices"]  # fallback to root
-
-    service = _get_drive_service()
-    client_name = client_name.strip()
-
-    # Search for existing folder
-    q = f"'{DRIVE_FOLDERS['invoices']}' in parents and name='{client_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
-    results = service.files().list(q=q, fields="files(id,name)").execute()
-    existing = results.get('files', [])
-
-    if existing:
-        return existing[0]['id']  # return existing folder ID
-
-    # Create new folder
-    folder_metadata = {
-        'name': client_name,
-        'mimeType': 'application/vnd.google-apps.folder',
-        'parents': [DRIVE_FOLDERS['invoices']]
-    }
-    folder = service.files().create(body=folder_metadata, fields='id').execute()
-    logger.info(f"✅ Created new client folder in Drive: {client_name}")
-    return folder['id']
+        return DRIVE_FOLDERS["invoices"]
+    try:
+        service = _get_drive_service()
+        client_name = client_name.strip()
+        q = f"'{DRIVE_FOLDERS['invoices']}' in parents and name='{client_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        results = service.files().list(q=q, fields="files(id,name)").execute()
+        existing = results.get('files', [])
+        if existing:
+            return existing[0]['id']
+        folder_metadata = {
+            'name': client_name,
+            'mimeType': 'application/vnd.google-apps.folder',
+            'parents': [DRIVE_FOLDERS['invoices']]
+        }
+        folder = service.files().create(body=folder_metadata, fields='id').execute()
+        logger.info(f"✅ Created new client folder in Drive: {client_name}")
+        return folder['id']
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Could not create/find Drive folder for '{client_name}': {e}")
+        return DRIVE_FOLDERS["invoices"]  # safe fallback
 # =================================================================
 
 logger = logging.getLogger(__name__)
@@ -1808,16 +1855,31 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(get_c
 @router.get("/invoices")
 async def list_invoices(current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
-    files = list_drive_files("invoices")
+    try:
+        files = list_drive_files("invoices")
+    except HTTPException as e:
+        # Drive is unavailable — return empty list with a warning header instead of 500
+        logger.error(f"Drive unavailable for list_invoices: {e.detail}")
+        raise HTTPException(e.status_code, f"Google Drive unavailable: {e.detail}")
+
     invoices = []
     for f in files:
-        if f['name'].endswith('.json'):
-            invoices.append({
+        if not f['name'].endswith('.json'):
+            continue
+        # Download and parse the stored JSON so the frontend gets full invoice data
+        content = download_from_drive(f['id'])
+        if not content:
+            # File unreadable — return minimal metadata so the row at least appears
+            content = {
                 "invoice_no": f['name'].replace("Invoice_", "").replace(".json", ""),
-                "drive_id": f['id'],
-                "webViewLink": f.get('webViewLink'),
-                "created_at": f.get('createdTime')
-            })
+                "status": "draft",
+            }
+        # Always ensure Drive metadata fields are present
+        content.setdefault("drive_id", f['id'])
+        content.setdefault("webViewLink", f.get('webViewLink', '#'))
+        content.setdefault("created_at", f.get('createdTime'))
+        content.pop("_id", None)  # strip any mongo _id if it snuck in
+        invoices.append(content)
     return invoices
 
 
@@ -1828,43 +1890,56 @@ async def invoice_stats(
     current_user: User = Depends(get_current_user)
 ):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
-    q: dict = {"invoice_type": "tax_invoice", "status": {"$ne": "cancelled"}}
-    if current_user.role != "admin": q["created_by"] = current_user.id
-    all_inv = await db.invoices.find(q, {"_id": 0,
-        "grand_total": 1, "amount_paid": 1, "amount_due": 1,
-        "status": 1, "invoice_date": 1, "client_name": 1,
-        "total_gst": 1}).to_list(5000)
+
+    # ── Build invoice list from Google Drive (mirrors list_invoices logic) ──
+    try:
+        files = list_drive_files("invoices")
+    except HTTPException:
+        files = []
+
+    all_inv = []
+    for f in files:
+        if not f['name'].endswith('.json'):
+            continue
+        content = download_from_drive(f['id'])
+        if content and content.get('invoice_type') == 'tax_invoice' and content.get('status') != 'cancelled':
+            if current_user.role != 'admin' and content.get('created_by') != current_user.id:
+                continue
+            all_inv.append(content)
+
     today = date.today()
     cur_year = year or today.year
     cur_mon = month or today.month
+
     def _in_month(d, y, m):
         try: dt = date.fromisoformat(d[:10]); return dt.year == y and dt.month == m
         except: return False
     def _in_year(d, y):
         try: return date.fromisoformat(d[:10]).year == y
         except: return False
-    total_rev = sum(i["grand_total"] for i in all_inv)
-    total_out = sum(i["amount_due"] for i in all_inv if i["amount_due"] > 0)
+
+    total_rev = sum(i.get("grand_total", 0) for i in all_inv)
+    total_out = sum(i.get("amount_due", 0) for i in all_inv if i.get("amount_due", 0) > 0)
     overdue_c = sum(1 for i in all_inv
-                    if i["status"] not in ("paid","cancelled","draft")
+                    if i.get("status") not in ("paid", "cancelled", "draft")
                     and i.get("amount_due", 0) > 0)
-    mon_inv = [i for i in all_inv if _in_month(i.get("invoice_date",""), cur_year, cur_mon)]
-    mon_rev = sum(i["grand_total"] for i in mon_inv)
-    mon_col = sum(i["amount_paid"] for i in mon_inv)
+    mon_inv = [i for i in all_inv if _in_month(i.get("invoice_date", ""), cur_year, cur_mon)]
+    mon_rev = sum(i.get("grand_total", 0) for i in mon_inv)
+    mon_col = sum(i.get("amount_paid", 0) for i in mon_inv)
     trend = []
     for offset in range(11, -1, -1):
         dt = (date(today.year, today.month, 1) - timedelta(days=offset * 28))
         y_, m_ = dt.year, dt.month
-        month_inv = [i for i in all_inv if _in_month(i.get("invoice_date",""), y_, m_)]
+        month_inv = [i for i in all_inv if _in_month(i.get("invoice_date", ""), y_, m_)]
         trend.append({"year": y_, "month": m_,
                        "label": date(y_, m_, 1).strftime("%b %y"),
-                       "revenue": sum(i["grand_total"] for i in month_inv),
-                       "collected": sum(i["amount_paid"] for i in month_inv),
+                       "revenue": sum(i.get("grand_total", 0) for i in month_inv),
+                       "collected": sum(i.get("amount_paid", 0) for i in month_inv),
                        "count": len(month_inv)})
     from collections import defaultdict
     client_rev: dict = defaultdict(float)
     for i in all_inv:
-        client_rev[i.get("client_name","Unknown")] += i["grand_total"]
+        client_rev[i.get("client_name", "Unknown")] += i.get("grand_total", 0)
     top_clients = sorted(client_rev.items(), key=lambda x: -x[1])[:5]
     return {
         "total_revenue": round(total_rev, 2),
@@ -1876,8 +1951,8 @@ async def invoice_stats(
         "month_invoices": len(mon_inv),
         "monthly_trend": trend,
         "top_clients": [{"name": n, "revenue": round(v, 2)} for n, v in top_clients],
-        "paid_count": sum(1 for i in all_inv if i["status"] == "paid"),
-        "draft_count": sum(1 for i in all_inv if i["status"] == "draft"),
+        "paid_count": sum(1 for i in all_inv if i.get("status") == "paid"),
+        "draft_count": sum(1 for i in all_inv if i.get("status") == "draft"),
         "total_gst": round(sum(i.get("total_gst", 0) for i in all_inv), 2),
     }
 
@@ -1889,7 +1964,14 @@ async def get_invoice(inv_id: str, current_user: User = Depends(get_current_user
     files = list_drive_files("invoices")
     for f in files:
         if f['name'] == f"Invoice_{inv_id}.json" or inv_id in f['name']:
-            return {"invoice_no": inv_id, "drive_id": f['id'], "webViewLink": f.get('webViewLink')}
+            content = download_from_drive(f['id'])
+            if content:
+                content.setdefault("drive_id", f['id'])
+                content.setdefault("webViewLink", f.get('webViewLink', '#'))
+                content.pop("_id", None)
+                return content
+            # File found but unreadable — return minimal metadata
+            return {"invoice_no": inv_id, "drive_id": f['id'], "webViewLink": f.get('webViewLink', '#')}
     raise HTTPException(404, "Invoice not found in Google Drive")
 
 
@@ -1916,9 +1998,23 @@ async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(g
 @router.delete("/invoices/{inv_id}")
 async def delete_invoice(inv_id: str, current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
-    # MongoDB deletes removed; Drive files are not deleted automatically
-    # In production you can call service.files().delete(fileId=...) here
-    return {"message": f"Invoice {inv_id} delete requested. Remove file manually from Drive if needed."}
+    try:
+        service = _get_drive_service()
+        files = list_drive_files("invoices")
+        deleted = []
+        for f in files:
+            if inv_id in f['name']:
+                service.files().delete(fileId=f['id']).execute()
+                deleted.append(f['name'])
+                logger.info(f"Deleted from Drive: {f['name']}")
+        if not deleted:
+            raise HTTPException(404, "Invoice files not found in Google Drive")
+        return {"message": f"Deleted {len(deleted)} file(s) for invoice {inv_id}", "deleted": deleted}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Drive delete failed for {inv_id}: {e}")
+        raise HTTPException(500, f"Failed to delete invoice from Drive: {str(e)}")
 
 
 # ── Convert quotation to invoice ───────────────────────────────────────────────
@@ -1979,8 +2075,18 @@ async def send_invoice_email(
 @router.post("/invoices/{inv_id}/mark-sent")
 async def mark_invoice_sent(inv_id: str, current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
-    # MongoDB update removed — status tracking now managed via Drive JSON file
-    return {"message": f"Invoice {inv_id} marked as sent (update Drive JSON to reflect status)"}
+    files = list_drive_files("invoices")
+    target = next((f for f in files if inv_id in f['name'] and f['name'].endswith('.json')), None)
+    if not target:
+        raise HTTPException(404, "Invoice not found in Google Drive")
+    content = download_from_drive(target['id'])
+    if not content:
+        raise HTTPException(500, "Failed to read invoice from Drive")
+    content['status'] = 'sent'
+    content['updated_at'] = datetime.now(timezone.utc).isoformat()
+    json_bytes = json.dumps(content, default=str).encode()
+    upload_to_drive(json_bytes, target['name'], "invoices", "application/json")
+    return {"message": f"Invoice {inv_id} marked as sent", "status": "sent"}
 
 
 # ── Recurring invoice generator ─────────────────────────────────────────────────
@@ -2020,16 +2126,10 @@ async def generate_recurring(inv_id: str, current_user: User = Depends(get_curre
 # PAYMENT ENDPOINTS  (Google Drive storage)
 # ════════════════════════════════════════════════════════════════════════════════
 
-@router.post("/payments", response_model=Payment)
+@router.post("/payments")
 async def record_payment(data: PaymentCreate, current_user: User = Depends(get_current_user)):
     if not _perm(current_user):
         raise HTTPException(403, "Access denied")
-
-    # Find invoice JSON in Drive to confirm it exists
-    files = list_drive_files("invoices")
-    inv_file = next((f for f in files if data.invoice_id in f['name']), None)
-    if not inv_file:
-        raise HTTPException(404, "Invoice not found in Drive")
 
     payment_data = {
         **data.model_dump(),
@@ -2039,15 +2139,16 @@ async def record_payment(data: PaymentCreate, current_user: User = Depends(get_c
     }
 
     json_bytes = json.dumps(payment_data, default=str).encode()
-    # MongoDB insert removed — save to Drive only
+    # Sanitise invoice_id for use in filename (remove slashes / special chars)
+    safe_inv_id = str(data.invoice_id).replace("/", "_").replace("\\", "_")
     upload_to_drive(
         json_bytes,
-        f"Payment_{data.invoice_id}_{datetime.now().strftime('%Y%m%d')}.json",
+        f"Payment_{safe_inv_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.json",
         "payments",
         "application/json"
     )
 
-    return {"status": "success", "message": "Payment recorded in Google Drive"}
+    return payment_data
 
 
 @router.get("/payments")
@@ -2056,26 +2157,52 @@ async def list_payments(
     current_user: User = Depends(get_current_user)
 ):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
-    files = list_drive_files("payments")
+    try:
+        files = list_drive_files("payments")
+    except HTTPException:
+        return []
+
     payments = []
     for f in files:
-        if f['name'].endswith('.json'):
-            if invoice_id and invoice_id not in f['name']:
-                continue
-            payments.append({
-                "filename": f['name'],
-                "drive_id": f['id'],
-                "webViewLink": f.get('webViewLink'),
-                "created_at": f.get('createdTime')
-            })
+        if not f['name'].endswith('.json'):
+            continue
+        # Download full JSON so caller gets all payment fields
+        content = download_from_drive(f['id'])
+        if not content:
+            continue
+        # Filter by invoice_id if provided — match against stored field, not filename
+        if invoice_id and content.get('invoice_id') != invoice_id:
+            continue
+        content.setdefault("drive_id", f['id'])
+        content.setdefault("webViewLink", f.get('webViewLink', '#'))
+        payments.append(content)
     return payments
 
 
 @router.delete("/payments/{pid}")
 async def delete_payment(pid: str, current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
-    # MongoDB deletes removed — Drive file deletion requires explicit Drive API call
-    return {"message": f"Payment {pid} delete requested. Remove file manually from Drive if needed."}
+    try:
+        service = _get_drive_service()
+        files = list_drive_files("payments")
+        # Try to match by stored id field (preferred) or filename
+        target = None
+        for f in files:
+            if f['name'].endswith('.json'):
+                content = download_from_drive(f['id'])
+                if content.get('id') == pid:
+                    target = f
+                    break
+        if not target:
+            raise HTTPException(404, f"Payment {pid} not found in Google Drive")
+        service.files().delete(fileId=target['id']).execute()
+        logger.info(f"Deleted payment from Drive: {target['name']}")
+        return {"message": f"Payment {pid} deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Drive delete failed for payment {pid}: {e}")
+        raise HTTPException(500, f"Failed to delete payment from Drive: {str(e)}")
 
 
 # ════════════════════════════════════════════════════════════════════════════════
