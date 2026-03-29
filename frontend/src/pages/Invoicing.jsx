@@ -802,6 +802,7 @@ function downloadInvoiceTemplate() {
 // UNIFIED IMPORT MODAL — .vyp KhataBook + Excel/CSV + Tally + Vyapar/JSON
 // ════════════════════════════════════════════════════════════════════════════════
 const KB_PAY_STATUS = { 1: 'sent', 2: 'partially_paid', 3: 'paid' };
+
 const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => {
   const [step, setStep] = useState('choose'); // choose | upload | preview | importing | done
   const [importMode, setImportMode] = useState(''); // 'vyp' | 'tally' | 'json' | 'excel'
@@ -816,23 +817,26 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
   const [importInvoices, setImportInvoices] = useState(true);
   const [selectedCompanyId, setSelectedCompanyId] = useState('__none__');
   const dropRef = useRef(null);
+
   const reset = () => {
     setStep('choose'); setImportMode(''); setFile(null); setParsed(null);
     setError(''); setLoading(false); setProgress(0);
     setResults({ imported: 0, clients: 0, skipped: 0, errors: [] });
     setSelectedFirm('__none__'); setSelectedCompanyId('__none__');
   };
+
   const handleClose = () => { reset(); onClose(); };
+
   const handleFileDrop = useCallback((e) => {
     e.preventDefault();
     const f = e.dataTransfer?.files?.[0] || e.target?.files?.[0];
     if (!f) return;
     const name = f.name.toLowerCase();
     const ALLOWED_EXTS = {
-      vyp:   ['.vyp', '.db'],
+      vyp: ['.vyp', '.db'],
       tally: ['.xml', '.tbk'],
       excel: ['.xlsx', '.xls', '.csv'],
-      json:  ['.json', '.vyb'],
+      json: ['.json', '.vyb'],
     };
     const allowed = ALLOWED_EXTS[importMode] || [];
     if (allowed.length > 0 && !allowed.some(ext => name.endsWith(ext))) {
@@ -840,6 +844,7 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
     }
     setFile(f); setError('');
   }, [importMode]);
+
   // ── Universal server-side parser for .vyp / .xml / .json / .vyb / .tbk ──
   const parseBackupViaAPI = async (f) => {
     const formData = new FormData();
@@ -853,17 +858,16 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
       throw new Error(err.response?.data?.detail || 'Server could not parse backup file');
     }
   };
+
   const handleParse = async () => {
     if (!file) return;
     setLoading(true); setError('');
     try {
       if (importMode === 'excel') {
-        // Client-side Excel parse for our template format
         const invoices = await parseExcelInvoices(file);
         if (!invoices.length) throw new Error('No valid invoice rows found. Check the template format.');
         setParsed({ invoices, firms: [], clients: [], items: [], mode: 'excel', source_label: 'Excel/CSV' });
       } else {
-        // Server-side universal parser for .vyp, .xml, .json, .vyb, .tbk
         const data = await parseBackupViaAPI(file);
         const mode = importMode === 'vyp' ? 'vyp' : importMode;
         setParsed({ ...data, mode });
@@ -876,12 +880,14 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
       setLoading(false);
     }
   };
+
   const handleImport = async () => {
     if (!parsed) return;
     setStep('importing'); setProgress(0);
     const res = { imported: 0, clients: 0, skipped: 0, errors: [] };
     const companyId = selectedCompanyId === '__none__' ? '' : selectedCompanyId;
-    // Import clients (server-parsed modes: vyp, tally, json)
+
+    // Import clients
     if (parsed.mode !== 'excel' && importClients && parsed.clients?.length > 0) {
       const clientsToImport = parsed.clients.slice(0, 500);
       let done = 0;
@@ -901,10 +907,12 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
         setProgress(Math.round((done / clientsToImport.length) * 40));
       }
     }
+
     // Import invoices
     const invToImport = parsed.mode === 'excel'
       ? parsed.invoices
       : (selectedFirm === '__none__' ? parsed.invoices : parsed.invoices.filter(i => String(i.company_id) === selectedFirm));
+
     let done = 0;
     for (const inv of (invToImport || [])) {
       try {
@@ -922,21 +930,23 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
       const base = parsed.mode !== 'excel' && importClients ? 40 : 0;
       setProgress(base + Math.round((done / (invToImport?.length || 1)) * (100 - base)));
     }
-    setResults(res); setStep('done');
-        onImportComplete?.();
-        // FINAL CHANGE: Refresh list so new Drive links appear instantly
-        fetchAll();
-        toast.success(`✅ All data saved to Google Drive!`);
-        // NEW: auto-refresh list so Drive links appear instantly
-            toast.success(`✅ ${res.imported} invoices saved to Google Drive`);
-          
-    const inputCls = `h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
+
+    setResults(res);
+    setStep('done');
+    onImportComplete?.();
+    fetchAll();                    // ← Refresh list so Drive links appear
+    toast.success(`✅ ${res.imported} invoices saved to Google Drive`);
+  };
+
+  const inputCls = `h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className={`w-full max-w-xl rounded-2xl border shadow-2xl p-0 overflow-hidden flex flex-col ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
         style={{ maxHeight: '90vh' }}>
         <DialogTitle className="sr-only">Import Invoices</DialogTitle>
         <DialogDescription className="sr-only">Import invoices from KhataBook .vyp or Excel file</DialogDescription>
+
         {/* ── Header ── */}
         <div className="px-6 py-5 relative overflow-hidden flex-shrink-0"
           style={{ background: 'linear-gradient(135deg, #065f46, #059669)' }}>
