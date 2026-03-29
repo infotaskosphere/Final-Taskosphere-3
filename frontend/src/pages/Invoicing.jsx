@@ -14,15 +14,16 @@ import { useNavigate } from 'react-router-dom';
 import { format, parseISO, differenceInDays, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import * as XLSX from 'xlsx';
 import {
-  Plus, Edit, Trash2, FileText, Search, Download, X, ChevronRight, Check, Eye, Printer, Layout,
+  Plus, Edit, Trash2, FileText, Search, Download, X, ChevronRight,
+  Check, Eye, Printer, Layout, Palette,
   CheckCircle2, Clock, AlertCircle, TrendingUp, DollarSign, BarChart3,
-  Building2, Users, Receipt, CreditCard, RefreshCw, Eye, Send, Copy,
+  Building2, Users, Receipt, CreditCard, RefreshCw, Send, Copy,
   Repeat, Package, Tag, ChevronDown, ChevronUp, Percent, Truck,
   ArrowUpRight, Activity, Zap, Shield, Star, Filter,
   IndianRupee, CalendarDays, FileCheck, ArrowRightLeft, Layers,
   Upload, Database, FileUp, CheckSquare, AlertTriangle, Phone, Mail,
   FileSpreadsheet, Briefcase, PieChart, Settings, Table, FileDown, BookOpen,
-  ExternalLink 
+  ExternalLink
 } from 'lucide-react';
 import InvoiceSettings, { getInvSettings, getNextInvoiceNumber } from './InvoiceSettings';
 import { COLOR_THEMES, INVOICE_TEMPLATES, generateInvoiceHTML, openInvoicePrint } from './InvoiceTemplates';
