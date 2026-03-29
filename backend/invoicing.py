@@ -82,22 +82,34 @@ DRIVE_FOLDERS = {
 }
 
 def _get_drive_service():
-    """Build and return a Google Drive API service client.
-    Raises a descriptive HTTPException if credentials are missing or invalid."""
-    if not os.path.exists(SERVICE_ACCOUNT_FILE):
-        raise HTTPException(
-            503,
-            f"Google Drive service account file '{SERVICE_ACCOUNT_FILE}' not found on server. "
-            "Please upload it to the server root and restart."
-        )
+    creds_info = None
+    raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+    if raw_json:
+        try:
+            creds_info = json.loads(raw_json)
+        except Exception as e:
+            raise HTTPException(503, f"GOOGLE_SERVICE_ACCOUNT_JSON env-var contains invalid JSON: {e}")
+    if not creds_info:
+        raw_b64 = os.getenv("GOOGLE_SERVICE_ACCOUNT_B64", "").strip()
+        if raw_b64:
+            try:
+                import base64 as _b64
+                creds_info = json.loads(_b64.b64decode(raw_b64).decode("utf-8"))
+            except Exception as e:
+                raise HTTPException(503, f"GOOGLE_SERVICE_ACCOUNT_B64 env-var is invalid: {e}")
+    if not creds_info:
+        if os.path.exists(SERVICE_ACCOUNT_FILE):
+            with open(SERVICE_ACCOUNT_FILE) as f:
+                creds_info = json.load(f)
+        else:
+            raise HTTPException(503,
+                "Google Drive credentials not configured. "
+                "Add GOOGLE_SERVICE_ACCOUNT_JSON env var on Render.")
     try:
-        creds = service_account.Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_FILE,
-            scopes=['https://www.googleapis.com/auth/drive']  # broader scope: needed to list ANY file in the folder
-        )
+        creds = service_account.Credentials.from_service_account_info(
+            creds_info, scopes=['https://www.googleapis.com/auth/drive'])
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
-        logger.error(f"Drive credentials error: {e}")
         raise HTTPException(503, f"Google Drive authentication failed: {str(e)}")
 
 def upload_to_drive(content_bytes: bytes, filename: str, folder_key: str, mime_type: str, custom_parent_id: str = None):
