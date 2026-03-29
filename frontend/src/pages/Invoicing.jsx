@@ -1838,16 +1838,24 @@ export default function Invoicing() {
     return () => window.removeEventListener('keydown', h);
   }, [formOpen, detailOpen, payOpen, gstOpen]);
   const fetchAll = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [invR, compR, clientR, leadR, statR] = await Promise.all([
-        api.get('/invoices'), api.get('/companies'), api.get('/clients'), api.get('/leads'), api.get('/invoices/stats')
-      ]);
-      setInvoices(invR.data || []); setCompanies(compR.data || []); setClients(clientR.data || []);
-      setLeads(leadR.data || []); setStats(statR.data || null);
-    } catch { toast.error('Failed to load invoicing data'); }
-    finally { setLoading(false); }
-  }, []);
+      setLoading(true);
+      try {
+        const [invR, compR, clientR, leadR, statR] = await Promise.all([
+          api.get('/invoices'), api.get('/companies'), api.get('/clients'), api.get('/leads'), api.get('/invoices/stats')
+        ]);
+      // NEW: Drive returns webViewLink for each invoice
+        const driveInvoices = (invR.data || []).map(inv => ({
+          ...inv,
+          webViewLink: inv.webViewLink || inv.driveLink || '#',   // safe fallback
+        }));
+        setInvoices(driveInvoices);
+        setCompanies(compR.data || []);
+        setClients(clientR.data || []);
+        setLeads(leadR.data || []);
+        setStats(statR.data || null);
+      } catch { toast.error('Failed to load invoicing data'); }
+      finally { setLoading(false); }
+    }, []);
   useEffect(() => { fetchAll(); }, [fetchAll]);
   const availableYears = useMemo(() => {
     const years = new Set(invoices.map(i => i.invoice_date?.slice(0, 4)).filter(Boolean));
