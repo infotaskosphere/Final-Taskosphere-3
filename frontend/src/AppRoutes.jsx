@@ -24,38 +24,33 @@ const EmailSettings     = lazy(() => import("@/components/EmailSettings.jsx"));
 const Quotations        = lazy(() => import("@/pages/Quotations.jsx"));
 const GeneralSettings   = lazy(() => import("@/pages/GeneralSettings.jsx"));
 const Passvault         = lazy(() => import("@/pages/Passvault.jsx"));
-// ── NEW: Invoicing & Billing ────────────────────────────────────────────────
 const Invoicing         = lazy(() => import("@/pages/Invoicing.jsx"));
 
 /* ── Route Guards ───────────────────────────────────────────────────────── */
 
-/**
- * Protected — requires login only (no specific permission).
- */
+/* ✅ FIXED: Never return null */
 const Protected = ({ children }) => {
   const { user, loading } = useAuth();
-  if (loading) return null;
+
+  if (loading) return <div style={{ padding: 20 }}>Loading...</div>;
   if (!user) return <Navigate to="/login" replace />;
+
   return <DashboardLayout>{children}</DashboardLayout>;
 };
 
-/**
- * Public — redirects logged-in users away to dashboard.
- */
 const Public = ({ children }) => {
   const { user, loading } = useAuth();
-  if (loading) return null;
+
+  if (loading) return <div style={{ padding: 20 }}>Loading...</div>;
   if (user) return <Navigate to="/dashboard" replace />;
+
   return children;
 };
 
-/**
- * Permission — requires login AND one (or more) permissions.
- */
 const Permission = ({ permission, children }) => {
   const { user, loading, hasPermission } = useAuth();
 
-  if (loading) return null;
+  if (loading) return <div style={{ padding: 20 }}>Loading...</div>;
   if (!user) return <Navigate to="/login" replace />;
 
   if (user.role === "admin") {
@@ -76,228 +71,56 @@ const Permission = ({ permission, children }) => {
   return <DashboardLayout>{children}</DashboardLayout>;
 };
 
-/* ── Page Loader Wrapper ───────────────────────────────────────────────── */
+/* ── Page Loader ───────────────────────────────────────────────────────── */
 const PageLoader = ({ children }) => (
-  <Suspense fallback={<div className="page-loader">Loading...</div>}>
+  <Suspense fallback={<div style={{ padding: 20 }}>Loading...</div>}>
     {children}
   </Suspense>
 );
 
-/* ── App Routes ───────────────────────────────────────────────────────── */
+/* ── Routes ────────────────────────────────────────────────────────────── */
 function AppRoutes() {
   return (
     <Routes>
-      {/* ── Public ────────────────────────────────────────────────────── */}
-      <Route
-        path="/"
-        element={
-          <Public>
-            <PageLoader><Login /></PageLoader>
-          </Public>
-        }
-      />
 
-      <Route
-        path="/login"
-        element={
-          <Public>
-            <PageLoader><Login /></PageLoader>
-          </Public>
-        }
-      />
+      {/* Public */}
+      <Route path="/" element={<Public><PageLoader><Login /></PageLoader></Public>} />
+      <Route path="/login" element={<Public><PageLoader><Login /></PageLoader></Public>} />
+      <Route path="/register" element={<Public><PageLoader><Register /></PageLoader></Public>} />
 
-      <Route
-        path="/register"
-        element={
-          <Public>
-            <PageLoader><Register /></PageLoader>
-          </Public>
-        }
-      />
+      {/* Dashboard */}
+      <Route path="/dashboard" element={<Protected><PageLoader><Dashboard /></PageLoader></Protected>} />
 
-      {/* ── Dashboard ─────────────────────────────────────────────────── */}
-      <Route
-        path="/dashboard"
-        element={
-          <Protected>
-            <PageLoader><Dashboard /></PageLoader>
-          </Protected>
-        }
-      />
+      {/* Operations */}
+      <Route path="/tasks" element={<Protected><PageLoader><Tasks /></PageLoader></Protected>} />
+      <Route path="/todos" element={<Protected><PageLoader><TodoDashboard /></PageLoader></Protected>} />
+      <Route path="/attendance" element={<Protected><PageLoader><Attendance /></PageLoader></Protected>} />
+      <Route path="/visits" element={<Protected><PageLoader><VisitsPage /></PageLoader></Protected>} />
+      <Route path="/duedates" element={<Protected><PageLoader><DueDates /></PageLoader></Protected>} />
+      <Route path="/reports" element={<Protected><PageLoader><Reports /></PageLoader></Protected>} />
 
-      {/* ── Operations ────────────────────────────────────────────────── */}
-      <Route
-        path="/tasks"
-        element={
-          <Protected>
-            <PageLoader><Tasks /></PageLoader>
-          </Protected>
-        }
-      />
+      {/* Registers */}
+      <Route path="/dsc" element={<Permission permission="can_view_all_dsc"><PageLoader><DSCRegister /></PageLoader></Permission>} />
+      <Route path="/documents" element={<Permission permission="can_view_documents"><PageLoader><DocumentsRegister /></PageLoader></Permission>} />
+      <Route path="/clients" element={<Protected><PageLoader><Clients /></PageLoader></Protected>} />
+      <Route path="/passwords" element={<Protected><PageLoader><Passvault /></PageLoader></Protected>} />
 
-      <Route
-        path="/todos"
-        element={
-          <Protected>
-            <PageLoader><TodoDashboard /></PageLoader>
-          </Protected>
-        }
-      />
+      {/* Admin */}
+      <Route path="/users" element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
+      <Route path="/leads" element={<Permission permission="can_view_all_leads"><PageLoader><LeadsPage /></PageLoader></Permission>} />
+      <Route path="/quotations" element={<Permission permission={["can_create_quotations", "can_manage_invoices"]}><PageLoader><Quotations /></PageLoader></Permission>} />
+      <Route path="/invoicing" element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><Invoicing /></PageLoader></Permission>} />
+      <Route path="/staff-activity" element={<Permission permission="can_view_staff_activity"><PageLoader><StaffActivity /></PageLoader></Permission>} />
+      <Route path="/task-audit" element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
 
-      <Route
-        path="/attendance"
-        element={
-          <Protected>
-            <PageLoader><Attendance /></PageLoader>
-          </Protected>
-        }
-      />
+      {/* Settings */}
+      <Route path="/settings/email" element={<Protected><PageLoader><EmailSettings /></PageLoader></Protected>} />
+      <Route path="/settings/general" element={<Protected><PageLoader><GeneralSettings /></PageLoader></Protected>} />
+      <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
 
-      <Route
-        path="/visits"
-        element={
-          <Protected>
-            <PageLoader><VisitsPage /></PageLoader>
-          </Protected>
-        }
-      />
-
-      <Route
-        path="/duedates"
-        element={
-          <Protected>
-            <PageLoader><DueDates /></PageLoader>
-          </Protected>
-        }
-      />
-
-      <Route
-        path="/reports"
-        element={
-          <Protected>
-            <PageLoader><Reports /></PageLoader>
-          </Protected>
-        }
-      />
-
-      {/* ── Gated Registers ───────────────────────────────────────────── */}
-      <Route
-        path="/dsc"
-        element={
-          <Permission permission="can_view_all_dsc">
-            <PageLoader><DSCRegister /></PageLoader>
-          </Permission>
-        }
-      />
-
-      <Route
-        path="/documents"
-        element={
-          <Permission permission="can_view_documents">
-            <PageLoader><DocumentsRegister /></PageLoader>
-          </Permission>
-        }
-      />
-
-      <Route
-        path="/clients"
-        element={
-          <Protected>
-            <PageLoader><Clients /></PageLoader>
-          </Protected>
-        }
-      />
-
-      <Route
-        path="/passwords"
-        element={
-          <Protected>
-            <PageLoader><Passvault /></PageLoader>
-          </Protected>
-        }
-      />
-
-      {/* ── Admin ─────────────────────────────────────────────────────── */}
-      <Route
-        path="/users"
-        element={
-          <Permission permission="can_view_user_page">
-            <PageLoader><Users /></PageLoader>
-          </Permission>
-        }
-      />
-
-      <Route
-        path="/leads"
-        element={
-          <Permission permission="can_view_all_leads">
-            <PageLoader><LeadsPage /></PageLoader>
-          </Permission>
-        }
-      />
-
-      <Route
-        path="/quotations"
-        element={
-          <Permission permission={["can_create_quotations", "can_manage_invoices"]}>
-            <PageLoader><Quotations /></PageLoader>
-          </Permission>
-        }
-      />
-
-      <Route
-        path="/invoicing"
-        element={
-          <Permission permission={["can_manage_invoices", "can_create_quotations"]}>
-            <PageLoader><Invoicing /></PageLoader>
-          </Permission>
-        }
-      />
-
-      <Route
-        path="/staff-activity"
-        element={
-          <Permission permission="can_view_staff_activity">
-            <PageLoader><StaffActivity /></PageLoader>
-          </Permission>
-        }
-      />
-
-      <Route
-        path="/task-audit"
-        element={
-          <Permission permission="can_view_audit_logs">
-            <PageLoader><TaskAudit /></PageLoader>
-          </Permission>
-        }
-      />
-
-      {/* ── Settings ──────────────────────────────────────────────────── */}
-      <Route
-        path="/settings/email"
-        element={
-          <Protected>
-            <PageLoader><EmailSettings /></PageLoader>
-          </Protected>
-        }
-      />
-
-      <Route
-        path="/settings/general"
-        element={
-          <Protected>
-            <PageLoader><GeneralSettings /></PageLoader>
-          </Protected>
-        }
-      />
-
-      <Route
-        path="/settings"
-        element={<Navigate to="/settings/general" replace />}
-      />
-
-      {/* ── Fallback ──────────────────────────────────────────────────── */}
+      {/* Fallback */}
       <Route path="*" element={<Navigate to="/login" replace />} />
+
     </Routes>
   );
 }
