@@ -1,33 +1,18 @@
 /**
  * lib/api.js
  * ─────────────────────────────────────────────────────────────────────────────
- * Axios instance for all API calls.
+ * Axios instance for all API calls (FIXED VERSION)
  */
 
 import axios from "axios";
 import { useState, useEffect } from "react";
 
-// ─── Base URL Normalizer ──────────────────────────────────────────────────────
-const getBaseUrl = () => {
-  let url =
-    import.meta.env.VITE_API_URL ||
-    import.meta.env.VITE_BACKEND_URL ||
-    "http://localhost:8000/api";
+// ─── FINAL BASE URL (FIXED — NO AUTO LOGIC) ───────────────────────────────────
+const BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  "https://final-taskosphere-backend.onrender.com/api";
 
-  // Remove trailing slash if present
-  url = url.replace(/\/$/, "");
-
-  // FIX: Use 'url' instead of 'sanitizedUrl'
-  if (!url.endsWith("/api")) {
-    return `${url}/api`;
-  }
-  
-  return url;
-};
-
-const BASE_URL = getBaseUrl();
-
-// ─── Token Helpers ─────────────────────────────────────────────────────────────
+// ─── Token Helpers ────────────────────────────────────────────────────────────
 const TOKEN_KEY = "taskosphere_token";
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY);
@@ -92,7 +77,7 @@ api.interceptors.response.use(
   (error) => {
     if (!error.config?._silent) _setLoading(-1);
 
-    // 401 → token expired or invalid → force logout
+    // 401 → logout
     if (error.response?.status === 401) {
       clearToken();
       if (!window.location.pathname.startsWith("/login")) {
@@ -118,6 +103,7 @@ api.interceptors.response.use(
   }
 );
 
+// ─── Helper Methods ──────────────────────────────────────────────────────────
 export const silentGet = (url, config = {}) =>
   api.get(url, { ...config, _silent: true });
 
@@ -127,14 +113,18 @@ export const upload = (url, formData, config = {}) =>
     headers: { "Content-Type": "multipart/form-data", ...config.headers },
   });
 
+// ─── Error Formatter ─────────────────────────────────────────────────────────
 export function getErrorMessage(error) {
   if (!error) return "An unknown error occurred";
   const data = error.response?.data;
+
   if (!data) return error.message || "Network error";
   if (data._normalised) return data._normalised;
   if (typeof data.detail === "string") return data.detail;
-  if (Array.isArray(data.detail)) return data.detail.map((e) => e.msg).join(", ");
+  if (Array.isArray(data.detail))
+    return data.detail.map((e) => e.msg).join(", ");
   if (typeof data.message === "string") return data.message;
+
   return "Request failed";
 }
 
