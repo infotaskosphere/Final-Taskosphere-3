@@ -922,10 +922,15 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
       const base = parsed.mode !== 'excel' && importClients ? 40 : 0;
       setProgress(base + Math.round((done / (invToImport?.length || 1)) * (100 - base)));
     }
-    setProgress(100); setResults(res); setStep('done');
-    onImportComplete?.();
-  };
-  const inputCls = `h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
+    setResults(res); setStep('done');
+        onImportComplete?.();
+        // FINAL CHANGE: Refresh list so new Drive links appear instantly
+        fetchAll();
+        toast.success(`✅ All data saved to Google Drive!`);
+        // NEW: auto-refresh list so Drive links appear instantly
+            toast.success(`✅ ${res.imported} invoices saved to Google Drive`);
+          
+    const inputCls = `h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className={`w-full max-w-xl rounded-2xl border shadow-2xl p-0 overflow-hidden flex flex-col ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
@@ -1439,8 +1444,13 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       const payload = { ...form, ...totals };
       if (editingInv) await api.put(`/invoices/${editingInv.id}`, payload);
       else await api.post('/invoices', payload);
-      toast.success(editingInv ? 'Invoice updated!' : 'Invoice created!');
-      onSuccess?.(); onClose();
+      toast.success(
+        editingInv 
+          ? '✅ Invoice updated & saved to Google Drive' 
+          : '✅ Invoice created & saved to Google Drive'
+      );
+      onSuccess?.(); 
+      onClose();
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to save invoice'); }
     finally { setLoading(false); }
   };
@@ -1919,15 +1929,28 @@ export default function Invoicing() {
     catch { toast.error('Failed to delete'); }
   }, [fetchAll]);
   const handleDownloadPdf = useCallback(async (inv) => {
-    try {
-      const r = await api.get(`/invoices/${inv.id}/pdf`, { responseType: 'blob' });
-      const url = URL.createObjectURL(r.data);
-      const link = document.createElement('a');
-      link.href = url; link.download = `invoice_${inv.invoice_no?.replace('/', '_')}.pdf`;
-      document.body.appendChild(link); link.click(); document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch { toast.error('PDF generation failed'); }
-  }, []);
+      // NEW: Prefer direct Google Drive link (already returned by backend)
+      if (inv.webViewLink && inv.webViewLink !== '#') {
+        window.open(inv.webViewLink, '_blank');
+        toast.success('Opened PDF from Google Drive');
+        return;
+      }
+      // Fallback for old invoices (generates PDF normally)
+      try {
+        const r = await api.get(`/invoices/${inv.id}/pdf`, { responseType: 'blob' });
+        const url = URL.createObjectURL(r.data);
+        const link = document.createElement('a');
+        link.href = url; 
+        link.download = `invoice_${inv.invoice_no?.replace('/', '_')}.pdf`;
+        document.body.appendChild(link); 
+        link.click(); 
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        toast.success('PDF downloaded');
+      } catch { 
+        toast.error('PDF generation failed'); 
+      }
+    }, []);
   const handleMarkSent = useCallback(async (inv) => {
     try { await api.post(`/invoices/${inv.id}/mark-sent`); fetchAll(); toast.success('Marked as sent'); }
     catch { toast.error('Failed'); }
