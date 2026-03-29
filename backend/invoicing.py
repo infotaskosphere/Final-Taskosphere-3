@@ -2089,3 +2089,114 @@ async def generate_recurring(inv_id: str, current_user: User = Depends(get_curre
     new_inv["amount_due"] = new_inv["grand_total"]
     await db.invoices.insert_one(new_inv); new_inv.pop("_id", None)
     return new_inv
+
+# ====================== REMAINING DRIVE-ONLY ENDPOINTS ======================
+
+# Updated numbering function (counts files in Drive instead of MongoDB)
+async def _next_invoice_no(prefix: str = "INV") -> str:
+    today = date.today()
+    fy_start = today.year if today.month >= 4 else today.year - 1
+    fy_label = f"{fy_start % 100:02d}-{(fy_start + 1) % 100:02d}"
+    
+    files = list_drive_files("invoices")
+    count = sum(1 for f in files if f['name'].startswith(f"Invoice_{prefix}"))
+    
+    return f"{prefix}-{count + 1:04d}/{fy_label}"
+
+
+@router.get("/invoices/{inv_id}")
+async def get_invoice(inv_id: str, current_user: User = Depends(get_current_user)):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    
+    files = list_drive_files("invoices")
+    for f in files:
+        if f['name'] == f"Invoice_{inv_id}.json" or inv_id in f['name']:
+            # In real production you can download JSON here if needed
+            return {"invoice_no": inv_id, "drive_id": f['id'], "webViewLink": f.get('webViewLink')}
+    raise HTTPException(404, "Invoice not found in Google Drive")
+
+
+@router.post("/payments")
+async def record_payment(data: PaymentCreate, current_user: User = Depends(get_current_user)):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    
+    # Find invoice JSON in Drive
+    files = list_drive_files("invoices")
+    inv_file = next((f for f in files if data.invoice_id in f['name']), None)
+    if not inv_file:
+        raise HTTPException(404, "Invoice not found in Drive")
+    
+    # For simplicity we just create a payment record in Payments folder
+    payment_data = {
+        **data.model_dump(),
+        "id": str(uuid.uuid4()),
+        "created_by": current_user.id,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    json_bytes = json.dumps(payment_data, default=str).encode()
+    upload_to_drive(json_bytes, f"Payment_{data.invoice_id}_{datetime.now().strftime('%Y%m%d')}.json", 
+                   "payments", "application/json")
+    
+    return {"status": "success", "message": "Payment recorded in Google Drive"}
+
+
+@router.post("/credit-notes")
+async def create_credit_note(data: CreditNoteCreate, current_user: User = Depends(get_current_user)):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    
+    inv_no = await _next_invoice_no("CN")
+    raw = {
+        "id": str(uuid.uuid4()),
+        "invoice_no": inv_no,
+        "invoice_type": "credit_note",
+        **data.model_dump(),
+        "invoice_date": date.today().isoformat(),
+        "due_date": date.today().isoformat(),
+        "created_by": current_user.id,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    raw = _compute_invoice_totals(raw)
+    
+    company = await db.companies.find_one({"id": raw.get("company_id")})
+    pdf_buf = _build_invoice_pdf(raw, company)
+    pdf_bytes = pdf_buf.getvalue()
+    json_bytes = json.dumps(raw, default=str).encode()
+    
+    upload_to_drive(pdf_bytes, f"CreditNote_{inv_no}.pdf", "credit_notes", "application/pdf")
+    upload_to_drive(json_bytes, f"CreditNote_{inv_no}.json", "credit_notes", "application/json")
+    
+    return {"status": "success", "invoice_no": inv_no, "message": "Credit Note saved to Google Drive"}
+
+
+@router.get("/invoices/{inv_id}/pdf")
+async def download_invoice_pdf(inv_id: str, current_user: User = Depends(get_current_user)):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    
+    files = list_drive_files("invoices")
+    pdf_file = next((f for f in files if f['name'] == f"Invoice_{inv_id}.pdf"), None)
+    if not pdf_file:
+        raise HTTPException(404, "PDF not found in Drive")
+    
+    # For direct download we would need to fetch bytes, but for now return link
+    return {"download_link": pdf_file.get('webViewLink'), "filename": f"Invoice_{inv_id}.pdf"}
+
+
+@router.post("/invoices/{inv_id}/send-email")
+async def send_invoice_email(inv_id: str, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user)):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    
+    # Find PDF in Drive
+    files = list_drive_files("invoices")
+    pdf_file = next((f for f in files if f['name'] == f"Invoice_{inv_id}.pdf"), None)
+    if not pdf_file:
+        raise HTTPException(404, "Invoice PDF not found")
+    
+    # TODO: In production you can download PDF bytes and attach
+    # For now we return success (you can enhance later)
+    return {"message": "Email would be sent with PDF from Google Drive", "invoice_no": inv_id}
