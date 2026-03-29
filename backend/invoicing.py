@@ -1888,15 +1888,32 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(get_c
     await db.invoices.insert_one({**raw})
     raw.pop("_id", None)
 
-    # ── SECONDARY: Upload PDF + JSON to Drive if credentials available ────────
+    # ── SECONDARY: Upload PDF + JSON to Drive, store PDF link in MongoDB ──────
     company = await db.companies.find_one({"id": raw.get("company_id")})
     if _drive_configured():
         try:
             client_name = raw.get("client_name", "").strip()
             client_folder_id = _get_or_create_client_folder(client_name)
-            pdf_buf = _build_invoice_pdf(raw, company)
-            upload_to_drive(pdf_buf.getvalue(), f"Invoice_{inv_no}.pdf", "invoices", "application/pdf", custom_parent_id=client_folder_id)
-            upload_to_drive(json.dumps(raw, default=str).encode(), f"Invoice_{inv_no}.json", "invoices", "application/json", custom_parent_id=client_folder_id)
+            pdf_buf = _build_invoice_pdf(raw, company or {})
+            safe_inv_no = inv_no.replace("/", "_")
+            pdf_link = upload_to_drive(
+                pdf_buf.getvalue(),
+                f"Invoice_{safe_inv_no}.pdf",
+                "invoices", "application/pdf",
+                custom_parent_id=client_folder_id
+            )
+            upload_to_drive(
+                json.dumps(raw, default=str).encode(),
+                f"Invoice_{safe_inv_no}.json",
+                "invoices", "application/json",
+                custom_parent_id=client_folder_id
+            )
+            if pdf_link:
+                await db.invoices.update_one(
+                    {"id": raw["id"]},
+                    {"$set": {"pdf_drive_link": pdf_link}}
+                )
+                raw["pdf_drive_link"] = pdf_link
         except Exception as e:
             logger.warning(f"Drive backup skipped for {inv_no}: {e}")
 
@@ -2245,10 +2262,21 @@ async def download_invoice_pdf(inv_id: str, current_user: User = Depends(get_cur
     if not _perm(current_user):
         raise HTTPException(403, "Access denied")
 
-    files = list_drive_files("invoices")
-    pdf_file = next((f for f in files if f['name'] == f"Invoice_{inv_id}.pdf"), None)
-    if not pdf_file:
-        raise HTTPException(404, "PDF not found in Drive")
+    # Fetch invoice from MongoDB
+    inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(404, "Invoice not found")
 
-    # Return the Drive web view link for direct download
-    return {"download_link": pdf_file.get('webViewLink'), "filename": f"Invoice_{inv_id}.pdf"}
+    # If a Drive PDF link is stored, redirect to it
+    if inv.get("pdf_drive_link"):
+        return {"download_link": inv["pdf_drive_link"], "filename": f"Invoice_{inv.get('invoice_no',inv_id)}.pdf"}
+
+    # Otherwise generate PDF on-the-fly from MongoDB data and stream it
+    company = await db.companies.find_one({"id": inv.get("company_id")}, {"_id": 0}) or {}
+    pdf_buf = _build_invoice_pdf(inv, company)
+    safe_name = (inv.get("invoice_no") or inv_id).replace("/", "_")
+    return StreamingResponse(
+        pdf_buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="Invoice_{safe_name}.pdf"'}
+    )
