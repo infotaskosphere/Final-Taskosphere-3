@@ -1615,24 +1615,49 @@ export default function Invoicing() {
     return () => window.removeEventListener('keydown', h);
   }, [formOpen, detailOpen, payOpen, gstOpen]);
   const fetchAll = useCallback(async () => {
-      setLoading(true);
-      try {
-        const [invR, compR, clientR, leadR, statR] = await Promise.all([
-          api.get('/invoices'), api.get('/companies'), api.get('/clients'), api.get('/leads'), api.get('/invoices/stats')
-        ]);
-      // NEW: Drive returns webViewLink for each invoice
-        const driveInvoices = (invR.data || []).map(inv => ({
+    setLoading(true);
+    try {
+      // Use allSettled so a single failing endpoint doesn't blank the whole page
+      const [invR, compR, clientR, leadR, statR] = await Promise.allSettled([
+        api.get('/invoices'),
+        api.get('/companies'),
+        api.get('/clients'),
+        api.get('/leads'),
+        api.get('/invoices/stats'),
+      ]);
+
+      if (invR.status === 'fulfilled') {
+        const driveInvoices = (invR.value.data || []).map(inv => ({
           ...inv,
-          webViewLink: inv.webViewLink || inv.driveLink || '#',   // safe fallback
+          webViewLink: inv.webViewLink || inv.driveLink || '#',
         }));
         setInvoices(driveInvoices);
-        setCompanies(compR.data || []);
-        setClients(clientR.data || []);
-        setLeads(leadR.data || []);
-        setStats(statR.data || null);
-      } catch { toast.error('Failed to load invoicing data'); }
-      finally { setLoading(false); }
-    }, []);
+      } else {
+        console.error('Failed to load invoices:', invR.reason);
+        toast.error('Failed to load invoices — check Google Drive connection');
+        setInvoices([]);
+      }
+
+      if (compR.status === 'fulfilled') setCompanies(compR.value.data || []);
+      else { console.error('Failed to load companies:', compR.reason); setCompanies([]); }
+
+      if (clientR.status === 'fulfilled') setClients(clientR.value.data || []);
+      else { console.error('Failed to load clients:', clientR.reason); setClients([]); }
+
+      if (leadR.status === 'fulfilled') setLeads(leadR.value.data || []);
+      else { console.error('Failed to load leads:', leadR.reason); setLeads([]); }
+
+      if (statR.status === 'fulfilled') setStats(statR.value.data || null);
+      else { console.error('Failed to load stats:', statR.reason); setStats(null); }
+
+    } catch (err) {
+      // Truly unexpected error (e.g. network down before any call fires)
+      console.error('fetchAll unexpected error:', err);
+      toast.error('Failed to load invoicing data');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
   useEffect(() => { fetchAll(); }, [fetchAll]);
   const availableYears = useMemo(() => {
     const years = new Set(invoices.map(i => i.invoice_date?.slice(0, 4)).filter(Boolean));
