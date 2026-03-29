@@ -22,6 +22,7 @@ import {
   IndianRupee, CalendarDays, FileCheck, ArrowRightLeft, Layers,
   Upload, Database, FileUp, CheckSquare, AlertTriangle, Phone, Mail,
   FileSpreadsheet, Briefcase, PieChart, Settings, Table, FileDown, BookOpen,
+  ExternalLink 
 } from 'lucide-react';
 import InvoiceSettings, { getInvSettings, getNextInvoiceNumber } from './InvoiceSettings';
 import PartyLedger from './PartyLedger';
