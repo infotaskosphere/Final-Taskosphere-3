@@ -9,6 +9,9 @@ const __dirname = path.dirname(__filename);
 export default defineConfig({
   plugins: [react()],
 
+  // ✅ CRITICAL FIX
+  base: '/',   // <-- ADD THIS LINE
+
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -19,7 +22,6 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
     assetsDir: 'assets',
-    // Removed strict manualChunks to let Vite resolve paths automatically
     chunkSizeWarningLimit: 2000,
   },
 
