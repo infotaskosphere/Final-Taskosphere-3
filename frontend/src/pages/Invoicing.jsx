@@ -1379,7 +1379,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                       className="h-8 px-3 text-xs rounded-xl gap-1.5"><Printer className="h-3.5 w-3.5" /> Open Print Preview</Button>
                   </div>
                   <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-200'}`} style={{ height: 420 }}>
-                    <iframe key={`${form.invoice_template}-${form.invoice_theme}-${form.invoice_custom_color}`} srcDoc={previewHtml} className="w-full h-full border-0" title="Invoice Preview" sandbox="allow-same-origin" />
+                    <iframe key={`${form.invoice_template}-${form.invoice_theme}-${form.invoice_custom_color}`} srcDoc={previewHtml} className="w-full h-full border-0" title="Invoice Preview" sandbox="allow-scripts" />
                   </div>
                   {/* *** BUG-005 FIX: Added note about PDF download vs template preview *** */}
                   <p className={`text-[10px] mt-2 text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
