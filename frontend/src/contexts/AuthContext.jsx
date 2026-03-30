@@ -68,8 +68,8 @@ export const AuthProvider = ({ children }) => {
 
         api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
 
-        // ✅ FIXED PATH
-        await api.get("/api/auth/me");
+        // ✅ FIX: No "/api" prefix — baseURL already includes /api
+        await api.get("/auth/me");
 
         setUser(parsedUser);
 
@@ -147,8 +147,8 @@ export const AuthProvider = ({ children }) => {
 
   const refreshUser = useCallback(async () => {
     try {
-      // ✅ FIXED PATH
-      const response = await api.get("/api/auth/me");
+      // ✅ FIX: No "/api" prefix — baseURL already includes /api
+      const response = await api.get("/auth/me");
       const updatedUser = response.data;
 
       updatedUser.permissions = normalizePermissions(updatedUser.permissions);
