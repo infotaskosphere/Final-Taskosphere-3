@@ -26,7 +26,8 @@ import {
   ExternalLink
 } from 'lucide-react';
 import InvoiceSettings, { getInvSettings, getNextInvoiceNumber } from './InvoiceSettings';
-import { COLOR_THEMES, INVOICE_TEMPLATES, generateInvoiceHTML, openInvoicePrint } from './InvoiceTemplates';
+// STEP 1 FIX: Updated import to include useInvoicePreviewHtml
+import { COLOR_THEMES, INVOICE_TEMPLATES, generateInvoiceHTML, openInvoicePrint, useInvoicePreviewHtml } from './InvoiceTemplates';
 import PartyLedger from './PartyLedger';
 // ─── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
@@ -39,17 +40,6 @@ const COLORS = {
   purple: '#7C3AED',
   teal: '#0D9488',
 };
-// ─── Invoice Themes ───────────────────────────────────────────────────────────
-const INVOICE_THEMES = [
-  { id: 'classic_blue',   label: 'Classic Blue',   primary: '#0D3B66', accent: '#1F6FB2', bg: '#EFF6FF', headerGrad: 'linear-gradient(135deg,#0D3B66,#1F6FB2)', tag: 'Default' },
-  { id: 'emerald',        label: 'Emerald',         primary: '#065f46', accent: '#059669', bg: '#ECFDF5', headerGrad: 'linear-gradient(135deg,#065f46,#059669)', tag: 'Fresh' },
-  { id: 'purple',         label: 'Royal Purple',    primary: '#4c1d95', accent: '#7c3aed', bg: '#F5F3FF', headerGrad: 'linear-gradient(135deg,#4c1d95,#7c3aed)', tag: 'Premium' },
-  { id: 'coral',          label: 'Coral Sunrise',   primary: '#7c2d12', accent: '#ea580c', bg: '#FFF7ED', headerGrad: 'linear-gradient(135deg,#7c2d12,#ea580c)', tag: 'Bold' },
-  { id: 'teal',           label: 'Deep Teal',       primary: '#134e4a', accent: '#0d9488', bg: '#F0FDFA', headerGrad: 'linear-gradient(135deg,#134e4a,#0d9488)', tag: 'Calm' },
-  { id: 'slate',          label: 'Slate Pro',       primary: '#1e293b', accent: '#475569', bg: '#F8FAFC', headerGrad: 'linear-gradient(135deg,#1e293b,#475569)', tag: 'Minimal' },
-  { id: 'rose',           label: 'Rose Gold',       primary: '#881337', accent: '#e11d48', bg: '#FFF1F2', headerGrad: 'linear-gradient(135deg,#881337,#e11d48)', tag: 'Elegant' },
-  { id: 'amber',          label: 'Amber Gold',      primary: '#78350f', accent: '#d97706', bg: '#FFFBEB', headerGrad: 'linear-gradient(135deg,#78350f,#d97706)', tag: 'Warm' },
-];
 // ─── Constants ────────────────────────────────────────────────────────────────
 const GST_RATES = [0, 5, 12, 18, 28];
 const UNITS = ['service','nos','kg','ltr','mtr','sqft','hr','day','month','year','set','lot','pcs','box'];
@@ -1296,7 +1286,8 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   const labelCls = "text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block";
   const inputCls = `h-11 rounded-xl text-sm border-slate-200 dark:border-slate-600 focus:border-blue-400 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
   const sectionCls = `border rounded-2xl p-5 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`;
-  // FIX 2: Removed the "theme" tab — Design & Preview already includes both template + color theme pickers
+  // STEP 2 FIX: Add useInvoicePreviewHtml hook call before return
+  const previewHtml = useInvoicePreviewHtml(form, totals, companies, editingInv);
   const tabs = [
     { id: 'details',  label: 'Details',         icon: FileText    },
     { id: 'items',    label: 'Items',            icon: Package     },
@@ -1582,13 +1573,16 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                     <h3 className={`text-sm font-semibold flex items-center gap-2 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
                       <Eye className="h-4 w-4" /> Live Preview
                     </h3>
+                    {/* STEP 4 FIX: Updated Open Print Preview button handler */}
                     <Button type="button" size="sm" variant="outline"
                       onClick={() => {
                         const company = companies.find(c => c.id === form.company_id) || {};
-                        const previewInv = { ...form, ...totals,
-                          invoice_no: 'PREVIEW-001',
+                        const previewInv = {
+                          ...form,
+                          invoice_no:   editingInv?.invoice_no || 'PREVIEW-001',
                           invoice_date: form.invoice_date || format(new Date(), 'yyyy-MM-dd'),
-                          due_date: form.due_date || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
+                          due_date:     form.due_date     || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
+                          client_name:  form.client_name  || 'Client Name',
                         };
                         openInvoicePrint(previewInv, company, form.invoice_template, form.invoice_theme, form.invoice_custom_color);
                       }}
@@ -1596,27 +1590,19 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                       <Printer className="h-3.5 w-3.5" /> Open Print Preview
                     </Button>
                   </div>
-                  {/* FIX 4: Added allow-scripts and allow-popups to iframe sandbox so preview actually renders */}
-                  <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-200'}`} style={{ height: 420 }}>
+                  {/* STEP 3 FIX: Replaced old iframe block with fixed version using previewHtml hook + sandbox="allow-same-origin" only */}
+                  <div
+                    className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-200'}`}
+                    style={{ height: 420 }}
+                  >
                     <iframe
                       key={`${form.invoice_template}-${form.invoice_theme}-${form.invoice_custom_color}`}
-                      srcDoc={(() => {
-                        try {
-                          const company = companies.find(c => c.id === form.company_id) || { name: 'Your Company', gstin: 'GSTIN', address: 'Company Address' };
-                          const previewInv = { ...form, ...totals,
-                            invoice_no: editingInv?.invoice_no || 'PREVIEW-001',
-                            invoice_date: form.invoice_date || format(new Date(), 'yyyy-MM-dd'),
-                            due_date: form.due_date || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
-                            client_name: form.client_name || 'Client Name',
-                            items: form.items.filter(it => it.description?.trim()).length > 0
-                              ? form.items : [{ description: 'Sample Service', quantity: 1, unit: 'service', unit_price: 10000, gst_rate: 18, taxable_value: 10000, cgst_rate: 9, sgst_rate: 9, cgst_amount: 900, sgst_amount: 900, igst_amount: 0, total_amount: 11800 }],
-                          };
-                          return generateInvoiceHTML(previewInv, company, form.invoice_template, form.invoice_theme, form.invoice_custom_color);
-                        } catch { return '<p style="padding:20px;color:#999">Preview not available — fill in invoice details first</p>'; }
-                      })()}
+                      srcDoc={previewHtml}
                       className="w-full h-full border-0"
                       title="Invoice Preview"
-                      sandbox="allow-same-origin allow-scripts allow-popups"
+                      // FIX: Removed allow-scripts — the HTML is static, no JS needed.
+                      //      This eliminates the yellow sandbox security warning.
+                      sandbox="allow-same-origin"
                     />
                   </div>
                   <p className={`text-[10px] mt-2 text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -1641,7 +1627,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
             {activeTab !== 'design' ? (
               <Button type="button"
                 onClick={() => {
-                  // FIX 3: Updated tab order — removed 'theme' step
+                  // STEP 3 FIX: Updated tab order — no 'theme' step
                   const order = ['details', 'items', 'totals', 'settings', 'design'];
                   const next = order[order.indexOf(activeTab) + 1];
                   if (next) setActiveTab(next);
