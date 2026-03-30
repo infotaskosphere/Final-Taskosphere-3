@@ -3,8 +3,8 @@
  *
  * FIXES:
  *  1. ₹0 total bug — totals now computed from items correctly in all render paths
- *  2. Sandbox warning — iframe uses srcdoc with no allow-scripts + allow-same-origin combo;
- *     preview uses blob URL approach with only allow-same-origin (no scripts needed for static HTML)
+ *  2. Sandbox warning — iframe uses srcdoc with no allow-scripts + allow-scripts combo;
+ *     preview uses blob URL approach with only allow-scripts (no scripts needed for static HTML)
  *  3. Theme sync — COLOR_THEMES IDs now match what Invoicing.jsx uses (invoice_theme field)
  *  4. QR code — every template now shows UPI QR with PENDING amount (amount_due), not grand_total
  *  5. Live preview computes totals before rendering so sample numbers are correct
@@ -1190,27 +1190,20 @@ export function openInvoicePrint(inv, company, templateId='classic', themeId='cl
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 10. INVOICE FORM INTEGRATION — fixed iframe sandbox
-//
-//  The sandbox warning in the browser console:
-//    "An iframe which has both allow-scripts and allow-same-origin
-//     for its sandbox attribute can escape its sandboxing."
-//
-//  FIX: For STATIC HTML previews we don't need allow-scripts at all.
-//  The generated invoice HTML is pure HTML+CSS with no scripts,
-//  so we use sandbox="allow-same-origin" ONLY (no allow-scripts).
-//  This eliminates the security warning completely.
-//
-//  Use this in InvoiceForm's Design & Preview tab:
-//
-//    <iframe
-//      key={`${form.invoice_template}-${form.invoice_theme}`}
-//      srcDoc={previewHtml}
-//      sandbox="allow-same-origin"   ← NO allow-scripts
-//      title="Invoice Preview"
-//      className="w-full h-full border-0"
-//    />
-//
+
+
+<iframe
+  ref={iframeRef}
+  srcDoc={previewHtml}
+  title="Invoice Preview"
+  style={{
+    width: '100%',
+    height: INVOICE_TEMPLATES.find(t => t.id === selectedTemplate)?.thermal ? 500 : 1122,
+    border: 'none', display: 'block'
+  }}
+  sandbox="allow-scripts"
+/>
+
 // ═══════════════════════════════════════════════════════════════
 
 /**
@@ -1504,7 +1497,7 @@ export const InvoiceDesignModal = ({
             <div className="flex-1 overflow-auto p-4" style={{ background: isDark ? '#1e293b' : '#e2e8f0' }}>
               <div style={{ maxWidth: 794, margin: '0 auto', boxShadow: '0 8px 32px rgba(0,0,0,0.18)', borderRadius: 4, overflow: 'hidden', background: 'white' }}>
                 {/*
-                  FIX: sandbox="allow-same-origin" ONLY — no allow-scripts.
+                  FIX: sandbox="allow-scripts" ONLY — no allow-scripts.
                   The invoice HTML is static (no JS), so this is safe and
                   eliminates the browser console sandbox security warning.
                 */}
@@ -1517,7 +1510,7 @@ export const InvoiceDesignModal = ({
                     height: INVOICE_TEMPLATES.find(t => t.id === selectedTemplate)?.thermal ? 500 : 1122,
                     border: 'none', display: 'block'
                   }}
-                  sandbox="allow-same-origin"
+                  sandbox="allow-scripts"
                 />
               </div>
             </div>
