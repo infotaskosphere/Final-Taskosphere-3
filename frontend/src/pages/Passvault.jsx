@@ -157,7 +157,7 @@ function RevealPw({ entryId, isDark }) {
     if (shown) { setShown(false); setPw(''); return; }
     setLoading(true);
     try {
-      const r = await api.get(`/api/passwords/${entryId}/reveal`);
+      const r = await api.get(`/${entryId}/reveal`);
       if (!mounted.current) return;
       setPw(r.data.password || '');
       setShown(true);
@@ -302,10 +302,10 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
     setBusy(true);
     try {
       if (entry?.id) {
-        await api.put(`/api/passwords/${entry.id}`, form);
+        await api.put(`/passwords/${entry.id}`, form);
         toast.success('Entry updated');
       } else {
-        await api.post('/api/passwords', form);
+        await api.post('/passwords', form);
         toast.success('Entry created');
       }
       qc.invalidateQueries({ queryKey: ['passwords'] });
@@ -427,7 +427,7 @@ function DeleteModal({ open, onClose, entry, isDark }) {
   const del = async () => {
     setBusy(true);
     try {
-      await api.delete(`/api/passwords/${entry.id}`);
+      await api.delete(`/passwords/${entry.id}`);
       toast.success('Entry deleted');
       qc.invalidateQueries({ queryKey: ['passwords'] });
       qc.invalidateQueries({ queryKey: ['pw-stats'] });
@@ -470,7 +470,7 @@ function WAModal({ open, onClose, entry, isDark }) {
     if (!open || !entry?.id) return;
     setPhone(entry.mobile || '');
     setLoadPw(true);
-    api.get(`/api/passwords/${entry.id}/reveal`)
+    api.get(`/passwords/${entry.id}/reveal`)
       .then(r => setPw(r.data.password || ''))
       .catch(() => setPw(''))
       .finally(() => setLoadPw(false));
@@ -563,7 +563,7 @@ function ImportModal({ open, onClose, isDark }) {
     setBusy(true);
     try {
       const fd = new FormData(); fd.append('file', file);
-      const r = await api.post('/api/passwords/bulk-import', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const r = await api.post('/passwords/bulk-import', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       setResult(r.data); setStep(2);
       qc.invalidateQueries({ queryKey: ['passwords'] });
       qc.invalidateQueries({ queryKey: ['pw-stats'] });
@@ -835,7 +835,7 @@ export default function PasswordRepository() {
       if (fType !== 'ALL') p.portal_type = fType;
       if (fClient !== 'ALL') p.client_id = fClient;
       if (fHolder !== 'ALL') p.holder_type = fHolder;
-      const r = await api.get('/api/passwords', { params: p });
+      const r = await api.get('/passwords', { params: p });
       return Array.isArray(r.data) ? r.data : [];
     },
     enabled: canView,
@@ -849,7 +849,7 @@ export default function PasswordRepository() {
     queryKey: ['pw-stats'],
     queryFn: async () => {
       try {
-        const r = await api.get('/api/passwords/admin/stats');
+        const r = await api.get('/passwords/admin/stats');
         return r.data || {};
       } catch (e) {
         if (process.env.NODE_ENV === 'development') console.warn('pw-stats:', e.message);
@@ -878,7 +878,7 @@ export default function PasswordRepository() {
 
   const dlTemplate = async () => {
     try {
-      const r = await api.get('/api/passwords/template', { responseType: 'blob' });
+      const r = await api.get('/passwords/template', { responseType: 'blob' });
       const url = URL.createObjectURL(new Blob([r.data]));
       const a = document.createElement('a');
       a.href = url; a.download = 'password_template.xlsx'; a.click();
