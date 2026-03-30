@@ -1,13 +1,18 @@
 """
-invoicing.py  —  v6.0  FIXED
+invoicing.py  —  v6.1  FIXED
 ──────────────────────────────────────────────────────────────────────────────
-CHANGES in v6.0:
-  - Google Drive is 100% OPTIONAL — no crash if credentials missing
-  - PDF /pdf endpoint ALWAYS streams PDF locally (never redirects to Drive)
-  - /upload-to-drive is a separate, user-triggered endpoint
-  - Removed hard import of google-auth (lazy import only when Drive is used)
-  - All Drive calls are wrapped in try/except and never block core flow
-  - PDF generation cleaned up and hardened
+CHANGES in v6.1 (bug-fixes over v6.0):
+  - FIXED: Route shadowing — GET /invoices/drive-status moved BEFORE
+    GET /invoices/{inv_id} so FastAPI no longer treats "drive-status" as an
+    invoice ID (was causing 404 / wrong handler every time).
+  - FIXED: PDF now reads invoice_custom_color / company color instead of
+    using a hardcoded navy constant.
+  - FIXED: PDF layout rebuilt to match the Invoice Settings "Preview" tab
+    (dark full-width header, logo left + doc-type right, Bill To / Due Date
+    two-column section, Disc% column in items table, signature bottom-right).
+  - FIXED: .vyb backup extension now correctly routed to the .vyp SQLite
+    parser (KhataBook Pro uses .vyb, same SQLite schema as .vyp).
+  - Added _hex_to_rgb() helper used by the PDF builder.
 """
 
 import uuid
@@ -316,8 +321,20 @@ def _lighten(c, f=0.88): return tuple(int(x + (255 - x) * f) for x in c)
 def _darken(c, f=0.65): return tuple(int(x * f) for x in c)
 
 
+# FIX: helper to parse hex color strings like "#0D3B66" → (13, 59, 102)
+def _hex_to_rgb(hex_color: str) -> tuple:
+    """Convert a CSS hex color string to an (R, G, B) tuple."""
+    try:
+        h = hex_color.strip().lstrip("#")
+        if len(h) == 3:
+            h = "".join(c * 2 for c in h)
+        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+    except Exception:
+        return (13, 59, 102)  # fallback to default navy
+
+
 # ═══════════════════════════════════════════════════════════
-# UNIVERSAL BACKUP PARSERS  (unchanged from v5)
+# UNIVERSAL BACKUP PARSERS
 # ═══════════════════════════════════════════════════════════
 
 def _safe_float(val, default=0.0):
@@ -342,12 +359,12 @@ def _safe_date(val, default=None):
 
 
 def _parse_vyp_file(file_path: str) -> dict:
-    """Parse KhataBook .vyp SQLite backup."""
+    """Parse KhataBook .vyp / .vyb SQLite backup."""
     try:
         conn = sqlite3.connect(file_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        result = {"source": "khatabook", "source_label": "KhataBook (.vyp)",
+        result = {"source": "khatabook", "source_label": "KhataBook (.vyp / .vyb)",
                   "firms": [], "clients": [], "items": [], "invoices": [], "payments": [], "stats": {}}
 
         try:
@@ -530,7 +547,7 @@ def _parse_vyp_file(file_path: str) -> dict:
         conn.close()
         return result
     except Exception as e:
-        raise HTTPException(400, f"Failed to parse .vyp file: {e}")
+        raise HTTPException(400, f"Failed to parse .vyp/.vyb file: {e}")
 
 
 def _parse_excel_file(file_path: str, filename: str) -> dict:
@@ -911,27 +928,42 @@ def _compute_invoice_totals(inv_data: dict) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════
-# PDF BUILDER
+# PDF BUILDER  — v6.1: matches Invoice Settings preview tab
+#   • Reads invoice_custom_color / company color (no more hardcoded navy)
+#   • Full-width dark header: logo + company left, doc-type right
+#   • Bill To (left) / Due Date (right) two-column section
+#   • Items table with Disc% column matching the UI preview
+#   • Signature block bottom-right
 # ═══════════════════════════════════════════════════════════
 
 def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
-    BRAND = (13, 59, 102)
-    BL = _lighten(BRAND, 0.90)
-    BD = _darken(BRAND, 0.70)
-    DARK = (30, 41, 59)
+    # ── Resolve brand color from invoice settings → company settings → default
+    raw_color = (
+        inv.get("invoice_custom_color")
+        or company.get("invoice_custom_color")
+        or company.get("brand_color")
+        or "#0D3B66"
+    )
+    BRAND = _hex_to_rgb(raw_color)
+    BL    = _lighten(BRAND, 0.92)   # very light tint for alternating rows
+    BD    = _darken(BRAND, 0.65)    # darker shade for accents
+    DARK  = (30, 41, 59)
     MUTED = (100, 116, 139)
     WHITE = (255, 255, 255)
-    RED = (220, 38, 38)
     GREEN = (22, 163, 74)
-    _inv = inv
-    _MUTED = MUTED
+    RED   = (220, 38, 38)
 
     inv_type_labels = {
-        "tax_invoice": "TAX INVOICE", "proforma": "PROFORMA INVOICE",
-        "estimate": "ESTIMATE", "credit_note": "CREDIT NOTE", "debit_note": "DEBIT NOTE",
+        "tax_invoice": "Tax Invoice",
+        "proforma":    "Proforma Invoice",
+        "estimate":    "Estimate",
+        "credit_note": "Credit Note",
+        "debit_note":  "Debit Note",
     }
-    title_label = inv_type_labels.get(inv.get("invoice_type", "tax_invoice"), "TAX INVOICE")
+    title_label = inv_type_labels.get(inv.get("invoice_type", "tax_invoice"), "Tax Invoice")
     is_cn = inv.get("invoice_type") == "credit_note"
+    _inv  = inv
+    _MUTED = MUTED
 
     class PDF(FPDF):
         def header(self): pass
@@ -939,245 +971,388 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
             self.set_y(-12)
             self.set_font("Helvetica", "I", 7)
             self.set_text_color(*_MUTED)
-            _cell(self, 0, 5, _s(f"{title_label} · {_inv.get('invoice_no','')} · Page {self.page_no()}"), align="C", nl=True)
+            _cell(self, 0, 5,
+                  _s(f"This is a computer-generated document.  ·  {_inv.get('invoice_no','')}  ·  Page {self.page_no()}"),
+                  align="C", nl=True)
 
     pdf = PDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.add_page()
-    W = pdf.w - 28
 
-    _embed_logo(pdf, company.get("logo_base64", ""), x=14, y=11, h=18)
-    pdf.set_xy(14, 31)
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.set_text_color(*BD)
-    _cell(pdf, 0, 6, _s(company.get("name", "")), nl=True)
+    MARGIN     = 14
+    CONTENT_W  = pdf.w - MARGIN * 2   # ≈ 182 mm on A4
+
+    # ══════════════════════════════════════════════════════
+    # HEADER BAND  — full-width coloured rectangle
+    # ══════════════════════════════════════════════════════
+    HEADER_H = 44
+    header_color = RED if is_cn else BRAND
+    pdf.set_fill_color(*header_color)
+    pdf.rect(0, 0, pdf.w, HEADER_H, "F")
+
+    # Logo (top-left, inside margin)
+    if company.get("logo_base64"):
+        _embed_logo(pdf, company["logo_base64"], x=MARGIN, y=7, h=16)
+        logo_offset = 20   # shift text right if logo present
+    else:
+        logo_offset = 0
+
+    # Company info — left column
+    pdf.set_xy(MARGIN + logo_offset, 7)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(*WHITE)
+    _cell(pdf, CONTENT_W * 0.55, 6, _s(company.get("name", "")), nl=True)
+
+    pdf.set_x(MARGIN + logo_offset)
+    pdf.set_font("Helvetica", "", 7.5)
+    pdf.set_text_color(210, 225, 245)
+
+    addr_lines = _s(company.get("address", ""))
+    if addr_lines:
+        _mcell(pdf, CONTENT_W * 0.55, 4, addr_lines)
+        pdf.set_x(MARGIN + logo_offset)
+
+    contact_parts = []
+    if company.get("phone"): contact_parts.append(f"Ph: {company['phone']}")
+    if company.get("email"): contact_parts.append(company["email"])
+    if contact_parts:
+        _cell(pdf, CONTENT_W * 0.55, 4, _s("  ·  ".join(contact_parts)), nl=True)
+        pdf.set_x(MARGIN + logo_offset)
+
+    if company.get("gstin"):
+        pdf.set_font("Helvetica", "B", 7.5)
+        pdf.set_text_color(*WHITE)
+        _cell(pdf, CONTENT_W * 0.55, 4, _s(f"GSTIN: {company['gstin']}"), nl=True)
+    if company.get("pan"):
+        pdf.set_font("Helvetica", "", 7.5)
+        pdf.set_text_color(210, 225, 245)
+        pdf.set_x(MARGIN + logo_offset)
+        _cell(pdf, CONTENT_W * 0.55, 4, _s(f"PAN: {company['pan']}"), nl=True)
+
+    # Document type — right column (aligned to right edge)
+    right_col_x = MARGIN + CONTENT_W * 0.60
+    right_col_w = CONTENT_W * 0.40
+
+    pdf.set_xy(right_col_x, 7)
+    pdf.set_font("Helvetica", "B", 20)
+    pdf.set_text_color(*WHITE)
+    _cell(pdf, right_col_w, 10, title_label, align="R", nl=True)
+
+    pdf.set_x(right_col_x)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(210, 225, 245)
+    inv_no = inv.get("invoice_no", "")
+    _cell(pdf, right_col_w, 5, _s(f"# {inv_no}"), align="R", nl=True)
+
+    pdf.set_x(right_col_x)
+    _cell(pdf, right_col_w, 5, _s(f"Date: {inv.get('invoice_date', '')}"), align="R", nl=True)
+
+    # ══════════════════════════════════════════════════════
+    # BILL TO  /  DUE DATE  — two-column section
+    # ══════════════════════════════════════════════════════
+    info_y = HEADER_H + 5
+    pdf.set_xy(MARGIN, info_y)
+
+    # Left: Bill To
+    bill_w = CONTENT_W * 0.56
+    pdf.set_font("Helvetica", "B", 7.5)
+    pdf.set_text_color(*MUTED)
+    _cell(pdf, bill_w, 5, "BILL TO", nl=True)
+
+    pdf.set_x(MARGIN)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(*DARK)
+    _cell(pdf, bill_w, 6, _s(inv.get("client_name", ""), 50), nl=True)
+
+    pdf.set_x(MARGIN)
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(*MUTED)
-    if company.get("address"):
-        _mcell(pdf, W * 0.55, 4, _s(company["address"]))
-    parts = []
-    if company.get("phone"): parts.append(f"Ph: {company['phone']}")
-    if company.get("email"): parts.append(company["email"])
-    if parts: _cell(pdf, 0, 4, _s(" · ".join(parts)), nl=True)
-    if company.get("gstin"):
-        pdf.set_font("Helvetica", "B", 8); pdf.set_text_color(*DARK)
-        _cell(pdf, 0, 4, _s(f"GSTIN: {company['gstin']}"), nl=True)
-    if company.get("pan"):
-        pdf.set_font("Helvetica", "", 8); pdf.set_text_color(*MUTED)
-        _cell(pdf, 0, 4, _s(f"PAN: {company['pan']}"), nl=True)
+    if inv.get("client_address"):
+        _mcell(pdf, bill_w, 4, _s(inv["client_address"], 90))
+        pdf.set_x(MARGIN)
 
-    band_y = 65
-    band_c = RED if is_cn else BRAND
-    pdf.set_fill_color(*band_c)
-    pdf.rect(14, band_y, W, 10, "F")
-    pdf.set_xy(14, band_y + 1.5)
-    pdf.set_font("Helvetica", "B", 12); pdf.set_text_color(*WHITE)
-    _cell(pdf, W, 7, title_label, align="C", nl=True)
+    contact_c = []
+    if inv.get("client_phone"): contact_c.append(inv["client_phone"])
+    if inv.get("client_email"): contact_c.append(inv["client_email"])
+    if contact_c:
+        _cell(pdf, bill_w, 4, _s("  ·  ".join(contact_c)), nl=True)
 
-    pdf.set_xy(14, band_y + 13)
-    half = W / 2
-    pdf.set_font("Helvetica", "B", 8); pdf.set_text_color(*DARK)
-    _cell(pdf, half * 0.40, 5, "Invoice No:", nl=False)
-    pdf.set_font("Helvetica", "", 8)
-    _cell(pdf, half * 0.60, 5, _s(inv.get("invoice_no", "")), nl=False)
-    pdf.set_font("Helvetica", "B", 8)
-    _cell(pdf, half * 0.40, 5, "Invoice Date:", nl=False)
-    pdf.set_font("Helvetica", "", 8)
-    _cell(pdf, half * 0.60, 5, _s(inv.get("invoice_date", "")), nl=True)
+    if inv.get("client_gstin"):
+        pdf.set_x(MARGIN)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(*DARK)
+        _cell(pdf, bill_w, 4, _s(f"GSTIN: {inv['client_gstin']}"), nl=True)
 
-    pdf.set_x(14)
-    pdf.set_font("Helvetica", "B", 8)
-    _cell(pdf, half * 0.40, 5, "Due Date:", nl=False)
+    # Right: Due Date block
+    due_x = MARGIN + CONTENT_W * 0.62
+    due_w = CONTENT_W * 0.38
+    pdf.set_xy(due_x, info_y)
+
+    pdf.set_font("Helvetica", "B", 7.5)
+    pdf.set_text_color(*MUTED)
+    _cell(pdf, due_w, 5, "DUE DATE", align="R", nl=True)
+
+    pdf.set_x(due_x)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(*DARK)
+    _cell(pdf, due_w, 7, _s(inv.get("due_date", "")), align="R", nl=True)
+
+    pdf.set_x(due_x)
     pdf.set_font("Helvetica", "", 8)
-    _cell(pdf, half * 0.60, 5, _s(inv.get("due_date", "")), nl=False)
-    pdf.set_font("Helvetica", "B", 8)
-    _cell(pdf, half * 0.40, 5, "Supply Type:", nl=False)
-    pdf.set_font("Helvetica", "", 8)
-    _cell(pdf, half * 0.60, 5, "Interstate (IGST)" if inv.get("is_interstate") else "Intrastate (CGST+SGST)", nl=True)
+    pdf.set_text_color(*MUTED)
+    _cell(pdf, due_w, 5, _s(inv.get("payment_terms", "Due on receipt")), align="R", nl=True)
 
     if inv.get("reference_no"):
-        pdf.set_x(14); pdf.set_font("Helvetica", "B", 8)
-        _cell(pdf, half * 0.40, 5, "Reference No:", nl=False)
-        pdf.set_font("Helvetica", "", 8)
-        _cell(pdf, half * 0.60, 5, _s(inv.get("reference_no", "")), nl=True)
+        pdf.set_x(due_x)
+        _cell(pdf, due_w, 5, _s(f"PO: {inv['reference_no']}"), align="R", nl=True)
 
-    bl_y = pdf.get_y() + 4
-    pdf.set_fill_color(*BL)
-    pdf.rect(14, bl_y, W, 24, "F")
-    pdf.set_xy(16, bl_y + 2)
-    pdf.set_font("Helvetica", "B", 8); pdf.set_text_color(*BRAND)
-    _cell(pdf, 0, 5, "Bill To:", nl=True)
-    pdf.set_x(16)
-    pdf.set_font("Helvetica", "B", 11); pdf.set_text_color(*DARK)
-    _cell(pdf, 0, 5, _s(inv.get("client_name", ""), 60), nl=True)
-    pdf.set_x(16)
-    pdf.set_font("Helvetica", "", 8); pdf.set_text_color(*MUTED)
-    if inv.get("client_address"): _cell(pdf, 0, 4, _s(inv["client_address"], 80), nl=True)
-    pdf.set_x(16)
-    ct = []
-    if inv.get("client_phone"): ct.append(inv["client_phone"])
-    if inv.get("client_email"): ct.append(inv["client_email"])
-    if ct: _cell(pdf, 0, 4, _s(" · ".join(ct)), nl=True)
-    if inv.get("client_gstin"):
-        pdf.set_x(16); pdf.set_font("Helvetica", "B", 8); pdf.set_text_color(*DARK)
-        _cell(pdf, 0, 4, _s(f"GSTIN: {inv['client_gstin']}"), nl=True)
+    supply_label = "Interstate (IGST)" if inv.get("is_interstate") else "Intrastate (CGST+SGST)"
+    pdf.set_x(due_x)
+    _cell(pdf, due_w, 5, _s(supply_label), align="R", nl=True)
 
-    pdf.set_xy(14, bl_y + 28)
-    pdf.set_font("Helvetica", "B", 9); pdf.set_text_color(*BRAND)
-    _cell(pdf, 0, 6, "Items / Services", nl=True)
-    pdf.set_draw_color(*BRAND)
-    pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
-    pdf.ln(1)
+    # Divider
+    div_y = max(pdf.get_y(), info_y + 30) + 2
+    pdf.set_draw_color(*_lighten(BRAND, 0.70))
+    pdf.set_line_width(0.3)
+    pdf.line(MARGIN, div_y, MARGIN + CONTENT_W, div_y)
+    pdf.set_line_width(0.2)
+
+    # ══════════════════════════════════════════════════════
+    # ITEMS TABLE
+    # ══════════════════════════════════════════════════════
+    table_y = div_y + 3
+    pdf.set_xy(MARGIN, table_y)
 
     is_inter = inv.get("is_interstate", False)
-    sr_w = 8; hsn_w = 22; qty_w = 14; unit_w = 16; rate_w = 26; tax_w = 18; amt_w = 26
-    desc_w = W - sr_w - hsn_w - qty_w - unit_w - rate_w - (0 if is_inter else tax_w * 2) - (tax_w if is_inter else 0) - amt_w
+
+    # Column widths — match UI preview: Description | HSN/SAC | Qty | Disc% | Rate | (tax cols) | Amount
+    sr_w   = 7
+    hsn_w  = 20
+    qty_w  = 13
+    disc_w = 13
+    rate_w = 24
+    amt_w  = 26
+    tax_w  = 18   # per CGST / SGST / IGST column
+    n_tax_cols = 1 if is_inter else 2
+    desc_w = CONTENT_W - sr_w - hsn_w - qty_w - disc_w - rate_w - tax_w * n_tax_cols - amt_w
 
     def _th(txt, w, a="C"):
-        pdf.set_fill_color(*BRAND); pdf.set_text_color(*WHITE)
+        pdf.set_fill_color(*BRAND)
+        pdf.set_text_color(*WHITE)
         pdf.set_font("Helvetica", "B", 7)
         _cell(pdf, w, 7, txt, align=a, fill=True, nl=False)
 
-    _th("Sr", sr_w); _th("Description", desc_w, "L"); _th("HSN/SAC", hsn_w)
-    _th("Qty", qty_w); _th("Unit", unit_w); _th("Rate", rate_w, "R")
+    _th("Sr",          sr_w)
+    _th("Description", desc_w, "L")
+    _th("HSN/SAC",     hsn_w)
+    _th("Qty",         qty_w)
+    _th("Disc%",       disc_w)
+    _th("Rate",        rate_w, "R")
     if is_inter:
-        _th("IGST%", tax_w); _th("IGST Amt", amt_w, "R")
+        _th("IGST%",   tax_w)
     else:
-        _th("CGST%", tax_w); _th("CGST Amt", tax_w, "R")
-        _th("SGST%", tax_w); _th("SGST Amt", tax_w, "R")
-    _th("Amount", amt_w, "R")
-    pdf.ln(0); _cell(pdf, 0, 0, "", nl=True)
+        _th("CGST%",   tax_w)
+        _th("SGST%",   tax_w)
+    _th("Amount",      amt_w, "R")
+    _cell(pdf, 0, 0, "", nl=True)
 
     items = inv.get("items", [])
     for idx, it in enumerate(items, 1):
-        fc = BL if idx % 2 == 0 else WHITE
-        pdf.set_fill_color(*fc); pdf.set_text_color(*DARK)
+        row_bg = BL if idx % 2 == 0 else WHITE
+        pdf.set_fill_color(*row_bg)
+        pdf.set_text_color(*DARK)
         pdf.set_font("Helvetica", "", 7.5)
-        _cell(pdf, sr_w, 7, str(idx), align="C", fill=True, nl=False)
-        _cell(pdf, desc_w, 7, _s(it.get("description", ""), 38), align="L", fill=True, nl=False)
-        _cell(pdf, hsn_w, 7, _s(it.get("hsn_sac", "")[:10]), align="C", fill=True, nl=False)
-        _cell(pdf, qty_w, 7, f"{it.get('quantity', 1):.2f}", align="C", fill=True, nl=False)
-        _cell(pdf, unit_w, 7, _s(it.get("unit", "")[:6]), align="C", fill=True, nl=False)
-        _cell(pdf, rate_w, 7, f"{it.get('unit_price', 0):,.2f}", align="R", fill=True, nl=False)
+
+        _cell(pdf, sr_w,   7, str(idx),                                align="C", fill=True, nl=False)
+        _cell(pdf, desc_w, 7, _s(it.get("description", ""), 42),      align="L", fill=True, nl=False)
+        _cell(pdf, hsn_w,  7, _s(it.get("hsn_sac", "")[:12]),         align="C", fill=True, nl=False)
+        _cell(pdf, qty_w,  7, f"{it.get('quantity', 1):.2f}",         align="C", fill=True, nl=False)
+        _cell(pdf, disc_w, 7, f"{it.get('discount_pct', 0):.1f}%",    align="C", fill=True, nl=False)
+        _cell(pdf, rate_w, 7, f"Rs.{it.get('unit_price', 0):,.2f}",   align="R", fill=True, nl=False)
         if is_inter:
-            _cell(pdf, tax_w, 7, f"{it.get('igst_rate', 0):.1f}%", align="C", fill=True, nl=False)
-            _cell(pdf, amt_w, 7, f"{it.get('igst_amount', 0):,.2f}", align="R", fill=True, nl=False)
+            _cell(pdf, tax_w, 7, f"{it.get('igst_rate', 0):.1f}%",   align="C", fill=True, nl=False)
         else:
-            _cell(pdf, tax_w, 7, f"{it.get('cgst_rate', 0):.1f}%", align="C", fill=True, nl=False)
-            _cell(pdf, tax_w, 7, f"{it.get('cgst_amount', 0):,.2f}", align="R", fill=True, nl=False)
-            _cell(pdf, tax_w, 7, f"{it.get('sgst_rate', 0):.1f}%", align="C", fill=True, nl=False)
-            _cell(pdf, tax_w, 7, f"{it.get('sgst_amount', 0):,.2f}", align="R", fill=True, nl=False)
-        _cell(pdf, amt_w, 7, f"{it.get('total_amount', 0):,.2f}", align="R", fill=True, nl=True)
+            cgst_r = it.get("cgst_rate", it.get("gst_rate", 18) / 2)
+            sgst_r = it.get("sgst_rate", it.get("gst_rate", 18) / 2)
+            _cell(pdf, tax_w, 7, f"{cgst_r:.1f}%",                    align="C", fill=True, nl=False)
+            _cell(pdf, tax_w, 7, f"{sgst_r:.1f}%",                    align="C", fill=True, nl=False)
+        _cell(pdf, amt_w,  7, f"Rs.{it.get('total_amount', 0):,.2f}", align="R", fill=True, nl=True)
 
-    lbl_w = W - amt_w
-    pdf.set_font("Helvetica", "", 8); pdf.set_fill_color(*BL); pdf.set_text_color(*DARK)
+        # Optional sub-detail line (unit / item_details)
+        sub_parts = []
+        if it.get("item_details"): sub_parts.append(_s(it["item_details"]))
+        if it.get("unit"):         sub_parts.append(_s(it["unit"]))
+        if sub_parts:
+            pdf.set_x(MARGIN + sr_w)
+            pdf.set_font("Helvetica", "I", 6.5)
+            pdf.set_text_color(*MUTED)
+            pdf.set_fill_color(*row_bg)
+            sub_w = desc_w + hsn_w + qty_w + disc_w + rate_w + tax_w * n_tax_cols + amt_w
+            _cell(pdf, sub_w, 4, _s("  ".join(sub_parts)), align="L", fill=True, nl=True)
 
-    def _trow(label, value, bold=False, color=None):
-        fc = BRAND if bold else BL
-        tc = WHITE if bold else (color or DARK)
-        pdf.set_fill_color(*fc); pdf.set_text_color(*tc)
+    # ══════════════════════════════════════════════════════
+    # TOTALS BLOCK
+    # ══════════════════════════════════════════════════════
+    def _trow(label, value, bold=False, strike=False):
+        bg = BRAND if bold else BL
+        tc = WHITE if bold else DARK
+        pdf.set_fill_color(*bg)
+        pdf.set_text_color(*tc)
         pdf.set_font("Helvetica", "B" if bold else "", 8 if not bold else 9)
-        _cell(pdf, lbl_w, 7, label, align="R", fill=True, nl=False)
-        _cell(pdf, amt_w, 7, f"Rs. {float(value):,.2f}", align="R", fill=True, nl=True)
+        _cell(pdf, CONTENT_W - amt_w, 7, label, align="R", fill=True, nl=False)
+        prefix = "-Rs." if strike else "Rs."
+        val_str = f"{prefix}{abs(float(value)):,.2f}"
+        _cell(pdf, amt_w, 7, val_str, align="R", fill=True, nl=True)
 
-    _trow("Subtotal:", inv.get("subtotal", 0))
-    if inv.get("total_discount", 0): _trow("Discount:", inv.get("total_discount", 0))
-    _trow("Taxable Value:", inv.get("total_taxable", 0))
+    pdf.set_x(MARGIN)
+    _trow("Subtotal", inv.get("subtotal", 0))
+    if float(inv.get("total_discount", 0)) > 0:
+        _trow("Discount", inv.get("total_discount", 0), strike=True)
+    _trow("Taxable Value", inv.get("total_taxable", 0))
+
+    tt = float(inv.get("total_taxable", 1)) or 1
     if is_inter:
-        _trow("IGST:", inv.get("total_igst", 0))
+        igst_pct = round(float(inv.get("total_igst", 0)) / tt * 100, 1)
+        _trow(f"IGST ({igst_pct:.1f}%)", inv.get("total_igst", 0))
     else:
-        _trow("CGST:", inv.get("total_cgst", 0))
-        _trow("SGST:", inv.get("total_sgst", 0))
-    if inv.get("shipping_charges", 0): _trow("Shipping:", inv.get("shipping_charges", 0))
-    if inv.get("other_charges", 0): _trow("Other Charges:", inv.get("other_charges", 0))
-    _trow("GRAND TOTAL:", inv.get("grand_total", 0), bold=True)
+        cgst_pct = round(float(inv.get("total_cgst", 0)) / tt * 100, 1)
+        sgst_pct = round(float(inv.get("total_sgst", 0)) / tt * 100, 1)
+        _trow(f"CGST ({cgst_pct:.1f}%)", inv.get("total_cgst", 0))
+        _trow(f"SGST ({sgst_pct:.1f}%)", inv.get("total_sgst", 0))
 
-    pdf.ln(2)
-    pdf.set_font("Helvetica", "I", 8); pdf.set_text_color(*MUTED)
-    _cell(pdf, 0, 5, _s(_amount_in_words(float(inv.get("grand_total", 0)))), nl=True)
+    if float(inv.get("shipping_charges", 0)) > 0:
+        _trow("Shipping Charges", inv.get("shipping_charges", 0))
+    if float(inv.get("other_charges", 0)) > 0:
+        _trow("Other Charges", inv.get("other_charges", 0))
+    _trow("GRAND TOTAL", inv.get("grand_total", 0), bold=True)
 
-    # GST summary
-    pdf.ln(4)
-    pdf.set_font("Helvetica", "B", 9); pdf.set_text_color(*BRAND)
+    # Amount in words
+    pdf.set_x(MARGIN)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(*MUTED)
+    _cell(pdf, CONTENT_W, 5, _s(_amount_in_words(float(inv.get("grand_total", 0)))), nl=True)
+
+    # PAID stamp (right side)
+    if inv.get("status") == "paid":
+        stamp_y = pdf.get_y() - 12
+        pdf.set_xy(MARGIN + CONTENT_W - 56, stamp_y)
+        pdf.set_draw_color(*GREEN)
+        pdf.set_line_width(0.8)
+        pdf.set_font("Helvetica", "B", 20)
+        pdf.set_text_color(*GREEN)
+        pdf.cell(50, 12, "PAID", border=1, align="C")
+        pdf.set_line_width(0.2)
+
+    # ══════════════════════════════════════════════════════
+    # GST SUMMARY
+    # ══════════════════════════════════════════════════════
+    pdf.ln(5)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*BRAND)
     _cell(pdf, 0, 5, "GST Summary", nl=True)
-    pdf.set_draw_color(*BRAND)
-    pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y()); pdf.ln(1)
+    pdf.set_draw_color(*_lighten(BRAND, 0.70))
+    pdf.line(MARGIN, pdf.get_y(), MARGIN + CONTENT_W, pdf.get_y())
+    pdf.ln(1)
+
     gst_sum: Dict[float, Dict[str, float]] = {}
     for it in items:
         r = float(it.get("gst_rate", 18))
-        if r not in gst_sum: gst_sum[r] = {"taxable": 0, "cgst": 0, "sgst": 0, "igst": 0}
+        if r not in gst_sum:
+            gst_sum[r] = {"taxable": 0.0, "cgst": 0.0, "sgst": 0.0, "igst": 0.0}
         gst_sum[r]["taxable"] += float(it.get("taxable_value", 0))
-        gst_sum[r]["cgst"] += float(it.get("cgst_amount", 0))
-        gst_sum[r]["sgst"] += float(it.get("sgst_amount", 0))
-        gst_sum[r]["igst"] += float(it.get("igst_amount", 0))
-    g_w = W / 5
-    pdf.set_fill_color(*BRAND); pdf.set_text_color(*WHITE); pdf.set_font("Helvetica", "B", 7.5)
-    for h in ["GST Rate", "Taxable Amt", "CGST", "SGST / IGST", "Total GST"]:
-        _cell(pdf, g_w, 6, h, align="C", fill=True, nl=False)
+        gst_sum[r]["cgst"]    += float(it.get("cgst_amount",   0))
+        gst_sum[r]["sgst"]    += float(it.get("sgst_amount",   0))
+        gst_sum[r]["igst"]    += float(it.get("igst_amount",   0))
+
+    g_w = CONTENT_W / 5
+    pdf.set_fill_color(*BRAND)
+    pdf.set_text_color(*WHITE)
+    pdf.set_font("Helvetica", "B", 7.5)
+    for col_hdr in ["GST Rate", "Taxable Amt", "CGST", "SGST / IGST", "Total GST"]:
+        _cell(pdf, g_w, 6, col_hdr, align="C", fill=True, nl=False)
     _cell(pdf, 0, 0, "", nl=True)
+
     pdf.set_font("Helvetica", "", 7.5)
     for i, (rate, row) in enumerate(sorted(gst_sum.items())):
-        pdf.set_fill_color(*(BL if i % 2 == 0 else WHITE)); pdf.set_text_color(*DARK)
-        gst_tot = row["cgst"] + row["sgst"] + row["igst"]
-        _cell(pdf, g_w, 6, f"{rate:.1f}%", align="C", fill=True, nl=False)
-        _cell(pdf, g_w, 6, f"{row['taxable']:,.2f}", align="C", fill=True, nl=False)
-        _cell(pdf, g_w, 6, f"{row['cgst']:,.2f}", align="C", fill=True, nl=False)
-        _cell(pdf, g_w, 6, f"{row['sgst'] or row['igst']:,.2f}", align="C", fill=True, nl=False)
-        _cell(pdf, g_w, 6, f"{gst_tot:,.2f}", align="C", fill=True, nl=True)
-
-    # Bank details
-    if company.get("bank_account_no") or company.get("bank_name"):
-        pdf.ln(4)
-        pdf.set_font("Helvetica", "B", 9); pdf.set_text_color(*BRAND)
-        _cell(pdf, 0, 5, "Bank Details for Payment", nl=True)
-        pdf.set_draw_color(*BRAND)
-        pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y()); pdf.ln(1)
+        pdf.set_fill_color(*(BL if i % 2 == 0 else WHITE))
         pdf.set_text_color(*DARK)
-        h2 = W / 2
-        for label, val in [("Account Name", company.get("bank_account_name", "")),
-                           ("Bank Name", company.get("bank_name", "")),
-                           ("Account No", company.get("bank_account_no", "")),
-                           ("IFSC Code", company.get("bank_ifsc", ""))]:
-            pdf.set_font("Helvetica", "B", 8)
-            _cell(pdf, h2 * 0.42, 5, _s(f"{label}:"), nl=False)
-            pdf.set_font("Helvetica", "", 8)
-            _cell(pdf, h2 * 0.58, 5, _s(val), nl=True)
+        gst_tot = row["cgst"] + row["sgst"] + row["igst"]
+        _cell(pdf, g_w, 6, f"{rate:.1f}%",              align="C", fill=True, nl=False)
+        _cell(pdf, g_w, 6, f"Rs.{row['taxable']:,.2f}", align="C", fill=True, nl=False)
+        _cell(pdf, g_w, 6, f"Rs.{row['cgst']:,.2f}",   align="C", fill=True, nl=False)
+        _cell(pdf, g_w, 6, f"Rs.{row['sgst'] or row['igst']:,.2f}", align="C", fill=True, nl=False)
+        _cell(pdf, g_w, 6, f"Rs.{gst_tot:,.2f}",       align="C", fill=True, nl=True)
 
-    if inv.get("status") == "paid":
-        stamp_y = pdf.get_y() + 2
-        pdf.set_xy(14 + W - 60, stamp_y)
-        pdf.set_draw_color(*GREEN); pdf.set_font("Helvetica", "B", 18)
-        pdf.set_text_color(*GREEN)
-        pdf.cell(50, 12, "PAID", border=1, align="C")
-
-    if inv.get("notes") or inv.get("terms_conditions"):
+    # ══════════════════════════════════════════════════════
+    # BANK DETAILS
+    # ══════════════════════════════════════════════════════
+    if company.get("bank_account_no") or company.get("bank_name"):
         pdf.ln(5)
-        pdf.set_font("Helvetica", "B", 9); pdf.set_text_color(*BRAND)
-        _cell(pdf, 0, 5, "Terms & Notes", nl=True)
-        pdf.set_draw_color(*BRAND)
-        pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y()); pdf.ln(1)
-        pdf.set_font("Helvetica", "", 8); pdf.set_text_color(*DARK)
-        if inv.get("payment_terms"): _mcell(pdf, W, 4, _s(f"Payment: {inv['payment_terms']}"))
-        if inv.get("terms_conditions"): _mcell(pdf, W, 4, _s(inv["terms_conditions"]))
-        if inv.get("notes"): _mcell(pdf, W, 4, _s(f"Note: {inv['notes']}"))
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*BRAND)
+        _cell(pdf, 0, 5, "Bank Details for Payment", nl=True)
+        pdf.set_draw_color(*_lighten(BRAND, 0.70))
+        pdf.line(MARGIN, pdf.get_y(), MARGIN + CONTENT_W, pdf.get_y())
+        pdf.ln(1)
+        half_w = CONTENT_W / 2
+        for lbl, val in [
+            ("Account Name", company.get("bank_account_name", "")),
+            ("Bank Name",    company.get("bank_name",          "")),
+            ("Account No",   company.get("bank_account_no",    "")),
+            ("IFSC Code",    company.get("bank_ifsc",          "")),
+        ]:
+            pdf.set_font("Helvetica", "B", 8); pdf.set_text_color(*DARK)
+            _cell(pdf, half_w * 0.42, 5, _s(f"{lbl}:"), nl=False)
+            pdf.set_font("Helvetica", "", 8)
+            _cell(pdf, half_w * 0.58, 5, _s(val), nl=True)
 
+    # ══════════════════════════════════════════════════════
+    # TERMS & NOTES
+    # ══════════════════════════════════════════════════════
+    if inv.get("terms_conditions") or inv.get("notes"):
+        pdf.ln(5)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*BRAND)
+        _cell(pdf, 0, 5, "Terms & Notes", nl=True)
+        pdf.set_draw_color(*_lighten(BRAND, 0.70))
+        pdf.line(MARGIN, pdf.get_y(), MARGIN + CONTENT_W, pdf.get_y())
+        pdf.ln(1)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(*DARK)
+        if inv.get("terms_conditions"):
+            _mcell(pdf, CONTENT_W, 4, _s(inv["terms_conditions"]))
+        if inv.get("notes"):
+            _mcell(pdf, CONTENT_W, 4, _s(f"Note: {inv['notes']}"))
+
+    # ══════════════════════════════════════════════════════
+    # SIGNATURE — bottom-right
+    # ══════════════════════════════════════════════════════
     pdf.ln(8)
+    sig_y   = pdf.get_y()
+    sig_x   = MARGIN + CONTENT_W - 58
+    sig_w   = 55
+
     sig_b64 = company.get("signature_base64", "")
     if sig_b64:
-        _embed_logo(pdf, sig_b64, x=14, y=pdf.get_y(), h=14)
-        pdf.ln(16)
-    else:
-        pdf.ln(12)
-    pdf.set_draw_color(*BRAND)
-    pdf.line(14, pdf.get_y(), 75, pdf.get_y())
-    pdf.set_font("Helvetica", "B", 9); pdf.set_text_color(*DARK)
-    _cell(pdf, 0, 5, _s(f"For {company.get('name', '')}"), nl=True)
-    pdf.set_font("Helvetica", "", 8); pdf.set_text_color(*MUTED)
-    _cell(pdf, 0, 4, "Authorised Signatory", nl=True)
-    pdf.ln(4)
-    pdf.set_font("Helvetica", "I", 7.5)
-    _cell(pdf, 0, 4, "This is a computer generated invoice.", nl=True)
+        _embed_logo(pdf, sig_b64, x=sig_x, y=sig_y, h=14)
+        sig_y += 16
 
+    pdf.set_draw_color(*BRAND)
+    pdf.set_line_width(0.4)
+    pdf.line(sig_x, sig_y, sig_x + sig_w, sig_y)
+    pdf.set_line_width(0.2)
+
+    pdf.set_xy(sig_x, sig_y + 1)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(*DARK)
+    _cell(pdf, sig_w, 5, _s(f"For {company.get('name', '')}"), align="C", nl=True)
+
+    pdf.set_x(sig_x)
+    pdf.set_font("Helvetica", "", 7)
+    pdf.set_text_color(*MUTED)
+    _cell(pdf, sig_w, 4, "Authorised Signatory", align="C", nl=True)
+
+    # ── Output
     buf = BytesIO()
     buf.write(pdf.output())
     buf.seek(0)
@@ -1207,24 +1382,39 @@ async def parse_backup_file(file: UploadFile = File(...), current_user: User = D
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     filename = file.filename or "unknown"
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    supported = {"vyp": "vyp", "db": "vyp", "xml": "xml", "tbk": "xml",
-                 "xlsx": "excel", "xls": "excel", "csv": "excel", "json": "json", "vyb": "json"}
+
+    # FIX: .vyb is KhataBook Pro format — same SQLite schema as .vyp, route to vyp parser
+    supported = {
+        "vyp":  "vyp",
+        "vyb":  "vyp",    # ← was incorrectly mapped to "json" in v6.0
+        "db":   "vyp",
+        "xml":  "xml",
+        "tbk":  "xml",
+        "xlsx": "excel",
+        "xls":  "excel",
+        "csv":  "excel",
+        "json": "json",
+    }
     parser_type = supported.get(ext)
     if not parser_type:
-        raise HTTPException(400, f"Unsupported file format: .{ext}")
+        raise HTTPException(400, f"Unsupported file format: .{ext}. Supported: {', '.join(f'.{k}' for k in supported)}")
+
     tmp_path = None
     try:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}")
         content = await file.read()
         tmp.write(content); tmp.close(); tmp_path = tmp.name
-        if parser_type == "vyp": result = _parse_vyp_file(tmp_path)
-        elif parser_type == "xml": result = _parse_tally_xml(tmp_path)
+
+        if   parser_type == "vyp":   result = _parse_vyp_file(tmp_path)
+        elif parser_type == "xml":   result = _parse_tally_xml(tmp_path)
         elif parser_type == "excel": result = _parse_excel_file(tmp_path, filename)
-        elif parser_type == "json": result = _parse_json_file(tmp_path)
+        elif parser_type == "json":  result = _parse_json_file(tmp_path)
         else: raise HTTPException(400, "No parser available")
-        # Optionally backup to Drive — but never fail if it doesn't work
+
+        # Optionally backup to Drive — never fail if it doesn't work
         if _drive_configured():
-            _upload_to_drive(content, f"Backup_{filename}", "backups", file.content_type or "application/octet-stream")
+            _upload_to_drive(content, f"Backup_{filename}", "backups",
+                             file.content_type or "application/octet-stream")
         return result
     finally:
         if tmp_path and os.path.exists(tmp_path):
@@ -1348,6 +1538,35 @@ async def invoice_stats(year: Optional[int] = None, month: Optional[int] = None,
     }
 
 
+# ══════════════════════════════════════════════════════════════
+# FIX: drive-status MUST be declared BEFORE /invoices/{inv_id}
+# In v6.0 it was after, so FastAPI matched "drive-status" as an
+# invoice ID and routed it to get_invoice() → always 404.
+# ══════════════════════════════════════════════════════════════
+
+@router.get("/invoices/drive-status")
+async def check_drive_status(current_user: User = Depends(get_current_user)):
+    if not _perm(current_user): raise HTTPException(403, "Access denied")
+    configured = _drive_configured()
+    accessible = False
+    if configured:
+        try:
+            service = _get_drive_service()
+            service.files().list(pageSize=1).execute()
+            accessible = True
+        except Exception:
+            pass
+    return {
+        "configured": configured,
+        "accessible": accessible,
+        "message": (
+            "Google Drive is connected and ready" if accessible
+            else "Drive credentials found but connection failed" if configured
+            else "Google Drive not configured (optional feature)"
+        ),
+    }
+
+
 @router.get("/invoices/{inv_id}")
 async def get_invoice(inv_id: str, current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
@@ -1420,7 +1639,6 @@ async def download_invoice_pdf(inv_id: str, current_user: User = Depends(get_cur
 
 # ═══════════════════════════════════════════════════════════
 # OPTIONAL: UPLOAD PDF TO GOOGLE DRIVE
-# User explicitly triggers this after local download
 # ═══════════════════════════════════════════════════════════
 
 @router.post("/invoices/{inv_id}/upload-to-drive")
@@ -1428,7 +1646,6 @@ async def upload_invoice_to_drive(inv_id: str, current_user: User = Depends(get_
     """
     Optional: generate PDF and upload to Google Drive.
     Only works if Drive credentials are configured.
-    Call this AFTER local download if the user wants a Drive backup.
     """
     if not _perm(current_user):
         raise HTTPException(403, "Access denied")
@@ -1457,11 +1674,10 @@ async def upload_invoice_to_drive(inv_id: str, current_user: User = Depends(get_
         client_folder_id = DRIVE_FOLDERS["invoices"]
 
     safe_inv_no = (inv.get("invoice_no") or inv_id).replace("/", "_").replace("\\", "_")
-
-    pdf_link = _upload_to_drive(pdf_bytes, f"Invoice_{safe_inv_no}.pdf", "invoices", "application/pdf", custom_parent_id=client_folder_id)
-
-    # Also upload JSON backup
-    _upload_to_drive(json.dumps(inv, default=str).encode(), f"Invoice_{safe_inv_no}.json", "invoices", "application/json", custom_parent_id=client_folder_id)
+    pdf_link = _upload_to_drive(pdf_bytes, f"Invoice_{safe_inv_no}.pdf", "invoices", "application/pdf",
+                                custom_parent_id=client_folder_id)
+    _upload_to_drive(json.dumps(inv, default=str).encode(), f"Invoice_{safe_inv_no}.json",
+                     "invoices", "application/json", custom_parent_id=client_folder_id)
 
     if pdf_link:
         await db.invoices.update_one({"id": inv_id},
@@ -1470,35 +1686,8 @@ async def upload_invoice_to_drive(inv_id: str, current_user: User = Depends(get_
     return {
         "status": "success" if pdf_link else "warning",
         "drive_link": pdf_link or "",
-        "message": f"Invoice uploaded to Google Drive" if pdf_link else "Upload failed — check Drive credentials",
+        "message": "Invoice uploaded to Google Drive" if pdf_link else "Upload failed — check Drive credentials",
         "invoice_no": inv.get("invoice_no", ""),
-    }
-
-
-# ═══════════════════════════════════════════════════════════
-# DRIVE STATUS CHECK
-# ═══════════════════════════════════════════════════════════
-
-@router.get("/invoices/drive-status")
-async def check_drive_status(current_user: User = Depends(get_current_user)):
-    if not _perm(current_user): raise HTTPException(403, "Access denied")
-    configured = _drive_configured()
-    accessible = False
-    if configured:
-        try:
-            service = _get_drive_service()
-            service.files().list(pageSize=1).execute()
-            accessible = True
-        except Exception:
-            pass
-    return {
-        "configured": configured,
-        "accessible": accessible,
-        "message": (
-            "Google Drive is connected and ready" if accessible
-            else "Drive credentials found but connection failed" if configured
-            else "Google Drive not configured (optional feature)"
-        ),
     }
 
 
@@ -1545,7 +1734,7 @@ async def send_invoice_email(inv_id: str, background_tasks: BackgroundTasks,
     subject = f"Invoice {inv_no} from {company.get('name', 'Your Company')}"
     html_body = f"""<h2>Invoice {inv_no}</h2>
     <p>Dear {inv.get('client_name', 'Customer')},</p>
-    <p>Please find attached invoice <strong>{inv_no}</strong> for <strong>₹{inv.get('grand_total', 0):,.2f}</strong>.</p>
+    <p>Please find attached invoice <strong>{inv_no}</strong> for <strong>Rs.{inv.get('grand_total', 0):,.2f}</strong>.</p>
     <p>Due Date: {inv.get('due_date', 'N/A')}</p><br>
     <p>Regards,<br>{company.get('name', 'Your Company')}</p>"""
     background_tasks.add_task(_send_email, inv["client_email"], subject, html_body,
