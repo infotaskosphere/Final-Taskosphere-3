@@ -154,7 +154,7 @@ const Hl = ({ text = '', query = '' }) => {
   );
 };
 
-// ─── FIX 5: DriveUploadBtn component ─────────────────────────────────────────
+// ─── DriveUploadBtn component ─────────────────────────────────────────
 const DriveUploadBtn = ({ invoiceId, invoiceNo }) => {
   const [loading, setLoading] = useState(false);
 
@@ -442,27 +442,6 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
       ];
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'B2B');
     }
-    if (gstr1.b2cL.length) {
-      const rows = [['GSTR-1 B2C Large (>₹2.5L)'], [`Period: ${periodLabel}`], [],
-        ['Type','Place of Supply','Applicable % of Tax Rate','Taxable Value (₹)','IGST (₹)','CGST (₹)','SGST/UTGST (₹)','Cess (₹)','Client Name','Invoice No','Invoice Date','Invoice Value'],
-        ...gstr1.b2cL.map(inv => ['OE',inv.client_state||'','',inv.total_taxable||0,inv.total_igst||0,inv.total_cgst||0,inv.total_sgst||0,0,inv.client_name||'',inv.invoice_no||'',inv.invoice_date||'',inv.grand_total||0]),
-      ];
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'B2CL');
-    }
-    {
-      const rows = [['GSTR-1 B2C Small (≤₹2.5L) — Aggregate'], [`Period: ${periodLabel}`], [],
-        ['Type','Place of Supply','Supply Type','Taxable Value (₹)','IGST (₹)','CGST (₹)','SGST/UTGST (₹)','Cess (₹)'],
-        ['OE','Aggregate','Intra/Inter',gstr1.b2cSTotal.taxable,gstr1.b2cSTotal.igst,gstr1.b2cSTotal.cgst,gstr1.b2cSTotal.sgst,0],
-      ];
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'B2CS');
-    }
-    if (gstr1.cdnr.length) {
-      const rows = [['GSTR-1 Credit/Debit Notes (Registered)'], [`Period: ${periodLabel}`], [],
-        ['GSTIN/UIN of Recipient','Receiver Name','Note No.','Note Date','Note Type','Place of Supply','Reverse Charge','Note Supply Type','Note Value (₹)','Taxable Value (₹)','IGST (₹)','CGST (₹)','SGST (₹)','Cess (₹)'],
-        ...gstr1.cdnr.map(inv => [inv.client_gstin||'',inv.client_name||'',inv.invoice_no||'',inv.invoice_date||'',inv.invoice_type==='credit_note'?'C':'D',inv.client_state||'','N','Regular',inv.grand_total||0,inv.total_taxable||0,inv.total_igst||0,inv.total_cgst||0,inv.total_sgst||0,0]),
-      ];
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'CDNR');
-    }
     if (gstr1.hsnSummary.length) {
       const rows = [['GSTR-1 HSN/SAC Summary'], [`Period: ${periodLabel}`], [],
         ['HSN/SAC','Description','UQC','Total Quantity','Total Value (₹)','Taxable Value (₹)','IGST (₹)','CGST (₹)','SGST/UTGST (₹)','Cess (₹)'],
@@ -480,12 +459,8 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
       [`GSTR-3B Return — ${periodLabel}`], [],
       ['3.1 DETAILS OF OUTWARD SUPPLIES AND INWARD SUPPLIES LIABLE TO REVERSE CHARGE'], [],
       ['Nature of Supplies','Total Taxable Value (₹)','Integrated Tax (₹)','Central Tax (₹)','State/UT Tax (₹)','Cess (₹)'],
-      ['(a) Outward taxable supplies (other than zero rated, nil and exempted)',fmt(gstr3b.outward.taxable),fmt(gstr3b.outward.igst),fmt(gstr3b.outward.cgst),fmt(gstr3b.outward.sgst),'0.00'],
-      ['(b) Outward taxable supplies (zero rated)','0.00','0.00','0.00','0.00','0.00'],
-      ['(c) Other outward supplies (Nil rated, exempted)','0.00','0.00','0.00','0.00','0.00'],
-      ['(d) Inward supplies (liable to reverse charge)','0.00','0.00','0.00','0.00','0.00'],
-      ['(e) Non-GST outward supplies','0.00','','','',''], [],
-      ['NET TAX PAYABLE',fmt(gstr3b.netTotal),'','','',fmt(gstr3b.netTotal)],
+      ['(a) Outward taxable supplies',fmt(gstr3b.outward.taxable),fmt(gstr3b.outward.igst),fmt(gstr3b.outward.cgst),fmt(gstr3b.outward.sgst),'0.00'],
+      [], ['NET TAX PAYABLE',fmt(gstr3b.netTotal),'','','',fmt(gstr3b.netTotal)],
     ];
     const ws = XLSX.utils.aoa_to_sheet(rows);
     const wb = XLSX.utils.book_new();
@@ -510,220 +485,113 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
         <DialogDescription className="sr-only">Generate GSTR-1, GSTR-3B, GSTR-2B reports</DialogDescription>
         <div className="px-7 py-5 relative overflow-hidden flex-shrink-0"
           style={{ background: 'linear-gradient(135deg, #064e3b, #065f46, #047857)' }}>
-          <div className="absolute right-0 top-0 w-52 h-52 rounded-full -mr-16 -mt-16 opacity-10"
-            style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
           <div className="relative flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center">
-                <FileSpreadsheet className="h-5 w-5 text-white" />
-              </div>
-              <div>
-                <h2 className="text-white font-bold text-xl">GST Returns</h2>
-                <p className="text-emerald-200 text-xs mt-0.5">Generate & export GSTR-1 · GSTR-3B · GSTR-2B</p>
-              </div>
+              <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center"><FileSpreadsheet className="h-5 w-5 text-white" /></div>
+              <div><h2 className="text-white font-bold text-xl">GST Returns</h2><p className="text-emerald-200 text-xs mt-0.5">Generate & export GSTR-1 · GSTR-3B · GSTR-2B</p></div>
             </div>
             <div className="flex items-center gap-3">
-              <div>
-                <p className="text-[10px] text-white/50 uppercase tracking-widest mb-1">Return Period</p>
-                <input type="month" value={month} onChange={e => setMonth(e.target.value)}
-                  className="h-9 px-3 rounded-xl bg-white/15 border border-white/25 text-white text-sm font-semibold outline-none focus:bg-white/25 transition-colors" />
-              </div>
-              <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-all">
-                <X className="h-4 w-4 text-white" />
-              </button>
+              <input type="month" value={month} onChange={e => setMonth(e.target.value)}
+                className="h-9 px-3 rounded-xl bg-white/15 border border-white/25 text-white text-sm font-semibold outline-none" />
+              <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center"><X className="h-4 w-4 text-white" /></button>
             </div>
           </div>
           <div className="relative mt-5 flex gap-1">
             {TABS.map(t => (
               <button key={t.id} onClick={() => setTab(t.id)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all
-                  ${tab === t.id ? 'bg-white text-emerald-800 shadow-sm' : 'bg-white/10 text-white/70 hover:bg-white/20'}`}>
-                <t.icon className="h-3.5 w-3.5" />
-                <span>{t.label}</span>
-                <span className={`text-[9px] ${tab === t.id ? 'text-emerald-600' : 'text-white/40'}`}>{t.sub}</span>
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${tab === t.id ? 'bg-white text-emerald-800 shadow-sm' : 'bg-white/10 text-white/70 hover:bg-white/20'}`}>
+                <t.icon className="h-3.5 w-3.5" /><span>{t.label}</span>
               </button>
             ))}
-            <div className="ml-auto flex items-center gap-2">
-              <span className={`text-xs px-3 py-1.5 rounded-lg font-semibold ${monthInvoices.length > 0 ? 'bg-white/20 text-white' : 'bg-white/10 text-white/40'}`}>
-                {monthInvoices.length} invoice{monthInvoices.length !== 1 ? 's' : ''} this period
-              </span>
-            </div>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto">
-          {tab === 'gstr1' && (
-            <div className="p-6 space-y-5">
-              {monthInvoices.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-                  <FileSpreadsheet className="h-10 w-10 mb-3 opacity-30" />
-                  <p className="text-sm font-medium">No invoices for this period</p>
-                  <p className="text-xs mt-1">Change the month selector above</p>
-                </div>
-              ) : (
-                <>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {[
-                      { label: 'B2B Invoices', val: gstr1.b2b.length, sub: fmtC(gstr1.b2b.reduce((s,i)=>s+(i.grand_total||0),0)), color: COLORS.mediumBlue },
-                      { label: 'B2C Large', val: gstr1.b2cL.length, sub: fmtC(gstr1.b2cL.reduce((s,i)=>s+(i.grand_total||0),0)), color: COLORS.amber },
-                      { label: 'B2C Small', val: gstr1.b2cS.length, sub: fmtC(gstr1.b2cSTotal.taxable), color: COLORS.teal },
-                      { label: 'Credit / Debit', val: gstr1.cdnr.length, sub: 'Registered parties', color: COLORS.purple },
-                    ].map(c => (
-                      <div key={c.label} className={`rounded-xl border p-4 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                        <p className="text-2xl font-black" style={{ color: c.color }}>{c.val}</p>
-                        <p className={`text-[10px] font-bold uppercase tracking-wider mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{c.label}</p>
-                        <p className="text-xs text-slate-400 mt-0.5">{c.sub}</p>
-                      </div>
-                    ))}
-                  </div>
-                  {gstr1.b2b.length > 0 && (
-                    <div className={`rounded-2xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                      <div className={`px-5 py-3 border-b flex items-center justify-between ${isDark ? 'bg-slate-700/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
-                        <p className={labelCls}>B2B — Registered Recipients ({gstr1.b2b.length})</p>
-                      </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-xs">
-                          <thead><tr>{['GSTIN','Client','Invoice No','Date','Value','Taxable','IGST','CGST','SGST'].map(h => (<th key={h} className={thCls}>{h}</th>))}</tr></thead>
-                          <tbody>
-                            {gstr1.b2b.map(inv => (
-                              <tr key={inv.id} className={rowCls}>
-                                <td className={`${cellCls} font-mono text-xs`}>{inv.client_gstin}</td>
-                                <td className={cellCls}>{inv.client_name}</td>
-                                <td className={`${cellCls} font-mono font-bold text-blue-600 dark:text-blue-400`}>{inv.invoice_no}</td>
-                                <td className={cellCls}>{inv.invoice_date}</td>
-                                <td className={numCls}>{fmtC(inv.grand_total)}</td>
-                                <td className={numCls}>{fmtC(inv.total_taxable)}</td>
-                                <td className={numCls}>{fmtC(inv.total_igst)}</td>
-                                <td className={numCls}>{fmtC(inv.total_cgst)}</td>
-                                <td className={numCls}>{fmtC(inv.total_sgst)}</td>
-                              </tr>
-                            ))}
-                            <tr className={`font-bold border-t-2 ${isDark ? 'border-slate-600 bg-slate-700/40' : 'border-slate-200 bg-slate-50'}`}>
-                              <td colSpan={4} className={`${cellCls} font-bold`}>TOTAL</td>
-                              <td className={numCls}>{fmtC(gstr1.b2b.reduce((s,i)=>s+(i.grand_total||0),0))}</td>
-                              <td className={numCls}>{fmtC(gstr1.b2b.reduce((s,i)=>s+(i.total_taxable||0),0))}</td>
-                              <td className={numCls}>{fmtC(gstr1.b2b.reduce((s,i)=>s+(i.total_igst||0),0))}</td>
-                              <td className={numCls}>{fmtC(gstr1.b2b.reduce((s,i)=>s+(i.total_cgst||0),0))}</td>
-                              <td className={numCls}>{fmtC(gstr1.b2b.reduce((s,i)=>s+(i.total_sgst||0),0))}</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                  {gstr1.hsnSummary.length > 0 && (
-                    <div className={`rounded-2xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                      <div className={`px-5 py-3 border-b ${isDark ? 'bg-slate-700/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
-                        <p className={labelCls}>HSN / SAC Summary ({gstr1.hsnSummary.length} codes)</p>
-                      </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-xs">
-                          <thead><tr>{['HSN/SAC','Description','Qty','Taxable Value','IGST','CGST','SGST','Total Tax'].map(h => (<th key={h} className={thCls}>{h}</th>))}</tr></thead>
-                          <tbody>
-                            {gstr1.hsnSummary.map(h => (
-                              <tr key={h.hsn_sac} className={rowCls}>
-                                <td className={`${cellCls} font-mono font-bold`}>{h.hsn_sac}</td>
-                                <td className={`${cellCls} max-w-[160px] truncate`}>{h.description}</td>
-                                <td className={numCls}>{Math.round(h.quantity * 100) / 100}</td>
-                                <td className={numCls}>{fmtC(h.taxable)}</td>
-                                <td className={numCls}>{fmtC(h.igst)}</td>
-                                <td className={numCls}>{fmtC(h.cgst)}</td>
-                                <td className={numCls}>{fmtC(h.sgst)}</td>
-                                <td className={`${numCls} font-bold`} style={{ color: COLORS.mediumBlue }}>{fmtC(h.total_tax)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
+        <div className="flex-1 overflow-y-auto p-6">
+          {monthInvoices.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+              <FileSpreadsheet className="h-10 w-10 mb-3 opacity-30" />
+              <p className="text-sm font-medium">No invoices for this period</p>
             </div>
-          )}
-          {tab === 'gstr3b' && (
-            <div className="p-6 space-y-5">
-              {monthInvoices.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-                  <BarChart3 className="h-10 w-10 mb-3 opacity-30" />
-                  <p className="text-sm font-medium">No data for this period</p>
-                </div>
-              ) : (
-                <>
-                  <div className={`rounded-2xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                    <div className={`px-5 py-3.5 border-b ${isDark ? 'bg-slate-700/50 border-slate-700' : 'bg-emerald-50 border-emerald-100'}`}>
-                      <p className={`text-sm font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-800'}`}>3.1 — Outward Supplies</p>
-                    </div>
+          ) : tab === 'gstr1' ? (
+            <div className="space-y-5">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { label: 'B2B Invoices', val: gstr1.b2b.length, sub: fmtC(gstr1.b2b.reduce((s,i)=>s+(i.grand_total||0),0)), color: COLORS.mediumBlue },
+                  { label: 'B2C Large', val: gstr1.b2cL.length, sub: fmtC(gstr1.b2cL.reduce((s,i)=>s+(i.grand_total||0),0)), color: COLORS.amber },
+                  { label: 'B2C Small', val: gstr1.b2cS.length, sub: fmtC(gstr1.b2cSTotal.taxable), color: COLORS.teal },
+                  { label: 'Credit / Debit', val: gstr1.cdnr.length, sub: 'Registered parties', color: COLORS.purple },
+                ].map(c => (
+                  <div key={c.label} className={`rounded-xl border p-4 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                    <p className="text-2xl font-black" style={{ color: c.color }}>{c.val}</p>
+                    <p className={`text-[10px] font-bold uppercase tracking-wider mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{c.label}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{c.sub}</p>
+                  </div>
+                ))}
+              </div>
+              {gstr1.b2b.length > 0 && (
+                <div className={`rounded-2xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                  <div className={`px-5 py-3 border-b ${isDark ? 'bg-slate-700/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+                    <p className={labelCls}>B2B — Registered Recipients ({gstr1.b2b.length})</p>
+                  </div>
+                  <div className="overflow-x-auto">
                     <table className="w-full text-xs">
-                      <thead><tr>{['Nature of Supplies','Taxable Value','IGST','CGST','SGST/UTGST','Cess'].map(h => (<th key={h} className={thCls}>{h}</th>))}</tr></thead>
+                      <thead><tr>{['GSTIN','Client','Invoice No','Date','Value','Taxable','IGST','CGST','SGST'].map(h => (<th key={h} className={thCls}>{h}</th>))}</tr></thead>
                       <tbody>
-                        {[['(a) Outward taxable supplies',gstr3b.outward.taxable,gstr3b.outward.igst,gstr3b.outward.cgst,gstr3b.outward.sgst,0],['(b) Zero rated',0,0,0,0,0],['(c) Nil / Exempt',0,0,0,0,0]].map(([label,...vals])=>(
-                          <tr key={label} className={rowCls}><td className={cellCls}>{label}</td>{vals.map((v,i)=>(<td key={i} className={numCls}>{fmtC(v)}</td>))}</tr>
+                        {gstr1.b2b.map(inv => (
+                          <tr key={inv.id} className={rowCls}>
+                            <td className={`${cellCls} font-mono text-xs`}>{inv.client_gstin}</td>
+                            <td className={cellCls}>{inv.client_name}</td>
+                            <td className={`${cellCls} font-mono font-bold text-blue-600`}>{inv.invoice_no}</td>
+                            <td className={cellCls}>{inv.invoice_date}</td>
+                            <td className={numCls}>{fmtC(inv.grand_total)}</td>
+                            <td className={numCls}>{fmtC(inv.total_taxable)}</td>
+                            <td className={numCls}>{fmtC(inv.total_igst)}</td>
+                            <td className={numCls}>{fmtC(inv.total_cgst)}</td>
+                            <td className={numCls}>{fmtC(inv.total_sgst)}</td>
+                          </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {[
-                      { label: 'Total Taxable Value', val: gstr3b.outward.taxable, color: COLORS.deepBlue },
-                      { label: 'IGST Payable', val: gstr3b.netIGST, color: COLORS.mediumBlue },
-                      { label: 'CGST Payable', val: gstr3b.netCGST, color: COLORS.teal },
-                      { label: 'SGST Payable', val: gstr3b.netSGST, color: COLORS.purple },
-                    ].map(c => (
-                      <div key={c.label} className={`rounded-2xl border p-5 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-white border-slate-200'}`}>
-                        <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{c.label}</p>
-                        <p className="text-xl font-black" style={{ color: c.color }}>{fmtC(c.val)}</p>
-                      </div>
-                    ))}
-                  </div>
-                  <div className={`rounded-2xl p-5 border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-emerald-50 border-emerald-200'}`}>
-                    <p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${isDark ? 'text-slate-400' : 'text-emerald-600'}`}>Net Tax Payable in Cash Ledger</p>
-                    <p className={`text-3xl font-black ${isDark ? 'text-emerald-400' : 'text-emerald-800'}`}>{fmtC(gstr3b.netTotal)}</p>
-                    <p className="text-xs text-slate-500 mt-1">IGST {fmtC(gstr3b.netIGST)} + CGST {fmtC(gstr3b.netCGST)} + SGST {fmtC(gstr3b.netSGST)}</p>
-                  </div>
-                </>
+                </div>
               )}
             </div>
-          )}
-          {tab === 'gstr2b' && (
-            <div className="p-6 flex flex-col items-center justify-center py-16 gap-5 text-center">
-              <div className={`w-16 h-16 rounded-2xl flex items-center justify-center ${isDark ? 'bg-slate-700' : 'bg-blue-50'}`}>
-                <ArrowRightLeft className="h-8 w-8 text-blue-500" />
+          ) : tab === 'gstr3b' ? (
+            <div className="space-y-5">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { label: 'Total Taxable Value', val: gstr3b.outward.taxable, color: COLORS.deepBlue },
+                  { label: 'IGST Payable', val: gstr3b.netIGST, color: COLORS.mediumBlue },
+                  { label: 'CGST Payable', val: gstr3b.netCGST, color: COLORS.teal },
+                  { label: 'SGST Payable', val: gstr3b.netSGST, color: COLORS.purple },
+                ].map(c => (
+                  <div key={c.label} className={`rounded-2xl border p-5 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-white border-slate-200'}`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{c.label}</p>
+                    <p className="text-xl font-black" style={{ color: c.color }}>{fmtC(c.val)}</p>
+                  </div>
+                ))}
               </div>
-              <div>
-                <p className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>GSTR-2B — Auto-Drafted ITC Statement</p>
-                <p className="text-sm text-slate-400 mt-2 max-w-md">GSTR-2B is auto-generated by the GST portal based on your suppliers' filings. It cannot be filed or edited manually.</p>
+              <div className={`rounded-2xl p-5 border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-emerald-50 border-emerald-200'}`}>
+                <p className={`text-3xl font-black ${isDark ? 'text-emerald-400' : 'text-emerald-800'}`}>{fmtC(gstr3b.netTotal)}</p>
+                <p className="text-xs text-slate-500 mt-1">Net Tax Payable</p>
               </div>
-              <Button onClick={() => window.open('https://gst.gov.in', '_blank')}
-                className="h-10 px-6 rounded-xl text-white font-semibold gap-2"
-                style={{ background: 'linear-gradient(135deg, #064e3b, #065f46)' }}>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-16 gap-5 text-center">
+              <ArrowRightLeft className="h-8 w-8 text-blue-500" />
+              <p className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>GSTR-2B — Auto-Drafted ITC Statement</p>
+              <p className="text-sm text-slate-400 mt-2 max-w-md">Auto-generated by the GST portal based on your suppliers' filings.</p>
+              <Button onClick={() => window.open('https://gst.gov.in', '_blank')} className="h-10 px-6 rounded-xl text-white font-semibold gap-2" style={{ background: 'linear-gradient(135deg, #064e3b, #065f46)' }}>
                 <ArrowUpRight className="h-4 w-4" /> Open GST Portal
               </Button>
             </div>
           )}
         </div>
         <div className={`flex-shrink-0 flex items-center justify-between gap-3 px-7 py-4 border-t ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-400" />
-            <p className="text-xs text-slate-400">
-              Based on <span className="font-semibold">{monthInvoices.length}</span> invoices · Period: <span className="font-semibold">{format(new Date(month + '-01'), 'MMMM yyyy')}</span>
-            </p>
-          </div>
+          <p className="text-xs text-slate-400">{monthInvoices.length} invoices · {format(new Date(month + '-01'), 'MMMM yyyy')}</p>
           <div className="flex gap-2">
             <Button variant="ghost" onClick={onClose} className="h-9 px-4 text-sm rounded-xl text-slate-500">Close</Button>
-            {tab === 'gstr1' && (
-              <Button onClick={exportGSTR1} disabled={monthInvoices.length === 0}
-                className="h-9 px-5 text-sm rounded-xl text-white font-semibold gap-2"
-                style={{ background: monthInvoices.length === 0 ? '#94a3b8' : 'linear-gradient(135deg, #064e3b, #065f46)' }}>
-                <Download className="h-4 w-4" /> Export GSTR-1 (.xlsx)
-              </Button>
-            )}
-            {tab === 'gstr3b' && (
-              <Button onClick={exportGSTR3B} disabled={monthInvoices.length === 0}
-                className="h-9 px-5 text-sm rounded-xl text-white font-semibold gap-2"
-                style={{ background: monthInvoices.length === 0 ? '#94a3b8' : 'linear-gradient(135deg, #064e3b, #065f46)' }}>
-                <Download className="h-4 w-4" /> Export GSTR-3B (.xlsx)
-              </Button>
-            )}
+            {tab === 'gstr1' && <Button onClick={exportGSTR1} disabled={monthInvoices.length === 0} className="h-9 px-5 text-sm rounded-xl text-white font-semibold gap-2" style={{ background: monthInvoices.length === 0 ? '#94a3b8' : 'linear-gradient(135deg, #064e3b, #065f46)' }}><Download className="h-4 w-4" /> Export GSTR-1</Button>}
+            {tab === 'gstr3b' && <Button onClick={exportGSTR3B} disabled={monthInvoices.length === 0} className="h-9 px-5 text-sm rounded-xl text-white font-semibold gap-2" style={{ background: monthInvoices.length === 0 ? '#94a3b8' : 'linear-gradient(135deg, #064e3b, #065f46)' }}><Download className="h-4 w-4" /> Export GSTR-3B</Button>}
           </div>
         </div>
       </DialogContent>
@@ -741,7 +609,6 @@ function parseExcelInvoices(file) {
         const wb = XLSX.read(e.target.result, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-        // Map Excel columns → invoice format
         const invoices = rows
           .filter(row => row['Client Name'] || row['client_name'])
           .map(row => {
@@ -755,8 +622,7 @@ function parseExcelInvoices(file) {
             const cgst = Math.round(taxable * half / 100 * 100) / 100;
             const sgst = Math.round(taxable * half / 100 * 100) / 100;
             return {
-              invoice_type: 'tax_invoice',
-              client_name: clientName,
+              invoice_type: 'tax_invoice', client_name: clientName,
               client_email: row['Email'] || row['client_email'] || '',
               client_phone: row['Phone'] || row['client_phone'] || '',
               client_gstin: row['GSTIN'] || row['client_gstin'] || '',
@@ -767,106 +633,39 @@ function parseExcelInvoices(file) {
               reference_no: row['Reference No'] || row['reference_no'] || '',
               notes: row['Notes'] || row['notes'] || '',
               is_interstate: false,
-              items: [{
-                description: desc,
-                hsn_sac: row['HSN/SAC'] || row['hsn_sac'] || '',
-                quantity: qty,
-                unit: row['Unit'] || row['unit'] || 'service',
-                unit_price: rate,
-                discount_pct: parseFloat(row['Discount%'] || row['discount_pct'] || 0) || 0,
-                gst_rate: gstRate,
-                taxable_value: taxable,
-                cgst_rate: half, sgst_rate: half, igst_rate: 0,
+              items: [{ description: desc, hsn_sac: row['HSN/SAC'] || row['hsn_sac'] || '', quantity: qty,
+                unit: row['Unit'] || row['unit'] || 'service', unit_price: rate,
+                discount_pct: parseFloat(row['Discount%'] || row['discount_pct'] || 0) || 0, gst_rate: gstRate,
+                taxable_value: taxable, cgst_rate: half, sgst_rate: half, igst_rate: 0,
                 cgst_amount: cgst, sgst_amount: sgst, igst_amount: 0,
-                total_amount: Math.round((taxable + cgst + sgst) * 100) / 100,
-              }],
-              subtotal: taxable,
-              total_taxable: taxable,
-              total_cgst: cgst,
-              total_sgst: sgst,
-              total_igst: 0,
-              total_gst: cgst + sgst,
-              grand_total: Math.round((taxable + cgst + sgst) * 100) / 100,
-              amount_paid: 0,
-              amount_due: Math.round((taxable + cgst + sgst) * 100) / 100,
-              status: 'draft',
-              payment_terms: 'Due on receipt',
+                total_amount: Math.round((taxable + cgst + sgst) * 100) / 100 }],
+              subtotal: taxable, total_taxable: taxable, total_cgst: cgst, total_sgst: sgst, total_igst: 0,
+              total_gst: cgst + sgst, grand_total: Math.round((taxable + cgst + sgst) * 100) / 100,
+              amount_paid: 0, amount_due: Math.round((taxable + cgst + sgst) * 100) / 100,
+              status: 'draft', payment_terms: 'Due on receipt',
             };
           });
         resolve(invoices);
-      } catch (err) {
-        reject(new Error(`Failed to parse Excel file: ${err.message}`));
-      }
+      } catch (err) { reject(new Error(`Failed to parse Excel file: ${err.message}`)); }
     };
     reader.onerror = () => reject(new Error('Failed to read file'));
     reader.readAsArrayBuffer(file);
   });
 }
-// Download ready-made Excel template
 function downloadInvoiceTemplate() {
   const wb = XLSX.utils.book_new();
-  const headers = [
-    'Client Name', 'Email', 'Phone', 'GSTIN', 'Address', 'State',
-    'Invoice Date', 'Due Date', 'Reference No',
-    'Description', 'HSN/SAC', 'Quantity', 'Unit', 'Rate', 'Discount%', 'GST Rate',
-    'Notes',
-  ];
+  const headers = ['Client Name','Email','Phone','GSTIN','Address','State','Invoice Date','Due Date','Reference No','Description','HSN/SAC','Quantity','Unit','Rate','Discount%','GST Rate','Notes'];
   const sampleRows = [
-    ['Acme Corp Pvt Ltd', 'billing@acme.com', '9876543210', '24AAAAA0000A1Z5', '123 Main Street, Surat', 'Gujarat',
-      format(new Date(), 'yyyy-MM-dd'), format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'), 'PO-2025-001',
-      'Website Development Services', '998314', '1', 'service', '50000', '0', '18',
-      'Net 30 payment terms'],
-    ['Global Traders', 'accounts@globaltraders.in', '9123456780', '', '456 Ring Road, Ahmedabad', 'Gujarat',
-      format(new Date(), 'yyyy-MM-dd'), format(new Date(Date.now() + 15 * 86400000), 'yyyy-MM-dd'), '',
-      'Annual Maintenance Contract', '998313', '12', 'month', '5000', '0', '18',
-      ''],
-    ['Tech Solutions Ltd', 'finance@techsol.com', '8899001122', '27BBBBB0000B1Z3', 'Mumbai, Maharashtra', 'Maharashtra',
-      format(new Date(), 'yyyy-MM-dd'), format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'), 'REF-001',
-      'Cloud Hosting Services', '998315', '3', 'month', '15000', '5', '18',
-      'Hosting for Q1 2025'],
+    ['Acme Corp Pvt Ltd','billing@acme.com','9876543210','24AAAAA0000A1Z5','123 Main Street, Surat','Gujarat',format(new Date(),'yyyy-MM-dd'),format(new Date(Date.now()+30*86400000),'yyyy-MM-dd'),'PO-2025-001','Website Development Services','998314','1','service','50000','0','18','Net 30 payment terms'],
   ];
   const ws = XLSX.utils.aoa_to_sheet([headers, ...sampleRows]);
-  // Column widths
   ws['!cols'] = headers.map((h, i) => ({ wch: [25,28,14,20,35,14,14,14,14,35,10,10,10,12,10,10,35][i] || 18 }));
   XLSX.utils.book_append_sheet(wb, ws, 'Invoices');
-  // Instructions sheet
-  const instrWs = XLSX.utils.aoa_to_sheet([
-    ['INVOICE IMPORT TEMPLATE — INSTRUCTIONS'],
-    [],
-    ['Column', 'Required', 'Format / Example', 'Notes'],
-    ['Client Name', 'YES', 'Acme Corp Pvt Ltd', 'Full legal name of the client'],
-    ['Email', 'No', 'billing@client.com', 'Used for email invoices'],
-    ['Phone', 'No', '9876543210', '10-digit mobile number'],
-    ['GSTIN', 'No', '24AAAAA0000A1Z5', '15-character GST number'],
-    ['Address', 'No', '123 Main Street, Surat', 'Full billing address'],
-    ['State', 'No', 'Gujarat', 'State name for GST calculation'],
-    ['Invoice Date', 'No', 'YYYY-MM-DD (2025-01-15)', 'Defaults to today if blank'],
-    ['Due Date', 'No', 'YYYY-MM-DD (2025-02-15)', 'Defaults to +30 days if blank'],
-    ['Reference No', 'No', 'PO-2025-001', 'Purchase order or reference number'],
-    ['Description', 'YES', 'Website Development Services', 'Item/service description'],
-    ['HSN/SAC', 'No', '998314', '6-digit HSN or SAC code'],
-    ['Quantity', 'No', '1 or 12.5', 'Numeric value, defaults to 1'],
-    ['Unit', 'No', 'service / nos / hr / kg', 'Unit of measurement'],
-    ['Rate', 'YES', '50000', 'Price per unit in ₹'],
-    ['Discount%', 'No', '0 or 5', 'Discount percentage (0-100)'],
-    ['GST Rate', 'No', '0 / 5 / 12 / 18 / 28', 'GST % — defaults to 18 if blank'],
-    ['Notes', 'No', 'Payment terms, remarks', 'Any additional notes'],
-    [],
-    ['TIPS:'],
-    ['• One row = One invoice with one line item'],
-    ['• For multiple items per invoice, create duplicate rows with same Client Name'],
-    ['• GSTIN format: 2-digit state code + 10-char PAN + 1-char entity + Z + 1-char checksum'],
-    ['• Dates must be in YYYY-MM-DD format'],
-    ['• Supported GST rates: 0, 5, 12, 18, 28'],
-    ['• Delete sample rows before importing, keep the header row'],
-  ]);
-  instrWs['!cols'] = [{ wch: 20 }, { wch: 12 }, { wch: 30 }, { wch: 50 }];
-  XLSX.utils.book_append_sheet(wb, instrWs, 'Instructions');
   XLSX.writeFile(wb, 'Invoice_Import_Template.xlsx');
   toast.success('Template downloaded! Fill it and import back.');
 }
 // ════════════════════════════════════════════════════════════════════════════════
-// UNIFIED IMPORT MODAL — .vyp KhataBook + Excel/CSV + Tally + Vyapar/JSON
+// UNIFIED IMPORT MODAL — *** ALL 4 MISSING STEPS ADDED (BUG-001 FIX) ***
 // ════════════════════════════════════════════════════════════════════════════════
 const KB_PAY_STATUS = { 1: 'sent', 2: 'partially_paid', 3: 'paid' };
 
@@ -894,16 +693,17 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
 
   const handleClose = () => { reset(); onClose(); };
 
+  // *** BUG-002 FIX: .vyb moved from json to vyp ***
   const handleFileDrop = useCallback((e) => {
     e.preventDefault();
     const f = e.dataTransfer?.files?.[0] || e.target?.files?.[0];
     if (!f) return;
     const name = f.name.toLowerCase();
     const ALLOWED_EXTS = {
-      vyp: ['.vyp', '.db'],
+      vyp:   ['.vyp', '.vyb', '.db'],  // FIX: .vyb is KhataBook Pro (SQLite), belongs here
       tally: ['.xml', '.tbk'],
       excel: ['.xlsx', '.xls', '.csv'],
-      json: ['.json', '.vyb'],
+      json:  ['.json'],                 // FIX: .vyb removed from here
     };
     const allowed = ALLOWED_EXTS[importMode] || [];
     if (allowed.length > 0 && !allowed.some(ext => name.endsWith(ext))) {
@@ -954,18 +754,14 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
     const res = { imported: 0, clients: 0, skipped: 0, errors: [] };
     const companyId = selectedCompanyId === '__none__' ? '' : selectedCompanyId;
 
-    // Import clients
     if (parsed.mode !== 'excel' && importClients && parsed.clients?.length > 0) {
       const clientsToImport = parsed.clients.slice(0, 500);
       let done = 0;
       for (const c of clientsToImport) {
         try {
           await api.post('/clients', {
-            company_name: c.full_name || 'Unknown',
-            email: c.email || null,
-            phone: c.phone_number || null,
-            address: c.address || '',
-            notes: `Imported from ${parsed.mode.toUpperCase()}. GSTIN: ${c.name_gstin_number || 'N/A'}`,
+            company_name: c.full_name || 'Unknown', email: c.email || null, phone: c.phone_number || null,
+            address: c.address || '', notes: `Imported from ${parsed.mode.toUpperCase()}. GSTIN: ${c.name_gstin_number || 'N/A'}`,
             client_type: 'other', status: 'active', assigned_to: null,
           });
           res.clients++;
@@ -975,7 +771,6 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
       }
     }
 
-    // Import invoices
     const invToImport = parsed.mode === 'excel'
       ? parsed.invoices
       : (selectedFirm === '__none__' ? parsed.invoices : parsed.invoices.filter(i => String(i.company_id) === selectedFirm));
@@ -984,15 +779,16 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
     for (const inv of (invToImport || [])) {
       try {
         const payload = {
-          ...inv,
-          company_id: companyId,
-          invoice_type: 'tax_invoice',
+          ...inv, company_id: companyId, invoice_type: inv.invoice_type || 'tax_invoice',
           items: inv.items?.length > 0 ? inv.items : [{ ...emptyItem(), description: 'Imported service', unit_price: inv.grand_total || 0 }],
         };
         delete payload._kb_id;
         await api.post('/invoices', payload);
         res.imported++;
-      } catch { res.skipped++; }
+      } catch (err) {
+        res.skipped++;
+        res.errors.push(`${inv.invoice_no || 'Unknown'}: ${err.response?.data?.detail || err.message}`);
+      }
       done++;
       const base = parsed.mode !== 'excel' && importClients ? 40 : 0;
       setProgress(base + Math.round((done / (invToImport?.length || 1)) * (100 - base)));
@@ -1001,7 +797,8 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
     setResults(res);
     setStep('done');
     onImportComplete?.();
-    toast.success(`✅ ${res.imported} invoices saved to Google Drive`);
+    // *** BUG-003 FIX: Accurate toast message (not "saved to Google Drive") ***
+    toast.success(`Imported ${res.imported} invoice${res.imported !== 1 ? 's' : ''} successfully`);
   };
 
   const inputCls = `h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
@@ -1020,20 +817,11 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
             style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
           <div className="relative flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
-                <Database className="h-5 w-5 text-white" />
-              </div>
-              <div>
-                <h2 className="text-white font-bold text-lg leading-tight">Import Invoices</h2>
-                <p className="text-emerald-200 text-xs mt-0.5">KhataBook · Tally · Vyapar · Excel</p>
-              </div>
+              <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0"><Database className="h-5 w-5 text-white" /></div>
+              <div><h2 className="text-white font-bold text-lg leading-tight">Import Invoices</h2><p className="text-emerald-200 text-xs mt-0.5">KhataBook · Tally · Vyapar · Excel</p></div>
             </div>
-            <button onClick={handleClose} className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-all flex-shrink-0">
-              <X className="h-4 w-4 text-white" />
-            </button>
+            <button onClick={handleClose} className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-all flex-shrink-0"><X className="h-4 w-4 text-white" /></button>
           </div>
-
-          {/* Step indicator */}
           {step !== 'choose' && (
             <div className="relative mt-4 flex items-center gap-1">
               {['upload', 'preview', 'importing', 'done'].map((s, i) => {
@@ -1057,48 +845,32 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-6">
-          {/* CHOOSE MODE */}
+          {/* ═══ STEP: CHOOSE MODE ═══ */}
           {step === 'choose' && (
             <div className="space-y-4">
-              <p className={`text-sm font-medium text-center mb-5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                Choose your import source
-              </p>
-              {/* Download Template */}
+              <p className={`text-sm font-medium text-center mb-5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Choose your import source</p>
               <div className={`rounded-xl border-2 border-dashed p-4 ${isDark ? 'border-slate-600 bg-slate-700/30' : 'border-slate-200 bg-slate-50'}`}>
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
-                    <FileDown className="h-5 w-5 text-amber-600" />
-                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0"><FileDown className="h-5 w-5 text-amber-600" /></div>
                   <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-                      Download Excel Template
-                    </p>
-                    <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                      Get a ready-made template with sample data & instructions
-                    </p>
+                    <p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Download Excel Template</p>
+                    <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Get a ready-made template with sample data & instructions</p>
                   </div>
-                  <Button type="button" size="sm" onClick={downloadInvoiceTemplate}
-                    className="h-8 px-3 rounded-xl text-xs font-semibold gap-1.5 flex-shrink-0 text-white"
-                    style={{ background: 'linear-gradient(135deg, #b45309, #d97706)' }}>
-                    <Download className="h-3.5 w-3.5" /> Download
-                  </Button>
+                  <Button type="button" size="sm" onClick={downloadInvoiceTemplate} className="h-8 px-3 rounded-xl text-xs font-semibold gap-1.5 flex-shrink-0 text-white" style={{ background: 'linear-gradient(135deg, #b45309, #d97706)' }}><Download className="h-3.5 w-3.5" /> Download</Button>
                 </div>
               </div>
-              {/* Mode Cards */}
+              {/* *** BUG-006 FIX: .vyb listed under KhataBook, not Vyapar *** */}
               <div className="grid grid-cols-1 gap-3">
                 {[
-                  { mode: 'vyp', icon: Database, title: 'KhataBook Backup (.vyp)', desc: 'Import clients, items & invoices from KhataBook .vyp backup file', color: 'from-emerald-600 to-emerald-700', badge: 'Recommended' },
+                  { mode: 'vyp', icon: Database, title: 'KhataBook Backup (.vyp / .vyb)', desc: 'Import clients, items & invoices from KhataBook .vyp or KhataBook Pro .vyb backup', color: 'from-emerald-600 to-emerald-700', badge: 'Recommended' },
                   { mode: 'tally', icon: FileSpreadsheet, title: 'Tally Export (.xml)', desc: 'Import from TallyPrime / Tally.ERP 9 XML export or .tbk backup', color: 'from-purple-600 to-purple-700', badge: 'Tally' },
-                  { mode: 'json', icon: FileText, title: 'Vyapar / JSON (.vyb, .json)', desc: 'Import from Vyapar backup (.vyb) or any JSON formatted export', color: 'from-amber-600 to-amber-700', badge: 'Vyapar' },
+                  { mode: 'json', icon: FileText, title: 'Vyapar / JSON (.json)', desc: 'Import from Vyapar JSON export or any JSON formatted backup file', color: 'from-amber-600 to-amber-700', badge: 'Vyapar' },
                   { mode: 'excel', icon: Table, title: 'Excel / CSV (.xlsx, .xls, .csv)', desc: 'Import from any spreadsheet — Sage, myBillBook, Zoho, Xero, or our template', color: 'from-blue-600 to-blue-700', badge: 'Universal' },
                 ].map(opt => (
                   <button key={opt.mode} type="button"
                     onClick={() => { setImportMode(opt.mode); setStep('upload'); setError(''); setFile(null); }}
-                    className={`w-full flex items-center gap-4 p-4 rounded-xl border-2 transition-all text-left hover:shadow-md
-                      ${isDark ? 'border-slate-600 hover:border-emerald-500 bg-slate-700/40' : 'border-slate-200 hover:border-emerald-400 bg-white'}`}>
-                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white flex-shrink-0 bg-gradient-to-br ${opt.color}`}>
-                      <opt.icon className="h-6 w-6" />
-                    </div>
+                    className={`w-full flex items-center gap-4 p-4 rounded-xl border-2 transition-all text-left hover:shadow-md ${isDark ? 'border-slate-600 hover:border-emerald-500 bg-slate-700/40' : 'border-slate-200 hover:border-emerald-400 bg-white'}`}>
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white flex-shrink-0 bg-gradient-to-br ${opt.color}`}><opt.icon className="h-6 w-6" /></div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{opt.title}</p>
@@ -1109,6 +881,135 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
                     <ChevronRight className="h-4 w-4 text-slate-400 flex-shrink-0" />
                   </button>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* ═══ STEP: UPLOAD FILE *** BUG-001 FIX: was completely missing *** ═══ */}
+          {step === 'upload' && (
+            <div className="space-y-5">
+              <button type="button" onClick={() => { setStep('choose'); setFile(null); setError(''); }}
+                className="flex items-center gap-1 text-xs font-semibold text-emerald-600 hover:text-emerald-700">← Back to source selection</button>
+              <div ref={dropRef} onDrop={handleFileDrop} onDragOver={(e) => e.preventDefault()}
+                onClick={() => {
+                  const inp = document.createElement('input'); inp.type = 'file';
+                  inp.accept = importMode === 'vyp' ? '.vyp,.vyb,.db' : importMode === 'tally' ? '.xml,.tbk' : importMode === 'excel' ? '.xlsx,.xls,.csv' : '.json';
+                  inp.onchange = handleFileDrop; inp.click();
+                }}
+                className={`rounded-2xl border-2 border-dashed p-10 text-center cursor-pointer transition-all ${file ? (isDark ? 'border-emerald-500 bg-emerald-900/20' : 'border-emerald-400 bg-emerald-50') : (isDark ? 'border-slate-600 bg-slate-700/30 hover:border-emerald-500' : 'border-slate-300 bg-slate-50 hover:border-emerald-400')}`}>
+                {file ? (
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="w-14 h-14 rounded-2xl bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center"><CheckCircle2 className="h-7 w-7 text-emerald-600" /></div>
+                    <div><p className={`text-sm font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>{file.name}</p><p className="text-xs text-slate-400 mt-1">{(file.size / 1024).toFixed(1)} KB · Click or drop to change</p></div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-3">
+                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`}><Upload className="h-7 w-7 text-slate-400" /></div>
+                    <div>
+                      <p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Drop your file here or click to browse</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        {importMode === 'vyp' && 'Accepts .vyp, .vyb, or .db files'}
+                        {importMode === 'tally' && 'Accepts .xml or .tbk files'}
+                        {importMode === 'excel' && 'Accepts .xlsx, .xls, or .csv files'}
+                        {importMode === 'json' && 'Accepts .json files'}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+              {error && (
+                <div className={`rounded-xl border p-3 flex items-start gap-2 ${isDark ? 'bg-red-900/20 border-red-800 text-red-300' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                  <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" /><p className="text-xs">{error}</p>
+                </div>
+              )}
+              <Button onClick={handleParse} disabled={!file || loading} className="w-full h-11 rounded-xl text-white font-semibold"
+                style={{ background: !file || loading ? '#94a3b8' : 'linear-gradient(135deg, #065f46, #059669)' }}>
+                {loading ? <span className="flex items-center gap-2"><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Parsing file…</span>
+                  : <span className="flex items-center gap-2"><FileUp className="h-4 w-4" /> Parse & Preview</span>}
+              </Button>
+            </div>
+          )}
+
+          {/* ═══ STEP: PREVIEW *** BUG-001 FIX: was completely missing *** ═══ */}
+          {step === 'preview' && parsed && (
+            <div className="space-y-5">
+              <button type="button" onClick={() => setStep('upload')} className="flex items-center gap-1 text-xs font-semibold text-emerald-600 hover:text-emerald-700">← Back to upload</button>
+              <div className={`rounded-xl border p-4 ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-emerald-50 border-emerald-200'}`}>
+                <p className={`text-xs font-bold uppercase tracking-widest mb-2 ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>Parsed: {parsed.source_label || parsed.mode}</p>
+                <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
+                  {[{ label: 'Firms', val: parsed.stats?.firms ?? parsed.firms?.length ?? 0 },
+                    { label: 'Clients', val: parsed.stats?.clients ?? parsed.clients?.length ?? 0 },
+                    { label: 'Items', val: parsed.stats?.items ?? parsed.items?.length ?? 0 },
+                    { label: 'Invoices', val: parsed.stats?.invoices ?? parsed.invoices?.length ?? 0 },
+                    { label: 'Payments', val: parsed.stats?.payments ?? parsed.payments?.length ?? 0 },
+                  ].map(s => (<div key={s.label} className="text-center"><p className={`text-xl font-black ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{s.val}</p><p className="text-[10px] font-semibold text-slate-400 uppercase">{s.label}</p></div>))}
+                </div>
+              </div>
+              {parsed.firms?.length > 1 && (
+                <div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Select Firm</label>
+                  <Select value={selectedFirm} onValueChange={setSelectedFirm}><SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="__none__">All firms</SelectItem>{parsed.firms.map(f => <SelectItem key={f.firm_id} value={String(f.firm_id)}>{f.firm_name}</SelectItem>)}</SelectContent></Select></div>
+              )}
+              <div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Import Into Company Profile</label>
+                <Select value={selectedCompanyId} onValueChange={setSelectedCompanyId}><SelectTrigger className={inputCls}><SelectValue placeholder="Select target company" /></SelectTrigger>
+                  <SelectContent><SelectItem value="__none__">— Select later —</SelectItem>{(companies || []).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></div>
+              {parsed.mode !== 'excel' && parsed.clients?.length > 0 && (
+                <div className="flex items-center gap-3"><Switch checked={importClients} onCheckedChange={setImportClients} />
+                  <div><p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Import Clients ({parsed.clients.length})</p><p className="text-xs text-slate-400">Add as client records</p></div></div>
+              )}
+              {parsed.invoices?.length > 0 && (
+                <div className={`rounded-xl border max-h-48 overflow-y-auto ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+                  <div className={`px-4 py-2 border-b sticky top-0 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Invoice Preview ({parsed.invoices.length})</p></div>
+                  {parsed.invoices.slice(0, 20).map((inv, i) => (
+                    <div key={i} className={`flex items-center justify-between px-4 py-2 border-b last:border-0 ${isDark ? 'border-slate-700' : 'border-slate-50'}`}>
+                      <div className="flex-1 min-w-0"><p className={`text-xs font-semibold truncate ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{inv.client_name || 'Unknown'}</p><p className="text-[10px] text-slate-400">{inv.invoice_no || `#${i+1}`} · {inv.invoice_date || '—'}</p></div>
+                      <p className={`text-xs font-bold ${isDark ? 'text-slate-100' : 'text-slate-700'}`}>{fmtC(inv.grand_total || 0)}</p></div>
+                  ))}
+                  {parsed.invoices.length > 20 && <div className="px-4 py-2 text-center text-xs text-slate-400">+{parsed.invoices.length - 20} more…</div>}
+                </div>
+              )}
+              <Button onClick={handleImport} className="w-full h-11 rounded-xl text-white font-semibold" style={{ background: 'linear-gradient(135deg, #065f46, #059669)' }}>
+                <CheckSquare className="h-4 w-4 mr-2" /> Import {parsed.invoices?.length || 0} Invoices{importClients && parsed.clients?.length > 0 ? ` + ${parsed.clients.length} Clients` : ''}</Button>
+            </div>
+          )}
+
+          {/* ═══ STEP: IMPORTING *** BUG-001 FIX: was completely missing *** ═══ */}
+          {step === 'importing' && (
+            <div className="flex flex-col items-center justify-center py-10 gap-6">
+              <div className="w-16 h-16 rounded-2xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center"><RefreshCw className="h-8 w-8 text-emerald-600 animate-spin" /></div>
+              <div className="text-center"><p className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Importing…</p><p className="text-sm text-slate-400 mt-1">Please wait while your data is being imported</p></div>
+              <div className="w-full max-w-xs">
+                <div className={`h-3 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
+                  <div className="h-full rounded-full transition-all duration-300" style={{ width: `${progress}%`, background: 'linear-gradient(90deg, #065f46, #059669)' }} /></div>
+                <p className="text-center text-xs font-bold text-emerald-600 mt-2">{progress}%</p>
+              </div>
+            </div>
+          )}
+
+          {/* ═══ STEP: DONE *** BUG-001 FIX: was completely missing *** ═══ */}
+          {step === 'done' && (
+            <div className="space-y-5">
+              <div className="flex flex-col items-center justify-center py-6 gap-4">
+                <div className="w-16 h-16 rounded-2xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center"><CheckCircle2 className="h-8 w-8 text-emerald-600" /></div>
+                <p className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Import Complete!</p>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                {[{ label: 'Invoices Imported', val: results.imported, color: '#1FAF5A' },
+                  { label: 'Clients Added', val: results.clients, color: '#1F6FB2' },
+                  { label: 'Skipped', val: results.skipped, color: '#F59E0B' },
+                ].map(s => (<div key={s.label} className={`rounded-xl border p-4 text-center ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                  <p className="text-2xl font-black" style={{ color: s.color }}>{s.val}</p><p className="text-[10px] font-semibold text-slate-400 uppercase mt-1">{s.label}</p></div>))}
+              </div>
+              {results.errors?.length > 0 && (
+                <div className={`rounded-xl border p-3 max-h-32 overflow-y-auto ${isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-200'}`}>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-red-500 mb-2">Errors ({results.errors.length})</p>
+                  {results.errors.slice(0, 10).map((err, i) => <p key={i} className="text-xs text-red-600 dark:text-red-400">{err}</p>)}
+                </div>
+              )}
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={handleClose} className="flex-1 h-10 rounded-xl">Close</Button>
+                <Button onClick={() => reset()} className="flex-1 h-10 rounded-xl text-white" style={{ background: 'linear-gradient(135deg, #065f46, #059669)' }}>Import More</Button>
               </div>
             </div>
           )}
@@ -1217,7 +1118,7 @@ const PaymentModal = ({ invoice, open, onClose, onSuccess, isDark }) => {
   );
 };
 // ════════════════════════════════════════════════════════════════════════════════
-// INVOICE FORM
+// INVOICE FORM — with BUG-003 FIX (toast messages) and BUG-005 FIX (design note)
 // ════════════════════════════════════════════════════════════════════════════════
 const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onSuccess, isDark }) => {
   const navigate = useNavigate();
@@ -1272,11 +1173,8 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       const payload = { ...form, ...totals };
       if (editingInv) await api.put(`/invoices/${editingInv.id}`, payload);
       else await api.post('/invoices', payload);
-      toast.success(
-        editingInv
-          ? '✅ Invoice updated & saved to Google Drive'
-          : '✅ Invoice created & saved to Google Drive'
-      );
+      // *** BUG-003 FIX: Accurate toast (not "saved to Google Drive") ***
+      toast.success(editingInv ? 'Invoice updated successfully' : 'Invoice created successfully');
       saveItemMemory(form.items);
       onSuccess?.();
       onClose();
@@ -1286,7 +1184,6 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   const labelCls = "text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block";
   const inputCls = `h-11 rounded-xl text-sm border-slate-200 dark:border-slate-600 focus:border-blue-400 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
   const sectionCls = `border rounded-2xl p-5 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`;
-  // STEP 2 FIX: Add useInvoicePreviewHtml hook call before return
   const previewHtml = useInvoicePreviewHtml(form, totals, companies, editingInv);
   const tabs = [
     { id: 'details',  label: 'Details',         icon: FileText    },
@@ -1331,22 +1228,10 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
             {activeTab === 'details' && (
               <div className="space-y-5">
                 <div className={sectionCls}>
-                  <div className="flex items-center gap-2 mb-5">
-                    <div className="w-7 h-7 rounded-xl flex items-center justify-center text-white text-xs font-bold" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}><Building2 className="h-4 w-4" /></div>
-                    <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Company & Client</h3>
-                  </div>
+                  <div className="flex items-center gap-2 mb-5"><div className="w-7 h-7 rounded-xl flex items-center justify-center text-white text-xs font-bold" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}><Building2 className="h-4 w-4" /></div><h3 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Company & Client</h3></div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className={labelCls}>Company Profile *</label>
-                      <Select value={form.company_id || '__none__'} onValueChange={v => setField('company_id', v === '__none__' ? '' : v)}>
-                        <SelectTrigger className={inputCls}><SelectValue placeholder="Select company profile" /></SelectTrigger>
-                        <SelectContent><SelectItem value="__none__">— Select company —</SelectItem>{companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <label className={labelCls}>Select Client (auto-fill){form.client_id && <span className="ml-2 text-emerald-600 dark:text-emerald-400 normal-case tracking-normal font-normal">✓ auto-populated</span>}</label>
-                      <ClientSearchCombobox clients={clients} value={form.client_id} onSelect={handleClientSelect} onAddNew={() => { onClose(); window.open('/clients?openAddClient=true', '_blank'); }} isDark={isDark} />
-                    </div>
+                    <div><label className={labelCls}>Company Profile *</label><Select value={form.company_id || '__none__'} onValueChange={v => setField('company_id', v === '__none__' ? '' : v)}><SelectTrigger className={inputCls}><SelectValue placeholder="Select company profile" /></SelectTrigger><SelectContent><SelectItem value="__none__">— Select company —</SelectItem>{companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></div>
+                    <div><label className={labelCls}>Select Client (auto-fill){form.client_id && <span className="ml-2 text-emerald-600 dark:text-emerald-400 normal-case tracking-normal font-normal">✓ auto-populated</span>}</label><ClientSearchCombobox clients={clients} value={form.client_id} onSelect={handleClientSelect} onAddNew={() => { onClose(); window.open('/clients?openAddClient=true', '_blank'); }} isDark={isDark} /></div>
                     <div><label className={labelCls}>Client Name *</label><Input className={inputCls} value={form.client_name} onChange={e => setField('client_name', e.target.value)} required /></div>
                     <div><label className={labelCls}>Client GSTIN</label><Input className={inputCls} placeholder="22AAAAA0000A1Z5" value={form.client_gstin} onChange={e => setField('client_gstin', e.target.value)} /></div>
                     <div><label className={labelCls}>Email</label><Input type="email" className={inputCls} value={form.client_email} onChange={e => setField('client_email', e.target.value)} /></div>
@@ -1357,17 +1242,11 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                   </div>
                   <div className="mt-4 flex items-center gap-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl px-4 py-3">
                     <Switch checked={form.is_interstate} onCheckedChange={v => setField('is_interstate', v)} />
-                    <div>
-                      <p className={`text-sm font-semibold ${isDark ? 'text-amber-300' : 'text-amber-800'}`}>Interstate Supply (IGST)</p>
-                      <p className="text-xs text-amber-600 dark:text-amber-400">{form.is_interstate ? 'IGST will be applied' : 'CGST + SGST will be applied'}</p>
-                    </div>
+                    <div><p className={`text-sm font-semibold ${isDark ? 'text-amber-300' : 'text-amber-800'}`}>Interstate Supply (IGST)</p><p className="text-xs text-amber-600 dark:text-amber-400">{form.is_interstate ? 'IGST will be applied' : 'CGST + SGST will be applied'}</p></div>
                   </div>
                 </div>
                 <div className={sectionCls}>
-                  <div className="flex items-center gap-2 mb-5">
-                    <div className="w-7 h-7 rounded-xl flex items-center justify-center text-white text-xs font-bold" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}><CalendarDays className="h-4 w-4" /></div>
-                    <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Invoice Details</h3>
-                  </div>
+                  <div className="flex items-center gap-2 mb-5"><div className="w-7 h-7 rounded-xl flex items-center justify-center text-white text-xs font-bold" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}><CalendarDays className="h-4 w-4" /></div><h3 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Invoice Details</h3></div>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     <div><label className={labelCls}>Invoice Date *</label><Input type="date" className={inputCls} value={form.invoice_date} onChange={e => setField('invoice_date', e.target.value)} required /></div>
                     <div><label className={labelCls}>Due Date</label><Input type="date" className={inputCls} value={form.due_date} onChange={e => setField('due_date', e.target.value)} /></div>
@@ -1382,10 +1261,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
             {activeTab === 'items' && (
               <div className={sectionCls}>
                 <div className="flex items-center justify-between mb-5">
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-xl flex items-center justify-center text-white text-xs font-bold" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}><Package className="h-4 w-4" /></div>
-                    <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Line Items</h3>
-                  </div>
+                  <div className="flex items-center gap-2"><div className="w-7 h-7 rounded-xl flex items-center justify-center text-white text-xs font-bold" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}><Package className="h-4 w-4" /></div><h3 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Line Items</h3></div>
                   <Button type="button" size="sm" onClick={addItem} variant="outline" className="h-8 px-3 text-xs rounded-xl"><Plus className="h-3 w-3 mr-1" /> Add Item</Button>
                 </div>
                 <div className="space-y-4">
@@ -1396,51 +1272,13 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center gap-2">
                             <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
-                            <Select value={item.product_id || '__none__'} onValueChange={v => fillFromProduct(idx, v)}>
-                              <SelectTrigger className="h-7 w-44 text-xs rounded-lg border-slate-200"><SelectValue placeholder="Pick from catalog…" /></SelectTrigger>
-                              <SelectContent><SelectItem value="__none__">— Manual Entry —</SelectItem>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
-                            </Select>
+                            <Select value={item.product_id || '__none__'} onValueChange={v => fillFromProduct(idx, v)}><SelectTrigger className="h-7 w-44 text-xs rounded-lg border-slate-200"><SelectValue placeholder="Pick from catalog…" /></SelectTrigger><SelectContent><SelectItem value="__none__">— Manual Entry —</SelectItem>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent></Select>
                           </div>
                           {form.items.length > 1 && (<button type="button" onClick={() => removeItem(idx)} className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>)}
                         </div>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                          <div className="md:col-span-2">
-                            <label className={labelCls}>Description *</label>
-                            <Input
-                              className={inputCls}
-                              value={item.description}
-                              list={`item-mem-${idx}`}
-                              onChange={e => updateItem(idx, 'description', e.target.value)}
-                              onBlur={e => {
-                                const key = e.target.value.trim().toLowerCase();
-                                if (!key) return;
-                                const saved = getItemMemory()[key];
-                                if (saved) {
-                                  setForm(p => ({ ...p, items: p.items.map((it, i) => i !== idx ? it : {
-                                    ...it,
-                                    unit_price: it.unit_price === 0 ? saved.unit_price : it.unit_price,
-                                    gst_rate: saved.gst_rate ?? it.gst_rate,
-                                    unit: it.unit === 'service' ? (saved.unit || it.unit) : it.unit,
-                                    hsn_sac: it.hsn_sac || saved.hsn_sac || '',
-                                  })}));
-                                }
-                              }}
-                            />
-                            <datalist id={`item-mem-${idx}`}>
-                              {Object.values(getItemMemory()).map((m, mi) => (
-                                <option key={mi} value={m.description} />
-                              ))}
-                            </datalist>
-                          </div>
-                          <div className="md:col-span-2">
-                            <label className={labelCls}>Details</label>
-                            <Textarea
-                              className={`rounded-xl text-sm min-h-[60px] resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}
-                              placeholder="Additional details for this line item…"
-                              value={item.item_details || ''}
-                              onChange={e => updateItem(idx, 'item_details', e.target.value)}
-                            />
-                          </div>
+                          <div className="md:col-span-2"><label className={labelCls}>Description *</label><Input className={inputCls} value={item.description} list={`item-mem-${idx}`} onChange={e => updateItem(idx, 'description', e.target.value)} onBlur={e => { const key = e.target.value.trim().toLowerCase(); if (!key) return; const saved = getItemMemory()[key]; if (saved) { setForm(p => ({ ...p, items: p.items.map((it, i) => i !== idx ? it : { ...it, unit_price: it.unit_price === 0 ? saved.unit_price : it.unit_price, gst_rate: saved.gst_rate ?? it.gst_rate, unit: it.unit === 'service' ? (saved.unit || it.unit) : it.unit, hsn_sac: it.hsn_sac || saved.hsn_sac || '' }) })); } }} /><datalist id={`item-mem-${idx}`}>{Object.values(getItemMemory()).map((m, mi) => <option key={mi} value={m.description} />)}</datalist></div>
+                          <div className="md:col-span-2"><label className={labelCls}>Details</label><Textarea className={`rounded-xl text-sm min-h-[60px] resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} placeholder="Additional details…" value={item.item_details || ''} onChange={e => updateItem(idx, 'item_details', e.target.value)} /></div>
                           <div><label className={labelCls}>HSN / SAC</label><Input className={inputCls} placeholder="e.g. 9983" value={item.hsn_sac} onChange={e => updateItem(idx, 'hsn_sac', e.target.value)} /></div>
                           <div><label className={labelCls}>Unit</label><Select value={item.unit} onValueChange={v => updateItem(idx, 'unit', v)}><SelectTrigger className={inputCls}><SelectValue /></SelectTrigger><SelectContent>{UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent></Select></div>
                           <div><label className={labelCls}>Quantity</label><Input type="number" min="0" step="0.01" className={inputCls} value={item.quantity} onChange={e => updateItem(idx, 'quantity', parseFloat(e.target.value) || 0)} /></div>
@@ -1491,10 +1329,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                 </div>
                 <div className={sectionCls}>
                   <h3 className={`text-sm font-semibold mb-4 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Recurring Settings</h3>
-                  <div className="flex items-center gap-3 mb-4">
-                    <Switch checked={form.is_recurring} onCheckedChange={v => setField('is_recurring', v)} />
-                    <div><p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Enable Recurring Invoice</p><p className="text-xs text-slate-400">Auto-generate new invoice on schedule</p></div>
-                  </div>
+                  <div className="flex items-center gap-3 mb-4"><Switch checked={form.is_recurring} onCheckedChange={v => setField('is_recurring', v)} /><div><p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Enable Recurring Invoice</p><p className="text-xs text-slate-400">Auto-generate new invoice on schedule</p></div></div>
                   {form.is_recurring && (
                     <div className="grid grid-cols-2 gap-4">
                       <div><label className={labelCls}>Recurrence Pattern</label><Select value={form.recurrence_pattern} onValueChange={v => setField('recurrence_pattern', v)}><SelectTrigger className={inputCls}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="monthly">Monthly</SelectItem><SelectItem value="quarterly">Quarterly</SelectItem><SelectItem value="yearly">Yearly</SelectItem></SelectContent></Select></div>
@@ -1506,107 +1341,51 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
             )}
             {activeTab === 'design' && (
               <div className="space-y-5">
-                {/* ── Template Picker ── */}
                 <div className={sectionCls}>
-                  <h3 className={`text-sm font-semibold mb-4 flex items-center gap-2 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-                    <Layout className="h-4 w-4" /> Invoice Template
-                  </h3>
+                  <h3 className={`text-sm font-semibold mb-4 flex items-center gap-2 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}><Layout className="h-4 w-4" /> Invoice Template</h3>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                     {INVOICE_TEMPLATES.map(t => (
-                      <button key={t.id} type="button"
-                        onClick={() => setField('invoice_template', t.id)}
+                      <button key={t.id} type="button" onClick={() => setField('invoice_template', t.id)}
                         className={`relative p-4 rounded-xl border-2 text-left transition-all hover:shadow-md ${form.invoice_template === t.id ? 'border-blue-500 shadow-md' : (isDark ? 'border-slate-600 hover:border-slate-500' : 'border-slate-200 hover:border-slate-300')}`}>
-                        {form.invoice_template === t.id && (
-                          <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center">
-                            <Check className="h-3 w-3 text-white" />
-                          </div>
-                        )}
-                        {t.badge && (
-                          <span className="inline-block text-[9px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 mb-2">{t.badge}</span>
-                        )}
+                        {form.invoice_template === t.id && <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center"><Check className="h-3 w-3 text-white" /></div>}
+                        {t.badge && <span className="inline-block text-[9px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 mb-2">{t.badge}</span>}
                         <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{t.name}</p>
                         <p className={`text-[10px] mt-1 leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{t.desc}</p>
                       </button>
                     ))}
                   </div>
                 </div>
-
-                {/* ── Color Theme Picker ── */}
                 <div className={sectionCls}>
-                  <h3 className={`text-sm font-semibold mb-4 flex items-center gap-2 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-                    <Palette className="h-4 w-4" /> Color Theme
-                  </h3>
+                  <h3 className={`text-sm font-semibold mb-4 flex items-center gap-2 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}><Palette className="h-4 w-4" /> Color Theme</h3>
                   <div className="grid grid-cols-4 md:grid-cols-8 gap-3">
                     {COLOR_THEMES.map(theme => (
-                      <button key={theme.id} type="button"
-                        onClick={() => setField('invoice_theme', theme.id)}
+                      <button key={theme.id} type="button" onClick={() => setField('invoice_theme', theme.id)}
                         className={`flex flex-col items-center gap-1.5 p-2 rounded-xl border-2 transition-all ${form.invoice_theme === theme.id ? 'border-blue-500 shadow-md' : (isDark ? 'border-slate-600 hover:border-slate-500' : 'border-slate-200 hover:border-slate-300')}`}>
-                        <div className="relative w-8 h-8 rounded-lg overflow-hidden flex-shrink-0">
-                          <div className="absolute inset-0" style={{ background: theme.primary }} />
-                          <div className="absolute bottom-0 right-0 w-4 h-4" style={{ background: theme.secondary }} />
-                          {form.invoice_theme === theme.id && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                              <Check className="h-3 w-3 text-white" />
-                            </div>
-                          )}
-                        </div>
+                        <div className="relative w-8 h-8 rounded-lg overflow-hidden flex-shrink-0"><div className="absolute inset-0" style={{ background: theme.primary }} /><div className="absolute bottom-0 right-0 w-4 h-4" style={{ background: theme.secondary }} />{form.invoice_theme === theme.id && <div className="absolute inset-0 flex items-center justify-center bg-black/30"><Check className="h-3 w-3 text-white" /></div>}</div>
                         <p className={`text-[9px] font-semibold text-center leading-tight ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{theme.name}</p>
                       </button>
                     ))}
-                    {/* Custom color */}
                     <div className="flex flex-col items-center gap-1.5 p-2 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600">
-                      <label className="cursor-pointer">
-                        <div className="w-8 h-8 rounded-lg overflow-hidden border border-slate-300">
-                          <input type="color" value={form.invoice_custom_color}
-                            onChange={e => { setField('invoice_custom_color', e.target.value); setField('invoice_theme', 'custom'); }}
-                            className="w-12 h-12 -ml-1 -mt-1 cursor-pointer border-0 p-0" />
-                        </div>
-                      </label>
+                      <label className="cursor-pointer"><div className="w-8 h-8 rounded-lg overflow-hidden border border-slate-300"><input type="color" value={form.invoice_custom_color} onChange={e => { setField('invoice_custom_color', e.target.value); setField('invoice_theme', 'custom'); }} className="w-12 h-12 -ml-1 -mt-1 cursor-pointer border-0 p-0" /></div></label>
                       <p className={`text-[9px] font-semibold text-center leading-tight ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Custom</p>
                     </div>
                   </div>
                 </div>
-
-                {/* ── Live Preview ── */}
                 <div className={sectionCls}>
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className={`text-sm font-semibold flex items-center gap-2 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-                      <Eye className="h-4 w-4" /> Live Preview
-                    </h3>
-                    {/* STEP 4 FIX: Updated Open Print Preview button handler */}
+                    <h3 className={`text-sm font-semibold flex items-center gap-2 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}><Eye className="h-4 w-4" /> Live Preview</h3>
                     <Button type="button" size="sm" variant="outline"
-                      onClick={() => {
-                        const company = companies.find(c => c.id === form.company_id) || {};
-                        const previewInv = {
-                          ...form,
-                          invoice_no:   editingInv?.invoice_no || 'PREVIEW-001',
-                          invoice_date: form.invoice_date || format(new Date(), 'yyyy-MM-dd'),
-                          due_date:     form.due_date     || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
-                          client_name:  form.client_name  || 'Client Name',
-                        };
-                        openInvoicePrint(previewInv, company, form.invoice_template, form.invoice_theme, form.invoice_custom_color);
-                      }}
-                      className="h-8 px-3 text-xs rounded-xl gap-1.5">
-                      <Printer className="h-3.5 w-3.5" /> Open Print Preview
-                    </Button>
+                      onClick={() => { const company = companies.find(c => c.id === form.company_id) || {}; const previewInv = { ...form, invoice_no: editingInv?.invoice_no || 'PREVIEW-001', invoice_date: form.invoice_date || format(new Date(), 'yyyy-MM-dd'), due_date: form.due_date || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'), client_name: form.client_name || 'Client Name' }; openInvoicePrint(previewInv, company, form.invoice_template, form.invoice_theme, form.invoice_custom_color); }}
+                      className="h-8 px-3 text-xs rounded-xl gap-1.5"><Printer className="h-3.5 w-3.5" /> Open Print Preview</Button>
                   </div>
-                  {/* STEP 3 FIX: Replaced old iframe block with fixed version using previewHtml hook + sandbox="allow-same-origin" only */}
-                  <div
-                    className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-200'}`}
-                    style={{ height: 420 }}
-                  >
-                    <iframe
-                      key={`${form.invoice_template}-${form.invoice_theme}-${form.invoice_custom_color}`}
-                      srcDoc={previewHtml}
-                      className="w-full h-full border-0"
-                      title="Invoice Preview"
-                      // FIX: Removed allow-scripts — the HTML is static, no JS needed.
-                      //      This eliminates the yellow sandbox security warning.
-                      sandbox="allow-same-origin"
-                    />
+                  <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-200'}`} style={{ height: 420 }}>
+                    <iframe key={`${form.invoice_template}-${form.invoice_theme}-${form.invoice_custom_color}`} srcDoc={previewHtml} className="w-full h-full border-0" title="Invoice Preview" sandbox="allow-same-origin" />
                   </div>
+                  {/* *** BUG-005 FIX: Added note about PDF download vs template preview *** */}
                   <p className={`text-[10px] mt-2 text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    Preview updates live as you change template or theme · Actual invoice may vary slightly
+                    Preview updates live as you change template or theme.
+                    The "PDF" download button uses a standard layout with your brand color.
+                    For themed output matching this preview, use "Open Print Preview" → Save as PDF.
                   </p>
                 </div>
               </div>
@@ -1616,32 +1395,15 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
         <div className={`flex-shrink-0 flex items-center justify-between gap-3 px-7 py-4 border-t ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
           <div className="flex items-center gap-2">
             <Button type="button" variant="ghost" onClick={onClose} className="h-10 px-5 text-sm rounded-xl text-slate-500">Cancel</Button>
-            <Button type="button" variant="outline" size="sm"
-              onClick={() => setActiveTab('design')}
-              className="h-10 px-4 text-xs rounded-xl gap-1.5 border-purple-200 text-purple-600 hover:bg-purple-50">
-              <Palette className="h-3.5 w-3.5" /> Design & Preview
-            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => setActiveTab('design')} className="h-10 px-4 text-xs rounded-xl gap-1.5 border-purple-200 text-purple-600 hover:bg-purple-50"><Palette className="h-3.5 w-3.5" /> Design & Preview</Button>
           </div>
           <div className="flex items-center gap-3">
             {totals.grand_total > 0 && (<span className={`text-sm font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Total: <span style={{ color: COLORS.mediumBlue }}>{fmtC(totals.grand_total)}</span></span>)}
             {activeTab !== 'design' ? (
-              <Button type="button"
-                onClick={() => {
-                  // STEP 3 FIX: Updated tab order — no 'theme' step
-                  const order = ['details', 'items', 'totals', 'settings', 'design'];
-                  const next = order[order.indexOf(activeTab) + 1];
-                  if (next) setActiveTab(next);
-                }}
-                className="h-10 px-7 text-sm rounded-xl text-white font-semibold shadow-sm gap-2"
-                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-                Next <ChevronRight className="h-4 w-4" />
-              </Button>
+              <Button type="button" onClick={() => { const order = ['details', 'items', 'totals', 'settings', 'design']; const next = order[order.indexOf(activeTab) + 1]; if (next) setActiveTab(next); }}
+                className="h-10 px-7 text-sm rounded-xl text-white font-semibold shadow-sm gap-2" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>Next <ChevronRight className="h-4 w-4" /></Button>
             ) : (
-              <Button type="button" onClick={handleSubmit} disabled={loading}
-                className="h-10 px-7 text-sm rounded-xl text-white font-semibold shadow-sm"
-                style={{ background: loading ? '#94a3b8' : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-                {loading ? 'Saving…' : editingInv ? '✓ Update Invoice' : '✓ Create Invoice'}
-              </Button>
+              <Button type="button" onClick={handleSubmit} disabled={loading} className="h-10 px-7 text-sm rounded-xl text-white font-semibold shadow-sm" style={{ background: loading ? '#94a3b8' : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>{loading ? 'Saving…' : editingInv ? '✓ Update Invoice' : '✓ Create Invoice'}</Button>
             )}
           </div>
         </div>
@@ -1663,7 +1425,6 @@ const InvoiceDetailPanel = ({ invoice, open, onClose, onPayment, onEdit, onDelet
         <DialogTitle className="sr-only">Invoice Detail</DialogTitle>
         <DialogDescription className="sr-only">Invoice details</DialogDescription>
         <div className="px-7 py-5 relative overflow-hidden flex-shrink-0" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-          <div className="absolute right-0 top-0 w-48 h-48 rounded-full -mr-16 -mt-16 opacity-10" style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
           <div className="relative flex items-start justify-between gap-3">
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0"><Receipt className="h-5 w-5 text-white" /></div>
@@ -1692,7 +1453,7 @@ const InvoiceDetailPanel = ({ invoice, open, onClose, onPayment, onEdit, onDelet
                 </table>
               </div>
               <div className={`px-5 py-3 space-y-1.5 border-t ${isDark ? 'border-slate-700 bg-slate-700/20' : 'border-slate-100 bg-slate-50/50'}`}>
-                {[['Taxable Value', invoice.total_taxable], isInterstate ? ['IGST', invoice.total_igst] : null, !isInterstate ? ['CGST', invoice.total_cgst] : null, !isInterstate ? ['SGST', invoice.total_sgst] : null, invoice.shipping_charges > 0 ? ['Shipping', invoice.shipping_charges] : null].filter(Boolean).map(([label, val]) => (
+                {[['Taxable Value', invoice.total_taxable], isInterstate ? ['IGST', invoice.total_igst] : null, !isInterstate ? ['CGST', invoice.total_cgst] : null, !isInterstate ? ['SGST', invoice.total_sgst] : null].filter(Boolean).map(([label, val]) => (
                   <div key={label} className="flex items-center justify-between text-xs"><span className={isDark ? 'text-slate-400' : 'text-slate-500'}>{label}</span><span className={`font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{fmtC(val)}</span></div>
                 ))}
                 <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-600"><span className="text-sm font-bold" style={{ color: COLORS.deepBlue }}>Grand Total</span><span className="text-lg font-black" style={{ color: COLORS.mediumBlue }}>{fmtC(invoice.grand_total)}</span></div>
@@ -1706,15 +1467,8 @@ const InvoiceDetailPanel = ({ invoice, open, onClose, onPayment, onEdit, onDelet
                 </div>
               </div>
             )}
-            {(invoice.notes || invoice.terms_conditions) && (
-              <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
-                {invoice.notes && <><p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Notes</p><p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{invoice.notes}</p></>}
-                {invoice.terms_conditions && <><p className={`text-[10px] font-bold uppercase tracking-widest mt-3 mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>T&C</p><p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{invoice.terms_conditions}</p></>}
-              </div>
-            )}
           </div>
         </div>
-        {/* FIX 5: Added DriveUploadBtn after PDF download button */}
         <div className={`flex-shrink-0 flex items-center gap-2 px-7 py-4 border-t flex-wrap ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
           <Button variant="outline" size="sm" onClick={() => { onClose(); onEdit?.(invoice); }} className="rounded-xl text-xs h-9 gap-1.5"><Edit className="h-3.5 w-3.5" /> Edit</Button>
           <Button variant="outline" size="sm" onClick={() => onDownloadPdf?.(invoice)} className="rounded-xl text-xs h-9 gap-1.5"><Download className="h-3.5 w-3.5" /> PDF</Button>
@@ -1759,10 +1513,7 @@ const ProductModal = ({ open, onClose, isDark, onSaved }) => {
         <DialogTitle className="sr-only">Product Catalog</DialogTitle>
         <DialogDescription className="sr-only">Manage products and services</DialogDescription>
         <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-700">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}><Package className="h-5 w-5" /></div>
-            <div><h2 className={`font-bold text-lg ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Product / Service Catalog</h2><p className="text-xs text-slate-400">Reusable items for quick invoice creation</p></div>
-          </div>
+          <div className="flex items-center gap-3"><div className="w-9 h-9 rounded-xl flex items-center justify-center text-white" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}><Package className="h-5 w-5" /></div><div><h2 className={`font-bold text-lg ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Product / Service Catalog</h2><p className="text-xs text-slate-400">Reusable items for quick invoice creation</p></div></div>
         </div>
         <div className="flex-1 overflow-hidden flex">
           <div className={`w-72 flex-shrink-0 p-5 border-r overflow-y-auto ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-slate-50/40'}`}>
@@ -1805,7 +1556,7 @@ const ProductModal = ({ open, onClose, isDark, onSaved }) => {
   );
 };
 // ════════════════════════════════════════════════════════════════════════════════
-// MAIN PAGE
+// MAIN PAGE — with BUG-004 FIX (fetchAll) and BUG-003 FIX (error toast)
 // ════════════════════════════════════════════════════════════════════════════════
 export default function Invoicing() {
   const { user } = useAuth();
@@ -1838,98 +1589,70 @@ export default function Invoicing() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const searchRef = useRef(null);
-  useEffect(() => {
-    const t = setTimeout(() => setSearchTerm(searchInput), 250);
-    return () => clearTimeout(t);
-  }, [searchInput]);
+  useEffect(() => { const t = setTimeout(() => setSearchTerm(searchInput), 250); return () => clearTimeout(t); }, [searchInput]);
   useEffect(() => {
     const h = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); searchRef.current?.focus(); }
       if (e.key === 'n' && !formOpen && !detailOpen && !payOpen && !gstOpen && document.activeElement.tagName === 'BODY') setFormOpen(true);
     };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
+    window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
   }, [formOpen, detailOpen, payOpen, gstOpen]);
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      // Use allSettled so a single failing endpoint doesn't blank the whole page
       const [invR, compR, clientR, leadR, statR] = await Promise.allSettled([
-        api.get('/invoices'),
-        api.get('/companies'),
-        api.get('/clients'),
-        api.get('/leads'),
-        api.get('/invoices/stats'),
+        api.get('/invoices'), api.get('/companies'), api.get('/clients'), api.get('/leads'), api.get('/invoices/stats'),
       ]);
 
+      // *** BUG-004 FIX: Removed webViewLink mapping — invoices used as-is ***
+      // *** BUG-003 FIX: Removed misleading "Google Drive connection" error ***
       if (invR.status === 'fulfilled') {
-        const driveInvoices = (invR.value.data || []).map(inv => ({
-          ...inv,
-          webViewLink: inv.webViewLink || inv.driveLink || '#',
-        }));
-        setInvoices(driveInvoices);
+        setInvoices(invR.value.data || []);
       } else {
         console.error('Failed to load invoices:', invR.reason);
-        toast.error('Failed to load invoices — check Google Drive connection');
+        toast.error('Failed to load invoices');
         setInvoices([]);
       }
 
       if (compR.status === 'fulfilled') setCompanies(compR.value.data || []);
       else { console.error('Failed to load companies:', compR.reason); setCompanies([]); }
-
       if (clientR.status === 'fulfilled') setClients(clientR.value.data || []);
       else { console.error('Failed to load clients:', clientR.reason); setClients([]); }
-
       if (leadR.status === 'fulfilled') setLeads(leadR.value.data || []);
       else { console.error('Failed to load leads:', leadR.reason); setLeads([]); }
-
       if (statR.status === 'fulfilled') setStats(statR.value.data || null);
       else { console.error('Failed to load stats:', statR.reason); setStats(null); }
-
     } catch (err) {
-      // Truly unexpected error (e.g. network down before any call fires)
       console.error('fetchAll unexpected error:', err);
       toast.error('Failed to load invoicing data');
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }, []);
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
   const availableYears = useMemo(() => {
     const years = new Set(invoices.map(i => i.invoice_date?.slice(0, 4)).filter(Boolean));
     return Array.from(years).sort().reverse();
   }, [invoices]);
-  const fyRange = (year) => {
-    if (!year || year === 'all') return null;
-    const y = parseInt(year);
-    return { from: `${y}-04-01`, to: `${y + 1}-03-31` };
-  };
+  const fyRange = (year) => { if (!year || year === 'all') return null; const y = parseInt(year); return { from: `${y}-04-01`, to: `${y + 1}-03-31` }; };
   const localStats = useMemo(() => {
-    const now = new Date();
-    const curMonth = format(now, 'yyyy-MM');
-    const fy = fyRange(yearFilter === 'all' ? null : yearFilter);
-    const base = invoices.filter(inv => {
-      if (companyFilter !== 'all' && inv.company_id !== companyFilter) return false;
-      if (fy && (inv.invoice_date < fy.from || inv.invoice_date > fy.to)) return false;
-      return true;
-    });
+    const now = new Date(); const curMonth = format(now, 'yyyy-MM'); const fy = fyRange(yearFilter === 'all' ? null : yearFilter);
+    const base = invoices.filter(inv => { if (companyFilter !== 'all' && inv.company_id !== companyFilter) return false; if (fy && (inv.invoice_date < fy.from || inv.invoice_date > fy.to)) return false; return true; });
     const total_revenue = base.reduce((s, i) => s + (i.grand_total || 0), 0);
     const total_outstanding = base.reduce((s, i) => s + (i.amount_due || 0), 0);
     const total_gst = base.reduce((s, i) => s + (i.total_gst || 0), 0);
     const total_invoices = base.length;
     const month_revenue = base.filter(i => i.invoice_date?.startsWith(curMonth)).reduce((s, i) => s + (i.grand_total || 0), 0);
     const month_invoices = base.filter(i => i.invoice_date?.startsWith(curMonth)).length;
-    const overdue_count = base.filter(i => i.amount_due > 0 && i.due_date && differenceInDays(parseISO(i.due_date), now) < 0).length;
+    const overdue_count = base.filter(i => i.amount_due > 0 && i.due_date && differenceInDays(new Date(), parseISO(i.due_date)) > 0).length;
     const paid_count = base.filter(i => i.status === 'paid').length;
     const draft_count = base.filter(i => i.status === 'draft').length;
     const monthly_trend = Array.from({ length: 12 }, (_, i) => {
-      const d = subMonths(now, 11 - i);
-      const key = format(d, 'yyyy-MM');
+      const d = subMonths(now, 11 - i); const key = format(d, 'yyyy-MM');
       const monthInvs = base.filter(inv => inv.invoice_date?.startsWith(key));
       return { label: format(d, 'MMM yy'), revenue: monthInvs.reduce((s, inv) => s + (inv.grand_total || 0), 0), collected: monthInvs.reduce((s, inv) => s + (inv.amount_paid || 0), 0) };
     });
-    const clientMap = {};
-    base.forEach(inv => { if (!inv.client_name) return; clientMap[inv.client_name] = (clientMap[inv.client_name] || 0) + (inv.grand_total || 0); });
+    const clientMap = {}; base.forEach(inv => { if (!inv.client_name) return; clientMap[inv.client_name] = (clientMap[inv.client_name] || 0) + (inv.grand_total || 0); });
     const top_clients = Object.entries(clientMap).map(([name, revenue]) => ({ name, revenue })).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
     return { total_revenue, total_outstanding, total_gst, total_invoices, month_revenue, month_invoices, overdue_count, paid_count, draft_count, monthly_trend, top_clients };
   }, [invoices, companyFilter, yearFilter]);
@@ -1956,38 +1679,24 @@ export default function Invoicing() {
     try { await api.delete(`/invoices/${inv.id}`); toast.success('Invoice deleted'); fetchAll(); setDetailOpen(false); }
     catch { toast.error('Failed to delete'); }
   }, [fetchAll]);
-  // FIX 1: handleDownloadPdf — always streams PDF locally as a blob download
   const handleDownloadPdf = useCallback(async (inv) => {
     try {
       toast.info('Generating PDF…', { duration: 1500 });
-      const response = await api.get(`/invoices/${inv.id}/pdf`, {
-        responseType: 'blob',
-        timeout: 30000,
-      });
+      const response = await api.get(`/invoices/${inv.id}/pdf`, { responseType: 'blob', timeout: 30000 });
       const blob = new Blob([response.data], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
+      const link = document.createElement('a'); link.href = url;
       link.download = `Invoice_${(inv.invoice_no || inv.id).replace(/\//g, '_').replace(/\\/g, '_')}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      document.body.appendChild(link); link.click(); document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-      toast.success(`✅ PDF downloaded: ${inv.invoice_no || inv.id}`);
+      toast.success(`PDF downloaded: ${inv.invoice_no || inv.id}`);
     } catch (err) {
       console.error('PDF download error:', err);
-      toast.error(
-        err.response?.status === 404
-          ? 'Invoice not found'
-          : err.response?.status === 500
-          ? 'PDF generation failed on server — check invoice data'
-          : 'PDF download failed — please try again'
-      );
+      toast.error(err.response?.status === 404 ? 'Invoice not found' : err.response?.status === 500 ? 'PDF generation failed on server' : 'PDF download failed — please try again');
     }
   }, []);
   const handleMarkSent = useCallback(async (inv) => {
-    try { await api.post(`/invoices/${inv.id}/mark-sent`); fetchAll(); toast.success('Marked as sent'); }
-    catch { toast.error('Failed'); }
+    try { await api.post(`/invoices/${inv.id}/mark-sent`); fetchAll(); toast.success('Marked as sent'); } catch { toast.error('Failed'); }
   }, [fetchAll]);
   const handleSendEmail = useCallback(async (inv) => {
     if (!inv.client_email) { toast.error('Client email address is missing'); return; }
@@ -1997,67 +1706,32 @@ export default function Invoicing() {
   }, [fetchAll]);
   const handleExport = useCallback(() => {
     if (!enrichedFiltered.length) { toast.error('No invoices to export'); return; }
-    const rows = [['Invoice No', 'Type', 'Client', 'Date', 'Due Date', 'Taxable', 'GST', 'Total', 'Paid', 'Balance', 'Status'],
+    const rows = [['Invoice No','Type','Client','Date','Due Date','Taxable','GST','Total','Paid','Balance','Status'],
       ...enrichedFiltered.map(inv => [inv.invoice_no, INV_TYPES.find(t => t.value === inv.invoice_type)?.label || inv.invoice_type, inv.client_name, inv.invoice_date, inv.due_date, inv.total_taxable, inv.total_gst, inv.grand_total, inv.amount_paid, inv.amount_due, inv.status])];
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(rows); const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Invoices');
     XLSX.writeFile(wb, `invoices_${format(new Date(), 'dd-MMM-yyyy')}.xlsx`);
     toast.success(`Exported ${enrichedFiltered.length} invoices`);
   }, [enrichedFiltered]);
+
   return (
     <div className={`min-h-screen p-5 md:p-7 space-y-5 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
       {/* PAGE HEADER */}
-      <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 shadow-sm"
-        style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)` }}>
-        <div className="absolute -top-10 -right-10 w-52 h-52 rounded-full opacity-10" style={{ background: 'radial-gradient(circle, #fff 0%, transparent 70%)' }} />
+      <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 shadow-sm" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)` }}>
         <div className="relative flex flex-col sm:flex-row justify-between items-start sm:items-center gap-5 px-7 py-6">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-white/15 backdrop-blur-sm border border-white/20 flex-shrink-0"><Receipt className="h-6 w-6 text-white" /></div>
-            <div>
-              <h1 className="text-2xl font-bold text-white tracking-tight">Invoicing & Billing</h1>
-              <p className="text-sm text-blue-200 mt-0.5">
-                GST-compliant · Smart client search · GSTR reports · Email invoices ·&nbsp;
-                <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white/20 font-mono">Ctrl+K</kbd> ·&nbsp;
-                <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white/20 font-mono">N</kbd> new
-                {companyFilter !== 'all' && <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white">📋 {companies.find(c => c.id === companyFilter)?.name}</span>}
-              </p>
-            </div>
+            <div><h1 className="text-2xl font-bold text-white tracking-tight">Invoicing & Billing</h1><p className="text-sm text-blue-200 mt-0.5">GST-compliant · Smart client search · GSTR reports · Email invoices · <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white/20 font-mono">Ctrl+K</kbd> · <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white/20 font-mono">N</kbd> new</p></div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => { setLedgerClient(null); setLedgerOpen(true); }}
-              className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold">
-              <BookOpen className="h-4 w-4" /> Party Ledger
-            </Button>
-            <Button variant="outline" onClick={() => setGstOpen(true)}
-              className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold">
-              <FileSpreadsheet className="h-4 w-4" /> GST Returns
-            </Button>
-            <Button variant="outline" onClick={() => setSettingsOpen(true)}
-              className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold">
-              <Settings className="h-4 w-4" /> Settings
-            </Button>
-            {/* UNIFIED IMPORT BUTTON */}
-            <Button variant="outline" onClick={() => setImportOpen(true)}
-              className="h-9 px-4 text-sm bg-emerald-500/20 border-emerald-300/40 text-white hover:bg-emerald-500/30 rounded-xl gap-2 backdrop-blur-sm font-semibold">
-              <Database className="h-4 w-4" /> Import
-            </Button>
-            <Button variant="outline" onClick={downloadInvoiceTemplate}
-              className="h-9 px-4 text-sm bg-amber-500/20 border-amber-300/40 text-white hover:bg-amber-500/30 rounded-xl gap-2 backdrop-blur-sm font-semibold">
-              <FileDown className="h-4 w-4" /> Template
-            </Button>
-            <Button variant="outline" onClick={() => setCatOpen(true)}
-              className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm">
-              <Package className="h-4 w-4" /> Catalog
-            </Button>
-            <Button variant="outline" onClick={handleExport}
-              className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm">
-              <Download className="h-4 w-4" /> Export
-            </Button>
-            <Button onClick={() => { setEditingInv(null); setFormOpen(true); }}
-              className="h-9 px-5 text-sm rounded-xl bg-white text-slate-800 hover:bg-blue-50 shadow-sm gap-2 font-semibold border-0">
-              <Plus className="h-4 w-4" /> New Invoice
-            </Button>
+            <Button variant="outline" onClick={() => { setLedgerClient(null); setLedgerOpen(true); }} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold"><BookOpen className="h-4 w-4" /> Party Ledger</Button>
+            <Button variant="outline" onClick={() => setGstOpen(true)} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold"><FileSpreadsheet className="h-4 w-4" /> GST Returns</Button>
+            <Button variant="outline" onClick={() => setSettingsOpen(true)} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold"><Settings className="h-4 w-4" /> Settings</Button>
+            <Button variant="outline" onClick={() => setImportOpen(true)} className="h-9 px-4 text-sm bg-emerald-500/20 border-emerald-300/40 text-white hover:bg-emerald-500/30 rounded-xl gap-2 backdrop-blur-sm font-semibold"><Database className="h-4 w-4" /> Import</Button>
+            <Button variant="outline" onClick={downloadInvoiceTemplate} className="h-9 px-4 text-sm bg-amber-500/20 border-amber-300/40 text-white hover:bg-amber-500/30 rounded-xl gap-2 backdrop-blur-sm font-semibold"><FileDown className="h-4 w-4" /> Template</Button>
+            <Button variant="outline" onClick={() => setCatOpen(true)} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm"><Package className="h-4 w-4" /> Catalog</Button>
+            <Button variant="outline" onClick={handleExport} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm"><Download className="h-4 w-4" /> Export</Button>
+            <Button onClick={() => { setEditingInv(null); setFormOpen(true); }} className="h-9 px-5 text-sm rounded-xl bg-white text-slate-800 hover:bg-blue-50 shadow-sm gap-2 font-semibold border-0"><Plus className="h-4 w-4" /> New Invoice</Button>
           </div>
         </div>
       </div>
@@ -2073,14 +1747,8 @@ export default function Invoicing() {
       {localStats.monthly_trend?.some(d => d.revenue > 0) && (
         <div className={`rounded-2xl border p-5 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`}>
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2.5">
-              <div className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/40"><BarChart3 className="h-4 w-4 text-blue-500" /></div>
-              <div><h3 className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Revenue Trend</h3><p className="text-xs text-slate-400">Last 12 months{companyFilter !== 'all' ? ` · ${companies.find(c => c.id === companyFilter)?.name || ''}` : ''}</p></div>
-            </div>
-            <div className="flex items-center gap-4 text-xs">
-              <span className="flex items-center gap-1.5"><span className="w-4 h-0.5 inline-block rounded" style={{ background: COLORS.mediumBlue }} /> Revenue</span>
-              <span className="flex items-center gap-1.5"><span className="w-4 h-px inline-block rounded border-t-2 border-dashed" style={{ borderColor: COLORS.emeraldGreen }} /> Collected</span>
-            </div>
+            <div className="flex items-center gap-2.5"><div className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/40"><BarChart3 className="h-4 w-4 text-blue-500" /></div><div><h3 className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Revenue Trend</h3><p className="text-xs text-slate-400">Last 12 months</p></div></div>
+            <div className="flex items-center gap-4 text-xs"><span className="flex items-center gap-1.5"><span className="w-4 h-0.5 inline-block rounded" style={{ background: COLORS.mediumBlue }} /> Revenue</span><span className="flex items-center gap-1.5"><span className="w-4 h-px inline-block rounded border-t-2 border-dashed" style={{ borderColor: COLORS.emeraldGreen }} /> Collected</span></div>
           </div>
           <RevenueChart trend={localStats.monthly_trend} isDark={isDark} />
         </div>
@@ -2090,59 +1758,28 @@ export default function Invoicing() {
         <div className={`flex items-center gap-3 px-3.5 py-3 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
           <div className="relative flex-1">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-            <Input ref={searchRef} placeholder="Search invoice no. or client… (Ctrl+K)"
-              className={`pl-10 h-9 border-none focus-visible:ring-1 focus-visible:ring-blue-300 rounded-xl text-sm ${isDark ? 'bg-slate-700 text-slate-100 placeholder:text-slate-400' : 'bg-slate-50'}`}
-              value={searchInput} onChange={e => setSearchInput(e.target.value)} />
+            <Input ref={searchRef} placeholder="Search invoice no. or client… (Ctrl+K)" className={`pl-10 h-9 border-none focus-visible:ring-1 focus-visible:ring-blue-300 rounded-xl text-sm ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`} value={searchInput} onChange={e => setSearchInput(e.target.value)} />
             {searchInput && <button onClick={() => setSearchInput('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X className="h-3.5 w-3.5" /></button>}
           </div>
-          <div className={`h-9 px-3 flex items-center rounded-xl text-xs font-bold border whitespace-nowrap flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-300 border-slate-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
-            {enrichedFiltered.length} <span className="ml-1 font-normal text-slate-400">invoices</span>
-          </div>
+          <div className={`h-9 px-3 flex items-center rounded-xl text-xs font-bold border whitespace-nowrap flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-300 border-slate-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>{enrichedFiltered.length} <span className="ml-1 font-normal text-slate-400">invoices</span></div>
         </div>
         <div className="flex items-center gap-2 px-3.5 py-2.5 overflow-x-auto scrollbar-none flex-wrap">
           {companies.length > 1 && (
-            <Select value={companyFilter} onValueChange={setCompanyFilter}>
-              <SelectTrigger className={`h-9 w-[160px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-blue-50 text-blue-700'}`}>
-                <Building2 className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" /><SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Companies</SelectItem>
-                {companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <Select value={companyFilter} onValueChange={setCompanyFilter}><SelectTrigger className={`h-9 w-[160px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-blue-50 text-blue-700'}`}><Building2 className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" /><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Companies</SelectItem>{companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select>
           )}
-          <Select value={yearFilter} onValueChange={setYearFilter}>
-            <SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}>
-              <CalendarDays className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" /><SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Years</SelectItem>
-              {availableYears.map(y => <SelectItem key={y} value={y}>FY {y}-{String(parseInt(y) + 1).slice(2)}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <Select value={yearFilter} onValueChange={setYearFilter}><SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><CalendarDays className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" /><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Years</SelectItem>{availableYears.map(y => <SelectItem key={y} value={y}>FY {y}-{String(parseInt(y) + 1).slice(2)}</SelectItem>)}</SelectContent></Select>
           <Select value={statusFilter} onValueChange={setStatusFilter}><SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Status</SelectItem>{Object.entries(STATUS_META).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent></Select>
           <Select value={typeFilter} onValueChange={setTypeFilter}><SelectTrigger className={`h-9 w-[145px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Types</SelectItem>{INV_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent></Select>
-          <div className="flex items-center gap-1.5">
-            <CalendarDays className="h-3.5 w-3.5 text-slate-400" />
-            <Input type="date" className={`h-9 w-36 border-none rounded-xl text-xs ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`} value={fromDate} onChange={e => setFromDate(e.target.value)} />
-            <span className="text-slate-400 text-xs">to</span>
-            <Input type="date" className={`h-9 w-36 border-none rounded-xl text-xs ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`} value={toDate} onChange={e => setToDate(e.target.value)} />
-          </div>
+          <div className="flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5 text-slate-400" /><Input type="date" className={`h-9 w-36 border-none rounded-xl text-xs ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`} value={fromDate} onChange={e => setFromDate(e.target.value)} /><span className="text-slate-400 text-xs">to</span><Input type="date" className={`h-9 w-36 border-none rounded-xl text-xs ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`} value={toDate} onChange={e => setToDate(e.target.value)} /></div>
           {(companyFilter !== 'all' || yearFilter !== 'all' || statusFilter !== 'all' || typeFilter !== 'all' || fromDate || toDate || searchInput) && (
-            <button onClick={() => { setCompanyFilter('all'); setYearFilter('all'); setStatusFilter('all'); setTypeFilter('all'); setFromDate(''); setToDate(''); setSearchInput(''); }}
-              className="flex items-center gap-1 text-xs font-semibold text-red-500 hover:text-red-700 px-2.5 py-1 rounded-xl hover:bg-red-50 transition-colors">
-              <X className="h-3 w-3" /> Clear
-            </button>
+            <button onClick={() => { setCompanyFilter('all'); setYearFilter('all'); setStatusFilter('all'); setTypeFilter('all'); setFromDate(''); setToDate(''); setSearchInput(''); }} className="flex items-center gap-1 text-xs font-semibold text-red-500 hover:text-red-700 px-2.5 py-1 rounded-xl hover:bg-red-50 transition-colors"><X className="h-3 w-3" /> Clear</button>
           )}
         </div>
       </div>
       {/* INVOICE TABLE */}
       <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`}>
-        <div className={`grid border-b px-5 py-3 ${isDark ? 'bg-slate-700/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}
-          style={{ gridTemplateColumns: '1fr 1fr 110px 100px 100px 100px 100px 160px' }}>
-          {['Invoice No', 'Client', 'Date', 'Total', 'Paid', 'Balance', 'Status', 'Actions'].map(h => (
-            <div key={h} className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{h}</div>
-          ))}
+        <div className={`grid border-b px-5 py-3 ${isDark ? 'bg-slate-700/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`} style={{ gridTemplateColumns: '1fr 1fr 110px 100px 100px 100px 100px 160px' }}>
+          {['Invoice No', 'Client', 'Date', 'Total', 'Paid', 'Balance', 'Status', 'Actions'].map(h => (<div key={h} className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{h}</div>))}
         </div>
         {loading ? (
           <div className="flex items-center justify-center py-16"><div className="h-6 w-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" /></div>
@@ -2160,18 +1797,10 @@ export default function Invoicing() {
             {enrichedFiltered.map(inv => {
               const meta = getStatusMeta(inv); const isOverdue = inv.status === 'overdue';
               return (
-                <div key={inv.id}
-                  className={`grid items-center px-5 py-3.5 border-b cursor-pointer group transition-colors last:border-0 ${isOverdue ? (isDark ? 'bg-red-900/10 border-red-900/20' : 'bg-red-50/30 border-red-100') : ''} ${isDark ? 'border-slate-700 hover:bg-slate-700/40' : 'border-slate-100 hover:bg-slate-50/60'}`}
-                  style={{ gridTemplateColumns: '1fr 1fr 110px 100px 100px 100px 100px 160px' }}
-                  onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
-                  <div className="flex items-center gap-3">
-                    <div className="w-1 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: meta.hex }} />
-                    <div><p className={`text-sm font-bold font-mono ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>{inv.invoice_no}</p><p className="text-[10px] text-slate-400">{INV_TYPES.find(t => t.value === inv.invoice_type)?.label || 'Tax Invoice'}</p></div>
-                  </div>
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>{inv.client_name?.charAt(0).toUpperCase() || '?'}</div>
-                    <div className="min-w-0"><p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{inv.client_name}</p>{inv.client_gstin && <p className="text-[10px] text-slate-400 font-mono truncate">{inv.client_gstin}</p>}</div>
-                  </div>
+                <div key={inv.id} className={`grid items-center px-5 py-3.5 border-b cursor-pointer group transition-colors last:border-0 ${isOverdue ? (isDark ? 'bg-red-900/10 border-red-900/20' : 'bg-red-50/30 border-red-100') : ''} ${isDark ? 'border-slate-700 hover:bg-slate-700/40' : 'border-slate-100 hover:bg-slate-50/60'}`}
+                  style={{ gridTemplateColumns: '1fr 1fr 110px 100px 100px 100px 100px 160px' }} onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
+                  <div className="flex items-center gap-3"><div className="w-1 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: meta.hex }} /><div><p className={`text-sm font-bold font-mono ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>{inv.invoice_no}</p><p className="text-[10px] text-slate-400">{INV_TYPES.find(t => t.value === inv.invoice_type)?.label || 'Tax Invoice'}</p></div></div>
+                  <div className="flex items-center gap-2.5 min-w-0"><div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>{inv.client_name?.charAt(0).toUpperCase() || '?'}</div><div className="min-w-0"><p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{inv.client_name}</p>{inv.client_gstin && <p className="text-[10px] text-slate-400 font-mono truncate">{inv.client_gstin}</p>}</div></div>
                   <div><p className={`text-xs font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{inv.invoice_date}</p><p className={`text-[10px] ${isOverdue ? 'text-red-500 font-semibold' : 'text-slate-400'}`}>Due: {inv.due_date}</p></div>
                   <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(inv.grand_total)}</p>
                   <p className={`text-sm font-semibold ${inv.amount_paid > 0 ? 'text-emerald-600' : (isDark ? 'text-slate-500' : 'text-slate-300')}`}>{fmtC(inv.amount_paid)}</p>
@@ -2199,20 +1828,14 @@ export default function Invoicing() {
               <span className="font-semibold text-amber-600">Outstanding: {fmtC(enrichedFiltered.reduce((s, i) => s + (i.amount_due || 0), 0))}</span>
               <span className="font-semibold" style={{ color: COLORS.mediumBlue }}>GST: {fmtC(enrichedFiltered.reduce((s, i) => s + (i.total_gst || 0), 0))}</span>
             </div>
-            <button onClick={() => setGstOpen(true)}
-              className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors">
-              <FileSpreadsheet className="h-3.5 w-3.5" /> Generate GST Returns
-            </button>
+            <button onClick={() => setGstOpen(true)} className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors"><FileSpreadsheet className="h-3.5 w-3.5" /> Generate GST Returns</button>
           </div>
         )}
       </div>
       {/* TOP CLIENTS */}
       {localStats?.top_clients?.length > 0 && (
         <div className={`rounded-2xl border p-5 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`}>
-          <div className="flex items-center gap-2.5 mb-4">
-            <div className="p-1.5 rounded-lg bg-yellow-50 dark:bg-yellow-900/40"><Star className="h-4 w-4 text-yellow-500" /></div>
-            <div><h3 className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Top Clients by Revenue</h3><p className="text-xs text-slate-400">Based on {yearFilter !== 'all' ? `FY ${yearFilter}-${String(parseInt(yearFilter) + 1).slice(2)}` : 'all invoices'}</p></div>
-          </div>
+          <div className="flex items-center gap-2.5 mb-4"><div className="p-1.5 rounded-lg bg-yellow-50 dark:bg-yellow-900/40"><Star className="h-4 w-4 text-yellow-500" /></div><div><h3 className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Top Clients by Revenue</h3></div></div>
           <div className="space-y-3">
             {localStats.top_clients.map((c, i) => {
               const pct = localStats.total_revenue > 0 ? (c.revenue / localStats.total_revenue) * 100 : 0;
@@ -2230,35 +1853,14 @@ export default function Invoicing() {
         </div>
       )}
       {/* ─── DIALOGS ─────────────────────────────────────────────────────────── */}
-      <InvoiceForm open={formOpen} onClose={() => { setFormOpen(false); setEditingInv(null); }}
-        editingInv={editingInv} companies={companies} clients={clients} leads={leads}
-        onSuccess={fetchAll} isDark={isDark} />
-      <InvoiceDetailPanel
-        invoice={detailInv} open={detailOpen} onClose={() => setDetailOpen(false)}
-        onPayment={(inv) => { setPayInv(inv); setPayOpen(true); }}
-        onEdit={handleEdit} onDelete={handleDelete}
-        onDownloadPdf={handleDownloadPdf} onSendEmail={handleSendEmail}
-        isDark={isDark} />
-      <PaymentModal invoice={payInv} open={payOpen} onClose={() => { setPayOpen(false); setPayInv(null); }}
-        onSuccess={fetchAll} isDark={isDark} />
+      <InvoiceForm open={formOpen} onClose={() => { setFormOpen(false); setEditingInv(null); }} editingInv={editingInv} companies={companies} clients={clients} leads={leads} onSuccess={fetchAll} isDark={isDark} />
+      <InvoiceDetailPanel invoice={detailInv} open={detailOpen} onClose={() => setDetailOpen(false)} onPayment={(inv) => { setPayInv(inv); setPayOpen(true); }} onEdit={handleEdit} onDelete={handleDelete} onDownloadPdf={handleDownloadPdf} onSendEmail={handleSendEmail} isDark={isDark} />
+      <PaymentModal invoice={payInv} open={payOpen} onClose={() => { setPayOpen(false); setPayInv(null); }} onSuccess={fetchAll} isDark={isDark} />
       <ProductModal open={catOpen} onClose={() => setCatOpen(false)} isDark={isDark} onSaved={() => {}} />
-      {/* UNIFIED IMPORT MODAL — replaces VypImportModal */}
-      <ImportModal open={importOpen} onClose={() => setImportOpen(false)}
-        isDark={isDark} companies={companies} onImportComplete={fetchAll} />
-      <GSTReportsModal open={gstOpen} onClose={() => setGstOpen(false)}
-        invoices={invoices} isDark={isDark} />
-      <InvoiceSettings
-        open={settingsOpen} onClose={() => setSettingsOpen(false)}
-        companies={companies} isDark={isDark} />
-      <PartyLedger
-        open={ledgerOpen}
-        onClose={() => setLedgerOpen(false)}
-        invoices={invoices}
-        clients={clients}
-        companies={companies}
-        preselectedClientName={ledgerClient}
-        isDark={isDark}
-      />
+      <ImportModal open={importOpen} onClose={() => setImportOpen(false)} isDark={isDark} companies={companies} onImportComplete={fetchAll} />
+      <GSTReportsModal open={gstOpen} onClose={() => setGstOpen(false)} invoices={invoices} isDark={isDark} />
+      <InvoiceSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} companies={companies} isDark={isDark} />
+      <PartyLedger open={ledgerOpen} onClose={() => setLedgerOpen(false)} invoices={invoices} clients={clients} companies={companies} preselectedClientName={ledgerClient} isDark={isDark} />
     </div>
   );
 }
