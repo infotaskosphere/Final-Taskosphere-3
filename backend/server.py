@@ -5001,7 +5001,7 @@ async def universal_exception_handler(request: Request, exc: Exception):
 
 # Api Router
 api_router.include_router(invoicing_router)
-app.include_router(passwords_router, prefix="/api")
+api_router.include_router(passwords_router)
 api_router.include_router(visits_router)
 api_router.include_router(website_tracking_router)
 api_router.include_router(quotation_router)
