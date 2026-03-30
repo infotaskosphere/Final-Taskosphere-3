@@ -2,15 +2,28 @@
  * lib/api.js
  * ─────────────────────────────────────────────────────────────
  * FINAL VERSION — MATCHED WITH BACKEND (/api prefix)
+ *
+ * FIX: Ensures BASE_URL always ends with /api, regardless of
+ * whether the VITE_API_URL env var includes it or not.
+ * All endpoint calls (e.g. "/auth/login") are relative to this
+ * base, so they must NOT include "/api" themselves.
  */
 
 import axios from "axios";
 import { useState, useEffect } from "react";
 
-// ✅ BASE URL — NO /api HERE
-const BASE_URL =
+// ✅ Normalise: always ensure the base ends with /api
+let _raw =
   import.meta.env.VITE_API_URL ||
-  "https://final-taskosphere-backend.onrender.com/api";
+  "https://final-taskosphere-backend.onrender.com";
+
+// Strip trailing slash(es), then append /api if missing
+_raw = _raw.replace(/\/+$/, "");
+if (!_raw.endsWith("/api")) {
+  _raw += "/api";
+}
+
+const BASE_URL = _raw;
 
 // ─── Token Helpers ───────────────────────────────────────────
 const TOKEN_KEY = "taskosphere_token";
