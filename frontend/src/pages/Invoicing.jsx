@@ -26,9 +26,9 @@ import {
   ExternalLink
 } from 'lucide-react';
 import InvoiceSettings, { getInvSettings, getNextInvoiceNumber } from './InvoiceSettings';
-// STEP 1 FIX: Updated import to include useInvoicePreviewHtml
-import { COLOR_THEMES, INVOICE_TEMPLATES, generateInvoiceHTML, openInvoicePrint, useInvoicePreviewHtml } from './InvoiceTemplates';
+import { COLOR_THEMES, INVOICE_TEMPLATES, generateInvoiceHTML } from './InvoiceTemplates';
 import PartyLedger from './PartyLedger';
+
 // ─── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -40,6 +40,7 @@ const COLORS = {
   purple: '#7C3AED',
   teal: '#0D9488',
 };
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 const GST_RATES = [0, 5, 12, 18, 28];
 const UNITS = ['service','nos','kg','ltr','mtr','sqft','hr','day','month','year','set','lot','pcs','box'];
@@ -60,6 +61,7 @@ const STATUS_META = {
   cancelled: { label: 'Cancelled', bg: 'bg-slate-100 dark:bg-slate-700', text: 'text-slate-500 dark:text-slate-400', dot: 'bg-slate-400', hex: '#94A3B8' },
   credit_note: { label: 'Credit Note', bg: 'bg-purple-50 dark:bg-purple-900/20', text: 'text-purple-600 dark:text-purple-400', dot: 'bg-purple-500', hex: COLORS.purple },
 };
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmt = (n) => new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n ?? 0);
 const fmtC = (n) => `₹${fmt(n)}`;
@@ -76,6 +78,7 @@ const emptyItem = () => ({
   cgst_amount: 0, sgst_amount: 0, igst_amount: 0, total_amount: 0,
   item_details: '',
 });
+
 // ─── Item Memory (localStorage) ───────────────────────────────────────────────
 const getItemMemory = () => {
   try { return JSON.parse(localStorage.getItem('inv_item_memory') || '{}'); }
@@ -157,7 +160,6 @@ const Hl = ({ text = '', query = '' }) => {
 // ─── DriveUploadBtn component ─────────────────────────────────────────
 const DriveUploadBtn = ({ invoiceId, invoiceNo }) => {
   const [loading, setLoading] = useState(false);
-
   const handleDriveUpload = async () => {
     setLoading(true);
     try {
@@ -181,7 +183,6 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo }) => {
       setLoading(false);
     }
   };
-
   return (
     <Button
       variant="outline"
@@ -378,6 +379,7 @@ const ClientSearchCombobox = ({ clients = [], value, onSelect, onAddNew, isDark 
     </div>
   );
 };
+
 // ════════════════════════════════════════════════════════════════════════════════
 // GST REPORTS MODAL
 // ════════════════════════════════════════════════════════════════════════════════
@@ -598,6 +600,7 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
     </Dialog>
   );
 };
+
 // ════════════════════════════════════════════════════════════════════════════════
 // EXCEL IMPORT — parse Excel/CSV invoice template
 // ════════════════════════════════════════════════════════════════════════════════
@@ -664,11 +667,11 @@ function downloadInvoiceTemplate() {
   XLSX.writeFile(wb, 'Invoice_Import_Template.xlsx');
   toast.success('Template downloaded! Fill it and import back.');
 }
+
 // ════════════════════════════════════════════════════════════════════════════════
-// UNIFIED IMPORT MODAL — *** ALL 4 MISSING STEPS ADDED (BUG-001 FIX) ***
+// UNIFIED IMPORT MODAL
 // ════════════════════════════════════════════════════════════════════════════════
 const KB_PAY_STATUS = { 1: 'sent', 2: 'partially_paid', 3: 'paid' };
-
 const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => {
   const [step, setStep] = useState('choose');
   const [importMode, setImportMode] = useState('');
@@ -683,27 +686,23 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
   const [importInvoices, setImportInvoices] = useState(true);
   const [selectedCompanyId, setSelectedCompanyId] = useState('__none__');
   const dropRef = useRef(null);
-
   const reset = () => {
     setStep('choose'); setImportMode(''); setFile(null); setParsed(null);
     setError(''); setLoading(false); setProgress(0);
     setResults({ imported: 0, clients: 0, skipped: 0, errors: [] });
     setSelectedFirm('__none__'); setSelectedCompanyId('__none__');
   };
-
   const handleClose = () => { reset(); onClose(); };
-
-  // *** BUG-002 FIX: .vyb moved from json to vyp ***
   const handleFileDrop = useCallback((e) => {
     e.preventDefault();
     const f = e.dataTransfer?.files?.[0] || e.target?.files?.[0];
     if (!f) return;
     const name = f.name.toLowerCase();
     const ALLOWED_EXTS = {
-      vyp:   ['.vyp', '.vyb', '.db'],  // FIX: .vyb is KhataBook Pro (SQLite), belongs here
+      vyp: ['.vyp', '.vyb', '.db'],
       tally: ['.xml', '.tbk'],
       excel: ['.xlsx', '.xls', '.csv'],
-      json:  ['.json'],                 // FIX: .vyb removed from here
+      json: ['.json'],
     };
     const allowed = ALLOWED_EXTS[importMode] || [];
     if (allowed.length > 0 && !allowed.some(ext => name.endsWith(ext))) {
@@ -712,7 +711,6 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
     }
     setFile(f); setError('');
   }, [importMode]);
-
   const parseBackupViaAPI = async (f) => {
     const formData = new FormData();
     formData.append('file', f);
@@ -725,7 +723,6 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
       throw new Error(err.response?.data?.detail || 'Server could not parse backup file');
     }
   };
-
   const handleParse = async () => {
     if (!file) return;
     setLoading(true); setError('');
@@ -747,13 +744,11 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
       setLoading(false);
     }
   };
-
   const handleImport = async () => {
     if (!parsed) return;
     setStep('importing'); setProgress(0);
     const res = { imported: 0, clients: 0, skipped: 0, errors: [] };
     const companyId = selectedCompanyId === '__none__' ? '' : selectedCompanyId;
-
     if (parsed.mode !== 'excel' && importClients && parsed.clients?.length > 0) {
       const clientsToImport = parsed.clients.slice(0, 500);
       let done = 0;
@@ -770,11 +765,9 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
         setProgress(Math.round((done / clientsToImport.length) * 40));
       }
     }
-
     const invToImport = parsed.mode === 'excel'
       ? parsed.invoices
       : (selectedFirm === '__none__' ? parsed.invoices : parsed.invoices.filter(i => String(i.company_id) === selectedFirm));
-
     let done = 0;
     for (const inv of (invToImport || [])) {
       try {
@@ -793,23 +786,18 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
       const base = parsed.mode !== 'excel' && importClients ? 40 : 0;
       setProgress(base + Math.round((done / (invToImport?.length || 1)) * (100 - base)));
     }
-
     setResults(res);
     setStep('done');
     onImportComplete?.();
-    // *** BUG-003 FIX: Accurate toast message (not "saved to Google Drive") ***
     toast.success(`Imported ${res.imported} invoice${res.imported !== 1 ? 's' : ''} successfully`);
   };
-
   const inputCls = `h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
-
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className={`w-full max-w-xl rounded-2xl border shadow-2xl p-0 overflow-hidden flex flex-col ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
         style={{ maxHeight: '90vh' }}>
         <DialogTitle className="sr-only">Import Invoices</DialogTitle>
         <DialogDescription className="sr-only">Import invoices from KhataBook .vyp or Excel file</DialogDescription>
-
         {/* Header */}
         <div className="px-6 py-5 relative overflow-hidden flex-shrink-0"
           style={{ background: 'linear-gradient(135deg, #065f46, #059669)' }}>
@@ -842,10 +830,9 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
             </div>
           )}
         </div>
-
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-6">
-          {/* ═══ STEP: CHOOSE MODE ═══ */}
+          {/* STEP: CHOOSE MODE */}
           {step === 'choose' && (
             <div className="space-y-4">
               <p className={`text-sm font-medium text-center mb-5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Choose your import source</p>
@@ -859,7 +846,6 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
                   <Button type="button" size="sm" onClick={downloadInvoiceTemplate} className="h-8 px-3 rounded-xl text-xs font-semibold gap-1.5 flex-shrink-0 text-white" style={{ background: 'linear-gradient(135deg, #b45309, #d97706)' }}><Download className="h-3.5 w-3.5" /> Download</Button>
                 </div>
               </div>
-              {/* *** BUG-006 FIX: .vyb listed under KhataBook, not Vyapar *** */}
               <div className="grid grid-cols-1 gap-3">
                 {[
                   { mode: 'vyp', icon: Database, title: 'KhataBook Backup (.vyp / .vyb)', desc: 'Import clients, items & invoices from KhataBook .vyp or KhataBook Pro .vyb backup', color: 'from-emerald-600 to-emerald-700', badge: 'Recommended' },
@@ -884,8 +870,7 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
               </div>
             </div>
           )}
-
-          {/* ═══ STEP: UPLOAD FILE *** BUG-001 FIX: was completely missing *** ═══ */}
+          {/* STEP: UPLOAD FILE */}
           {step === 'upload' && (
             <div className="space-y-5">
               <button type="button" onClick={() => { setStep('choose'); setFile(null); setError(''); }}
@@ -929,8 +914,7 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
               </Button>
             </div>
           )}
-
-          {/* ═══ STEP: PREVIEW *** BUG-001 FIX: was completely missing *** ═══ */}
+          {/* STEP: PREVIEW */}
           {step === 'preview' && parsed && (
             <div className="space-y-5">
               <button type="button" onClick={() => setStep('upload')} className="flex items-center gap-1 text-xs font-semibold text-emerald-600 hover:text-emerald-700">← Back to upload</button>
@@ -973,8 +957,7 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
                 <CheckSquare className="h-4 w-4 mr-2" /> Import {parsed.invoices?.length || 0} Invoices{importClients && parsed.clients?.length > 0 ? ` + ${parsed.clients.length} Clients` : ''}</Button>
             </div>
           )}
-
-          {/* ═══ STEP: IMPORTING *** BUG-001 FIX: was completely missing *** ═══ */}
+          {/* STEP: IMPORTING */}
           {step === 'importing' && (
             <div className="flex flex-col items-center justify-center py-10 gap-6">
               <div className="w-16 h-16 rounded-2xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center"><RefreshCw className="h-8 w-8 text-emerald-600 animate-spin" /></div>
@@ -986,8 +969,7 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
               </div>
             </div>
           )}
-
-          {/* ═══ STEP: DONE *** BUG-001 FIX: was completely missing *** ═══ */}
+          {/* STEP: DONE */}
           {step === 'done' && (
             <div className="space-y-5">
               <div className="flex flex-col items-center justify-center py-6 gap-4">
@@ -1018,6 +1000,7 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
     </Dialog>
   );
 };
+
 // ════════════════════════════════════════════════════════════════════════════════
 // STATUS PILL
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1029,6 +1012,7 @@ const StatusPill = ({ inv }) => {
     </span>
   );
 };
+
 // ════════════════════════════════════════════════════════════════════════════════
 // STAT CARD
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1045,6 +1029,7 @@ const StatCard = ({ label, value, sub, icon: Icon, color, bg, onClick, isDark, t
     {sub && <p className={`text-xs pl-2 mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{sub}</p>}
   </div>
 );
+
 // ════════════════════════════════════════════════════════════════════════════════
 // MINI REVENUE CHART
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1069,6 +1054,7 @@ const RevenueChart = ({ trend = [], isDark }) => {
     </svg>
   );
 };
+
 // ════════════════════════════════════════════════════════════════════════════════
 // PAYMENT MODAL
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1117,8 +1103,9 @@ const PaymentModal = ({ invoice, open, onClose, onSuccess, isDark }) => {
     </Dialog>
   );
 };
+
 // ════════════════════════════════════════════════════════════════════════════════
-// INVOICE FORM — with BUG-003 FIX (toast messages) and BUG-005 FIX (design note)
+// INVOICE FORM — UPDATED WITH ALL COMMANDS
 // ════════════════════════════════════════════════════════════════════════════════
 const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onSuccess, isDark }) => {
   const navigate = useNavigate();
@@ -1138,13 +1125,20 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('details');
   const [products, setProducts] = useState([]);
+
+  // COMMAND 2: ADD iframeRef
+  const iframeRef = useRef(null);
+
   useEffect(() => { if (open) { if (editingInv) setForm({ ...defaultForm, ...editingInv }); else setForm(defaultForm); setActiveTab('details'); } }, [open, editingInv]);
   useEffect(() => { api.get('/products').then(r => setProducts(r.data || [])).catch(() => {}); }, []);
+
   const totals = useMemo(() => computeTotals(form.items, form.is_interstate, form.discount_amount, form.shipping_charges, form.other_charges), [form.items, form.is_interstate, form.discount_amount, form.shipping_charges, form.other_charges]);
+
   const setField = useCallback((k, v) => setForm(p => ({ ...p, [k]: v })), []);
   const updateItem = useCallback((idx, k, val) => setForm(p => ({ ...p, items: p.items.map((it, i) => i !== idx ? it : { ...it, [k]: val }) })), []);
   const addItem = useCallback(() => setForm(p => ({ ...p, items: [...p.items, emptyItem()] })), []);
   const removeItem = useCallback((idx) => setForm(p => ({ ...p, items: p.items.filter((_, i) => i !== idx) })), []);
+
   const handleClientSelect = useCallback((client) => {
     if (!client) { setForm(p => ({ ...p, client_id: '', client_name: '', client_email: '', client_phone: '', client_address: '', client_state: '', client_gstin: '' })); return; }
     const addressParts = [client.address, client.city, client.state].filter(Boolean).join(', ');
@@ -1157,12 +1151,38 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     }));
     toast.success(`Auto-filled from "${client.company_name}"`, { duration: 1500 });
   }, []);
+
   const fillFromProduct = useCallback((idx, productId) => {
     if (productId === '__none__') return;
     const prod = products.find(x => x.id === productId);
     if (!prod) return;
     setForm(p => ({ ...p, items: p.items.map((it, i) => i !== idx ? it : { ...it, product_id: productId, description: prod.name, hsn_sac: prod.hsn_sac || '', unit: prod.unit || 'service', unit_price: prod.unit_price || 0, gst_rate: prod.gst_rate || 18 }) }));
   }, [products]);
+
+  // COMMAND 4: ADD PREVIEW FUNCTION
+  const handlePreview = () => {
+    const company = companies.find(c => c.id === form.company_id) || {};
+
+    const previewInv = {
+      ...form,
+      invoice_no: editingInv?.invoice_no || 'PREVIEW-001',
+      invoice_date: form.invoice_date || format(new Date(), 'yyyy-MM-dd'),
+      due_date: form.due_date || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
+      client_name: form.client_name || 'Client Name'
+    };
+
+    const html = generateInvoiceHTML(previewInv, {
+      company,
+      template: form.invoice_template,
+      theme: form.invoice_theme,
+      customColor: form.invoice_custom_color
+    });
+
+    if (iframeRef.current) {
+      iframeRef.current.srcdoc = html;
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.company_id) { toast.error('Please select a company profile'); return; }
@@ -1173,7 +1193,6 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       const payload = { ...form, ...totals };
       if (editingInv) await api.put(`/invoices/${editingInv.id}`, payload);
       else await api.post('/invoices', payload);
-      // *** BUG-003 FIX: Accurate toast (not "saved to Google Drive") ***
       toast.success(editingInv ? 'Invoice updated successfully' : 'Invoice created successfully');
       saveItemMemory(form.items);
       onSuccess?.();
@@ -1181,17 +1200,19 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to save invoice'); }
     finally { setLoading(false); }
   };
+
   const labelCls = "text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block";
   const inputCls = `h-11 rounded-xl text-sm border-slate-200 dark:border-slate-600 focus:border-blue-400 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
   const sectionCls = `border rounded-2xl p-5 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`;
-  const previewHtml = useInvoicePreviewHtml(form, totals, companies, editingInv);
+
   const tabs = [
-    { id: 'details',  label: 'Details',         icon: FileText    },
-    { id: 'items',    label: 'Items',            icon: Package     },
-    { id: 'totals',   label: 'Totals',           icon: IndianRupee },
-    { id: 'settings', label: 'Settings',         icon: Layers      },
-    { id: 'design',   label: 'Design & Preview', icon: Palette     },
+    { id: 'details', label: 'Details', icon: FileText },
+    { id: 'items', label: 'Items', icon: Package },
+    { id: 'totals', label: 'Totals', icon: IndianRupee },
+    { id: 'settings', label: 'Settings', icon: Layers },
+    { id: 'design', label: 'Design & Preview', icon: Palette },
   ];
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className={`max-w-5xl max-h-[96vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -1374,18 +1395,48 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                 <div className={sectionCls}>
                   <div className="flex items-center justify-between mb-4">
                     <h3 className={`text-sm font-semibold flex items-center gap-2 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}><Eye className="h-4 w-4" /> Live Preview</h3>
-                    <Button type="button" size="sm" variant="outline"
-                      onClick={() => { const company = companies.find(c => c.id === form.company_id) || {}; const previewInv = { ...form, invoice_no: editingInv?.invoice_no || 'PREVIEW-001', invoice_date: form.invoice_date || format(new Date(), 'yyyy-MM-dd'), due_date: form.due_date || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'), client_name: form.client_name || 'Client Name' }; const html = generateInvoiceHTML(previewInv, { company, template: form.invoice_template, theme: form.invoice_theme, customColor: form.invoice_custom_color }); const blob = new Blob([html], { type: 'text/html' }); const url = URL.createObjectURL(blob); const win = window.open(url, '_blank'); win.onload = () => win.print(); }}
-                      className="h-8 px-3 text-xs rounded-xl gap-1.5"><Printer className="h-3.5 w-3.5" /> Open Print Preview</Button>
+                    <div className="flex gap-2">
+                      {/* COMMAND 6: ADD PREVIEW BUTTON */}
+                      <Button type="button" size="sm" variant="outline" onClick={handlePreview} className="h-8 px-3 text-xs rounded-xl gap-1.5">
+                        <Eye className="h-3.5 w-3.5" /> Preview
+                      </Button>
+                      {/* COMMAND 5: REPLACE DOWNLOAD BUTTON */}
+                      <Button type="button" size="sm" variant="outline"
+                        onClick={() => { 
+                          const company = companies.find(c => c.id === form.company_id) || {}; 
+                          const previewInv = { 
+                            ...form, 
+                            invoice_no: editingInv?.invoice_no || 'PREVIEW-001', 
+                            invoice_date: form.invoice_date || format(new Date(), 'yyyy-MM-dd'), 
+                            due_date: form.due_date || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'), 
+                            client_name: form.client_name || 'Client Name' 
+                          }; 
+                          const html = generateInvoiceHTML(previewInv, { 
+                            company, 
+                            template: form.invoice_template, 
+                            theme: form.invoice_theme, 
+                            customColor: form.invoice_custom_color 
+                          }); 
+                          const blob = new Blob([html], { type: 'text/html' }); 
+                          const url = URL.createObjectURL(blob); 
+                          const win = window.open(url, '_blank'); 
+                          win.onload = () => win.print(); 
+                        }}
+                        className="h-8 px-3 text-xs rounded-xl gap-1.5"><Printer className="h-3.5 w-3.5" /> Open Print Preview</Button>
+                    </div>
                   </div>
-                  <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-200'}`} style={{ height: 420 }}>
-                    <iframe key={`${form.invoice_template}-${form.invoice_theme}-${form.invoice_custom_color}`} srcDoc={previewHtml} className="w-full h-full border-0" title="Invoice Preview" sandbox="allow-scripts" />
+                  {/* COMMAND 7: ADD iframe UI */}
+                  <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-200'}`} style={{ height: 600 }}>
+                    <iframe
+                      ref={iframeRef}
+                      className="w-full h-[600px] border rounded-xl bg-white"
+                      title="Invoice Preview"
+                      sandbox="allow-scripts"
+                    />
                   </div>
-                  {/* *** BUG-005 FIX: Added note about PDF download vs template preview *** */}
                   <p className={`text-[10px] mt-2 text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    Preview updates live as you change template or theme.
-                    The "PDF" download button uses a standard layout with your brand color.
-                    For themed output matching this preview, use "Open Print Preview" → Save as PDF.
+                    Click <strong>Preview</strong> to load the invoice in the iframe below.<br />
+                    Use "Open Print Preview" to open in a new tab for printing/saving as PDF.
                   </p>
                 </div>
               </div>
@@ -1411,6 +1462,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     </Dialog>
   );
 };
+
 // ════════════════════════════════════════════════════════════════════════════════
 // INVOICE DETAIL PANEL
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1481,6 +1533,7 @@ const InvoiceDetailPanel = ({ invoice, open, onClose, onPayment, onEdit, onDelet
     </Dialog>
   );
 };
+
 // ════════════════════════════════════════════════════════════════════════════════
 // PRODUCT MODAL
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1555,8 +1608,9 @@ const ProductModal = ({ open, onClose, isDark, onSaved }) => {
     </Dialog>
   );
 };
+
 // ════════════════════════════════════════════════════════════════════════════════
-// MAIN PAGE — with BUG-004 FIX (fetchAll) and BUG-003 FIX (error toast)
+// MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════════
 export default function Invoicing() {
   const { user } = useAuth();
@@ -1589,6 +1643,7 @@ export default function Invoicing() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const searchRef = useRef(null);
+
   useEffect(() => { const t = setTimeout(() => setSearchTerm(searchInput), 250); return () => clearTimeout(t); }, [searchInput]);
   useEffect(() => {
     const h = (e) => {
@@ -1604,9 +1659,6 @@ export default function Invoicing() {
       const [invR, compR, clientR, leadR, statR] = await Promise.allSettled([
         api.get('/invoices'), api.get('/companies'), api.get('/clients'), api.get('/leads'), api.get('/invoices/stats'),
       ]);
-
-      // *** BUG-004 FIX: Removed webViewLink mapping — invoices used as-is ***
-      // *** BUG-003 FIX: Removed misleading "Google Drive connection" error ***
       if (invR.status === 'fulfilled') {
         setInvoices(invR.value.data || []);
       } else {
@@ -1614,7 +1666,6 @@ export default function Invoicing() {
         toast.error('Failed to load invoices');
         setInvoices([]);
       }
-
       if (compR.status === 'fulfilled') setCompanies(compR.value.data || []);
       else { console.error('Failed to load companies:', compR.reason); setCompanies([]); }
       if (clientR.status === 'fulfilled') setClients(clientR.value.data || []);
@@ -1628,13 +1679,16 @@ export default function Invoicing() {
       toast.error('Failed to load invoicing data');
     } finally { setLoading(false); }
   }, []);
+
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   const availableYears = useMemo(() => {
     const years = new Set(invoices.map(i => i.invoice_date?.slice(0, 4)).filter(Boolean));
     return Array.from(years).sort().reverse();
   }, [invoices]);
+
   const fyRange = (year) => { if (!year || year === 'all') return null; const y = parseInt(year); return { from: `${y}-04-01`, to: `${y + 1}-03-31` }; };
+
   const localStats = useMemo(() => {
     const now = new Date(); const curMonth = format(now, 'yyyy-MM'); const fy = fyRange(yearFilter === 'all' ? null : yearFilter);
     const base = invoices.filter(inv => { if (companyFilter !== 'all' && inv.company_id !== companyFilter) return false; if (fy && (inv.invoice_date < fy.from || inv.invoice_date > fy.to)) return false; return true; });
@@ -1656,6 +1710,7 @@ export default function Invoicing() {
     const top_clients = Object.entries(clientMap).map(([name, revenue]) => ({ name, revenue })).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
     return { total_revenue, total_outstanding, total_gst, total_invoices, month_revenue, month_invoices, overdue_count, paid_count, draft_count, monthly_trend, top_clients };
   }, [invoices, companyFilter, yearFilter]);
+
   const filtered = useMemo(() => {
     const fy = fyRange(yearFilter === 'all' ? null : yearFilter);
     return invoices.filter(inv => {
@@ -1669,16 +1724,19 @@ export default function Invoicing() {
       return true;
     });
   }, [invoices, companyFilter, yearFilter, searchTerm, statusFilter, typeFilter, fromDate, toDate]);
+
   const enrichedFiltered = useMemo(() => filtered.map(inv => {
     if (inv.status === 'sent' && inv.amount_due > 0 && inv.due_date && differenceInDays(parseISO(inv.due_date), new Date()) < 0) return { ...inv, status: 'overdue' };
     return inv;
   }), [filtered]);
+
   const handleEdit = useCallback((inv) => { setEditingInv(inv); setFormOpen(true); }, []);
   const handleDelete = useCallback(async (inv) => {
     if (!window.confirm(`Delete invoice ${inv.invoice_no}?`)) return;
     try { await api.delete(`/invoices/${inv.id}`); toast.success('Invoice deleted'); fetchAll(); setDetailOpen(false); }
     catch { toast.error('Failed to delete'); }
   }, [fetchAll]);
+
   const handleDownloadPdf = useCallback(async (inv) => {
     try {
       toast.info('Generating PDF…', { duration: 1500 });
@@ -1695,15 +1753,18 @@ export default function Invoicing() {
       toast.error(err.response?.status === 404 ? 'Invoice not found' : err.response?.status === 500 ? 'PDF generation failed on server' : 'PDF download failed — please try again');
     }
   }, []);
+
   const handleMarkSent = useCallback(async (inv) => {
     try { await api.post(`/invoices/${inv.id}/mark-sent`); fetchAll(); toast.success('Marked as sent'); } catch { toast.error('Failed'); }
   }, [fetchAll]);
+
   const handleSendEmail = useCallback(async (inv) => {
     if (!inv.client_email) { toast.error('Client email address is missing'); return; }
     if (!window.confirm(`Send invoice ${inv.invoice_no} to ${inv.client_email}?`)) return;
     try { await api.post(`/invoices/${inv.id}/send-email`); toast.success(`Email queued for ${inv.invoice_no}`); fetchAll(); }
     catch (err) { toast.error(err.response?.data?.detail || 'Failed to queue email'); }
   }, [fetchAll]);
+
   const handleExport = useCallback(() => {
     if (!enrichedFiltered.length) { toast.error('No invoices to export'); return; }
     const rows = [['Invoice No','Type','Client','Date','Due Date','Taxable','GST','Total','Paid','Balance','Status'],
@@ -1735,6 +1796,7 @@ export default function Invoicing() {
           </div>
         </div>
       </div>
+
       {/* STATS */}
       {(localStats.total_invoices > 0 || invoices.length > 0) && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1744,6 +1806,7 @@ export default function Invoicing() {
           <StatCard label="Total GST" value={fmtC(localStats.total_gst)} sub={`${localStats.paid_count} paid · ${localStats.draft_count} draft`} icon={Shield} color={COLORS.amber} bg={`${COLORS.amber}12`} isDark={isDark} onClick={() => setGstOpen(true)} />
         </div>
       )}
+
       {localStats.monthly_trend?.some(d => d.revenue > 0) && (
         <div className={`rounded-2xl border p-5 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`}>
           <div className="flex items-center justify-between mb-4">
@@ -1753,6 +1816,7 @@ export default function Invoicing() {
           <RevenueChart trend={localStats.monthly_trend} isDark={isDark} />
         </div>
       )}
+
       {/* FILTERS */}
       <div className={`rounded-2xl border shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
         <div className={`flex items-center gap-3 px-3.5 py-3 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
@@ -1776,6 +1840,7 @@ export default function Invoicing() {
           )}
         </div>
       </div>
+
       {/* INVOICE TABLE */}
       <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`}>
         <div className={`grid border-b px-5 py-3 ${isDark ? 'bg-slate-700/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`} style={{ gridTemplateColumns: '1fr 1fr 110px 100px 100px 100px 100px 160px' }}>
@@ -1832,6 +1897,7 @@ export default function Invoicing() {
           </div>
         )}
       </div>
+
       {/* TOP CLIENTS */}
       {localStats?.top_clients?.length > 0 && (
         <div className={`rounded-2xl border p-5 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`}>
@@ -1852,7 +1918,8 @@ export default function Invoicing() {
           </div>
         </div>
       )}
-      {/* ─── DIALOGS ─────────────────────────────────────────────────────────── */}
+
+      {/* DIALOGS */}
       <InvoiceForm open={formOpen} onClose={() => { setFormOpen(false); setEditingInv(null); }} editingInv={editingInv} companies={companies} clients={clients} leads={leads} onSuccess={fetchAll} isDark={isDark} />
       <InvoiceDetailPanel invoice={detailInv} open={detailOpen} onClose={() => setDetailOpen(false)} onPayment={(inv) => { setPayInv(inv); setPayOpen(true); }} onEdit={handleEdit} onDelete={handleDelete} onDownloadPdf={handleDownloadPdf} onSendEmail={handleSendEmail} isDark={isDark} />
       <PaymentModal invoice={payInv} open={payOpen} onClose={() => { setPayOpen(false); setPayInv(null); }} onSuccess={fetchAll} isDark={isDark} />
