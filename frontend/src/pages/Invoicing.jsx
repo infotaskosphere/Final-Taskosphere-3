@@ -11,6 +11,7 @@ import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
+import { generateInvoiceHTML } from './InvoiceTemplates';
 import { format, parseISO, differenceInDays, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import * as XLSX from 'xlsx';
 import {
@@ -1375,7 +1376,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                   <div className="flex items-center justify-between mb-4">
                     <h3 className={`text-sm font-semibold flex items-center gap-2 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}><Eye className="h-4 w-4" /> Live Preview</h3>
                     <Button type="button" size="sm" variant="outline"
-                      onClick={() => { const company = companies.find(c => c.id === form.company_id) || {}; const previewInv = { ...form, invoice_no: editingInv?.invoice_no || 'PREVIEW-001', invoice_date: form.invoice_date || format(new Date(), 'yyyy-MM-dd'), due_date: form.due_date || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'), client_name: form.client_name || 'Client Name' }; openInvoicePrint(previewInv, company, form.invoice_template, form.invoice_theme, form.invoice_custom_color); }}
+                      onClick={() => { const company = companies.find(c => c.id === form.company_id) || {}; const previewInv = { ...form, invoice_no: editingInv?.invoice_no || 'PREVIEW-001', invoice_date: form.invoice_date || format(new Date(), 'yyyy-MM-dd'), due_date: form.due_date || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'), client_name: form.client_name || 'Client Name' }; const html = generateInvoiceHTML(previewInv, company, form.invoice_template, form.invoice_theme, form.invoice_custom_color); const blob = new Blob([html], { type: 'text/html' }); const url = URL.createObjectURL(blob); const win = window.open(url, '_blank'); win.onload = () => win.print(); }}
                       className="h-8 px-3 text-xs rounded-xl gap-1.5"><Printer className="h-3.5 w-3.5" /> Open Print Preview</Button>
                   </div>
                   <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-200'}`} style={{ height: 420 }}>
