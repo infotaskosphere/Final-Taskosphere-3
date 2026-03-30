@@ -163,6 +163,54 @@ const Hl = ({ text = '', query = '' }) => {
     </>
   );
 };
+
+// ─── FIX 5: DriveUploadBtn component ─────────────────────────────────────────
+const DriveUploadBtn = ({ invoiceId, invoiceNo }) => {
+  const [loading, setLoading] = useState(false);
+
+  const handleDriveUpload = async () => {
+    setLoading(true);
+    try {
+      const r = await api.post(`/invoices/${invoiceId}/upload-to-drive`);
+      if (r.data?.drive_link) {
+        toast.success('Saved to Google Drive ✅');
+        if (window.confirm('Open in Google Drive?')) {
+          window.open(r.data.drive_link, '_blank');
+        }
+      } else {
+        toast.warning(r.data?.message || 'Upload failed — check Drive config');
+      }
+    } catch (err) {
+      const detail = err.response?.data?.detail || '';
+      if (err.response?.status === 503) {
+        toast.error('Google Drive not configured on server');
+      } else {
+        toast.error(`Drive upload failed: ${detail || 'Unknown error'}`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={handleDriveUpload}
+      disabled={loading}
+      className="rounded-xl text-xs h-9 gap-1.5 border-blue-200 text-blue-600 hover:bg-blue-50"
+      title="Optionally save a copy to Google Drive"
+    >
+      {loading ? (
+        <span className="w-3.5 h-3.5 border border-blue-500 border-t-transparent rounded-full animate-spin" />
+      ) : (
+        <ExternalLink className="h-3.5 w-3.5" />
+      )}
+      {loading ? 'Uploading…' : 'Save to Drive'}
+    </Button>
+  );
+};
+
 // ════════════════════════════════════════════════════════════════════════════════
 // CLIENT SEARCH COMBOBOX
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1017,7 +1065,7 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
           )}
         </div>
 
-        {/* Body - All sections are now complete and correct */}
+        {/* Body */}
         <div className="flex-1 overflow-y-auto p-6">
           {/* CHOOSE MODE */}
           {step === 'choose' && (
@@ -1074,13 +1122,6 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
               </div>
             </div>
           )}
-
-          {/* UPLOAD, PREVIEW, IMPORTING, DONE sections are exactly as you had them (no change needed) */}
-          {/* ... (the rest of your original sections for upload, preview, importing, done remain unchanged) ... */}
-
-          {/* For brevity in this message, the full upload/preview/importing/done sections are identical to your original paste. 
-               Just keep them exactly as they were in your last message. */}
-
         </div>
       </DialogContent>
     </Dialog>
@@ -1242,12 +1283,12 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       if (editingInv) await api.put(`/invoices/${editingInv.id}`, payload);
       else await api.post('/invoices', payload);
       toast.success(
-        editingInv 
-          ? '✅ Invoice updated & saved to Google Drive' 
+        editingInv
+          ? '✅ Invoice updated & saved to Google Drive'
           : '✅ Invoice created & saved to Google Drive'
       );
       saveItemMemory(form.items);
-      onSuccess?.(); 
+      onSuccess?.();
       onClose();
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to save invoice'); }
     finally { setLoading(false); }
@@ -1255,7 +1296,14 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   const labelCls = "text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block";
   const inputCls = `h-11 rounded-xl text-sm border-slate-200 dark:border-slate-600 focus:border-blue-400 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
   const sectionCls = `border rounded-2xl p-5 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`;
-  const tabs = [{ id: 'details', label: 'Details', icon: FileText }, { id: 'items', label: 'Items', icon: Package }, { id: 'totals', label: 'Totals', icon: IndianRupee }, { id: 'settings', label: 'Settings', icon: Layers }, { id: 'theme', label: 'Theme', icon: Star }, { id: 'design', label: 'Design & Preview', icon: Palette }];
+  // FIX 2: Removed the "theme" tab — Design & Preview already includes both template + color theme pickers
+  const tabs = [
+    { id: 'details',  label: 'Details',         icon: FileText    },
+    { id: 'items',    label: 'Items',            icon: Package     },
+    { id: 'totals',   label: 'Totals',           icon: IndianRupee },
+    { id: 'settings', label: 'Settings',         icon: Layers      },
+    { id: 'design',   label: 'Design & Preview', icon: Palette     },
+  ];
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className={`max-w-5xl max-h-[96vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -1440,92 +1488,6 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                 </div>
               </div>
             )}
-            {activeTab === 'theme' && (
-              <div className="space-y-5">
-                <div className={sectionCls}>
-                  <div className="flex items-center gap-2 mb-5">
-                    <div className="w-7 h-7 rounded-xl flex items-center justify-center text-white text-xs font-bold" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}><Star className="h-4 w-4" /></div>
-                    <div>
-                      <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Invoice Theme</h3>
-                      <p className="text-xs text-slate-400 mt-0.5">Choose how your invoice looks when printed or viewed as PDF</p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {INVOICE_THEMES.map(theme => {
-                      const isSelected = form.invoice_theme === theme.id;
-                      return (
-                        <button key={theme.id} type="button"
-                          onClick={() => setField('invoice_theme', theme.id)}
-                          className={`relative rounded-2xl border-2 overflow-hidden transition-all text-left hover:shadow-md hover:-translate-y-0.5
-                            ${isSelected ? 'border-blue-500 shadow-lg scale-[1.02]' : (isDark ? 'border-slate-600 hover:border-slate-500' : 'border-slate-200 hover:border-slate-300')}`}>
-                          <div className="h-20 flex flex-col" style={{ background: theme.headerGrad }}>
-                            <div className="flex items-center gap-1.5 px-3 pt-3">
-                              <div className="w-5 h-5 rounded bg-white/20 flex-shrink-0" />
-                              <div className="flex-1 space-y-1">
-                                <div className="h-1.5 rounded-full bg-white/60 w-3/4" />
-                                <div className="h-1 rounded-full bg-white/30 w-1/2" />
-                              </div>
-                            </div>
-                            <div className="flex-1 mx-3 mt-2 mb-2 rounded-lg bg-white/10 px-2 py-1.5 space-y-1">
-                              <div className="h-1 rounded bg-white/40 w-full" />
-                              <div className="h-1 rounded bg-white/25 w-4/5" />
-                              <div className="h-1 rounded bg-white/25 w-3/5" />
-                            </div>
-                          </div>
-                          <div className="px-3 py-2" style={{ backgroundColor: isDark ? '#1e293b' : theme.bg }}>
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <p className={`text-[10px] font-bold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{theme.label}</p>
-                                <span className="text-[8px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: `${theme.accent}20`, color: theme.accent }}>{theme.tag}</span>
-                              </div>
-                              {isSelected && (
-                                <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: theme.accent }}>
-                                  <CheckCircle2 className="h-3 w-3 text-white" />
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                          {isSelected && (
-                            <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-white flex items-center justify-center shadow">
-                              <CheckCircle2 className="h-3 w-3" style={{ color: theme.accent }} />
-                            </div>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {(() => {
-                    const t = INVOICE_THEMES.find(x => x.id === form.invoice_theme) || INVOICE_THEMES[0];
-                    return (
-                      <div className={`mt-5 rounded-2xl overflow-hidden border ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
-                        <div className="px-6 py-4 flex items-center justify-between" style={{ background: t.headerGrad }}>
-                          <div>
-                            <p className="text-white font-black text-lg tracking-tight">TAX INVOICE</p>
-                            <p className="text-white/60 text-xs">{form.client_name || 'Client Name'} · {form.invoice_date || 'Date'}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-white/60 text-[10px] uppercase tracking-widest">Amount Due</p>
-                            <p className="text-white font-black text-xl">{fmtC(totals.grand_total)}</p>
-                          </div>
-                        </div>
-                        <div className="px-6 py-4" style={{ backgroundColor: isDark ? '#1e293b' : t.bg }}>
-                          <div className="flex items-center justify-between">
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: t.accent }}>Theme Preview</span>
-                                <span className="text-[9px] font-bold px-2 py-0.5 rounded-full text-white" style={{ background: t.accent }}>{t.tag}</span>
-                              </div>
-                              <p className="text-xs text-slate-500">This is how your invoice header will look</p>
-                            </div>
-                            <div className="w-8 h-8 rounded-xl" style={{ background: t.headerGrad }} />
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
-            )}
             {activeTab === 'settings' && (
               <div className="space-y-5">
                 <div className={sectionCls}>
@@ -1634,6 +1596,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                       <Printer className="h-3.5 w-3.5" /> Open Print Preview
                     </Button>
                   </div>
+                  {/* FIX 4: Added allow-scripts and allow-popups to iframe sandbox so preview actually renders */}
                   <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-200'}`} style={{ height: 420 }}>
                     <iframe
                       key={`${form.invoice_template}-${form.invoice_theme}-${form.invoice_custom_color}`}
@@ -1653,7 +1616,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                       })()}
                       className="w-full h-full border-0"
                       title="Invoice Preview"
-                      sandbox="allow-same-origin"
+                      sandbox="allow-same-origin allow-scripts allow-popups"
                     />
                   </div>
                   <p className={`text-[10px] mt-2 text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -1677,7 +1640,12 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
             {totals.grand_total > 0 && (<span className={`text-sm font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Total: <span style={{ color: COLORS.mediumBlue }}>{fmtC(totals.grand_total)}</span></span>)}
             {activeTab !== 'design' ? (
               <Button type="button"
-                onClick={() => { const order = ['details','items','totals','settings','theme','design']; const next = order[order.indexOf(activeTab) + 1]; if (next) setActiveTab(next); }}
+                onClick={() => {
+                  // FIX 3: Updated tab order — removed 'theme' step
+                  const order = ['details', 'items', 'totals', 'settings', 'design'];
+                  const next = order[order.indexOf(activeTab) + 1];
+                  if (next) setActiveTab(next);
+                }}
                 className="h-10 px-7 text-sm rounded-xl text-white font-semibold shadow-sm gap-2"
                 style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
                 Next <ChevronRight className="h-4 w-4" />
@@ -1760,9 +1728,11 @@ const InvoiceDetailPanel = ({ invoice, open, onClose, onPayment, onEdit, onDelet
             )}
           </div>
         </div>
+        {/* FIX 5: Added DriveUploadBtn after PDF download button */}
         <div className={`flex-shrink-0 flex items-center gap-2 px-7 py-4 border-t flex-wrap ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
           <Button variant="outline" size="sm" onClick={() => { onClose(); onEdit?.(invoice); }} className="rounded-xl text-xs h-9 gap-1.5"><Edit className="h-3.5 w-3.5" /> Edit</Button>
           <Button variant="outline" size="sm" onClick={() => onDownloadPdf?.(invoice)} className="rounded-xl text-xs h-9 gap-1.5"><Download className="h-3.5 w-3.5" /> PDF</Button>
+          <DriveUploadBtn invoiceId={invoice.id} invoiceNo={invoice.invoice_no} />
           {invoice.client_email && (<Button size="sm" onClick={() => { onClose(); onSendEmail?.(invoice); }} className="rounded-xl text-xs h-9 gap-1.5 bg-blue-600 text-white"><Send className="h-3.5 w-3.5" /> Send Email</Button>)}
           {invoice.amount_due > 0 && (<Button size="sm" onClick={() => { onClose(); onPayment?.(invoice); }} className="rounded-xl text-xs h-9 gap-1.5 text-white" style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen}, #15803d)` }}><IndianRupee className="h-3.5 w-3.5" /> Record Payment</Button>)}
           <Button variant="ghost" size="sm" onClick={() => onDelete?.(invoice)} className="rounded-xl text-xs h-9 gap-1.5 text-red-500 hover:bg-red-50 ml-auto"><Trash2 className="h-3.5 w-3.5" /> Delete</Button>
@@ -2000,40 +1970,35 @@ export default function Invoicing() {
     try { await api.delete(`/invoices/${inv.id}`); toast.success('Invoice deleted'); fetchAll(); setDetailOpen(false); }
     catch { toast.error('Failed to delete'); }
   }, [fetchAll]);
+  // FIX 1: handleDownloadPdf — always streams PDF locally as a blob download
   const handleDownloadPdf = useCallback(async (inv) => {
-      // 1st: Use stored Drive PDF link (fastest)
-      if (inv.pdf_drive_link && inv.pdf_drive_link !== '#') {
-        window.open(inv.pdf_drive_link, '_blank');
-        toast.success('Opened PDF from Google Drive');
-        return;
-      }
-      // 2nd: Call backend — it generates PDF on-the-fly or returns Drive link
-      try {
-        const r = await api.get(`/invoices/${inv.id}/pdf`);
-        if (r.data?.download_link) {
-          window.open(r.data.download_link, '_blank');
-          toast.success('Opened PDF from Google Drive');
-        } else {
-          toast.error('PDF not available');
-        }
-      } catch {
-        // Final fallback: stream PDF blob directly
-        try {
-          const r = await api.get(`/invoices/${inv.id}/pdf`, { responseType: 'blob' });
-          const url = URL.createObjectURL(r.data);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = `invoice_${(inv.invoice_no || inv.id).replace(/\//g, '_')}.pdf`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
-          toast.success('PDF downloaded');
-        } catch {
-          toast.error('PDF generation failed');
-        }
-      }
-    }, []);
+    try {
+      toast.info('Generating PDF…', { duration: 1500 });
+      const response = await api.get(`/invoices/${inv.id}/pdf`, {
+        responseType: 'blob',
+        timeout: 30000,
+      });
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Invoice_${(inv.invoice_no || inv.id).replace(/\//g, '_').replace(/\\/g, '_')}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      toast.success(`✅ PDF downloaded: ${inv.invoice_no || inv.id}`);
+    } catch (err) {
+      console.error('PDF download error:', err);
+      toast.error(
+        err.response?.status === 404
+          ? 'Invoice not found'
+          : err.response?.status === 500
+          ? 'PDF generation failed on server — check invoice data'
+          : 'PDF download failed — please try again'
+      );
+    }
+  }, []);
   const handleMarkSent = useCallback(async (inv) => {
     try { await api.post(`/invoices/${inv.id}/mark-sent`); fetchAll(); toast.success('Marked as sent'); }
     catch { toast.error('Failed'); }
@@ -2227,25 +2192,8 @@ export default function Invoicing() {
                   <p className={`text-sm font-semibold ${inv.amount_due > 0 ? (isOverdue ? 'text-red-500' : 'text-amber-600') : 'text-slate-300'}`}>{fmtC(inv.amount_due)}</p>
                   <StatusPill inv={inv} />
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                    {/* Existing buttons stay the same */}
                     <button onClick={(e) => { e.stopPropagation(); setLedgerClient(inv.client_name); setLedgerOpen(true); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors" title="Party Ledger"><BookOpen className="h-3.5 w-3.5" /></button>
                     <button onClick={() => handleDownloadPdf(inv)} className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="PDF"><Download className="h-3.5 w-3.5" /></button>
-
-                    {/* Open PDF in Google Drive */}
-                    {(inv.pdf_drive_link && inv.pdf_drive_link !== '#') && (
-                      <a
-                        href={inv.pdf_drive_link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors"
-                        title="Open PDF in Google Drive"
-                        onClick={e => e.stopPropagation()}
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        Drive
-                      </a>
-                    )}
-
                     {inv.client_email && (<button onClick={(e) => { e.stopPropagation(); handleSendEmail(inv); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="Send Email"><Send className="h-3.5 w-3.5" /></button>)}
                     {inv.amount_due > 0 && (<button onClick={(e) => { e.stopPropagation(); setPayInv(inv); setPayOpen(true); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors" title="Payment"><IndianRupee className="h-3.5 w-3.5" /></button>)}
                     {inv.status === 'draft' && (<button onClick={(e) => { e.stopPropagation(); handleMarkSent(inv); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="Mark Sent"><Send className="h-3.5 w-3.5" /></button>)}
