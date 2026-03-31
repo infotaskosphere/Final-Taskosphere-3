@@ -62,7 +62,7 @@ const STATUS_META = {
   credit_note: { label: 'Credit Note', bg: 'bg-purple-50 dark:bg-purple-900/20', text: 'text-purple-600 dark:text-purple-400', dot: 'bg-purple-500', hex: COLORS.purple },
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Pure Module-Level Helpers ────────────────────────────────────────────────
 const fmt = (n) => new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n ?? 0);
 const fmtC = (n) => `₹${fmt(n)}`;
 const getStatusMeta = (inv) => {
@@ -78,6 +78,13 @@ const emptyItem = () => ({
   cgst_amount: 0, sgst_amount: 0, igst_amount: 0, total_amount: 0,
   item_details: '',
 });
+
+// Pure helper — no hooks, safe to call anywhere
+const fyRange = (year) => {
+  if (!year || year === 'all') return null;
+  const y = parseInt(year);
+  return { from: `${y}-04-01`, to: `${y + 1}-03-31` };
+};
 
 // ─── Item Memory (localStorage) ───────────────────────────────────────────────
 const getItemMemory = () => {
@@ -206,13 +213,18 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo }) => {
 // CLIENT SEARCH COMBOBOX
 // ════════════════════════════════════════════════════════════════════════════════
 const ClientSearchCombobox = ({ clients = [], value, onSelect, onAddNew, isDark }) => {
+  // ── useState ──
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(-1);
+
+  // ── useRef ──
   const wrapRef = useRef(null);
   const inputRef = useRef(null);
   const listRef = useRef(null);
-  const selected = clients.find(c => c.id === value) || null;
+
+  // ── useMemo ──
+  const selected = useMemo(() => clients.find(c => c.id === value) || null, [clients, value]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return clients.slice(0, 50);
@@ -223,6 +235,8 @@ const ClientSearchCombobox = ({ clients = [], value, onSelect, onAddNew, isDark 
       (c.client_gstin || '').toLowerCase().includes(q)
     ).slice(0, 40);
   }, [clients, query]);
+
+  // ── useEffect ──
   useEffect(() => {
     const h = (e) => {
       if (wrapRef.current && !wrapRef.current.contains(e.target)) {
@@ -232,11 +246,14 @@ const ClientSearchCombobox = ({ clients = [], value, onSelect, onAddNew, isDark 
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, []);
+
   useEffect(() => {
     if (focused >= 0 && listRef.current) {
       listRef.current.querySelector(`[data-idx="${focused}"]`)?.scrollIntoView({ block: 'nearest' });
     }
   }, [focused]);
+
+  // ── Handlers ──
   const openDrop = () => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 20); };
   const pick = (client) => { onSelect(client); setOpen(false); setQuery(''); setFocused(-1); };
   const clear = (e) => { e.stopPropagation(); onSelect(null); };
@@ -252,9 +269,11 @@ const ClientSearchCombobox = ({ clients = [], value, onSelect, onAddNew, isDark 
       if (focused >= 0 && filtered[focused]) pick(filtered[focused]);
     }
   };
+
   const inputCls = `w-full flex items-center gap-2.5 h-11 px-3 rounded-xl border text-sm transition-all outline-none
     ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}
     ${open ? 'border-blue-400 ring-2 ring-blue-100 shadow-sm' : 'hover:border-blue-300'}`;
+
   return (
     <div ref={wrapRef} className="relative" onKeyDown={onKeyDown}>
       <button type="button" onClick={open ? () => { setOpen(false); setQuery(''); } : openDrop}
@@ -384,19 +403,20 @@ const ClientSearchCombobox = ({ clients = [], value, onSelect, onAddNew, isDark 
 // GST REPORTS MODAL
 // ════════════════════════════════════════════════════════════════════════════════
 const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
+  // ── useState ──
   const [tab, setTab] = useState('gstr1');
   const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
 
-  // ✅ 1. BASE DATA (ALWAYS FIRST)
+  // ── useMemo: BASE DATA (always first) ──
   const monthInvoices = useMemo(() => {
-    return invoices.filter(inv =>
+    return (invoices || []).filter(inv =>
       inv.invoice_date?.startsWith(month) &&
       ['tax_invoice','credit_note','debit_note'].includes(inv.invoice_type) &&
       inv.status !== 'cancelled'
     );
   }, [invoices, month]);
 
-  // ✅ 2. GSTR-1 CALCULATION
+  // ── useMemo: GSTR-1 (depends on monthInvoices) ──
   const gstr1 = useMemo(() => {
     const b2b = [], b2cL = [], b2cS = [], cdnr = [], hsnMap = {};
 
@@ -410,31 +430,17 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
       else if (total > 250000) b2cL.push(inv);
       else b2cS.push(inv);
 
-      for (const item of inv.items || []) {
+      for (const item of (inv.items || [])) {
         const key = item.hsn_sac || 'UNKNOWN';
-
         if (!hsnMap[key]) {
-          hsnMap[key] = {
-            hsn_sac: key,
-            description: item.description || '',
-            quantity: 0,
-            taxable: 0,
-            igst: 0,
-            cgst: 0,
-            sgst: 0,
-            total_tax: 0
-          };
+          hsnMap[key] = { hsn_sac: key, description: item.description || '', quantity: 0, taxable: 0, igst: 0, cgst: 0, sgst: 0, total_tax: 0 };
         }
-
         hsnMap[key].quantity += item.quantity || 0;
         hsnMap[key].taxable += item.taxable_value || 0;
         hsnMap[key].igst += item.igst_amount || 0;
         hsnMap[key].cgst += item.cgst_amount || 0;
         hsnMap[key].sgst += item.sgst_amount || 0;
-        hsnMap[key].total_tax +=
-          (item.igst_amount || 0) +
-          (item.cgst_amount || 0) +
-          (item.sgst_amount || 0);
+        hsnMap[key].total_tax += (item.igst_amount || 0) + (item.cgst_amount || 0) + (item.sgst_amount || 0);
       }
     }
 
@@ -445,21 +451,13 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
       sgst: acc.sgst + (inv.total_sgst || 0),
     }), { taxable: 0, igst: 0, cgst: 0, sgst: 0 });
 
-    return {
-      b2b,
-      b2cL,
-      b2cS,
-      b2cSTotal,
-      cdnr,
-      hsnSummary: Object.values(hsnMap)
-    };
+    return { b2b, b2cL, b2cS, b2cSTotal, cdnr, hsnSummary: Object.values(hsnMap) };
   }, [monthInvoices]);
 
-  // ✅ 3. GSTR-3B CALCULATION
+  // ── useMemo: GSTR-3B (depends on monthInvoices) ──
   const gstr3b = useMemo(() => {
     const outward = monthInvoices.reduce((acc, inv) => {
       if (inv.invoice_type !== 'tax_invoice') return acc;
-
       return {
         taxable: acc.taxable + (inv.total_taxable || 0),
         igst: acc.igst + (inv.total_igst || 0),
@@ -482,28 +480,16 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
     const netCGST = outward.cgst - credits.cgst;
     const netSGST = outward.sgst - credits.sgst;
 
-    return {
-      outward,
-      credits,
-      netIGST,
-      netCGST,
-      netSGST,
-      netTotal: netIGST + netCGST + netSGST
-    };
+    return { outward, credits, netIGST, netCGST, netSGST, netTotal: netIGST + netCGST + netSGST };
   }, [monthInvoices]);
 
-  // ✅ UI (UNCHANGED)
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className={`max-w-5xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 [&>button.absolute]:hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-
         <DialogTitle className="sr-only">GST Returns</DialogTitle>
         <DialogDescription className="sr-only">Generate GSTR-1, GSTR-3B, GSTR-2B reports</DialogDescription>
-
-        {/* HEADER */}
         <div className="px-7 py-5 flex items-center justify-between"
           style={{ background: 'linear-gradient(135deg, #064e3b, #065f46, #047857)' }}>
-
           <div className="flex items-center gap-3">
             <FileSpreadsheet className="h-5 w-5 text-white" />
             <div>
@@ -511,7 +497,6 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
               <p className="text-emerald-200 text-xs">GSTR-1 · GSTR-3B · GSTR-2B</p>
             </div>
           </div>
-
           <div className="flex gap-3">
             <input
               type="month"
@@ -524,13 +509,9 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
             </button>
           </div>
         </div>
-
-        {/* BODY */}
         <div className="flex-1 overflow-y-auto p-6">
           {monthInvoices.length === 0 ? (
-            <div className="text-center text-slate-400 py-10">
-              No invoices found
-            </div>
+            <div className="text-center text-slate-400 py-10">No invoices found</div>
           ) : tab === 'gstr1' ? (
             <div>
               <p>B2B Count: {gstr1.b2b.length}</p>
@@ -542,11 +523,11 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
             </div>
           )}
         </div>
-
       </DialogContent>
     </Dialog>
   );
 };
+
 // ════════════════════════════════════════════════════════════════════════════════
 // EXCEL IMPORT — parse Excel/CSV invoice template
 // ════════════════════════════════════════════════════════════════════════════════
@@ -626,7 +607,9 @@ function parseSaleReportExcel(file) {
 // UNIFIED IMPORT MODAL
 // ════════════════════════════════════════════════════════════════════════════════
 const KB_PAY_STATUS = { 1: 'sent', 2: 'partially_paid', 3: 'paid' };
+
 const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => {
+  // ── useState ──
   const [step, setStep] = useState('choose');
   const [importMode, setImportMode] = useState('');
   const [file, setFile] = useState(null);
@@ -639,14 +622,20 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
   const [importClients, setImportClients] = useState(true);
   const [importInvoices, setImportInvoices] = useState(true);
   const [selectedCompanyId, setSelectedCompanyId] = useState('__none__');
+
+  // ── useRef ──
   const dropRef = useRef(null);
+
+  // ── Handlers ──
   const reset = () => {
     setStep('choose'); setImportMode(''); setFile(null); setParsed(null);
     setError(''); setLoading(false); setProgress(0);
     setResults({ imported: 0, clients: 0, skipped: 0, errors: [] });
     setSelectedFirm('__none__'); setSelectedCompanyId('__none__');
   };
+
   const handleClose = () => { reset(); onClose(); };
+
   const handleFileDrop = useCallback((e) => {
     e.preventDefault();
     const f = e.dataTransfer?.files?.[0] || e.target?.files?.[0];
@@ -665,6 +654,7 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
     }
     setFile(f); setError('');
   }, [importMode]);
+
   const parseBackupViaAPI = async (f) => {
     const formData = new FormData();
     formData.append('file', f);
@@ -677,6 +667,7 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
       throw new Error(err.response?.data?.detail || 'Server could not parse backup file');
     }
   };
+
   const handleParse = async () => {
     if (!file) return;
     setLoading(true); setError('');
@@ -718,12 +709,13 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
       setLoading(false);
     }
   };
+
   const handleImport = async () => {
     if (!parsed) return;
     setStep('importing'); setProgress(0);
     const res = { imported: 0, clients: 0, skipped: 0, errors: [] };
     const companyId = selectedCompanyId === '__none__' ? '' : selectedCompanyId;
-    if (parsed.mode !== 'excel' && importClients && parsed.clients?.length > 0) {
+    if (parsed.mode !== 'excel' && importClients && (parsed.clients?.length || 0) > 0) {
       const clientsToImport = parsed.clients.slice(0, 500);
       let done = 0;
       for (const c of clientsToImport) {
@@ -740,14 +732,14 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
       }
     }
     const invToImport = parsed.mode === 'excel'
-      ? parsed.invoices
-      : (selectedFirm === '__none__' ? parsed.invoices : parsed.invoices.filter(i => String(i.company_id) === selectedFirm));
+      ? (parsed.invoices || [])
+      : (selectedFirm === '__none__' ? (parsed.invoices || []) : (parsed.invoices || []).filter(i => String(i.company_id) === selectedFirm));
     let done = 0;
-    for (const inv of (invToImport || [])) {
+    for (const inv of invToImport) {
       try {
         const payload = {
           ...inv, company_id: companyId, invoice_type: inv.invoice_type || 'tax_invoice',
-          items: inv.items?.length > 0 ? inv.items : [{ ...emptyItem(), description: 'Imported service', unit_price: inv.grand_total || 0 }],
+          items: (inv.items?.length || 0) > 0 ? inv.items : [{ ...emptyItem(), description: 'Imported service', unit_price: inv.grand_total || 0 }],
         };
         delete payload._kb_id;
         await api.post('/invoices', payload);
@@ -758,14 +750,16 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
       }
       done++;
       const base = parsed.mode !== 'excel' && importClients ? 40 : 0;
-      setProgress(base + Math.round((done / (invToImport?.length || 1)) * (100 - base)));
+      setProgress(base + Math.round((done / (invToImport.length || 1)) * (100 - base)));
     }
     setResults(res);
     setStep('done');
     onImportComplete?.();
     toast.success(`Imported ${res.imported} invoice${res.imported !== 1 ? 's' : ''} successfully`);
   };
+
   const inputCls = `h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className={`w-full max-w-xl rounded-2xl border shadow-2xl p-0 overflow-hidden flex flex-col ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
@@ -903,23 +897,23 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
                   ].map(s => (<div key={s.label} className="text-center"><p className={`text-xl font-black ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{s.val}</p><p className="text-[10px] font-semibold text-slate-400 uppercase">{s.label}</p></div>))}
                 </div>
               </div>
-              {parsed.firms?.length > 1 && (
+              {(parsed.firms?.length || 0) > 1 && (
                 <div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Select Firm</label>
                   <Select value={selectedFirm} onValueChange={setSelectedFirm}><SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
-                    <SelectContent><SelectItem value="__none__">All firms</SelectItem>{parsed.firms.map(f => <SelectItem key={f.firm_id} value={String(f.firm_id)}>{f.firm_name}</SelectItem>)}</SelectContent></Select></div>
+                    <SelectContent><SelectItem value="__none__">All firms</SelectItem>{(parsed.firms || []).map(f => <SelectItem key={f.firm_id} value={String(f.firm_id)}>{f.firm_name}</SelectItem>)}</SelectContent></Select></div>
               )}
               <div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Import Into Company Profile</label>
                 <Select value={selectedCompanyId} onValueChange={setSelectedCompanyId}><SelectTrigger className={inputCls}><SelectValue placeholder="Select target company" /></SelectTrigger>
                   <SelectContent><SelectItem value="__none__">— Select later —</SelectItem>{(companies || []).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></div>
-              {parsed.mode !== 'excel' && parsed.clients?.length > 0 && (
+              {parsed.mode !== 'excel' && (parsed.clients?.length || 0) > 0 && (
                 <div className="flex items-center gap-3"><Switch checked={importClients} onCheckedChange={setImportClients} />
                   <div><p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Import Clients ({parsed.clients.length})</p><p className="text-xs text-slate-400">Add as client records</p></div></div>
               )}
-              {parsed.invoices?.length > 0 && (
+              {(parsed.invoices?.length || 0) > 0 && (
                 <div className={`rounded-xl border max-h-48 overflow-y-auto ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
                   <div className={`px-4 py-2 border-b sticky top-0 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Invoice Preview ({parsed.invoices.length})</p></div>
-                  {parsed.invoices.slice(0, 20).map((inv, i) => (
+                  {(parsed.invoices || []).slice(0, 20).map((inv, i) => (
                     <div key={i} className={`flex items-center justify-between px-4 py-2 border-b last:border-0 ${isDark ? 'border-slate-700' : 'border-slate-50'}`}>
                       <div className="flex-1 min-w-0"><p className={`text-xs font-semibold truncate ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{inv.client_name || 'Unknown'}</p><p className="text-[10px] text-slate-400">{inv.invoice_no || `#${i+1}`} · {inv.invoice_date || '—'}</p></div>
                       <p className={`text-xs font-bold ${isDark ? 'text-slate-100' : 'text-slate-700'}`}>{fmtC(inv.grand_total || 0)}</p></div>
@@ -928,7 +922,7 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
                 </div>
               )}
               <Button onClick={handleImport} className="w-full h-11 rounded-xl text-white font-semibold" style={{ background: 'linear-gradient(135deg, #065f46, #059669)' }}>
-                <CheckSquare className="h-4 w-4 mr-2" /> Import {parsed.invoices?.length || 0} Invoices{importClients && parsed.clients?.length > 0 ? ` + ${parsed.clients.length} Clients` : ''}</Button>
+                <CheckSquare className="h-4 w-4 mr-2" /> Import {parsed.invoices?.length || 0} Invoices{importClients && (parsed.clients?.length || 0) > 0 ? ` + ${parsed.clients.length} Clients` : ''}</Button>
             </div>
           )}
           {/* STEP: IMPORTING */}
@@ -957,7 +951,7 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
                 ].map(s => (<div key={s.label} className={`rounded-xl border p-4 text-center ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
                   <p className="text-2xl font-black" style={{ color: s.color }}>{s.val}</p><p className="text-[10px] font-semibold text-slate-400 uppercase mt-1">{s.label}</p></div>))}
               </div>
-              {results.errors?.length > 0 && (
+              {(results.errors?.length || 0) > 0 && (
                 <div className={`rounded-xl border p-3 max-h-32 overflow-y-auto ${isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-200'}`}>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-red-500 mb-2">Errors ({results.errors.length})</p>
                   {results.errors.slice(0, 10).map((err, i) => <p key={i} className="text-xs text-red-600 dark:text-red-400">{err}</p>)}
@@ -1006,6 +1000,7 @@ const StatCard = ({ label, value, sub, icon: Icon, color, bg, onClick, isDark, t
 
 // ─── Enhanced Revenue Trend ───────────────────────────────────────────────────
 const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
+  // ── useState ──
   const [trendRange, setTrendRange] = useState('12m');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
@@ -1013,8 +1008,10 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
   const [showServiceBreakdown, setShowServiceBreakdown] = useState(false);
   const [selectedServices, setSelectedServices] = useState([]);
 
-  const fmtAxis = v => v >= 10000000 ? `${(v/10000000).toFixed(1)}Cr` : v >= 100000 ? `${(v/100000).toFixed(1)}L` : v >= 1000 ? `${(v/1000).toFixed(0)}k` : v.toFixed(0);
+  // ── Pure helpers (no hooks) ──
+  const fmtAxis = (v) => v >= 10000000 ? `${(v/10000000).toFixed(1)}Cr` : v >= 100000 ? `${(v/100000).toFixed(1)}L` : v >= 1000 ? `${(v/1000).toFixed(0)}k` : v.toFixed(0);
 
+  // ── useCallback: getRange (stable, used by memos) ──
   const getRange = useCallback(() => {
     const now = new Date();
     if (trendRange === 'custom') {
@@ -1027,6 +1024,7 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
     return { start: subMonths(now, m), end: now };
   }, [trendRange, customFrom, customTo]);
 
+  // ── useCallback: getMonths ──
   const getMonths = useCallback((start, end) => {
     const months = [];
     let cur = startOfMonth(start);
@@ -1037,10 +1035,18 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
     return months;
   }, []);
 
+  // ── useMemo: allServices ──
+  const allServices = useMemo(() => {
+    const s = new Set();
+    (invoices || []).forEach(inv => (inv.items || []).forEach(it => { if (it.description?.trim()) s.add(it.description.trim()); }));
+    return Array.from(s).slice(0, 30);
+  }, [invoices]);
+
+  // ── useMemo: currentData ──
   const currentData = useMemo(() => {
     const { start, end } = getRange();
     return getMonths(start, end).map(m => {
-      const monthInvs = invoices.filter(i => i.invoice_date?.startsWith(m) && i.status !== 'cancelled');
+      const monthInvs = (invoices || []).filter(i => i.invoice_date?.startsWith(m) && i.status !== 'cancelled');
       let serviceRevenue = 0;
       if (selectedServices.length > 0) {
         monthInvs.forEach(inv => (inv.items || []).forEach(it => {
@@ -1056,6 +1062,7 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
     });
   }, [invoices, trendRange, customFrom, customTo, selectedServices, getRange, getMonths]);
 
+  // ── useMemo: prevData ──
   const prevData = useMemo(() => {
     if (!compareEnabled) return [];
     const { start, end } = getRange();
@@ -1063,7 +1070,7 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
     const prevStart = new Date(start.getTime() - diff);
     const prevEnd = new Date(start);
     return getMonths(prevStart, prevEnd).map(m => {
-      const monthInvs = invoices.filter(i => i.invoice_date?.startsWith(m) && i.status !== 'cancelled');
+      const monthInvs = (invoices || []).filter(i => i.invoice_date?.startsWith(m) && i.status !== 'cancelled');
       return {
         month: m, label: format(new Date(m + '-15'), 'MMM yy'),
         revenue: monthInvs.reduce((s, i) => s + (i.grand_total || 0), 0),
@@ -1072,11 +1079,12 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
     });
   }, [invoices, compareEnabled, trendRange, customFrom, customTo, getRange, getMonths]);
 
+  // ── useMemo: serviceBreakdown ──
   const serviceBreakdown = useMemo(() => {
     const { start, end } = getRange();
     const startStr = format(start, 'yyyy-MM-dd'), endStr = format(end, 'yyyy-MM-dd');
     const map = {};
-    invoices.filter(i => i.invoice_date >= startStr && i.invoice_date <= endStr && i.status !== 'cancelled')
+    (invoices || []).filter(i => i.invoice_date >= startStr && i.invoice_date <= endStr && i.status !== 'cancelled')
       .forEach(inv => (inv.items || []).forEach(it => {
         const k = (it.description || 'Unknown').trim();
         if (!map[k]) map[k] = { description: k, revenue: 0, count: 0 };
@@ -1085,35 +1093,28 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
     return Object.values(map).sort((a, b) => b.revenue - a.revenue);
   }, [invoices, trendRange, customFrom, customTo, getRange]);
 
-  const allServices = useMemo(() => {
-    const s = new Set();
-    invoices.forEach(inv => (inv.items || []).forEach(it => { if (it.description?.trim()) s.add(it.description.trim()); }));
-    return Array.from(s).slice(0, 30);
-  }, [invoices]);
+  // ── useMemo: aggregate totals (depend on currentData / prevData) ──
+  const totalRevenue = useMemo(() => currentData.reduce((s, d) => s + d.revenue, 0), [currentData]);
+  const totalCollected = useMemo(() => currentData.reduce((s, d) => s + d.collected, 0), [currentData]);
+  const prevTotal = useMemo(() => prevData.reduce((s, d) => s + d.revenue, 0), [prevData]);
+  const growthPct = useMemo(() => prevTotal > 0 ? Math.round((totalRevenue - prevTotal) / prevTotal * 100) : null, [totalRevenue, prevTotal]);
 
-  const totalRevenue = currentData.reduce((s, d) => s + d.revenue, 0);
-  const totalCollected = currentData.reduce((s, d) => s + d.collected, 0);
-  const prevTotal = prevData.reduce((s, d) => s + d.revenue, 0);
-  const growthPct = prevTotal > 0 ? Math.round((totalRevenue - prevTotal) / prevTotal * 100) : null;
-
-  // SVG chart
+  // SVG chart params (derived, no hooks needed)
   const W = 700, H = 160, pad = { t: 20, b: 34, l: 58, r: 16 };
   const allVals = [...currentData.map(d => d.revenue), ...(compareEnabled ? prevData.map(d => d.revenue) : [])];
   const maxVal = Math.max(...allVals, 1);
   const n = currentData.length;
   const xStep = n > 1 ? (W - pad.l - pad.r) / (n - 1) : 0;
-  const yS = v => H - pad.b - (v / maxVal) * (H - pad.t - pad.b);
+  const yS = (v) => H - pad.b - (v / maxVal) * (H - pad.t - pad.b);
   const pts = currentData.map((d, i) => [pad.l + i * xStep, yS(d.revenue)]);
   const colPts = currentData.map((d, i) => [pad.l + i * xStep, yS(d.collected)]);
   const svcPts = selectedServices.length > 0 ? currentData.map((d, i) => [pad.l + i * xStep, yS(d.serviceRevenue)]) : [];
   const prevAligned = compareEnabled ? currentData.map((_, i) => prevData[i] || { revenue: 0 }) : [];
   const prevPts = prevAligned.map((d, i) => [pad.l + i * xStep, yS(d.revenue)]);
-  const mkLine = pp => pp.length > 1 ? `M${pp.map(p => `${p[0]},${p[1]}`).join(' L')}` : '';
-  const mkArea = pp => pp.length > 1 ? `M${pp[0][0]},${H - pad.b} L${pp.map(p => `${p[0]},${p[1]}`).join(' L')} L${pp[pp.length-1][0]},${H - pad.b} Z` : '';
 
   const RANGE_BTNS = [{ v:'1m',l:'1M' },{ v:'3m',l:'3M' },{ v:'6m',l:'6M' },{ v:'12m',l:'12M' },{ v:'custom',l:'Custom' }];
 
-  if (!invoices.some(i => (i.grand_total||0) > 0)) return null;
+  if (!(invoices || []).some(i => (i.grand_total||0) > 0)) return null;
 
   return (
     <div className={`rounded-2xl border p-5 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`}>
@@ -1198,7 +1199,7 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
         </div>
       )}
 
-{/* SVG Chart — smooth cubic bezier */}
+      {/* SVG Chart — smooth cubic bezier */}
       {currentData.length > 0 && (
         <div>
           <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="none" style={{ overflow: 'visible' }}>
@@ -1282,6 +1283,7 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
           </div>
         </div>
       )}
+
       {/* Comparative table */}
       {compareEnabled && currentData.length > 0 && (
         <div className={`mt-4 rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
@@ -1354,13 +1356,19 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
     </div>
   );
 };
+
 // ════════════════════════════════════════════════════════════════════════════════
 // PAYMENT MODAL
 // ════════════════════════════════════════════════════════════════════════════════
 const PaymentModal = ({ invoice, open, onClose, onSuccess, isDark }) => {
+  // ── useState ──
   const [form, setForm] = useState({ amount: '', payment_date: format(new Date(), 'yyyy-MM-dd'), payment_mode: 'neft', reference_no: '', notes: '' });
   const [loading, setLoading] = useState(false);
+
+  // ── useEffect ──
   useEffect(() => { if (open && invoice) setForm(p => ({ ...p, amount: invoice.amount_due?.toFixed(2) || '' })); }, [open, invoice]);
+
+  // ── Handlers ──
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.amount || parseFloat(form.amount) <= 0) { toast.error('Enter a valid amount'); return; }
@@ -1371,6 +1379,7 @@ const PaymentModal = ({ invoice, open, onClose, onSuccess, isDark }) => {
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to record payment'); }
     finally { setLoading(false); }
   };
+
   if (!invoice) return null;
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -1404,7 +1413,7 @@ const PaymentModal = ({ invoice, open, onClose, onSuccess, isDark }) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// INVOICE FORM — UPDATED WITH ALL COMMANDS
+// INVOICE FORM
 // ════════════════════════════════════════════════════════════════════════════════
 const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onSuccess, isDark }) => {
   const navigate = useNavigate();
@@ -1420,14 +1429,17 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     is_recurring: false, recurrence_pattern: 'monthly', status: 'draft',
     invoice_template: 'prestige', invoice_theme: 'classic_blue', invoice_custom_color: '#0D3B66',
   };
+
+  // ── useState ──
   const [form, setForm] = useState(defaultForm);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('details');
   const [products, setProducts] = useState([]);
 
-  // COMMAND 2: ADD iframeRef
+  // ── useRef ──
   const previewRef = useRef(null);
 
+  // ── useEffect ──
   useEffect(() => {
     if (open) {
       if (editingInv) {
@@ -1443,10 +1455,13 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       setActiveTab('details');
     }
   }, [open, editingInv]);
+
   useEffect(() => { api.get('/products').then(r => setProducts(r.data || [])).catch(() => {}); }, []);
 
+  // ── useMemo ──
   const totals = useMemo(() => computeTotals(form.items, form.is_interstate, form.discount_amount, form.shipping_charges, form.other_charges), [form.items, form.is_interstate, form.discount_amount, form.shipping_charges, form.other_charges]);
 
+  // ── useCallback ──
   const setField = useCallback((k, v) => setForm(p => ({ ...p, [k]: v })), []);
   const updateItem = useCallback((idx, k, val) => setForm(p => ({ ...p, items: p.items.map((it, i) => i !== idx ? it : { ...it, [k]: val }) })), []);
   const addItem = useCallback(() => setForm(p => ({ ...p, items: [...p.items, emptyItem()] })), []);
@@ -1472,11 +1487,8 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     setForm(p => ({ ...p, items: p.items.map((it, i) => i !== idx ? it : { ...it, product_id: productId, description: prod.name, hsn_sac: prod.hsn_sac || '', unit: prod.unit || 'service', unit_price: prod.unit_price || 0, gst_rate: prod.gst_rate || 18 }) }));
   }, [products]);
 
-  
-  // 2. The corrected handlePreview function using previewRef
-  const handlePreview = () => {
-    const company = companies.find(c => c.id === form.company_id) || {};
-
+  const handlePreview = useCallback(() => {
+    const company = (companies || []).find(c => c.id === form.company_id) || {};
     const previewInv = {
       ...form,
       invoice_no: editingInv?.invoice_no || 'PREVIEW-001',
@@ -1484,21 +1496,19 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       due_date: form.due_date || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
       client_name: form.client_name || 'Client Name'
     };
-
     const html = generateInvoiceHTML(previewInv, {
       company,
       template: form.invoice_template,
       theme: form.invoice_theme,
       customColor: form.invoice_custom_color
     });
-
-    // CHANGE THIS LINE Specifically: Use previewRef instead of iframeRef
     if (previewRef.current) {
       previewRef.current.srcdoc = html;
     }
-  };
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  }, [companies, form, editingInv]);
+
+  const handleSubmit = useCallback(async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
     if (!form.company_id) { toast.error('Please select a company profile'); return; }
     if (!form.client_name?.trim()) { toast.error('Client name is required'); return; }
     if (!form.items.some(it => it.description?.trim())) { toast.error('Add at least one item'); return; }
@@ -1513,7 +1523,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       onClose();
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to save invoice'); }
     finally { setLoading(false); }
-  };
+  }, [form, totals, editingInv, onSuccess, onClose]);
 
   const labelCls = "text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block";
   const inputCls = `h-11 rounded-xl text-sm border-slate-200 dark:border-slate-600 focus:border-blue-400 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
@@ -1570,8 +1580,8 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                 <div className={sectionCls}>
                   <div className="flex items-center gap-2 mb-5"><div className="w-7 h-7 rounded-xl flex items-center justify-center text-white text-xs font-bold" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}><Building2 className="h-4 w-4" /></div><h3 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Company & Client</h3></div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div><label className={labelCls}>Company Profile *</label><Select value={form.company_id || '__none__'} onValueChange={v => setField('company_id', v === '__none__' ? '' : v)}><SelectTrigger className={inputCls}><SelectValue placeholder="Select company profile" /></SelectTrigger><SelectContent><SelectItem value="__none__">— Select company —</SelectItem>{companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></div>
-                    <div><label className={labelCls}>Select Client (auto-fill){form.client_id && <span className="ml-2 text-emerald-600 dark:text-emerald-400 normal-case tracking-normal font-normal">✓ auto-populated</span>}</label><ClientSearchCombobox clients={clients} value={form.client_id} onSelect={handleClientSelect} onAddNew={() => { onClose(); window.open('/clients?openAddClient=true', '_blank'); }} isDark={isDark} /></div>
+                    <div><label className={labelCls}>Company Profile *</label><Select value={form.company_id || '__none__'} onValueChange={v => setField('company_id', v === '__none__' ? '' : v)}><SelectTrigger className={inputCls}><SelectValue placeholder="Select company profile" /></SelectTrigger><SelectContent><SelectItem value="__none__">— Select company —</SelectItem>{(companies || []).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></div>
+                    <div><label className={labelCls}>Select Client (auto-fill){form.client_id && <span className="ml-2 text-emerald-600 dark:text-emerald-400 normal-case tracking-normal font-normal">✓ auto-populated</span>}</label><ClientSearchCombobox clients={clients || []} value={form.client_id} onSelect={handleClientSelect} onAddNew={() => { onClose(); window.open('/clients?openAddClient=true', '_blank'); }} isDark={isDark} /></div>
                     <div><label className={labelCls}>Client Name *</label><Input className={inputCls} value={form.client_name} onChange={e => setField('client_name', e.target.value)} required /></div>
                     <div><label className={labelCls}>Client GSTIN</label><Input className={inputCls} placeholder="22AAAAA0000A1Z5" value={form.client_gstin} onChange={e => setField('client_gstin', e.target.value)} /></div>
                     <div><label className={labelCls}>Email</label><Input type="email" className={inputCls} value={form.client_email} onChange={e => setField('client_email', e.target.value)} /></div>
@@ -1605,7 +1615,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                     </div>
                     <div><label className={labelCls}>Reference / PO No.</label><Input className={inputCls} placeholder="Optional" value={form.reference_no} onChange={e => setField('reference_no', e.target.value)} /></div>
                     <div><label className={labelCls}>Payment Terms</label><Input className={inputCls} value={form.payment_terms} onChange={e => setField('payment_terms', e.target.value)} /></div>
-                    <div><label className={labelCls}>Linked Lead</label><Select value={form.lead_id || '__none__'} onValueChange={v => setField('lead_id', v === '__none__' ? null : v)}><SelectTrigger className={inputCls}><SelectValue placeholder="Link to lead…" /></SelectTrigger><SelectContent><SelectItem value="__none__">— No Lead —</SelectItem>{leads.map(l => <SelectItem key={l.id} value={l.id}>{l.company_name}</SelectItem>)}</SelectContent></Select></div>
+                    <div><label className={labelCls}>Linked Lead</label><Select value={form.lead_id || '__none__'} onValueChange={v => setField('lead_id', v === '__none__' ? null : v)}><SelectTrigger className={inputCls}><SelectValue placeholder="Link to lead…" /></SelectTrigger><SelectContent><SelectItem value="__none__">— No Lead —</SelectItem>{(leads || []).map(l => <SelectItem key={l.id} value={l.id}>{l.company_name}</SelectItem>)}</SelectContent></Select></div>
                     <div><label className={labelCls}>Status</label><Select value={form.status} onValueChange={v => setField('status', v)}><SelectTrigger className={inputCls}><SelectValue /></SelectTrigger><SelectContent>{['draft','sent','partially_paid','paid','overdue','cancelled'].map(s => <SelectItem key={s} value={s}>{s.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}</SelectItem>)}</SelectContent></Select></div>
                   </div>
                 </div>
@@ -1728,39 +1738,36 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                   <div className="flex items-center justify-between mb-4">
                     <h3 className={`text-sm font-semibold flex items-center gap-2 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}><Eye className="h-4 w-4" /> Live Preview</h3>
                     <div className="flex gap-2">
-                      {/* COMMAND 6: ADD PREVIEW BUTTON */}
                       <Button type="button" size="sm" variant="outline" onClick={handlePreview} className="h-8 px-3 text-xs rounded-xl gap-1.5">
                         <Eye className="h-3.5 w-3.5" /> Preview
                       </Button>
-                      {/* COMMAND 5: REPLACE DOWNLOAD BUTTON */}
                       <Button type="button" size="sm" variant="outline"
-                        onClick={() => { 
-                          const company = companies.find(c => c.id === form.company_id) || {}; 
-                          const previewInv = { 
-                            ...form, 
-                            invoice_no: editingInv?.invoice_no || 'PREVIEW-001', 
-                            invoice_date: form.invoice_date || format(new Date(), 'yyyy-MM-dd'), 
-                            due_date: form.due_date || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'), 
-                            client_name: form.client_name || 'Client Name' 
-                          }; 
-                          const html = generateInvoiceHTML(previewInv, { 
-                            company, 
-                            template: form.invoice_template, 
-                            theme: form.invoice_theme, 
-                            customColor: form.invoice_custom_color 
-                          }); 
-                          const blob = new Blob([html], { type: 'text/html' }); 
-                          const url = URL.createObjectURL(blob); 
-                          const win = window.open(url, '_blank'); 
-                          win.onload = () => win.print(); 
+                        onClick={() => {
+                          const company = (companies || []).find(c => c.id === form.company_id) || {};
+                          const previewInv = {
+                            ...form,
+                            invoice_no: editingInv?.invoice_no || 'PREVIEW-001',
+                            invoice_date: form.invoice_date || format(new Date(), 'yyyy-MM-dd'),
+                            due_date: form.due_date || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
+                            client_name: form.client_name || 'Client Name'
+                          };
+                          const html = generateInvoiceHTML(previewInv, {
+                            company,
+                            template: form.invoice_template,
+                            theme: form.invoice_theme,
+                            customColor: form.invoice_custom_color
+                          });
+                          const blob = new Blob([html], { type: 'text/html' });
+                          const url = URL.createObjectURL(blob);
+                          const win = window.open(url, '_blank');
+                          win.onload = () => win.print();
                         }}
                         className="h-8 px-3 text-xs rounded-xl gap-1.5"><Printer className="h-3.5 w-3.5" /> Open Print Preview</Button>
                     </div>
                   </div>
-                  {/* COMMAND 7: ADD iframe UI */}
                   <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-200'}`} style={{ height: 600 }}>
                     <iframe
-                      ref={previewRef} 
+                      ref={previewRef}
                       className="w-full h-[600px] border rounded-xl bg-white"
                       title="Invoice Preview"
                       sandbox="allow-scripts"
@@ -1799,10 +1806,20 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
 // INVOICE DETAIL PANEL
 // ════════════════════════════════════════════════════════════════════════════════
 const InvoiceDetailPanel = ({ invoice, open, onClose, onPayment, onEdit, onDelete, onDownloadPdf, onSendEmail, isDark }) => {
+  // ── useState ──
   const [payments, setPayments] = useState([]);
-  useEffect(() => { if (open && invoice) { api.get('/payments', { params: { invoice_id: invoice.id } }).then(r => setPayments(r.data || [])).catch(() => setPayments([])); } }, [open, invoice?.id]);
+
+  // ── useEffect ──
+  useEffect(() => {
+    if (open && invoice) {
+      api.get('/payments', { params: { invoice_id: invoice.id } }).then(r => setPayments(r.data || [])).catch(() => setPayments([]));
+    }
+  }, [open, invoice?.id]);
+
   if (!invoice) return null;
-  const meta = getStatusMeta(invoice); const isInterstate = invoice.is_interstate;
+  const meta = getStatusMeta(invoice);
+  const isInterstate = invoice.is_interstate;
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className={`max-w-2xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -1870,11 +1887,16 @@ const InvoiceDetailPanel = ({ invoice, open, onClose, onPayment, onEdit, onDelet
 // PRODUCT MODAL
 // ════════════════════════════════════════════════════════════════════════════════
 const ProductModal = ({ open, onClose, isDark, onSaved }) => {
+  // ── useState ──
   const [products, setProducts] = useState([]);
   const [form, setForm] = useState({ name: '', description: '', hsn_sac: '', unit: 'service', unit_price: 0, gst_rate: 18, category: '', is_service: true });
   const [editing, setEditing] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  // ── useEffect ──
   useEffect(() => { if (open) api.get('/products').then(r => setProducts(r.data || [])).catch(() => {}); }, [open]);
+
+  // ── Handlers ──
   const handleSave = async (e) => {
     e.preventDefault(); setLoading(true);
     try {
@@ -1887,11 +1909,14 @@ const ProductModal = ({ open, onClose, isDark, onSaved }) => {
     } catch { toast.error('Failed to save product'); }
     finally { setLoading(false); }
   };
+
   const handleDelete = async (id) => {
     try { await api.delete(`/products/${id}`); setProducts(p => p.filter(x => x.id !== id)); toast.success('Deleted'); }
     catch { toast.error('Failed'); }
   };
+
   const inputCls = `h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 focus:border-blue-400 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className={`max-w-3xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white'}`}>
@@ -1945,10 +1970,7 @@ const ProductModal = ({ open, onClose, isDark, onSaved }) => {
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════════
 export default function Invoicing() {
-  const iframeRef = useRef(null);
-  const { user } = useAuth();
-  const isDark = useDark();
-  const navigate = useNavigate();
+  // ── A. ALL useState (top of component) ──────────────────────────────────────
   const [invoices, setInvoices] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [clients, setClients] = useState([]);
@@ -1975,42 +1997,89 @@ export default function Invoicing() {
   const [yearFilter, setYearFilter] = useState('all');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
-  const searchRef = useRef(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
+
+  // ── B. ALL useRef ─────────────────────────────────────────────────────────
+  const iframeRef = useRef(null);
+  const searchRef = useRef(null);
+
+  // ── hooks from context/router (treat as stable) ──
+  const { user } = useAuth();
+  const isDark = useDark();
+  const navigate = useNavigate();
+
+  // ── D. ALL useMemo: BASE DATA ─────────────────────────────────────────────
+
+  const availableYears = useMemo(() => {
+    const years = new Set((invoices || []).map(i => i.invoice_date?.slice(0, 4)).filter(Boolean));
+    return Array.from(years).sort().reverse();
+  }, [invoices]);
+
+  const localStats = useMemo(() => {
+    const now = new Date();
+    const curMonth = format(now, 'yyyy-MM');
+    const fy = fyRange(yearFilter === 'all' ? null : yearFilter);
+    const base = (invoices || []).filter(inv => {
+      if (companyFilter !== 'all' && inv.company_id !== companyFilter) return false;
+      if (fy && (inv.invoice_date < fy.from || inv.invoice_date > fy.to)) return false;
+      return true;
+    });
+    const total_revenue = base.reduce((s, i) => s + (i.grand_total || 0), 0);
+    const total_outstanding = base.reduce((s, i) => s + (i.amount_due || 0), 0);
+    const total_gst = base.reduce((s, i) => s + (i.total_gst || 0), 0);
+    const total_invoices = base.length;
+    const month_revenue = base.filter(i => i.invoice_date?.startsWith(curMonth)).reduce((s, i) => s + (i.grand_total || 0), 0);
+    const month_invoices = base.filter(i => i.invoice_date?.startsWith(curMonth)).length;
+    const overdue_count = base.filter(i => i.amount_due > 0 && i.due_date && differenceInDays(new Date(), parseISO(i.due_date)) > 0).length;
+    const paid_count = base.filter(i => i.status === 'paid').length;
+    const draft_count = base.filter(i => i.status === 'draft').length;
+    const monthly_trend = Array.from({ length: 12 }, (_, i) => {
+      const d = subMonths(now, 11 - i); const key = format(d, 'yyyy-MM');
+      const monthInvs = base.filter(inv => inv.invoice_date?.startsWith(key));
+      return { label: format(d, 'MMM yy'), revenue: monthInvs.reduce((s, inv) => s + (inv.grand_total || 0), 0), collected: monthInvs.reduce((s, inv) => s + (inv.amount_paid || 0), 0) };
+    });
+    const clientMap = {};
+    base.forEach(inv => { if (!inv.client_name) return; clientMap[inv.client_name] = (clientMap[inv.client_name] || 0) + (inv.grand_total || 0); });
+    const top_clients = Object.entries(clientMap).map(([name, revenue]) => ({ name, revenue })).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
+    return { total_revenue, total_outstanding, total_gst, total_invoices, month_revenue, month_invoices, overdue_count, paid_count, draft_count, monthly_trend, top_clients };
+  }, [invoices, companyFilter, yearFilter]);
+
+  // ── E. ALL useMemo: DERIVED DATA ──────────────────────────────────────────
+
+  const filtered = useMemo(() => {
+    const fy = fyRange(yearFilter === 'all' ? null : yearFilter);
+    return (invoices || []).filter(inv => {
+      if (companyFilter !== 'all' && inv.company_id !== companyFilter) return false;
+      if (fy && (inv.invoice_date < fy.from || inv.invoice_date > fy.to)) return false;
+      if (searchTerm && !inv.invoice_no?.toLowerCase().includes(searchTerm.toLowerCase()) && !inv.client_name?.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+      if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
+      if (typeFilter !== 'all' && inv.invoice_type !== typeFilter) return false;
+      if (fromDate && inv.invoice_date < fromDate) return false;
+      if (toDate && inv.invoice_date > toDate) return false;
+      return true;
+    });
+  }, [invoices, companyFilter, yearFilter, searchTerm, statusFilter, typeFilter, fromDate, toDate]);
+
+  // ── F. ALL useMemo: TOTALS / AGGREGATIONS ────────────────────────────────
+
+  const enrichedFiltered = useMemo(() => (filtered || []).map(inv => {
+    if (inv.status === 'sent' && inv.amount_due > 0 && inv.due_date && differenceInDays(parseISO(inv.due_date), new Date()) < 0) return { ...inv, status: 'overdue' };
+    return inv;
+  }), [filtered]);
+
+  // ── G. ALL useCallback (AFTER ALL MEMOS) ─────────────────────────────────
 
   const toggleSelect = useCallback((id) => {
     setSelectedIds(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
   }, []);
 
+  // toggleSelectAll depends on enrichedFiltered — declared AFTER it ✓
   const toggleSelectAll = useCallback(() => {
     setSelectedIds(prev => prev.size === enrichedFiltered.length ? new Set() : new Set(enrichedFiltered.map(i => i.id)));
   }, [enrichedFiltered]);
 
-  const handleBulkDelete = useCallback(async () => {
-    if (!selectedIds.size) return;
-    if (!window.confirm(`Delete ${selectedIds.size} invoice${selectedIds.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
-    setBulkDeleteLoading(true);
-    let deleted = 0, failed = 0;
-    for (const id of selectedIds) {
-      try { await api.delete(`/invoices/${id}`); deleted++; }
-      catch { failed++; }
-    }
-    setBulkDeleteLoading(false);
-    setSelectedIds(new Set());
-    fetchAll();
-    toast.success(`Deleted ${deleted} invoice${deleted > 1 ? 's' : ''}${failed ? ` (${failed} failed)` : ''}`);
-  }, [selectedIds, fetchAll]);
-  
-  useEffect(() => { const t = setTimeout(() => setSearchTerm(searchInput), 250); return () => clearTimeout(t); }, [searchInput]);
-  useEffect(() => {
-    const h = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); searchRef.current?.focus(); }
-      if (e.key === 'n' && !formOpen && !detailOpen && !payOpen && !gstOpen && document.activeElement.tagName === 'BODY') setFormOpen(true);
-    };
-    window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
-  }, [formOpen, detailOpen, payOpen, gstOpen]);
-
+  // fetchAll declared before handleBulkDelete ✓
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
@@ -2038,109 +2107,66 @@ export default function Invoicing() {
     } finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
-
-  const availableYears = useMemo(() => {
-    const years = new Set(invoices.map(i => i.invoice_date?.slice(0, 4)).filter(Boolean));
-    return Array.from(years).sort().reverse();
-  }, [invoices]);
-
-  const fyRange = (year) => { if (!year || year === 'all') return null; const y = parseInt(year); return { from: `${y}-04-01`, to: `${y + 1}-03-31` }; };
-
-  const localStats = useMemo(() => {
-    const now = new Date(); const curMonth = format(now, 'yyyy-MM'); const fy = fyRange(yearFilter === 'all' ? null : yearFilter);
-    const base = invoices.filter(inv => { if (companyFilter !== 'all' && inv.company_id !== companyFilter) return false; if (fy && (inv.invoice_date < fy.from || inv.invoice_date > fy.to)) return false; return true; });
-    const total_revenue = base.reduce((s, i) => s + (i.grand_total || 0), 0);
-    const total_outstanding = base.reduce((s, i) => s + (i.amount_due || 0), 0);
-    const total_gst = base.reduce((s, i) => s + (i.total_gst || 0), 0);
-    const total_invoices = base.length;
-    const month_revenue = base.filter(i => i.invoice_date?.startsWith(curMonth)).reduce((s, i) => s + (i.grand_total || 0), 0);
-    const month_invoices = base.filter(i => i.invoice_date?.startsWith(curMonth)).length;
-    const overdue_count = base.filter(i => i.amount_due > 0 && i.due_date && differenceInDays(new Date(), parseISO(i.due_date)) > 0).length;
-    const paid_count = base.filter(i => i.status === 'paid').length;
-    const draft_count = base.filter(i => i.status === 'draft').length;
-    const monthly_trend = Array.from({ length: 12 }, (_, i) => {
-      const d = subMonths(now, 11 - i); const key = format(d, 'yyyy-MM');
-      const monthInvs = base.filter(inv => inv.invoice_date?.startsWith(key));
-      return { label: format(d, 'MMM yy'), revenue: monthInvs.reduce((s, inv) => s + (inv.grand_total || 0), 0), collected: monthInvs.reduce((s, inv) => s + (inv.amount_paid || 0), 0) };
-    });
-    const clientMap = {}; base.forEach(inv => { if (!inv.client_name) return; clientMap[inv.client_name] = (clientMap[inv.client_name] || 0) + (inv.grand_total || 0); });
-    const top_clients = Object.entries(clientMap).map(([name, revenue]) => ({ name, revenue })).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
-    return { total_revenue, total_outstanding, total_gst, total_invoices, month_revenue, month_invoices, overdue_count, paid_count, draft_count, monthly_trend, top_clients };
-  }, [invoices, companyFilter, yearFilter]);
-
-  const filtered = useMemo(() => {
-    const fy = fyRange(yearFilter === 'all' ? null : yearFilter);
-    return invoices.filter(inv => {
-      if (companyFilter !== 'all' && inv.company_id !== companyFilter) return false;
-      if (fy && (inv.invoice_date < fy.from || inv.invoice_date > fy.to)) return false;
-      if (searchTerm && !inv.invoice_no?.toLowerCase().includes(searchTerm.toLowerCase()) && !inv.client_name?.toLowerCase().includes(searchTerm.toLowerCase())) return false;
-      if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
-      if (typeFilter !== 'all' && inv.invoice_type !== typeFilter) return false;
-      if (fromDate && inv.invoice_date < fromDate) return false;
-      if (toDate && inv.invoice_date > toDate) return false;
-      return true;
-    });
-  }, [invoices, companyFilter, yearFilter, searchTerm, statusFilter, typeFilter, fromDate, toDate]);
-
-  const enrichedFiltered = useMemo(() => filtered.map(inv => {
-    if (inv.status === 'sent' && inv.amount_due > 0 && inv.due_date && differenceInDays(parseISO(inv.due_date), new Date()) < 0) return { ...inv, status: 'overdue' };
-    return inv;
-  }), [filtered]);
+  // handleBulkDelete depends on fetchAll — declared AFTER it ✓
+  const handleBulkDelete = useCallback(async () => {
+    if (!selectedIds.size) return;
+    if (!window.confirm(`Delete ${selectedIds.size} invoice${selectedIds.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
+    setBulkDeleteLoading(true);
+    let deleted = 0, failed = 0;
+    for (const id of selectedIds) {
+      try { await api.delete(`/invoices/${id}`); deleted++; }
+      catch { failed++; }
+    }
+    setBulkDeleteLoading(false);
+    setSelectedIds(new Set());
+    fetchAll();
+    toast.success(`Deleted ${deleted} invoice${deleted > 1 ? 's' : ''}${failed ? ` (${failed} failed)` : ''}`);
+  }, [selectedIds, fetchAll]);
 
   const handleEdit = useCallback((inv) => { setEditingInv(inv); setFormOpen(true); }, []);
+
   const handleDelete = useCallback(async (inv) => {
     if (!window.confirm(`Delete invoice ${inv.invoice_no}?`)) return;
     try { await api.delete(`/invoices/${inv.id}`); toast.success('Invoice deleted'); fetchAll(); setDetailOpen(false); }
     catch { toast.error('Failed to delete'); }
   }, [fetchAll]);
 
-const handleDownloadPdf = useCallback(async (inv) => {
-  try {
-    toast.info('Generating PDF…', { duration: 1500 });
-
-    const invData = inv.items?.length > 0
-      ? inv
-      : (await api.get(`/invoices/${inv.id}`)).data;
-
-    const baseCompany = companies.find(c => c.id === invData.company_id) || {};
-    const invSettings = getInvSettings(invData.company_id);
-    const company = {
-      ...baseCompany,
-      bank_name:       baseCompany.bank_name       || invSettings.bank_name       || '',
-      bank_account_no: baseCompany.bank_account_no || invSettings.bank_account_no || '',
-      bank_account:    baseCompany.bank_account    || invSettings.bank_account_no || '',
-      bank_ifsc:       baseCompany.bank_ifsc       || invSettings.bank_ifsc       || '',
-      bank_branch:     baseCompany.bank_branch     || invSettings.bank_branch     || '',
-      upi_id:          baseCompany.upi_id          || invSettings.upi_id          || '',
-      show_qr_code:    invSettings.show_qr_code    ?? true,
-    };
-
-    const html = generateInvoiceHTML(invData, {
-      company,
-      template:    invData.invoice_template     || invSettings.template     || 'classic',
-      theme:       invData.invoice_theme        || invSettings.theme        || 'classic_blue',
-      customColor: invData.invoice_custom_color || invSettings.custom_color || '#0D3B66',
-    });
-
-    const win = window.open('', '_blank', 'width=900,height=700');
-    if (!win) {
-      toast.error('Allow pop-ups to download PDF');
-      return;
+  const handleDownloadPdf = useCallback(async (inv) => {
+    try {
+      toast.info('Generating PDF…', { duration: 1500 });
+      const invData = (inv.items?.length || 0) > 0
+        ? inv
+        : (await api.get(`/invoices/${inv.id}`)).data;
+      const baseCompany = (companies || []).find(c => c.id === invData.company_id) || {};
+      const invSettings = getInvSettings(invData.company_id);
+      const company = {
+        ...baseCompany,
+        bank_name:       baseCompany.bank_name       || invSettings.bank_name       || '',
+        bank_account_no: baseCompany.bank_account_no || invSettings.bank_account_no || '',
+        bank_account:    baseCompany.bank_account    || invSettings.bank_account_no || '',
+        bank_ifsc:       baseCompany.bank_ifsc       || invSettings.bank_ifsc       || '',
+        bank_branch:     baseCompany.bank_branch     || invSettings.bank_branch     || '',
+        upi_id:          baseCompany.upi_id          || invSettings.upi_id          || '',
+        show_qr_code:    invSettings.show_qr_code    ?? true,
+      };
+      const html = generateInvoiceHTML(invData, {
+        company,
+        template:    invData.invoice_template     || invSettings.template     || 'classic',
+        theme:       invData.invoice_theme        || invSettings.theme        || 'classic_blue',
+        customColor: invData.invoice_custom_color || invSettings.custom_color || '#0D3B66',
+      });
+      const win = window.open('', '_blank', 'width=900,height=700');
+      if (!win) { toast.error('Allow pop-ups to download PDF'); return; }
+      win.document.write(html);
+      win.document.close();
+      win.onload = () => { win.focus(); win.print(); };
+      toast.success(`PDF ready: ${inv.invoice_no}`);
+    } catch (err) {
+      console.error('PDF error:', err);
+      toast.error('PDF generation failed');
     }
-    win.document.write(html);
-    win.document.close();
-    win.onload = () => {
-      win.focus();
-      win.print();
-    };
+  }, [companies]);
 
-    toast.success(`PDF ready: ${inv.invoice_no}`);
-  } catch (err) {
-    console.error('PDF error:', err);
-    toast.error('PDF generation failed');
-  }
-}, [companies]);
   const handleMarkSent = useCallback(async (inv) => {
     try { await api.post(`/invoices/${inv.id}/mark-sent`); fetchAll(); toast.success('Marked as sent'); } catch { toast.error('Failed'); }
   }, [fetchAll]);
@@ -2153,7 +2179,7 @@ const handleDownloadPdf = useCallback(async (inv) => {
   }, [fetchAll]);
 
   const handleExport = useCallback(() => {
-    if (!enrichedFiltered.length) { toast.error('No invoices to export'); return; }
+    if (!(enrichedFiltered?.length)) { toast.error('No invoices to export'); return; }
     const rows = [['Invoice No','Type','Client','Date','Due Date','Taxable','GST','Total','Paid','Balance','Status'],
       ...enrichedFiltered.map(inv => [inv.invoice_no, INV_TYPES.find(t => t.value === inv.invoice_type)?.label || inv.invoice_type, inv.client_name, inv.invoice_date, inv.due_date, inv.total_taxable, inv.total_gst, inv.grand_total, inv.amount_paid, inv.amount_due, inv.status])];
     const ws = XLSX.utils.aoa_to_sheet(rows); const wb = XLSX.utils.book_new();
@@ -2161,6 +2187,22 @@ const handleDownloadPdf = useCallback(async (inv) => {
     XLSX.writeFile(wb, `invoices_${format(new Date(), 'dd-MMM-yyyy')}.xlsx`);
     toast.success(`Exported ${enrichedFiltered.length} invoices`);
   }, [enrichedFiltered]);
+
+  // ── H. ALL useEffect ──────────────────────────────────────────────────────
+
+  useEffect(() => { const t = setTimeout(() => setSearchTerm(searchInput), 250); return () => clearTimeout(t); }, [searchInput]);
+
+  useEffect(() => {
+    const h = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); searchRef.current?.focus(); }
+      if (e.key === 'n' && !formOpen && !detailOpen && !payOpen && !gstOpen && document.activeElement.tagName === 'BODY') setFormOpen(true);
+    };
+    window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
+  }, [formOpen, detailOpen, payOpen, gstOpen]);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // ── I. JSX return ─────────────────────────────────────────────────────────
 
   return (
     <div className={`min-h-screen p-5 md:p-7 space-y-5 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
@@ -2185,7 +2227,7 @@ const handleDownloadPdf = useCallback(async (inv) => {
       </div>
 
       {/* STATS */}
-      {(localStats.total_invoices > 0 || invoices.length > 0) && (
+      {((localStats?.total_invoices || 0) > 0 || (invoices?.length || 0) > 0) && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard label="Total Revenue" value={fmtC(localStats.total_revenue)} sub={`${localStats.total_invoices} invoices`} icon={IndianRupee} color={COLORS.mediumBlue} bg={`${COLORS.mediumBlue}12`} isDark={isDark} onClick={() => setStatusFilter('all')} />
           <StatCard label="Outstanding" value={fmtC(localStats.total_outstanding)} sub={`${localStats.overdue_count} overdue`} icon={AlertCircle} color={COLORS.coral} bg={`${COLORS.coral}15`} isDark={isDark} onClick={() => setStatusFilter('overdue')} />
@@ -2194,8 +2236,8 @@ const handleDownloadPdf = useCallback(async (inv) => {
         </div>
       )}
 
-      {localStats.monthly_trend?.some(d => d.revenue > 0) && (
-        <EnhancedRevenueTrend invoices={invoices} isDark={isDark} />
+      {localStats?.monthly_trend?.some(d => d.revenue > 0) && (
+        <EnhancedRevenueTrend invoices={invoices || []} isDark={isDark} />
       )}
 
       {/* FILTERS */}
@@ -2209,8 +2251,8 @@ const handleDownloadPdf = useCallback(async (inv) => {
           <div className={`h-9 px-3 flex items-center rounded-xl text-xs font-bold border whitespace-nowrap flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-300 border-slate-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>{enrichedFiltered.length} <span className="ml-1 font-normal text-slate-400">invoices</span></div>
         </div>
         <div className="flex items-center gap-2 px-3.5 py-2.5 overflow-x-auto scrollbar-none flex-wrap">
-          {companies.length > 1 && (
-            <Select value={companyFilter} onValueChange={setCompanyFilter}><SelectTrigger className={`h-9 w-[160px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-blue-50 text-blue-700'}`}><Building2 className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" /><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Companies</SelectItem>{companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select>
+          {(companies?.length || 0) > 1 && (
+            <Select value={companyFilter} onValueChange={setCompanyFilter}><SelectTrigger className={`h-9 w-[160px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-blue-50 text-blue-700'}`}><Building2 className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" /><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Companies</SelectItem>{(companies || []).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select>
           )}
           <Select value={yearFilter} onValueChange={setYearFilter}><SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><CalendarDays className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" /><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Years</SelectItem>{availableYears.map(y => <SelectItem key={y} value={y}>FY {y}-{String(parseInt(y) + 1).slice(2)}</SelectItem>)}</SelectContent></Select>
           <Select value={statusFilter} onValueChange={setStatusFilter}><SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Status</SelectItem>{Object.entries(STATUS_META).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent></Select>
@@ -2303,9 +2345,8 @@ const handleDownloadPdf = useCallback(async (inv) => {
         )}
       </div>
 
-    
       {/* TOP CLIENTS SECTION */}
-      {localStats?.top_clients?.length > 0 && (
+      {(localStats?.top_clients?.length || 0) > 0 && (
         <div className={`rounded-2xl border p-5 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`}>
           <div className="flex items-center gap-2.5 mb-4">
             <div className="p-1.5 rounded-lg bg-yellow-50 dark:bg-yellow-900/40">
@@ -2322,8 +2363,8 @@ const handleDownloadPdf = useCallback(async (inv) => {
               const pct = localStats.total_revenue > 0 ? (c.revenue / localStats.total_revenue) * 100 : 0;
               return (
                 <div key={c.name} className="flex items-center gap-3">
-                  <div 
-                    className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" 
+                  <div
+                    className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
                     style={{ background: i === 0 ? 'linear-gradient(135deg, #b45309, #d97706)' : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
                   >
                     {i + 1}
@@ -2338,9 +2379,9 @@ const handleDownloadPdf = useCallback(async (inv) => {
                       </p>
                     </div>
                     <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                      <div 
-                        className="h-full rounded-full transition-all duration-700" 
-                        style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }} 
+                      <div
+                        className="h-full rounded-full transition-all duration-700"
+                        style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
                       />
                     </div>
                   </div>
@@ -2351,18 +2392,18 @@ const handleDownloadPdf = useCallback(async (inv) => {
         </div>
       )}
 
-      {/* HIDDEN PRINT FRAME - ALWAYS RENDERED OUTSIDE TO PREVENT ReferenceError */}
+      {/* HIDDEN PRINT FRAME */}
       <iframe ref={iframeRef} style={{ display: 'none' }} title="print-frame" />
-      
+
       {/* DIALOGS */}
       <InvoiceForm open={formOpen} onClose={() => { setFormOpen(false); setEditingInv(null); }} editingInv={editingInv} companies={companies} clients={clients} leads={leads} onSuccess={fetchAll} isDark={isDark} />
       <InvoiceDetailPanel invoice={detailInv} open={detailOpen} onClose={() => setDetailOpen(false)} onPayment={(inv) => { setPayInv(inv); setPayOpen(true); }} onEdit={handleEdit} onDelete={handleDelete} onDownloadPdf={handleDownloadPdf} onSendEmail={handleSendEmail} isDark={isDark} />
       <PaymentModal invoice={payInv} open={payOpen} onClose={() => { setPayOpen(false); setPayInv(null); }} onSuccess={fetchAll} isDark={isDark} />
       <ProductModal open={catOpen} onClose={() => setCatOpen(false)} isDark={isDark} onSaved={() => {}} />
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} isDark={isDark} companies={companies} onImportComplete={fetchAll} />
-      <GSTReportsModal open={gstOpen} onClose={() => setGstOpen(false)} invoices={invoices} isDark={isDark} />
+      <GSTReportsModal open={gstOpen} onClose={() => setGstOpen(false)} invoices={invoices || []} isDark={isDark} />
       <InvoiceSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} companies={companies} isDark={isDark} />
-      <PartyLedger open={ledgerOpen} onClose={() => setLedgerOpen(false)} invoices={invoices} clients={clients} companies={companies} preselectedClientName={ledgerClient} isDark={isDark} />
+      <PartyLedger open={ledgerOpen} onClose={() => setLedgerOpen(false)} invoices={invoices || []} clients={clients || []} companies={companies || []} preselectedClientName={ledgerClient} isDark={isDark} />
     </div>
   );
 }
