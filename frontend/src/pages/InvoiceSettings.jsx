@@ -37,6 +37,7 @@ import { Button }   from '@/components/ui/button';
 import { Input }    from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch }   from '@/components/ui/switch';
+import api from '@/lib/api';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
@@ -262,13 +263,27 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
 
   const set = useCallback((k, v) => setForm(p => ({ ...p, [k]: v })), []);
 
-  const handleSave = useCallback(() => {
-    if (!cid) { toast.error('Select a company first'); return; }
-    saveInvSettings(cid, form);
-    setSaved(true);
-    toast.success(`Saved — ${companies.find(c => c.id === cid)?.name}`);
-    setTimeout(() => setSaved(false), 2500);
-  }, [cid, form, companies]);
+  const handleSave = useCallback(async () => {
+      if (!cid) { toast.error('Select a company first'); return; }
+      saveInvSettings(cid, form);
+
+      // Also push bank/UPI fields to the company API so invoices can read them
+      try {
+        await api.patch(`/companies/${cid}`, {
+          bank_name:       form.bank_name,
+          bank_account_no: form.bank_account_no,
+          bank_ifsc:       form.bank_ifsc,
+          bank_branch:     form.bank_branch,
+          upi_id:          form.upi_id,
+        });
+      } catch (err) {
+        toast.warning('Settings saved locally but failed to sync bank/UPI to server');
+      }
+
+      setSaved(true);
+      toast.success(`Saved — ${companies.find(c => c.id === cid)?.name}`);
+      setTimeout(() => setSaved(false), 2500);
+    }, [cid, form, companies]);
 
   const handleReset = useCallback(() => {
     if (!window.confirm('Reset all settings for this company to defaults?')) return;
