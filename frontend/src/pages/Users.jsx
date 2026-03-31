@@ -1247,6 +1247,15 @@ export default function Users() {
       <Dialog open={permDialogOpen} onOpenChange={setPermDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto users-slim rounded-2xl p-0 border-0 shadow-2xl gap-0">
 
+          <DialogHeader className="sr-only">
+            <DialogTitle>
+              {`Permissions — ${selectedUserForPerms?.full_name || 'User'}`}
+            </DialogTitle>
+            <DialogDescription>
+              Configure access levels and module permissions for this user.
+            </DialogDescription>
+          </DialogHeader>
+
           <DialogGradHeader
             gradient={GRADIENT}
             icon={Shield}
@@ -1254,12 +1263,9 @@ export default function Users() {
             title={`Permissions — ${selectedUserForPerms?.full_name || ''}`}
             subtitle="Configure access levels and module permissions"
           />
-
           <div className="p-6 space-y-5 bg-white dark:bg-slate-900">
-
             {/* Summary */}
             <PermissionMatrixSummary permissions={permissions} />
-
             {/* Quick Reset */}
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Quick Reset:</span>
