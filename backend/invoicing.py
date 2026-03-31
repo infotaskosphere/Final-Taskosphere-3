@@ -615,10 +615,86 @@ def _parse_excel_file(file_path: str, filename: str) -> dict:
 
 
 def _parse_tally_xml(file_path: str) -> dict:
-    # (unchanged - omitted for brevity)
-    result = {"source": "tally", "source_label": "Tally XML", "firms": [], "clients": [], "items": [], "invoices": [], "payments": [], "stats": {}}
-    # ... original implementation ...
-    return result
+    try:
+        tree = ET.parse(file_path)
+        root = tree.getroot()
+
+        result = {
+            "source": "tally",
+            "source_label": "Tally XML",
+            "firms": [],
+            "clients": [],
+            "items": [],
+            "invoices": [],
+            "payments": [],
+            "stats": {}
+        }
+
+        # 🔴 THIS IS THE MOST IMPORTANT LINE
+        vouchers = root.findall(".//VOUCHER")
+
+        print("TOTAL VOUCHERS FOUND:", len(vouchers))
+
+        for v in vouchers:
+            vch_type = (v.attrib.get("VCHTYPE") or "").lower()
+
+            # Only Sales invoices
+            if "sales" not in vch_type:
+                continue
+
+            date = v.findtext("DATE", "")
+            party = v.findtext("PARTYNAME", "")
+            invoice_no = v.findtext("VOUCHERNUMBER", "")
+
+            items = []
+
+            inventory_entries = v.findall(".//ALLINVENTORYENTRIES.LIST")
+
+            for item in inventory_entries:
+                name = item.findtext("STOCKITEMNAME", "Item")
+                qty_raw = item.findtext("BILLEDQTY", "1")
+                amount = float(item.findtext("AMOUNT", "0"))
+
+                # Extract numeric qty
+                try:
+                    qty = float(qty_raw.split()[0])
+                except:
+                    qty = 1
+
+                rate = amount / qty if qty else 0
+
+                items.append({
+                    "description": name,
+                    "quantity": qty,
+                    "unit_price": rate,
+                    "total_amount": amount
+                })
+
+            total = sum(i["total_amount"] for i in items)
+
+            result["invoices"].append({
+                "invoice_no": invoice_no,
+                "invoice_date": date,
+                "client_name": party,
+                "client_phone": "",
+                "items": items,
+                "subtotal": total,
+                "grand_total": total,
+                "status": "draft"
+            })
+
+        result["stats"] = {
+            "invoices": len(result["invoices"]),
+            "clients": len(set(i["client_name"] for i in result["invoices"])),
+            "items": sum(len(i["items"]) for i in result["invoices"]),
+            "firms": 0,
+            "payments": 0
+        }
+
+        return result
+
+    except Exception as e:
+        raise HTTPException(400, f"Tally parse failed: {e}")
 
 
 def _parse_json_file(file_path: str) -> dict:
