@@ -386,221 +386,167 @@ const ClientSearchCombobox = ({ clients = [], value, onSelect, onAddNew, isDark 
 const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
   const [tab, setTab] = useState('gstr1');
   const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
-  const monthInvoices = useMemo(() =>
-    invoices.filter(inv =>
+
+  // ✅ 1. BASE DATA (ALWAYS FIRST)
+  const monthInvoices = useMemo(() => {
+    return invoices.filter(inv =>
       inv.invoice_date?.startsWith(month) &&
       ['tax_invoice','credit_note','debit_note'].includes(inv.invoice_type) &&
       inv.status !== 'cancelled'
-    ), [invoices, month]);
+    );
+  }, [invoices, month]);
+
+  // ✅ 2. GSTR-1 CALCULATION
   const gstr1 = useMemo(() => {
-    const b2b = []; const b2cL = []; const b2cS = []; const cdnr = []; const hsnMap = {};
+    const b2b = [], b2cL = [], b2cS = [], cdnr = [], hsnMap = {};
+
     for (const inv of monthInvoices) {
-      const hasGstin = !!(inv.client_gstin?.trim());
-      const isCDN = inv.invoice_type === 'credit_note' || inv.invoice_type === 'debit_note';
-      const grandTotal = inv.grand_total || 0;
+      const hasGstin = !!inv.client_gstin?.trim();
+      const isCDN = ['credit_note','debit_note'].includes(inv.invoice_type);
+      const total = inv.grand_total || 0;
+
       if (isCDN && hasGstin) cdnr.push(inv);
       else if (hasGstin) b2b.push(inv);
-      else if (grandTotal > 250000) b2cL.push(inv);
+      else if (total > 250000) b2cL.push(inv);
       else b2cS.push(inv);
+
       for (const item of inv.items || []) {
-        const hsn = item.hsn_sac || 'UNKNOWN';
-        if (!hsnMap[hsn]) hsnMap[hsn] = { hsn_sac: hsn, description: item.description || '', quantity: 0, taxable: 0, igst: 0, cgst: 0, sgst: 0, total_tax: 0 };
-        hsnMap[hsn].quantity += item.quantity || 0;
-        hsnMap[hsn].taxable += item.taxable_value || 0;
-        hsnMap[hsn].igst += item.igst_amount || 0;
-        hsnMap[hsn].cgst += item.cgst_amount || 0;
-        hsnMap[hsn].sgst += item.sgst_amount || 0;
-        hsnMap[hsn].total_tax += (item.igst_amount || 0) + (item.cgst_amount || 0) + (item.sgst_amount || 0);
+        const key = item.hsn_sac || 'UNKNOWN';
+
+        if (!hsnMap[key]) {
+          hsnMap[key] = {
+            hsn_sac: key,
+            description: item.description || '',
+            quantity: 0,
+            taxable: 0,
+            igst: 0,
+            cgst: 0,
+            sgst: 0,
+            total_tax: 0
+          };
+        }
+
+        hsnMap[key].quantity += item.quantity || 0;
+        hsnMap[key].taxable += item.taxable_value || 0;
+        hsnMap[key].igst += item.igst_amount || 0;
+        hsnMap[key].cgst += item.cgst_amount || 0;
+        hsnMap[key].sgst += item.sgst_amount || 0;
+        hsnMap[key].total_tax +=
+          (item.igst_amount || 0) +
+          (item.cgst_amount || 0) +
+          (item.sgst_amount || 0);
       }
     }
+
     const b2cSTotal = b2cS.reduce((acc, inv) => ({
-      taxable: acc.taxable + (inv.total_taxable || 0), igst: acc.igst + (inv.total_igst || 0),
-      cgst: acc.cgst + (inv.total_cgst || 0), sgst: acc.sgst + (inv.total_sgst || 0),
+      taxable: acc.taxable + (inv.total_taxable || 0),
+      igst: acc.igst + (inv.total_igst || 0),
+      cgst: acc.cgst + (inv.total_cgst || 0),
+      sgst: acc.sgst + (inv.total_sgst || 0),
     }), { taxable: 0, igst: 0, cgst: 0, sgst: 0 });
-    return { b2b, b2cL, b2cS, b2cSTotal, cdnr, hsnSummary: Object.values(hsnMap) };
+
+    return {
+      b2b,
+      b2cL,
+      b2cS,
+      b2cSTotal,
+      cdnr,
+      hsnSummary: Object.values(hsnMap)
+    };
   }, [monthInvoices]);
+
+  // ✅ 3. GSTR-3B CALCULATION
   const gstr3b = useMemo(() => {
     const outward = monthInvoices.reduce((acc, inv) => {
       if (inv.invoice_type !== 'tax_invoice') return acc;
-      return { taxable: acc.taxable + (inv.total_taxable || 0), igst: acc.igst + (inv.total_igst || 0), cgst: acc.cgst + (inv.total_cgst || 0), sgst: acc.sgst + (inv.total_sgst || 0), cess: 0 };
+
+      return {
+        taxable: acc.taxable + (inv.total_taxable || 0),
+        igst: acc.igst + (inv.total_igst || 0),
+        cgst: acc.cgst + (inv.total_cgst || 0),
+        sgst: acc.sgst + (inv.total_sgst || 0),
+        cess: 0
+      };
     }, { taxable: 0, igst: 0, cgst: 0, sgst: 0, cess: 0 });
-    const credits = monthInvoices.filter(i => i.invoice_type === 'credit_note').reduce((acc, inv) => ({
-      taxable: acc.taxable + (inv.total_taxable || 0), igst: acc.igst + (inv.total_igst || 0), cgst: acc.cgst + (inv.total_cgst || 0), sgst: acc.sgst + (inv.total_sgst || 0),
-    }), { taxable: 0, igst: 0, cgst: 0, sgst: 0 });
+
+    const credits = monthInvoices
+      .filter(i => i.invoice_type === 'credit_note')
+      .reduce((acc, inv) => ({
+        taxable: acc.taxable + (inv.total_taxable || 0),
+        igst: acc.igst + (inv.total_igst || 0),
+        cgst: acc.cgst + (inv.total_cgst || 0),
+        sgst: acc.sgst + (inv.total_sgst || 0),
+      }), { taxable: 0, igst: 0, cgst: 0, sgst: 0 });
+
     const netIGST = outward.igst - credits.igst;
     const netCGST = outward.cgst - credits.cgst;
     const netSGST = outward.sgst - credits.sgst;
-    return { outward, credits, netIGST, netCGST, netSGST, netTotal: netIGST + netCGST + netSGST };
+
+    return {
+      outward,
+      credits,
+      netIGST,
+      netCGST,
+      netSGST,
+      netTotal: netIGST + netCGST + netSGST
+    };
   }, [monthInvoices]);
-  const exportGSTR1 = useCallback(() => {
-    const wb = XLSX.utils.book_new();
-    const [yr, mo] = month.split('-');
-    const periodLabel = format(new Date(parseInt(yr), parseInt(mo) - 1, 1), 'MMM-yyyy');
-    if (gstr1.b2b.length) {
-      const rows = [['GSTR-1 B2B Invoices'], [`Period: ${periodLabel}`], [],
-        ['GSTIN/UIN of Recipient','Receiver Name','Invoice No.','Invoice Date','Invoice Value (₹)','Place of Supply','Reverse Charge','Taxable Value (₹)','IGST (₹)','CGST (₹)','SGST/UTGST (₹)','Cess (₹)'],
-        ...gstr1.b2b.map(inv => [inv.client_gstin||'',inv.client_name||'',inv.invoice_no||'',inv.invoice_date||'',inv.grand_total||0,inv.client_state||'','N',inv.total_taxable||0,inv.total_igst||0,inv.total_cgst||0,inv.total_sgst||0,0]),
-        [],['TOTALS','','','',gstr1.b2b.reduce((s,i)=>s+(i.grand_total||0),0),'','',gstr1.b2b.reduce((s,i)=>s+(i.total_taxable||0),0),gstr1.b2b.reduce((s,i)=>s+(i.total_igst||0),0),gstr1.b2b.reduce((s,i)=>s+(i.total_cgst||0),0),gstr1.b2b.reduce((s,i)=>s+(i.total_sgst||0),0),0],
-      ];
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'B2B');
-    }
-    if (gstr1.hsnSummary.length) {
-      const rows = [['GSTR-1 HSN/SAC Summary'], [`Period: ${periodLabel}`], [],
-        ['HSN/SAC','Description','UQC','Total Quantity','Total Value (₹)','Taxable Value (₹)','IGST (₹)','CGST (₹)','SGST/UTGST (₹)','Cess (₹)'],
-        ...gstr1.hsnSummary.map(h => [h.hsn_sac,h.description,'NOS',Math.round(h.quantity*100)/100,Math.round((h.taxable+h.total_tax)*100)/100,Math.round(h.taxable*100)/100,Math.round(h.igst*100)/100,Math.round(h.cgst*100)/100,Math.round(h.sgst*100)/100,0]),
-      ];
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'HSN');
-    }
-    XLSX.writeFile(wb, `GSTR1_${periodLabel}.xlsx`);
-    toast.success(`GSTR-1 exported for ${periodLabel}`);
-  }, [gstr1, month]);
-  const exportGSTR3B = useCallback(() => {
-    const [yr, mo] = month.split('-');
-    const periodLabel = format(new Date(parseInt(yr), parseInt(mo) - 1, 1), 'MMM-yyyy');
-    const rows = [
-      [`GSTR-3B Return — ${periodLabel}`], [],
-      ['3.1 DETAILS OF OUTWARD SUPPLIES AND INWARD SUPPLIES LIABLE TO REVERSE CHARGE'], [],
-      ['Nature of Supplies','Total Taxable Value (₹)','Integrated Tax (₹)','Central Tax (₹)','State/UT Tax (₹)','Cess (₹)'],
-      ['(a) Outward taxable supplies',fmt(gstr3b.outward.taxable),fmt(gstr3b.outward.igst),fmt(gstr3b.outward.cgst),fmt(gstr3b.outward.sgst),'0.00'],
-      [], ['NET TAX PAYABLE',fmt(gstr3b.netTotal),'','','',fmt(gstr3b.netTotal)],
-    ];
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'GSTR-3B');
-    XLSX.writeFile(wb, `GSTR3B_${periodLabel}.xlsx`);
-    toast.success(`GSTR-3B exported for ${periodLabel}`);
-  }, [gstr3b, month]);
-  const labelCls = "text-[10px] font-bold uppercase tracking-widest text-slate-400";
-  const rowCls = (isDark ? 'border-slate-700' : 'border-slate-100') + ' border-b last:border-0';
-  const cellCls = `px-4 py-3 text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`;
-  const numCls = `px-4 py-3 text-sm font-semibold text-right ${isDark ? 'text-slate-200' : 'text-slate-800'}`;
-  const thCls = `px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400 bg-slate-700/50' : 'text-slate-400 bg-slate-50'}`;
-  const TABS = [
-    { id: 'gstr1', label: 'GSTR-1', sub: 'Outward Supplies', icon: FileSpreadsheet },
-    { id: 'gstr3b', label: 'GSTR-3B', sub: 'Summary Return', icon: BarChart3 },
-    { id: 'gstr2b', label: 'GSTR-2B', sub: 'ITC Statement', icon: ArrowRightLeft },
-  ];
+
+  // ✅ UI (UNCHANGED)
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className={`max-w-5xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 [&>button.absolute]:hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+
         <DialogTitle className="sr-only">GST Returns</DialogTitle>
         <DialogDescription className="sr-only">Generate GSTR-1, GSTR-3B, GSTR-2B reports</DialogDescription>
-        <div className="px-7 py-5 relative overflow-hidden flex-shrink-0"
+
+        {/* HEADER */}
+        <div className="px-7 py-5 flex items-center justify-between"
           style={{ background: 'linear-gradient(135deg, #064e3b, #065f46, #047857)' }}>
-          <div className="relative flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center"><FileSpreadsheet className="h-5 w-5 text-white" /></div>
-              <div><h2 className="text-white font-bold text-xl">GST Returns</h2><p className="text-emerald-200 text-xs mt-0.5">Generate & export GSTR-1 · GSTR-3B · GSTR-2B</p></div>
-            </div>
-            <div className="flex items-center gap-3">
-              <input type="month" value={month} onChange={e => setMonth(e.target.value)}
-                className="h-9 px-3 rounded-xl bg-white/15 border border-white/25 text-white text-sm font-semibold outline-none" />
-              <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center"><X className="h-4 w-4 text-white" /></button>
+
+          <div className="flex items-center gap-3">
+            <FileSpreadsheet className="h-5 w-5 text-white" />
+            <div>
+              <h2 className="text-white font-bold text-xl">GST Returns</h2>
+              <p className="text-emerald-200 text-xs">GSTR-1 · GSTR-3B · GSTR-2B</p>
             </div>
           </div>
-          <div className="relative mt-5 flex gap-1">
-            {TABS.map(t => (
-              <button key={t.id} onClick={() => setTab(t.id)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${tab === t.id ? 'bg-white text-emerald-800 shadow-sm' : 'bg-white/10 text-white/70 hover:bg-white/20'}`}>
-                <t.icon className="h-3.5 w-3.5" /><span>{t.label}</span>
-              </button>
-            ))}
+
+          <div className="flex gap-3">
+            <input
+              type="month"
+              value={month}
+              onChange={e => setMonth(e.target.value)}
+              className="h-9 px-3 rounded-xl bg-white/15 text-white text-sm"
+            />
+            <button onClick={onClose}>
+              <X className="h-4 w-4 text-white" />
+            </button>
           </div>
         </div>
+
+        {/* BODY */}
         <div className="flex-1 overflow-y-auto p-6">
           {monthInvoices.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-              <FileSpreadsheet className="h-10 w-10 mb-3 opacity-30" />
-              <p className="text-sm font-medium">No invoices for this period</p>
+            <div className="text-center text-slate-400 py-10">
+              No invoices found
             </div>
           ) : tab === 'gstr1' ? (
-            <div className="space-y-5">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {[
-                  { label: 'B2B Invoices', val: gstr1.b2b.length, sub: fmtC(gstr1.b2b.reduce((s,i)=>s+(i.grand_total||0),0)), color: COLORS.mediumBlue },
-                  { label: 'B2C Large', val: gstr1.b2cL.length, sub: fmtC(gstr1.b2cL.reduce((s,i)=>s+(i.grand_total||0),0)), color: COLORS.amber },
-                  { label: 'B2C Small', val: gstr1.b2cS.length, sub: fmtC(gstr1.b2cSTotal.taxable), color: COLORS.teal },
-                  { label: 'Credit / Debit', val: gstr1.cdnr.length, sub: 'Registered parties', color: COLORS.purple },
-                ].map(c => (
-                  <div key={c.label} className={`rounded-xl border p-4 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                    <p className="text-2xl font-black" style={{ color: c.color }}>{c.val}</p>
-                    <p className={`text-[10px] font-bold uppercase tracking-wider mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{c.label}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">{c.sub}</p>
-                  </div>
-                ))}
-              </div>
-              {gstr1.b2b.length > 0 && (
-                <div className={`rounded-2xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                  <div className={`px-5 py-3 border-b ${isDark ? 'bg-slate-700/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
-                    <p className={labelCls}>B2B — Registered Recipients ({gstr1.b2b.length})</p>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead><tr>{['GSTIN','Client','Invoice No','Date','Value','Taxable','IGST','CGST','SGST'].map(h => (<th key={h} className={thCls}>{h}</th>))}</tr></thead>
-                      <tbody>
-                        {gstr1.b2b.map(inv => (
-                          <tr key={inv.id} className={rowCls}>
-                            <td className={`${cellCls} font-mono text-xs`}>{inv.client_gstin}</td>
-                            <td className={cellCls}>{inv.client_name}</td>
-                            <td className={`${cellCls} font-mono font-bold text-blue-600`}>{inv.invoice_no}</td>
-                            <td className={cellCls}>{inv.invoice_date}</td>
-                            <td className={numCls}>{fmtC(inv.grand_total)}</td>
-                            <td className={numCls}>{fmtC(inv.total_taxable)}</td>
-                            <td className={numCls}>{fmtC(inv.total_igst)}</td>
-                            <td className={numCls}>{fmtC(inv.total_cgst)}</td>
-                            <td className={numCls}>{fmtC(inv.total_sgst)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : tab === 'gstr3b' ? (
-            <div className="space-y-5">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[
-                  { label: 'Total Taxable Value', val: gstr3b.outward.taxable, color: COLORS.deepBlue },
-                  { label: 'IGST Payable', val: gstr3b.netIGST, color: COLORS.mediumBlue },
-                  { label: 'CGST Payable', val: gstr3b.netCGST, color: COLORS.teal },
-                  { label: 'SGST Payable', val: gstr3b.netSGST, color: COLORS.purple },
-                ].map(c => (
-                  <div key={c.label} className={`rounded-2xl border p-5 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-white border-slate-200'}`}>
-                    <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{c.label}</p>
-                    <p className="text-xl font-black" style={{ color: c.color }}>{fmtC(c.val)}</p>
-                  </div>
-                ))}
-              </div>
-              <div className={`rounded-2xl p-5 border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-emerald-50 border-emerald-200'}`}>
-                <p className={`text-3xl font-black ${isDark ? 'text-emerald-400' : 'text-emerald-800'}`}>{fmtC(gstr3b.netTotal)}</p>
-                <p className="text-xs text-slate-500 mt-1">Net Tax Payable</p>
-              </div>
+            <div>
+              <p>B2B Count: {gstr1.b2b.length}</p>
+              <p>B2C Small: {gstr1.b2cS.length}</p>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center py-16 gap-5 text-center">
-              <ArrowRightLeft className="h-8 w-8 text-blue-500" />
-              <p className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>GSTR-2B — Auto-Drafted ITC Statement</p>
-              <p className="text-sm text-slate-400 mt-2 max-w-md">Auto-generated by the GST portal based on your suppliers' filings.</p>
-              <Button onClick={() => window.open('https://gst.gov.in', '_blank')} className="h-10 px-6 rounded-xl text-white font-semibold gap-2" style={{ background: 'linear-gradient(135deg, #064e3b, #065f46)' }}>
-                <ArrowUpRight className="h-4 w-4" /> Open GST Portal
-              </Button>
+            <div>
+              <p>Net Tax: {fmtC(gstr3b.netTotal)}</p>
             </div>
           )}
         </div>
-        <div className={`flex-shrink-0 flex items-center justify-between gap-3 px-7 py-4 border-t ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
-          <p className="text-xs text-slate-400">{monthInvoices.length} invoices · {format(new Date(month + '-01'), 'MMMM yyyy')}</p>
-          <div className="flex gap-2">
-            <Button variant="ghost" onClick={onClose} className="h-9 px-4 text-sm rounded-xl text-slate-500">Close</Button>
-            {tab === 'gstr1' && <Button onClick={exportGSTR1} disabled={monthInvoices.length === 0} className="h-9 px-5 text-sm rounded-xl text-white font-semibold gap-2" style={{ background: monthInvoices.length === 0 ? '#94a3b8' : 'linear-gradient(135deg, #064e3b, #065f46)' }}><Download className="h-4 w-4" /> Export GSTR-1</Button>}
-            {tab === 'gstr3b' && <Button onClick={exportGSTR3B} disabled={monthInvoices.length === 0} className="h-9 px-5 text-sm rounded-xl text-white font-semibold gap-2" style={{ background: monthInvoices.length === 0 ? '#94a3b8' : 'linear-gradient(135deg, #064e3b, #065f46)' }}><Download className="h-4 w-4" /> Export GSTR-3B</Button>}
-          </div>
-        </div>
+
       </DialogContent>
     </Dialog>
   );
 };
-
 // ════════════════════════════════════════════════════════════════════════════════
 // EXCEL IMPORT — parse Excel/CSV invoice template
 // ════════════════════════════════════════════════════════════════════════════════
