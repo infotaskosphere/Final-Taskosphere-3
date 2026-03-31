@@ -571,6 +571,62 @@ def _parse_excel_file(file_path: str, filename: str) -> dict:
                     if i < len(headers) and headers[i]: rd[headers[i]] = val
                 if any(v for v in rd.values() if v): rows.append(rd)
 
+        is_sale_report = any(
+            'generated on' in str(r[0]).lower()
+            for r in rows[:3] if r and r[0]
+        )
+
+        if is_sale_report:
+            header_idx = next((i for i, r in enumerate(rows) if r and str(r[0]).strip().lower() == 'date'), 2)
+            data_rows = [r for r in rows[header_idx + 1:] if r and r[0] and str(r[0]).strip()]
+            for row in data_rows:
+                def _col(idx, default=''):
+                    try: return str(row[idx]).strip() if row[idx] is not None else default
+                    except: return default
+                raw_date = _col(0); order_no = _col(1); inv_no_raw = _col(2)
+                party_name = _col(3) or 'Unknown'; gstin_val = _col(4); phone_val = _col(5)
+                txn_type = _col(6).lower(); total_amt = _safe_float(_col(7))
+                pay_type = _col(8); received = _safe_float(_col(9)); balance = _safe_float(_col(10))
+                pay_status = _col(11).lower(); desc_val = _col(12)
+                inv_date = date.today().isoformat()
+                if raw_date and '/' in raw_date:
+                    parts = raw_date.split('/')
+                    if len(parts) == 3:
+                        try:
+                            yr = parts[2] if len(parts[2]) == 4 else '20' + parts[2]
+                            inv_date = f"{yr}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+                        except: pass
+                due_date_val = (datetime.strptime(inv_date, '%Y-%m-%d') + timedelta(days=30)).strftime('%Y-%m-%d')
+                status = 'draft'
+                if pay_status == 'paid': status = 'paid'
+                elif received > 0 and balance > 0: status = 'partially_paid'
+                elif balance > 0: status = 'sent'
+                inv_type = 'credit_note' if 'credit' in txn_type else 'tax_invoice'
+                taxable = round(total_amt / 1.18, 2)
+                gst_amt = round(total_amt - taxable, 2)
+                cgst = round(gst_amt / 2, 2); sgst = round(gst_amt / 2, 2)
+                if total_amt <= 0: continue
+                result['invoices'].append({
+                    'invoice_type': inv_type,
+                    'invoice_no': f"SR-{inv_no_raw}" if inv_no_raw else f"SR-{len(result['invoices'])+1:04d}",
+                    'invoice_date': inv_date, 'due_date': due_date_val,
+                    'client_name': party_name, 'client_email': '', 'client_phone': phone_val,
+                    'client_gstin': gstin_val, 'client_address': '', 'client_state': '',
+                    'is_interstate': False, 'reference_no': order_no,
+                    'notes': desc_val or pay_type, 'payment_terms': pay_type or 'Due on receipt',
+                    'items': [{'description': desc_val or f'Sale - {inv_no_raw}', 'hsn_sac': '',
+                        'quantity': 1, 'unit': 'service', 'unit_price': taxable, 'discount_pct': 0,
+                        'gst_rate': 18.0, 'taxable_value': taxable,
+                        'cgst_rate': 9.0, 'sgst_rate': 9.0, 'igst_rate': 0.0,
+                        'cgst_amount': cgst, 'sgst_amount': sgst, 'igst_amount': 0.0, 'total_amount': total_amt}],
+                    'subtotal': taxable, 'total_taxable': taxable, 'total_cgst': cgst,
+                    'total_sgst': sgst, 'total_igst': 0.0, 'total_gst': gst_amt,
+                    'grand_total': total_amt, 'amount_paid': received, 'amount_due': balance, 'status': status,
+                })
+            result['stats'] = {'firms': 0, 'clients': len(set(i['client_name'] for i in result['invoices'])),
+                               'items': 0, 'invoices': len(result['invoices']), 'payments': 0}
+            return result
+
         def _get(row, *keys, default=""):
             for k in keys:
                 for rk in row.keys():
@@ -1590,6 +1646,20 @@ async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(g
     data["amount_due"] = round(data["grand_total"] - ex.get("amount_paid", 0), 2)
     await db.invoices.update_one({"id": inv_id}, {"$set": data})
     return await db.invoices.find_one({"id": inv_id}, {"_id": 0})
+
+
+@router.delete("/invoices/bulk-delete")
+async def bulk_delete_invoices(ids: List[str], current_user: User = Depends(get_current_user)):
+    if not _perm(current_user): raise HTTPException(403, "Access denied")
+    if not ids: raise HTTPException(400, "No IDs provided")
+    deleted, failed = 0, 0
+    for inv_id in ids:
+        try:
+            r = await db.invoices.delete_one({"id": inv_id})
+            if r.deleted_count: deleted += 1
+            else: failed += 1
+        except Exception: failed += 1
+    return {"deleted": deleted, "failed": failed, "total": len(ids)}
 
 
 @router.delete("/invoices/{inv_id}")
