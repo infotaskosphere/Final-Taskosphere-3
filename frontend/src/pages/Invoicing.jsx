@@ -1160,6 +1160,10 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   }, [products]);
 
   // COMMAND 4: ADD PREVIEW FUNCTION
+ // 1. Ensure the reference is declared at the top of InvoiceForm
+  const previewRef = useRef(null);
+
+  // 2. The corrected handlePreview function using previewRef
   const handlePreview = () => {
     const company = companies.find(c => c.id === form.company_id) || {};
 
@@ -1179,7 +1183,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     });
 
     if (previewRef.current) {
-      iframeRef.current.srcdoc = html;
+      previewRef.current.srcdoc = html;
     }
   };
 
@@ -1204,7 +1208,6 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   const labelCls = "text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block";
   const inputCls = `h-11 rounded-xl text-sm border-slate-200 dark:border-slate-600 focus:border-blue-400 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
   const sectionCls = `border rounded-2xl p-5 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`;
-
   const tabs = [
     { id: 'details', label: 'Details', icon: FileText },
     { id: 'items', label: 'Items', icon: Package },
