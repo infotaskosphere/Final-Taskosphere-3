@@ -1171,12 +1171,11 @@ const TEMPLATE_FNS = {
  * PRIMARY EXPORT — always recomputes totals before rendering
  * This is the key fix for the ₹0 bug in the live preview.
  */
-export function generateInvoiceHTML(inv, company, templateId, themeId, customColor) {
-  // FIX: Always recompute so preview is never stuck at ₹0
+export function generateInvoiceHTML(inv, { company, template, theme, customColor } = {}) {
   const invWithTotals = recomputeTotals(inv || {});
-  const theme = getThemeColor(themeId || 'classic_blue', customColor || '#0D3B66');
-  const fn    = TEMPLATE_FNS[templateId] || tplClassic;
-  return fn(invWithTotals, company || {}, theme);
+  const resolvedTheme = getThemeColor(theme || 'classic_blue', customColor || '#0D3B66');
+  const fn = TEMPLATE_FNS[template] || tplClassic;
+  return fn(invWithTotals, company || {}, resolvedTheme);
 }
 
 export function openInvoicePrint(inv, company, templateId='classic', themeId='classic_blue', customColor='#0D3B66') {
@@ -1189,20 +1188,6 @@ export function openInvoicePrint(inv, company, templateId='classic', themeId='cl
   win.onload = () => { win.focus(); win.print(); };
 }
 
-// ═══════════════════════════════════════════════════════════════
-
-
-<iframe
-  ref={iframeRef}
-  srcDoc={previewHtml}
-  title="Invoice Preview"
-  style={{
-    width: '100%',
-    height: INVOICE_TEMPLATES.find(t => t.id === selectedTemplate)?.thermal ? 500 : 1122,
-    border: 'none', display: 'block'
-  }}
-  sandbox="allow-scripts"
-/>
 
 // ═══════════════════════════════════════════════════════════════
 
