@@ -271,17 +271,24 @@ function totalsHTML(inv) {
 }
 
 function bankQrHTML(company, inv) {
-  // FIX: QR uses amount_due (pending amount)
+  // Skip QR if no UPI ID configured
+  if (!company?.upi_id) return '';
+  // Skip QR if explicitly disabled in settings
+  if (company?.show_qr_code === false) return '';
+
   const upiUrl = buildUpiUrl(company, inv);
+  if (!upiUrl) return '';
+
   const pendingAmt = parseFloat(inv?.amount_due || 0);
   const qrLabel = pendingAmt > 0
     ? `Scan to Pay · Balance Due: ${fmtC(pendingAmt)}`
     : 'Scan to Pay via UPI';
   const qr = getQrHTML(upiUrl, 82, qrLabel);
 
-  if (!company?.bank_name && !company?.upi_id) {
-    return qr ? `<div>${qr}</div>` : '';
+  if (!company?.bank_name && !company?.bank_account_no && !company?.bank_account) {
+    return `<div style="text-align:center;margin:8px 0">${qr}</div>`;
   }
+
   return `<div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
     <div style="flex:1">
       <div style="font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#9E9E9E;margin-bottom:5px">Bank Details</div>
@@ -294,7 +301,6 @@ function bankQrHTML(company, inv) {
     ${qr}
   </div>`;
 }
-
 function signRow(company, inv) {
   return `<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:10px;padding-top:8px;border-top:1px solid #E0E0E0">
     <div style="font-size:9.5px;color:#757575;max-width:60%;line-height:1.7">
