@@ -963,7 +963,7 @@ async def update_company(
         "logo_base64", "signature_base64",
         "smtp_host", "smtp_port", "smtp_user", "smtp_password", "smtp_from_name",
     ]
-    update = {k: data[k] for k in allowed if k in data}
+    update = {k: data[k] for k in allowed if k in data and data[k] is not None}
     await db.companies.update_one({"id": company_id}, {"$set": update})
     updated = await db.companies.find_one({"id": company_id}, {"_id": 0})
     return updated
