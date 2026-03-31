@@ -1,22 +1,26 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Invoicing</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-</head>
-<body class="bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
-    <div id="root"></div>
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { createRoot } from "react-dom/client";
+import Papa from "papaparse";
+import * as XLSX from "xlsx";
+import {
+  format,
+  parseISO,
+  differenceInDays,
+  startOfMonth,
+  endOfMonth,
+  subMonths,
+} from "date-fns";
 
-    <script type="module">
-        import Papa from 'papaparse/papaparse.js';
-        import React from 'react';
-        import { createRoot } from 'react-dom/client';
-        import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-        import { format, parseISO, differenceInDays, startOfMonth, endOfMonth, subMonths } from 'date-fns';
-        import * as XLSX from 'xlsx';
+// Root Component Wrapper (since earlier HTML used #root)
+function InvoicingApp() {
+  return (
+    <div className="bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 min-h-screen">
+      {/* Your existing components/code will continue below this */}
+    </div>
+  );
+}
+
+export default InvoicingApp;
 
         // ─── Brand Colors ─────────────────────────────────────────────────────────────
         const COLORS = {
