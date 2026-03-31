@@ -190,7 +190,7 @@ function PromoteToTaskModal({ todo, isDark, onClose, onConfirm, isLoading, allUs
       ...form,
       assigned_to:   form.assigned_to === 'unassigned' ? null : form.assigned_to,
       client_id:     form.client_id || null,
-      due_date:      dueDate ? `${dueDate}T00:00:00.000Z` : null,
+      due_date: form.due_date ? `${form.due_date}T00:00:00.000Z` : null,
       sub_assignees: form.sub_assignees || [],
     });
   };
@@ -1112,13 +1112,25 @@ export default function TodoDashboard() {
     onError: () => toast.error('Failed to create todo'),
   });
 
-  const toggleMutation = useMutation({
-    mutationFn: ({ id }) => {
-      const todo = todos.find(t => (t.id || t._id) === id);
-      if (!todo) throw new Error('Todo not found');
-      const nowCompleted = !(todo.is_completed === true || todo.status === 'completed');
-      return api.patch(`/todos/${id}`, { is_completed: nowCompleted });
-    },
+ const toggleMutation = useMutation({
+  mutationFn: ({ id }) => {
+    const todo = todos.find(t => (t.id || t._id) === id);
+    if (!todo) throw new Error('Todo not found');
+
+    const nowCompleted = !(todo.is_completed === true || todo.status === 'completed');
+
+    const payload = {
+      title: todo.title || "",
+      description: todo.description || "",
+      due_date: todo.due_date || null,
+      is_completed: nowCompleted,
+      status: nowCompleted ? "completed" : "pending"
+    };
+
+    console.log("TOGGLE PAYLOAD:", payload);
+
+    return api.patch(`/todos/${id}`, payload);
+  },
     onSuccess: (_, { id }) => {
       const todo = todos.find(t => (t.id || t._id) === id);
       if (todo) {
@@ -1168,12 +1180,12 @@ export default function TodoDashboard() {
   const handleAdd = () => {
     if (!title.trim()) return;
     addMutation.mutate({
-      title:        title.trim(),
-      description:  description.trim(),
-      due_date:     dueDate ? new Date(dueDate).toISOString() : null,
+      title: title.trim(),
+      description: description.trim(),
+      due_date: dueDate ? new Date(dueDate).toISOString() : null,
       is_completed: false,
+      status: "pending"
     });
-  };
 
   const handleToggle  = (id) => toggleMutation.mutate({ id });
   const handleDelete  = (id) => deleteMutation.mutate(id);
