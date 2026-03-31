@@ -1756,6 +1756,7 @@ const handleDownloadPdf = useCallback(async (inv) => {
       bank_ifsc:       baseCompany.bank_ifsc       || invSettings.bank_ifsc       || '',
       bank_branch:     baseCompany.bank_branch     || invSettings.bank_branch     || '',
       upi_id:          baseCompany.upi_id          || invSettings.upi_id          || '',
+      show_qr_code:    invSettings.show_qr_code    ?? true,
     };
 
     const html = generateInvoiceHTML(invData, {
