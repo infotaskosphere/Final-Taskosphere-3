@@ -1,7 +1,6 @@
 import Papa from 'papaparse/papaparse.js';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useDark } from '@/hooks/useDark';
-import { generateInvoiceHTML } from './InvoiceTemplates';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
