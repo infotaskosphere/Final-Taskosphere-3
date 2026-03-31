@@ -2,59 +2,52 @@ import { useEffect, useRef, useCallback } from 'react';
 import api from '@/lib/api';
 
 /**
- * Activity Tracker Hook
- * Tracks user activity based on keyboard/mouse events
- * Sends activity data to backend every 30 seconds
+ * 🚀 PRODUCTION SAFE Activity Tracker
+ * Fixes:
+ * - No API calls without token
+ * - No tracking on login page
+ * - Stops after logout
+ * - Safe interval handling
+ * - Prevents 403 spam
  */
+
 export const useActivityTracker = (enabled = true) => {
   const lastActivityTime = useRef(Date.now());
   const activeSeconds = useRef(0);
   const isActive = useRef(true);
   const intervalRef = useRef(null);
-  const IDLE_THRESHOLD = 60000; // 1 minute of no activity = idle
-  const SYNC_INTERVAL = 30000; // Sync every 30 seconds
+
+  const IDLE_THRESHOLD = 60000; // 1 min
+  const SYNC_INTERVAL = 30000;  // 30 sec
+
+  /* ============================================================
+  Activity Update
+  ============================================================ */
 
   const updateActivity = useCallback(() => {
+    if (window.__STOP_ACTIVITY__) return;
+
     const now = Date.now();
     const timeSinceLastActivity = now - lastActivityTime.current;
-    
+
     if (timeSinceLastActivity < IDLE_THRESHOLD) {
-      // User is active, count this time
       if (isActive.current) {
         activeSeconds.current += Math.min(timeSinceLastActivity / 1000, 30);
       }
     }
-    
+
     lastActivityTime.current = now;
     isActive.current = true;
   }, []);
 
   const handleActivity = useCallback(() => {
+    if (window.__STOP_ACTIVITY__) return;
     updateActivity();
   }, [updateActivity]);
 
-  const syncActivity = useCallback(async () => {
-    if (activeSeconds.current > 0) {
-      try {
-        // Get current page/app context
-        const currentPage = window.location.pathname;
-        const pageName = getPageName(currentPage);
-        
-        await api.post('/activity/log', {
-          app_name: 'Taskosphere Web',
-          window_title: pageName,
-          url: window.location.href,
-          category: 'productivity',
-          duration_seconds: Math.round(activeSeconds.current)
-        });
-        
-        // Reset counter after successful sync
-        activeSeconds.current = 0;
-      } catch (error) {
-        console.error('Failed to sync activity:', error);
-      }
-    }
-  }, []);
+  /* ============================================================
+  Page Name Helper
+  ============================================================ */
 
   const getPageName = (path) => {
     const pageNames = {
@@ -71,22 +64,85 @@ export const useActivityTracker = (enabled = true) => {
     return pageNames[path] || 'Taskosphere';
   };
 
-  useEffect(() => {
-    if (!enabled) return;
+  /* ============================================================
+  Sync Activity (FIXED)
+  ============================================================ */
 
-    // Track keyboard and mouse activity
-    const events = ['keydown', 'keypress', 'mousemove', 'mousedown', 'scroll', 'touchstart', 'click'];
-    
+  const syncActivity = useCallback(async () => {
+    const token =
+      localStorage.getItem("token") ||
+      sessionStorage.getItem("token");
+
+    // 🚀 HARD STOP CONDITIONS
+    if (
+      !token ||
+      window.__STOP_ACTIVITY__ ||
+      window.location.pathname === "/login"
+    ) {
+      return;
+    }
+
+    if (activeSeconds.current <= 0) return;
+
+    try {
+      const currentPage = window.location.pathname;
+      const pageName = getPageName(currentPage);
+
+      await api.post('/activity/log', {
+        app_name: 'Taskosphere Web',
+        window_title: pageName,
+        url: window.location.href,
+        category: 'productivity',
+        duration_seconds: Math.round(activeSeconds.current)
+      });
+
+      // Reset after success
+      activeSeconds.current = 0;
+
+    } catch (error) {
+      // ❌ Avoid console spam for auth errors
+      if (error.response?.status !== 401 && error.response?.status !== 403) {
+        console.error('Activity sync error:', error);
+      }
+    }
+  }, []);
+
+  /* ============================================================
+  Main Effect
+  ============================================================ */
+
+  useEffect(() => {
+    // 🔴 STOP COMPLETELY if disabled
+    if (!enabled) {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      return;
+    }
+
+    // Track activity events
+    const events = [
+      'keydown',
+      'keypress',
+      'mousemove',
+      'mousedown',
+      'scroll',
+      'touchstart',
+      'click'
+    ];
+
     events.forEach(event => {
       window.addEventListener(event, handleActivity, { passive: true });
     });
 
-    // Sync activity periodically
-    intervalRef.current = setInterval(() => {
-      syncActivity();
+    // ✅ Safe interval (async protected)
+    intervalRef.current = setInterval(async () => {
+      try {
+        await syncActivity();
+      } catch {}
     }, SYNC_INTERVAL);
 
-    // Sync on page visibility change
+    // Visibility change
     const handleVisibilityChange = () => {
       if (document.hidden) {
         syncActivity();
@@ -96,31 +152,37 @@ export const useActivityTracker = (enabled = true) => {
         isActive.current = true;
       }
     };
-    
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Sync before unload
+    // Before unload
     const handleBeforeUnload = () => {
       syncActivity();
     };
+
     window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
       events.forEach(event => {
         window.removeEventListener(event, handleActivity);
       });
-      
+
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
-      
+
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      
-      // Final sync on cleanup
+
+      // Final sync
       syncActivity();
     };
+
   }, [enabled, handleActivity, syncActivity]);
+
+  /* ============================================================
+  Public API
+  ============================================================ */
 
   return {
     isTracking: enabled,
