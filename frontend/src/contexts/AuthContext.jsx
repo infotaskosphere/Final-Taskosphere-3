@@ -36,8 +36,11 @@ export const AuthProvider = ({ children }) => {
 
   const persistAuth = (token, userData, rememberMe = false) => {
     const storage = rememberMe ? localStorage : sessionStorage;
+
     storage.setItem("token", token);
     storage.setItem("user", JSON.stringify(userData));
+
+    // ✅ Ensure token is always attached
     api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
   };
 
@@ -46,6 +49,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem("user");
     sessionStorage.removeItem("token");
     sessionStorage.removeItem("user");
+
     delete api.defaults.headers.common["Authorization"];
   };
 
@@ -66,9 +70,9 @@ export const AuthProvider = ({ children }) => {
         const parsedUser = JSON.parse(storedUser);
         parsedUser.permissions = normalizePermissions(parsedUser.permissions);
 
+        // ✅ attach token before API call
         api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
 
-        // ✅ FIX: No "/api" prefix — baseURL already includes /api
         await api.get("/auth/me");
 
         setUser(parsedUser);
@@ -121,20 +125,19 @@ export const AuthProvider = ({ children }) => {
   };
 
   /* ============================================================
-  Logout
+  Logout  ✅ FIXED (NO API CALL)
   ============================================================ */
 
   const logout = async () => {
-    const token =
-      localStorage.getItem("token") ||
-      sessionStorage.getItem("token");
-
     try {
-      if (token) {
-        await api.post("/activity/logout");
-      }
+      // 🚀 IMPORTANT: Stop activity tracking globally
+      window.__STOP_ACTIVITY__ = true;
+
+      // ❌ REMOVED: await api.post("/activity/logout")
+      // Reason: This API does NOT exist → was causing 404
+
     } catch (e) {
-      console.error("Logout API failed", e);
+      console.error("Logout error", e);
     } finally {
       clearStorage();
       setUser(null);
@@ -147,7 +150,6 @@ export const AuthProvider = ({ children }) => {
 
   const refreshUser = useCallback(async () => {
     try {
-      // ✅ FIX: No "/api" prefix — baseURL already includes /api
       const response = await api.get("/auth/me");
       const updatedUser = response.data;
 
