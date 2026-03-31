@@ -2152,7 +2152,8 @@ const handleDownloadPdf = useCallback(async (inv) => {
       )}
 
       {localStats.monthly_trend?.some(d => d.revenue > 0) && (
-      <EnhancedRevenueTrend invoices={invoices} isDark={isDark} />
+        <EnhancedRevenueTrend invoices={invoices} isDark={isDark} />
+      )}
 
       {/* FILTERS */}
       <div className={`rounded-2xl border shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
