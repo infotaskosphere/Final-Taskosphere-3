@@ -269,7 +269,7 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
 
       // Also push bank/UPI fields to the company API so invoices can read them
       try {
-        await api.patch(`/companies/${cid}`, {
+        await api.put(`/companies/${cid}`, {
           bank_name:       form.bank_name,
           bank_account_no: form.bank_account_no,
           bank_ifsc:       form.bank_ifsc,
