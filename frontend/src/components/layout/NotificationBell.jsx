@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Bell, CheckCheck, Trash2, Info, CheckSquare, ClipboardList, Users } from "lucide-react";
+import {
+  Bell, CheckCheck, Trash2, Info,
+  CheckSquare, ClipboardList, Users,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -68,14 +71,14 @@ export const NotificationBell = () => {
     setUnreadCount((c) => Math.max(0, c - 1));
 
     try {
-      await api.put(`/notifications/${notificationId}/read`);
+      await api.patch(`/notifications/${notificationId}/read`);
     } catch (err) {
       toast.error("Failed to mark notification as read");
-      fetchNotifications(); // revert on failure
+      fetchNotifications();
     }
   };
 
-  // ── Mark ALL read — FIX: explicit PUT with correct path ───────────────────
+  // ── Mark ALL read ──────────────────────────────────────────────────────────
   const markAllRead = async () => {
     if (loading) return;
     setLoading(true);
@@ -85,15 +88,12 @@ export const NotificationBell = () => {
     setUnreadCount(0);
 
     try {
-      await api({
-        method: "PUT",           // explicitly set — avoids any axios config issues
-        url: "/notifications/read-all",
-      });
+      await api.patch("/notifications/read-all");
       toast.success("All notifications marked as read");
     } catch (err) {
       console.error("markAllRead error:", err);
       toast.error("Failed to mark all notifications as read");
-      fetchNotifications(); // revert on failure
+      fetchNotifications();
     } finally {
       setLoading(false);
     }
@@ -102,18 +102,34 @@ export const NotificationBell = () => {
   // ── Delete single ──────────────────────────────────────────────────────────
   const deleteNotification = async (e, notificationId) => {
     e.stopPropagation();
+
+    const isUnread = notifications.find((n) => n.id === notificationId)?.is_read === false;
+
+    // Optimistic update
     setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
-    setUnreadCount((c) =>
-      Math.max(
-        0,
-        c - (notifications.find((n) => n.id === notificationId)?.is_read ? 0 : 1)
-      )
-    );
+    if (isUnread) setUnreadCount((c) => Math.max(0, c - 1));
 
     try {
       await api.delete(`/notifications/${notificationId}`);
     } catch (err) {
       toast.error("Failed to delete notification");
+      fetchNotifications();
+    }
+  };
+
+  // ── Clear all ──────────────────────────────────────────────────────────────
+  const clearAll = async () => {
+    if (!window.confirm("Clear all notifications?")) return;
+
+    // Optimistic update
+    setNotifications([]);
+    setUnreadCount(0);
+
+    try {
+      await api.delete("/notifications/clear-all");
+      toast.success("All notifications cleared");
+    } catch (err) {
+      toast.error("Failed to clear notifications");
       fetchNotifications();
     }
   };
@@ -142,8 +158,10 @@ export const NotificationBell = () => {
       </PopoverTrigger>
 
       {/* ── Popover panel ── */}
-      <PopoverContent className="w-96 p-0 shadow-xl border border-slate-200 rounded-xl overflow-hidden" align="end">
-
+      <PopoverContent
+        className="w-96 p-0 shadow-xl border border-slate-200 rounded-xl overflow-hidden"
+        align="end"
+      >
         {/* Header */}
         <div className="px-4 py-3 bg-white border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -156,16 +174,27 @@ export const NotificationBell = () => {
             )}
           </div>
 
-          {unreadCount > 0 && (
-            <button
-              onClick={markAllRead}
-              disabled={loading}
-              className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50 transition-colors"
-            >
-              <CheckCheck className="h-3.5 w-3.5" />
-              {loading ? "Marking…" : "Mark all read"}
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {unreadCount > 0 && (
+              <button
+                onClick={markAllRead}
+                disabled={loading}
+                className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50 transition-colors"
+              >
+                <CheckCheck className="h-3.5 w-3.5" />
+                {loading ? "Marking…" : "Mark all read"}
+              </button>
+            )}
+            {notifications.length > 0 && (
+              <button
+                onClick={clearAll}
+                className="flex items-center gap-1 text-xs text-red-400 hover:text-red-600 font-medium transition-colors"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Clear all
+              </button>
+            )}
+          </div>
         </div>
 
         {/* List */}
@@ -189,19 +218,27 @@ export const NotificationBell = () => {
                   <div
                     key={n.id}
                     className={`group relative flex gap-3 px-4 py-3.5 cursor-pointer transition-colors hover:bg-white ${
-                      !n.is_read ? "bg-white border-l-2 border-l-indigo-500" : "bg-slate-50"
+                      !n.is_read
+                        ? "bg-white border-l-2 border-l-indigo-500"
+                        : "bg-slate-50"
                     }`}
                     onClick={() => !n.is_read && markAsRead(n.id)}
                     data-testid={`notification-item-${n.id}`}
                   >
                     {/* Type icon */}
-                    <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${meta.bg}`}>
+                    <div
+                      className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${meta.bg}`}
+                    >
                       <Icon className={`h-4 w-4 ${meta.color}`} />
                     </div>
 
                     {/* Content */}
                     <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-medium truncate ${!n.is_read ? "text-slate-900" : "text-slate-600"}`}>
+                      <p
+                        className={`text-sm font-medium truncate ${
+                          !n.is_read ? "text-slate-900" : "text-slate-600"
+                        }`}
+                      >
                         {n.title}
                       </p>
                       <p className="text-xs text-slate-500 mt-0.5 line-clamp-2 leading-relaxed">
@@ -236,7 +273,8 @@ export const NotificationBell = () => {
         {notifications.length > 0 && (
           <div className="px-4 py-2.5 bg-white border-t border-slate-100 text-center">
             <p className="text-xs text-slate-400">
-              {notifications.length} notification{notifications.length !== 1 ? "s" : ""} total
+              {notifications.length} notification
+              {notifications.length !== 1 ? "s" : ""} total
             </p>
           </div>
         )}
