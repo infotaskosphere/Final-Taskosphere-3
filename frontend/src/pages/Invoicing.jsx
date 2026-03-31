@@ -1,6 +1,7 @@
 import Papa from 'papaparse/papaparse.js';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useDark } from '@/hooks/useDark';
+import { generateInvoiceHTML } from './InvoiceTemplates';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -1738,22 +1739,42 @@ export default function Invoicing() {
     catch { toast.error('Failed to delete'); }
   }, [fetchAll]);
 
-  const handleDownloadPdf = useCallback(async (inv) => {
-    try {
-      toast.info('Generating PDF…', { duration: 1500 });
-      const response = await api.get(`/invoices/${inv.id}/pdf`, { responseType: 'blob', timeout: 30000 });
-      const blob = new Blob([response.data], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a'); link.href = url;
-      link.download = `Invoice_${(inv.invoice_no || inv.id).replace(/\//g, '_').replace(/\\/g, '_')}.pdf`;
-      document.body.appendChild(link); link.click(); document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-      toast.success(`PDF downloaded: ${inv.invoice_no || inv.id}`);
-    } catch (err) {
-      console.error('PDF download error:', err);
-      toast.error(err.response?.status === 404 ? 'Invoice not found' : err.response?.status === 500 ? 'PDF generation failed on server' : 'PDF download failed — please try again');
+const handleDownloadPdf = useCallback(async (inv) => {
+  try {
+    toast.info('Generating PDF…', { duration: 1500 });
+    
+    // Fetch full invoice details (in case the list view has partial data)
+    const invData = inv.items?.length > 0 ? inv : 
+      (await api.get(`/invoices/${inv.id}`)).data;
+    
+    const company = companies.find(c => c.id === invData.company_id) || {};
+    
+    const html = generateInvoiceHTML(invData, {
+      company,
+      template: invData.invoice_template || 'classic',
+      theme:    invData.invoice_theme    || 'classic_blue',
+      customColor: invData.invoice_custom_color || '#0D3B66',
+    });
+
+    // Open in a new window and trigger print (Save as PDF)
+    const win = window.open('', '_blank', 'width=900,height=700');
+    if (!win) {
+      toast.error('Allow pop-ups to download PDF');
+      return;
     }
-  }, []);
+    win.document.write(html);
+    win.document.close();
+    win.onload = () => {
+      win.focus();
+      win.print(); // browser "Save as PDF" dialog
+    };
+    
+    toast.success(`PDF ready: ${inv.invoice_no}`);
+  } catch (err) {
+    console.error('PDF error:', err);
+    toast.error('PDF generation failed');
+  }
+}, [companies]);
 
   const handleMarkSent = useCallback(async (inv) => {
     try { await api.post(`/invoices/${inv.id}/mark-sent`); fetchAll(); toast.success('Marked as sent'); } catch { toast.error('Failed'); }
