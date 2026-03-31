@@ -1738,15 +1738,7 @@ export default function Invoicing() {
     catch { toast.error('Failed to delete'); }
   }, [fetchAll]);
 
-
-    // Fetch full invoice details (in case the list view has partial data)
 const handleDownloadPdf = useCallback(async (inv) => {
-  try {
-    toast.info('Generating PDF…', { duration: 1500 });
-
-    // 1. Get full invoice data (with items)
-    const invData = inv.items?.length > 0
-      ? invconst handleDownloadPdf = useCallback(async (inv) => {
   try {
     toast.info('Generating PDF…', { duration: 1500 });
 
@@ -1768,55 +1760,11 @@ const handleDownloadPdf = useCallback(async (inv) => {
 
     const html = generateInvoiceHTML(invData, {
       company,
-      template:    invData.invoice_template    || invSettings.template    || 'classic',
-      theme:       invData.invoice_theme       || invSettings.theme       || 'classic_blue',
-      customColor: invData.invoice_custom_color|| invSettings.custom_color|| '#0D3B66',
+      template:    invData.invoice_template     || invSettings.template     || 'classic',
+      theme:       invData.invoice_theme        || invSettings.theme        || 'classic_blue',
+      customColor: invData.invoice_custom_color || invSettings.custom_color || '#0D3B66',
     });
 
-    const win = window.open('', '_blank', 'width=900,height=700');
-    if (!win) {
-      toast.error('Allow pop-ups to download PDF');
-      return;
-    }
-    win.document.write(html);
-    win.document.close();
-    win.onload = () => {
-      win.focus();
-      win.print();
-    };
-
-    toast.success(`PDF ready: ${inv.invoice_no}`);
-  } catch (err) {
-    console.error('PDF error:', err);
-    toast.error('PDF generation failed');
-  }
-}, [companies]);   // ← must have BOTH ); here
-      : (await api.get(`/invoices/${inv.id}`)).data;
-
-    // 2. Get company from API state
-    const baseCompany = companies.find(c => c.id === invData.company_id) || {};
-
-    // 3. Merge localStorage bank/UPI settings as fallback
-    const invSettings = getInvSettings(invData.company_id);
-    const company = {
-      ...baseCompany,
-      bank_name:       baseCompany.bank_name       || invSettings.bank_name       || '',
-      bank_account_no: baseCompany.bank_account_no || invSettings.bank_account_no || '',
-      bank_account:    baseCompany.bank_account    || invSettings.bank_account_no || '',
-      bank_ifsc:       baseCompany.bank_ifsc       || invSettings.bank_ifsc       || '',
-      bank_branch:     baseCompany.bank_branch     || invSettings.bank_branch     || '',
-      upi_id:          baseCompany.upi_id          || invSettings.upi_id          || '',
-    };
-
-    // 4. Generate HTML
-    const html = generateInvoiceHTML(invData, {
-      company,
-      template:    invData.invoice_template    || invSettings.template    || 'classic',
-      theme:       invData.invoice_theme       || invSettings.theme       || 'classic_blue',
-      customColor: invData.invoice_custom_color|| invSettings.custom_color|| '#0D3B66',
-    });
-
-    // 5. Open print window
     const win = window.open('', '_blank', 'width=900,height=700');
     if (!win) {
       toast.error('Allow pop-ups to download PDF');
@@ -1835,7 +1783,6 @@ const handleDownloadPdf = useCallback(async (inv) => {
     toast.error('PDF generation failed');
   }
 }, [companies]);
-    
   const handleMarkSent = useCallback(async (inv) => {
     try { await api.post(`/invoices/${inv.id}/mark-sent`); fetchAll(); toast.success('Marked as sent'); } catch { toast.error('Failed'); }
   }, [fetchAll]);
