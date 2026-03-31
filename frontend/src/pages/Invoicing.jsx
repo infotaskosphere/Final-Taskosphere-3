@@ -1127,7 +1127,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   const [products, setProducts] = useState([]);
 
   // COMMAND 2: ADD iframeRef
-  const iframeRef = useRef(null);
+  const previewRef = useRef(null);
 
   useEffect(() => { if (open) { if (editingInv) setForm({ ...defaultForm, ...editingInv }); else setForm(defaultForm); setActiveTab('details'); } }, [open, editingInv]);
   useEffect(() => { api.get('/products').then(r => setProducts(r.data || [])).catch(() => {}); }, []);
@@ -1178,7 +1178,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       customColor: form.invoice_custom_color
     });
 
-    if (iframeRef.current) {
+    if (previewRef.current) {
       iframeRef.current.srcdoc = html;
     }
   };
@@ -1428,7 +1428,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                   {/* COMMAND 7: ADD iframe UI */}
                   <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-200'}`} style={{ height: 600 }}>
                     <iframe
-                      ref={iframeRef}
+                      ref={previewRef}
                       className="w-full h-[600px] border rounded-xl bg-white"
                       title="Invoice Preview"
                       sandbox="allow-scripts"
@@ -1613,6 +1613,7 @@ const ProductModal = ({ open, onClose, isDark, onSaved }) => {
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════════
 export default function Invoicing() {
+  const iframeRef = useRef(null);
   const { user } = useAuth();
   const isDark = useDark();
   const navigate = useNavigate();
@@ -1898,19 +1899,46 @@ export default function Invoicing() {
         )}
       </div>
 
-      {/* TOP CLIENTS */}
+    
+      {/* TOP CLIENTS SECTION */}
       {localStats?.top_clients?.length > 0 && (
         <div className={`rounded-2xl border p-5 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`}>
-          <div className="flex items-center gap-2.5 mb-4"><div className="p-1.5 rounded-lg bg-yellow-50 dark:bg-yellow-900/40"><Star className="h-4 w-4 text-yellow-500" /></div><div><h3 className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Top Clients by Revenue</h3></div></div>
+          <div className="flex items-center gap-2.5 mb-4">
+            <div className="p-1.5 rounded-lg bg-yellow-50 dark:bg-yellow-900/40">
+              <Star className="h-4 w-4 text-yellow-500" />
+            </div>
+            <div>
+              <h3 className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                Top Clients by Revenue
+              </h3>
+            </div>
+          </div>
           <div className="space-y-3">
             {localStats.top_clients.map((c, i) => {
               const pct = localStats.total_revenue > 0 ? (c.revenue / localStats.total_revenue) * 100 : 0;
               return (
                 <div key={c.name} className="flex items-center gap-3">
-                  <div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" style={{ background: i === 0 ? 'linear-gradient(135deg, #b45309, #d97706)' : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>{i + 1}</div>
+                  <div 
+                    className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" 
+                    style={{ background: i === 0 ? 'linear-gradient(135deg, #b45309, #d97706)' : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+                  >
+                    {i + 1}
+                  </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1"><p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{c.name}</p><p className="text-sm font-bold flex-shrink-0 ml-3" style={{ color: COLORS.mediumBlue }}>{fmtC(c.revenue)}</p></div>
-                    <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}><div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }} /></div>
+                    <div className="flex items-center justify-between mb-1">
+                      <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                        {c.name}
+                      </p>
+                      <p className="text-sm font-bold flex-shrink-0 ml-3" style={{ color: COLORS.mediumBlue }}>
+                        {fmtC(c.revenue)}
+                      </p>
+                    </div>
+                    <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                      <div 
+                        className="h-full rounded-full transition-all duration-700" 
+                        style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }} 
+                      />
+                    </div>
                   </div>
                 </div>
               );
@@ -1919,6 +1947,9 @@ export default function Invoicing() {
         </div>
       )}
 
+      {/* HIDDEN PRINT FRAME - ALWAYS RENDERED OUTSIDE TO PREVENT ReferenceError */}
+      <iframe ref={iframeRef} style={{ display: 'none' }} title="print-frame" />
+      
       {/* DIALOGS */}
       <InvoiceForm open={formOpen} onClose={() => { setFormOpen(false); setEditingInv(null); }} editingInv={editingInv} companies={companies} clients={clients} leads={leads} onSuccess={fetchAll} isDark={isDark} />
       <InvoiceDetailPanel invoice={detailInv} open={detailOpen} onClose={() => setDetailOpen(false)} onPayment={(inv) => { setPayInv(inv); setPayOpen(true); }} onEdit={handleEdit} onDelete={handleDelete} onDownloadPdf={handleDownloadPdf} onSendEmail={handleSendEmail} isDark={isDark} />
