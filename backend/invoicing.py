@@ -243,11 +243,14 @@ def _perm(user: User) -> bool:
 # NEXT INVOICE NUMBER
 # ═══════════════════════════════════════════════════════════
 
-async def _next_invoice_no(prefix: str = "INV") -> str:
+async def _next_invoice_no(prefix: str = "INV", company_id: str = None) -> str:
     today = date.today()
     fy_start = today.year if today.month >= 4 else today.year - 1
     fy_label = f"{fy_start % 100:02d}-{(fy_start + 1) % 100:02d}"
-    count = await db.invoices.count_documents({"invoice_no": {"$regex": f"^{prefix}-"}})
+    query: dict = {"invoice_no": {"$regex": f"^{prefix}-"}}
+    if company_id:
+        query["company_id"] = company_id
+    count = await db.invoices.count_documents(query)
     return f"{prefix}-{count + 1:04d}/{fy_label}"
 
 
@@ -1473,7 +1476,7 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(get_c
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     now = datetime.now(timezone.utc).isoformat()
     prefix = {"proforma": "PRO", "estimate": "EST", "credit_note": "CN", "debit_note": "DN"}.get(data.invoice_type, "INV")
-    inv_no = await _next_invoice_no(prefix)
+    inv_no = await _next_invoice_no(prefix, data.company_id)
     inv_date = data.invoice_date or date.today().isoformat()
     due_date = data.due_date or (date.today() + timedelta(days=30)).isoformat()
     raw = {"id": str(uuid.uuid4()), "invoice_no": inv_no, "invoice_date": inv_date, "due_date": due_date,
@@ -1767,7 +1770,7 @@ async def generate_recurring(inv_id: str, current_user: User = Depends(get_curre
     template = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
     if not template: raise HTTPException(404, "Template invoice not found")
     now = datetime.now(timezone.utc).isoformat()
-    new_inv = {**template, "id": str(uuid.uuid4()), "invoice_no": await _next_invoice_no("INV"),
+    new_inv = {**template, "id": str(uuid.uuid4()), "invoice_no": await _next_invoice_no("INV", template.get("company_id")),
                "invoice_date": date.today().isoformat(),
                "due_date": (date.today() + timedelta(days=30)).isoformat(),
                "status": "draft", "amount_paid": 0.0, "amount_due": template.get("grand_total", 0),
@@ -1825,7 +1828,7 @@ async def delete_payment(pid: str, current_user: User = Depends(get_current_user
 @router.post("/credit-notes")
 async def create_credit_note(data: CreditNoteCreate, current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
-    inv_no = await _next_invoice_no("CN")
+    inv_no = await _next_invoice_no("CN", data.company_id)
     now = datetime.now(timezone.utc).isoformat()
     raw = {"id": str(uuid.uuid4()), "invoice_no": inv_no, "invoice_type": "credit_note",
            **data.model_dump(), "invoice_date": date.today().isoformat(), "due_date": date.today().isoformat(),
