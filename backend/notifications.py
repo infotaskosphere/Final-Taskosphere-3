@@ -334,7 +334,7 @@ async def send_notification(
     payload: AdminNotificationRequest,
     # BUG FIX: require_admin is an async function dependency — do NOT call it
     # with () here. Use Depends(require_admin) not Depends(require_admin()).
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
 ):
     """ 
     Admin-only endpoint to manually send notifications.
@@ -384,10 +384,18 @@ async def send_notification(
         )
         if result:
             return {"status": "success", "message": "Notification sent"}
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create notification",
+        result = await create_notification(
+            user_id=current_user.id,
+            title=payload.title,
+            message=payload.message,
+            type=payload.type,
         )
+if result:
+    return {"status": "success", "message": "Notification sent to self"}
+raise HTTPException(
+    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    detail="Failed to create notification",
+)
 
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -435,7 +443,7 @@ async def get_unread_count(
         return {"count": 0}
 
 
-@router.patch("/{notification_id}/read")
+@router.put("/{notification_id}/read")
 async def mark_notification_read(
     notification_id: str,
     current_user: User = Depends(get_current_user),
@@ -451,7 +459,7 @@ async def mark_notification_read(
 
 # BUG FIX: /read-all MUST come before /{notification_id} in declaration order
 # to prevent FastAPI treating "read-all" as a notification_id path param.
-@router.patch("/read-all")
+@router.put("/read-all")
 async def mark_all_notifications_read(
     current_user: User = Depends(get_current_user),
 ):
