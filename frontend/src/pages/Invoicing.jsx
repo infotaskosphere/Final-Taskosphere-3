@@ -1030,31 +1030,312 @@ const StatCard = ({ label, value, sub, icon: Icon, color, bg, onClick, isDark, t
   </div>
 );
 
-// ════════════════════════════════════════════════════════════════════════════════
-// MINI REVENUE CHART
-// ════════════════════════════════════════════════════════════════════════════════
-const RevenueChart = ({ trend = [], isDark }) => {
-  if (!trend.length) return null;
-  const W = 700, H = 130, pad = { t: 16, b: 28, l: 56, r: 16 };
-  const maxVal = Math.max(...trend.map(d => d.revenue), 1);
-  const xStep = (W - pad.l - pad.r) / Math.max(trend.length - 1, 1);
-  const yScale = (v) => H - pad.b - (v / maxVal) * (H - pad.t - pad.b);
-  const pts = trend.map((d, i) => [pad.l + i * xStep, yScale(d.revenue)]);
-  const area = `M${pts[0][0]},${H - pad.b} L${pts.map(p => `${p[0]},${p[1]}`).join(' L')} L${pts[pts.length - 1][0]},${H - pad.b} Z`;
-  const line = `M${pts.map(p => `${p[0]},${p[1]}`).join(' L')}`;
-  const colPts = trend.map((d, i) => [pad.l + i * xStep, yScale(d.collected)]);
-  const cline = `M${colPts.map(p => `${p[0]},${p[1]}`).join(' L')}`;
+// ─── Enhanced Revenue Trend ───────────────────────────────────────────────────
+const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
+  const [trendRange, setTrendRange] = useState('12m');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [compareEnabled, setCompareEnabled] = useState(false);
+  const [showServiceBreakdown, setShowServiceBreakdown] = useState(false);
+  const [selectedServices, setSelectedServices] = useState([]);
+
+  const fmtAxis = v => v >= 10000000 ? `${(v/10000000).toFixed(1)}Cr` : v >= 100000 ? `${(v/100000).toFixed(1)}L` : v >= 1000 ? `${(v/1000).toFixed(0)}k` : v.toFixed(0);
+
+  const getRange = useCallback(() => {
+    const now = new Date();
+    if (trendRange === 'custom') {
+      return {
+        start: customFrom ? new Date(customFrom + 'T00:00:00') : subMonths(now, 12),
+        end: customTo ? new Date(customTo + 'T23:59:59') : now,
+      };
+    }
+    const m = { '1m': 1, '3m': 3, '6m': 6, '12m': 12 }[trendRange] || 12;
+    return { start: subMonths(now, m), end: now };
+  }, [trendRange, customFrom, customTo]);
+
+  const getMonths = useCallback((start, end) => {
+    const months = [];
+    let cur = startOfMonth(start);
+    while (cur <= end) {
+      months.push(format(cur, 'yyyy-MM'));
+      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    }
+    return months;
+  }, []);
+
+  const currentData = useMemo(() => {
+    const { start, end } = getRange();
+    return getMonths(start, end).map(m => {
+      const monthInvs = invoices.filter(i => i.invoice_date?.startsWith(m) && i.status !== 'cancelled');
+      let serviceRevenue = 0;
+      if (selectedServices.length > 0) {
+        monthInvs.forEach(inv => (inv.items || []).forEach(it => {
+          if (selectedServices.includes(it.description?.trim())) serviceRevenue += (it.total_amount || 0);
+        }));
+      }
+      return {
+        month: m, label: format(new Date(m + '-15'), 'MMM yy'),
+        revenue: monthInvs.reduce((s, i) => s + (i.grand_total || 0), 0),
+        collected: monthInvs.reduce((s, i) => s + (i.amount_paid || 0), 0),
+        count: monthInvs.length, serviceRevenue,
+      };
+    });
+  }, [invoices, trendRange, customFrom, customTo, selectedServices, getRange, getMonths]);
+
+  const prevData = useMemo(() => {
+    if (!compareEnabled) return [];
+    const { start, end } = getRange();
+    const diff = end.getTime() - start.getTime();
+    const prevStart = new Date(start.getTime() - diff);
+    const prevEnd = new Date(start);
+    return getMonths(prevStart, prevEnd).map(m => {
+      const monthInvs = invoices.filter(i => i.invoice_date?.startsWith(m) && i.status !== 'cancelled');
+      return {
+        month: m, label: format(new Date(m + '-15'), 'MMM yy'),
+        revenue: monthInvs.reduce((s, i) => s + (i.grand_total || 0), 0),
+        collected: monthInvs.reduce((s, i) => s + (i.amount_paid || 0), 0),
+      };
+    });
+  }, [invoices, compareEnabled, trendRange, customFrom, customTo, getRange, getMonths]);
+
+  const serviceBreakdown = useMemo(() => {
+    const { start, end } = getRange();
+    const startStr = format(start, 'yyyy-MM-dd'), endStr = format(end, 'yyyy-MM-dd');
+    const map = {};
+    invoices.filter(i => i.invoice_date >= startStr && i.invoice_date <= endStr && i.status !== 'cancelled')
+      .forEach(inv => (inv.items || []).forEach(it => {
+        const k = (it.description || 'Unknown').trim();
+        if (!map[k]) map[k] = { description: k, revenue: 0, count: 0 };
+        map[k].revenue += (it.total_amount || 0); map[k].count++;
+      }));
+    return Object.values(map).sort((a, b) => b.revenue - a.revenue);
+  }, [invoices, trendRange, customFrom, customTo, getRange]);
+
+  const allServices = useMemo(() => {
+    const s = new Set();
+    invoices.forEach(inv => (inv.items || []).forEach(it => { if (it.description?.trim()) s.add(it.description.trim()); }));
+    return Array.from(s).slice(0, 30);
+  }, [invoices]);
+
+  const totalRevenue = currentData.reduce((s, d) => s + d.revenue, 0);
+  const totalCollected = currentData.reduce((s, d) => s + d.collected, 0);
+  const prevTotal = prevData.reduce((s, d) => s + d.revenue, 0);
+  const growthPct = prevTotal > 0 ? Math.round((totalRevenue - prevTotal) / prevTotal * 100) : null;
+
+  // SVG chart
+  const W = 700, H = 160, pad = { t: 20, b: 34, l: 58, r: 16 };
+  const allVals = [...currentData.map(d => d.revenue), ...(compareEnabled ? prevData.map(d => d.revenue) : [])];
+  const maxVal = Math.max(...allVals, 1);
+  const n = currentData.length;
+  const xStep = n > 1 ? (W - pad.l - pad.r) / (n - 1) : 0;
+  const yS = v => H - pad.b - (v / maxVal) * (H - pad.t - pad.b);
+  const pts = currentData.map((d, i) => [pad.l + i * xStep, yS(d.revenue)]);
+  const colPts = currentData.map((d, i) => [pad.l + i * xStep, yS(d.collected)]);
+  const svcPts = selectedServices.length > 0 ? currentData.map((d, i) => [pad.l + i * xStep, yS(d.serviceRevenue)]) : [];
+  const prevAligned = compareEnabled ? currentData.map((_, i) => prevData[i] || { revenue: 0 }) : [];
+  const prevPts = prevAligned.map((d, i) => [pad.l + i * xStep, yS(d.revenue)]);
+  const mkLine = pp => pp.length > 1 ? `M${pp.map(p => `${p[0]},${p[1]}`).join(' L')}` : '';
+  const mkArea = pp => pp.length > 1 ? `M${pp[0][0]},${H - pad.b} L${pp.map(p => `${p[0]},${p[1]}`).join(' L')} L${pp[pp.length-1][0]},${H - pad.b} Z` : '';
+
+  const RANGE_BTNS = [{ v:'1m',l:'1M' },{ v:'3m',l:'3M' },{ v:'6m',l:'6M' },{ v:'12m',l:'12M' },{ v:'custom',l:'Custom' }];
+
+  if (!invoices.some(i => (i.grand_total||0) > 0)) return null;
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="none">
-      <defs><linearGradient id="rg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={COLORS.mediumBlue} stopOpacity="0.25" /><stop offset="100%" stopColor={COLORS.mediumBlue} stopOpacity="0" /></linearGradient></defs>
-      <path d={area} fill="url(#rg)" />
-      <path d={line} fill="none" stroke={COLORS.mediumBlue} strokeWidth="2" strokeLinecap="round" />
-      <path d={cline} fill="none" stroke={COLORS.emeraldGreen} strokeWidth="1.5" strokeDasharray="4 3" strokeLinecap="round" />
-      {pts.map(([x, y], i) => (<g key={i}><circle cx={x} cy={y} r="3.5" fill={COLORS.mediumBlue} /><text x={x} y={H - 6} textAnchor="middle" fontSize="9" fill={isDark ? '#64748b' : '#94a3b8'} fontFamily="monospace">{trend[i].label}</text></g>))}
-    </svg>
+    <div className={`rounded-2xl border p-5 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`}>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 flex-wrap">
+        <div className="flex items-center gap-2.5">
+          <div className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/40"><BarChart3 className="h-4 w-4 text-blue-500" /></div>
+          <div>
+            <h3 className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Revenue Trend</h3>
+            <p className="text-xs text-slate-400">
+              {fmtC(totalRevenue)} · {currentData.length} months
+              {growthPct !== null && <span className={`ml-2 font-bold ${growthPct >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{growthPct >= 0 ? '↑' : '↓'} {Math.abs(growthPct)}% vs prev period</span>}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 items-center">
+          <div className={`flex rounded-xl overflow-hidden border ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+            {RANGE_BTNS.map(b => (
+              <button key={b.v} onClick={() => setTrendRange(b.v)}
+                className={`px-2.5 py-1.5 text-[10px] font-bold transition-all whitespace-nowrap ${trendRange === b.v ? 'bg-blue-600 text-white' : isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+                {b.l}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setCompareEnabled(c => !c)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold border transition-all ${compareEnabled ? 'bg-purple-600 text-white border-purple-600' : isDark ? 'bg-slate-700 text-slate-300 border-slate-600' : 'bg-white text-slate-600 border-slate-200'}`}>
+            <ArrowRightLeft className="h-3 w-3" /> Compare
+          </button>
+          <button onClick={() => setShowServiceBreakdown(s => !s)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold border transition-all ${showServiceBreakdown ? 'bg-emerald-600 text-white border-emerald-600' : isDark ? 'bg-slate-700 text-slate-300 border-slate-600' : 'bg-white text-slate-600 border-slate-200'}`}>
+            <PieChart className="h-3 w-3" /> By Service
+          </button>
+        </div>
+      </div>
+
+      {/* Custom date range */}
+      {trendRange === 'custom' && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <CalendarDays className="h-3.5 w-3.5 text-slate-400" />
+          <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+            className={`h-8 px-2 rounded-lg text-xs border ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 [color-scheme:dark]' : 'bg-white border-slate-200 text-slate-800'}`} />
+          <span className="text-slate-400 text-xs">to</span>
+          <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+            className={`h-8 px-2 rounded-lg text-xs border ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 [color-scheme:dark]' : 'bg-white border-slate-200 text-slate-800'}`} />
+        </div>
+      )}
+
+      {/* Comparative totals */}
+      {compareEnabled && (
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          {[
+            { label: 'Current Period', val: totalRevenue, color: COLORS.mediumBlue },
+            { label: 'Previous Period', val: prevTotal, color: COLORS.purple },
+            { label: totalRevenue >= prevTotal ? 'Growth ↑' : 'Decline ↓', val: Math.abs(totalRevenue - prevTotal), sub: growthPct !== null ? `${Math.abs(growthPct)}%` : '—', color: totalRevenue >= prevTotal ? COLORS.emeraldGreen : COLORS.coral },
+          ].map(c => (
+            <div key={c.label} className={`rounded-xl border p-3 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+              <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1">{c.label}</p>
+              <p className="text-base font-black" style={{ color: c.color }}>{fmtC(c.val)}</p>
+              {c.sub && <p className="text-[10px] text-slate-400 mt-0.5">{c.sub}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Service filter chips */}
+      {showServiceBreakdown && allServices.length > 0 && (
+        <div className="mb-4">
+          <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-2">Filter by Service (multi-select — also highlights on chart)</p>
+          <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
+            <button onClick={() => setSelectedServices([])}
+              className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold border transition-all ${selectedServices.length === 0 ? 'bg-blue-600 text-white border-blue-600' : isDark ? 'bg-slate-700 text-slate-300 border-slate-600' : 'bg-white text-slate-600 border-slate-200'}`}>
+              All
+            </button>
+            {allServices.map(name => (
+              <button key={name} title={name}
+                onClick={() => setSelectedServices(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name])}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold border transition-all max-w-[180px] truncate ${selectedServices.includes(name) ? 'bg-emerald-600 text-white border-emerald-600' : isDark ? 'bg-slate-700 text-slate-300 border-slate-600' : 'bg-white text-slate-600 border-slate-200'}`}>
+                {name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* SVG Chart */}
+      {currentData.length > 0 && (
+        <div>
+          <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="trendAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={COLORS.mediumBlue} stopOpacity="0.22" />
+                <stop offset="100%" stopColor={COLORS.mediumBlue} stopOpacity="0.01" />
+              </linearGradient>
+            </defs>
+            {[0.25, 0.5, 0.75, 1].map(f => {
+              const y = H - pad.b - f * (H - pad.t - pad.b);
+              return (
+                <g key={f}>
+                  <line x1={pad.l} y1={y} x2={W - pad.r} y2={y} stroke={isDark ? '#334155' : '#f1f5f9'} strokeWidth="1" />
+                  <text x={pad.l - 4} y={y + 3} textAnchor="end" fontSize="8" fill={isDark ? '#64748b' : '#94a3b8'} fontFamily="monospace">{fmtAxis(maxVal * f)}</text>
+                </g>
+              );
+            })}
+            {mkArea(pts) && <path d={mkArea(pts)} fill="url(#trendAreaGrad)" />}
+            {compareEnabled && mkLine(prevPts) && <path d={mkLine(prevPts)} fill="none" stroke={COLORS.purple} strokeWidth="1.5" strokeDasharray="5 3" opacity="0.8" strokeLinecap="round" />}
+            {mkLine(colPts) && <path d={mkLine(colPts)} fill="none" stroke={COLORS.emeraldGreen} strokeWidth="1.5" strokeDasharray="3 2" strokeLinecap="round" />}
+            {selectedServices.length > 0 && mkLine(svcPts) && <path d={mkLine(svcPts)} fill="none" stroke={COLORS.amber} strokeWidth="2.5" strokeLinecap="round" />}
+            {mkLine(pts) && <path d={mkLine(pts)} fill="none" stroke={COLORS.mediumBlue} strokeWidth="2.5" strokeLinecap="round" />}
+            {pts.map(([x, y], i) => (
+              <g key={i}>
+                <circle cx={x} cy={y} r="3.5" fill="white" stroke={COLORS.mediumBlue} strokeWidth="2" />
+                <text x={x} y={H - 7} textAnchor="middle" fontSize="8" fill={isDark ? '#64748b' : '#94a3b8'}>{currentData[i]?.label}</text>
+              </g>
+            ))}
+          </svg>
+          <div className="flex flex-wrap gap-4 text-[10px] mt-1 text-slate-400">
+            <span className="flex items-center gap-1.5"><span className="w-4 h-0.5 inline-block rounded" style={{ background: COLORS.mediumBlue }} />Revenue</span>
+            <span className="flex items-center gap-1.5"><span className="w-4 h-0.5 inline-block border-t-2 border-dashed" style={{ borderColor: COLORS.emeraldGreen }} />Collected</span>
+            {compareEnabled && <span className="flex items-center gap-1.5"><span className="w-4 h-0.5 inline-block border-t-2 border-dashed" style={{ borderColor: COLORS.purple }} />Prev Period</span>}
+            {selectedServices.length > 0 && <span className="flex items-center gap-1.5"><span className="w-4 h-0.5 inline-block rounded" style={{ background: COLORS.amber }} />Selected Services</span>}
+          </div>
+        </div>
+      )}
+
+      {/* Comparative table */}
+      {compareEnabled && currentData.length > 0 && (
+        <div className={`mt-4 rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+          <div className={`px-4 py-2 border-b ${isDark ? 'bg-slate-700/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Month-by-Month Comparison</p>
+          </div>
+          <div className="overflow-x-auto max-h-48 overflow-y-auto">
+            <table className="w-full text-xs">
+              <thead><tr className={isDark ? 'bg-slate-700/30' : 'bg-slate-50/60'}>
+                {['Month','Revenue','Collected','Prev Revenue','Change'].map(h => (
+                  <th key={h} className={`px-3 py-2 text-left text-[9px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {currentData.map((d, i) => {
+                  const prev = prevData[i];
+                  const chg = prev != null ? d.revenue - prev.revenue : null;
+                  return (
+                    <tr key={d.month} className={`border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                      <td className={`px-3 py-2 font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{d.label}</td>
+                      <td className={`px-3 py-2 font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(d.revenue)}</td>
+                      <td className="px-3 py-2 text-emerald-600">{fmtC(d.collected)}</td>
+                      <td className={`px-3 py-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{prev != null ? fmtC(prev.revenue) : '—'}</td>
+                      <td className={`px-3 py-2 font-bold ${chg == null ? '' : chg >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                        {chg == null ? '—' : `${chg >= 0 ? '+' : ''}${fmtC(chg)}`}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Service breakdown table */}
+      {showServiceBreakdown && serviceBreakdown.length > 0 && (
+        <div className={`mt-4 rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+          <div className={`px-4 py-2.5 border-b ${isDark ? 'bg-slate-700/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Revenue by Service / Item — click to toggle chart highlight</p>
+          </div>
+          <div className="max-h-52 overflow-y-auto">
+            {serviceBreakdown.map((s, i) => {
+              const pct = totalRevenue > 0 ? (s.revenue / totalRevenue) * 100 : 0;
+              const isSelected = selectedServices.includes(s.description);
+              return (
+                <div key={s.description}
+                  onClick={() => setSelectedServices(prev => prev.includes(s.description) ? prev.filter(n => n !== s.description) : [...prev, s.description])}
+                  className={`flex items-center gap-3 px-4 py-2.5 border-b last:border-0 cursor-pointer transition-colors ${isSelected ? (isDark ? 'bg-emerald-900/20' : 'bg-emerald-50') : (isDark ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50')} ${isDark ? 'border-slate-700' : 'border-slate-50'}`}>
+                  <div className="w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0"
+                    style={{ background: isSelected ? COLORS.emeraldGreen : `linear-gradient(135deg,${COLORS.deepBlue},${COLORS.mediumBlue})` }}>
+                    {isSelected ? '✓' : i + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-xs font-semibold truncate ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{s.description}</p>
+                    <div className={`h-1 rounded-full mt-1 ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                      <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: `linear-gradient(90deg,${COLORS.deepBlue},${COLORS.mediumBlue})` }} />
+                    </div>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-xs font-bold" style={{ color: COLORS.mediumBlue }}>{fmtC(s.revenue)}</p>
+                    <p className="text-[9px] text-slate-400">{pct.toFixed(1)}% · {s.count}×</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
-
 // ════════════════════════════════════════════════════════════════════════════════
 // PAYMENT MODAL
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1129,7 +1410,21 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   // COMMAND 2: ADD iframeRef
   const previewRef = useRef(null);
 
-  useEffect(() => { if (open) { if (editingInv) setForm({ ...defaultForm, ...editingInv }); else setForm(defaultForm); setActiveTab('details'); } }, [open, editingInv]);
+  useEffect(() => {
+    if (open) {
+      if (editingInv) {
+        setForm({
+          ...defaultForm,
+          ...editingInv,
+          invoice_date: (editingInv.invoice_date || '').slice(0, 10) || format(new Date(), 'yyyy-MM-dd'),
+          due_date: (editingInv.due_date || '').slice(0, 10) || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
+        });
+      } else {
+        setForm(defaultForm);
+      }
+      setActiveTab('details');
+    }
+  }, [open, editingInv]);
   useEffect(() => { api.get('/products').then(r => setProducts(r.data || [])).catch(() => {}); }, []);
 
   const totals = useMemo(() => computeTotals(form.items, form.is_interstate, form.discount_amount, form.shipping_charges, form.other_charges), [form.items, form.is_interstate, form.discount_amount, form.shipping_charges, form.other_charges]);
@@ -1215,7 +1510,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className={`max-w-5xl max-h-[96vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+      <DialogContent className={`max-w-5xl max-h-[96vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 [&>button.absolute]:hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <DialogTitle className="sr-only">{editingInv ? 'Edit Invoice' : 'Create Invoice'}</DialogTitle>
         <DialogDescription className="sr-only">Invoice form</DialogDescription>
         <div className="sticky top-0 z-20 flex-shrink-0">
@@ -1226,10 +1521,16 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                 <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center"><Receipt className="h-5 w-5 text-white" /></div>
                 <div><p className="text-white/50 text-[10px] uppercase tracking-widest">{editingInv ? `Edit · ${editingInv.invoice_no}` : 'New Document'}</p><h2 className="text-white font-bold text-xl">{editingInv ? 'Edit Invoice' : 'Create Invoice / Estimate'}</h2></div>
               </div>
-              <Select value={form.invoice_type} onValueChange={v => setField('invoice_type', v)}>
-                <SelectTrigger className="w-44 h-9 rounded-xl border-white/20 bg-white/10 text-white text-xs font-semibold"><SelectValue /></SelectTrigger>
-                <SelectContent>{INV_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
-              </Select>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Select value={form.invoice_type} onValueChange={v => setField('invoice_type', v)}>
+                  <SelectTrigger className="w-44 h-9 rounded-xl border-white/20 bg-white/10 text-white text-xs font-semibold"><SelectValue /></SelectTrigger>
+                  <SelectContent>{INV_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+                </Select>
+                <button type="button" onClick={onClose}
+                  className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-all">
+                  <X className="h-4 w-4 text-white" />
+                </button>
+              </div>
             </div>
           </div>
           <div className={`flex border-b ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
@@ -1269,8 +1570,21 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                 <div className={sectionCls}>
                   <div className="flex items-center gap-2 mb-5"><div className="w-7 h-7 rounded-xl flex items-center justify-center text-white text-xs font-bold" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}><CalendarDays className="h-4 w-4" /></div><h3 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Invoice Details</h3></div>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    <div><label className={labelCls}>Invoice Date *</label><Input type="date" className={inputCls} value={form.invoice_date} onChange={e => setField('invoice_date', e.target.value)} required /></div>
-                    <div><label className={labelCls}>Due Date</label><Input type="date" className={inputCls} value={form.due_date} onChange={e => setField('due_date', e.target.value)} /></div>
+                    <div>
+                      <label className={labelCls}>Invoice Date *</label>
+                      <input type="date"
+                        className={`w-full h-11 rounded-xl text-sm px-3 border border-slate-200 dark:border-slate-600 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200 ${isDark ? 'bg-slate-700 text-slate-100 [color-scheme:dark]' : 'bg-white text-slate-800'}`}
+                        value={form.invoice_date}
+                        onChange={e => setField('invoice_date', e.target.value)}
+                        required />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Due Date</label>
+                      <input type="date"
+                        className={`w-full h-11 rounded-xl text-sm px-3 border border-slate-200 dark:border-slate-600 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200 ${isDark ? 'bg-slate-700 text-slate-100 [color-scheme:dark]' : 'bg-white text-slate-800'}`}
+                        value={form.due_date}
+                        onChange={e => setField('due_date', e.target.value)} />
+                    </div>
                     <div><label className={labelCls}>Reference / PO No.</label><Input className={inputCls} placeholder="Optional" value={form.reference_no} onChange={e => setField('reference_no', e.target.value)} /></div>
                     <div><label className={labelCls}>Payment Terms</label><Input className={inputCls} value={form.payment_terms} onChange={e => setField('payment_terms', e.target.value)} /></div>
                     <div><label className={labelCls}>Linked Lead</label><Select value={form.lead_id || '__none__'} onValueChange={v => setField('lead_id', v === '__none__' ? null : v)}><SelectTrigger className={inputCls}><SelectValue placeholder="Link to lead…" /></SelectTrigger><SelectContent><SelectItem value="__none__">— No Lead —</SelectItem>{leads.map(l => <SelectItem key={l.id} value={l.id}>{l.company_name}</SelectItem>)}</SelectContent></Select></div>
@@ -1838,14 +2152,7 @@ const handleDownloadPdf = useCallback(async (inv) => {
       )}
 
       {localStats.monthly_trend?.some(d => d.revenue > 0) && (
-        <div className={`rounded-2xl border p-5 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`}>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2.5"><div className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/40"><BarChart3 className="h-4 w-4 text-blue-500" /></div><div><h3 className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Revenue Trend</h3><p className="text-xs text-slate-400">Last 12 months</p></div></div>
-            <div className="flex items-center gap-4 text-xs"><span className="flex items-center gap-1.5"><span className="w-4 h-0.5 inline-block rounded" style={{ background: COLORS.mediumBlue }} /> Revenue</span><span className="flex items-center gap-1.5"><span className="w-4 h-px inline-block rounded border-t-2 border-dashed" style={{ borderColor: COLORS.emeraldGreen }} /> Collected</span></div>
-          </div>
-          <RevenueChart trend={localStats.monthly_trend} isDark={isDark} />
-        </div>
-      )}
+      <EnhancedRevenueTrend invoices={invoices} isDark={isDark} />
 
       {/* FILTERS */}
       <div className={`rounded-2xl border shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
