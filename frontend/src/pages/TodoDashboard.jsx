@@ -1182,7 +1182,9 @@ export default function TodoDashboard() {
     addMutation.mutate({
       title: title.trim(),
       description: description.trim(),
-      due_date: dueDate ? new Date(dueDate).toISOString() : null,
+      due_date: dueDate && !isNaN(new Date(dueDate))
+        ? new Date(dueDate).toISOString()
+        : null,
       is_completed: false,
       status: "pending"
     });
