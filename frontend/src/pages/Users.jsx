@@ -1073,8 +1073,17 @@ export default function Users() {
       {/* ════════════════════════════════════════════════════════════════════
           CREATE / EDIT DIALOG
       ════════════════════════════════════════════════════════════════════ */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+<Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto users-slim rounded-2xl p-0 border-0 shadow-2xl gap-0">
+
+          <DialogHeader className="sr-only">
+            <DialogTitle>
+              {selectedUser ? `Edit Member — ${selectedUser.full_name}` : 'Add New Team Member'}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedUser ? 'Update user profile and settings.' : 'Register a new team member.'}
+            </DialogDescription>
+          </DialogHeader>
 
           <DialogGradHeader
             gradient={GRADIENT}
@@ -1231,7 +1240,7 @@ export default function Users() {
           </div>
         </DialogContent>
       </Dialog>
-
+      
       {/* ════════════════════════════════════════════════════════════════════
           PERMISSIONS DIALOG
       ════════════════════════════════════════════════════════════════════ */}
