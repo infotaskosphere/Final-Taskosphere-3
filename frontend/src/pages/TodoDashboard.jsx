@@ -1179,6 +1179,7 @@ export default function TodoDashboard() {
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleAdd = () => {
     if (!title.trim()) return;
+
     addMutation.mutate({
       title: title.trim(),
       description: description.trim(),
@@ -1188,8 +1189,9 @@ export default function TodoDashboard() {
       is_completed: false,
       status: "pending"
     });
+  };
 
-  const handleToggle  = (id) => toggleMutation.mutate({ id });
+  const handleToggle = (id) => toggleMutation.mutate({ id });
   const handleDelete  = (id) => deleteMutation.mutate(id);
 
   // Open promote modal instead of firing directly
