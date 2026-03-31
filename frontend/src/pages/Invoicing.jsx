@@ -1159,10 +1159,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     setForm(p => ({ ...p, items: p.items.map((it, i) => i !== idx ? it : { ...it, product_id: productId, description: prod.name, hsn_sac: prod.hsn_sac || '', unit: prod.unit || 'service', unit_price: prod.unit_price || 0, gst_rate: prod.gst_rate || 18 }) }));
   }, [products]);
 
-  // COMMAND 4: ADD PREVIEW FUNCTION
- // 1. Ensure the reference is declared at the top of InvoiceForm
-  const previewRef = useRef(null);
-
+  
   // 2. The corrected handlePreview function using previewRef
   const handlePreview = () => {
     const company = companies.find(c => c.id === form.company_id) || {};
@@ -1182,11 +1179,11 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       customColor: form.invoice_custom_color
     });
 
+    // CHANGE THIS LINE Specifically: Use previewRef instead of iframeRef
     if (previewRef.current) {
       previewRef.current.srcdoc = html;
     }
   };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.company_id) { toast.error('Please select a company profile'); return; }
@@ -1431,7 +1428,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                   {/* COMMAND 7: ADD iframe UI */}
                   <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-200'}`} style={{ height: 600 }}>
                     <iframe
-                      ref={previewRef}
+                      ref={previewRef} 
                       className="w-full h-[600px] border rounded-xl bg-white"
                       title="Invoice Preview"
                       sandbox="allow-scripts"
