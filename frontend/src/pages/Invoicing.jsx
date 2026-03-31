@@ -604,68 +604,76 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
 // ════════════════════════════════════════════════════════════════════════════════
 // EXCEL IMPORT — parse Excel/CSV invoice template
 // ════════════════════════════════════════════════════════════════════════════════
-function parseExcelInvoices(file) {
+function parseSaleReportExcel(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const wb = XLSX.read(e.target.result, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-        const invoices = rows
-          .filter(row => row['Client Name'] || row['client_name'])
-          .map(row => {
-            const clientName = row['Client Name'] || row['client_name'] || '';
-            const desc = row['Description'] || row['description'] || row['Item Description'] || 'Service';
-            const qty = parseFloat(row['Quantity'] || row['quantity'] || row['Qty'] || 1) || 1;
-            const rate = parseFloat(row['Rate'] || row['rate'] || row['Unit Price'] || row['unit_price'] || 0) || 0;
-            const gstRate = parseFloat(row['GST Rate'] || row['gst_rate'] || row['GST%'] || 18) || 18;
-            const taxable = qty * rate;
-            const half = gstRate / 2;
-            const cgst = Math.round(taxable * half / 100 * 100) / 100;
-            const sgst = Math.round(taxable * half / 100 * 100) / 100;
-            return {
-              invoice_type: 'tax_invoice', client_name: clientName,
-              client_email: row['Email'] || row['client_email'] || '',
-              client_phone: row['Phone'] || row['client_phone'] || '',
-              client_gstin: row['GSTIN'] || row['client_gstin'] || '',
-              client_address: row['Address'] || row['client_address'] || '',
-              client_state: row['State'] || row['client_state'] || '',
-              invoice_date: row['Invoice Date'] || row['invoice_date'] || format(new Date(), 'yyyy-MM-dd'),
-              due_date: row['Due Date'] || row['due_date'] || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
-              reference_no: row['Reference No'] || row['reference_no'] || '',
-              notes: row['Notes'] || row['notes'] || '',
-              is_interstate: false,
-              items: [{ description: desc, hsn_sac: row['HSN/SAC'] || row['hsn_sac'] || '', quantity: qty,
-                unit: row['Unit'] || row['unit'] || 'service', unit_price: rate,
-                discount_pct: parseFloat(row['Discount%'] || row['discount_pct'] || 0) || 0, gst_rate: gstRate,
-                taxable_value: taxable, cgst_rate: half, sgst_rate: half, igst_rate: 0,
-                cgst_amount: cgst, sgst_amount: sgst, igst_amount: 0,
-                total_amount: Math.round((taxable + cgst + sgst) * 100) / 100 }],
-              subtotal: taxable, total_taxable: taxable, total_cgst: cgst, total_sgst: sgst, total_igst: 0,
-              total_gst: cgst + sgst, grand_total: Math.round((taxable + cgst + sgst) * 100) / 100,
-              amount_paid: 0, amount_due: Math.round((taxable + cgst + sgst) * 100) / 100,
-              status: 'draft', payment_terms: 'Due on receipt',
-            };
-          });
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: '', header: 1 });
+        let headerIdx = rows.findIndex(r => String(r[0]).trim().toLowerCase() === 'date');
+        if (headerIdx === -1) headerIdx = 2;
+        const dataRows = rows.slice(headerIdx + 1).filter(r => r[0] && String(r[0]).trim());
+        const invoices = dataRows.map((row, i) => {
+          const rawDate = String(row[0] || '').trim();
+          const orderNo = String(row[1] || '').trim();
+          const invoiceNo = String(row[2] || '').trim();
+          const partyName = String(row[3] || '').trim() || 'Unknown';
+          const gstin = String(row[4] || '').trim();
+          const phone = String(row[5] || '').trim();
+          const txnType = String(row[6] || '').trim().toLowerCase();
+          const totalAmount = parseFloat(row[7]) || 0;
+          const paymentType = String(row[8] || '').trim();
+          const received = parseFloat(row[9]) || 0;
+          const balanceDue = parseFloat(row[10]) || 0;
+          const paymentStatus = String(row[11] || '').trim().toLowerCase();
+          const description = String(row[12] || '').trim();
+          let invDate = format(new Date(), 'yyyy-MM-dd');
+          if (rawDate) {
+            const parts = rawDate.split('/');
+            if (parts.length === 3) {
+              const yr = parts[2].length === 2 ? '20' + parts[2] : parts[2];
+              invDate = `${yr}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
+            }
+          }
+          const dueDate = format(new Date(new Date(invDate).getTime() + 30 * 86400000), 'yyyy-MM-dd');
+          let status = 'draft';
+          if (paymentStatus === 'paid') status = 'paid';
+          else if (received > 0 && balanceDue > 0) status = 'partially_paid';
+          else if (balanceDue > 0) status = 'sent';
+          let invoice_type = 'tax_invoice';
+          if (txnType.includes('credit')) invoice_type = 'credit_note';
+          else if (txnType.includes('estimate')) invoice_type = 'estimate';
+          const taxable = Math.round(totalAmount / 1.18 * 100) / 100;
+          const gstAmt = Math.round((totalAmount - taxable) * 100) / 100;
+          const cgst = Math.round(gstAmt / 2 * 100) / 100;
+          const sgst = Math.round(gstAmt / 2 * 100) / 100;
+          return {
+            invoice_type,
+            client_name: partyName,
+            client_email: '',
+            client_phone: phone,
+            client_gstin: gstin,
+            client_address: '',
+            client_state: '',
+            invoice_date: invDate,
+            due_date: dueDate,
+            reference_no: orderNo || invoiceNo,
+            notes: description || paymentType,
+            is_interstate: false,
+            items: [{ description: description || `Sale - ${invoiceNo || i + 1}`, hsn_sac: '', quantity: 1, unit: 'service', unit_price: taxable, discount_pct: 0, gst_rate: 18, taxable_value: taxable, cgst_rate: 9, sgst_rate: 9, igst_rate: 0, cgst_amount: cgst, sgst_amount: sgst, igst_amount: 0, total_amount: totalAmount }],
+            subtotal: taxable, total_taxable: taxable, total_cgst: cgst, total_sgst: sgst, total_igst: 0,
+            total_gst: gstAmt, grand_total: totalAmount, amount_paid: received, amount_due: balanceDue,
+            status, payment_terms: paymentType || 'Due on receipt',
+          };
+        }).filter(inv => inv.grand_total > 0);
         resolve(invoices);
-      } catch (err) { reject(new Error(`Failed to parse Excel file: ${err.message}`)); }
+      } catch (err) { reject(new Error(`Failed to parse SaleReport: ${err.message}`)); }
     };
     reader.onerror = () => reject(new Error('Failed to read file'));
     reader.readAsArrayBuffer(file);
   });
-}
-function downloadInvoiceTemplate() {
-  const wb = XLSX.utils.book_new();
-  const headers = ['Client Name','Email','Phone','GSTIN','Address','State','Invoice Date','Due Date','Reference No','Description','HSN/SAC','Quantity','Unit','Rate','Discount%','GST Rate','Notes'];
-  const sampleRows = [
-    ['Acme Corp Pvt Ltd','billing@acme.com','9876543210','24AAAAA0000A1Z5','123 Main Street, Surat','Gujarat',format(new Date(),'yyyy-MM-dd'),format(new Date(Date.now()+30*86400000),'yyyy-MM-dd'),'PO-2025-001','Website Development Services','998314','1','service','50000','0','18','Net 30 payment terms'],
-  ];
-  const ws = XLSX.utils.aoa_to_sheet([headers, ...sampleRows]);
-  ws['!cols'] = headers.map((h, i) => ({ wch: [25,28,14,20,35,14,14,14,14,35,10,10,10,12,10,10,35][i] || 18 }));
-  XLSX.utils.book_append_sheet(wb, ws, 'Invoices');
-  XLSX.writeFile(wb, 'Invoice_Import_Template.xlsx');
-  toast.success('Template downloaded! Fill it and import back.');
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -728,9 +736,29 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
     setLoading(true); setError('');
     try {
       if (importMode === 'excel') {
-        const invoices = await parseExcelInvoices(file);
-        if (!invoices.length) throw new Error('No valid invoice rows found. Check the template format.');
-        setParsed({ invoices, firms: [], clients: [], items: [], mode: 'excel', source_label: 'Excel/CSV' });
+        const sniffReader = new FileReader();
+        const firstCell = await new Promise(res => {
+          sniffReader.onload = e => {
+            try {
+              const wb2 = XLSX.read(e.target.result, { type: 'array' });
+              const ws2 = wb2.Sheets[wb2.SheetNames[0]];
+              const r = XLSX.utils.sheet_to_json(ws2, { header: 1, defval: '' });
+              res(String(r[0]?.[0] || ''));
+            } catch { res(''); }
+          };
+          sniffReader.readAsArrayBuffer(file);
+        });
+        const isSaleReport = firstCell.toLowerCase().includes('generated on');
+        let invoices;
+        if (isSaleReport) {
+          invoices = await parseSaleReportExcel(file);
+          if (!invoices.length) throw new Error('No valid sale rows found in SaleReport format.');
+          setParsed({ invoices, firms: [], clients: [], items: [], mode: 'excel', source_label: 'SaleReport (Auto-detected)' });
+        } else {
+          invoices = await parseExcelInvoices(file);
+          if (!invoices.length) throw new Error('No valid invoice rows found. Check the template format.');
+          setParsed({ invoices, firms: [], clients: [], items: [], mode: 'excel', source_label: 'Excel/CSV' });
+        }
       } else {
         const data = await parseBackupViaAPI(file);
         const mode = importMode === 'vyp' ? 'vyp' : importMode;
@@ -1224,46 +1252,90 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
         </div>
       )}
 
-      {/* SVG Chart */}
+{/* SVG Chart — smooth cubic bezier */}
       {currentData.length > 0 && (
         <div>
-          <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="none">
+          <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="none" style={{ overflow: 'visible' }}>
             <defs>
               <linearGradient id="trendAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={COLORS.mediumBlue} stopOpacity="0.22" />
-                <stop offset="100%" stopColor={COLORS.mediumBlue} stopOpacity="0.01" />
+                <stop offset="0%" stopColor={COLORS.mediumBlue} stopOpacity="0.28" />
+                <stop offset="65%" stopColor={COLORS.mediumBlue} stopOpacity="0.07" />
+                <stop offset="100%" stopColor={COLORS.mediumBlue} stopOpacity="0" />
               </linearGradient>
+              <linearGradient id="collectedAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={COLORS.emeraldGreen} stopOpacity="0.18" />
+                <stop offset="100%" stopColor={COLORS.emeraldGreen} stopOpacity="0" />
+              </linearGradient>
+              <filter id="glowBlue" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
+              <filter id="glowGreen" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="2" result="blur" />
+                <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
             </defs>
             {[0.25, 0.5, 0.75, 1].map(f => {
               const y = H - pad.b - f * (H - pad.t - pad.b);
               return (
                 <g key={f}>
-                  <line x1={pad.l} y1={y} x2={W - pad.r} y2={y} stroke={isDark ? '#334155' : '#f1f5f9'} strokeWidth="1" />
-                  <text x={pad.l - 4} y={y + 3} textAnchor="end" fontSize="8" fill={isDark ? '#64748b' : '#94a3b8'} fontFamily="monospace">{fmtAxis(maxVal * f)}</text>
+                  <line x1={pad.l} y1={y} x2={W - pad.r} y2={y} stroke={isDark ? '#1e293b' : '#f1f5f9'} strokeWidth="1" strokeDasharray="4 4" />
+                  <text x={pad.l - 6} y={y + 3.5} textAnchor="end" fontSize="8" fill={isDark ? '#475569' : '#94a3b8'} fontFamily="monospace">{fmtAxis(maxVal * f)}</text>
                 </g>
               );
             })}
-            {mkArea(pts) && <path d={mkArea(pts)} fill="url(#trendAreaGrad)" />}
-            {compareEnabled && mkLine(prevPts) && <path d={mkLine(prevPts)} fill="none" stroke={COLORS.purple} strokeWidth="1.5" strokeDasharray="5 3" opacity="0.8" strokeLinecap="round" />}
-            {mkLine(colPts) && <path d={mkLine(colPts)} fill="none" stroke={COLORS.emeraldGreen} strokeWidth="1.5" strokeDasharray="3 2" strokeLinecap="round" />}
-            {selectedServices.length > 0 && mkLine(svcPts) && <path d={mkLine(svcPts)} fill="none" stroke={COLORS.amber} strokeWidth="2.5" strokeLinecap="round" />}
-            {mkLine(pts) && <path d={mkLine(pts)} fill="none" stroke={COLORS.mediumBlue} strokeWidth="2.5" strokeLinecap="round" />}
-            {pts.map(([x, y], i) => (
-              <g key={i}>
-                <circle cx={x} cy={y} r="3.5" fill="white" stroke={COLORS.mediumBlue} strokeWidth="2" />
-                <text x={x} y={H - 7} textAnchor="middle" fontSize="8" fill={isDark ? '#64748b' : '#94a3b8'}>{currentData[i]?.label}</text>
-              </g>
-            ))}
+            {(() => {
+              const smooth = (pp) => {
+                if (pp.length < 2) return '';
+                let d = `M${pp[0][0]},${pp[0][1]}`;
+                for (let i = 0; i < pp.length - 1; i++) {
+                  const x0 = i > 0 ? pp[i-1][0] : pp[i][0], y0 = i > 0 ? pp[i-1][1] : pp[i][1];
+                  const x1 = pp[i][0], y1 = pp[i][1];
+                  const x2 = pp[i+1][0], y2 = pp[i+1][1];
+                  const x3 = i < pp.length-2 ? pp[i+2][0] : x2, y3 = i < pp.length-2 ? pp[i+2][1] : y2;
+                  const cp1x = x1 + (x2-x0)/5, cp1y = y1 + (y2-y0)/5;
+                  const cp2x = x2 - (x3-x1)/5, cp2y = y2 - (y3-y1)/5;
+                  d += ` C${cp1x},${cp1y} ${cp2x},${cp2y} ${x2},${y2}`;
+                }
+                return d;
+              };
+              const smoothArea = (pp) => {
+                if (pp.length < 2) return '';
+                return `${smooth(pp)} L${pp[pp.length-1][0]},${H-pad.b} L${pp[0][0]},${H-pad.b} Z`;
+              };
+              return (
+                <>
+                  {colPts.length > 1 && <path d={smoothArea(colPts)} fill="url(#collectedAreaGrad)" />}
+                  {pts.length > 1 && <path d={smoothArea(pts)} fill="url(#trendAreaGrad)" />}
+                  {compareEnabled && prevPts.length > 1 && <path d={smooth(prevPts)} fill="none" stroke={COLORS.purple} strokeWidth="2" strokeDasharray="6 3" opacity="0.75" strokeLinecap="round" strokeLinejoin="round" />}
+                  {selectedServices.length > 0 && svcPts.length > 1 && <path d={smooth(svcPts)} fill="none" stroke={COLORS.amber} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
+                  {colPts.length > 1 && <path d={smooth(colPts)} fill="none" stroke={COLORS.emeraldGreen} strokeWidth="2" strokeDasharray="5 3" strokeLinecap="round" strokeLinejoin="round" filter="url(#glowGreen)" />}
+                  {pts.length > 1 && <path d={smooth(pts)} fill="none" stroke={COLORS.mediumBlue} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" filter="url(#glowBlue)" />}
+                  {pts.map(([x, y], i) => (
+                    <g key={i}>
+                      <circle cx={x} cy={y} r="7" fill={COLORS.mediumBlue} opacity="0.10" />
+                      <circle cx={x} cy={y} r="3.5" fill="white" stroke={COLORS.mediumBlue} strokeWidth="2.5" />
+                      {i === pts.length - 1 && currentData[i]?.revenue > 0 && (
+                        <>
+                          <rect x={x-24} y={y-22} width="48" height="14" rx="4" fill={COLORS.mediumBlue} opacity="0.92" />
+                          <text x={x} y={y-12} textAnchor="middle" fontSize="7.5" fill="white" fontFamily="monospace" fontWeight="bold">{fmtAxis(currentData[i].revenue)}</text>
+                        </>
+                      )}
+                      <text x={x} y={H-6} textAnchor="middle" fontSize="8" fill={isDark ? '#475569' : '#94a3b8'}>{currentData[i]?.label}</text>
+                    </g>
+                  ))}
+                </>
+              );
+            })()}
           </svg>
-          <div className="flex flex-wrap gap-4 text-[10px] mt-1 text-slate-400">
-            <span className="flex items-center gap-1.5"><span className="w-4 h-0.5 inline-block rounded" style={{ background: COLORS.mediumBlue }} />Revenue</span>
-            <span className="flex items-center gap-1.5"><span className="w-4 h-0.5 inline-block border-t-2 border-dashed" style={{ borderColor: COLORS.emeraldGreen }} />Collected</span>
-            {compareEnabled && <span className="flex items-center gap-1.5"><span className="w-4 h-0.5 inline-block border-t-2 border-dashed" style={{ borderColor: COLORS.purple }} />Prev Period</span>}
-            {selectedServices.length > 0 && <span className="flex items-center gap-1.5"><span className="w-4 h-0.5 inline-block rounded" style={{ background: COLORS.amber }} />Selected Services</span>}
+          <div className="flex flex-wrap gap-4 text-[10px] mt-2 text-slate-400">
+            <span className="flex items-center gap-1.5"><span className="w-5 h-0.5 inline-block rounded-full" style={{ background: COLORS.mediumBlue }} />Revenue</span>
+            <span className="flex items-center gap-1.5"><span className="w-5 h-0.5 inline-block rounded-full border-t-2 border-dashed" style={{ borderColor: COLORS.emeraldGreen }} />Collected</span>
+            {compareEnabled && <span className="flex items-center gap-1.5"><span className="w-5 h-0.5 inline-block border-t-2 border-dashed" style={{ borderColor: COLORS.purple }} />Prev Period</span>}
+            {selectedServices.length > 0 && <span className="flex items-center gap-1.5"><span className="w-5 h-0.5 inline-block rounded-full" style={{ background: COLORS.amber }} />Selected Services</span>}
           </div>
         </div>
       )}
-
       {/* Comparative table */}
       {compareEnabled && currentData.length > 0 && (
         <div className={`mt-4 rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
@@ -1958,7 +2030,32 @@ export default function Invoicing() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const searchRef = useRef(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
 
+  const toggleSelect = useCallback((id) => {
+    setSelectedIds(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds(prev => prev.size === enrichedFiltered.length ? new Set() : new Set(enrichedFiltered.map(i => i.id)));
+  }, [enrichedFiltered]);
+
+  const handleBulkDelete = useCallback(async () => {
+    if (!selectedIds.size) return;
+    if (!window.confirm(`Delete ${selectedIds.size} invoice${selectedIds.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
+    setBulkDeleteLoading(true);
+    let deleted = 0, failed = 0;
+    for (const id of selectedIds) {
+      try { await api.delete(`/invoices/${id}`); deleted++; }
+      catch { failed++; }
+    }
+    setBulkDeleteLoading(false);
+    setSelectedIds(new Set());
+    fetchAll();
+    toast.success(`Deleted ${deleted} invoice${deleted > 1 ? 's' : ''}${failed ? ` (${failed} failed)` : ''}`);
+  }, [selectedIds, fetchAll]);
+  
   useEffect(() => { const t = setTimeout(() => setSearchTerm(searchInput), 250); return () => clearTimeout(t); }, [searchInput]);
   useEffect(() => {
     const h = (e) => {
@@ -2181,8 +2278,28 @@ const handleDownloadPdf = useCallback(async (inv) => {
 
       {/* INVOICE TABLE */}
       <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`}>
-        <div className={`grid border-b px-5 py-3 ${isDark ? 'bg-slate-700/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`} style={{ gridTemplateColumns: '1fr 1fr 110px 100px 100px 100px 100px 160px' }}>
-          {['Invoice No', 'Client', 'Date', 'Total', 'Paid', 'Balance', 'Status', 'Actions'].map(h => (<div key={h} className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{h}</div>))}
+        {selectedIds.size > 0 && (
+          <div className={`flex items-center gap-3 px-5 py-2.5 border-b ${isDark ? 'bg-blue-900/20 border-slate-700' : 'bg-blue-50 border-blue-100'}`}>
+            <span className={`text-sm font-semibold ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>{selectedIds.size} selected</span>
+            <Button size="sm" onClick={handleBulkDelete} disabled={bulkDeleteLoading}
+              className="h-8 px-4 rounded-xl text-xs text-white font-semibold gap-1.5"
+              style={{ background: 'linear-gradient(135deg, #dc2626, #b91c1c)' }}>
+              <Trash2 className="h-3.5 w-3.5" />
+              {bulkDeleteLoading ? 'Deleting…' : `Delete ${selectedIds.size}`}
+            </Button>
+            <button onClick={() => setSelectedIds(new Set())} className="text-xs text-slate-400 hover:text-slate-600">Clear selection</button>
+          </div>
+        )}
+        <div className={`grid border-b px-5 py-3 ${isDark ? 'bg-slate-700/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`} style={{ gridTemplateColumns: '32px 1fr 1fr 110px 100px 100px 100px 100px 160px' }}>
+          <div className="flex items-center">
+            <input type="checkbox"
+              checked={enrichedFiltered.length > 0 && selectedIds.size === enrichedFiltered.length}
+              onChange={toggleSelectAll}
+              className="w-3.5 h-3.5 rounded accent-blue-600 cursor-pointer" />
+          </div>
+          {['Invoice No', 'Client', 'Date', 'Total', 'Paid', 'Balance', 'Status', 'Actions'].map(h => (
+            <div key={h} className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{h}</div>
+          ))}
         </div>
         {loading ? (
           <div className="flex items-center justify-center py-16"><div className="h-6 w-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" /></div>
@@ -2200,8 +2317,12 @@ const handleDownloadPdf = useCallback(async (inv) => {
             {enrichedFiltered.map(inv => {
               const meta = getStatusMeta(inv); const isOverdue = inv.status === 'overdue';
               return (
-                <div key={inv.id} className={`grid items-center px-5 py-3.5 border-b cursor-pointer group transition-colors last:border-0 ${isOverdue ? (isDark ? 'bg-red-900/10 border-red-900/20' : 'bg-red-50/30 border-red-100') : ''} ${isDark ? 'border-slate-700 hover:bg-slate-700/40' : 'border-slate-100 hover:bg-slate-50/60'}`}
-                  style={{ gridTemplateColumns: '1fr 1fr 110px 100px 100px 100px 100px 160px' }} onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
+                <div key={inv.id} className={`grid items-center px-5 py-3.5 border-b cursor-pointer group transition-colors last:border-0 ${selectedIds.has(inv.id) ? (isDark ? 'bg-blue-900/15' : 'bg-blue-50/60') : ''} ${isOverdue ? (isDark ? 'bg-red-900/10 border-red-900/20' : 'bg-red-50/30 border-red-100') : ''} ${isDark ? 'border-slate-700 hover:bg-slate-700/40' : 'border-slate-100 hover:bg-slate-50/60'}`}
+                  style={{ gridTemplateColumns: '32px 1fr 1fr 110px 100px 100px 100px 100px 160px' }} onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
+                  <div onClick={e => { e.stopPropagation(); toggleSelect(inv.id); }} className="flex items-center">
+                    <input type="checkbox" checked={selectedIds.has(inv.id)} onChange={() => toggleSelect(inv.id)}
+                      className="w-3.5 h-3.5 rounded accent-blue-600 cursor-pointer" />
+                  </div>
                   <div className="flex items-center gap-3"><div className="w-1 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: meta.hex }} /><div><p className={`text-sm font-bold font-mono ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>{inv.invoice_no}</p><p className="text-[10px] text-slate-400">{INV_TYPES.find(t => t.value === inv.invoice_type)?.label || 'Tax Invoice'}</p></div></div>
                   <div className="flex items-center gap-2.5 min-w-0"><div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>{inv.client_name?.charAt(0).toUpperCase() || '?'}</div><div className="min-w-0"><p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{inv.client_name}</p>{inv.client_gstin && <p className="text-[10px] text-slate-400 font-mono truncate">{inv.client_gstin}</p>}</div></div>
                   <div><p className={`text-xs font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{inv.invoice_date}</p><p className={`text-[10px] ${isOverdue ? 'text-red-500 font-semibold' : 'text-slate-400'}`}>Due: {inv.due_date}</p></div>
