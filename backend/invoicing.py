@@ -60,10 +60,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Invoicing"])
 
 # ═══════════════════════════════════════════════════════════
-# GOOGLE DRIVE — fully optional, lazy-loaded
+# GOOGLE DRIVE — OAuth-based (FINAL VERSION)
 # ═══════════════════════════════════════════════════════════
 
-SERVICE_ACCOUNT_FILE = "google-drive-service-account.json"
+import os
+import io as _io
+from typing import Optional
+from fastapi import HTTPException
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+
 
 DRIVE_FOLDERS = {
     "invoices":     "1NhadvUmWtZ8x37FrJ2oeKTCOvHVyCyPv",
@@ -73,105 +80,120 @@ DRIVE_FOLDERS = {
 }
 
 
-def _drive_configured() -> bool:
-    return (
-        bool(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip())
-        or bool(os.getenv("GOOGLE_SERVICE_ACCOUNT_B64", "").strip())
-        or os.path.exists(SERVICE_ACCOUNT_FILE)
-    )
+# ═══════════════════════════════════════════════════════════
+# AUTH — OAuth (REPLACES SERVICE ACCOUNT)
+# ═══════════════════════════════════════════════════════════
 
-
-def _get_drive_service():
-    """Lazy-load Drive credentials. Raises HTTPException if not configured."""
+def _get_drive_service(access_token: str, refresh_token: str):
     try:
-        from google.oauth2 import service_account
-        from googleapiclient.discovery import build
-    except ImportError:
-        raise HTTPException(503, "google-auth is not installed. Run: pip install google-auth google-api-python-client")
+        creds = Credentials(
+            token=access_token,
+            refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=os.getenv("GOOGLE_CLIENT_ID"),
+            client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+        )
 
-    creds_info = None
-
-    raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
-    if raw_json:
-        try:
-            creds_info = json.loads(raw_json)
-        except Exception as e:
-            raise HTTPException(503, f"GOOGLE_SERVICE_ACCOUNT_JSON is invalid JSON: {e}")
-
-    if not creds_info:
-        raw_b64 = os.getenv("GOOGLE_SERVICE_ACCOUNT_B64", "").strip()
-        if raw_b64:
-            try:
-                creds_info = json.loads(base64.b64decode(raw_b64).decode("utf-8"))
-            except Exception as e:
-                raise HTTPException(503, f"GOOGLE_SERVICE_ACCOUNT_B64 is invalid: {e}")
-
-    if not creds_info:
-        if os.path.exists(SERVICE_ACCOUNT_FILE):
-            try:
-                with open(SERVICE_ACCOUNT_FILE) as f:
-                    creds_info = json.load(f)
-            except Exception as e:
-                raise HTTPException(503, f"Failed to read '{SERVICE_ACCOUNT_FILE}': {e}")
-        else:
-            raise HTTPException(
-                503,
-                "Google Drive not configured. Add GOOGLE_SERVICE_ACCOUNT_JSON env var or place "
-                "google-drive-service-account.json in the project root.",
-            )
-
-    _DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
-    try:
-        creds = service_account.Credentials.from_service_account_info(creds_info, scopes=_DRIVE_SCOPES)
         return build("drive", "v3", credentials=creds)
+
     except Exception as e:
-        raise HTTPException(503, f"Google Drive authentication failed: {e}")
+        raise HTTPException(500, f"Google Drive auth failed: {e}")
 
 
-def _upload_to_drive(content_bytes: bytes, filename: str, folder_key: str, mime_type: str, custom_parent_id: str = None) -> Optional[str]:
-    """Upload bytes to Drive. Returns webViewLink or None. Never raises — failures are logged."""
-    if not _drive_configured():
-        return None
+# ═══════════════════════════════════════════════════════════
+# UPLOAD
+# ═══════════════════════════════════════════════════════════
+
+async def _upload_to_drive(
+    content_bytes: bytes,
+    filename: str,
+    folder_key: str,
+    mime_type: str,
+    access_token: str,
+    refresh_token: str,
+    custom_parent_id: str = None
+) -> Optional[str]:
+    """Upload bytes to Drive using OAuth"""
+
     try:
-        import io as _io
-        from googleapiclient.http import MediaIoBaseUpload
-        service = _get_drive_service()
+        service = _get_drive_service(access_token, refresh_token)
+
         parent_id = custom_parent_id if custom_parent_id else DRIVE_FOLDERS[folder_key]
-        file_metadata = {"name": filename, "parents": [parent_id]}
-        media = MediaIoBaseUpload(_io.BytesIO(content_bytes), mimetype=mime_type, resumable=True)
-        f = service.files().create(body=file_metadata, media_body=media, fields="id,webViewLink,name").execute()
+
+        file_metadata = {
+            "name": filename,
+            "parents": [parent_id]
+        }
+
+        media = MediaIoBaseUpload(
+            _io.BytesIO(content_bytes),
+            mimetype=mime_type,
+            resumable=True
+        )
+
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields="id, webViewLink, name"
+        ).execute()
+
         logger.info(f"Uploaded to Drive → {filename}")
-        return f.get("webViewLink")
+
+        return file.get("webViewLink")
+
     except Exception as e:
         logger.error(f"Drive upload FAILED: {e}", exc_info=True)
         raise HTTPException(500, f"Drive upload failed: {str(e)}")
 
 
-def _get_or_create_client_folder(client_name: str) -> str:
+# ═══════════════════════════════════════════════════════════
+# CLIENT FOLDER (DYNAMIC)
+# ═══════════════════════════════════════════════════════════
+
+def _get_or_create_client_folder(
+    client_name: str,
+    access_token: str,
+    refresh_token: str
+) -> str:
     if not client_name or not client_name.strip():
         return DRIVE_FOLDERS["invoices"]
+
     try:
-        service = _get_drive_service()
+        service = _get_drive_service(access_token, refresh_token)
+
         cn = client_name.strip()
-        q = (
+
+        query = (
             f"'{DRIVE_FOLDERS['invoices']}' in parents and name='{cn}' "
             f"and mimeType='application/vnd.google-apps.folder' and trashed=false"
         )
-        results = service.files().list(q=q, fields="files(id,name)").execute()
+
+        results = service.files().list(
+            q=query,
+            fields="files(id,name)"
+        ).execute()
+
         existing = results.get("files", [])
+
         if existing:
             return existing[0]["id"]
+
         folder_metadata = {
             "name": cn,
             "mimeType": "application/vnd.google-apps.folder",
             "parents": [DRIVE_FOLDERS["invoices"]],
         }
-        folder = service.files().create(body=folder_metadata, fields="id").execute()
+
+        folder = service.files().create(
+            body=folder_metadata,
+            fields="id"
+        ).execute()
+
         return folder["id"]
+
     except Exception as e:
         logger.warning(f"Could not create Drive folder for '{client_name}': {e}")
         return DRIVE_FOLDERS["invoices"]
-
 
 # ═══════════════════════════════════════════════════════════
 # CONSTANTS
