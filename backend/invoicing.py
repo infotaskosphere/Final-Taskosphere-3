@@ -13,6 +13,13 @@ CHANGES in v6.1 (bug-fixes over v6.0):
   - FIXED: .vyb backup extension now correctly routed to the .vyp SQLite
     parser (KhataBook Pro uses .vyb, same SQLite schema as .vyp).
   - Added _hex_to_rgb() helper used by the PDF builder.
+
+CHANGES in v6.2 (bug-fixes over v6.1):
+  - FIXED: _upload_to_drive() is async — added missing `await` in
+    upload_invoice_to_drive() and parse_backup_file() endpoints.
+    Previously the coroutine object was passed directly to MongoDB causing:
+    bson.errors.InvalidDocument: cannot encode object: <coroutine object
+    _upload_to_drive ...>
 """
 
 import uuid
@@ -1532,7 +1539,7 @@ async def parse_backup_file(file: UploadFile = File(...), current_user: User = D
         elif parser_type == "json":  result = _parse_json_file(tmp_path)
         else: raise HTTPException(400, "No parser available")
 
-        # Optionally backup to Drive — never fail if it doesn't work
+        # ✅ FIX v6.2: added `await` — _upload_to_drive is async, was never awaited before
         if _drive_configured():
             await _upload_to_drive(content, f"Backup_{filename}", "backups",
                                    file.content_type or "application/octet-stream")
@@ -1809,10 +1816,18 @@ async def upload_invoice_to_drive(inv_id: str, current_user: User = Depends(get_
         client_folder_id = DRIVE_FOLDERS["invoices"]
 
     safe_inv_no = (inv.get("invoice_no") or inv_id).replace("/", "_").replace("\\", "_")
-    pdf_link = await _upload_to_drive(pdf_bytes, f"Invoice_{safe_inv_no}.pdf", "invoices", "application/pdf",
-                                      custom_parent_id=client_folder_id)
-    await _upload_to_drive(json.dumps(inv, default=str).encode(), f"Invoice_{safe_inv_no}.json",
-                           "invoices", "application/json", custom_parent_id=client_folder_id)
+
+    # ✅ FIX v6.2: added `await` to both _upload_to_drive calls —
+    #    previously the coroutine object itself was stored in pdf_link,
+    #    causing bson.errors.InvalidDocument when saving to MongoDB.
+    pdf_link = await _upload_to_drive(
+        pdf_bytes, f"Invoice_{safe_inv_no}.pdf", "invoices", "application/pdf",
+        custom_parent_id=client_folder_id
+    )
+    await _upload_to_drive(
+        json.dumps(inv, default=str).encode(), f"Invoice_{safe_inv_no}.json",
+        "invoices", "application/json", custom_parent_id=client_folder_id
+    )
 
     if pdf_link:
         await db.invoices.update_one({"id": inv_id},
