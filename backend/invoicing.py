@@ -25,17 +25,42 @@ import os
 import smtplib
 import json
 import csv
+
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
+
 from datetime import datetime, timezone, date, timedelta
 from io import BytesIO, StringIO
 from typing import List, Optional, Literal, Any, Dict
-from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks, UploadFile, File
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    status,
+    BackgroundTasks,
+    UploadFile,
+    File,
+)
 from fastapi.responses import StreamingResponse
+
 from pydantic import BaseModel, Field, field_validator
+
 from backend.dependencies import db, get_current_user
 from backend.models import User
+
+# ✅ Google imports (clean)
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+
+
+# ═══════════════════════════════════════════════════════════
+# OPTIONAL LIBRARIES (AUTO-INSTALL)
+# ═══════════════════════════════════════════════════════════
 
 try:
     from fpdf import FPDF
@@ -54,23 +79,20 @@ except ImportError:
 try:
     import xml.etree.ElementTree as ET
 except ImportError:
-    pass
+    ET = None
+
+
+# ═══════════════════════════════════════════════════════════
+# LOGGER + ROUTER
+# ═══════════════════════════════════════════════════════════
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Invoicing"])
 
-# ═══════════════════════════════════════════════════════════
-# GOOGLE DRIVE — OAuth-based (FINAL VERSION)
-# ═══════════════════════════════════════════════════════════
 
-import os
-import io as _io
-from typing import Optional
-from fastapi import HTTPException
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
-
+# ═══════════════════════════════════════════════════════════
+# DRIVE FOLDERS (MAKE SURE THESE ARE ACCESSIBLE)
+# ═══════════════════════════════════════════════════════════
 
 DRIVE_FOLDERS = {
     "invoices":     "1NhadvUmWtZ8x37FrJ2oeKTCOvHVyCyPv",
@@ -81,25 +103,36 @@ DRIVE_FOLDERS = {
 
 
 # ═══════════════════════════════════════════════════════════
-# AUTH — OAuth (REPLACES SERVICE ACCOUNT)
+# AUTH — OAuth (REFRESH TOKEN BASED)
 # ═══════════════════════════════════════════════════════════
 
-def _get_drive_service(access_token: str, refresh_token: str):
+def _get_drive_service():
     try:
+        refresh_token = os.getenv("GOOGLE_REFRESH_TOKEN")
+        client_id = os.getenv("GOOGLE_CLIENT_ID")
+        client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+
+        if not refresh_token:
+            raise HTTPException(500, "Missing GOOGLE_REFRESH_TOKEN")
+
+        if not client_id or not client_secret:
+            raise HTTPException(500, "Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET")
+
         creds = Credentials(
-            token=access_token,
+            None,
             refresh_token=refresh_token,
             token_uri="https://oauth2.googleapis.com/token",
-            client_id=os.getenv("GOOGLE_CLIENT_ID"),
-            client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+            client_id=client_id,
+            client_secret=client_secret,
         )
+
+        creds.refresh(Request())
 
         return build("drive", "v3", credentials=creds)
 
     except Exception as e:
-        raise HTTPException(500, f"Google Drive auth failed: {e}")
-
-
+        logger.error(f"❌ DRIVE AUTH ERROR: {e}", exc_info=True)
+        raise HTTPException(500, f"Google Drive auth failed: {str(e)}")
 # ═══════════════════════════════════════════════════════════
 # UPLOAD
 # ═══════════════════════════════════════════════════════════
@@ -109,17 +142,17 @@ async def _upload_to_drive(
     filename: str,
     folder_key: str,
     mime_type: str,
-    access_token: str,
-    refresh_token: str,
     custom_parent_id: str = None
-) -> Optional[str]:
+):
     """Upload bytes to Drive using OAuth"""
 
     try:
-        service = _get_drive_service(access_token, refresh_token)
+        service = _get_drive_service()
 
-        parent_id = custom_parent_id if custom_parent_id else DRIVE_FOLDERS[folder_key]
+        parent_id = custom_parent_id if custom_parent_id else DRIVE_FOLDERS.get(folder_key)
 
+        if not parent_id:
+            raise HTTPException(500, f"Invalid folder key: {folder_key}")
         file_metadata = {
             "name": filename,
             "parents": [parent_id]
@@ -142,24 +175,24 @@ async def _upload_to_drive(
         return file.get("webViewLink")
 
     except Exception as e:
-        logger.error(f"Drive upload FAILED: {e}", exc_info=True)
-        raise HTTPException(500, f"Drive upload failed: {str(e)}")
-
+        logger.error(f"❌ DRIVE UPLOAD FAILED: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Drive upload failed: {str(e)}"
+        )
 
 # ═══════════════════════════════════════════════════════════
 # CLIENT FOLDER (DYNAMIC)
 # ═══════════════════════════════════════════════════════════
 
 def _get_or_create_client_folder(
-    client_name: str,
-    access_token: str,
-    refresh_token: str
+    client_name: str
 ) -> str:
     if not client_name or not client_name.strip():
         return DRIVE_FOLDERS["invoices"]
 
     try:
-        service = _get_drive_service(access_token, refresh_token)
+        service = _get_drive_service()
 
         cn = client_name.strip()
 
