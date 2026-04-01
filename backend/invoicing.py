@@ -143,8 +143,8 @@ def _upload_to_drive(content_bytes: bytes, filename: str, folder_key: str, mime_
         logger.info(f"Uploaded to Drive → {filename}")
         return f.get("webViewLink")
     except Exception as e:
-        logger.warning(f"Drive upload skipped for '{filename}': {e}")
-        return None
+        logger.error(f"Drive upload FAILED: {e}", exc_info=True)
+        raise HTTPException(500, f"Drive upload failed: {str(e)}")
 
 
 def _get_or_create_client_folder(client_name: str) -> str:
