@@ -102,6 +102,13 @@ DRIVE_FOLDERS = {
 }
 
 
+def _drive_configured() -> bool:
+    return bool(
+        os.getenv("GOOGLE_REFRESH_TOKEN") and
+        os.getenv("GOOGLE_CLIENT_ID") and
+        os.getenv("GOOGLE_CLIENT_SECRET")
+    )
+
 # ═══════════════════════════════════════════════════════════
 # AUTH — OAuth (REFRESH TOKEN BASED)
 # ═══════════════════════════════════════════════════════════
