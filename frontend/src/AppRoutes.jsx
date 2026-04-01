@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext.jsx";
 import DashboardLayout from "@/components/layout/DashboardLayout.jsx";
 
 /* ── Lazy Loaded Pages ──────────────────────────────────────────────────── */
+const IdentixAttendance = lazy(() => import("@/pages/IdentixAttendance.jsx"));
 const Login             = lazy(() => import("@/pages/Login.jsx"));
 const TaskAudit         = lazy(() => import("@/pages/TaskAudit.jsx"));
 const Register          = lazy(() => import("@/pages/Register.jsx"));
@@ -112,7 +113,13 @@ function AppRoutes() {
       <Route path="/invoicing" element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><Invoicing /></PageLoader></Permission>} />
       <Route path="/staff-activity" element={<Permission permission="can_view_staff_activity"><PageLoader><StaffActivity /></PageLoader></Permission>} />
       <Route path="/task-audit" element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
-
+      <Route path="/identix" element={
+        <Permission>
+          <PageLoader><IdentixAttendance /></PageLoader>
+        </Permission>
+      } />
+      
+      
       {/* Settings */}
       <Route path="/settings/email" element={<Protected><PageLoader><EmailSettings /></PageLoader></Protected>} />
       <Route path="/settings/general" element={<Protected><PageLoader><GeneralSettings /></PageLoader></Protected>} />
