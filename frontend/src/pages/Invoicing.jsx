@@ -626,37 +626,6 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
   // ── useRef ──
   const dropRef = useRef(null);
 
-  const downloadInvoiceTemplate = () => {
-    const headers = [
-      "Invoice No","Date","Customer Name","GSTIN","Phone",
-      "Item Description","HSN/SAC","Quantity","Unit",
-      "Unit Price","Discount %","GST %",
-      "Shipping","Other Charges",
-      "Total Amount","Paid Amount","Balance",
-      "Payment Terms","Notes"
-    ];
-
-    const sampleRows = [
-      ["INV-001","01/04/2026","ABC Pvt Ltd","24ABCDE1234F1Z5","9876543210","Consulting Service","9983","1","service","10000","0","18","0","0","11800","5000","6800","Due in 30 days","First invoice"]
-    ];
-
-    const csvContent = [
-      headers.join(","),
-      ...sampleRows.map(r => r.join(","))
-    ].join("\n");
-
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = "invoice_template.csv";
-
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  
   // ── Handlers ──
   const reset = () => {
     setStep('choose'); setImportMode(''); setFile(null); setParsed(null);
