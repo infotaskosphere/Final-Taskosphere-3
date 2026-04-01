@@ -7,8 +7,7 @@ import {
   Users, LogOut, Menu, Calendar, Activity, ChevronDown,
   PanelLeftClose, PanelLeftOpen, Target, Sun, Moon, MapPin,
   Settings, Mail, Receipt, X, KeyRound,
-  // ── NEW: Invoicing & Billing nav icon (CreditCard — in all lucide versions)
-  CreditCard,
+  CreditCard, Fingerprint,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
