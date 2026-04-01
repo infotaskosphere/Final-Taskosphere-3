@@ -34,13 +34,9 @@ from pydantic import BaseModel
 
 logger = logging.getLogger("identix")
 
-# ─── Import from your existing backend ──────────────────────────────────────
-# Adjust the import path if your project structure differs
-try:
-    from backend.server import db, get_current_user, require_admin, User
-except ImportError:
-    # Fallback if running standalone
-    raise ImportError("Could not import from server.py. Place this file in the same backend/ folder.")
+# ─── Import directly from dependencies/models to avoid circular import ───────
+from backend.dependencies import db, get_current_user, require_admin
+from backend.models import User
 
 identix_router = APIRouter(prefix="/identix", tags=["Identix"])
 
