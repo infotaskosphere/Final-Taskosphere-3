@@ -237,7 +237,7 @@ function itemsTableHTML(inv, p, light) {
   </tr></thead><tbody>
   ${items.map((it,i) => `<tr class="${i%2===1?'alt':''}">
     <td class="c">${i+1}</td>
-    <td class="desc">${it.description||''}</td>
+    <td class="desc">${it.description||''}${it.item_details ? `<div style="font-size:9.5px;color:#757575;font-weight:400;margin-top:2px;line-height:1.4;white-space:pre-wrap">${it.item_details}</div>` : ''}</td>
     <td class="c">${it.hsn_sac||''}</td>
     <td class="r">${fmtN(it.quantity)}</td>
     <td class="c">${it.unit||''}</td>
@@ -309,10 +309,8 @@ function signRow(company, inv) {
       ${!inv.notes && !inv.terms_conditions ? '<em>Thanks for doing business with us!</em>' : ''}
     </div>
     <div style="text-align:right">
-      <div style="font-size:9px;color:#9E9E9E">For&nbsp;${company?.name||'Your Company'}</div>
-      <div style="border-top:1px solid #9E9E9E;margin-top:34px;padding-top:5px;font-size:9.5px;color:#9E9E9E">Authorised Signatory</div>
-    </div>
-  </div>`;
+    <div style="font-size:9px;color:#9E9E9E">For&nbsp;${company?.name||'Your Company'}</div>
+    ${company?.signatory_name ? `<div style="font-size:10px;font-weight:600;color:#424242;margin-top:28px">${company.signatory_name}</div><div style="border-top:1px solid #9E9E9E;padding-top:5px;font-size:9.5px;color:#9E9E9E">${company.signatory_label||'Authorised Signatory'}</div>` : `<div style="border-top:1px solid #9E9E9E;margin-top:34px;padding-top:5px;font-size:9.5px;color:#9E9E9E">${company.signatory_label||'Authorised Signatory'}</div>`}
 }
 
 function partyBoxes(inv, p) {
@@ -380,7 +378,7 @@ ${itemTableCSS(p,l)}
     ${company?.phone ? `<span class="co-tag" style="margin-left:4px">📞&nbsp;${company.phone}</span>` : ''}
   </div>
   <div class="inv-r">
-    <div class="inv-type">Tax Invoice</div>
+    <div class="inv-type">${company?.invoice_title||'Tax Invoice'}</div>
     <div class="inv-no">${inv.invoice_no||'—'}</div>
     <div class="inv-meta">Date: ${inv.invoice_date||'—'}${inv.due_date ? `<br>Due: ${inv.due_date}` : ''}</div>
   </div>
@@ -694,7 +692,7 @@ ${itemTableCSS(p,l)}
 <div class="main">
   <div class="main-top">
     <div>
-      <div class="inv-type">Tax Invoice</div>
+      <div class="inv-type">${company?.invoice_title||'Tax Invoice'}</div>
       <div class="inv-no">${inv.invoice_no||'—'}</div>
     </div>
     <div>
