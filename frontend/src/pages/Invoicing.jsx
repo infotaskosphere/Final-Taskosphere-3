@@ -2171,13 +2171,18 @@ export default function Invoicing() {
       const invSettings = getInvSettings(invData.company_id);
       const company = {
         ...baseCompany,
-        bank_name:       baseCompany.bank_name       || invSettings.bank_name       || '',
-        bank_account_no: baseCompany.bank_account_no || invSettings.bank_account_no || '',
-        bank_account:    baseCompany.bank_account    || invSettings.bank_account_no || '',
-        bank_ifsc:       baseCompany.bank_ifsc       || invSettings.bank_ifsc       || '',
-        bank_branch:     baseCompany.bank_branch     || invSettings.bank_branch     || '',
-        upi_id:          baseCompany.upi_id          || invSettings.upi_id          || '',
-        show_qr_code:    invSettings.show_qr_code    ?? true,
+        bank_name:        baseCompany.bank_name       || invSettings.bank_name       || '',
+        bank_account_no:  baseCompany.bank_account_no || invSettings.bank_account_no || '',
+        bank_account:     baseCompany.bank_account    || invSettings.bank_account_no || '',
+        bank_ifsc:        baseCompany.bank_ifsc       || invSettings.bank_ifsc       || '',
+        bank_branch:      baseCompany.bank_branch     || invSettings.bank_branch     || '',
+        upi_id:           baseCompany.upi_id          || invSettings.upi_id          || '',
+        show_qr_code:     invSettings.show_qr_code    ?? true,
+        // Settings fields applied to existing invoices
+        invoice_title:    invSettings.invoice_title   || 'Tax Invoice',
+        signatory_name:   invSettings.signatory_name  || '',
+        signatory_label:  invSettings.signatory_label || 'Authorised Signatory',
+        footer_line:      invSettings.footer_line     || '',
       };
       const html = generateInvoiceHTML(invData, {
         company,
