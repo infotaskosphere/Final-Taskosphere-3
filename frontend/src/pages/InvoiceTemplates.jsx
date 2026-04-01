@@ -314,29 +314,28 @@ function signRow(company, inv) {
 }
 
 function partyBoxes(inv, p) {
-  return `<div style="display:grid;grid-template-columns:1fr 1fr;border:1px solid #E0E0E0;border-radius:4px;overflow:hidden;margin-bottom:8px">
-    <div style="padding:9px 12px;border-right:1px solid #E0E0E0">
-      <div style="font-size:8px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:${p};margin-bottom:5px;padding-bottom:3px;border-bottom:1px solid #E0E0E0">Bill To</div>
-      <div style="font-size:12.5px;font-weight:700;color:#212121;margin-bottom:3px">${inv.client_name||'—'}</div>
-      <div style="font-size:10.5px;color:#424242;line-height:1.65">${inv.client_address||''}</div>
-      ${inv.client_email ? `<div style="font-size:10px;color:#424242">✉ ${inv.client_email}</div>` : ''}
-      ${inv.client_phone ? `<div style="font-size:10px;color:#424242">📞 ${inv.client_phone}</div>` : ''}
-      ${inv.client_gstin ? `<div style="display:inline-block;background:${p};color:white;font-size:8px;font-weight:700;padding:2px 7px;border-radius:2px;margin-top:3px">GSTIN&nbsp;${inv.client_gstin}</div>` : ''}
-    </div>
-    <div style="padding:9px 12px">
-      <div style="font-size:8px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:${p};margin-bottom:5px;padding-bottom:3px;border-bottom:1px solid #E0E0E0">Invoice Details</div>
-      <div style="font-size:10.5px;color:#424242;line-height:1.75">
-        <div><strong>Invoice No:</strong> ${inv.invoice_no||'—'}</div>
-        <div><strong>Date:</strong> ${inv.invoice_date||'—'}</div>
-        ${inv.due_date ? `<div><strong>Due Date:</strong> ${inv.due_date}</div>` : ''}
-        ${inv.payment_terms ? `<div><strong>Terms:</strong> ${inv.payment_terms}</div>` : ''}
-        ${inv.reference_no ? `<div><strong>Ref/PO:</strong> ${inv.reference_no}</div>` : ''}
-        <div><strong>Supply:</strong> ${inv.is_interstate ? 'Interstate (IGST)' : 'Intrastate (CGST+SGST)'}</div>
-      </div>
-    </div>
-  </div>`;
+  return '<div style="display:grid;grid-template-columns:1fr 1fr;border:1px solid #E0E0E0;border-radius:4px;overflow:hidden;margin-bottom:8px">'
+    + '<div style="padding:9px 12px;border-right:1px solid #E0E0E0">'
+      + '<div style="font-size:8px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:' + p + ';margin-bottom:5px;padding-bottom:3px;border-bottom:1px solid #E0E0E0">Bill To</div>'
+      + '<div style="font-size:12.5px;font-weight:700;color:#212121;margin-bottom:3px">' + (inv.client_name || '—') + '</div>'
+      + '<div style="font-size:10.5px;color:#424242;line-height:1.65">' + (inv.client_address || '') + '</div>'
+      + (inv.client_email ? '<div style="font-size:10px;color:#424242">\u2709 ' + inv.client_email + '</div>' : '')
+      + (inv.client_phone ? '<div style="font-size:10px;color:#424242">\uD83D\uDCDE ' + inv.client_phone + '</div>' : '')
+      + (inv.client_gstin ? '<div style="display:inline-block;background:' + p + ';color:white;font-size:8px;font-weight:700;padding:2px 7px;border-radius:2px;margin-top:3px">GSTIN&nbsp;' + inv.client_gstin + '</div>' : '')
+    + '</div>'
+    + '<div style="padding:9px 12px">'
+      + '<div style="font-size:8px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:' + p + ';margin-bottom:5px;padding-bottom:3px;border-bottom:1px solid #E0E0E0">Invoice Details</div>'
+      + '<div style="font-size:10.5px;color:#424242;line-height:1.75">'
+        + '<div><strong>Invoice No:</strong> ' + (inv.invoice_no || '—') + '</div>'
+        + '<div><strong>Date:</strong> ' + (inv.invoice_date || '—') + '</div>'
+        + (inv.due_date ? '<div><strong>Due Date:</strong> ' + inv.due_date + '</div>' : '')
+        + (inv.payment_terms ? '<div><strong>Terms:</strong> ' + inv.payment_terms + '</div>' : '')
+        + (inv.reference_no ? '<div><strong>Ref/PO:</strong> ' + inv.reference_no + '</div>' : '')
+        + '<div><strong>Supply:</strong> ' + (inv.is_interstate ? 'Interstate (IGST)' : 'Intrastate (CGST+SGST)') + '</div>'
+      + '</div>'
+    + '</div>'
+  + '</div>';
 }
-
 function wordsBox(inv, p, light, accent) {
   return `<div style="background:${light};border:1px solid ${accent};border-radius:4px;padding:7px 10px;margin-bottom:8px">
     <div style="font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:${p};margin-bottom:2px">Invoice Amount in Words</div>
