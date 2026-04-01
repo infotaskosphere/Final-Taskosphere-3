@@ -37,7 +37,7 @@ logger = logging.getLogger("identix")
 # ─── Import from your existing backend ──────────────────────────────────────
 # Adjust the import path if your project structure differs
 try:
-    from server import db, get_current_user, require_admin, User
+    from backend.server import db, get_current_user, require_admin, User
 except ImportError:
     # Fallback if running standalone
     raise ImportError("Could not import from server.py. Place this file in the same backend/ folder.")
