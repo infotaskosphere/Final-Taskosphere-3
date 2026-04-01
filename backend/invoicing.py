@@ -1534,8 +1534,8 @@ async def parse_backup_file(file: UploadFile = File(...), current_user: User = D
 
         # Optionally backup to Drive — never fail if it doesn't work
         if _drive_configured():
-            _upload_to_drive(content, f"Backup_{filename}", "backups",
-                             file.content_type or "application/octet-stream")
+            await _upload_to_drive(content, f"Backup_{filename}", "backups",
+                                   file.content_type or "application/octet-stream")
         return result
     finally:
         if tmp_path and os.path.exists(tmp_path):
@@ -1809,10 +1809,10 @@ async def upload_invoice_to_drive(inv_id: str, current_user: User = Depends(get_
         client_folder_id = DRIVE_FOLDERS["invoices"]
 
     safe_inv_no = (inv.get("invoice_no") or inv_id).replace("/", "_").replace("\\", "_")
-    pdf_link = _upload_to_drive(pdf_bytes, f"Invoice_{safe_inv_no}.pdf", "invoices", "application/pdf",
-                                custom_parent_id=client_folder_id)
-    _upload_to_drive(json.dumps(inv, default=str).encode(), f"Invoice_{safe_inv_no}.json",
-                     "invoices", "application/json", custom_parent_id=client_folder_id)
+    pdf_link = await _upload_to_drive(pdf_bytes, f"Invoice_{safe_inv_no}.pdf", "invoices", "application/pdf",
+                                      custom_parent_id=client_folder_id)
+    await _upload_to_drive(json.dumps(inv, default=str).encode(), f"Invoice_{safe_inv_no}.json",
+                           "invoices", "application/json", custom_parent_id=client_folder_id)
 
     if pdf_link:
         await db.invoices.update_one({"id": inv_id},
