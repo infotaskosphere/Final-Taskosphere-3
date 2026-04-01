@@ -13,6 +13,7 @@ import requests
 import httpx
 import pandas as pd
 from datetime import datetime, date, timezone, timedelta
+from attendance_identix import identix_router, sync_user_to_identix_devices
 
 # --- FIXED ROUTER IMPORTS ---
 # Added 'backend.' to invoicing to match the others
@@ -950,20 +951,26 @@ async def update_todo(
 async def register(user_data: UserCreate, current_user: User = Depends(get_current_user)):
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
+
     existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
+
     hashed_password = get_password_hash(user_data.password)
+
     requested_role = user_data.role.value if hasattr(user_data.role, "value") else user_data.role
+
     if requested_role in ["admin", "manager", "superadmin"]:
         if current_user.role != "admin":
             raise HTTPException(
                 status_code=400,
                 detail="Only staff role can be assigned during registration"
             )
+
     role_val = requested_role
     default_permissions = DEFAULT_ROLE_PERMISSIONS.get(role_val, {})
     user_id = str(uuid.uuid4())
+
     new_user = {
         "id": user_id,
         "email": user_data.email,
@@ -985,23 +992,40 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
         "permissions": user_data.permissions if user_data.permissions else default_permissions,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
+
     await db.users.insert_one(new_user)
+
+    # Background sync (NON-BLOCKING)
+    async def run_safe_background(coro, name="task"):
+        try:
+            await coro
+        except Exception as e:
+            logger.error(f"{name} failed: {e}", exc_info=True)
+
+    asyncio.create_task(run_safe_background(
+        sync_user_to_identix_devices(new_user),
+        "identix_sync"
+    ))
     access_token = create_access_token({"sub": user_id})
-    # Remove password from response dict before returning to prevent leaking hash
+
+    # Remove sensitive fields
     new_user.pop("password", None)
     new_user.pop("_id", None)
-    return {"access_token": access_token, "token_type": "bearer", "user": new_user}
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": new_user
+    }
+
 
 @api_router.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin):
-    # Find user
     user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
 
-    # Invalid credentials
     if not user or not verify_password(credentials.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    # Inactive user
     user_status = user.get("status")
     if user_status is not None and user_status != "active":
         raise HTTPException(
@@ -1009,243 +1033,85 @@ async def login(credentials: UserLogin):
             detail=f"Your account is {user_status}. Awaiting admin approval."
         )
 
-    # Ensure permissions exist
     user["permissions"] = user.get("permissions", UserPermissions().model_dump())
 
-    # Fix datetime
     if "created_at" in user and isinstance(user["created_at"], str):
         user["created_at"] = datetime.fromisoformat(user["created_at"])
 
-    # Create user object
     user_obj = User(**{k: v for k, v in user.items() if k != "password"})
-
-    # Generate token
     access_token = create_access_token({"sub": user_obj.id})
 
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "user": user_obj,
-        "consent_given": True   # Always true — popup removed
+        "consent_given": True
     }
+
 
 @api_router.get("/auth/me", response_model=User)
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
-# require_admin is a plain async function — use Depends(require_admin) without ()
+
 @api_router.post("/users/{user_id}/approve")
 async def approve_user(user_id: str, current_user: User = Depends(require_admin)):
     existing = await db.users.find_one({"id": user_id}, {"_id": 0})
+
     if not existing:
         raise HTTPException(status_code=404, detail="User not found")
+
     if existing.get("status") != "pending_approval":
         raise HTTPException(
             status_code=400,
             detail=f"User status is {existing.get('status')}, not pending approval"
         )
+
     update_data = {
         "status": "active",
         "is_active": True,
         "approved_by": current_user.id,
         "approved_at": datetime.now(timezone.utc).isoformat()
     }
+
     await db.users.update_one({"id": user_id}, {"$set": update_data})
-    await create_audit_log(current_user, "APPROVE_USER", "user", user_id, existing, update_data)
+
+    await create_audit_log(
+        current_user,
+        "APPROVE_USER",
+        "user",
+        user_id,
+        existing,
+        update_data
+    )
+
     return {"message": "User approved successfully"}
+
 
 @api_router.post("/users/{user_id}/reject")
 async def reject_user(user_id: str, current_user: User = Depends(require_admin)):
     existing = await db.users.find_one({"id": user_id}, {"_id": 0})
+
     if not existing:
         raise HTTPException(status_code=404, detail="User not found")
-    update_data = {"status": "rejected", "is_active": False}
-    await db.users.update_one({"id": user_id}, {"$set": update_data})
-    await create_audit_log(current_user, "REJECT_USER", "user", user_id, existing, update_data)
-    return {"message": "User rejected"}
 
-# ==========================================================
-
-def normalize_reminder_doc(doc: dict) -> dict:
-    """
-    Ensure every reminder document has a string `id` field and no ObjectId fields.
-    BUG FIX v5: pop _id after converting it — was missing, caused 500 on GET /reminders.
-    """
-    if not doc:
-        return doc
-    doc = dict(doc)
-    if "_id" in doc:
-        doc["id"] = str(doc["_id"])
-        doc.pop("_id")
-    elif "id" not in doc:
-        doc["id"] = ""
-    for field in ["remind_at", "created_at", "updated_at"]:
-        if field in doc and doc[field] and hasattr(doc[field], "isoformat"):
-            doc[field] = doc[field].isoformat()
-    return doc
-
-
-@api_router.post("/reminders")
-async def create_reminder(
-    data: ReminderCreate,
-    current_user: User = Depends(get_current_user)
-):
-    """Create a reminder. Handles multiple date formats from the frontend."""
-    from zoneinfo import ZoneInfo
-    IST = ZoneInfo("Asia/Kolkata")
-
-    # Parse remind_at — handles ISO, "23-03-2026 11:30 AM", datetime object
-    remind_dt = None
-    raw = data.remind_at
-
-    if isinstance(raw, datetime):
-        remind_dt = raw if raw.tzinfo else raw.replace(tzinfo=IST)
-    else:
-        raw_str = str(raw).strip()
-        # ISO variants
-        for fmt in [
-            "%Y-%m-%dT%H:%M:%S",
-            "%Y-%m-%dT%H:%M",
-            "%Y-%m-%d %H:%M:%S",
-            "%Y-%m-%d %H:%M",
-        ]:
-            try:
-                remind_dt = datetime.strptime(
-                    raw_str.replace("Z", "").split("+")[0].split(".")[0], fmt
-                ).replace(tzinfo=IST)
-                break
-            except ValueError:
-                continue
-        # DD-MM-YYYY variants (frontend date-time picker)
-        if not remind_dt:
-            for fmt in [
-                "%d-%m-%Y %I:%M %p",
-                "%d-%m-%Y %H:%M",
-                "%d/%m/%Y %I:%M %p",
-                "%d/%m/%Y %H:%M",
-            ]:
-                try:
-                    remind_dt = datetime.strptime(raw_str, fmt).replace(tzinfo=IST)
-                    break
-                except ValueError:
-                    continue
-        # Last resort: tomorrow 10 AM
-        if not remind_dt:
-            remind_dt = (datetime.now(IST) + timedelta(days=1)).replace(
-                hour=10, minute=0, second=0, microsecond=0
-            )
-
-    import uuid
-    reminder_id = str(uuid.uuid4())
-    reminder = {
-        "id":           reminder_id,
-        "user_id":      current_user.id,
-        "title":        data.title,
-        "description":  data.description,
-        "remind_at":    remind_dt.isoformat(),
-        "is_dismissed": False,
-        "urgency":      "medium",
-        "source":       "manual",
-        "created_at":   datetime.now(timezone.utc).isoformat(),
+    update_data = {
+        "status": "rejected",
+        "is_active": False
     }
-    await db.reminders.insert_one(reminder)
-    reminder.pop("_id", None)
-    return reminder
 
+    await db.users.update_one({"id": user_id}, {"$set": update_data})
 
-@api_router.get("/reminders")
-async def get_reminders(
-    user_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    if user_id and user_id != current_user.id:
-        if current_user.role != "admin":
-            raise HTTPException(status_code=403, detail="Not authorized")
-        query = {"user_id": user_id}
-    else:
-        query = {"user_id": current_user.id}
-
-    reminders = await db.reminders.find(
-        query, {"_id": 0}
-    ).sort("remind_at", 1).to_list(500)
-    return [normalize_reminder_doc(doc) for doc in reminders]
-
-
-@api_router.patch("/reminders/{reminder_id}")
-async def update_reminder(
-    reminder_id: str,
-    updates: dict,
-    current_user: User = Depends(get_current_user)
-):
-    user_id = str(current_user.id)
-    updated = None
-
-    if ObjectId.is_valid(reminder_id):
-        result = await db.reminders.update_one(
-            {"_id": ObjectId(reminder_id), "user_id": user_id},
-            {"$set": updates}
-        )
-        if result.matched_count > 0:
-            updated = await db.reminders.find_one(
-                {"_id": ObjectId(reminder_id)}, {"_id": 0}
-            )
-
-    if not updated:
-        result = await db.reminders.update_one(
-            {"id": reminder_id, "user_id": user_id},
-            {"$set": updates}
-        )
-        if result.matched_count > 0:
-            updated = await db.reminders.find_one(
-                {"id": reminder_id}, {"_id": 0}
-            )
-
-    if not updated:
-        raise HTTPException(status_code=404, detail="Reminder not found")
-
-    return normalize_reminder_doc(updated)
-
-
-@api_router.delete("/reminders/{reminder_id}")
-async def delete_reminder(
-    reminder_id: str,
-    current_user: User = Depends(get_current_user)
-):
-    user_id = str(current_user.id)
-
-    # Strategy 1: Delete by MongoDB ObjectId (_id)
-    if ObjectId.is_valid(reminder_id):
-        result = await db.reminders.delete_one(
-            {"_id": ObjectId(reminder_id), "user_id": user_id}
-        )
-        if result.deleted_count > 0:
-            return {"status": "deleted"}
-
-    # Strategy 2: Delete by string `id` field
-    result = await db.reminders.delete_one(
-        {"id": reminder_id, "user_id": user_id}
+    await create_audit_log(
+        current_user,
+        "REJECT_USER",
+        "user",
+        user_id,
+        existing,
+        update_data
     )
-    if result.deleted_count > 0:
-        return {"status": "deleted"}
 
-    # Strategy 3: Soft dismiss by string id
-    update_result = await db.reminders.update_one(
-        {"id": reminder_id, "user_id": user_id},
-        {"$set": {"is_dismissed": True}}
-    )
-    if update_result.modified_count > 0:
-        return {"status": "dismissed"}
-
-    # Strategy 4: Soft dismiss by ObjectId
-    if ObjectId.is_valid(reminder_id):
-        update_result = await db.reminders.update_one(
-            {"_id": ObjectId(reminder_id), "user_id": user_id},
-            {"$set": {"is_dismissed": True}}
-        )
-        if update_result.modified_count > 0:
-            return {"status": "dismissed"}
-
-    raise HTTPException(status_code=404, detail="Reminder not found")
+    return {"message": "User rejected"}
 #============================================================
 # USER MANAGEMENT
 #=============================================================
@@ -5011,4 +4877,5 @@ api_router.include_router(leads_router)
 api_router.include_router(notification_router)
 api_router.include_router(email_router)
 app.include_router(google_auth_router)
+api_router.include_router(identix_router)
 app.include_router(api_router)
