@@ -13,7 +13,7 @@ import requests
 import httpx
 import pandas as pd
 from datetime import datetime, date, timezone, timedelta
-from attendance_identix import identix_router, sync_user_to_identix_devices
+from backend.attendance_identix import identix_router, sync_user_to_identix_devices
 
 # --- FIXED ROUTER IMPORTS ---
 # Added 'backend.' to invoicing to match the others
