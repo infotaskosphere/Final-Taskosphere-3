@@ -159,7 +159,7 @@ async def _upload_to_drive(
         }
 
         media = MediaIoBaseUpload(
-            _io.BytesIO(content_bytes),
+            BytesIO(content_bytes),
             mimetype=mime_type,
             resumable=True
         )
