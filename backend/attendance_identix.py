@@ -733,7 +733,23 @@ async def sync_attendance_PATCHED(
         ),
         "errors": errors,
     }
- 
+@identix_router.post("/attendance/sync")
+async def sync_attendance(
+    payload: SyncRequest,
+    current_user: User = Depends(require_admin),
+):
+    return await sync_attendance_PATCHED(
+        payload=payload,
+        current_user=current_user,
+        db=db,
+        asyncio=asyncio,
+        uuid=uuid,
+        datetime=datetime,
+        timezone=timezone,
+        logger=logger,
+        _fetch_attendance_from_device=_fetch_attendance_from_device,
+    )
+
 # ─────────────────────────────────────────────────────────────────────────────
 # USER ENROLLMENT ROUTES
 # ─────────────────────────────────────────────────────────────────────────────
