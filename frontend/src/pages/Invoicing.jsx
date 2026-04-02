@@ -167,119 +167,113 @@ const Hl = ({ text = '', query = '' }) => {
 // ─── DriveUploadBtn component ─────────────────────────────────────────
 const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
   const [loading, setLoading] = useState(false);
-
+ 
   const handleDriveUpload = async () => {
     setLoading(true);
-
     try {
-      // ── 1. Resolve company + settings (identical to handleDownloadPdf) ──
+      // 1. Fetch full invoice data if items are missing
       const invData = (invoice.items?.length || 0) > 0
         ? invoice
         : (await api.get(`/invoices/${invoiceId}`)).data;
-
-      const baseCompany = (companies || []).find(c => c.id === invData.company_id) || {};
-      const invSettings = getInvSettings(invData.company_id);
+ 
+      // 2. Resolve company + settings (same logic as handleDownloadPdf)
+      const baseCompany  = (companies || []).find(c => c.id === invData.company_id) || {};
+      const invSettings  = getInvSettings(invData.company_id);
       const company = {
         ...baseCompany,
-        bank_name:       baseCompany.bank_name       || invSettings.bank_name       || '',
-        bank_account_no: baseCompany.bank_account_no || invSettings.bank_account_no || '',
-        bank_account:    baseCompany.bank_account    || invSettings.bank_account_no || '',
-        bank_ifsc:       baseCompany.bank_ifsc        || invSettings.bank_ifsc        || '',
-        bank_branch:     baseCompany.bank_branch      || invSettings.bank_branch     || '',
-        upi_id:          baseCompany.upi_id           || invSettings.upi_id           || '',
-        show_qr_code:    invSettings.show_qr_code     ?? true,
-        invoice_title:   invSettings.invoice_title    || 'Tax Invoice',
-        signatory_name:  invSettings.signatory_name   || '',
-        signatory_label: invSettings.signatory_label  || 'Authorised Signatory',
-        footer_line:     invSettings.footer_line      || '',
+        bank_name:        baseCompany.bank_name        || invSettings.bank_name        || '',
+        bank_account_no:  baseCompany.bank_account_no  || invSettings.bank_account_no  || '',
+        bank_account:     baseCompany.bank_account     || invSettings.bank_account_no  || '',
+        bank_ifsc:        baseCompany.bank_ifsc        || invSettings.bank_ifsc        || '',
+        bank_branch:      baseCompany.bank_branch      || invSettings.bank_branch      || '',
+        upi_id:           baseCompany.upi_id           || invSettings.upi_id           || '',
+        show_qr_code:     invSettings.show_qr_code     ?? true,
+        invoice_title:    invSettings.invoice_title    || 'Tax Invoice',
+        signatory_name:   invSettings.signatory_name   || '',
+        signatory_label:  invSettings.signatory_label  || 'Authorised Signatory',
+        footer_line:      invSettings.footer_line      || '',
       };
-
-      // ── 2. Generate HTML (identical to handleDownloadPdf) ──
+ 
+      // 3. Generate HTML using the SINGLE source-of-truth renderer
       const html = generateInvoiceHTML(invData, {
         company,
         template:    invData.invoice_template     || invSettings.template     || 'classic',
         theme:       invData.invoice_theme        || invSettings.theme        || 'classic_blue',
         customColor: invData.invoice_custom_color || invSettings.custom_color || '#0D3B66',
       });
-
-      // ── 3. Open popup and write HTML (identical to handleDownloadPdf) ──
-      const win = window.open('', '_blank', 'width=900,height=700');
-      if (!win) {
-        toast.error('Please allow pop-ups for this site to enable Drive upload.');
-        setLoading(false);
-        return;
-      }
-      win.document.write(html);
-      win.document.close();
-
-      // ── 4. Wait for full render (fonts, images, styles) ──
-      await new Promise(resolve => {
-        if (win.document.readyState === 'complete') {
-          setTimeout(resolve, 1500);
-        } else {
-          win.onload = () => setTimeout(resolve, 1500);
-        }
-      });
-
-      // ── 5. Capture popup using html2canvas from main window ──
-      const pageWidth  = win.document.documentElement.scrollWidth;
-      const pageHeight = win.document.documentElement.scrollHeight;
-
-      win.scrollTo(0, 0);
-
-      const canvas = await window.html2canvas(win.document.body, {
-        scale:        2,
-        useCORS:      true,
-        allowTaint:   true,
-        logging:      false,
-        width:        pageWidth,
-        height:       pageHeight,
-        windowWidth:  pageWidth,
-        windowHeight: pageHeight,
-        scrollX:      0,
-        scrollY:      0,
-      });
-
-      win.close();
-
-      // ── 6. Build A4 PDF from canvas using jsPDF ──
+ 
+      // 4. Build PDF from HTML using jsPDF html() – identical to print path
       const { jsPDF } = window.jspdf;
-
-      const A4_W        = 210;
-      const A4_H        = 297;
-      const imgData     = canvas.toDataURL('image/jpeg', 0.98);
-      const imgWidthMM  = A4_W;
-      const imgHeightMM = (canvas.height * A4_W) / canvas.width;
-
-      const pdf     = new jsPDF('p', 'mm', 'a4');
-      let yPos      = 0;
-      let remaining = imgHeightMM;
-
-      pdf.addImage(imgData, 'JPEG', 0, yPos, imgWidthMM, imgHeightMM);
-      remaining -= A4_H;
-
-      while (remaining > 0) {
-        yPos -= A4_H;
-        pdf.addPage();
-        pdf.addImage(imgData, 'JPEG', 0, yPos, imgWidthMM, imgHeightMM);
-        remaining -= A4_H;
-      }
-
-      // ── 7. Get PDF as Base64 ──
-      const base64 = pdf.output('datauristring').split(',')[1];
-
-      // ── 8. Upload to backend ──
-      const response = await api.post(
-        `/invoices/${invoiceId}/upload-pdf-to-drive`,
-        {
-          pdf_base64: base64,
-          filename: `Invoice_${(invoiceNo || '')
-            .replace(/\//g, '_')
-            .replace(/\s/g, '_')}.pdf`,
-        }
-      );
-
-      // ── 9. Handle response ──
+      const pdf       = new jsPDF('p', 'mm', 'a4');
+ 
+      // Write HTML to a temp blob URL so jsPDF can render it
+      const blob    = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const blobUrl = URL.createObjectURL(blob);
+ 
+      await new Promise((resolve, reject) => {
+        // Use an offscreen iframe for rendering
+        const iframe = document.createElement('iframe');
+        iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;visibility:hidden';
+        document.body.appendChild(iframe);
+ 
+        iframe.onload = async () => {
+          try {
+            await new Promise(r => setTimeout(r, 1800)); // let fonts/images load
+ 
+            const canvas = await window.html2canvas(iframe.contentDocument.body, {
+              scale:       2,
+              useCORS:     true,
+              allowTaint:  true,
+              logging:     false,
+              width:       794,
+              windowWidth: 794,
+              scrollX:     0,
+              scrollY:     0,
+            });
+ 
+            const A4_W       = 210;
+            const imgData    = canvas.toDataURL('image/jpeg', 0.97);
+            const imgHeightMM= (canvas.height * A4_W) / canvas.width;
+ 
+            pdf.addImage(imgData, 'JPEG', 0, 0, A4_W, imgHeightMM);
+ 
+            let remaining = imgHeightMM - 297;
+            let yPos      = -297;
+            while (remaining > 0) {
+              yPos -= 297;
+              pdf.addPage();
+              pdf.addImage(imgData, 'JPEG', 0, yPos, A4_W, imgHeightMM);
+              remaining -= 297;
+            }
+ 
+            document.body.removeChild(iframe);
+            URL.revokeObjectURL(blobUrl);
+            resolve();
+          } catch (err) {
+            document.body.removeChild(iframe);
+            URL.revokeObjectURL(blobUrl);
+            reject(err);
+          }
+        };
+ 
+        iframe.onerror = (e) => {
+          document.body.removeChild(iframe);
+          URL.revokeObjectURL(blobUrl);
+          reject(new Error('iframe load failed'));
+        };
+ 
+        iframe.src = blobUrl;
+      });
+ 
+      // 5. Upload base64 PDF to backend
+      const base64   = pdf.output('datauristring').split(',')[1];
+      const filename = `Invoice_${(invoiceNo || '').replace(/[\/\s]/g, '_')}.pdf`;
+ 
+      const response = await api.post(`/invoices/${invoiceId}/upload-pdf-to-drive`, {
+        pdf_base64: base64,
+        filename,
+      });
+ 
       if (response.data?.drive_link) {
         toast.success('Saved to Google Drive ✅');
         if (window.confirm('Open in Google Drive?')) {
@@ -288,21 +282,15 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
       } else {
         toast.warning(response.data?.message || 'Upload failed');
       }
-
+ 
     } catch (err) {
-      console.error(err);
-      toast.error(
-        `Drive upload failed: ${
-          err.response?.data?.detail ||
-          err.message ||
-          'Unknown error'
-        }`
-      );
+      console.error('Drive upload error:', err);
+      toast.error(`Drive upload failed: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
   };
-
+ 
   return (
     <Button
       variant="outline"
@@ -310,7 +298,7 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
       onClick={handleDriveUpload}
       disabled={loading}
       className="rounded-xl text-xs h-9 gap-1.5 border-blue-200 text-blue-600 hover:bg-blue-50"
-      title="Save invoice to Google Drive"
+      title="Save invoice to Google Drive (pixel-identical to PDF)"
     >
       {loading ? (
         <span className="flex items-center gap-1">
@@ -323,6 +311,140 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
     </Button>
   );
 };
+
+function parseExcelInvoices(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb      = XLSX.read(e.target.result, { type: 'array' });
+        const ws      = wb.Sheets[wb.SheetNames[0]];
+        const rows    = XLSX.utils.sheet_to_json(ws, { defval: '', header: 1 });
+ 
+        // Find header row (first row containing "Invoice No" or "invoice no")
+        let headerIdx = rows.findIndex(r =>
+          String(r[0] || '').toLowerCase().includes('invoice') ||
+          String(r[1] || '').toLowerCase().includes('invoice')
+        );
+        if (headerIdx === -1) headerIdx = 0;
+ 
+        const headers   = (rows[headerIdx] || []).map(h => String(h).trim().toLowerCase());
+        const dataRows  = rows.slice(headerIdx + 1).filter(r => r.some(cell => cell !== ''));
+ 
+        const col = (name) => {
+          const idx = headers.findIndex(h => h.includes(name));
+          return idx;
+        };
+ 
+        const invoices = dataRows.map((row, i) => {
+          const get = (name, fallback = '') => {
+            const idx = col(name);
+            return idx >= 0 ? String(row[idx] || '').trim() : fallback;
+          };
+          const getNum = (name, fallback = 0) => {
+            const idx = col(name);
+            return idx >= 0 ? (parseFloat(row[idx]) || fallback) : fallback;
+          };
+ 
+          const rawDate   = get('date');
+          const invoiceNo = get('invoice no') || get('invoice #') || `IMP-${String(i + 1).padStart(4, '0')}`;
+          const clientName= get('customer') || get('client') || get('party') || 'Unknown';
+          const gstin     = get('gstin') || get('gst');
+          const phone     = get('phone') || get('mobile');
+          const total     = getNum('total') || getNum('amount') || getNum('grand');
+          const paid      = getNum('paid') || getNum('received');
+          const balance   = getNum('balance') || getNum('due') || Math.max(total - paid, 0);
+          const notes     = get('notes') || get('description') || get('remarks');
+          const terms     = get('payment terms') || get('terms');
+ 
+          // Normalise date  DD/MM/YYYY → YYYY-MM-DD
+          let invDate = format(new Date(), 'yyyy-MM-dd');
+          if (rawDate) {
+            const parts = rawDate.split(/[\/\-\.]/);
+            if (parts.length === 3) {
+              const y = parts[2].length === 2 ? '20' + parts[2] : parts[2];
+              const m = parts[1].padStart(2, '0');
+              const d = parts[0].padStart(2, '0');
+              const parsed = new Date(`${y}-${m}-${d}`);
+              if (!isNaN(parsed)) invDate = format(parsed, 'yyyy-MM-dd');
+            }
+          }
+ 
+          const dueDate = format(
+            new Date(new Date(invDate).getTime() + 30 * 86400000),
+            'yyyy-MM-dd'
+          );
+ 
+          // Derive status
+          let status = 'draft';
+          if (balance <= 0 && total > 0)            status = 'paid';
+          else if (paid > 0 && balance > 0)          status = 'partially_paid';
+          else if (balance > 0)                      status = 'sent';
+ 
+          // Back-calculate taxable assuming 18% GST
+          const gstRate  = 18;
+          const taxable  = Math.round(total / 1.18 * 100) / 100;
+          const gstAmt   = Math.round((total - taxable) * 100) / 100;
+          const cgst     = Math.round(gstAmt / 2 * 100) / 100;
+ 
+          return {
+            invoice_type:    'tax_invoice',
+            invoice_no:      invoiceNo,
+            client_name:     clientName,
+            client_email:    get('email') || '',
+            client_phone:    phone,
+            client_gstin:    gstin,
+            client_address:  get('address') || '',
+            client_state:    get('state') || '',
+            invoice_date:    invDate,
+            due_date:        dueDate,
+            reference_no:    get('ref') || get('po') || '',
+            notes:           notes,
+            payment_terms:   terms || 'Due on receipt',
+            is_interstate:   false,
+            items: [{
+              description:    notes || `Import – ${invoiceNo}`,
+              hsn_sac:        '',
+              quantity:       1,
+              unit:           'service',
+              unit_price:     taxable,
+              discount_pct:   0,
+              gst_rate:       gstRate,
+              taxable_value:  taxable,
+              cgst_rate:      9,
+              sgst_rate:      9,
+              igst_rate:      0,
+              cgst_amount:    cgst,
+              sgst_amount:    cgst,
+              igst_amount:    0,
+              total_amount:   total,
+            }],
+            subtotal:        taxable,
+            total_taxable:   taxable,
+            total_cgst:      cgst,
+            total_sgst:      cgst,
+            total_igst:      0,
+            total_gst:       gstAmt,
+            grand_total:     total,
+            amount_paid:     paid,
+            amount_due:      balance,
+            status,
+            discount_amount:  0,
+            shipping_charges: 0,
+            other_charges:    0,
+          };
+        }).filter(inv => (inv.grand_total || 0) > 0);
+ 
+        resolve(invoices);
+      } catch (err) {
+        reject(new Error(`Failed to parse Excel: ${err.message}`));
+      }
+    };
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 // ════════════════════════════════════════════════════════════════════════════════
 //  Module-level: used by Invoicing header AND ImportModal 
 // ════════════════════════════════════════════════════════════════════════════════
