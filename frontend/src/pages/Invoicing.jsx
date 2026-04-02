@@ -2040,12 +2040,63 @@ const InvoiceDetailPanel = ({
         </div>
 
         {/* BODY */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="p-7 space-y-5">
-            {/* ITEMS TABLE (unchanged) */}
-            {/* ...keeping your original logic intact... */}
-          </div>
+<div className="flex-1 overflow-y-auto">
+  <div className="p-7 space-y-5">
+
+    {/* LINE ITEMS */}
+    <div className={`border rounded-2xl overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+      <div className={`px-5 py-3 border-b ${isDark ? 'bg-slate-700/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+        <p className={`text-xs font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+          Line Items ({invoice.items?.length || 0})
+        </p>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className={isDark ? 'bg-slate-700/30' : 'bg-slate-50/60'}>
+              {['#', 'Description', 'HSN', 'Qty', 'Rate', 'Taxable', isInterstate ? 'IGST' : 'CGST+SGST', 'Total'].map(h => (
+                <th key={h} className="px-3 py-2.5 text-left font-bold uppercase text-[9px] text-slate-400">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+
+          <tbody>
+            {(invoice.items || []).map((it, i) => (
+              <tr key={i} className={`border-t ${isDark ? 'border-slate-700 hover:bg-slate-700/20' : 'border-slate-100 hover:bg-slate-50'}`}>
+                <td className="px-3 py-2.5 font-mono font-bold text-slate-400">{i + 1}</td>
+                <td className={`${isDark ? 'text-slate-200' : 'text-slate-800'} px-3 py-2.5 font-medium`}>{it.description}</td>
+                <td className="px-3 py-2.5 text-slate-500">{it.hsn_sac || '—'}</td>
+                <td className="px-3 py-2.5 text-slate-600">{it.quantity} {it.unit}</td>
+                <td className="px-3 py-2.5 text-slate-600">{fmtC(it.unit_price)}</td>
+                <td className="px-3 py-2.5 text-slate-600">{fmtC(it.taxable_value)}</td>
+                <td className="px-3 py-2.5 text-amber-600 font-medium">
+                  {isInterstate ? fmtC(it.igst_amount) : fmtC((it.cgst_amount || 0) + (it.sgst_amount || 0))}
+                </td>
+                <td className="px-3 py-2.5 font-bold">{fmtC(it.total_amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="px-5 py-3 space-y-1.5 border-t">
+        <div className="flex justify-between text-xs">
+          <span>Taxable Value</span>
+          <span>{fmtC(invoice.total_taxable)}</span>
         </div>
+
+        <div className="flex justify-between text-xs font-bold pt-2 border-t">
+          <span>Grand Total</span>
+          <span>{fmtC(invoice.grand_total)}</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
 
         {/* FOOTER (🔥 FIXED HERE) */}
         <div
