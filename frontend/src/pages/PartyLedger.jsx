@@ -2,13 +2,13 @@
  * PartyLedger.jsx — Redesigned & Alignment-Fixed
  *
  * CHANGES IN THIS VERSION:
- * 1. PDF title changed from "Party Ledger Statement" → "Account Statement"
+ * 1. PDF title: "Account Statement" (unchanged)
  * 2. All table columns properly constrained — no overflow, perfect alignment
  * 3. Summary cards + aging panel restructured into a clean responsive row
- * 4. Improved overall UI: refined typography, tighter spacing, better contrast
- * 5. Table uses fixed column widths + overflow:hidden + text-ellipsis for long content
- * 6. Header, filter bar, summary, table footer all pixel-aligned
- * 7. Dark mode improvements throughout
+ * 4. ADDED: Smart Analytics Panel — DSO, Collection Efficiency, Overdue Risk Score,
+ *           Payment Mode Breakdown, Avg Days to Pay, Top Unpaid Invoices, Payment Pattern
+ * 5. All additions are UI-only — zero backend changes, zero PDF layout changes
+ * 6. Dark mode throughout
  */
 
 import React, {
@@ -36,6 +36,12 @@ import {
   TrendingDown,
   AlertCircle,
   Clock,
+  BarChart2,
+  Zap,
+  CheckCircle2,
+  CreditCard,
+  ChevronRight,
+  Info,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -178,7 +184,6 @@ function ClientCombobox({ clients, value, onChange, isDark }) {
 
   return (
     <div ref={wrapRef} className="relative w-full">
-      {/* Trigger */}
       <div
         onClick={() => { setOpen((o) => !o); setTimeout(() => inputRef.current?.focus(), 20); }}
         className={`w-full flex items-center gap-2.5 h-10 px-3 rounded-xl border text-sm cursor-pointer transition-all
@@ -213,7 +218,6 @@ function ClientCombobox({ clients, value, onChange, isDark }) {
         <ChevronDown className={`w-3.5 h-3.5 text-slate-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </div>
 
-      {/* Dropdown */}
       {open && (
         <div className={`absolute z-50 w-full mt-1 rounded-2xl border shadow-2xl py-2 max-h-[300px] overflow-auto
           ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
@@ -341,6 +345,7 @@ function buildLedger(invoices, paymentsMap, openingBalance, dateFrom, dateTo) {
         dr:        0,
         cr:        pmt.amount || 0,
         sourceId:  inv.id,
+        paymentMode: pmt.payment_mode,
       });
     });
   });
@@ -369,7 +374,7 @@ function buildLedger(invoices, paymentsMap, openingBalance, dateFrom, dateTo) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// PRINT / PDF  — Title: "Account Statement"
+// PRINT / PDF  — Title: "Account Statement" — LAYOUT UNCHANGED
 // ════════════════════════════════════════════════════════════════════════════════
 function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
   const closingRow  = rows[rows.length - 1];
@@ -432,8 +437,6 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
       font-size: 13px;
     }
     .page-wrap { padding: 0; }
-
-    /* ── Header ── */
     .header {
       display: flex;
       justify-content: space-between;
@@ -464,8 +467,6 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
       font-weight: 700;
       color: #111827;
     }
-
-    /* ── Meta row ── */
     .meta-row {
       display: flex;
       gap: 24px;
@@ -477,8 +478,6 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
     }
     .meta-item label { font-size: 10px; text-transform: uppercase; color: #9CA3AF; letter-spacing: 0.06em; display:block; margin-bottom:2px; }
     .meta-item span  { font-size: 13px; font-weight: 600; color: #111827; }
-
-    /* ── Summary boxes ── */
     .summary-row {
       display: flex;
       gap: 10px;
@@ -492,8 +491,6 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
     }
     .summary-box label { font-size: 10px; text-transform: uppercase; color: #9CA3AF; letter-spacing: 0.06em; display:block; }
     .summary-box .val  { font-size: 16px; font-weight: 700; margin-top: 2px; }
-
-    /* ── Table ── */
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     colgroup col:nth-child(1) { width: 82px; }
     colgroup col:nth-child(2) { width: auto; }
@@ -502,7 +499,6 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
     colgroup col:nth-child(5) { width: 110px; }
     colgroup col:nth-child(6) { width: 110px; }
     colgroup col:nth-child(7) { width: 58px; }
-
     thead tr th {
       background: #1D4ED8;
       color: #fff;
@@ -518,7 +514,6 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
     thead tr th:nth-child(6) { text-align: right; }
     thead tr th:nth-child(3),
     thead tr th:nth-child(7) { text-align: center; }
-
     tfoot tr td {
       background: #1E3A5F;
       color: #fff;
@@ -530,7 +525,6 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
     tfoot tr td:nth-child(3) { text-align: right; }
     tfoot tr td:nth-child(4) { text-align: right; }
     tfoot tr td:nth-child(5) { text-align: center; }
-
     .footer {
       margin-top: 28px;
       padding-top: 12px;
@@ -548,7 +542,6 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
 </head>
 <body>
 <div class="page-wrap">
-  <!-- Header -->
   <div class="header">
     <div class="header-left">
       <h1>Account Statement</h1>
@@ -561,8 +554,6 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
       ${company?.email ? `<div>${company.email}</div>` : ''}
     </div>
   </div>
-
-  <!-- Meta -->
   <div class="meta-row">
     <div class="meta-item">
       <label>Party Name</label>
@@ -580,8 +571,6 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
       <span>₹${fmtN(openingBal)}</span>
     </div>
   </div>
-
-  <!-- Summary -->
   <div class="summary-row">
     <div class="summary-box">
       <label>Total Debit (₹)</label>
@@ -600,8 +589,6 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
       <div class="val" style="color:#6B7280;">₹${fmtN(Math.abs(totalDr - totalCr))}</div>
     </div>
   </div>
-
-  <!-- Table -->
   <table>
     <colgroup>
       <col /><col /><col /><col /><col /><col /><col />
@@ -628,7 +615,6 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
       </tr>
     </tfoot>
   </table>
-
   <div class="footer">
     <span>This is a computer-generated Account Statement.</span>
     <span>Generated on ${format(new Date(), 'dd-MMM-yyyy hh:mm a')}</span>
@@ -745,25 +731,336 @@ function SummaryCard({ label, value, color, icon: Icon, isDark }) {
 // ════════════════════════════════════════════════════════════════════════════════
 // AGING PILL
 // ════════════════════════════════════════════════════════════════════════════════
-function AgingPill({ bucket, amount, isDark }) {
+function AgingPill({ bucket, amount, total, isDark }) {
   const colorMap = {
-    '0-30':  { bg: '#DCFCE7', text: '#15803D', dark: '#166534' },
-    '31-60': { bg: '#FEF9C3', text: '#A16207', dark: '#854D0E' },
-    '61-90': { bg: '#FFEDD5', text: '#C2410C', dark: '#9A3412' },
-    '90+':   { bg: '#FEE2E2', text: '#B91C1C', dark: '#991B1B' },
+    '0-30':  { bg: '#DCFCE7', text: '#15803D', bar: '#22c55e' },
+    '31-60': { bg: '#FEF9C3', text: '#A16207', bar: '#eab308' },
+    '61-90': { bg: '#FFEDD5', text: '#C2410C', bar: '#f97316' },
+    '90+':   { bg: '#FEE2E2', text: '#B91C1C', bar: '#ef4444' },
   };
   const c = colorMap[bucket] || colorMap['0-30'];
+  const pct = total > 0 ? Math.round((amount / total) * 100) : 0;
+
   return (
-    <div className={`flex flex-col items-center rounded-xl px-3 py-2 flex-1 min-w-0
-      ${isDark ? 'bg-slate-700/60' : ''}`}
+    <div className={`flex flex-col rounded-xl px-3 py-2.5 flex-1 min-w-0 border
+      ${isDark ? 'bg-slate-700/60 border-slate-600' : 'border-transparent'}`}
       style={isDark ? {} : { background: c.bg }}
     >
-      <div className="text-[10px] font-bold uppercase tracking-wider mb-1"
-        style={{ color: isDark ? c.dark : c.text }}>{bucket} days</div>
-      <div className="text-xs font-semibold truncate"
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="text-[10px] font-bold uppercase tracking-wider"
+          style={{ color: isDark ? '#94a3b8' : c.text }}>{bucket} days
+        </div>
+        {pct > 0 && (
+          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+            style={{ background: isDark ? '#1e293b' : `${c.bar}20`, color: isDark ? '#94a3b8' : c.text }}>
+            {pct}%
+          </span>
+        )}
+      </div>
+      <div className="text-xs font-bold truncate mb-1.5"
         style={{ color: isDark ? '#e2e8f0' : c.text }}>
         {fmtC(amount)}
       </div>
+      {/* Mini bar */}
+      <div className={`h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-600' : 'bg-white/60'}`}>
+        <div className="h-full rounded-full transition-all"
+          style={{ width: `${pct}%`, background: c.bar }} />
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// SMART ANALYTICS PANEL  (UI-only, no backend, no PDF)
+// ════════════════════════════════════════════════════════════════════════════════
+function SmartAnalyticsPanel({ invoices, paymentsMap, isDark }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // ── Compute all smart metrics from existing data ──
+  const metrics = useMemo(() => {
+    if (!invoices.length) return null;
+
+    const today = new Date();
+
+    // 1. Total invoiced & collected
+    const totalInvoiced  = invoices.reduce((s, i) => s + (i.grand_total || 0), 0);
+    const totalCollected = invoices.reduce((s, i) => s + (i.amount_paid || 0), 0);
+    const totalDue       = invoices.reduce((s, i) => s + (i.amount_due  || 0), 0);
+
+    // 2. Collection Efficiency %
+    const collectionEfficiency = totalInvoiced > 0
+      ? Math.round((totalCollected / totalInvoiced) * 100)
+      : 0;
+
+    // 3. DSO — Days Sales Outstanding
+    //    Average days from invoice date to today for unpaid invoices
+    const unpaidInvoices = invoices.filter(i => (i.amount_due || 0) > 0 && i.invoice_date);
+    const dso = unpaidInvoices.length > 0
+      ? Math.round(
+          unpaidInvoices.reduce((s, i) => s + differenceInDays(today, parseISO(i.invoice_date)), 0)
+          / unpaidInvoices.length
+        )
+      : 0;
+
+    // 4. Average Days to Pay (for PAID invoices)
+    const paidWithDates = invoices.filter(i =>
+      i.status === 'paid' && i.invoice_date
+    );
+    let avgDaysToPay = null;
+    if (paidWithDates.length > 0) {
+      const daysArr = paidWithDates.map(inv => {
+        const pmts = paymentsMap[inv.id] || [];
+        if (!pmts.length) return null;
+        const lastPmt = pmts.reduce((a, b) =>
+          new Date(a.payment_date) > new Date(b.payment_date) ? a : b
+        );
+        return lastPmt.payment_date
+          ? differenceInDays(parseISO(lastPmt.payment_date), parseISO(inv.invoice_date))
+          : null;
+      }).filter(d => d !== null && d >= 0);
+      avgDaysToPay = daysArr.length > 0
+        ? Math.round(daysArr.reduce((s, d) => s + d, 0) / daysArr.length)
+        : null;
+    }
+
+    // 5. Payment Mode Breakdown
+    const modeMap = {};
+    Object.values(paymentsMap).flat().forEach(pmt => {
+      const mode = (pmt.payment_mode || 'other').toUpperCase();
+      modeMap[mode] = (modeMap[mode] || 0) + (pmt.amount || 0);
+    });
+    const paymentModes = Object.entries(modeMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+    const totalModeAmt = paymentModes.reduce((s, [, v]) => s + v, 0);
+
+    // 6. On-time vs Late payment count
+    let onTimeCount = 0, lateCount = 0;
+    invoices.forEach(inv => {
+      if (!inv.due_date) return;
+      const pmts = paymentsMap[inv.id] || [];
+      pmts.forEach(pmt => {
+        if (!pmt.payment_date) return;
+        const daysLate = differenceInDays(parseISO(pmt.payment_date), parseISO(inv.due_date));
+        if (daysLate <= 0) onTimeCount++; else lateCount++;
+      });
+    });
+
+    // 7. Overdue Risk Score (0–100)
+    //    = weighted by amount + days overdue
+    const overdueInvoices = invoices.filter(i =>
+      (i.amount_due || 0) > 0 && i.due_date &&
+      differenceInDays(today, parseISO(i.due_date)) > 0
+    );
+    let riskScore = 0;
+    if (totalDue > 0 && overdueInvoices.length > 0) {
+      const overdueAmt = overdueInvoices.reduce((s, i) => s + i.amount_due, 0);
+      const avgOverdueDays = overdueInvoices.reduce((s, i) =>
+        s + differenceInDays(today, parseISO(i.due_date)), 0
+      ) / overdueInvoices.length;
+      riskScore = Math.min(100, Math.round(
+        (overdueAmt / totalDue) * 60 +
+        Math.min(avgOverdueDays / 180 * 40, 40)
+      ));
+    }
+
+    // 8. Top unpaid invoices (by amount due, descending)
+    const topUnpaid = [...invoices]
+      .filter(i => (i.amount_due || 0) > 0)
+      .sort((a, b) => b.amount_due - a.amount_due)
+      .slice(0, 5);
+
+    // 9. Invoice count stats
+    const totalCount   = invoices.length;
+    const paidCount    = invoices.filter(i => i.status === 'paid').length;
+    const overdueCount = overdueInvoices.length;
+    const partialCount = invoices.filter(i => i.status === 'partially_paid').length;
+
+    return {
+      totalInvoiced, totalCollected, totalDue,
+      collectionEfficiency, dso, avgDaysToPay,
+      paymentModes, totalModeAmt,
+      onTimeCount, lateCount,
+      riskScore, topUnpaid,
+      totalCount, paidCount, overdueCount, partialCount,
+    };
+  }, [invoices, paymentsMap]);
+
+  if (!metrics) return null;
+
+  const card = isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200';
+  const muted = isDark ? 'text-slate-400' : 'text-slate-500';
+
+  // Risk color
+  const riskColor = metrics.riskScore >= 70 ? '#ef4444'
+    : metrics.riskScore >= 40 ? '#f97316'
+    : '#22c55e';
+  const riskLabel = metrics.riskScore >= 70 ? 'High Risk'
+    : metrics.riskScore >= 40 ? 'Medium Risk'
+    : 'Low Risk';
+
+  // Efficiency color
+  const effColor = metrics.collectionEfficiency >= 80 ? '#22c55e'
+    : metrics.collectionEfficiency >= 50 ? '#f97316'
+    : '#ef4444';
+
+  return (
+    <div className={`rounded-2xl border ${card} overflow-hidden`}>
+      {/* Panel header — always visible, toggleable */}
+      <button
+        type="button"
+        onClick={() => setExpanded(e => !e)}
+        className={`w-full flex items-center justify-between px-4 py-3 transition-colors
+          ${isDark ? 'hover:bg-slate-700/40' : 'hover:bg-slate-50/60'}`}
+      >
+        <div className="flex items-center gap-2.5">
+          <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0
+            ${isDark ? 'bg-violet-900/50' : 'bg-violet-50'}`}>
+            <BarChart2 className="w-3.5 h-3.5 text-violet-500" />
+          </div>
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Smart Analytics</span>
+          {/* Quick KPI chips — always visible */}
+          <div className="flex items-center gap-1.5 ml-2 flex-wrap">
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+              style={{ background: `${effColor}18`, color: effColor }}>
+              {metrics.collectionEfficiency}% collected
+            </span>
+            {metrics.dso > 0 && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                style={{ background: '#1d4ed818', color: '#1d4ed8' }}>
+                DSO {metrics.dso}d
+              </span>
+            )}
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+              style={{ background: `${riskColor}18`, color: riskColor }}>
+              {riskLabel}
+            </span>
+          </div>
+        </div>
+        <ChevronRight className={`w-4 h-4 ${muted} transition-transform flex-shrink-0 ${expanded ? 'rotate-90' : ''}`} />
+      </button>
+
+      {/* Expanded detail */}
+      {expanded && (
+        <div className={`px-4 pb-4 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+
+            {/* Collection Efficiency */}
+            <div className={`rounded-xl border p-3 ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50'}`}>
+              <div className={`text-[9px] font-bold uppercase tracking-wider mb-1 ${muted}`}>Collection Efficiency</div>
+              <div className="text-xl font-black" style={{ color: effColor }}>{metrics.collectionEfficiency}%</div>
+              <div className={`h-1.5 rounded-full mt-2 overflow-hidden ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`}>
+                <div className="h-full rounded-full" style={{ width: `${metrics.collectionEfficiency}%`, background: effColor }} />
+              </div>
+              <div className={`text-[9px] mt-1.5 ${muted}`}>{fmtC(metrics.totalCollected)} of {fmtC(metrics.totalInvoiced)}</div>
+            </div>
+
+            {/* DSO */}
+            <div className={`rounded-xl border p-3 ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50'}`}>
+              <div className={`text-[9px] font-bold uppercase tracking-wider mb-1 ${muted}`}>Days Sales Outstanding</div>
+              <div className="text-xl font-black text-blue-600">{metrics.dso > 0 ? `${metrics.dso}d` : '—'}</div>
+              <div className={`text-[9px] mt-1 ${muted}`}>Avg age of unpaid invoices</div>
+              {metrics.avgDaysToPay !== null && (
+                <div className="text-[10px] font-semibold text-emerald-600 mt-1.5">
+                  Avg paid in {metrics.avgDaysToPay}d
+                </div>
+              )}
+            </div>
+
+            {/* Risk Score */}
+            <div className={`rounded-xl border p-3 ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50'}`}>
+              <div className={`text-[9px] font-bold uppercase tracking-wider mb-1 ${muted}`}>Overdue Risk Score</div>
+              <div className="text-xl font-black" style={{ color: riskColor }}>{metrics.riskScore}/100</div>
+              <div className={`h-1.5 rounded-full mt-2 overflow-hidden ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`}>
+                <div className="h-full rounded-full" style={{ width: `${metrics.riskScore}%`, background: riskColor }} />
+              </div>
+              <div className={`text-[9px] mt-1.5 font-semibold`} style={{ color: riskColor }}>{riskLabel}</div>
+            </div>
+
+            {/* Payment Pattern */}
+            <div className={`rounded-xl border p-3 ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50'}`}>
+              <div className={`text-[9px] font-bold uppercase tracking-wider mb-1 ${muted}`}>Payment Pattern</div>
+              <div className="flex items-end gap-2 mt-1">
+                <div className="text-center">
+                  <div className="text-lg font-black text-emerald-600">{metrics.onTimeCount}</div>
+                  <div className={`text-[8px] font-semibold ${muted}`}>On-time</div>
+                </div>
+                <div className={`text-xl font-light ${muted} pb-1`}>/</div>
+                <div className="text-center">
+                  <div className="text-lg font-black text-red-500">{metrics.lateCount}</div>
+                  <div className={`text-[8px] font-semibold ${muted}`}>Late</div>
+                </div>
+              </div>
+              <div className={`text-[9px] mt-1.5 ${muted}`}>
+                {metrics.paidCount} paid · {metrics.overdueCount} overdue · {metrics.partialCount} partial
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom row: Payment Modes + Top Unpaid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+
+            {/* Payment Mode Breakdown */}
+            {metrics.paymentModes.length > 0 && (
+              <div className={`rounded-xl border p-3 ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50'}`}>
+                <div className={`text-[9px] font-bold uppercase tracking-wider mb-2 ${muted}`}>
+                  <CreditCard className="w-3 h-3 inline mr-1" />Payment Mode Breakdown
+                </div>
+                <div className="space-y-1.5">
+                  {metrics.paymentModes.map(([mode, amt]) => {
+                    const pct = metrics.totalModeAmt > 0 ? Math.round((amt / metrics.totalModeAmt) * 100) : 0;
+                    return (
+                      <div key={mode} className="flex items-center gap-2">
+                        <div className={`text-[10px] font-bold w-14 flex-shrink-0 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{mode}</div>
+                        <div className={`flex-1 h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`}>
+                          <div className="h-full rounded-full bg-blue-500" style={{ width: `${pct}%` }} />
+                        </div>
+                        <div className={`text-[10px] font-semibold w-8 text-right flex-shrink-0 ${muted}`}>{pct}%</div>
+                        <div className={`text-[10px] font-semibold w-20 text-right flex-shrink-0 ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{fmtC(amt)}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Top Unpaid Invoices */}
+            {metrics.topUnpaid.length > 0 && (
+              <div className={`rounded-xl border p-3 ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50'}`}>
+                <div className={`text-[9px] font-bold uppercase tracking-wider mb-2 ${muted}`}>
+                  <AlertCircle className="w-3 h-3 inline mr-1 text-amber-500" />Top Unpaid Invoices
+                </div>
+                <div className="space-y-1.5">
+                  {metrics.topUnpaid.map((inv, i) => {
+                    const daysOld = inv.invoice_date
+                      ? differenceInDays(new Date(), parseISO(inv.invoice_date))
+                      : null;
+                    const isOverdue = inv.due_date &&
+                      differenceInDays(new Date(), parseISO(inv.due_date)) > 0;
+                    return (
+                      <div key={inv.id} className="flex items-center gap-2">
+                        <div className={`text-[9px] font-bold w-4 flex-shrink-0 ${muted}`}>#{i + 1}</div>
+                        <div className={`text-[10px] font-mono truncate flex-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                          {inv.invoice_no || '—'}
+                        </div>
+                        {isOverdue && (
+                          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 flex-shrink-0">OD</span>
+                        )}
+                        {daysOld !== null && (
+                          <div className={`text-[9px] flex-shrink-0 ${muted}`}>{daysOld}d</div>
+                        )}
+                        <div className="text-[10px] font-bold text-red-600 flex-shrink-0 w-20 text-right">
+                          {fmtC(inv.amount_due)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -778,6 +1075,7 @@ export default function PartyLedger({
   clients   = [],
   companies = [],
   preselectedClientName = null,
+  initialClient = null,
   isDark,
 }) {
   const [clientId,    setClientId]    = useState(null);
@@ -788,16 +1086,22 @@ export default function PartyLedger({
   const [paymentsMap, setPaymentsMap] = useState({});
   const [loadingPmts, setLoadingPmts] = useState(false);
 
-  // Pre-select client
+  // Pre-select client via name or id
   useEffect(() => {
-    if (open && preselectedClientName) {
+    if (!open) return;
+    if (initialClient) {
+      setClientId(typeof initialClient === 'string' ? initialClient : initialClient.id);
+      return;
+    }
+    if (preselectedClientName) {
       const match = clients.find(
         (c) => c.company_name?.toLowerCase() === preselectedClientName.toLowerCase()
       );
       if (match) setClientId(match.id);
+      return;
     }
-    if (open && !preselectedClientName) setClientId(null);
-  }, [open, preselectedClientName, clients]);
+    setClientId(null);
+  }, [open, preselectedClientName, initialClient, clients]);
 
   // Filter invoices for selected client
   const clientInvoices = useMemo(() => {
@@ -848,6 +1152,11 @@ export default function PartyLedger({
     });
     return buckets;
   }, [clientInvoices]);
+
+  const agingTotal = useMemo(
+    () => Object.values(agingSummary).reduce((s, v) => s + v, 0),
+    [agingSummary]
+  );
 
   const summary = useMemo(() => {
     const overdueAmt = clientInvoices
@@ -1050,12 +1359,16 @@ export default function PartyLedger({
                           GST: {selectedClient.client_gstin}
                         </span>
                       )}
+                      {/* Invoice count badge */}
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-blue-50 text-blue-600'}`}>
+                        {clientInvoices.length} invoice{clientInvoices.length !== 1 ? 's' : ''}
+                      </span>
                     </div>
                   </div>
                 </div>
 
-                {/* Summary cards row — all in one line, properly bounded */}
-                <div className="grid grid-cols-8 gap-2">
+                {/* Summary cards row */}
+                <div className="grid grid-cols-8 gap-2 mb-3">
                   <div className="col-span-2">
                     <SummaryCard
                       label="Total Invoiced"
@@ -1094,18 +1407,27 @@ export default function PartyLedger({
                   </div>
                 </div>
 
-                {/* Aging analysis row */}
+                {/* Aging Analysis */}
                 {Object.values(agingSummary).some((v) => v > 0) && (
-                  <div className={`mt-3 rounded-2xl border p-3 ${card}`}>
+                  <div className={`rounded-2xl border p-3 mb-3 ${card}`}>
                     <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
                       Aging Analysis · Overdue Receivables
                     </div>
                     <div className="flex gap-2">
                       {Object.entries(agingSummary).map(([bucket, amount]) => (
-                        <AgingPill key={bucket} bucket={bucket} amount={amount} isDark={isDark} />
+                        <AgingPill key={bucket} bucket={bucket} amount={amount} total={agingTotal} isDark={isDark} />
                       ))}
                     </div>
                   </div>
+                )}
+
+                {/* Smart Analytics Panel */}
+                {clientInvoices.length > 0 && (
+                  <SmartAnalyticsPanel
+                    invoices={clientInvoices}
+                    paymentsMap={paymentsMap}
+                    isDark={isDark}
+                  />
                 )}
               </div>
 
@@ -1128,13 +1450,13 @@ export default function PartyLedger({
                       style={{ tableLayout: 'fixed', minWidth: 900 }}
                     >
                       <colgroup>
-                        <col style={{ width: 90  }} />  {/* Date */}
-                        <col />                           {/* Description — flex */}
-                        <col style={{ width: 130 }} />  {/* Voucher */}
-                        <col style={{ width: 120 }} />  {/* Debit */}
-                        <col style={{ width: 120 }} />  {/* Credit */}
-                        <col style={{ width: 120 }} />  {/* Balance */}
-                        <col style={{ width: 64  }} />  {/* Dr/Cr */}
+                        <col style={{ width: 90  }} />
+                        <col />
+                        <col style={{ width: 130 }} />
+                        <col style={{ width: 120 }} />
+                        <col style={{ width: 120 }} />
+                        <col style={{ width: 120 }} />
+                        <col style={{ width: 64  }} />
                       </colgroup>
 
                       <thead>
@@ -1155,13 +1477,18 @@ export default function PartyLedger({
                         {rows.map((row, idx) => {
                           const isOpening = row.type === 'opening';
                           const isPayment = row.type === 'payment';
-                          const isCr      = row.type === 'credit_note';
 
                           const rowBg = isOpening
                             ? isDark ? 'bg-blue-900/20' : 'bg-blue-50'
                             : idx % 2 === 0
                               ? isDark ? 'bg-slate-900' : 'bg-white'
                               : isDark ? 'bg-slate-800/40' : 'bg-slate-50/60';
+
+                          // Highlight overdue invoice rows
+                          const isOverdueRow = !isOpening && !isPayment &&
+                            row.dueDate &&
+                            differenceInDays(new Date(), parseISO(row.dueDate)) > 0 &&
+                            row.dr > 0;
 
                           return (
                             <tr
@@ -1176,12 +1503,27 @@ export default function PartyLedger({
 
                               {/* Narration */}
                               <td className="px-4 py-3.5 min-w-0">
-                                <div
-                                  className={`text-sm font-medium truncate ${isOpening ? 'font-semibold' : ''}
-                                    ${isDark ? 'text-slate-200' : 'text-slate-800'}`}
-                                  title={row.narration}
-                                >
-                                  {row.narration}
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <div
+                                    className={`text-sm font-medium truncate flex-1 ${isOpening ? 'font-semibold' : ''}
+                                      ${isDark ? 'text-slate-200' : 'text-slate-800'}`}
+                                    title={row.narration}
+                                  >
+                                    {row.narration}
+                                  </div>
+                                  {/* Overdue badge on invoice rows */}
+                                  {isOverdueRow && (
+                                    <span className="flex-shrink-0 text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">
+                                      OVERDUE
+                                    </span>
+                                  )}
+                                  {/* Payment mode badge */}
+                                  {isPayment && row.paymentMode && (
+                                    <span className={`flex-shrink-0 text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase
+                                      ${isDark ? 'bg-emerald-900/40 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
+                                      {row.paymentMode}
+                                    </span>
+                                  )}
                                 </div>
                               </td>
 
@@ -1269,39 +1611,19 @@ export default function PartyLedger({
           <div className={`flex-shrink-0 flex items-center justify-between px-7 py-3 border-t text-xs ${divider}
             ${isDark ? 'bg-slate-900 text-slate-400' : 'bg-white text-slate-500'}`}
           >
-            <div className="flex items-center gap-1.5">
-              <span className={`w-1.5 h-1.5 rounded-full bg-blue-500 inline-block`} />
-              <span>
-                {rows.length - 1} transaction{rows.length !== 2 ? 's' : ''}
-              </span>
-              <span className="mx-1">·</span>
-              <span>
-                {dateFrom ? format(new Date(dateFrom), 'dd-MMM-yyyy') : '—'}
-                &nbsp;to&nbsp;
-                {dateTo   ? format(new Date(dateTo),   'dd-MMM-yyyy') : '—'}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleExportExcel}
-                className={`h-8 text-xs rounded-xl px-3 gap-1.5 ${isDark ? 'border-slate-600 hover:bg-slate-700' : ''}`}
-              >
-                <Download className="w-3 h-3" />
-                Excel
-              </Button>
-              <Button
-                size="sm"
-                onClick={handlePrint}
-                className="h-8 text-xs rounded-xl px-3 gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
-              >
-                <Printer className="w-3 h-3" />
-                Print / PDF
-              </Button>
-            </div>
+            <span>
+              {rows.length - 1} transaction{rows.length - 1 !== 1 ? 's' : ''} ·{' '}
+              {dateFrom && dateTo
+                ? `${format(new Date(dateFrom), 'dd MMM yyyy')} – ${format(new Date(dateTo), 'dd MMM yyyy')}`
+                : 'All time'}
+            </span>
+            <span className="flex items-center gap-1">
+              <Info className="w-3 h-3" />
+              Computer-generated statement
+            </span>
           </div>
         )}
+
       </DialogContent>
     </Dialog>
   );
