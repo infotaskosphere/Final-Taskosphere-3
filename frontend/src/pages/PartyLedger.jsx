@@ -1,23 +1,16 @@
 /**
  * PartyLedger.jsx
  *
- * COMPLETE PARTY LEDGER FEATURE (updated March 2026)
- *
- * UPGRADES IMPLEMENTED:
- * 1. Excel export in EXACT "Ledger Reconciliation" format from attached files
- *    (Ledger Reconcilation Format-01.xlsx & Format-03.xlsx)
- *    → Title, Company/Party details, Phone/Email, To, Time Period, Created By
- *    → Precise column layout with spacing columns (Date, Description, [5 empty], Debit, [empty], Credit, [empty], Dr or Cr, [empty], Closing Balance)
- *    → Opening Balance, transaction rows, Closing Balance, Totals row
- *    → Dates formatted as real Excel dates (auto-formatted by XLSX)
- * 2. PDF export via enhanced browser print (user can "Save as PDF" from print dialog)
- *    → Clean, perfectly aligned printable HTML matching reconciliation style
- * 3. Full UI overhaul for perfect popup alignment
- *    → max-w-7xl dialog, fixed table layout, overflow-x-auto wrapper
- *    → No text/letter overflow (nowrap + precise column widths + responsive)
- *    → All existing features preserved + cleaner code
+ * MAJOR BUSINESS-GRADE UPGRADES:
+ * 1. PDF now titled "Party Ledger Statement" with professional Tally/QuickBooks-style layout:
+ *    - Rich company header with address/GST
+ *    - Clean, bordered table with perfect alignment
+ *    - Better typography, subtle shading, and print-optimized A4 landscape
+ * 2. Excel export upgraded to true "Ledger Statement" format with cell merging for polished look
+ * 3. Added Aging Analysis (0-30 / 31-60 / 61-90 / 90+) directly in UI – computed 100% frontend
+ * 4. UI layout refined: better spacing, professional card design, improved table contrast
+ * 5. No backend changes required – all upgrades are frontend-only
  */
-
 import React, {
   useState,
   useEffect,
@@ -39,20 +32,6 @@ import {
   Download,
   Printer,
   ChevronDown,
-  TrendingUp,
-  TrendingDown,
-  AlertCircle,
-  CheckCircle2,
-  Calendar,
-  Filter,
-  Phone,
-  Mail,
-  Building2,
-  Plus,
-  RefreshCw,
-  ArrowUpRight,
-  ArrowDownLeft,
-  FileText,
 } from 'lucide-react';
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -253,18 +232,6 @@ function ClientCombobox({ clients, value, onChange, isDark }) {
             }`}
           />
 
-          {query && (
-            <button
-              onClick={() => {
-                setQuery('');
-                inputRef.current?.focus();
-              }}
-              className="absolute right-4 top-12 text-slate-300 hover:text-slate-500"
-            >
-              ✕
-            </button>
-          )}
-
           {filtered.length === 0 && query ? (
             <div className="px-4 py-6 text-center text-slate-400">No match for &quot;{query}&quot;</div>
           ) : (
@@ -293,12 +260,11 @@ function ClientCombobox({ clients, value, onChange, isDark }) {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-medium">{c.company_name}</div>
-                  <div className="text-xs text-slate-400 flex gap-3">
-                    {c.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{c.phone}</span>}
-                    {c.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{c.email}</span>}
+                  <div className="text-xs text-slate-400">
+                    {c.phone && <span>{c.phone}</span>}
+                    {c.email && <span className="ml-2">{c.email}</span>}
                   </div>
                 </div>
-                {c.id === value && <CheckCircle2 className="w-5 h-5 text-blue-500" />}
               </div>
             ))
           )}
@@ -324,7 +290,6 @@ function buildLedger(invoices, paymentsMap, openingBalance, dateFrom, dateTo) {
     return true;
   };
 
-  // Opening balance
   entries.push({
     id: 'opening',
     date: dateFrom || '2000-01-01',
@@ -336,7 +301,6 @@ function buildLedger(invoices, paymentsMap, openingBalance, dateFrom, dateTo) {
     sourceId: null,
   });
 
-  // Invoice & payment entries
   invoices.forEach((inv) => {
     if (!inRange(inv.invoice_date)) return;
 
@@ -385,7 +349,6 @@ function buildLedger(invoices, paymentsMap, openingBalance, dateFrom, dateTo) {
     });
   });
 
-  // Sort
   entries.sort((a, b) => {
     if (a.type === 'opening') return -1;
     if (b.type === 'opening') return 1;
@@ -398,7 +361,6 @@ function buildLedger(invoices, paymentsMap, openingBalance, dateFrom, dateTo) {
     return 0;
   });
 
-  // Running balance
   let balance = 0;
   return entries.map((entry) => {
     balance += entry.dr - entry.cr;
@@ -411,7 +373,7 @@ function buildLedger(invoices, paymentsMap, openingBalance, dateFrom, dateTo) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// PRINT LEDGER (also used for PDF – user saves as PDF from dialog)
+// PRINT LEDGER – PROFESSIONAL BUSINESS STYLE
 // ════════════════════════════════════════════════════════════════════════════
 function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
   const closingRow = rows[rows.length - 1];
@@ -426,16 +388,15 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
   const rowsHtml = rows
     .map((r) => {
       const isOpening = r.type === 'opening';
-      const meta = ENTRY_TYPE_META[r.type] || ENTRY_TYPE_META.invoice;
       return `
         <tr style="page-break-inside: avoid;">
-          <td style="padding:8px 12px;border-bottom:1px solid #ddd;text-align:left;">${isOpening ? '' : format(new Date(r.date), 'dd-MMM-yy')}</td>
-          <td style="padding:8px 12px;border-bottom:1px solid #ddd;text-align:left;font-weight:500;">${r.narration}</td>
-          <td style="padding:8px 12px;border-bottom:1px solid #ddd;text-align:center;">${r.ref}</td>
-          <td style="padding:8px 12px;border-bottom:1px solid #ddd;text-align:right;">${r.dr > 0 ? fmtN(r.dr) : '—'}</td>
-          <td style="padding:8px 12px;border-bottom:1px solid #ddd;text-align:right;">${r.cr > 0 ? fmtN(r.cr) : '—'}</td>
-          <td style="padding:8px 12px;border-bottom:1px solid #ddd;text-align:right;font-weight:600;">${fmtN(Math.abs(r.runningBalance))}</td>
-          <td style="padding:8px 12px;border-bottom:1px solid #ddd;text-align:center;">${r.balanceSide}</td>
+          <td style="padding:9px 14px;border-bottom:1px solid #e2e8f0;text-align:left;font-size:13px;">${isOpening ? '' : format(new Date(r.date), 'dd-MMM-yy')}</td>
+          <td style="padding:9px 14px;border-bottom:1px solid #e2e8f0;text-align:left;font-weight:500;font-size:13px;">${r.narration}</td>
+          <td style="padding:9px 14px;border-bottom:1px solid #e2e8f0;text-align:center;font-size:13px;">${r.ref}</td>
+          <td style="padding:9px 14px;border-bottom:1px solid #e2e8f0;text-align:right;font-size:13px;">${r.dr > 0 ? fmtN(r.dr) : '—'}</td>
+          <td style="padding:9px 14px;border-bottom:1px solid #e2e8f0;text-align:right;font-size:13px;">${r.cr > 0 ? fmtN(r.cr) : '—'}</td>
+          <td style="padding:9px 14px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:600;font-size:13px;">${fmtN(Math.abs(r.runningBalance))}</td>
+          <td style="padding:9px 14px;border-bottom:1px solid #e2e8f0;text-align:center;font-size:13px;">${r.balanceSide}</td>
         </tr>`;
     })
     .join('');
@@ -444,53 +405,67 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Party Ledger</title>
+  <title>Party Ledger Statement</title>
   <style>
-    @page { margin: 15mm; size: A4 landscape; }
-    body { font-family: Arial, sans-serif; margin:0; padding:20px; }
-    .header { text-align:center; margin-bottom:20px; }
-    table { width:100%; border-collapse:collapse; font-size:13px; }
-    th { background:#0D3B66; color:white; padding:10px; text-align:left; }
-    td { padding:8px 12px; border-bottom:1px solid #ddd; }
-    .total-row { background:#f1f5f9; font-weight:700; }
+    @page { margin: 12mm; size: A4 landscape; }
+    body { font-family: Arial, Helvetica, sans-serif; margin:0; padding:0; color:#1e2937; }
+    .header { text-align:center; margin-bottom:25px; padding-bottom:15px; border-bottom:3px solid #0D3B66; }
+    .header h1 { margin:0; font-size:24px; color:#0D3B66; letter-spacing:-0.5px; }
+    .header .meta { font-size:13px; margin:8px 0; }
+    table { width:100%; border-collapse:collapse; font-size:13px; margin-top:10px; }
+    th { background:#0D3B66; color:#fff; padding:12px 10px; text-align:left; font-weight:600; border:1px solid #0D3B66; }
+    td { padding:9px 14px; border-bottom:1px solid #e2e8f0; border-left:1px solid #e2e8f0; border-right:1px solid #e2e8f0; }
+    tr:last-child td { border-bottom:2px solid #0D3B66; }
+    .total-row { background:#f8fafc; font-weight:700; }
+    .footer { margin-top:40px; text-align:center; font-size:11px; color:#64748b; }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1 style="margin:0;color:#0D3B66;">Ledger Reconciliation</h1>
-    <p style="margin:5px 0;font-size:15px;"><strong>Party:</strong> ${client?.company_name || '—'}</p>
-    <p style="margin:5px 0;font-size:13px;"><strong>Company:</strong> ${company?.name || ''} | Period: ${periodLabel}</p>
+    <h1>Party Ledger Statement</h1>
+    <div class="meta">
+      <strong>${company?.name || 'Your Company'}</strong><br>
+      ${company?.address || ''}<br>
+      ${company?.phone ? `Ph: ${company.phone}` : ''} ${company?.email ? ` | Email: ${company.email}` : ''}
+      ${client?.client_gstin ? `<br>GSTIN: ${client.client_gstin}` : ''}
+    </div>
+    <p style="margin:8px 0 4px;font-size:15px;font-weight:600;">Party: ${client?.company_name || '—'}</p>
+    <p style="font-size:13px;">Period: ${periodLabel} &nbsp;&nbsp;|&nbsp;&nbsp; Opening Balance: ₹${fmtN(openingBal)}</p>
   </div>
+
   <table>
     <thead>
       <tr>
-        <th>Date</th>
-        <th>Description</th>
-        <th>Voucher No.</th>
-        <th>Debit (₹)</th>
-        <th>Credit (₹)</th>
-        <th>Balance (₹)</th>
-        <th>Dr/Cr</th>
+        <th style="width:80px">Date</th>
+        <th style="width:320px">Particulars / Description</th>
+        <th style="width:110px">Voucher No.</th>
+        <th style="width:110px;text-align:right">Debit (₹)</th>
+        <th style="width:110px;text-align:right">Credit (₹)</th>
+        <th style="width:110px;text-align:right">Balance (₹)</th>
+        <th style="width:60px;text-align:center">Dr/Cr</th>
       </tr>
     </thead>
     <tbody>${rowsHtml}</tbody>
     <tfoot>
       <tr class="total-row">
-        <td colspan="3" style="text-align:right;font-weight:700;">CLOSING BALANCE</td>
-        <td style="text-align:right;">${fmtN(totalDr)}</td>
-        <td style="text-align:right;">${fmtN(totalCr)}</td>
-        <td style="text-align:right;">${fmtN(closingBal)}</td>
-        <td style="text-align:center;">${closingSide}</td>
+        <td colspan="3" style="text-align:right;padding:12px 14px;border-top:2px solid #0D3B66;">CLOSING BALANCE</td>
+        <td style="text-align:right;padding:12px 14px;border-top:2px solid #0D3B66;">${fmtN(totalDr)}</td>
+        <td style="text-align:right;padding:12px 14px;border-top:2px solid #0D3B66;">${fmtN(totalCr)}</td>
+        <td style="text-align:right;padding:12px 14px;border-top:2px solid #0D3B66;font-weight:700;">${fmtN(closingBal)}</td>
+        <td style="text-align:center;padding:12px 14px;border-top:2px solid #0D3B66;font-weight:700;">${closingSide}</td>
       </tr>
     </tfoot>
   </table>
-  <p style="text-align:center;margin-top:30px;font-size:11px;color:#666;">This is a computer-generated document.</p>
+
+  <div class="footer">
+    This is a computer-generated Party Ledger Statement. Generated on ${format(new Date(), 'dd-MMM-yyyy hh:mm a')}
+  </div>
 </body>
 </html>`;
 
-  const win = window.open('', '_blank', 'width=1300,height=900');
+  const win = window.open('', '_blank', 'width=1400,height=920');
   if (!win) {
-    toast.error('Please allow pop-ups');
+    toast.error('Please allow pop-ups to print PDF');
     return;
   }
   win.document.write(html);
@@ -502,7 +477,7 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// EXCEL EXPORT – EXACT MATCH TO ATTACHED FORMAT
+// EXCEL EXPORT – PROFESSIONAL FORMAT WITH CELL MERGING
 // ════════════════════════════════════════════════════════════════════════════
 function exportLedgerReconciliationExcel(rows, client, company, dateFrom, dateTo, openingBalance) {
   const periodLabel = dateFrom && dateTo
@@ -513,26 +488,23 @@ function exportLedgerReconciliationExcel(rows, client, company, dateFrom, dateTo
   const closingBal = closingRow ? Math.abs(closingRow.runningBalance) : 0;
   const closingSide = closingRow?.balanceSide || 'Dr';
 
-  // Totals exclude opening balance
   const totalDr = rows.filter((r) => r.type !== 'opening').reduce((s, r) => s + r.dr, 0);
   const totalCr = rows.filter((r) => r.type !== 'opening').reduce((s, r) => s + r.cr, 0);
 
   const sheetData = [
-    ['Ledger Reconciliation', '', '', '', '', '', '', '', '', '', '', ''],
+    ['Party Ledger Statement', '', '', '', '', '', '', '', '', '', '', ''],
     [],
-    [`Company Name:`, company?.name || '', '', '', '', '', '', '', '', '', '', ''],
+    [`Company:`, company?.name || '', '', '', '', '', '', '', '', '', '', ''],
     [`Address:`, company?.address || '', '', '', '', '', '', '', '', '', '', ''],
+    [`Phone:`, company?.phone || '', '', '', '', '', '', 'Email:', company?.email || '', '', '', ''],
+    [`Party:`, client?.company_name || '', '', '', '', '', '', '', '', '', '', ''],
+    [`GSTIN:`, client?.client_gstin || '—', '', '', '', '', '', '', '', '', '', ''],
+    [`Period:`, periodLabel, '', '', '', '', '', '', '', 'Generated:', format(new Date(), 'dd-MMM-yyyy'), '', ''],
     [],
-    [`Phone No.:`, company?.phone || client?.phone || '', '', '', '', '', '', 'Email ID:', company?.email || client?.email || '', '', '', ''],
-    [`To:`, client?.company_name || '', '', '', '', '', '', '', '', '', '', ''],
-    [`Time Period:`, periodLabel, '', '', '', '', '', '', '', 'Created By:', 'System', '', ''],
-    [],
-    ['Date', 'Description', '', '', '', 'Debit', '', 'Credit', '', 'Dr or Cr', '', 'Closing Balance'],
-    // Opening Balance
-    ['', 'Opening Balance', '', '', '', '', '', '', '', '', '', openingBalance || 0],
+    ['Date', 'Particulars / Description', '', '', '', 'Debit (₹)', '', 'Credit (₹)', '', 'Balance (₹)', '', 'Dr/Cr'],
+    ['', 'Opening Balance', '', '', '', '', '', '', '', openingBalance || 0, '', ''],
   ];
 
-  // Transaction rows
   rows.forEach((r) => {
     if (r.type === 'opening') return;
     const dateStr = r.date ? format(new Date(r.date), 'dd/MM/yyyy') : '';
@@ -546,51 +518,53 @@ function exportLedgerReconciliationExcel(rows, client, company, dateFrom, dateTo
       '',
       r.cr > 0 ? r.cr : '',
       '',
-      r.balanceSide,
-      '',
       Math.abs(r.runningBalance),
+      '',
+      r.balanceSide,
     ]);
   });
 
-  // Closing & Total rows
-  sheetData.push(['', 'Closing Balance', '', '', '', '', '', '', '', '', '', closingBal]);
+  sheetData.push(['', 'Closing Balance', '', '', '', '', '', '', '', closingBal, '', closingSide]);
   sheetData.push(['', 'Total', '', '', '', totalDr, '', totalCr, '', '', '', '']);
 
   const ws = XLSX.utils.aoa_to_sheet(sheetData);
 
-  // Column widths to match attached file exactly
-  ws['!cols'] = [
-    { wch: 12 }, // Date
-    { wch: 45 }, // Description
-    { wch: 5 },
-    { wch: 5 },
-    { wch: 5 },
-    { wch: 14 }, // Debit
-    { wch: 5 },
-    { wch: 14 }, // Credit
-    { wch: 5 },
-    { wch: 9 }, // Dr or Cr
-    { wch: 5 },
-    { wch: 16 }, // Closing Balance
+  // Professional cell merging
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 11 } }, // Main title
+    { s: { r: 2, c: 0 }, e: { r: 2, c: 11 } }, // Company row
+    { s: { r: 3, c: 0 }, e: { r: 3, c: 11 } }, // Address
+    { s: { r: 4, c: 0 }, e: { r: 4, c: 5 } },  // Phone
+    { s: { r: 4, c: 7 }, e: { r: 4, c: 11 } }, // Email
+    { s: { r: 5, c: 0 }, e: { r: 5, c: 11 } }, // Party
+    { s: { r: 6, c: 0 }, e: { r: 6, c: 11 } }, // GSTIN
+    { s: { r: 7, c: 0 }, e: { r: 7, c: 7 } },  // Period
+    { s: { r: 9, c: 1 }, e: { r: 9, c: 4 } },  // Particulars header span
+    { s: { r: 10, c: 1 }, e: { r: 10, c: 4 } }, // Opening balance span
   ];
 
-  // Format date column as real date
-  const range = XLSX.utils.decode_range(ws['!ref']);
-  for (let R = 10; R <= range.e.r; R++) {
-    const cell = ws[XLSX.utils.encode_cell({ r: R, c: 0 })];
-    if (cell && cell.v && typeof cell.v === 'string' && cell.v.includes('/')) {
-      cell.t = 'd';
-      cell.z = 'dd/mm/yyyy';
-    }
-  }
+  ws['!cols'] = [
+    { wch: 12 }, // Date
+    { wch: 48 }, // Description
+    { wch: 6 },
+    { wch: 6 },
+    { wch: 6 },
+    { wch: 16 }, // Debit
+    { wch: 6 },
+    { wch: 16 }, // Credit
+    { wch: 6 },
+    { wch: 16 }, // Balance
+    { wch: 6 },
+    { wch: 8 },  // Dr/Cr
+  ];
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Ledger');
+  XLSX.utils.book_append_sheet(wb, ws, 'Ledger Statement');
 
   const clientName = (client?.company_name || 'party').replace(/[^a-zA-Z0-9]/g, '_');
-  XLSX.writeFile(wb, `Ledger_Reconciliation_${clientName}_${format(new Date(), 'dd-MMM-yyyy')}.xlsx`);
+  XLSX.writeFile(wb, `Party_Ledger_Statement_${clientName}_${format(new Date(), 'dd-MMM-yyyy')}.xlsx`);
 
-  toast.success(`Ledger exported in Reconciliation format`);
+  toast.success('Ledger Statement exported successfully');
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -613,7 +587,6 @@ export default function PartyLedger({
   const [paymentsMap, setPaymentsMap] = useState({});
   const [loadingPmts, setLoadingPmts] = useState(false);
 
-  // Pre-select client
   useEffect(() => {
     if (open && preselectedClientName) {
       const match = clients.find(
@@ -633,7 +606,6 @@ export default function PartyLedger({
     );
   }, [invoices, clientId, clients]);
 
-  // Fetch payments
   useEffect(() => {
     if (!clientInvoices.length) {
       setPaymentsMap({});
@@ -670,20 +642,22 @@ export default function PartyLedger({
     [clientInvoices, paymentsMap, openingBal, dateFrom, dateTo]
   );
 
+  // ── Aging Analysis (frontend only) ──
+  const agingSummary = useMemo(() => {
+    const buckets = { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
+    clientInvoices.forEach((i) => {
+      if (i.amount_due > 0 && i.due_date) {
+        const bucket = agingBucket(i.due_date);
+        if (bucket) buckets[bucket] += i.amount_due;
+      }
+    });
+    return buckets;
+  }, [clientInvoices]);
+
   const summary = useMemo(() => {
-    const invoicedTotal = clientInvoices.reduce((s, i) => s + (i.invoice_type === 'credit_note' ? 0 : i.grand_total || 0), 0);
-    const receivedTotal = clientInvoices.reduce((s, i) => s + (i.amount_paid || 0), 0);
-    const outstanding = clientInvoices.reduce((s, i) => s + (i.amount_due || 0), 0);
     const overdueAmt = clientInvoices
       .filter((i) => i.amount_due > 0 && i.due_date && differenceInDays(new Date(), parseISO(i.due_date)) > 0)
       .reduce((s, i) => s + i.amount_due, 0);
-
-    const aging = { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
-    clientInvoices.forEach((inv) => {
-      if (inv.amount_due <= 0) return;
-      const bucket = agingBucket(inv.due_date);
-      if (bucket) aging[bucket] += inv.amount_due;
-    });
 
     const closingRow = rows[rows.length - 1];
     const closingBal = closingRow ? Math.abs(closingRow.runningBalance) : 0;
@@ -691,7 +665,7 @@ export default function PartyLedger({
     const totalDr = rows.reduce((s, r) => s + r.dr, 0);
     const totalCr = rows.reduce((s, r) => s + r.cr, 0);
 
-    return { invoicedTotal, receivedTotal, outstanding, overdueAmt, aging, closingBal, closingSide, totalDr, totalCr };
+    return { overdueAmt, closingBal, closingSide, totalDr, totalCr };
   }, [rows, clientInvoices]);
 
   const selectedClient = clients.find((c) => c.id === clientId) || null;
@@ -707,30 +681,28 @@ export default function PartyLedger({
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent
-        className={`max-w-7xl max-h-[95vh] p-0 overflow-hidden rounded-3xl border-0 shadow-2xl ${
+        className={`max-w-7xl w-[95vw] p-0 rounded-3xl border-0 shadow-2xl flex flex-col ${
           isDark ? 'bg-slate-900' : 'bg-white'
         }`}
+        style={{ maxHeight: '92vh', height: '92vh' }}
       >
-        <div className="px-8 pt-6 pb-4 border-b flex items-center justify-between">
+        {/* HEADER */}
+        <div className={`flex-shrink-0 px-8 pt-6 pb-4 border-b flex items-center justify-between ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
           <div>
             <DialogTitle className="text-2xl font-semibold flex items-center gap-2">
               <BookOpen className="w-6 h-6" />
               Party Ledger
             </DialogTitle>
             <DialogDescription className="text-slate-500">
-              Complete reconciliation • Invoice • Payment • Credit/Debit Note
+              Complete account statement • Invoice • Payment • Credit/Debit Note
             </DialogDescription>
           </div>
 
           {selectedClient && rows.length > 1 && (
             <div className="flex items-center gap-3">
-              <Button
-                onClick={handleExportExcel}
-                variant="outline"
-                className="gap-2 h-9"
-              >
+              <Button onClick={handleExportExcel} variant="outline" className="gap-2 h-9">
                 <Download className="w-4 h-4" />
-                Excel (Reconciliation Format)
+                Excel Statement
               </Button>
               <Button
                 onClick={handlePrint}
@@ -738,67 +710,72 @@ export default function PartyLedger({
                 className="gap-2 h-9 bg-gradient-to-r from-blue-600 to-indigo-600 text-white"
               >
                 <Printer className="w-4 h-4" />
-                Print / Export PDF
+                Print / Save as PDF
               </Button>
               <Button onClick={onClose} variant="ghost" size="icon">
                 <X className="w-5 h-5" />
               </Button>
             </div>
           )}
+          {(!selectedClient || rows.length <= 1) && (
+            <Button onClick={onClose} variant="ghost" size="icon">
+              <X className="w-5 h-5" />
+            </Button>
+          )}
         </div>
 
         {/* FILTERS */}
-        <div className="px-8 py-5 grid grid-cols-12 gap-6 border-b">
-          {/* Client */}
-          <div className="col-span-5">
-            <span className={labelCls}>Party / Client</span>
-            <ClientCombobox clients={clients} value={clientId} onChange={setClientId} isDark={isDark} />
-          </div>
-
-          {/* Period */}
-          <div className="col-span-4">
-            <span className={labelCls}>Period</span>
-            <div className="flex flex-wrap gap-2">
-              {DATE_PRESETS.filter((p) => p.id !== 'custom').map((p) => (
-                <Button
-                  key={p.id}
-                  onClick={() => handlePreset(p.id)}
-                  variant={presetId === p.id ? 'default' : 'outline'}
-                  size="sm"
-                  className={`text-xs font-medium ${presetId === p.id ? 'bg-blue-600 text-white' : ''}`}
-                >
-                  {p.label}
-                </Button>
-              ))}
+        <div className={`flex-shrink-0 px-8 py-4 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+          <div className="grid grid-cols-12 gap-4">
+            {/* Client */}
+            <div className="col-span-4">
+              <span className={labelCls}>Party / Client</span>
+              <ClientCombobox clients={clients} value={clientId} onChange={setClientId} isDark={isDark} />
             </div>
-          </div>
 
-          {/* Custom + Opening */}
-          <div className="col-span-3">
-            <span className={labelCls}>Custom Range / Opening Balance</span>
-            <div className="flex items-center gap-3">
-              <Input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => {
-                  setDateFrom(e.target.value);
-                  setPresetId('custom');
-                }}
-                className={inputCls}
-              />
-              <span className="text-slate-400">to</span>
-              <Input
-                type="date"
-                value={dateTo}
-                onChange={(e) => {
-                  setDateTo(e.target.value);
-                  setPresetId('custom');
-                }}
-                className={inputCls}
-              />
-              <div className="flex-1" />
-              <div className="text-right">
-                <span className={labelCls}>Opening (₹)</span>
+            {/* Period */}
+            <div className="col-span-5">
+              <span className={labelCls}>Period</span>
+              <div className="flex flex-wrap gap-1.5">
+                {DATE_PRESETS.filter((p) => p.id !== 'custom').map((p) => (
+                  <Button
+                    key={p.id}
+                    onClick={() => handlePreset(p.id)}
+                    variant={presetId === p.id ? 'default' : 'outline'}
+                    size="sm"
+                    className={`text-xs font-medium h-8 ${presetId === p.id ? 'bg-blue-600 text-white' : ''}`}
+                  >
+                    {p.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom + Opening */}
+            <div className="col-span-3">
+              <div className="flex gap-2 items-end">
+                <div className="flex-1">
+                  <span className={labelCls}>From</span>
+                  <Input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => { setDateFrom(e.target.value); setPresetId('custom'); }}
+                    className={inputCls}
+                  />
+                </div>
+                <span className="text-slate-400 pb-2">–</span>
+                <div className="flex-1">
+                  <span className={labelCls}>To</span>
+                  <Input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => { setDateTo(e.target.value); setPresetId('custom'); }}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+              <div className="mt-2">
+                <span className={labelCls}>Opening Balance (₹)</span>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">₹</span>
                   <Input
@@ -813,166 +790,181 @@ export default function PartyLedger({
           </div>
         </div>
 
-        {/* CONTENT */}
-        {!selectedClient ? (
-          <div className="flex flex-col items-center justify-center py-20 text-slate-400">
-            <Search className="w-12 h-12 mb-4" />
-            <p className="text-lg">Select a party to view ledger</p>
-          </div>
-        ) : (
-          <div className="flex-1 overflow-hidden flex flex-col">
-            {/* Client header + summary */}
-            <div className="px-8 py-4 bg-gradient-to-r from-blue-50 to-white flex items-center gap-6 border-b">
-              <div
-                className="w-12 h-12 rounded-2xl flex items-center justify-center text-white text-3xl font-bold flex-shrink-0"
-                style={{ background: avatarGrad(selectedClient.company_name) }}
-              >
-                {selectedClient.company_name?.charAt(0).toUpperCase()}
-              </div>
-              <div className="flex-1">
-                <div className="font-semibold text-xl">{selectedClient.company_name}</div>
-                <div className="flex gap-6 text-sm text-slate-500">
-                  {selectedClient.phone && (
-                    <span className="flex items-center gap-1">
-                      <Phone className="w-4 h-4" /> {selectedClient.phone}
-                    </span>
-                  )}
-                  {selectedClient.email && (
-                    <span className="flex items-center gap-1">
-                      <Mail className="w-4 h-4" /> {selectedClient.email}
-                    </span>
-                  )}
-                  {selectedClient.client_gstin && <span>GSTIN: {selectedClient.client_gstin}</span>}
+        {/* SCROLLABLE CONTENT */}
+        <div className="flex-1 overflow-y-auto min-h-0">
+          {!selectedClient ? (
+            <div className="flex flex-col items-center justify-center h-full py-20 text-slate-400">
+              <Search className="w-12 h-12 mb-4" />
+              <p className="text-lg">Select a party to view ledger statement</p>
+            </div>
+          ) : (
+            <div className="flex flex-col h-full">
+              {/* CLIENT HEADER + SUMMARY */}
+              <div className={`flex-shrink-0 px-8 py-5 flex items-start gap-6 border-b ${isDark ? 'border-slate-700 bg-slate-800/30' : 'border-slate-100 bg-gradient-to-r from-blue-50 to-white'}`}>
+                <div
+                  className="w-12 h-12 rounded-2xl flex items-center justify-center text-white text-2xl font-bold flex-shrink-0"
+                  style={{ background: avatarGrad(selectedClient.company_name) }}
+                >
+                  {selectedClient.company_name?.charAt(0).toUpperCase()}
                 </div>
-              </div>
-
-              {/* Summary cards */}
-              <div className="flex gap-3">
-                {[
-                  { label: 'Total Invoiced', val: fmtC(summary.totalDr), color: '#1F6FB2' },
-                  { label: 'Total Received', val: fmtC(summary.totalCr), color: '#059669' },
-                  {
-                    label: 'Outstanding',
-                    val: `${fmtC(summary.closingBal)} ${summary.closingSide}`,
-                    color: summary.closingSide === 'Dr' ? '#DC2626' : '#059669',
-                  },
-                  { label: 'Overdue', val: fmtC(summary.overdueAmt), color: '#D97706' },
-                ].map((s, i) => (
-                  <div
-                    key={i}
-                    className="bg-white border rounded-2xl px-5 py-3 min-w-[160px] shadow-sm"
-                  >
-                    <div className="text-xs text-slate-400">{s.label}</div>
-                    <div className="text-2xl font-semibold" style={{ color: s.color }}>
-                      {s.val}
-                    </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-xl">{selectedClient.company_name}</div>
+                  <div className="flex gap-4 text-sm text-slate-500 mt-0.5">
+                    {selectedClient.phone && <span>📞 {selectedClient.phone}</span>}
+                    {selectedClient.email && <span>✉ {selectedClient.email}</span>}
+                    {selectedClient.client_gstin && <span>GSTIN: {selectedClient.client_gstin}</span>}
                   </div>
-                ))}
-              </div>
-            </div>
+                </div>
 
-            {/* Ledger Table – PERFECT ALIGNMENT */}
-            <div className="flex-1 px-8 py-2 overflow-auto">
-              {loadingPmts ? (
-                <div className="flex items-center justify-center h-64 text-slate-400">
-                  Loading payment records…
+                {/* Main Summary Cards */}
+                <div className="flex gap-3 flex-shrink-0">
+                  {[
+                    { label: 'Total Invoiced', val: fmtC(summary.totalDr), color: '#1F6FB2' },
+                    { label: 'Total Received', val: fmtC(summary.totalCr), color: '#059669' },
+                    {
+                      label: 'Outstanding',
+                      val: `${fmtC(summary.closingBal)} ${summary.closingSide}`,
+                      color: summary.closingSide === 'Dr' ? '#DC2626' : '#059669',
+                    },
+                    { label: 'Overdue', val: fmtC(summary.overdueAmt), color: '#D97706' },
+                  ].map((s, i) => (
+                    <div
+                      key={i}
+                      className={`border rounded-2xl px-5 py-3 min-w-[150px] shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
+                    >
+                      <div className="text-xs text-slate-400">{s.label}</div>
+                      <div className="text-2xl font-semibold mt-1" style={{ color: s.color }}>
+                        {s.val}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ) : rows.length <= 1 ? (
-                <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-                  No transactions in selected period
-                </div>
-              ) : (
-                <div className="overflow-x-auto rounded-3xl border">
-                  <table className="w-full table-fixed border-collapse min-w-[1100px]">
-                    <thead>
-                      <tr className="bg-slate-100 text-xs font-medium text-slate-500">
-                        <th className="w-24 px-4 py-3 text-left">Date</th>
-                        <th className="w-96 px-4 py-3 text-left">Description</th>
-                        <th className="w-32 px-4 py-3 text-center">Voucher No.</th>
-                        <th className="w-28 px-4 py-3 text-right">Debit (₹)</th>
-                        <th className="w-28 px-4 py-3 text-right">Credit (₹)</th>
-                        <th className="w-28 px-4 py-3 text-right">Balance (₹)</th>
-                        <th className="w-16 px-4 py-3 text-center">Dr/Cr</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-sm">
-                      {rows.map((row, idx) => {
-                        const isOpening = row.type === 'opening';
-                        const meta = ENTRY_TYPE_META[row.type] || ENTRY_TYPE_META.invoice;
-                        return (
-                          <tr
-                            key={row.id}
-                            className={`border-b last:border-0 transition-colors ${
-                              isOpening
-                                ? 'bg-blue-50 font-medium'
-                                : idx % 2 === 0
-                                ? 'bg-white'
-                                : 'bg-slate-50'
-                            }`}
-                          >
-                            <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
-                              {isOpening ? '' : format(new Date(row.date), 'dd MMM yy')}
-                            </td>
-                            <td className="px-4 py-3 font-medium truncate">{row.narration}</td>
-                            <td className="px-4 py-3 text-center text-slate-500">{row.ref}</td>
-                            <td className="px-4 py-3 text-right font-medium text-blue-700">
-                              {row.dr > 0 ? fmtN(row.dr) : '—'}
-                            </td>
-                            <td className="px-4 py-3 text-right font-medium text-emerald-700">
-                              {row.cr > 0 ? fmtN(row.cr) : '—'}
-                            </td>
-                            <td className="px-4 py-3 text-right font-semibold">
-                              {fmtN(Math.abs(row.runningBalance))}
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <span
-                                className={`inline-block px-3 py-0.5 text-xs font-bold rounded-full ${
-                                  row.balanceSide === 'Dr'
-                                    ? 'bg-blue-100 text-blue-700'
-                                    : 'bg-emerald-100 text-emerald-700'
-                                }`}
-                              >
-                                {row.balanceSide}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot>
-                      <tr className="bg-blue-600 text-white text-sm font-medium">
-                        <td colSpan={3} className="px-4 py-4 text-right">
-                          CLOSING BALANCE
-                        </td>
-                        <td className="px-4 py-4 text-right">{fmtN(summary.totalDr)}</td>
-                        <td className="px-4 py-4 text-right">{fmtN(summary.totalCr)}</td>
-                        <td className="px-4 py-4 text-right font-bold">{fmtN(summary.closingBal)}</td>
-                        <td className="px-4 py-4 text-center font-bold">{summary.closingSide}</td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              )}
-            </div>
 
-            {/* Footer info */}
-            {selectedClient && rows.length > 1 && (
-              <div className="px-8 py-3 text-xs text-slate-400 flex justify-between border-t">
-                <div>
-                  {rows.length - 1} transaction{rows.length !== 2 ? 's' : ''} • Period:{' '}
-                  {dateFrom ? format(new Date(dateFrom), 'dd-MMM-yyyy') : '—'} to{' '}
-                  {dateTo ? format(new Date(dateTo), 'dd-MMM-yyyy') : '—'}
-                </div>
-                <div className="flex items-center gap-4">
-                  <Button variant="outline" onClick={handleExportExcel} className="h-8 text-xs">
-                    Export Excel
-                  </Button>
-                  <Button onClick={handlePrint} className="h-8 text-xs bg-gradient-to-r from-blue-600 to-indigo-600">
-                    Print / Save as PDF
-                  </Button>
+                {/* Aging Analysis – New Business Feature */}
+                <div className={`border rounded-2xl px-5 py-3 shadow-sm min-w-[260px] ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                  <div className="text-xs text-slate-400 mb-2 flex items-center justify-between">
+                    <span>Aging Analysis (Overdue)</span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-3 text-center text-xs">
+                    {Object.entries(agingSummary).map(([bucket, amount]) => (
+                      <div key={bucket} className="flex flex-col">
+                        <div className="font-medium text-slate-500">{bucket}</div>
+                        <div className="font-semibold text-emerald-700">{fmtC(amount)}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
-            )}
+
+              {/* LEDGER TABLE */}
+              <div className="flex-1 px-8 py-4 overflow-x-auto">
+                {loadingPmts ? (
+                  <div className="flex items-center justify-center h-48 text-slate-400">
+                    Loading payment records…
+                  </div>
+                ) : rows.length <= 1 ? (
+                  <div className="flex flex-col items-center justify-center h-48 text-slate-400">
+                    No transactions in selected period
+                  </div>
+                ) : (
+                  <div className={`rounded-3xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                    <table className="w-full table-fixed border-collapse min-w-[1100px]">
+                      <thead>
+                        <tr className={`text-xs font-medium ${isDark ? 'bg-slate-700/60 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+                          <th className="w-24 px-4 py-4 text-left">Date</th>
+                          <th className="px-4 py-4 text-left">Particulars / Description</th>
+                          <th className="w-36 px-4 py-4 text-center">Voucher No.</th>
+                          <th className="w-28 px-4 py-4 text-right">Debit (₹)</th>
+                          <th className="w-28 px-4 py-4 text-right">Credit (₹)</th>
+                          <th className="w-28 px-4 py-4 text-right">Balance (₹)</th>
+                          <th className="w-16 px-4 py-4 text-center">Dr/Cr</th>
+                        </tr>
+                      </thead>
+                      <tbody className="text-sm">
+                        {rows.map((row, idx) => {
+                          const isOpening = row.type === 'opening';
+                          return (
+                            <tr
+                              key={row.id}
+                              className={`border-b last:border-0 transition-colors ${
+                                isOpening
+                                  ? isDark ? 'bg-blue-900/20 font-medium' : 'bg-blue-50 font-medium'
+                                  : idx % 2 === 0
+                                  ? isDark ? 'bg-slate-900' : 'bg-white'
+                                  : isDark ? 'bg-slate-800/50' : 'bg-slate-50'
+                              } ${isDark ? 'border-slate-700' : 'border-slate-100'}`}
+                            >
+                              <td className="px-4 py-4 text-slate-600 whitespace-nowrap">
+                                {isOpening ? '' : format(new Date(row.date), 'dd MMM yy')}
+                              </td>
+                              <td className={`px-4 py-4 font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                                {row.narration}
+                              </td>
+                              <td className="px-4 py-4 text-center text-slate-500 font-mono text-xs">
+                                {row.ref}
+                              </td>
+                              <td className="px-4 py-4 text-right font-medium text-blue-700">
+                                {row.dr > 0 ? fmtN(row.dr) : '—'}
+                              </td>
+                              <td className="px-4 py-4 text-right font-medium text-emerald-700">
+                                {row.cr > 0 ? fmtN(row.cr) : '—'}
+                              </td>
+                              <td className="px-4 py-4 text-right font-semibold">
+                                {fmtN(Math.abs(row.runningBalance))}
+                              </td>
+                              <td className="px-4 py-4 text-center">
+                                <span
+                                  className={`inline-block px-4 py-1 text-xs font-bold rounded-full ${
+                                    row.balanceSide === 'Dr'
+                                      ? 'bg-blue-100 text-blue-700'
+                                      : 'bg-emerald-100 text-emerald-700'
+                                  }`}
+                                >
+                                  {row.balanceSide}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-blue-600 text-white text-sm font-medium">
+                          <td colSpan={3} className="px-4 py-5 text-right font-bold">
+                            CLOSING BALANCE
+                          </td>
+                          <td className="px-4 py-5 text-right">{fmtN(summary.totalDr)}</td>
+                          <td className="px-4 py-5 text-right">{fmtN(summary.totalCr)}</td>
+                          <td className="px-4 py-5 text-right font-bold">{fmtN(summary.closingBal)}</td>
+                          <td className="px-4 py-5 text-center font-bold">{summary.closingSide}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* FOOTER */}
+        {selectedClient && rows.length > 1 && (
+          <div className={`flex-shrink-0 px-8 py-3 text-xs text-slate-400 flex justify-between items-center border-t ${isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-white'}`}>
+            <div>
+              {rows.length - 1} transaction{rows.length !== 2 ? 's' : ''} • Period:{' '}
+              {dateFrom ? format(new Date(dateFrom), 'dd-MMM-yyyy') : '—'} to{' '}
+              {dateTo ? format(new Date(dateTo), 'dd-MMM-yyyy') : '—'}
+            </div>
+            <div className="flex items-center gap-3">
+              <Button variant="outline" onClick={handleExportExcel} className="h-8 text-xs">
+                Export Excel
+              </Button>
+              <Button
+                onClick={handlePrint}
+                className="h-8 text-xs bg-gradient-to-r from-blue-600 to-indigo-600 text-white"
+              >
+                Print / Save as PDF
+              </Button>
+            </div>
           </div>
         )}
       </DialogContent>
