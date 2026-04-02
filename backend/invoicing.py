@@ -1,5 +1,5 @@
 """
-invoicing.py  —  v6.1  FIXED
+invoicing.py  —  v6.3
 ──────────────────────────────────────────────────────────────────────────────
 CHANGES in v6.1 (bug-fixes over v6.0):
     GET /invoices/{inv_id} so FastAPI no longer treats "drive-status" as an
@@ -1698,10 +1698,38 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(get_c
 
 
 @router.get("/invoices")
-async def list_invoices(current_user: User = Depends(get_current_user)):
+async def list_invoices(
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    page_size: int = Query(20, ge=1, le=100, description="Results per page"),
+    status: Optional[str] = Query(None, description="Filter by status"),
+    search: Optional[str] = Query(None, description="Search by client name or invoice number"),
+    current_user: User = Depends(get_current_user),
+):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     q: dict = {} if current_user.role == "admin" else {"created_by": current_user.id}
-    return await db.invoices.find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    if status and status in INV_STATUS:
+        q["status"] = status
+    if search:
+        q["$or"] = [
+            {"client_name": {"$regex": search, "$options": "i"}},
+            {"invoice_no": {"$regex": search, "$options": "i"}},
+        ]
+    total = await db.invoices.count_documents(q)
+    skip = (page - 1) * page_size
+    invoices = await (
+        db.invoices.find(q, {"_id": 0})
+        .sort("created_at", -1)
+        .skip(skip)
+        .limit(page_size)
+        .to_list(page_size)
+    )
+    return {
+        "invoices": invoices,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": max(1, -(-total // page_size)),
+    }
 
 
 @router.get("/invoices/stats")
@@ -1778,6 +1806,38 @@ async def check_drive_status(current_user: User = Depends(get_current_user)):
     }
 
 
+
+# ═══════════════════════════════════════════════════════════
+# INLINE STATUS UPDATE (from invoice list page dropdown)
+# ═══════════════════════════════════════════════════════════
+
+@router.patch("/invoices/{inv_id}/status")
+async def update_invoice_status(
+    inv_id: str,
+    payload: dict,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Update only the status of an invoice — used by the list page dropdown.
+    Accepted: draft | sent | partially_paid | paid | overdue | cancelled | credit_note
+    """
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+
+    new_status = (payload.get("status") or "").strip().lower()
+    if new_status not in INV_STATUS:
+        raise HTTPException(400, f"Invalid status. Must be one of: {INV_STATUS}")
+
+    result = await db.invoices.update_one(
+        {"id": inv_id},
+        {"$set": {"status": new_status, "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(404, "Invoice not found")
+
+    return {"id": inv_id, "status": new_status}
+
+
 @router.get("/invoices/{inv_id}")
 async def get_invoice(inv_id: str, current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
@@ -1827,11 +1887,15 @@ async def delete_invoice(inv_id: str, current_user: User = Depends(get_current_u
 # ═══════════════════════════════════════════════════════════
 
 @router.get("/invoices/{inv_id}/pdf")
-async def download_invoice_pdf(inv_id: str, current_user: User = Depends(get_current_user)):
+async def download_invoice_pdf(
+    inv_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
     """
-    Always generates a fresh PDF and streams it as a file download.
-    This endpoint NEVER redirects to Google Drive — it always returns the PDF bytes.
-    To optionally save to Drive, call POST /invoices/{inv_id}/upload-to-drive separately.
+    Generates a fresh PDF, streams it as a file download, AND - when Google
+    Drive is configured - automatically uploads it to Drive in the background.
+    One click = browser download + Drive backup. No separate call required.
     """
     if not _perm(current_user):
         raise HTTPException(403, "Access denied")
@@ -1850,9 +1914,35 @@ async def download_invoice_pdf(inv_id: str, current_user: User = Depends(get_cur
 
     safe_name = (inv.get("invoice_no") or inv_id).replace("/", "_").replace("\\", "_")
     filename = f"Invoice_{safe_name}.pdf"
+    pdf_bytes = pdf_buf.getvalue()
+
+    # Auto-upload to Google Drive in the background (if configured)
+    if _drive_configured():
+        async def _bg_upload(inv_data: dict, raw_bytes: bytes, fname: str):
+            try:
+                client_name = inv_data.get("client_name", "").strip()
+                try:
+                    folder_id = _get_or_create_client_folder(client_name)
+                except Exception:
+                    folder_id = DRIVE_FOLDERS["invoices"]
+                link = await _upload_to_drive(
+                    raw_bytes, fname, "invoices", "application/pdf",
+                    custom_parent_id=folder_id,
+                )
+                if link:
+                    await db.invoices.update_one(
+                        {"id": inv_data["id"]},
+                        {"$set": {"pdf_drive_link": link,
+                                  "updated_at": datetime.now(timezone.utc).isoformat()}},
+                    )
+                    logger.info(f"Auto-uploaded to Drive: {fname} -> {link}")
+            except Exception as exc:
+                logger.warning(f"Background Drive upload failed for {fname}: {exc}")
+
+        background_tasks.add_task(_bg_upload, dict(inv), pdf_bytes, filename)
 
     return StreamingResponse(
-        pdf_buf,
+        BytesIO(pdf_bytes),
         media_type="application/pdf",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
