@@ -1,16 +1,16 @@
 /**
- * PartyLedger.jsx
+ * PartyLedger.jsx — Redesigned & Alignment-Fixed
  *
- * MAJOR BUSINESS-GRADE UPGRADES:
- * 1. PDF now titled "Party Ledger Statement" with professional Tally/QuickBooks-style layout:
- *    - Rich company header with address/GST
- *    - Clean, bordered table with perfect alignment
- *    - Better typography, subtle shading, and print-optimized A4 landscape
- * 2. Excel export upgraded to true "Ledger Statement" format with cell merging for polished look
- * 3. Added Aging Analysis (0-30 / 31-60 / 61-90 / 90+) directly in UI – computed 100% frontend
- * 4. UI layout refined: better spacing, professional card design, improved table contrast
- * 5. No backend changes required – all upgrades are frontend-only
+ * CHANGES IN THIS VERSION:
+ * 1. PDF title changed from "Party Ledger Statement" → "Account Statement"
+ * 2. All table columns properly constrained — no overflow, perfect alignment
+ * 3. Summary cards + aging panel restructured into a clean responsive row
+ * 4. Improved overall UI: refined typography, tighter spacing, better contrast
+ * 5. Table uses fixed column widths + overflow:hidden + text-ellipsis for long content
+ * 6. Header, filter bar, summary, table footer all pixel-aligned
+ * 7. Dark mode improvements throughout
  */
+
 import React, {
   useState,
   useEffect,
@@ -32,25 +32,32 @@ import {
   Download,
   Printer,
   ChevronDown,
+  TrendingUp,
+  TrendingDown,
+  AlertCircle,
+  Clock,
 } from 'lucide-react';
 
-// ─── Constants ─────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 const ENTRY_TYPE_META = {
-  invoice: { label: 'Tax Invoice', side: 'Dr', color: '#1F6FB2', bg: '#EFF6FF', border: '#BFDBFE' },
-  proforma: { label: 'Proforma Invoice', side: 'Dr', color: '#7C3AED', bg: '#F5F3FF', border: '#DDD6FE' },
-  estimate: { label: 'Estimate', side: 'Dr', color: '#64748B', bg: '#F8FAFC', border: '#CBD5E1' },
-  debit_note: { label: 'Debit Note', side: 'Dr', color: '#D97706', bg: '#FFFBEB', border: '#FDE68A' },
-  credit_note: { label: 'Credit Note', side: 'Cr', color: '#059669', bg: '#ECFDF5', border: '#6EE7B7' },
-  payment: { label: 'Payment Received', side: 'Cr', color: '#059669', bg: '#ECFDF5', border: '#6EE7B7' },
-  opening: { label: 'Opening Balance', side: null, color: '#0D3B66', bg: '#EFF6FF', border: '#93C5FD' },
+  invoice:    { label: 'Tax Invoice',       side: 'Dr', color: '#1D4ED8', bg: '#EFF6FF', border: '#BFDBFE' },
+  proforma:   { label: 'Proforma Invoice',  side: 'Dr', color: '#7C3AED', bg: '#F5F3FF', border: '#DDD6FE' },
+  estimate:   { label: 'Estimate',          side: 'Dr', color: '#64748B', bg: '#F8FAFC', border: '#CBD5E1' },
+  debit_note: { label: 'Debit Note',        side: 'Dr', color: '#D97706', bg: '#FFFBEB', border: '#FDE68A' },
+  credit_note:{ label: 'Credit Note',       side: 'Cr', color: '#059669', bg: '#ECFDF5', border: '#6EE7B7' },
+  payment:    { label: 'Payment Received',  side: 'Cr', color: '#059669', bg: '#ECFDF5', border: '#6EE7B7' },
+  opening:    { label: 'Opening Balance',   side: null,  color: '#0D3B66', bg: '#EFF6FF', border: '#93C5FD' },
 };
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtN = (n) =>
-  new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n ?? 0);
+  new Intl.NumberFormat('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n ?? 0);
+
 const fmtC = (n) => `₹${fmtN(n)}`;
 
-/** Indian Financial Year helpers */
 function getIndianFY(date = new Date()) {
   const m = date.getMonth();
   const y = date.getFullYear();
@@ -59,46 +66,41 @@ function getIndianFY(date = new Date()) {
 
 function fyDateRange(fy) {
   return {
-    from: `${fy.start}-04-01`,
-    to: `${fy.end}-03-31`,
+    from:  `${fy.start}-04-01`,
+    to:    `${fy.end}-03-31`,
     label: `FY ${fy.start}-${String(fy.end).slice(2)}`,
   };
 }
 
 const DATE_PRESETS = (() => {
-  const today = new Date();
-  const curFY = getIndianFY(today);
+  const today  = new Date();
+  const curFY  = getIndianFY(today);
   const prevFY = { start: curFY.start - 1, end: curFY.end - 1 };
-  const fmt = (d) => format(d, 'yyyy-MM-dd');
+  const fmt    = (d) => format(d, 'yyyy-MM-dd');
+  const sub    = (days) => { const d = new Date(today); d.setDate(d.getDate() - days); return d; };
 
-  const sub = (days) => {
-    const d = new Date(today);
-    d.setDate(d.getDate() - days);
-    return d;
-  };
   return [
-    { id: 'curFY', ...fyDateRange(curFY), label: `Current ${fyDateRange(curFY).label}` },
+    { id: 'curFY',  ...fyDateRange(curFY),  label: `Current ${fyDateRange(curFY).label}` },
     { id: 'prevFY', ...fyDateRange(prevFY), label: `Prev ${fyDateRange(prevFY).label}` },
-    { id: '3m', from: fmt(sub(90)), to: fmt(today), label: 'Last 3 months' },
-    { id: '6m', from: fmt(sub(180)), to: fmt(today), label: 'Last 6 months' },
-    { id: '1y', from: fmt(sub(365)), to: fmt(today), label: 'Last 1 year' },
-    { id: 'all', from: '2000-01-01', to: fmt(today), label: 'All time' },
-    { id: 'custom', from: '', to: '', label: 'Custom range' },
+    { id: '3m',     from: fmt(sub(90)),     to: fmt(today), label: 'Last 3 months' },
+    { id: '6m',     from: fmt(sub(180)),    to: fmt(today), label: 'Last 6 months' },
+    { id: '1y',     from: fmt(sub(365)),    to: fmt(today), label: 'Last 1 year' },
+    { id: 'all',    from: '2000-01-01',     to: fmt(today), label: 'All time' },
+    { id: 'custom', from: '',               to: '',          label: 'Custom' },
   ];
 })();
 
-/** Aging bucket */
 function agingBucket(dueDateStr) {
   if (!dueDateStr) return null;
   const days = differenceInDays(startOfDay(new Date()), startOfDay(parseISO(dueDateStr)));
-  if (days <= 0) return null;
+  if (days <= 0)  return null;
   if (days <= 30) return '0-30';
   if (days <= 60) return '31-60';
   if (days <= 90) return '61-90';
   return '90+';
 }
 
-// ─── Avatar helper ──────────────────────────────────────────────────────────
+// ─── Avatar ───────────────────────────────────────────────────────────────────
 const AVATAR_GRADS = [
   ['#0D3B66', '#1F6FB2'],
   ['#064e3b', '#059669'],
@@ -107,12 +109,13 @@ const AVATAR_GRADS = [
   ['#881337', '#e11d48'],
   ['#134e4a', '#0d9488'],
 ];
+
 const avatarGrad = (name = '') => {
   const i = (name?.charCodeAt(0) || 0) % AVATAR_GRADS.length;
   return `linear-gradient(135deg, ${AVATAR_GRADS[i][0]}, ${AVATAR_GRADS[i][1]})`;
 };
 
-// ─── Highlight helper ────────────────────────────────────────────────────────
+// ─── Highlight ────────────────────────────────────────────────────────────────
 const Hl = ({ text = '', query = '' }) => {
   if (!query.trim()) return <>{text}</>;
   const idx = text.toLowerCase().indexOf(query.toLowerCase());
@@ -126,15 +129,15 @@ const Hl = ({ text = '', query = '' }) => {
   );
 };
 
-// ════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════════
 // CLIENT COMBOBOX
-// ════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════════
 function ClientCombobox({ clients, value, onChange, isDark }) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
+  const [open, setOpen]     = useState(false);
+  const [query, setQuery]   = useState('');
   const [focused, setFocus] = useState(-1);
-  const wrapRef = useRef(null);
-  const inputRef = useRef(null);
+  const wrapRef             = useRef(null);
+  const inputRef            = useRef(null);
 
   const selected = clients.find((c) => c.id === value) || null;
 
@@ -145,8 +148,8 @@ function ClientCombobox({ clients, value, onChange, isDark }) {
       .filter(
         (c) =>
           (c.company_name || '').toLowerCase().includes(q) ||
-          (c.email || '').toLowerCase().includes(q) ||
-          (c.phone || '').includes(q)
+          (c.email        || '').toLowerCase().includes(q) ||
+          (c.phone        || '').includes(q)
       )
       .slice(0, 40);
   }, [clients, query]);
@@ -169,98 +172,90 @@ function ClientCombobox({ clients, value, onChange, isDark }) {
     setFocus(-1);
   };
 
+  const base = isDark
+    ? 'bg-slate-800 border-slate-600 text-slate-100'
+    : 'bg-white border-slate-200 text-slate-800';
+
   return (
     <div ref={wrapRef} className="relative w-full">
+      {/* Trigger */}
       <div
-        onClick={() => {
-          setOpen((o) => !o);
-          setTimeout(() => inputRef.current?.focus(), 20);
-        }}
-        className={`w-full flex items-center gap-2.5 h-11 px-3 rounded-2xl border text-sm transition-all outline-none cursor-pointer
-          ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 hover:border-slate-500' : 'bg-white border-slate-200 hover:border-blue-300'}
-          ${open ? 'border-blue-400 ring-2 ring-blue-100 shadow-sm' : ''}`}
+        onClick={() => { setOpen((o) => !o); setTimeout(() => inputRef.current?.focus(), 20); }}
+        className={`w-full flex items-center gap-2.5 h-10 px-3 rounded-xl border text-sm cursor-pointer transition-all
+          ${base}
+          ${open ? 'border-blue-500 ring-2 ring-blue-100' : isDark ? 'hover:border-slate-500' : 'hover:border-blue-300'}`}
       >
         {selected ? (
           <>
             <div
-              className="w-8 h-8 rounded-2xl flex items-center justify-center text-white text-lg font-semibold flex-shrink-0"
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
               style={{ background: avatarGrad(selected.company_name) }}
             >
               {selected.company_name?.charAt(0).toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="font-medium truncate">{selected.company_name}</div>
-              <div className="text-xs text-slate-400 truncate">
-                {selected.phone || selected.email || ''}
-              </div>
+              <div className="font-semibold text-sm truncate leading-tight">{selected.company_name}</div>
+              <div className="text-[11px] text-slate-400 truncate">{selected.phone || selected.email || ''}</div>
             </div>
             <button
-              onClick={(e) => {
-                e.stopPropagation();
-                pick(null);
-              }}
-              className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-red-100 hover:text-red-500 text-slate-400 flex-shrink-0"
+              onClick={(e) => { e.stopPropagation(); pick(null); }}
+              className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-red-100 hover:text-red-500 text-slate-400 flex-shrink-0 text-xs"
             >
               ✕
             </button>
           </>
         ) : (
           <div className="flex-1 flex items-center gap-2 text-slate-400">
-            <Search className="w-4 h-4" />
-            Search party / client…
+            <Search className="w-3.5 h-3.5 flex-shrink-0" />
+            <span className="text-sm">Search party / client…</span>
           </div>
         )}
-        <ChevronDown className="w-4 h-4 text-slate-400" />
+        <ChevronDown className={`w-3.5 h-3.5 text-slate-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </div>
 
+      {/* Dropdown */}
       {open && (
-        <div
-          className={`absolute z-50 w-full mt-1 bg-white border rounded-3xl shadow-xl py-1 max-h-[320px] overflow-auto ${
-            isDark ? 'bg-slate-800 border-slate-700' : ''
-          }`}
+        <div className={`absolute z-50 w-full mt-1 rounded-2xl border shadow-2xl py-2 max-h-[300px] overflow-auto
+          ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
         >
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setFocus(-1);
-            }}
-            placeholder="Type name, phone or email…"
-            className={`w-full mx-2 mb-2 px-3 h-9 text-sm outline-none rounded-2xl border ${
-              isDark ? 'bg-slate-700 text-slate-100 border-slate-600' : 'bg-white border-slate-200'
-            }`}
-          />
+          <div className="px-2 pb-2">
+            <input
+              ref={inputRef}
+              value={query}
+              onChange={(e) => { setQuery(e.target.value); setFocus(-1); }}
+              placeholder="Type name, phone or email…"
+              className={`w-full px-3 h-8 text-sm outline-none rounded-xl border
+                ${isDark ? 'bg-slate-700 text-slate-100 border-slate-600' : 'bg-slate-50 border-slate-200'}`}
+            />
+          </div>
 
           {filtered.length === 0 && query ? (
-            <div className="px-4 py-6 text-center text-slate-400">No match for &quot;{query}&quot;</div>
+            <div className="px-4 py-6 text-center text-slate-400 text-sm">
+              No match for &ldquo;{query}&rdquo;
+            </div>
           ) : (
             filtered.map((c, i) => (
               <div
                 key={c.id}
                 onClick={() => pick(c)}
                 onMouseEnter={() => setFocus(i)}
-                className={`flex items-center gap-3 px-4 py-3 cursor-pointer border-b last:border-0 transition-all ${
-                  isDark ? 'border-slate-700' : 'border-slate-100'
-                } ${
-                  i === focused
-                    ? isDark
-                      ? 'bg-blue-900/30'
-                      : 'bg-blue-50'
-                    : isDark
-                    ? 'hover:bg-slate-700/40'
-                    : 'hover:bg-slate-50'
-                } ${c.id === value ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/70') : ''}`}
+                className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors
+                  ${i === focused
+                    ? isDark ? 'bg-blue-900/40' : 'bg-blue-50'
+                    : isDark ? 'hover:bg-slate-700/60' : 'hover:bg-slate-50'}
+                  ${c.id === value ? isDark ? 'bg-blue-900/20' : 'bg-blue-50/60' : ''}`}
               >
                 <div
-                  className="w-8 h-8 rounded-2xl flex items-center justify-center text-white text-lg font-semibold flex-shrink-0"
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
                   style={{ background: avatarGrad(c.company_name) }}
                 >
                   {c.company_name?.charAt(0).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium">{c.company_name}</div>
-                  <div className="text-xs text-slate-400">
+                  <div className="font-medium text-sm truncate">
+                    <Hl text={c.company_name || ''} query={query} />
+                  </div>
+                  <div className="text-[11px] text-slate-400 truncate">
                     {c.phone && <span>{c.phone}</span>}
                     {c.email && <span className="ml-2">{c.email}</span>}
                   </div>
@@ -274,19 +269,19 @@ function ClientCombobox({ clients, value, onChange, isDark }) {
   );
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════════
 // LEDGER ENGINE
-// ════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════════
 function buildLedger(invoices, paymentsMap, openingBalance, dateFrom, dateTo) {
   const entries = [];
-  const from = dateFrom ? new Date(dateFrom) : null;
-  const to = dateTo ? new Date(dateTo + 'T23:59:59') : null;
+  const from    = dateFrom ? new Date(dateFrom)              : null;
+  const to      = dateTo   ? new Date(dateTo + 'T23:59:59')  : null;
 
   const inRange = (dateStr) => {
     if (!dateStr) return true;
     const d = new Date(dateStr);
     if (from && d < from) return false;
-    if (to && d > to) return false;
+    if (to   && d > to)   return false;
     return true;
   };
 
@@ -308,28 +303,29 @@ function buildLedger(invoices, paymentsMap, openingBalance, dateFrom, dateTo) {
 
     if (meta.side === 'Dr') {
       entries.push({
-        id: `inv-${inv.id}`,
-        date: inv.invoice_date,
-        type: inv.invoice_type,
-        ref: inv.invoice_no || '—',
+        id:        `inv-${inv.id}`,
+        date:      inv.invoice_date,
+        type:      inv.invoice_type,
+        ref:       inv.invoice_no || '—',
         narration: `${meta.label}${inv.reference_no ? ` | Ref: ${inv.reference_no}` : ''}`,
-        dr: inv.grand_total || 0,
-        cr: 0,
-        sourceId: inv.id,
-        dueDate: inv.due_date,
-        status: inv.status,
+        dr:        inv.grand_total || 0,
+        cr:        0,
+        sourceId:  inv.id,
+        dueDate:   inv.due_date,
+        status:    inv.status,
       });
     }
+
     if (meta.side === 'Cr' && inv.invoice_type === 'credit_note') {
       entries.push({
-        id: `cn-${inv.id}`,
-        date: inv.invoice_date,
-        type: 'credit_note',
-        ref: inv.invoice_no || '—',
+        id:        `cn-${inv.id}`,
+        date:      inv.invoice_date,
+        type:      'credit_note',
+        ref:       inv.invoice_no || '—',
         narration: 'Credit Note',
-        dr: 0,
-        cr: inv.grand_total || 0,
-        sourceId: inv.id,
+        dr:        0,
+        cr:        inv.grand_total || 0,
+        sourceId:  inv.id,
       });
     }
 
@@ -337,14 +333,14 @@ function buildLedger(invoices, paymentsMap, openingBalance, dateFrom, dateTo) {
     pmts.forEach((pmt) => {
       if (!inRange(pmt.payment_date)) return;
       entries.push({
-        id: `pmt-${pmt.id}`,
-        date: pmt.payment_date,
-        type: 'payment',
-        ref: pmt.reference_no || `PMT/${pmt.id?.slice(0, 6)?.toUpperCase() || '—'}`,
+        id:        `pmt-${pmt.id}`,
+        date:      pmt.payment_date,
+        type:      'payment',
+        ref:       pmt.reference_no || `PMT/${pmt.id?.slice(0, 6)?.toUpperCase() || '—'}`,
         narration: `Payment Received${pmt.payment_mode ? ` via ${pmt.payment_mode.toUpperCase()}` : ''}${pmt.notes ? ` | ${pmt.notes}` : ''}`,
-        dr: 0,
-        cr: pmt.amount || 0,
-        sourceId: inv.id,
+        dr:        0,
+        cr:        pmt.amount || 0,
+        sourceId:  inv.id,
       });
     });
   });
@@ -367,20 +363,20 @@ function buildLedger(invoices, paymentsMap, openingBalance, dateFrom, dateTo) {
     return {
       ...entry,
       runningBalance: balance,
-      balanceSide: balance >= 0 ? 'Dr' : 'Cr',
+      balanceSide:    balance >= 0 ? 'Dr' : 'Cr',
     };
   });
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// PRINT LEDGER – PROFESSIONAL BUSINESS STYLE
-// ════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════════
+// PRINT / PDF  — Title: "Account Statement"
+// ════════════════════════════════════════════════════════════════════════════════
 function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
-  const closingRow = rows[rows.length - 1];
-  const closingBal = closingRow ? Math.abs(closingRow.runningBalance) : 0;
+  const closingRow  = rows[rows.length - 1];
+  const closingBal  = closingRow ? Math.abs(closingRow.runningBalance) : 0;
   const closingSide = closingRow?.balanceSide || 'Dr';
-  const totalDr = rows.reduce((s, r) => s + r.dr, 0);
-  const totalCr = rows.reduce((s, r) => s + r.cr, 0);
+  const totalDr     = rows.reduce((s, r) => s + r.dr, 0);
+  const totalCr     = rows.reduce((s, r) => s + r.cr, 0);
   const periodLabel = dateFrom && dateTo
     ? `${format(new Date(dateFrom), 'dd-MMM-yyyy')} to ${format(new Date(dateTo), 'dd-MMM-yyyy')}`
     : 'All time';
@@ -388,118 +384,292 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
   const rowsHtml = rows
     .map((r) => {
       const isOpening = r.type === 'opening';
+      const drColor   = r.dr > 0 ? '#1D4ED8' : '#9CA3AF';
+      const crColor   = r.cr > 0 ? '#059669' : '#9CA3AF';
+      const bgColor   = isOpening ? '#EFF6FF' : 'transparent';
       return `
-        <tr style="page-break-inside: avoid;">
-          <td style="padding:9px 14px;border-bottom:1px solid #e2e8f0;text-align:left;font-size:13px;">${isOpening ? '' : format(new Date(r.date), 'dd-MMM-yy')}</td>
-          <td style="padding:9px 14px;border-bottom:1px solid #e2e8f0;text-align:left;font-weight:500;font-size:13px;">${r.narration}</td>
-          <td style="padding:9px 14px;border-bottom:1px solid #e2e8f0;text-align:center;font-size:13px;">${r.ref}</td>
-          <td style="padding:9px 14px;border-bottom:1px solid #e2e8f0;text-align:right;font-size:13px;">${r.dr > 0 ? fmtN(r.dr) : '—'}</td>
-          <td style="padding:9px 14px;border-bottom:1px solid #e2e8f0;text-align:right;font-size:13px;">${r.cr > 0 ? fmtN(r.cr) : '—'}</td>
-          <td style="padding:9px 14px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:600;font-size:13px;">${fmtN(Math.abs(r.runningBalance))}</td>
-          <td style="padding:9px 14px;border-bottom:1px solid #e2e8f0;text-align:center;font-size:13px;">${r.balanceSide}</td>
+        <tr style="background:${bgColor}; page-break-inside:avoid;">
+          <td style="padding:8px 12px; border-bottom:1px solid #E5E7EB; font-size:12.5px; color:#374151; white-space:nowrap;">
+            ${isOpening ? '' : format(new Date(r.date), 'dd-MMM-yy')}
+          </td>
+          <td style="padding:8px 12px; border-bottom:1px solid #E5E7EB; font-size:12.5px; color:#111827; font-weight:${isOpening ? '600' : '400'}; max-width:320px; overflow:hidden; text-overflow:ellipsis;">
+            ${r.narration}
+          </td>
+          <td style="padding:8px 12px; border-bottom:1px solid #E5E7EB; font-size:12px; color:#6B7280; text-align:center; font-family:monospace;">
+            ${r.ref}
+          </td>
+          <td style="padding:8px 12px; border-bottom:1px solid #E5E7EB; font-size:12.5px; text-align:right; color:${drColor}; font-weight:500;">
+            ${r.dr > 0 ? fmtN(r.dr) : '—'}
+          </td>
+          <td style="padding:8px 12px; border-bottom:1px solid #E5E7EB; font-size:12.5px; text-align:right; color:${crColor}; font-weight:500;">
+            ${r.cr > 0 ? fmtN(r.cr) : '—'}
+          </td>
+          <td style="padding:8px 12px; border-bottom:1px solid #E5E7EB; font-size:12.5px; text-align:right; font-weight:600; color:#111827;">
+            ${fmtN(Math.abs(r.runningBalance))}
+          </td>
+          <td style="padding:8px 12px; border-bottom:1px solid #E5E7EB; font-size:11px; text-align:center;">
+            <span style="display:inline-block; padding:2px 8px; border-radius:999px; font-weight:700;
+              background:${r.balanceSide === 'Dr' ? '#DBEAFE' : '#D1FAE5'};
+              color:${r.balanceSide === 'Dr' ? '#1D4ED8' : '#059669'};">
+              ${r.balanceSide}
+            </span>
+          </td>
         </tr>`;
     })
     .join('');
 
-  const html = `
-<!DOCTYPE html>
+  const html = `<!DOCTYPE html>
 <html>
 <head>
-  <title>Party Ledger Statement</title>
+  <title>Account Statement</title>
   <style>
-    @page { margin: 12mm; size: A4 landscape; }
-    body { font-family: Arial, Helvetica, sans-serif; margin:0; padding:0; color:#1e2937; }
-    .header { text-align:center; margin-bottom:25px; padding-bottom:15px; border-bottom:3px solid #0D3B66; }
-    .header h1 { margin:0; font-size:24px; color:#0D3B66; letter-spacing:-0.5px; }
-    .header .meta { font-size:13px; margin:8px 0; }
-    table { width:100%; border-collapse:collapse; font-size:13px; margin-top:10px; }
-    th { background:#0D3B66; color:#fff; padding:12px 10px; text-align:left; font-weight:600; border:1px solid #0D3B66; }
-    td { padding:9px 14px; border-bottom:1px solid #e2e8f0; border-left:1px solid #e2e8f0; border-right:1px solid #e2e8f0; }
-    tr:last-child td { border-bottom:2px solid #0D3B66; }
-    .total-row { background:#f8fafc; font-weight:700; }
-    .footer { margin-top:40px; text-align:center; font-size:11px; color:#64748b; }
+    @page { margin: 14mm 12mm; size: A4 landscape; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
+      margin: 0; padding: 0;
+      color: #111827;
+      font-size: 13px;
+    }
+    .page-wrap { padding: 0; }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding-bottom: 16px;
+      border-bottom: 2.5px solid #1D4ED8;
+      margin-bottom: 18px;
+    }
+    .header-left h1 {
+      margin: 0 0 4px;
+      font-size: 22px;
+      font-weight: 700;
+      color: #1D4ED8;
+      letter-spacing: -0.5px;
+    }
+    .header-left .subtitle {
+      font-size: 12px;
+      color: #6B7280;
+      margin: 0;
+    }
+    .header-right {
+      text-align: right;
+      font-size: 12.5px;
+      color: #374151;
+    }
+    .header-right .company-name {
+      font-size: 15px;
+      font-weight: 700;
+      color: #111827;
+    }
+
+    /* ── Meta row ── */
+    .meta-row {
+      display: flex;
+      gap: 24px;
+      margin-bottom: 16px;
+      padding: 12px 16px;
+      background: #F8FAFC;
+      border: 1px solid #E2E8F0;
+      border-radius: 8px;
+    }
+    .meta-item label { font-size: 10px; text-transform: uppercase; color: #9CA3AF; letter-spacing: 0.06em; display:block; margin-bottom:2px; }
+    .meta-item span  { font-size: 13px; font-weight: 600; color: #111827; }
+
+    /* ── Summary boxes ── */
+    .summary-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .summary-box {
+      flex: 1;
+      border: 1px solid #E2E8F0;
+      border-radius: 8px;
+      padding: 10px 14px;
+    }
+    .summary-box label { font-size: 10px; text-transform: uppercase; color: #9CA3AF; letter-spacing: 0.06em; display:block; }
+    .summary-box .val  { font-size: 16px; font-weight: 700; margin-top: 2px; }
+
+    /* ── Table ── */
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    colgroup col:nth-child(1) { width: 82px; }
+    colgroup col:nth-child(2) { width: auto; }
+    colgroup col:nth-child(3) { width: 110px; }
+    colgroup col:nth-child(4) { width: 110px; }
+    colgroup col:nth-child(5) { width: 110px; }
+    colgroup col:nth-child(6) { width: 110px; }
+    colgroup col:nth-child(7) { width: 58px; }
+
+    thead tr th {
+      background: #1D4ED8;
+      color: #fff;
+      padding: 10px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      border: none;
+    }
+    thead tr th:nth-child(4),
+    thead tr th:nth-child(5),
+    thead tr th:nth-child(6) { text-align: right; }
+    thead tr th:nth-child(3),
+    thead tr th:nth-child(7) { text-align: center; }
+
+    tfoot tr td {
+      background: #1E3A5F;
+      color: #fff;
+      padding: 11px 12px;
+      font-weight: 700;
+      font-size: 12.5px;
+    }
+    tfoot tr td:nth-child(2) { text-align: right; }
+    tfoot tr td:nth-child(3) { text-align: right; }
+    tfoot tr td:nth-child(4) { text-align: right; }
+    tfoot tr td:nth-child(5) { text-align: center; }
+
+    .footer {
+      margin-top: 28px;
+      padding-top: 12px;
+      border-top: 1px solid #E5E7EB;
+      font-size: 11px;
+      color: #9CA3AF;
+      display: flex;
+      justify-content: space-between;
+    }
+    @media print {
+      thead { display: table-header-group; }
+      tfoot { display: table-footer-group; }
+    }
   </style>
 </head>
 <body>
+<div class="page-wrap">
+  <!-- Header -->
   <div class="header">
-    <h1>Party Ledger Statement</h1>
-    <div class="meta">
-      <strong>${company?.name || 'Your Company'}</strong><br>
-      ${company?.address || ''}<br>
-      ${company?.phone ? `Ph: ${company.phone}` : ''} ${company?.email ? ` | Email: ${company.email}` : ''}
-      ${client?.client_gstin ? `<br>GSTIN: ${client.client_gstin}` : ''}
+    <div class="header-left">
+      <h1>Account Statement</h1>
+      <p class="subtitle">Party / Client Account Ledger</p>
     </div>
-    <p style="margin:8px 0 4px;font-size:15px;font-weight:600;">Party: ${client?.company_name || '—'}</p>
-    <p style="font-size:13px;">Period: ${periodLabel} &nbsp;&nbsp;|&nbsp;&nbsp; Opening Balance: ₹${fmtN(openingBal)}</p>
+    <div class="header-right">
+      <div class="company-name">${company?.name || 'Your Company'}</div>
+      <div>${company?.address || ''}</div>
+      ${company?.phone ? `<div>Ph: ${company.phone}</div>` : ''}
+      ${company?.email ? `<div>${company.email}</div>` : ''}
+    </div>
   </div>
 
+  <!-- Meta -->
+  <div class="meta-row">
+    <div class="meta-item">
+      <label>Party Name</label>
+      <span>${client?.company_name || '—'}</span>
+    </div>
+    ${client?.client_gstin ? `<div class="meta-item"><label>GSTIN</label><span>${client.client_gstin}</span></div>` : ''}
+    ${client?.phone ? `<div class="meta-item"><label>Phone</label><span>${client.phone}</span></div>` : ''}
+    ${client?.email ? `<div class="meta-item"><label>Email</label><span>${client.email}</span></div>` : ''}
+    <div class="meta-item">
+      <label>Period</label>
+      <span>${periodLabel}</span>
+    </div>
+    <div class="meta-item">
+      <label>Opening Balance</label>
+      <span>₹${fmtN(openingBal)}</span>
+    </div>
+  </div>
+
+  <!-- Summary -->
+  <div class="summary-row">
+    <div class="summary-box">
+      <label>Total Debit (₹)</label>
+      <div class="val" style="color:#1D4ED8;">₹${fmtN(totalDr)}</div>
+    </div>
+    <div class="summary-box">
+      <label>Total Credit (₹)</label>
+      <div class="val" style="color:#059669;">₹${fmtN(totalCr)}</div>
+    </div>
+    <div class="summary-box">
+      <label>Closing Balance</label>
+      <div class="val" style="color:${closingSide === 'Dr' ? '#DC2626' : '#059669'};">₹${fmtN(closingBal)} ${closingSide}</div>
+    </div>
+    <div class="summary-box">
+      <label>Net (Dr - Cr)</label>
+      <div class="val" style="color:#6B7280;">₹${fmtN(Math.abs(totalDr - totalCr))}</div>
+    </div>
+  </div>
+
+  <!-- Table -->
   <table>
+    <colgroup>
+      <col /><col /><col /><col /><col /><col /><col />
+    </colgroup>
     <thead>
       <tr>
-        <th style="width:80px">Date</th>
-        <th style="width:320px">Particulars / Description</th>
-        <th style="width:110px">Voucher No.</th>
-        <th style="width:110px;text-align:right">Debit (₹)</th>
-        <th style="width:110px;text-align:right">Credit (₹)</th>
-        <th style="width:110px;text-align:right">Balance (₹)</th>
-        <th style="width:60px;text-align:center">Dr/Cr</th>
+        <th style="text-align:left;">Date</th>
+        <th style="text-align:left;">Particulars / Description</th>
+        <th>Voucher No.</th>
+        <th>Debit (₹)</th>
+        <th>Credit (₹)</th>
+        <th>Balance (₹)</th>
+        <th>Dr/Cr</th>
       </tr>
     </thead>
     <tbody>${rowsHtml}</tbody>
     <tfoot>
-      <tr class="total-row">
-        <td colspan="3" style="text-align:right;padding:12px 14px;border-top:2px solid #0D3B66;">CLOSING BALANCE</td>
-        <td style="text-align:right;padding:12px 14px;border-top:2px solid #0D3B66;">${fmtN(totalDr)}</td>
-        <td style="text-align:right;padding:12px 14px;border-top:2px solid #0D3B66;">${fmtN(totalCr)}</td>
-        <td style="text-align:right;padding:12px 14px;border-top:2px solid #0D3B66;font-weight:700;">${fmtN(closingBal)}</td>
-        <td style="text-align:center;padding:12px 14px;border-top:2px solid #0D3B66;font-weight:700;">${closingSide}</td>
+      <tr>
+        <td colspan="3" style="text-align:right;">CLOSING BALANCE</td>
+        <td style="text-align:right;">₹${fmtN(totalDr)}</td>
+        <td style="text-align:right;">₹${fmtN(totalCr)}</td>
+        <td style="text-align:right;">₹${fmtN(closingBal)}</td>
+        <td style="text-align:center;">${closingSide}</td>
       </tr>
     </tfoot>
   </table>
 
   <div class="footer">
-    This is a computer-generated Party Ledger Statement. Generated on ${format(new Date(), 'dd-MMM-yyyy hh:mm a')}
+    <span>This is a computer-generated Account Statement.</span>
+    <span>Generated on ${format(new Date(), 'dd-MMM-yyyy hh:mm a')}</span>
   </div>
+</div>
 </body>
 </html>`;
 
   const win = window.open('', '_blank', 'width=1400,height=920');
   if (!win) {
-    toast.error('Please allow pop-ups to print PDF');
+    toast.error('Please allow pop-ups to print / save PDF.');
     return;
   }
   win.document.write(html);
   win.document.close();
-  win.onload = () => {
-    win.focus();
-    win.print();
-  };
+  win.onload = () => { win.focus(); win.print(); };
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// EXCEL EXPORT – PROFESSIONAL FORMAT WITH CELL MERGING
-// ════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════════
+// EXCEL EXPORT
+// ════════════════════════════════════════════════════════════════════════════════
 function exportLedgerReconciliationExcel(rows, client, company, dateFrom, dateTo, openingBalance) {
   const periodLabel = dateFrom && dateTo
     ? `${format(new Date(dateFrom), 'dd-MMM-yyyy')} – ${format(new Date(dateTo), 'dd-MMM-yyyy')}`
     : 'All time';
 
-  const closingRow = rows[rows.length - 1];
-  const closingBal = closingRow ? Math.abs(closingRow.runningBalance) : 0;
+  const closingRow  = rows[rows.length - 1];
+  const closingBal  = closingRow ? Math.abs(closingRow.runningBalance) : 0;
   const closingSide = closingRow?.balanceSide || 'Dr';
-
-  const totalDr = rows.filter((r) => r.type !== 'opening').reduce((s, r) => s + r.dr, 0);
-  const totalCr = rows.filter((r) => r.type !== 'opening').reduce((s, r) => s + r.cr, 0);
+  const totalDr     = rows.filter((r) => r.type !== 'opening').reduce((s, r) => s + r.dr, 0);
+  const totalCr     = rows.filter((r) => r.type !== 'opening').reduce((s, r) => s + r.cr, 0);
 
   const sheetData = [
-    ['Party Ledger Statement', '', '', '', '', '', '', '', '', '', '', ''],
+    ['Account Statement', '', '', '', '', '', '', '', '', '', '', ''],
     [],
-    [`Company:`, company?.name || '', '', '', '', '', '', '', '', '', '', ''],
-    [`Address:`, company?.address || '', '', '', '', '', '', '', '', '', '', ''],
-    [`Phone:`, company?.phone || '', '', '', '', '', '', 'Email:', company?.email || '', '', '', ''],
-    [`Party:`, client?.company_name || '', '', '', '', '', '', '', '', '', '', ''],
-    [`GSTIN:`, client?.client_gstin || '—', '', '', '', '', '', '', '', '', '', ''],
-    [`Period:`, periodLabel, '', '', '', '', '', '', '', 'Generated:', format(new Date(), 'dd-MMM-yyyy'), '', ''],
+    ['Company:',   company?.name    || '', '', '', '', '', '', '', '', '', '', ''],
+    ['Address:',   company?.address || '', '', '', '', '', '', '', '', '', '', ''],
+    ['Phone:',     company?.phone   || '', '', '', '', '', '', 'Email:', company?.email || '', '', ''],
+    ['Party:',     client?.company_name || '', '', '', '', '', '', '', '', '', '', ''],
+    ['GSTIN:',     client?.client_gstin || '—', '', '', '', '', '', '', '', '', '', ''],
+    ['Period:',    periodLabel, '', '', '', '', '', '', '', 'Generated:', format(new Date(), 'dd-MMM-yyyy'), ''],
     [],
     ['Date', 'Particulars / Description', '', '', '', 'Debit (₹)', '', 'Credit (₹)', '', 'Balance (₹)', '', 'Dr/Cr'],
     ['', 'Opening Balance', '', '', '', '', '', '', '', openingBalance || 0, '', ''],
@@ -510,83 +680,115 @@ function exportLedgerReconciliationExcel(rows, client, company, dateFrom, dateTo
     const dateStr = r.date ? format(new Date(r.date), 'dd/MM/yyyy') : '';
     sheetData.push([
       dateStr,
-      r.narration,
-      '',
-      '',
-      '',
-      r.dr > 0 ? r.dr : '',
-      '',
-      r.cr > 0 ? r.cr : '',
-      '',
-      Math.abs(r.runningBalance),
-      '',
+      r.narration, '', '', '',
+      r.dr > 0 ? r.dr : '', '',
+      r.cr > 0 ? r.cr : '', '',
+      Math.abs(r.runningBalance), '',
       r.balanceSide,
     ]);
   });
 
   sheetData.push(['', 'Closing Balance', '', '', '', '', '', '', '', closingBal, '', closingSide]);
-  sheetData.push(['', 'Total', '', '', '', totalDr, '', totalCr, '', '', '', '']);
+  sheetData.push(['', 'Total',           '', '', '', totalDr,      '', totalCr,   '', '',          '', '']);
 
   const ws = XLSX.utils.aoa_to_sheet(sheetData);
 
-  // Professional cell merging
   ws['!merges'] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 11 } }, // Main title
-    { s: { r: 2, c: 0 }, e: { r: 2, c: 11 } }, // Company row
-    { s: { r: 3, c: 0 }, e: { r: 3, c: 11 } }, // Address
-    { s: { r: 4, c: 0 }, e: { r: 4, c: 5 } },  // Phone
-    { s: { r: 4, c: 7 }, e: { r: 4, c: 11 } }, // Email
-    { s: { r: 5, c: 0 }, e: { r: 5, c: 11 } }, // Party
-    { s: { r: 6, c: 0 }, e: { r: 6, c: 11 } }, // GSTIN
-    { s: { r: 7, c: 0 }, e: { r: 7, c: 7 } },  // Period
-    { s: { r: 9, c: 1 }, e: { r: 9, c: 4 } },  // Particulars header span
-    { s: { r: 10, c: 1 }, e: { r: 10, c: 4 } }, // Opening balance span
+    { s: { r: 0,  c: 0 }, e: { r: 0,  c: 11 } },
+    { s: { r: 2,  c: 0 }, e: { r: 2,  c: 11 } },
+    { s: { r: 3,  c: 0 }, e: { r: 3,  c: 11 } },
+    { s: { r: 4,  c: 0 }, e: { r: 4,  c: 5  } },
+    { s: { r: 4,  c: 7 }, e: { r: 4,  c: 11 } },
+    { s: { r: 5,  c: 0 }, e: { r: 5,  c: 11 } },
+    { s: { r: 6,  c: 0 }, e: { r: 6,  c: 11 } },
+    { s: { r: 7,  c: 0 }, e: { r: 7,  c: 7  } },
+    { s: { r: 9,  c: 1 }, e: { r: 9,  c: 4  } },
+    { s: { r: 10, c: 1 }, e: { r: 10, c: 4  } },
   ];
 
   ws['!cols'] = [
-    { wch: 12 }, // Date
-    { wch: 48 }, // Description
-    { wch: 6 },
-    { wch: 6 },
-    { wch: 6 },
-    { wch: 16 }, // Debit
-    { wch: 6 },
-    { wch: 16 }, // Credit
-    { wch: 6 },
-    { wch: 16 }, // Balance
-    { wch: 6 },
-    { wch: 8 },  // Dr/Cr
+    { wch: 12 }, { wch: 48 }, { wch: 6 }, { wch: 6 }, { wch: 6 },
+    { wch: 16 }, { wch: 6 }, { wch: 16 }, { wch: 6 },
+    { wch: 16 }, { wch: 6 }, { wch: 8 },
   ];
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Ledger Statement');
+  XLSX.utils.book_append_sheet(wb, ws, 'Account Statement');
 
   const clientName = (client?.company_name || 'party').replace(/[^a-zA-Z0-9]/g, '_');
-  XLSX.writeFile(wb, `Party_Ledger_Statement_${clientName}_${format(new Date(), 'dd-MMM-yyyy')}.xlsx`);
-
-  toast.success('Ledger Statement exported successfully');
+  XLSX.writeFile(wb, `Account_Statement_${clientName}_${format(new Date(), 'dd-MMM-yyyy')}.xlsx`);
+  toast.success('Account Statement exported successfully');
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════════
+// SUMMARY CARD
+// ════════════════════════════════════════════════════════════════════════════════
+function SummaryCard({ label, value, color, icon: Icon, isDark }) {
+  return (
+    <div className={`flex items-center gap-3 rounded-2xl px-4 py-3 border min-w-0
+      ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200 shadow-sm'}`}
+    >
+      {Icon && (
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+          style={{ background: `${color}18` }}>
+          <Icon className="w-4 h-4" style={{ color }} />
+        </div>
+      )}
+      <div className="min-w-0">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 leading-none mb-1">{label}</div>
+        <div className="text-base font-bold leading-none truncate" style={{ color }}>{value}</div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// AGING PILL
+// ════════════════════════════════════════════════════════════════════════════════
+function AgingPill({ bucket, amount, isDark }) {
+  const colorMap = {
+    '0-30':  { bg: '#DCFCE7', text: '#15803D', dark: '#166534' },
+    '31-60': { bg: '#FEF9C3', text: '#A16207', dark: '#854D0E' },
+    '61-90': { bg: '#FFEDD5', text: '#C2410C', dark: '#9A3412' },
+    '90+':   { bg: '#FEE2E2', text: '#B91C1C', dark: '#991B1B' },
+  };
+  const c = colorMap[bucket] || colorMap['0-30'];
+  return (
+    <div className={`flex flex-col items-center rounded-xl px-3 py-2 flex-1 min-w-0
+      ${isDark ? 'bg-slate-700/60' : ''}`}
+      style={isDark ? {} : { background: c.bg }}
+    >
+      <div className="text-[10px] font-bold uppercase tracking-wider mb-1"
+        style={{ color: isDark ? c.dark : c.text }}>{bucket} days</div>
+      <div className="text-xs font-semibold truncate"
+        style={{ color: isDark ? '#e2e8f0' : c.text }}>
+        {fmtC(amount)}
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
-// ════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════════
 export default function PartyLedger({
   open,
   onClose,
-  invoices = [],
-  clients = [],
+  invoices  = [],
+  clients   = [],
   companies = [],
   preselectedClientName = null,
   isDark,
 }) {
-  const [clientId, setClientId] = useState(null);
-  const [presetId, setPresetId] = useState('curFY');
-  const [dateFrom, setDateFrom] = useState(DATE_PRESETS[0].from);
-  const [dateTo, setDateTo] = useState(DATE_PRESETS[0].to);
-  const [openingBal, setOpeningBal] = useState(0);
+  const [clientId,    setClientId]    = useState(null);
+  const [presetId,    setPresetId]    = useState('curFY');
+  const [dateFrom,    setDateFrom]    = useState(DATE_PRESETS[0].from);
+  const [dateTo,      setDateTo]      = useState(DATE_PRESETS[0].to);
+  const [openingBal,  setOpeningBal]  = useState(0);
   const [paymentsMap, setPaymentsMap] = useState({});
   const [loadingPmts, setLoadingPmts] = useState(false);
 
+  // Pre-select client
   useEffect(() => {
     if (open && preselectedClientName) {
       const match = clients.find(
@@ -597,6 +799,7 @@ export default function PartyLedger({
     if (open && !preselectedClientName) setClientId(null);
   }, [open, preselectedClientName, clients]);
 
+  // Filter invoices for selected client
   const clientInvoices = useMemo(() => {
     if (!clientId) return [];
     const client = clients.find((c) => c.id === clientId);
@@ -606,24 +809,20 @@ export default function PartyLedger({
     );
   }, [invoices, clientId, clients]);
 
+  // Fetch payments
   useEffect(() => {
-    if (!clientInvoices.length) {
-      setPaymentsMap({});
-      return;
-    }
+    if (!clientInvoices.length) { setPaymentsMap({}); return; }
     setLoadingPmts(true);
     Promise.all(
       clientInvoices.map((inv) =>
         api
           .get('/payments', { params: { invoice_id: inv.id } })
           .then((r) => [inv.id, r.data || []])
-          .catch(() => [inv.id, []])
+          .catch(()  => [inv.id, []])
       )
     ).then((results) => {
       const map = {};
-      results.forEach(([id, pmts]) => {
-        map[id] = pmts;
-      });
+      results.forEach(([id, pmts]) => { map[id] = pmts; });
       setPaymentsMap(map);
     }).finally(() => setLoadingPmts(false));
   }, [clientInvoices]);
@@ -631,10 +830,7 @@ export default function PartyLedger({
   const handlePreset = useCallback((id) => {
     setPresetId(id);
     const p = DATE_PRESETS.find((d) => d.id === id);
-    if (p && id !== 'custom') {
-      setDateFrom(p.from);
-      setDateTo(p.to);
-    }
+    if (p && id !== 'custom') { setDateFrom(p.from); setDateTo(p.to); }
   }, []);
 
   const rows = useMemo(
@@ -642,13 +838,12 @@ export default function PartyLedger({
     [clientInvoices, paymentsMap, openingBal, dateFrom, dateTo]
   );
 
-  // ── Aging Analysis (frontend only) ──
   const agingSummary = useMemo(() => {
     const buckets = { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
     clientInvoices.forEach((i) => {
       if (i.amount_due > 0 && i.due_date) {
-        const bucket = agingBucket(i.due_date);
-        if (bucket) buckets[bucket] += i.amount_due;
+        const b = agingBucket(i.due_date);
+        if (b) buckets[b] += i.amount_due;
       }
     });
     return buckets;
@@ -658,267 +853,374 @@ export default function PartyLedger({
     const overdueAmt = clientInvoices
       .filter((i) => i.amount_due > 0 && i.due_date && differenceInDays(new Date(), parseISO(i.due_date)) > 0)
       .reduce((s, i) => s + i.amount_due, 0);
-
-    const closingRow = rows[rows.length - 1];
-    const closingBal = closingRow ? Math.abs(closingRow.runningBalance) : 0;
+    const closingRow  = rows[rows.length - 1];
+    const closingBal  = closingRow ? Math.abs(closingRow.runningBalance) : 0;
     const closingSide = closingRow?.balanceSide || 'Dr';
-    const totalDr = rows.reduce((s, r) => s + r.dr, 0);
-    const totalCr = rows.reduce((s, r) => s + r.cr, 0);
-
+    const totalDr     = rows.reduce((s, r) => s + r.dr, 0);
+    const totalCr     = rows.reduce((s, r) => s + r.cr, 0);
     return { overdueAmt, closingBal, closingSide, totalDr, totalCr };
   }, [rows, clientInvoices]);
 
-  const selectedClient = clients.find((c) => c.id === clientId) || null;
+  const selectedClient  = clients.find((c) => c.id === clientId) || null;
   const selectedCompany = companies[0] || null;
+  const hasData         = rows.length > 1;
 
-  const handlePrint = () => printLedger(rows, selectedClient, selectedCompany, dateFrom, dateTo, openingBal);
-  const handleExportExcel = () =>
-    exportLedgerReconciliationExcel(rows, selectedClient, selectedCompany, dateFrom, dateTo, openingBal);
+  const handlePrint       = () => printLedger(rows, selectedClient, selectedCompany, dateFrom, dateTo, openingBal);
+  const handleExportExcel = () => exportLedgerReconciliationExcel(rows, selectedClient, selectedCompany, dateFrom, dateTo, openingBal);
 
-  const labelCls = 'text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1 block';
-  const inputCls = `h-9 rounded-2xl text-sm border-slate-200 focus:border-blue-400 focus:ring-blue-200 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white'}`;
+  // ── Style helpers ──
+  const surface   = isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900';
+  const card      = isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200';
+  const divider   = isDark ? 'border-slate-700' : 'border-slate-200';
+  const labelCls  = 'text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1 block';
+  const inputBase = `h-9 rounded-xl text-sm border focus:ring-1 focus:ring-blue-300 focus:border-blue-400 transition-colors
+    ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white border-slate-200'}`;
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent
-        className={`max-w-7xl w-[95vw] p-0 rounded-3xl border-0 shadow-2xl flex flex-col ${
-          isDark ? 'bg-slate-900' : 'bg-white'
-        }`}
-        style={{ maxHeight: '92vh', height: '92vh' }}
+        className={`max-w-[96vw] w-[1280px] p-0 rounded-3xl border-0 shadow-2xl flex flex-col overflow-hidden ${surface}`}
+        style={{ maxHeight: '94vh', height: '94vh' }}
       >
-        {/* HEADER */}
-        <div className={`flex-shrink-0 px-8 pt-6 pb-4 border-b flex items-center justify-between ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-          <div>
-            <DialogTitle className="text-2xl font-semibold flex items-center gap-2">
-              <BookOpen className="w-6 h-6" />
-              Party Ledger
-            </DialogTitle>
-            <DialogDescription className="text-slate-500">
-              Complete account statement • Invoice • Payment • Credit/Debit Note
-            </DialogDescription>
+
+        {/* ── HEADER BAR ────────────────────────────────────── */}
+        <div className={`flex-shrink-0 flex items-center justify-between px-7 py-4 border-b ${divider} ${isDark ? 'bg-slate-900' : 'bg-white'}`}>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${isDark ? 'bg-blue-900/50' : 'bg-blue-50'}`}>
+              <BookOpen className="w-5 h-5 text-blue-600" />
+            </div>
+            <div>
+              <DialogTitle className="text-lg font-bold leading-none">Party Ledger</DialogTitle>
+              <DialogDescription className="text-[12px] text-slate-400 mt-0.5 leading-none">
+                Account Statement · Invoice · Payment · Credit/Debit Note
+              </DialogDescription>
+            </div>
           </div>
 
-          {selectedClient && rows.length > 1 && (
-            <div className="flex items-center gap-3">
-              <Button onClick={handleExportExcel} variant="outline" className="gap-2 h-9">
-                <Download className="w-4 h-4" />
-                Excel Statement
-              </Button>
-              <Button
-                onClick={handlePrint}
-                variant="default"
-                className="gap-2 h-9 bg-gradient-to-r from-blue-600 to-indigo-600 text-white"
-              >
-                <Printer className="w-4 h-4" />
-                Print / Save as PDF
-              </Button>
-              <Button onClick={onClose} variant="ghost" size="icon">
-                <X className="w-5 h-5" />
-              </Button>
-            </div>
-          )}
-          {(!selectedClient || rows.length <= 1) && (
-            <Button onClick={onClose} variant="ghost" size="icon">
-              <X className="w-5 h-5" />
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {selectedClient && hasData && (
+              <>
+                <Button
+                  onClick={handleExportExcel}
+                  variant="outline"
+                  size="sm"
+                  className={`gap-1.5 text-xs font-medium rounded-xl h-9 px-4 ${isDark ? 'border-slate-600 hover:bg-slate-700' : ''}`}
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Export Excel
+                </Button>
+                <Button
+                  onClick={handlePrint}
+                  size="sm"
+                  className="gap-1.5 text-xs font-semibold rounded-xl h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  Print / PDF
+                </Button>
+              </>
+            )}
+            <Button
+              onClick={onClose}
+              variant="ghost"
+              size="icon"
+              className={`w-9 h-9 rounded-xl flex-shrink-0 ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
+            >
+              <X className="w-4 h-4" />
             </Button>
-          )}
+          </div>
         </div>
 
-        {/* FILTERS */}
-        <div className={`flex-shrink-0 px-8 py-4 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-          <div className="grid grid-cols-12 gap-4">
-            {/* Client */}
-            <div className="col-span-4">
+        {/* ── FILTER BAR ────────────────────────────────────── */}
+        <div className={`flex-shrink-0 px-7 py-4 border-b ${divider} ${isDark ? 'bg-slate-800/60' : 'bg-white'}`}>
+          <div className="flex items-end gap-5">
+
+            {/* Client search */}
+            <div className="w-72 flex-shrink-0">
               <span className={labelCls}>Party / Client</span>
               <ClientCombobox clients={clients} value={clientId} onChange={setClientId} isDark={isDark} />
             </div>
 
-            {/* Period */}
-            <div className="col-span-5">
+            {/* Period presets */}
+            <div className="flex-1 min-w-0">
               <span className={labelCls}>Period</span>
               <div className="flex flex-wrap gap-1.5">
                 {DATE_PRESETS.filter((p) => p.id !== 'custom').map((p) => (
-                  <Button
+                  <button
                     key={p.id}
                     onClick={() => handlePreset(p.id)}
-                    variant={presetId === p.id ? 'default' : 'outline'}
-                    size="sm"
-                    className={`text-xs font-medium h-8 ${presetId === p.id ? 'bg-blue-600 text-white' : ''}`}
+                    className={`px-3 h-9 text-xs font-semibold rounded-xl border transition-all whitespace-nowrap
+                      ${presetId === p.id
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                        : isDark
+                          ? 'bg-slate-700 text-slate-300 border-slate-600 hover:border-blue-500 hover:text-blue-400'
+                          : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600'
+                      }`}
                   >
                     {p.label}
-                  </Button>
+                  </button>
                 ))}
               </div>
             </div>
 
-            {/* Custom + Opening */}
-            <div className="col-span-3">
-              <div className="flex gap-2 items-end">
-                <div className="flex-1">
-                  <span className={labelCls}>From</span>
-                  <Input
-                    type="date"
-                    value={dateFrom}
-                    onChange={(e) => { setDateFrom(e.target.value); setPresetId('custom'); }}
-                    className={inputCls}
-                  />
-                </div>
-                <span className="text-slate-400 pb-2">–</span>
-                <div className="flex-1">
-                  <span className={labelCls}>To</span>
-                  <Input
-                    type="date"
-                    value={dateTo}
-                    onChange={(e) => { setDateTo(e.target.value); setPresetId('custom'); }}
-                    className={inputCls}
-                  />
-                </div>
+            {/* Custom date range */}
+            <div className="flex items-end gap-2 flex-shrink-0">
+              <div>
+                <span className={labelCls}>From</span>
+                <Input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => { setDateFrom(e.target.value); setPresetId('custom'); }}
+                  className={`${inputBase} w-36`}
+                />
               </div>
-              <div className="mt-2">
-                <span className={labelCls}>Opening Balance (₹)</span>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">₹</span>
-                  <Input
-                    type="number"
-                    value={openingBal}
-                    onChange={(e) => setOpeningBal(parseFloat(e.target.value) || 0)}
-                    className={`${inputCls} pl-7`}
-                  />
-                </div>
+              <span className="text-slate-400 pb-2 text-sm">—</span>
+              <div>
+                <span className={labelCls}>To</span>
+                <Input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => { setDateTo(e.target.value); setPresetId('custom'); }}
+                  className={`${inputBase} w-36`}
+                />
+              </div>
+            </div>
+
+            {/* Opening balance */}
+            <div className="flex-shrink-0 w-40">
+              <span className={labelCls}>Opening Balance (₹)</span>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">₹</span>
+                <Input
+                  type="number"
+                  value={openingBal}
+                  onChange={(e) => setOpeningBal(parseFloat(e.target.value) || 0)}
+                  className={`${inputBase} pl-7`}
+                />
               </div>
             </div>
           </div>
         </div>
 
-        {/* SCROLLABLE CONTENT */}
+        {/* ── SCROLLABLE BODY ───────────────────────────────── */}
         <div className="flex-1 overflow-y-auto min-h-0">
           {!selectedClient ? (
-            <div className="flex flex-col items-center justify-center h-full py-20 text-slate-400">
-              <Search className="w-12 h-12 mb-4" />
-              <p className="text-lg">Select a party to view ledger statement</p>
+
+            /* Empty state */
+            <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-4">
+              <div className={`w-20 h-20 rounded-3xl flex items-center justify-center ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                <Search className="w-9 h-9 text-slate-400" />
+              </div>
+              <div className="text-center">
+                <p className="text-base font-semibold text-slate-500">No party selected</p>
+                <p className="text-sm mt-1">Search and select a party to view the account statement</p>
+              </div>
             </div>
+
           ) : (
             <div className="flex flex-col h-full">
-              {/* CLIENT HEADER + SUMMARY */}
-              <div className={`flex-shrink-0 px-8 py-5 flex items-start gap-6 border-b ${isDark ? 'border-slate-700 bg-slate-800/30' : 'border-slate-100 bg-gradient-to-r from-blue-50 to-white'}`}>
-                <div
-                  className="w-12 h-12 rounded-2xl flex items-center justify-center text-white text-2xl font-bold flex-shrink-0"
-                  style={{ background: avatarGrad(selectedClient.company_name) }}
-                >
-                  {selectedClient.company_name?.charAt(0).toUpperCase()}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-xl">{selectedClient.company_name}</div>
-                  <div className="flex gap-4 text-sm text-slate-500 mt-0.5">
-                    {selectedClient.phone && <span>📞 {selectedClient.phone}</span>}
-                    {selectedClient.email && <span>✉ {selectedClient.email}</span>}
-                    {selectedClient.client_gstin && <span>GSTIN: {selectedClient.client_gstin}</span>}
-                  </div>
-                </div>
 
-                {/* Main Summary Cards */}
-                <div className="flex gap-3 flex-shrink-0">
-                  {[
-                    { label: 'Total Invoiced', val: fmtC(summary.totalDr), color: '#1F6FB2' },
-                    { label: 'Total Received', val: fmtC(summary.totalCr), color: '#059669' },
-                    {
-                      label: 'Outstanding',
-                      val: `${fmtC(summary.closingBal)} ${summary.closingSide}`,
-                      color: summary.closingSide === 'Dr' ? '#DC2626' : '#059669',
-                    },
-                    { label: 'Overdue', val: fmtC(summary.overdueAmt), color: '#D97706' },
-                  ].map((s, i) => (
-                    <div
-                      key={i}
-                      className={`border rounded-2xl px-5 py-3 min-w-[150px] shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
-                    >
-                      <div className="text-xs text-slate-400">{s.label}</div>
-                      <div className="text-2xl font-semibold mt-1" style={{ color: s.color }}>
-                        {s.val}
-                      </div>
+              {/* ── CLIENT INFO + SUMMARY STRIP ── */}
+              <div className={`flex-shrink-0 px-7 py-4 border-b ${divider} ${isDark ? 'bg-slate-800/40' : 'bg-gradient-to-r from-blue-50/60 to-white'}`}>
+
+                {/* Party info row */}
+                <div className="flex items-center gap-4 mb-4">
+                  <div
+                    className="w-11 h-11 rounded-2xl flex items-center justify-center text-white text-xl font-bold flex-shrink-0 shadow-sm"
+                    style={{ background: avatarGrad(selectedClient.company_name) }}
+                  >
+                    {selectedClient.company_name?.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-base leading-tight truncate">{selectedClient.company_name}</div>
+                    <div className="flex items-center gap-4 text-xs text-slate-500 mt-0.5 flex-wrap">
+                      {selectedClient.phone && (
+                        <span className="flex items-center gap-1">
+                          <span>📞</span>
+                          <span>{selectedClient.phone}</span>
+                        </span>
+                      )}
+                      {selectedClient.email && (
+                        <span className="flex items-center gap-1">
+                          <span>✉</span>
+                          <span className="truncate max-w-[200px]">{selectedClient.email}</span>
+                        </span>
+                      )}
+                      {selectedClient.client_gstin && (
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-semibold ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                          GST: {selectedClient.client_gstin}
+                        </span>
+                      )}
                     </div>
-                  ))}
+                  </div>
                 </div>
 
-                {/* Aging Analysis – New Business Feature */}
-                <div className={`border rounded-2xl px-5 py-3 shadow-sm min-w-[260px] ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                  <div className="text-xs text-slate-400 mb-2 flex items-center justify-between">
-                    <span>Aging Analysis (Overdue)</span>
+                {/* Summary cards row — all in one line, properly bounded */}
+                <div className="grid grid-cols-8 gap-2">
+                  <div className="col-span-2">
+                    <SummaryCard
+                      label="Total Invoiced"
+                      value={fmtC(summary.totalDr)}
+                      color="#1D4ED8"
+                      icon={TrendingUp}
+                      isDark={isDark}
+                    />
                   </div>
-                  <div className="grid grid-cols-4 gap-3 text-center text-xs">
-                    {Object.entries(agingSummary).map(([bucket, amount]) => (
-                      <div key={bucket} className="flex flex-col">
-                        <div className="font-medium text-slate-500">{bucket}</div>
-                        <div className="font-semibold text-emerald-700">{fmtC(amount)}</div>
-                      </div>
-                    ))}
+                  <div className="col-span-2">
+                    <SummaryCard
+                      label="Total Received"
+                      value={fmtC(summary.totalCr)}
+                      color="#059669"
+                      icon={TrendingDown}
+                      isDark={isDark}
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <SummaryCard
+                      label="Outstanding"
+                      value={`${fmtC(summary.closingBal)} ${summary.closingSide}`}
+                      color={summary.closingSide === 'Dr' ? '#DC2626' : '#059669'}
+                      icon={AlertCircle}
+                      isDark={isDark}
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <SummaryCard
+                      label="Overdue"
+                      value={fmtC(summary.overdueAmt)}
+                      color="#D97706"
+                      icon={Clock}
+                      isDark={isDark}
+                    />
                   </div>
                 </div>
+
+                {/* Aging analysis row */}
+                {Object.values(agingSummary).some((v) => v > 0) && (
+                  <div className={`mt-3 rounded-2xl border p-3 ${card}`}>
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                      Aging Analysis · Overdue Receivables
+                    </div>
+                    <div className="flex gap-2">
+                      {Object.entries(agingSummary).map(([bucket, amount]) => (
+                        <AgingPill key={bucket} bucket={bucket} amount={amount} isDark={isDark} />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {/* LEDGER TABLE */}
-              <div className="flex-1 px-8 py-4 overflow-x-auto">
+              {/* ── LEDGER TABLE ── */}
+              <div className="flex-1 overflow-auto px-7 py-5">
                 {loadingPmts ? (
-                  <div className="flex items-center justify-center h-48 text-slate-400">
-                    Loading payment records…
+                  <div className="flex items-center justify-center h-48 text-slate-400 gap-3">
+                    <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                    <span>Loading payment records…</span>
                   </div>
-                ) : rows.length <= 1 ? (
-                  <div className="flex flex-col items-center justify-center h-48 text-slate-400">
-                    No transactions in selected period
+                ) : !hasData ? (
+                  <div className="flex flex-col items-center justify-center h-48 text-slate-400 gap-2">
+                    <BookOpen className="w-10 h-10 opacity-40" />
+                    <p className="text-sm">No transactions in selected period</p>
                   </div>
                 ) : (
-                  <div className={`rounded-3xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                    <table className="w-full table-fixed border-collapse min-w-[1100px]">
+                  <div className={`rounded-2xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                    <table
+                      className="w-full border-collapse"
+                      style={{ tableLayout: 'fixed', minWidth: 900 }}
+                    >
+                      <colgroup>
+                        <col style={{ width: 90  }} />  {/* Date */}
+                        <col />                           {/* Description — flex */}
+                        <col style={{ width: 130 }} />  {/* Voucher */}
+                        <col style={{ width: 120 }} />  {/* Debit */}
+                        <col style={{ width: 120 }} />  {/* Credit */}
+                        <col style={{ width: 120 }} />  {/* Balance */}
+                        <col style={{ width: 64  }} />  {/* Dr/Cr */}
+                      </colgroup>
+
                       <thead>
-                        <tr className={`text-xs font-medium ${isDark ? 'bg-slate-700/60 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
-                          <th className="w-24 px-4 py-4 text-left">Date</th>
-                          <th className="px-4 py-4 text-left">Particulars / Description</th>
-                          <th className="w-36 px-4 py-4 text-center">Voucher No.</th>
-                          <th className="w-28 px-4 py-4 text-right">Debit (₹)</th>
-                          <th className="w-28 px-4 py-4 text-right">Credit (₹)</th>
-                          <th className="w-28 px-4 py-4 text-right">Balance (₹)</th>
-                          <th className="w-16 px-4 py-4 text-center">Dr/Cr</th>
+                        <tr className={`text-[11px] font-semibold uppercase tracking-wider
+                          ${isDark ? 'bg-slate-700/80 text-slate-400' : 'bg-slate-100 text-slate-500'}`}
+                        >
+                          <th className="px-4 py-3.5 text-left whitespace-nowrap">Date</th>
+                          <th className="px-4 py-3.5 text-left">Particulars / Description</th>
+                          <th className="px-4 py-3.5 text-center whitespace-nowrap">Voucher No.</th>
+                          <th className="px-4 py-3.5 text-right whitespace-nowrap">Debit (₹)</th>
+                          <th className="px-4 py-3.5 text-right whitespace-nowrap">Credit (₹)</th>
+                          <th className="px-4 py-3.5 text-right whitespace-nowrap">Balance (₹)</th>
+                          <th className="px-4 py-3.5 text-center">Dr/Cr</th>
                         </tr>
                       </thead>
-                      <tbody className="text-sm">
+
+                      <tbody>
                         {rows.map((row, idx) => {
                           const isOpening = row.type === 'opening';
+                          const isPayment = row.type === 'payment';
+                          const isCr      = row.type === 'credit_note';
+
+                          const rowBg = isOpening
+                            ? isDark ? 'bg-blue-900/20' : 'bg-blue-50'
+                            : idx % 2 === 0
+                              ? isDark ? 'bg-slate-900' : 'bg-white'
+                              : isDark ? 'bg-slate-800/40' : 'bg-slate-50/60';
+
                           return (
                             <tr
                               key={row.id}
-                              className={`border-b last:border-0 transition-colors ${
-                                isOpening
-                                  ? isDark ? 'bg-blue-900/20 font-medium' : 'bg-blue-50 font-medium'
-                                  : idx % 2 === 0
-                                  ? isDark ? 'bg-slate-900' : 'bg-white'
-                                  : isDark ? 'bg-slate-800/50' : 'bg-slate-50'
-                              } ${isDark ? 'border-slate-700' : 'border-slate-100'}`}
+                              className={`border-b transition-colors ${rowBg} ${isDark ? 'border-slate-700/60' : 'border-slate-100'}
+                                ${!isOpening ? (isDark ? 'hover:bg-slate-700/30' : 'hover:bg-blue-50/40') : ''}`}
                             >
-                              <td className="px-4 py-4 text-slate-600 whitespace-nowrap">
+                              {/* Date */}
+                              <td className={`px-4 py-3.5 text-sm whitespace-nowrap ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                                 {isOpening ? '' : format(new Date(row.date), 'dd MMM yy')}
                               </td>
-                              <td className={`px-4 py-4 font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-                                {row.narration}
+
+                              {/* Narration */}
+                              <td className="px-4 py-3.5 min-w-0">
+                                <div
+                                  className={`text-sm font-medium truncate ${isOpening ? 'font-semibold' : ''}
+                                    ${isDark ? 'text-slate-200' : 'text-slate-800'}`}
+                                  title={row.narration}
+                                >
+                                  {row.narration}
+                                </div>
                               </td>
-                              <td className="px-4 py-4 text-center text-slate-500 font-mono text-xs">
+
+                              {/* Voucher */}
+                              <td className={`px-4 py-3.5 text-center font-mono text-xs truncate
+                                ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+                                title={row.ref}
+                              >
                                 {row.ref}
                               </td>
-                              <td className="px-4 py-4 text-right font-medium text-blue-700">
-                                {row.dr > 0 ? fmtN(row.dr) : '—'}
+
+                              {/* Debit */}
+                              <td className="px-4 py-3.5 text-right text-sm font-semibold text-blue-600">
+                                {row.dr > 0 ? fmtN(row.dr) : (
+                                  <span className={isDark ? 'text-slate-600' : 'text-slate-300'}>—</span>
+                                )}
                               </td>
-                              <td className="px-4 py-4 text-right font-medium text-emerald-700">
-                                {row.cr > 0 ? fmtN(row.cr) : '—'}
+
+                              {/* Credit */}
+                              <td className="px-4 py-3.5 text-right text-sm font-semibold text-emerald-600">
+                                {row.cr > 0 ? fmtN(row.cr) : (
+                                  <span className={isDark ? 'text-slate-600' : 'text-slate-300'}>—</span>
+                                )}
                               </td>
-                              <td className="px-4 py-4 text-right font-semibold">
+
+                              {/* Balance */}
+                              <td className={`px-4 py-3.5 text-right text-sm font-bold
+                                ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
                                 {fmtN(Math.abs(row.runningBalance))}
                               </td>
-                              <td className="px-4 py-4 text-center">
+
+                              {/* Dr/Cr badge */}
+                              <td className="px-4 py-3.5 text-center">
                                 <span
-                                  className={`inline-block px-4 py-1 text-xs font-bold rounded-full ${
-                                    row.balanceSide === 'Dr'
-                                      ? 'bg-blue-100 text-blue-700'
-                                      : 'bg-emerald-100 text-emerald-700'
-                                  }`}
+                                  className={`inline-block px-2.5 py-0.5 text-[11px] font-bold rounded-full
+                                    ${row.balanceSide === 'Dr'
+                                      ? isDark ? 'bg-blue-900/50 text-blue-400' : 'bg-blue-100 text-blue-700'
+                                      : isDark ? 'bg-emerald-900/50 text-emerald-400' : 'bg-emerald-100 text-emerald-700'
+                                    }`}
                                 >
                                   {row.balanceSide}
                                 </span>
@@ -927,15 +1229,31 @@ export default function PartyLedger({
                           );
                         })}
                       </tbody>
+
+                      {/* Footer totals */}
                       <tfoot>
-                        <tr className="bg-blue-600 text-white text-sm font-medium">
-                          <td colSpan={3} className="px-4 py-5 text-right font-bold">
+                        <tr className="bg-gradient-to-r from-blue-700 to-blue-800 text-white">
+                          <td className="px-4 py-4 text-sm font-bold" colSpan={3}>
                             CLOSING BALANCE
                           </td>
-                          <td className="px-4 py-5 text-right">{fmtN(summary.totalDr)}</td>
-                          <td className="px-4 py-5 text-right">{fmtN(summary.totalCr)}</td>
-                          <td className="px-4 py-5 text-right font-bold">{fmtN(summary.closingBal)}</td>
-                          <td className="px-4 py-5 text-center font-bold">{summary.closingSide}</td>
+                          <td className="px-4 py-4 text-right text-sm font-semibold">
+                            {fmtN(summary.totalDr)}
+                          </td>
+                          <td className="px-4 py-4 text-right text-sm font-semibold">
+                            {fmtN(summary.totalCr)}
+                          </td>
+                          <td className="px-4 py-4 text-right text-base font-bold">
+                            {fmtN(summary.closingBal)}
+                          </td>
+                          <td className="px-4 py-4 text-center">
+                            <span className={`inline-block px-2.5 py-0.5 text-[11px] font-bold rounded-full
+                              ${summary.closingSide === 'Dr'
+                                ? 'bg-blue-500/40 text-blue-100'
+                                : 'bg-emerald-500/40 text-emerald-100'}`}
+                            >
+                              {summary.closingSide}
+                            </span>
+                          </td>
                         </tr>
                       </tfoot>
                     </table>
@@ -946,23 +1264,40 @@ export default function PartyLedger({
           )}
         </div>
 
-        {/* FOOTER */}
-        {selectedClient && rows.length > 1 && (
-          <div className={`flex-shrink-0 px-8 py-3 text-xs text-slate-400 flex justify-between items-center border-t ${isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-white'}`}>
-            <div>
-              {rows.length - 1} transaction{rows.length !== 2 ? 's' : ''} • Period:{' '}
-              {dateFrom ? format(new Date(dateFrom), 'dd-MMM-yyyy') : '—'} to{' '}
-              {dateTo ? format(new Date(dateTo), 'dd-MMM-yyyy') : '—'}
+        {/* ── FOOTER BAR ──────────────────────────────────── */}
+        {selectedClient && hasData && (
+          <div className={`flex-shrink-0 flex items-center justify-between px-7 py-3 border-t text-xs ${divider}
+            ${isDark ? 'bg-slate-900 text-slate-400' : 'bg-white text-slate-500'}`}
+          >
+            <div className="flex items-center gap-1.5">
+              <span className={`w-1.5 h-1.5 rounded-full bg-blue-500 inline-block`} />
+              <span>
+                {rows.length - 1} transaction{rows.length !== 2 ? 's' : ''}
+              </span>
+              <span className="mx-1">·</span>
+              <span>
+                {dateFrom ? format(new Date(dateFrom), 'dd-MMM-yyyy') : '—'}
+                &nbsp;to&nbsp;
+                {dateTo   ? format(new Date(dateTo),   'dd-MMM-yyyy') : '—'}
+              </span>
             </div>
-            <div className="flex items-center gap-3">
-              <Button variant="outline" onClick={handleExportExcel} className="h-8 text-xs">
-                Export Excel
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportExcel}
+                className={`h-8 text-xs rounded-xl px-3 gap-1.5 ${isDark ? 'border-slate-600 hover:bg-slate-700' : ''}`}
+              >
+                <Download className="w-3 h-3" />
+                Excel
               </Button>
               <Button
+                size="sm"
                 onClick={handlePrint}
-                className="h-8 text-xs bg-gradient-to-r from-blue-600 to-indigo-600 text-white"
+                className="h-8 text-xs rounded-xl px-3 gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
               >
-                Print / Save as PDF
+                <Printer className="w-3 h-3" />
+                Print / PDF
               </Button>
             </div>
           </div>
