@@ -2261,6 +2261,7 @@ const ProductModal = ({ open, onClose, isDark, onSaved }) => {
 // ════════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════════
+const LIST_PAGE_SIZE = 20;
 export default function Invoicing() {
   // ── A. ALL useState (top of component) ──────────────────────────────────────
   const [invoices, setInvoices] = useState([]);
@@ -2291,6 +2292,7 @@ export default function Invoicing() {
   const [toDate, setToDate] = useState('');
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
+  const [listPage, setListPage] = useState(1);
 
   // ── B. ALL useRef ─────────────────────────────────────────────────────────
   const iframeRef = useRef(null);
