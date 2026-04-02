@@ -172,112 +172,103 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
     setLoading(true);
 
     try {
-      // ─────────────────────────────────────────────
-      // 1. Resolve company + settings
-      // ─────────────────────────────────────────────
-      const company =
-        (companies || []).find(c => c.id === invoice?.company_id) || {};
+      // ── 1. Resolve company + settings (identical to handleDownloadPdf) ──
+      const invData = (invoice.items?.length || 0) > 0
+        ? invoice
+        : (await api.get(`/invoices/${invoiceId}`)).data;
 
-      const invSettings = getInvSettings(invoice?.company_id);
-
-      const companyWithBank = {
-        ...company,
-        bank_name:       company.bank_name       || invSettings.bank_name       || '',
-        bank_account_no: company.bank_account_no || invSettings.bank_account_no || '',
-        bank_ifsc:       company.bank_ifsc        || invSettings.bank_ifsc        || '',
-        upi_id:          company.upi_id           || invSettings.upi_id           || '',
+      const baseCompany = (companies || []).find(c => c.id === invData.company_id) || {};
+      const invSettings = getInvSettings(invData.company_id);
+      const company = {
+        ...baseCompany,
+        bank_name:       baseCompany.bank_name       || invSettings.bank_name       || '',
+        bank_account_no: baseCompany.bank_account_no || invSettings.bank_account_no || '',
+        bank_account:    baseCompany.bank_account    || invSettings.bank_account_no || '',
+        bank_ifsc:       baseCompany.bank_ifsc        || invSettings.bank_ifsc        || '',
+        bank_branch:     baseCompany.bank_branch      || invSettings.bank_branch     || '',
+        upi_id:          baseCompany.upi_id           || invSettings.upi_id           || '',
+        show_qr_code:    invSettings.show_qr_code     ?? true,
+        invoice_title:   invSettings.invoice_title    || 'Tax Invoice',
+        signatory_name:  invSettings.signatory_name   || '',
+        signatory_label: invSettings.signatory_label  || 'Authorised Signatory',
+        footer_line:     invSettings.footer_line      || '',
       };
 
-      // ─────────────────────────────────────────────
-      // 2. Generate same HTML as download
-      // ─────────────────────────────────────────────
-      const html = generateInvoiceHTML(invoice, {
-        company: companyWithBank,
-        template:    invoice?.invoice_template    || invSettings.template    || 'classic',
-        theme:       invoice?.invoice_theme       || invSettings.theme       || 'classic_blue',
-        customColor: invoice?.invoice_custom_color || invSettings.custom_color || '#0D3B66',
+      // ── 2. Generate HTML (identical to handleDownloadPdf) ──
+      const html = generateInvoiceHTML(invData, {
+        company,
+        template:    invData.invoice_template     || invSettings.template     || 'classic',
+        theme:       invData.invoice_theme        || invSettings.theme        || 'classic_blue',
+        customColor: invData.invoice_custom_color || invSettings.custom_color || '#0D3B66',
       });
 
-      // ─────────────────────────────────────────────
-      // 3. Render inside an iframe so the browser
-      //    fully lays out styles before capture
-      // ─────────────────────────────────────────────
-      const pdfBlob = await new Promise((resolve, reject) => {
-        const iframe = document.createElement('iframe');
+      // ── 3. Open popup and write HTML (identical to handleDownloadPdf) ──
+      const win = window.open('', '_blank', 'width=900,height=700');
+      if (!win) {
+        toast.error('Please allow pop-ups for this site to enable Drive upload.');
+        setLoading(false);
+        return;
+      }
+      win.document.write(html);
+      win.document.close();
 
-        iframe.style.cssText = `
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 794px;
-          height: 1123px;
-          opacity: 0;
-          pointer-events: none;
-          z-index: -1;
-          border: none;
-        `;
-
-        document.body.appendChild(iframe);
-
-        iframe.onload = async () => {
-          try {
-            const body = iframe.contentDocument?.body;
-            if (!body) throw new Error('iframe body not available');
-
-            // Wait for fonts/images inside the iframe to settle
-            await new Promise(res => setTimeout(res, 800));
-
-            const blob = await window.html2pdf()
-              .set({
-                margin: 0,
-                filename: `Invoice_${invoiceNo}.pdf`,
-                image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: {
-                  scale: 2,
-                  useCORS: true,
-                  logging: false,
-                  windowWidth:  794,
-                  windowHeight: 1123,
-                },
-                jsPDF: {
-                  unit:        'mm',
-                  format:      'a4',
-                  orientation: 'portrait',
-                },
-              })
-              .from(body)
-              .outputPdf('blob');
-
-            resolve(blob);
-          } catch (err) {
-            reject(err);
-          } finally {
-            document.body.removeChild(iframe);
-          }
-        };
-
-        iframe.onerror = () => {
-          document.body.removeChild(iframe);
-          reject(new Error('iframe failed to load'));
-        };
-
-        // Writing srcdoc triggers a full browser render of the invoice HTML
-        iframe.srcdoc = html;
+      // ── 4. Wait for full render (fonts, images, styles) ──
+      await new Promise(resolve => {
+        if (win.document.readyState === 'complete') {
+          setTimeout(resolve, 1500);
+        } else {
+          win.onload = () => setTimeout(resolve, 1500);
+        }
       });
 
-      // ─────────────────────────────────────────────
-      // 4. Convert Blob → Base64
-      // ─────────────────────────────────────────────
-      const base64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload  = () => resolve(reader.result.split(',')[1]);
-        reader.onerror = reject;
-        reader.readAsDataURL(pdfBlob);
+      // ── 5. Capture popup using html2canvas from main window ──
+      const pageWidth  = win.document.documentElement.scrollWidth;
+      const pageHeight = win.document.documentElement.scrollHeight;
+
+      win.scrollTo(0, 0);
+
+      const canvas = await window.html2canvas(win.document.body, {
+        scale:        2,
+        useCORS:      true,
+        allowTaint:   true,
+        logging:      false,
+        width:        pageWidth,
+        height:       pageHeight,
+        windowWidth:  pageWidth,
+        windowHeight: pageHeight,
+        scrollX:      0,
+        scrollY:      0,
       });
 
-      // ─────────────────────────────────────────────
-      // 5. Upload to backend
-      // ─────────────────────────────────────────────
+      win.close();
+
+      // ── 6. Build A4 PDF from canvas using jsPDF ──
+      const { jsPDF } = window.jspdf;
+
+      const A4_W        = 210;
+      const A4_H        = 297;
+      const imgData     = canvas.toDataURL('image/jpeg', 0.98);
+      const imgWidthMM  = A4_W;
+      const imgHeightMM = (canvas.height * A4_W) / canvas.width;
+
+      const pdf     = new jsPDF('p', 'mm', 'a4');
+      let yPos      = 0;
+      let remaining = imgHeightMM;
+
+      pdf.addImage(imgData, 'JPEG', 0, yPos, imgWidthMM, imgHeightMM);
+      remaining -= A4_H;
+
+      while (remaining > 0) {
+        yPos -= A4_H;
+        pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, yPos, imgWidthMM, imgHeightMM);
+        remaining -= A4_H;
+      }
+
+      // ── 7. Get PDF as Base64 ──
+      const base64 = pdf.output('datauristring').split(',')[1];
+
+      // ── 8. Upload to backend ──
       const response = await api.post(
         `/invoices/${invoiceId}/upload-pdf-to-drive`,
         {
@@ -288,9 +279,7 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
         }
       );
 
-      // ─────────────────────────────────────────────
-      // 6. Handle response
-      // ─────────────────────────────────────────────
+      // ── 9. Handle response ──
       if (response.data?.drive_link) {
         toast.success('Saved to Google Drive ✅');
         if (window.confirm('Open in Google Drive?')) {
