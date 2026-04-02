@@ -181,17 +181,19 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
       const invSettings  = getInvSettings(invData.company_id);
       const company = {
         ...baseCompany,
-        bank_name:        baseCompany.bank_name        || invSettings.bank_name        || '',
-        bank_account_no:  baseCompany.bank_account_no  || invSettings.bank_account_no  || '',
-        bank_account:     baseCompany.bank_account     || invSettings.bank_account_no  || '',
-        bank_ifsc:        baseCompany.bank_ifsc        || invSettings.bank_ifsc        || '',
-        bank_branch:      baseCompany.bank_branch      || invSettings.bank_branch      || '',
-        upi_id:           baseCompany.upi_id           || invSettings.upi_id           || '',
-        show_qr_code:     invSettings.show_qr_code     ?? true,
-        invoice_title:    invSettings.invoice_title    || 'Tax Invoice',
-        signatory_name:   invSettings.signatory_name   || '',
-        signatory_label:  invSettings.signatory_label  || 'Authorised Signatory',
-        footer_line:      invSettings.footer_line      || '',
+        bank_name:        baseCompany.bank_name       || invSettings.bank_name       || '',
+        bank_account_no:  baseCompany.bank_account_no || invSettings.bank_account_no || '',
+        bank_account:     baseCompany.bank_account    || invSettings.bank_account_no || '',
+        bank_ifsc:        baseCompany.bank_ifsc       || invSettings.bank_ifsc       || '',
+        bank_branch:      baseCompany.bank_branch     || invSettings.bank_branch     || '',
+        upi_id:           baseCompany.upi_id          || invSettings.upi_id          || '',
+        show_qr_code:     invSettings.show_qr_code    ?? true,
+        invoice_title:    invSettings.invoice_title   || 'Tax Invoice',
+        signatory_name:   invSettings.signatory_name  || '',
+        signatory_label:  invSettings.signatory_label || 'Authorised Signatory',
+        footer_line:      invSettings.footer_line     || '',
+        signature_image:  baseCompany.signature_image || invSettings.signature_image || '',
+        logo_url:         baseCompany.logo_url        || baseCompany.logo            || '',
       };
  
       // 3. Generate HTML using the SINGLE source-of-truth renderer
@@ -202,50 +204,65 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
         customColor: invData.invoice_custom_color || invSettings.custom_color || '#0D3B66',
       });
  
-      // 4. Build PDF from HTML using jsPDF html() – identical to print path
+      // 4. Open print window identical to handleDownloadPdf, capture via html2canvas
       const { jsPDF } = window.jspdf;
       const pdf       = new jsPDF('p', 'mm', 'a4');
- 
-      // Write HTML to a temp blob URL so jsPDF can render it
+
       const blob    = new Blob([html], { type: 'text/html;charset=utf-8' });
       const blobUrl = URL.createObjectURL(blob);
- 
+
       await new Promise((resolve, reject) => {
-        // Use an offscreen iframe for rendering
         const iframe = document.createElement('iframe');
-        iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;visibility:hidden';
+        iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:794px;height:1123px;visibility:hidden;border:none';
         document.body.appendChild(iframe);
- 
+
         iframe.onload = async () => {
           try {
-            await new Promise(r => setTimeout(r, 1800)); // let fonts/images load
- 
-            const canvas = await window.html2canvas(iframe.contentDocument.body, {
-              scale:       2,
-              useCORS:     true,
-              allowTaint:  true,
-              logging:     false,
-              width:       794,
-              windowWidth: 794,
-              scrollX:     0,
-              scrollY:     0,
+            // Wait for fonts, images (including signature) to fully load
+            await new Promise(r => setTimeout(r, 2500));
+
+            // Also wait for all images inside iframe to load
+            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+            const imgs = Array.from(iframeDoc.querySelectorAll('img'));
+            await Promise.all(imgs.map(img => {
+              if (img.complete) return Promise.resolve();
+              return new Promise(res => {
+                img.onload = res;
+                img.onerror = res;
+                setTimeout(res, 3000);
+              });
+            }));
+
+            const canvas = await window.html2canvas(iframeDoc.body, {
+              scale:            2,
+              useCORS:          true,
+              allowTaint:       true,
+              logging:          false,
+              width:            794,
+              height:           iframeDoc.body.scrollHeight,
+              windowWidth:      794,
+              windowHeight:     iframeDoc.body.scrollHeight,
+              scrollX:          0,
+              scrollY:          0,
+              backgroundColor:  '#ffffff',
             });
- 
-            const A4_W       = 210;
-            const imgData    = canvas.toDataURL('image/jpeg', 0.97);
-            const imgHeightMM= (canvas.height * A4_W) / canvas.width;
- 
-            pdf.addImage(imgData, 'JPEG', 0, 0, A4_W, imgHeightMM);
- 
-            let remaining = imgHeightMM - 297;
-            let yPos      = -297;
-            while (remaining > 0) {
-              yPos -= 297;
-              pdf.addPage();
-              pdf.addImage(imgData, 'JPEG', 0, yPos, A4_W, imgHeightMM);
-              remaining -= 297;
+
+            const A4_W        = 210;
+            const A4_H        = 297;
+            const imgData     = canvas.toDataURL('image/jpeg', 0.98);
+            const imgHeightMM = (canvas.height * A4_W) / canvas.width;
+
+            if (imgHeightMM <= A4_H) {
+              pdf.addImage(imgData, 'JPEG', 0, 0, A4_W, imgHeightMM);
+            } else {
+              let yOffset = 0;
+              while (yOffset < imgHeightMM) {
+                if (yOffset > 0) pdf.addPage();
+                pdf.addImage(imgData, 'JPEG', 0, -yOffset, A4_W, imgHeightMM);
+                yOffset += A4_H;
+              }
             }
- 
+
             document.body.removeChild(iframe);
             URL.revokeObjectURL(blobUrl);
             resolve();
@@ -255,13 +272,13 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
             reject(err);
           }
         };
- 
-        iframe.onerror = (e) => {
+
+        iframe.onerror = () => {
           document.body.removeChild(iframe);
           URL.revokeObjectURL(blobUrl);
           reject(new Error('iframe load failed'));
         };
- 
+
         iframe.src = blobUrl;
       });
  
@@ -2569,18 +2586,19 @@ export default function Invoicing() {
       const invSettings = getInvSettings(invData.company_id);
       const company = {
         ...baseCompany,
-        bank_name:        baseCompany.bank_name       || invSettings.bank_name       || '',
-        bank_account_no:  baseCompany.bank_account_no || invSettings.bank_account_no || '',
-        bank_account:     baseCompany.bank_account    || invSettings.bank_account_no || '',
-        bank_ifsc:        baseCompany.bank_ifsc       || invSettings.bank_ifsc       || '',
-        bank_branch:      baseCompany.bank_branch     || invSettings.bank_branch     || '',
-        upi_id:           baseCompany.upi_id          || invSettings.upi_id          || '',
-        show_qr_code:     invSettings.show_qr_code    ?? true,
-        // Settings fields applied to existing invoices
-        invoice_title:    invSettings.invoice_title   || 'Tax Invoice',
-        signatory_name:   invSettings.signatory_name  || '',
-        signatory_label:  invSettings.signatory_label || 'Authorised Signatory',
-        footer_line:      invSettings.footer_line     || '',
+        bank_name:        baseCompany.bank_name        || invSettings.bank_name        || '',
+        bank_account_no:  baseCompany.bank_account_no  || invSettings.bank_account_no  || '',
+        bank_account:     baseCompany.bank_account     || invSettings.bank_account_no  || '',
+        bank_ifsc:        baseCompany.bank_ifsc        || invSettings.bank_ifsc        || '',
+        bank_branch:      baseCompany.bank_branch      || invSettings.bank_branch      || '',
+        upi_id:           baseCompany.upi_id           || invSettings.upi_id           || '',
+        show_qr_code:     invSettings.show_qr_code     ?? true,
+        invoice_title:    invSettings.invoice_title    || 'Tax Invoice',
+        signatory_name:   invSettings.signatory_name   || '',
+        signatory_label:  invSettings.signatory_label  || 'Authorised Signatory',
+        footer_line:      invSettings.footer_line      || '',
+        signature_image:  baseCompany.signature_image  || invSettings.signature_image  || '',
+        logo_url:         baseCompany.logo_url         || baseCompany.logo             || '',
       };
       const html = generateInvoiceHTML(invData, {
         company,
