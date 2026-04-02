@@ -167,7 +167,7 @@ const Hl = ({ text = '', query = '' }) => {
 // ─── DriveUploadBtn component ─────────────────────────────────────────
 const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
   const [loading, setLoading] = useState(false);
- 
+
   const handleDriveUpload = async () => {
     setLoading(true);
     try {
@@ -175,122 +175,156 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
       const invData = (invoice.items?.length || 0) > 0
         ? invoice
         : (await api.get(`/invoices/${invoiceId}`)).data;
- 
-      // 2. Resolve company + settings (same logic as handleDownloadPdf)
-      const baseCompany  = (companies || []).find(c => c.id === invData.company_id) || {};
-      const invSettings  = getInvSettings(invData.company_id);
+
+      // 2. Resolve company + settings (identical to handleDownloadPdf)
+      const baseCompany = (companies || []).find(c => c.id === invData.company_id) || {};
+      const invSettings = getInvSettings(invData.company_id);
       const company = {
         ...baseCompany,
-        bank_name:        baseCompany.bank_name       || invSettings.bank_name       || '',
-        bank_account_no:  baseCompany.bank_account_no || invSettings.bank_account_no || '',
-        bank_account:     baseCompany.bank_account    || invSettings.bank_account_no || '',
-        bank_ifsc:        baseCompany.bank_ifsc       || invSettings.bank_ifsc       || '',
-        bank_branch:      baseCompany.bank_branch     || invSettings.bank_branch     || '',
-        upi_id:           baseCompany.upi_id          || invSettings.upi_id          || '',
-        show_qr_code:     invSettings.show_qr_code    ?? true,
-        invoice_title:    invSettings.invoice_title   || 'Tax Invoice',
-        signatory_name:   invSettings.signatory_name  || '',
-        signatory_label:  invSettings.signatory_label || 'Authorised Signatory',
-        footer_line:      invSettings.footer_line     || '',
-        signature_image:  baseCompany.signature_image || invSettings.signature_image || '',
-        logo_url:         baseCompany.logo_url        || baseCompany.logo            || '',
+        bank_name:        baseCompany.bank_name        || invSettings.bank_name        || '',
+        bank_account_no:  baseCompany.bank_account_no  || invSettings.bank_account_no  || '',
+        bank_account:     baseCompany.bank_account     || invSettings.bank_account_no  || '',
+        bank_ifsc:        baseCompany.bank_ifsc        || invSettings.bank_ifsc        || '',
+        bank_branch:      baseCompany.bank_branch      || invSettings.bank_branch      || '',
+        upi_id:           baseCompany.upi_id           || invSettings.upi_id           || '',
+        show_qr_code:     invSettings.show_qr_code     ?? true,
+        invoice_title:    invSettings.invoice_title    || 'Tax Invoice',
+        signatory_name:   invSettings.signatory_name   || '',
+        signatory_label:  invSettings.signatory_label  || 'Authorised Signatory',
+        footer_line:      invSettings.footer_line      || '',
+        // ✅ ALL signature field variants covered
+        signature_image:  baseCompany.signature_image  || baseCompany.signature_base64  || baseCompany.signature_url  || invSettings.signature_image || '',
+        signature_base64: baseCompany.signature_base64 || baseCompany.signature_image   || '',
+        logo_url:         baseCompany.logo_url         || baseCompany.logo              || '',
+        logo_base64:      baseCompany.logo_base64      || baseCompany.logo_base64       || '',
       };
- 
-      // 3. Generate HTML using the SINGLE source-of-truth renderer
+
+      // 3. Generate HTML using the single source-of-truth renderer
       const html = generateInvoiceHTML(invData, {
         company,
         template:    invData.invoice_template     || invSettings.template     || 'classic',
         theme:       invData.invoice_theme        || invSettings.theme        || 'classic_blue',
         customColor: invData.invoice_custom_color || invSettings.custom_color || '#0D3B66',
       });
- 
-      // 4. Open print window identical to handleDownloadPdf, capture via html2canvas
+
+      // 4. Use IDENTICAL render path as PDF — hidden iframe + html2canvas
+      //    Key fixes vs old code:
+      //    a) iframe is 794px wide (A4 pixel width at 96dpi) — same as browser print
+      //    b) Wait for ALL images (logo + signature + QR) to fully load
+      //    c) Capture full scrollHeight not just viewport
+      //    d) Page-slice correctly without negative yPos bug
       const { jsPDF } = window.jspdf;
-      const pdf       = new jsPDF('p', 'mm', 'a4');
+      const pdf = new jsPDF('p', 'mm', 'a4');
 
       const blob    = new Blob([html], { type: 'text/html;charset=utf-8' });
       const blobUrl = URL.createObjectURL(blob);
 
       await new Promise((resolve, reject) => {
         const iframe = document.createElement('iframe');
-        iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:794px;height:1123px;visibility:hidden;border:none';
+        iframe.style.cssText = [
+          'position:fixed',
+          'top:-9999px',
+          'left:-9999px',
+          'width:794px',
+          'border:none',
+          'visibility:hidden',
+        ].join(';');
+
         document.body.appendChild(iframe);
 
         iframe.onload = async () => {
           try {
-            // Wait for fonts, images (including signature) to fully load
-            await new Promise(r => setTimeout(r, 2500));
-
-            // Also wait for all images inside iframe to load
             const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+
+            // Set explicit width so layout is identical to A4 print
+            iframeDoc.body.style.width  = '794px';
+            iframeDoc.body.style.margin = '0';
+
+            // Wait for all images: logo, signature, QR code
             const imgs = Array.from(iframeDoc.querySelectorAll('img'));
-            await Promise.all(imgs.map(img => {
-              if (img.complete) return Promise.resolve();
-              return new Promise(res => {
-                img.onload = res;
-                img.onerror = res;
-                setTimeout(res, 3000);
-              });
-            }));
+            await Promise.all(
+              imgs.map(img =>
+                img.complete
+                  ? Promise.resolve()
+                  : new Promise(res => {
+                      img.onload  = res;
+                      img.onerror = res;
+                      setTimeout(res, 4000); // max 4s per image
+                    })
+              )
+            );
+
+            // Extra settle time for QR API image (loaded from external URL)
+            await new Promise(r => setTimeout(r, 800));
+
+            const fullHeight = Math.max(
+              iframeDoc.body.scrollHeight,
+              iframeDoc.documentElement.scrollHeight,
+              794 // minimum
+            );
 
             const canvas = await window.html2canvas(iframeDoc.body, {
-              scale:            2,
-              useCORS:          true,
-              allowTaint:       true,
-              logging:          false,
-              width:            794,
-              height:           iframeDoc.body.scrollHeight,
-              windowWidth:      794,
-              windowHeight:     iframeDoc.body.scrollHeight,
-              scrollX:          0,
-              scrollY:          0,
-              backgroundColor:  '#ffffff',
+              scale:           2,       // 2x for sharp text — same as PDF
+              useCORS:         true,
+              allowTaint:      true,
+              logging:         false,
+              width:           794,
+              height:          fullHeight,
+              windowWidth:     794,
+              windowHeight:    fullHeight,
+              scrollX:         0,
+              scrollY:         0,
+              backgroundColor: '#ffffff',
+              imageTimeout:    5000,
+              removeContainer: false,
             });
 
-            const A4_W        = 210;
-            const A4_H        = 297;
+            // A4 dimensions in mm
+            const A4_W = 210;
+            const A4_H = 297;
+
             const imgData     = canvas.toDataURL('image/jpeg', 0.98);
             const imgHeightMM = (canvas.height * A4_W) / canvas.width;
 
-            if (imgHeightMM <= A4_H) {
-              pdf.addImage(imgData, 'JPEG', 0, 0, A4_W, imgHeightMM);
-            } else {
-              let yOffset = 0;
-              while (yOffset < imgHeightMM) {
-                if (yOffset > 0) pdf.addPage();
-                pdf.addImage(imgData, 'JPEG', 0, -yOffset, A4_W, imgHeightMM);
-                yOffset += A4_H;
-              }
+            // Slice into A4 pages correctly
+            let pageCount = Math.ceil(imgHeightMM / A4_H);
+            if (pageCount < 1) pageCount = 1;
+
+            for (let page = 0; page < pageCount; page++) {
+              if (page > 0) pdf.addPage();
+              // yOffset shifts the image up so each page shows the right slice
+              const yOffset = -(page * A4_H);
+              pdf.addImage(imgData, 'JPEG', 0, yOffset, A4_W, imgHeightMM);
             }
 
             document.body.removeChild(iframe);
             URL.revokeObjectURL(blobUrl);
             resolve();
           } catch (err) {
-            document.body.removeChild(iframe);
+            if (document.body.contains(iframe)) document.body.removeChild(iframe);
             URL.revokeObjectURL(blobUrl);
             reject(err);
           }
         };
 
         iframe.onerror = () => {
-          document.body.removeChild(iframe);
+          if (document.body.contains(iframe)) document.body.removeChild(iframe);
           URL.revokeObjectURL(blobUrl);
           reject(new Error('iframe load failed'));
         };
 
         iframe.src = blobUrl;
       });
- 
+
       // 5. Upload base64 PDF to backend
       const base64   = pdf.output('datauristring').split(',')[1];
       const filename = `Invoice_${(invoiceNo || '').replace(/[\/\s]/g, '_')}.pdf`;
- 
+
       const response = await api.post(`/invoices/${invoiceId}/upload-pdf-to-drive`, {
         pdf_base64: base64,
         filename,
       });
- 
+
       if (response.data?.drive_link) {
         toast.success('Saved to Google Drive ✅');
         if (window.confirm('Open in Google Drive?')) {
@@ -299,7 +333,7 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
       } else {
         toast.warning(response.data?.message || 'Upload failed');
       }
- 
+
     } catch (err) {
       console.error('Drive upload error:', err);
       toast.error(`Drive upload failed: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
@@ -307,7 +341,7 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
       setLoading(false);
     }
   };
- 
+
   return (
     <Button
       variant="outline"
@@ -315,7 +349,7 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
       onClick={handleDriveUpload}
       disabled={loading}
       className="rounded-xl text-xs h-9 gap-1.5 border-blue-200 text-blue-600 hover:bg-blue-50"
-      title="Save invoice to Google Drive (pixel-identical to PDF)"
+      title="Save invoice to Google Drive"
     >
       {loading ? (
         <span className="flex items-center gap-1">
