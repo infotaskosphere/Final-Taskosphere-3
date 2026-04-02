@@ -165,31 +165,147 @@ const Hl = ({ text = '', query = '' }) => {
 };
 
 // ─── DriveUploadBtn component ─────────────────────────────────────────
-const DriveUploadBtn = ({ invoiceId, invoiceNo }) => {
+const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
   const [loading, setLoading] = useState(false);
+
   const handleDriveUpload = async () => {
     setLoading(true);
+
     try {
-      const r = await api.post(`/invoices/${invoiceId}/upload-to-drive`);
-      if (r.data?.drive_link) {
+      // ─────────────────────────────────────────────
+      // 1. Resolve company + settings
+      // ─────────────────────────────────────────────
+      const company =
+        (companies || []).find(c => c.id === invoice?.company_id) || {};
+
+      const invSettings = getInvSettings(invoice?.company_id);
+
+      const companyWithBank = {
+        ...company,
+        bank_name:
+          company.bank_name || invSettings.bank_name || '',
+        bank_account_no:
+          company.bank_account_no || invSettings.bank_account_no || '',
+        bank_ifsc:
+          company.bank_ifsc || invSettings.bank_ifsc || '',
+        upi_id:
+          company.upi_id || invSettings.upi_id || '',
+      };
+
+      // ─────────────────────────────────────────────
+      // 2. Generate SAME HTML as download
+      // ─────────────────────────────────────────────
+      const html = generateInvoiceHTML(invoice, {
+        company: companyWithBank,
+        template:
+          invoice?.invoice_template ||
+          invSettings.template ||
+          'classic',
+        theme:
+          invoice?.invoice_theme ||
+          invSettings.theme ||
+          'classic_blue',
+        customColor:
+          invoice?.invoice_custom_color ||
+          invSettings.custom_color ||
+          '#0D3B66',
+      });
+
+      // ─────────────────────────────────────────────
+      // 3. Create hidden container
+      // ─────────────────────────────────────────────
+      const container = document.createElement('div');
+      container.innerHTML = html;
+
+      container.style.position = 'fixed';
+      container.style.left = '-9999px';
+      container.style.top = '0';
+      container.style.width = '800px'; // stable render width
+
+      document.body.appendChild(container);
+
+      // ─────────────────────────────────────────────
+      // 4. Convert HTML → PDF
+      // ─────────────────────────────────────────────
+      const pdfBlob = await window.html2pdf()
+        .set({
+          margin: 0,
+          filename: `Invoice_${invoiceNo}.pdf`,
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: {
+            scale: 2,
+            useCORS: true,
+          },
+          jsPDF: {
+            unit: 'mm',
+            format: 'a4',
+            orientation: 'portrait',
+          },
+        })
+        .from(container)
+        .outputPdf('blob');
+
+      document.body.removeChild(container);
+
+      // ─────────────────────────────────────────────
+      // 5. Convert Blob → Base64
+      // ─────────────────────────────────────────────
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+
+        reader.onload = () => {
+          const result = reader.result.split(',')[1];
+          resolve(result);
+        };
+
+        reader.onerror = reject;
+        reader.readAsDataURL(pdfBlob);
+      });
+
+      // ─────────────────────────────────────────────
+      // 6. Upload to backend
+      // ─────────────────────────────────────────────
+      const response = await api.post(
+        `/invoices/${invoiceId}/upload-pdf-to-drive`,
+        {
+          pdf_base64: base64,
+          filename: `Invoice_${(invoiceNo || '')
+            .replace(/\//g, '_')
+            .replace(/\s/g, '_')}.pdf`,
+        }
+      );
+
+      // ─────────────────────────────────────────────
+      // 7. Handle response
+      // ─────────────────────────────────────────────
+      if (response.data?.drive_link) {
         toast.success('Saved to Google Drive ✅');
+
         if (window.confirm('Open in Google Drive?')) {
-          window.open(r.data.drive_link, '_blank');
+          window.open(response.data.drive_link, '_blank');
         }
       } else {
-        toast.warning(r.data?.message || 'Upload failed — check Drive config');
+        toast.warning(
+          response.data?.message || 'Upload failed'
+        );
       }
     } catch (err) {
-      const detail = err.response?.data?.detail || '';
-      if (err.response?.status === 503) {
-        toast.error('Google Drive not configured on server');
-      } else {
-        toast.error(`Drive upload failed: ${detail || 'Unknown error'}`);
-      }
+      console.error(err);
+      toast.error(
+        `Drive upload failed: ${
+          err.response?.data?.detail ||
+          err.message ||
+          'Unknown error'
+        }`
+      );
     } finally {
       setLoading(false);
     }
   };
+
+  // ─────────────────────────────────────────────
+  // UI
+  // ─────────────────────────────────────────────
   return (
     <Button
       variant="outline"
@@ -197,14 +313,16 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo }) => {
       onClick={handleDriveUpload}
       disabled={loading}
       className="rounded-xl text-xs h-9 gap-1.5 border-blue-200 text-blue-600 hover:bg-blue-50"
-      title="Optionally save a copy to Google Drive"
+      title="Save invoice to Google Drive"
     >
       {loading ? (
-        <span className="w-3.5 h-3.5 border border-blue-500 border-t-transparent rounded-full animate-spin" />
+        <span className="flex items-center gap-1">
+          <span className="w-3.5 h-3.5 border border-blue-500 border-t-transparent rounded-full animate-spin" />
+          Uploading…
+        </span>
       ) : (
-        <ExternalLink className="h-3.5 w-3.5" />
+        'Save to Drive'
       )}
-      {loading ? 'Uploading…' : 'Save to Drive'}
     </Button>
   );
 };
@@ -1903,7 +2021,7 @@ const InvoiceDetailPanel = ({ invoice, open, onClose, onPayment, onEdit, onDelet
         <div className={`flex-shrink-0 flex items-center gap-2 px-7 py-4 border-t flex-wrap ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
           <Button variant="outline" size="sm" onClick={() => { onClose(); onEdit?.(invoice); }} className="rounded-xl text-xs h-9 gap-1.5"><Edit className="h-3.5 w-3.5" /> Edit</Button>
           <Button variant="outline" size="sm" onClick={() => onDownloadPdf?.(invoice)} className="rounded-xl text-xs h-9 gap-1.5"><Download className="h-3.5 w-3.5" /> PDF</Button>
-          <DriveUploadBtn invoiceId={invoice.id} invoiceNo={invoice.invoice_no} />
+          <DriveUploadBtn invoiceId={inv.id} invoiceNo={inv.invoice_no} invoice={inv} companies={companies} />
           {invoice.client_email && (<Button size="sm" onClick={() => { onClose(); onSendEmail?.(invoice); }} className="rounded-xl text-xs h-9 gap-1.5 bg-blue-600 text-white"><Send className="h-3.5 w-3.5" /> Send Email</Button>)}
           {invoice.amount_due > 0 && (<Button size="sm" onClick={() => { onClose(); onPayment?.(invoice); }} className="rounded-xl text-xs h-9 gap-1.5 text-white" style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen}, #15803d)` }}><IndianRupee className="h-3.5 w-3.5" /> Record Payment</Button>)}
           <Button variant="ghost" size="sm" onClick={() => onDelete?.(invoice)} className="rounded-xl text-xs h-9 gap-1.5 text-red-500 hover:bg-red-50 ml-auto"><Trash2 className="h-3.5 w-3.5" /> Delete</Button>
