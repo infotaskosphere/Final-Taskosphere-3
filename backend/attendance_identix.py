@@ -508,61 +508,85 @@ async def poll_lan_scan(
 # ATTENDANCE SYNC ROUTES
 # ─────────────────────────────────────────────────────────────────────────────
 
-@identix_router.post("/attendance/sync")
-async def sync_attendance(
-    payload: SyncRequest,
-    current_user: User = Depends(require_admin),
+async def sync_attendance_PATCHED(
+    payload,        # SyncRequest
+    current_user,   # User = Depends(require_admin)
+    db,             # motor AsyncIOMotorDatabase
+    asyncio,        # imported at module level
+    uuid,           # imported at module level
+    datetime,       # imported at module level
+    timezone,       # from datetime
+    logger,         # logging.getLogger("identix")
+    _fetch_attendance_from_device,
 ):
+    """
+    Sync attendance from Identix/ZKTeco machines into BOTH:
+      1. identix_attendance  (raw machine log, unchanged)
+      2. attendance           (main attendance collection used by the app)
+ 
+    Machine punch_in → creates / updates the day's attendance record with punch_in.
+    Machine punch_out → updates the record with punch_out + duration_minutes.
+ 
+    Late detection uses the user's punch_in_time and grace_time fields.
+    """
+    from datetime import timedelta
+ 
     if payload.device_id:
         devices = await db.identix_devices.find({"id": payload.device_id}, {"_id": 0}).to_list(1)
     else:
         devices = await db.identix_devices.find({"is_active": True}, {"_id": 0}).to_list(50)
-
+ 
     if not devices:
-        return {"success": False, "newRecords": 0, "totalFetched": 0, "message": "No active devices", "errors": []}
-
+        return {"success": False, "newRecords": 0, "totalFetched": 0,
+                "message": "No active devices", "errors": []}
+ 
     from_dt = None
     if payload.from_date:
         try:
             from_dt = datetime.fromisoformat(payload.from_date)
         except ValueError:
             pass
-
+ 
     all_users   = await db.users.find(
         {"identix_uid": {"$exists": True}},
-        {"_id": 0, "id": 1, "full_name": 1, "identix_uid": 1, "departments": 1},
+        {"_id": 0, "id": 1, "full_name": 1, "identix_uid": 1,
+         "departments": 1, "punch_in_time": 1, "grace_time": 1},
     ).to_list(1000)
     uid_to_user = {str(u["identix_uid"]): u for u in all_users}
-
+ 
     total_fetched = 0
     total_new     = 0
     errors        = []
-
+ 
     for device in devices:
         try:
             logs = await asyncio.get_event_loop().run_in_executor(
                 None, _fetch_attendance_from_device, device, from_dt
             )
             total_fetched += len(logs)
-
+ 
             for log in logs:
-                device_uid = str(log["device_user_id"])
-                user       = uid_to_user.get(device_uid)
-
-                existing = await db.identix_attendance.find_one({
+                device_uid  = str(log["device_user_id"])
+                user        = uid_to_user.get(device_uid)
+                punch_time_iso = log["punch_time"]       # ISO string from device
+                punch_type     = log["punch_type"]       # "in" | "out"
+ 
+                # ── Skip duplicates in identix_attendance ──────────────────
+                existing_raw = await db.identix_attendance.find_one({
                     "log_id":    log.get("log_id"),
                     "device_id": device["id"],
                 })
-                if existing:
+                if existing_raw:
                     continue
-
+ 
+                # ── Insert into identix_attendance (raw log) ───────────────
                 record = {
                     "id":             str(uuid.uuid4()),
                     "device_id":      device["id"],
                     "device_name":    device.get("name"),
                     "device_user_id": device_uid,
-                    "punch_time":     log["punch_time"],
-                    "punch_type":     log["punch_type"],
+                    "punch_time":     punch_time_iso,
+                    "punch_type":     punch_type,
                     "verify_mode":    log.get("verify_mode", 0),
                     "log_id":         log.get("log_id"),
                     "source":         "machine",
@@ -573,107 +597,143 @@ async def sync_attendance(
                 }
                 await db.identix_attendance.insert_one(record)
                 total_new += 1
-
+ 
+                # ── Mirror into main attendance collection ─────────────────
+                if user:
+                    try:
+                        # Parse punch time to datetime (handle both tz-aware and naive)
+                        if isinstance(punch_time_iso, str):
+                            punch_dt = datetime.fromisoformat(punch_time_iso)
+                        else:
+                            punch_dt = punch_time_iso
+ 
+                        if punch_dt.tzinfo is None:
+                            punch_dt = punch_dt.replace(tzinfo=timezone.utc)
+ 
+                        # Get IST date for this punch
+                        from zoneinfo import ZoneInfo
+                        IST = ZoneInfo("Asia/Kolkata")
+                        punch_dt_ist = punch_dt.astimezone(IST)
+                        date_str     = punch_dt_ist.date().isoformat()
+ 
+                        user_id = user["id"]
+ 
+                        if punch_type == "in":
+                            # ── Determine is_late ──────────────────────────
+                            is_late = False
+                            try:
+                                pit_str = user.get("punch_in_time", "10:30")
+                                gt_str  = user.get("grace_time",    "00:15")
+                                pit = datetime.strptime(pit_str, "%H:%M")
+                                gt  = datetime.strptime(gt_str,  "%H:%M")
+                                grace_minutes = gt.hour * 60 + gt.minute
+                                deadline = punch_dt_ist.replace(
+                                    hour=pit.hour, minute=pit.minute, second=0, microsecond=0
+                                ) + timedelta(minutes=grace_minutes)
+                                is_late = punch_dt_ist > deadline
+                            except Exception:
+                                pass
+ 
+                            # ── Upsert punch_in (only if not already set) ──
+                            existing_att = await db.attendance.find_one(
+                                {"user_id": user_id, "date": date_str}, {"_id": 0}
+                            )
+                            if existing_att and existing_att.get("punch_in"):
+                                # Already has a punch_in (from app or earlier machine sync) — skip
+                                pass
+                            else:
+                                await db.attendance.update_one(
+                                    {"user_id": user_id, "date": date_str},
+                                    {"$set": {
+                                        "status":        "present",
+                                        "punch_in":      punch_dt,
+                                        "is_late":       is_late,
+                                        "leave_reason":  None,
+                                        "auto_marked":   False,
+                                        "source":        "machine",
+                                        "device_name":   device.get("name"),
+                                    }},
+                                    upsert=True,
+                                )
+ 
+                        elif punch_type == "out":
+                            # ── Update punch_out + duration ────────────────
+                            existing_att = await db.attendance.find_one(
+                                {"user_id": user_id, "date": date_str}, {"_id": 0}
+                            )
+ 
+                            if existing_att and existing_att.get("punch_in"):
+                                # Calculate duration
+                                punch_in_dt = existing_att["punch_in"]
+                                if isinstance(punch_in_dt, str):
+                                    punch_in_dt = datetime.fromisoformat(punch_in_dt)
+                                if punch_in_dt.tzinfo is None:
+                                    punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
+ 
+                                duration_minutes = max(0, int(
+                                    (punch_dt - punch_in_dt.astimezone(timezone.utc)).total_seconds() / 60
+                                ))
+ 
+                                # Determine early-out
+                                punched_out_early = False
+                                try:
+                                    pot_str = user.get("punch_out_time", "19:00")
+                                    pot = datetime.strptime(pot_str, "%H:%M")
+                                    expected_out = punch_dt_ist.replace(
+                                        hour=pot.hour, minute=pot.minute, second=0, microsecond=0
+                                    )
+                                    punched_out_early = punch_dt_ist < expected_out
+                                except Exception:
+                                    pass
+ 
+                                await db.attendance.update_one(
+                                    {"user_id": user_id, "date": date_str},
+                                    {"$set": {
+                                        "punch_out":        punch_dt,
+                                        "duration_minutes": duration_minutes,
+                                        "punched_out_early": punched_out_early,
+                                    }},
+                                )
+                            else:
+                                # No punch_in yet — store punch_out only, will backfill if in comes later
+                                await db.attendance.update_one(
+                                    {"user_id": user_id, "date": date_str},
+                                    {"$set": {
+                                        "punch_out":    punch_dt,
+                                        "source":       "machine",
+                                        "device_name":  device.get("name"),
+                                    }},
+                                    upsert=True,
+                                )
+ 
+                    except Exception as mirror_err:
+                        # Mirror failure is non-fatal — raw log is already saved
+                        logger.warning(
+                            f"Failed to mirror machine punch to main attendance "
+                            f"(user={user.get('id')}, date={date_str}): {mirror_err}"
+                        )
+ 
+            # Update last_sync_at
             await db.identix_devices.update_one(
                 {"id": device["id"]},
                 {"$set": {"last_sync_at": datetime.now(timezone.utc).isoformat()}},
             )
+ 
         except Exception as e:
             errors.append(f"{device.get('name', device['id'])}: {str(e)}")
             logger.error(f"Failed to sync from {device.get('name')}: {e}")
-
+ 
     return {
         "success":      len(errors) == 0,
         "newRecords":   total_new,
         "totalFetched": total_fetched,
-        "message":      f"Imported {total_new} new records from {len(devices)} device(s)",
-        "errors":       errors,
+        "message":      (
+            f"Imported {total_new} new records from {len(devices)} device(s). "
+            f"Machine punches have been added to the main attendance system."
+        ),
+        "errors": errors,
     }
-
-
-@identix_router.get("/attendance")
-async def get_identix_attendance(
-    page:        int           = 1,
-    limit:       int           = 50,
-    user_id:     Optional[str] = None,
-    department:  Optional[str] = None,
-    date:        Optional[str] = None,
-    from_date:   Optional[str] = None,
-    to_date:     Optional[str] = None,
-    current_user: User = Depends(require_admin),
-):
-    query = {}
-    if user_id:     query["user_id"]    = user_id
-    if department:  query["department"] = department
-    if date:
-        try:
-            d = datetime.fromisoformat(date)
-            query["punch_time"] = {
-                "$gte": d.replace(hour=0,  minute=0,  second=0).isoformat(),
-                "$lte": d.replace(hour=23, minute=59, second=59).isoformat(),
-            }
-        except ValueError:
-            pass
-    elif from_date or to_date:
-        tf = {}
-        if from_date: tf["$gte"] = from_date
-        if to_date:
-            try:
-                td = datetime.fromisoformat(to_date)
-                tf["$lte"] = td.replace(hour=23, minute=59, second=59).isoformat()
-            except ValueError:
-                tf["$lte"] = to_date
-        if tf:
-            query["punch_time"] = tf
-
-    skip    = (page - 1) * limit
-    total   = await db.identix_attendance.count_documents(query)
-    records = await db.identix_attendance.find(query, {"_id": 0}).sort(
-        "punch_time", -1
-    ).skip(skip).limit(limit).to_list(limit)
-    return {"records": records, "total": total, "page": page, "limit": limit}
-
-
-@identix_router.get("/attendance/summary")
-async def get_attendance_summary(
-    date: Optional[str] = None,
-    current_user: User  = Depends(require_admin),
-):
-    try:
-        target = datetime.fromisoformat(date) if date else datetime.now(timezone.utc)
-    except ValueError:
-        target = datetime.now(timezone.utc)
-
-    day_start = target.replace(hour=0,  minute=0,  second=0,  microsecond=0).isoformat()
-    day_end   = target.replace(hour=23, minute=59, second=59, microsecond=0).isoformat()
-
-    punched_today    = await db.identix_attendance.distinct(
-        "user_id", {"punch_time": {"$gte": day_start, "$lte": day_end}, "user_id": {"$ne": None}}
-    )
-    total_employees  = await db.users.count_documents({"is_active": True, "role": {"$ne": "admin"}})
-    pending_thumb    = await db.users.count_documents(
-        {"is_active": True, "thumb_enrolled": {"$ne": True}, "identix_uid": {"$exists": True}}
-    )
-    recent           = await db.identix_attendance.find({}, {"_id": 0}).sort("punch_time", -1).limit(10).to_list(10)
-
-    pipeline = [
-        {"$match":   {"punch_time": {"$gte": day_start, "$lte": day_end}}},
-        {"$group":   {"_id": "$department", "count": {"$addToSet": "$user_id"}}},
-        {"$project": {"department": "$_id", "present": {"$size": "$count"}, "_id": 0}},
-    ]
-    dept_stats = await db.identix_attendance.aggregate(pipeline).to_list(50)
-
-    return {
-        "date":                     target.date().isoformat(),
-        "totalEmployees":           total_employees,
-        "totalPresent":             len(punched_today),
-        "totalAbsent":              max(0, total_employees - len(punched_today)),
-        "pendingThumbEnrollment":   pending_thumb,
-        "byDepartment":             dept_stats,
-        "recentActivity":           recent,
-    }
-
-
+ 
 # ─────────────────────────────────────────────────────────────────────────────
 # USER ENROLLMENT ROUTES
 # ─────────────────────────────────────────────────────────────────────────────
