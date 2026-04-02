@@ -2360,7 +2360,18 @@ export default function Invoicing() {
     return inv;
   }), [filtered]);
 
-  // ── G. ALL useCallback (AFTER ALL MEMOS) ─────────────────────────────────
+  // ── paginatedFiltered: client-side page slice of enrichedFiltered ──────────
+    const paginatedFiltered = useMemo(() => {
+      const start = (listPage - 1) * LIST_PAGE_SIZE;
+      return enrichedFiltered.slice(start, start + LIST_PAGE_SIZE);
+    }, [enrichedFiltered, listPage, LIST_PAGE_SIZE]);
+
+    const totalListPages = useMemo(
+      () => Math.max(1, Math.ceil(enrichedFiltered.length / LIST_PAGE_SIZE)),
+      [enrichedFiltered, LIST_PAGE_SIZE]
+    );
+
+    // ── G. ALL useCallback (AFTER ALL MEMOS) ─────────────────────────────────
 
   const toggleSelect = useCallback((id) => {
     setSelectedIds(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
@@ -2487,7 +2498,7 @@ export default function Invoicing() {
 
   // ── H. ALL useEffect ──────────────────────────────────────────────────────
 
-  useEffect(() => { const t = setTimeout(() => setSearchTerm(searchInput), 250); return () => clearTimeout(t); }, [searchInput]);
+  useEffect(() => { const t = setTimeout(() => { setSearchTerm(searchInput); setListPage(1); }, 250); return () => clearTimeout(t); }, [searchInput]);
 
   useEffect(() => {
     const h = (e) => {
@@ -2498,6 +2509,9 @@ export default function Invoicing() {
   }, [formOpen, detailOpen, payOpen, gstOpen]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+    // Reset list page whenever filters or search change
+    useEffect(() => { setListPage(1); }, [statusFilter, typeFilter, companyFilter, yearFilter, fromDate, toDate, searchTerm]);
 
   // ── I. JSX return ─────────────────────────────────────────────────────────
 
