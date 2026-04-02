@@ -771,15 +771,21 @@ async def create_todo(
     todo_data: TodoCreate,
     current_user: User = Depends(get_current_user)
 ):
+    now = datetime.now(timezone.utc)
     todo = Todo(
         user_id=current_user.id,
         **todo_data.model_dump()
     )
     doc = todo.model_dump()
-    doc["created_at"] = doc["created_at"].isoformat()
-    doc["updated_at"] = doc["updated_at"].isoformat()
+
+    # Safe conversion with fallback
+    doc["created_at"] = (doc.get("created_at") or now).isoformat()
+    doc["updated_at"] = (doc.get("updated_at") or now).isoformat()
+    
     if doc.get("due_date"):
-        doc["due_date"] = doc["due_date"].isoformat()
+        if isinstance(doc["due_date"], (datetime, date)):
+            doc["due_date"] = doc["due_date"].isoformat()
+
     result = await db.todos.insert_one(doc)
     doc["id"] = str(result.inserted_id)
     doc.pop("_id", None)
