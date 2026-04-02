@@ -2615,7 +2615,7 @@ export default function Invoicing() {
           </div>
         ) : (
           <div>
-            {enrichedFiltered.map(inv => {
+            {paginatedFiltered.map(inv => {
               const meta = getStatusMeta(inv); const isOverdue = inv.status === 'overdue';
               return (
                 <div key={inv.id} className={`grid items-center px-5 py-3.5 border-b cursor-pointer group transition-colors last:border-0 ${selectedIds.has(inv.id) ? (isDark ? 'bg-blue-900/15' : 'bg-blue-50/60') : ''} ${isOverdue ? (isDark ? 'bg-red-900/10 border-red-900/20' : 'bg-red-50/30 border-red-100') : ''} ${isDark ? 'border-slate-700 hover:bg-slate-700/40' : 'border-slate-100 hover:bg-slate-50/60'}`}
@@ -2646,17 +2646,31 @@ export default function Invoicing() {
           </div>
         )}
         {enrichedFiltered.length > 0 && (
-          <div className={`flex items-center justify-between px-5 py-3 border-t ${isDark ? 'border-slate-700 bg-slate-800/50' : 'border-slate-100 bg-slate-50/50'}`}>
-            <div className="flex items-center gap-6 text-xs">
-              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Showing <span className="font-bold">{enrichedFiltered.length}</span> invoices</span>
-              <span className="font-semibold text-emerald-600">Total: {fmtC(enrichedFiltered.reduce((s, i) => s + (i.grand_total || 0), 0))}</span>
-              <span className="font-semibold text-amber-600">Outstanding: {fmtC(enrichedFiltered.reduce((s, i) => s + (i.amount_due || 0), 0))}</span>
-              <span className="font-semibold" style={{ color: COLORS.mediumBlue }}>GST: {fmtC(enrichedFiltered.reduce((s, i) => s + (i.total_gst || 0), 0))}</span>
+          <div className={`border-t ${isDark ? 'border-slate-700 bg-slate-800/50' : 'border-slate-100 bg-slate-50/50'}`}>
+            <div className={`flex items-center justify-between px-5 py-3 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+              <div className="flex items-center gap-6 text-xs">
+                <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Showing <span className="font-bold">{paginatedFiltered.length}</span> of <span className="font-bold">{enrichedFiltered.length}</span> invoices</span>
+                <span className="font-semibold text-emerald-600">Total: {fmtC(enrichedFiltered.reduce((s, i) => s + (i.grand_total || 0), 0))}</span>
+                <span className="font-semibold text-amber-600">Outstanding: {fmtC(enrichedFiltered.reduce((s, i) => s + (i.amount_due || 0), 0))}</span>
+                <span className="font-semibold" style={{ color: COLORS.mediumBlue }}>GST: {fmtC(enrichedFiltered.reduce((s, i) => s + (i.total_gst || 0), 0))}</span>
+              </div>
+              <button onClick={() => setGstOpen(true)} className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors"><FileSpreadsheet className="h-3.5 w-3.5" /> Generate GST Returns</button>
             </div>
-            <button onClick={() => setGstOpen(true)} className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors"><FileSpreadsheet className="h-3.5 w-3.5" /> Generate GST Returns</button>
+            <div className="flex items-center justify-center gap-2 px-5 py-3">
+              <button disabled={listPage <= 1} onClick={() => setListPage(p => p - 1)} className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all disabled:opacity-40 ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-100'}`}>← Prev</button>
+              <div className="flex items-center gap-1">
+                {Array.from({ length: totalListPages }, (_, i) => i + 1).filter(p => p === 1 || p === totalListPages || Math.abs(p - listPage) <= 1).map((p, idx, arr) => (
+                  <span key={p}>
+                    {idx > 0 && arr[idx - 1] !== p - 1 && <span className="text-slate-400 text-xs px-1">…</span>}
+                    <button onClick={() => setListPage(p)} className={`w-8 h-8 rounded-lg text-xs font-semibold transition-all ${listPage === p ? 'bg-blue-600 text-white' : isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-100'}`}>{p}</button>
+                  </span>
+                  ))}
+              </div>
+              <button disabled={listPage >= totalListPages} onClick={() => setListPage(p => p + 1)} className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all disabled:opacity-40 ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-100'}`}>Next →</button>
+            </div>
           </div>
         )}
-      </div>
+        </div>
 
       {/* TOP CLIENTS SECTION */}
       {(localStats?.top_clients?.length || 0) > 0 && (
