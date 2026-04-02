@@ -327,9 +327,10 @@ class Todo(BaseModel):
     title: str
     description: Optional[str] = None
     is_completed: bool = False
+    status: str = "pending"          # ADD THIS
     due_date: Optional[Any] = None
-    created_at: Optional[Any] = None
-    updated_at: Optional[Any] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))  # FIX
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))  # FIX
     completed_at: Optional[Any] = None
 
 
@@ -337,7 +338,8 @@ class TodoCreate(BaseModel):
     title: str
     description: Optional[str] = None
     due_date: Optional[Any] = None
-
+    is_completed: bool = False      
+    status: str = "pending"          
 
 class TaskBase(BaseModel):
     title: str
