@@ -48,7 +48,7 @@ import {
   StickyNote, AlertCircle, Eye, RotateCcw,
   Banknote, Smartphone, Shield, Pen, ChevronDown,
 } from 'lucide-react';
-import { COLOR_THEMES, INVOICE_TEMPLATES } from './InvoiceTemplates';
+import { COLOR_THEMES, INVOICE_TEMPLATES, generateInvoiceHTML } from './InvoiceTemplates';
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'taskosphere_inv_settings_v2';
@@ -137,7 +137,60 @@ function saveInvSettings(companyId, settings) {
   all[companyId] = settings;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
 }
-
+// ----Addition--------------------------------------------------
+function makeSampleInvoiceForSettings(companyId, settings) {
+  // Build a realistic sample invoice that uses real settings fields
+  const items = [
+    {
+      description:   'GST Return Filing (Monthly)',
+      hsn_sac:       '998311',
+      quantity:      1,
+      unit:          'month',
+      unit_price:    2500,
+      discount_pct:  0,
+      gst_rate:      settings.default_gst_rate ?? 18,
+    },
+    {
+      description:   'Income Tax Return — Individual',
+      hsn_sac:       '998311',
+      quantity:      1,
+      unit:          'service',
+      unit_price:    3500,
+      discount_pct:  10,
+      gst_rate:      settings.default_gst_rate ?? 18,
+    },
+    {
+      description:   'Bookkeeping & Accounting',
+      hsn_sac:       '998222',
+      quantity:      3,
+      unit:          'month',
+      unit_price:    1500,
+      discount_pct:  0,
+      gst_rate:      settings.default_gst_rate ?? 18,
+    },
+  ];
+ 
+  return {
+    invoice_no:       'INV/2025-26/0042',
+    invoice_type:     'tax_invoice',
+    invoice_date:     '2025-07-15',
+    due_date:         '2025-08-14',
+    client_name:      'Sunrise Technologies Pvt. Ltd.',
+    client_address:   '14 Patel Nagar, Ahmedabad, Gujarat – 380009',
+    client_email:     'accounts@sunrise.in',
+    client_phone:     '9876543210',
+    client_gstin:     '24AABCS1429B1Z5',
+    client_state:     'Gujarat',
+    payment_terms:    settings.default_payment_terms || 'Net 30 Days',
+    reference_no:     'PO/2025/1138',
+    is_interstate:    false,
+    items,
+    amount_paid:      10000,
+    notes:            settings.default_notes || 'Payment via NEFT/RTGS to bank details below.',
+    terms_conditions: settings.default_terms  || 'Goods once sold will not be returned.',
+  };
+}
+ 
 // ─── FY helper ────────────────────────────────────────────────────────────────
 function getIndianFY(date = new Date()) {
   const m = date.getMonth(), y = date.getFullYear();
@@ -245,6 +298,9 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
   const [tab,   setTab]   = useState('numbering');
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState('');
+  const [settingsPreviewHtml, setSettingsPreviewHtml] = useState('');
+  const [previewKey, setPreviewKey]                   = useState(0);
+ 
 
   useEffect(() => {
     if (open) {
@@ -260,7 +316,37 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
     if (cid) setForm(getInvSettings(cid));
     setSaved(false);
   }, [cid]);
-
+  useEffect(() => {
+  if (tab !== 'preview' || !cid) return;
+ 
+  const sampleInv = makeSampleInvoiceForSettings(cid, form);
+  const company   = {
+    // Real company fields
+    ...(companies.find(c => c.id === cid) || {}),
+    // Override with settings-panel values (bank, UPI, signatory)
+    bank_name:        form.bank_name,
+    bank_account_no:  form.bank_account_no,
+    bank_account:     form.bank_account_no,
+    bank_ifsc:        form.bank_ifsc,
+    bank_branch:      form.bank_branch,
+    upi_id:           form.upi_id,
+    show_qr_code:     form.show_qr_code,
+    invoice_title:    form.invoice_title,
+    signatory_name:   form.signatory_name,
+    signatory_label:  form.signatory_label,
+    footer_line:      form.footer_line,
+  };
+ 
+  const html = generateInvoiceHTML(sampleInv, {
+    company,
+    template:    form.template    || 'classic',
+    theme:       form.theme       || 'classic_blue',
+    customColor: form.custom_color || '#0D3B66',
+  });
+ 
+  setSettingsPreviewHtml(html);
+  setPreviewKey(k => k + 1);   // force iframe remount so srcDoc refreshes
+}, [tab, cid, form, companies]);
   const set = useCallback((k, v) => setForm(p => ({ ...p, [k]: v })), []);
 
   const handleSave = useCallback(async () => {
@@ -1017,144 +1103,59 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                 {/* ═══════════════════════════════════════════════════════
                     TAB: PREVIEW
                 ════════════════════════════════════════════════════════ */}
-                {tab === 'preview' && (() => {
-                  // Resolve active brand color
-                  const activeTheme = (COLOR_THEMES || []).find(t => t.id === form.theme);
-                  const brandColor  = form.theme === 'custom'
-                    ? form.custom_color
-                    : (activeTheme?.primary || '#0D3B66');
-                  const brandLight  = form.theme === 'custom'
-                    ? form.custom_color + '18'
-                    : (activeTheme?.primary || '#0D3B66') + '18';
-                  const invoiceNum  = previewNumber(form, 'invoice');
-                  const today       = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-                  const dueDate     = new Date(Date.now() + (form.default_due_days || 30) * 86400000)
-                    .toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-
-                  // Sample line items
-                  const sampleItems = [
-                    { desc: 'GST Return Filing (Monthly)',     qty: 1, unit: 'month',   price: 2500,  amt: 2500 },
-                    { desc: 'Income Tax Return — Individual',  qty: 1, unit: 'service', price: 3500,  amt: 3500 },
-                    { desc: 'Bookkeeping & Accounting',        qty: 3, unit: 'month',   price: 1500,  amt: 4500 },
-                  ];
-                  const subtotal  = sampleItems.reduce((s, i) => s + i.amt, 0);
-                  const gstAmt    = Math.round(subtotal * (form.default_gst_rate || 18) / 100);
-                  const total     = subtotal + gstAmt;
-                  const half      = form.default_gst_rate <= 18;  // CGST+SGST split if same state
-
-                  return (
-                    <div className="space-y-3">
-                      {/* Toolbar */}
-                      <div className={`flex items-center justify-between px-1`}>
-                        <p className={`text-xs font-semibold ${D ? 'text-slate-300' : 'text-slate-600'}`}>
-                          Live invoice mock — reflects your current settings
-                        </p>
-                        <span className={`text-[10px] px-2.5 py-1 rounded-full font-medium ${D ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-50 text-blue-600'}`}>
-                          Sample data only
-                        </span>
-                      </div>
-
-                      {/* A4 paper mock */}
-                      <div
-                        className="rounded-2xl overflow-hidden shadow-xl border mx-auto"
-                        style={{
-                          maxWidth: 640,
-                          background: '#fff',
-                          color: '#1e293b',
-                          fontFamily: 'system-ui, sans-serif',
-                          fontSize: 12,
-                          borderColor: D ? '#334155' : '#e2e8f0',
-                        }}
-                      >
-                        {/* ── Invoice header band ── */}
-                        <div style={{ background: brandColor, padding: '18px 24px 14px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            {/* Logo + company */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                              {selectedCompany?.logo_base64 ? (
-                                <img
-                                  src={selectedCompany.logo_base64}
-                                  alt="logo"
-                                  style={{ height: 48, maxWidth: 80, objectFit: 'contain', background: 'white', borderRadius: 8, padding: 4 }}
-                                />
-                              ) : (
-                                <div style={{ width: 48, height: 48, borderRadius: 8, background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                  <Building2 style={{ width: 22, height: 22, color: 'white', opacity: 0.7 }} />
-                                </div>
-                              )}
-                              <div>
-                                <div style={{ color: 'white', fontWeight: 700, fontSize: 15, lineHeight: 1.2 }}>
-                                  {selectedCompany?.name || 'Your Company Name'}
-                                </div>
-                                {selectedCompany?.gstin && (
-                                  <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: 10, marginTop: 2, fontFamily: 'monospace' }}>
-                                    GSTIN: {selectedCompany.gstin}
-                                  </div>
-                                )}
-                                {selectedCompany?.address && (
-                                  <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, marginTop: 1 }}>
-                                    {selectedCompany.address}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                            {/* Document title */}
-                            <div style={{ textAlign: 'right' }}>
-                              <div style={{ color: 'white', fontWeight: 800, fontSize: 18, letterSpacing: 1 }}>
-                                {form.invoice_title || 'Tax Invoice'}
-                              </div>
-                              <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: 11, marginTop: 4, fontFamily: 'monospace' }}>
-                                {invoiceNum}
-                              </div>
-                              <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, marginTop: 2 }}>
-                                Date: {today}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* ── Bill to / Due date row ── */}
-                        <div style={{ display: 'flex', gap: 0, borderBottom: `1px solid #e2e8f0` }}>
-                          <div style={{ flex: 1, padding: '12px 24px', borderRight: '1px solid #e2e8f0', background: brandLight }}>
-                            <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: brandColor, marginBottom: 4 }}>
-                              Bill To
-                            </div>
-                            <div style={{ fontWeight: 700, fontSize: 13 }}>Sample Client Pvt. Ltd.</div>
-                            <div style={{ color: '#64748b', fontSize: 10, marginTop: 2 }}>24 Business Park, Surat, Gujarat</div>
-                            <div style={{ color: '#64748b', fontSize: 10 }}>GSTIN: 24ABCDE1234F1Z5</div>
-                          </div>
-                          {form.show_due_date && (
-                            <div style={{ padding: '12px 24px', background: '#f8fafc', minWidth: 140 }}>
-                              <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: '#94a3b8', marginBottom: 4 }}>
-                                Due Date
-                              </div>
-                              <div style={{ fontWeight: 700, color: brandColor, fontSize: 13 }}>{dueDate}</div>
-                              <div style={{ color: '#94a3b8', fontSize: 10, marginTop: 2 }}>{form.default_payment_terms || 'Due within 30 days'}</div>
-                              {form.show_po_number && (
-                                <div style={{ color: '#94a3b8', fontSize: 10, marginTop: 4 }}>PO: PO-2025-001</div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* ── Items table ── */}
-                        <div style={{ padding: '0 24px' }}>
-                          {/* Table header */}
-                          <div style={{
-                            display: 'grid',
-                            gridTemplateColumns: form.show_hsn_column
-                              ? (form.show_discount_column ? '1fr 70px 60px 60px 70px 70px' : '1fr 70px 60px 70px 70px')
-                              : (form.show_discount_column ? '1fr 70px 60px 70px 70px' : '1fr 70px 60px 70px'),
-                            gap: 0,
-                            background: brandColor,
-                            marginLeft: -24, marginRight: -24,
-                            padding: '7px 24px',
-                            marginTop: 0,
-                          }}>
-                            {['Description', ...(form.show_hsn_column ? ['HSN/SAC'] : []), 'Qty', ...(form.show_discount_column ? ['Disc%'] : []), 'Rate', 'Amount'].map((h, i) => (
-                              <div key={h} style={{ color: 'white', fontWeight: 700, fontSize: 10, textAlign: i === 0 ? 'left' : 'right' }}>{h}</div>
-                            ))}
-                          </div>
+{tab === 'preview' && (
+  <div className="space-y-3">
+ 
+    {/* Toolbar */}
+    <div className="flex items-center justify-between px-1 flex-wrap gap-2">
+      <div>
+        <p className={`text-xs font-semibold ${D ? 'text-slate-300' : 'text-slate-600'}`}>
+          Live preview — uses real template engine, reflects every setting change
+        </p>
+        <p className={`text-[10px] mt-0.5 ${D ? 'text-slate-500' : 'text-slate-400'}`}>
+          This is pixel-identical to the PDF &amp; Google Drive output
+        </p>
+      </div>
+      <span className={`text-[10px] px-2.5 py-1 rounded-full font-medium flex-shrink-0
+        ${D ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-50 text-blue-600'}`}>
+        Sample data · live render
+      </span>
+    </div>
+ 
+    {/* iframe — same engine as PDF / Drive */}
+    {settingsPreviewHtml ? (
+      <div className={`rounded-2xl border overflow-hidden shadow-xl
+        ${D ? 'border-slate-600' : 'border-slate-200'}`}
+        style={{ background: D ? '#1e293b' : '#e2e8f0', padding: 12 }}>
+        <div style={{
+          maxWidth: 794,
+          margin:   '0 auto',
+          boxShadow:'0 8px 32px rgba(0,0,0,0.18)',
+          borderRadius: 4,
+          overflow: 'hidden',
+          background: 'white',
+        }}>
+          <iframe
+            key={previewKey}
+            srcDoc={settingsPreviewHtml}
+            title="Settings Invoice Preview"
+            style={{ width: '100%', height: 1050, border: 'none', display: 'block' }}
+            sandbox="allow-scripts"
+          />
+        </div>
+      </div>
+    ) : (
+      <div className={`rounded-2xl border p-12 text-center
+        ${D ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+        <p className="text-sm text-slate-400">Select a company and configure settings to see the live preview.</p>
+      </div>
+    )}
+ 
+    <p className={`text-center text-[10px] ${D ? 'text-slate-500' : 'text-slate-400'}`}>
+      Preview uses sample data. Actual invoices will show real client &amp; item details.
+    </p>
+  </div>
+)}
 
                           {/* Rows */}
                           {sampleItems.map((item, idx) => (
