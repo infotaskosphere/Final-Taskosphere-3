@@ -182,88 +182,101 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
 
       const companyWithBank = {
         ...company,
-        bank_name:
-          company.bank_name || invSettings.bank_name || '',
-        bank_account_no:
-          company.bank_account_no || invSettings.bank_account_no || '',
-        bank_ifsc:
-          company.bank_ifsc || invSettings.bank_ifsc || '',
-        upi_id:
-          company.upi_id || invSettings.upi_id || '',
+        bank_name:       company.bank_name       || invSettings.bank_name       || '',
+        bank_account_no: company.bank_account_no || invSettings.bank_account_no || '',
+        bank_ifsc:       company.bank_ifsc        || invSettings.bank_ifsc        || '',
+        upi_id:          company.upi_id           || invSettings.upi_id           || '',
       };
 
       // ─────────────────────────────────────────────
-      // 2. Generate SAME HTML as download
+      // 2. Generate same HTML as download
       // ─────────────────────────────────────────────
       const html = generateInvoiceHTML(invoice, {
         company: companyWithBank,
-        template:
-          invoice?.invoice_template ||
-          invSettings.template ||
-          'classic',
-        theme:
-          invoice?.invoice_theme ||
-          invSettings.theme ||
-          'classic_blue',
-        customColor:
-          invoice?.invoice_custom_color ||
-          invSettings.custom_color ||
-          '#0D3B66',
+        template:    invoice?.invoice_template    || invSettings.template    || 'classic',
+        theme:       invoice?.invoice_theme       || invSettings.theme       || 'classic_blue',
+        customColor: invoice?.invoice_custom_color || invSettings.custom_color || '#0D3B66',
       });
 
       // ─────────────────────────────────────────────
-      // 3. Create hidden container
+      // 3. Render inside an iframe so the browser
+      //    fully lays out styles before capture
       // ─────────────────────────────────────────────
-      const container = document.createElement('div');
-      container.innerHTML = html;
+      const pdfBlob = await new Promise((resolve, reject) => {
+        const iframe = document.createElement('iframe');
 
-      container.style.position = 'fixed';
-      container.style.left = '-9999px';
-      container.style.top = '0';
-      container.style.width = '800px'; // stable render width
+        iframe.style.cssText = `
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 794px;
+          height: 1123px;
+          opacity: 0;
+          pointer-events: none;
+          z-index: -1;
+          border: none;
+        `;
 
-      document.body.appendChild(container);
+        document.body.appendChild(iframe);
+
+        iframe.onload = async () => {
+          try {
+            const body = iframe.contentDocument?.body;
+            if (!body) throw new Error('iframe body not available');
+
+            // Wait for fonts/images inside the iframe to settle
+            await new Promise(res => setTimeout(res, 800));
+
+            const blob = await window.html2pdf()
+              .set({
+                margin: 0,
+                filename: `Invoice_${invoiceNo}.pdf`,
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: {
+                  scale: 2,
+                  useCORS: true,
+                  logging: false,
+                  windowWidth:  794,
+                  windowHeight: 1123,
+                },
+                jsPDF: {
+                  unit:        'mm',
+                  format:      'a4',
+                  orientation: 'portrait',
+                },
+              })
+              .from(body)
+              .outputPdf('blob');
+
+            resolve(blob);
+          } catch (err) {
+            reject(err);
+          } finally {
+            document.body.removeChild(iframe);
+          }
+        };
+
+        iframe.onerror = () => {
+          document.body.removeChild(iframe);
+          reject(new Error('iframe failed to load'));
+        };
+
+        // Writing srcdoc triggers a full browser render of the invoice HTML
+        iframe.srcdoc = html;
+      });
 
       // ─────────────────────────────────────────────
-      // 4. Convert HTML → PDF
-      // ─────────────────────────────────────────────
-      const pdfBlob = await window.html2pdf()
-        .set({
-          margin: 0,
-          filename: `Invoice_${invoiceNo}.pdf`,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: {
-            scale: 2,
-            useCORS: true,
-          },
-          jsPDF: {
-            unit: 'mm',
-            format: 'a4',
-            orientation: 'portrait',
-          },
-        })
-        .from(container)
-        .outputPdf('blob');
-
-      document.body.removeChild(container);
-
-      // ─────────────────────────────────────────────
-      // 5. Convert Blob → Base64
+      // 4. Convert Blob → Base64
       // ─────────────────────────────────────────────
       const base64 = await new Promise((resolve, reject) => {
         const reader = new FileReader();
-
-        reader.onload = () => {
-          const result = reader.result.split(',')[1];
-          resolve(result);
-        };
-
+        reader.onload  = () => resolve(reader.result.split(',')[1]);
         reader.onerror = reject;
         reader.readAsDataURL(pdfBlob);
       });
 
       // ─────────────────────────────────────────────
-      // 6. Upload to backend
+      // 5. Upload to backend
       // ─────────────────────────────────────────────
       const response = await api.post(
         `/invoices/${invoiceId}/upload-pdf-to-drive`,
@@ -276,19 +289,17 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
       );
 
       // ─────────────────────────────────────────────
-      // 7. Handle response
+      // 6. Handle response
       // ─────────────────────────────────────────────
       if (response.data?.drive_link) {
         toast.success('Saved to Google Drive ✅');
-
         if (window.confirm('Open in Google Drive?')) {
           window.open(response.data.drive_link, '_blank');
         }
       } else {
-        toast.warning(
-          response.data?.message || 'Upload failed'
-        );
+        toast.warning(response.data?.message || 'Upload failed');
       }
+
     } catch (err) {
       console.error(err);
       toast.error(
@@ -303,9 +314,6 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
     }
   };
 
-  // ─────────────────────────────────────────────
-  // UI
-  // ─────────────────────────────────────────────
   return (
     <Button
       variant="outline"
