@@ -2392,7 +2392,8 @@ export default function Invoicing() {
         api.get('/invoices'), api.get('/companies'), api.get('/clients'), api.get('/leads'), api.get('/invoices/stats'),
       ]);
       if (invR.status === 'fulfilled') {
-        setInvoices(invR.value.data || []);
+        const invPayload = invR.value.data;
+        setInvoices(Array.isArray(invPayload) ? invPayload : (invPayload?.invoices || []));
       } else {
         console.error('Failed to load invoices:', invR.reason);
         toast.error('Failed to load invoices');
