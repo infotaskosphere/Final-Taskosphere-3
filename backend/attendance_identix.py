@@ -547,16 +547,19 @@ async def sync_attendance_PATCHED(
         except ValueError:
             pass
  
-    all_users   = await db.users.find(
-        {"identix_uid": {"$exists": True}},
-        {"_id": 0, "id": 1, "full_name": 1, "identix_uid": 1,
-         "departments": 1, "punch_in_time": 1, "grace_time": 1},
-    ).to_list(1000)
-    uid_to_user = {str(u["identix_uid"]): u for u in all_users}
- 
-    total_fetched = 0
-    total_new     = 0
-    errors        = []
+    all_users = await db.users.find(
+    {"identix_uid": {"$exists": True}},
+    {
+        "_id": 0,
+        "id": 1,
+        "full_name": 1,
+        "identix_uid": 1,
+        "departments": 1,
+        "punch_in_time": 1,
+        "grace_time": 1,
+        "punch_out_time": 1,  
+    },
+).to_list(1000)
  
     for device in devices:
         try:
