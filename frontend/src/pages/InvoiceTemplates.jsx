@@ -335,13 +335,33 @@ function signRow(company, inv) {
   if (inv.notes) leftHtml += '<strong>Notes:</strong> ' + inv.notes + '<br>';
   if (inv.terms_conditions) leftHtml += '<strong>T&amp;C:</strong> ' + inv.terms_conditions;
   if (!inv.notes && !inv.terms_conditions) leftHtml += '<em>Thanks for doing business with us!</em>';
+
+  // Resolve signature image from all possible field names
+  var sigImg = (company && (
+    company.signature_image    ||
+    company.signature_base64   ||
+    company.signature_url      ||
+    company.signatureImage     ||
+    company.signatureBase64
+  )) || '';
+
   var signatoryHtml = '';
-  if (company && company.signatory_name) {
+  if (sigImg) {
+    // Show actual signature image above the line
+    signatoryHtml = '<div style="margin-top:6px;margin-bottom:4px;text-align:right">'
+      + '<img src="' + sigImg + '" alt="Signature" style="height:38px;max-width:160px;object-fit:contain;display:inline-block;vertical-align:bottom"/>'
+      + '</div>'
+      + '<div style="border-top:1px solid #9E9E9E;padding-top:5px;font-size:9.5px;color:#9E9E9E">'
+      + ((company && company.signatory_name) ? '<span style="font-weight:600;color:#424242">' + company.signatory_name + '</span><br>' : '')
+      + ((company && company.signatory_label) || 'Authorised Signatory')
+      + '</div>';
+  } else if (company && company.signatory_name) {
     signatoryHtml = '<div style="font-size:10px;font-weight:600;color:#424242;margin-top:28px">' + company.signatory_name + '</div>'
       + '<div style="border-top:1px solid #9E9E9E;padding-top:5px;font-size:9.5px;color:#9E9E9E">' + ((company && company.signatory_label) || 'Authorised Signatory') + '</div>';
   } else {
     signatoryHtml = '<div style="border-top:1px solid #9E9E9E;margin-top:34px;padding-top:5px;font-size:9.5px;color:#9E9E9E">' + ((company && company.signatory_label) || 'Authorised Signatory') + '</div>';
   }
+
   return '<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:10px;padding-top:8px;border-top:1px solid #E0E0E0">'
     + '<div style="font-size:9.5px;color:#757575;max-width:60%;line-height:1.7">' + leftHtml + '</div>'
     + '<div style="text-align:right">'
