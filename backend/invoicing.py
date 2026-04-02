@@ -2,7 +2,6 @@
 invoicing.py  —  v6.1  FIXED
 ──────────────────────────────────────────────────────────────────────────────
 CHANGES in v6.1 (bug-fixes over v6.0):
-  - FIXED: Route shadowing — GET /invoices/drive-status moved BEFORE
     GET /invoices/{inv_id} so FastAPI no longer treats "drive-status" as an
     invoice ID (was causing 404 / wrong handler every time).
   - FIXED: PDF now reads invoice_custom_color / company color instead of
@@ -1492,63 +1491,147 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
 # ═══════════════════════════════════════════════════════════
 
 @router.post("/invoices/parse-vyp")
-async def parse_vyp_file(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    if not _perm(current_user): raise HTTPException(403, "Access denied")
+async def parse_vyp_file(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+
     tmp_path = None
     try:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".vyp")
-        tmp.write(await file.read()); tmp.close(); tmp_path = tmp.name
+        tmp.write(await file.read())
+        tmp.close()
+        tmp_path = tmp.name
+
         return _parse_vyp_file(tmp_path)
+
     finally:
         if tmp_path and os.path.exists(tmp_path):
-            try: os.unlink(tmp_path)
-            except: pass
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
 
 
 @router.post("/invoices/parse-backup")
-async def parse_backup_file(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    if not _perm(current_user): raise HTTPException(403, "Access denied")
+async def parse_backup_file(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+
     filename = file.filename or "unknown"
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
-    # FIX: .vyb is KhataBook Pro format — same SQLite schema as .vyp, route to vyp parser
     supported = {
-        "vyp":  "vyp",
-        "vyb":  "vyp",    # ← was incorrectly mapped to "json" in v6.0
-        "db":   "vyp",
-        "xml":  "xml",
-        "tbk":  "xml",
+        "vyp": "vyp",
+        "vyb": "vyp",
+        "db": "vyp",
+        "xml": "xml",
+        "tbk": "xml",
         "xlsx": "excel",
-        "xls":  "excel",
-        "csv":  "excel",
+        "xls": "excel",
+        "csv": "excel",
         "json": "json",
     }
+
     parser_type = supported.get(ext)
     if not parser_type:
-        raise HTTPException(400, f"Unsupported file format: .{ext}. Supported: {', '.join(f'.{k}' for k in supported)}")
+        raise HTTPException(
+            400,
+            f"Unsupported file format: .{ext}. Supported: {', '.join(f'.{k}' for k in supported)}"
+        )
 
     tmp_path = None
     try:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}")
         content = await file.read()
-        tmp.write(content); tmp.close(); tmp_path = tmp.name
+        tmp.write(content)
+        tmp.close()
+        tmp_path = tmp.name
 
-        if   parser_type == "vyp":   result = _parse_vyp_file(tmp_path)
-        elif parser_type == "xml":   result = _parse_tally_xml(tmp_path)
-        elif parser_type == "excel": result = _parse_excel_file(tmp_path, filename)
-        elif parser_type == "json":  result = _parse_json_file(tmp_path)
-        else: raise HTTPException(400, "No parser available")
+        if parser_type == "vyp":
+            result = _parse_vyp_file(tmp_path)
+        elif parser_type == "xml":
+            result = _parse_tally_xml(tmp_path)
+        elif parser_type == "excel":
+            result = _parse_excel_file(tmp_path, filename)
+        elif parser_type == "json":
+            result = _parse_json_file(tmp_path)
+        else:
+            raise HTTPException(400, "No parser available")
 
-        # ✅ FIX v6.2: added `await` — _upload_to_drive is async, was never awaited before
+        # ✅ upload backup (already correct)
         if _drive_configured():
-            await _upload_to_drive(content, f"Backup_{filename}", "backups",
-                                   file.content_type or "application/octet-stream")
+            await _upload_to_drive(
+                content,
+                f"Backup_{filename}",
+                "backups",
+                file.content_type or "application/octet-stream"
+            )
+
         return result
+
     finally:
         if tmp_path and os.path.exists(tmp_path):
-            try: os.unlink(tmp_path)
-            except: pass
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
 
+
+# ─────────────────────────────────────────────
+# ✅ NEW ENDPOINT (CHANGE 3 — ADD THIS HERE)
+# ─────────────────────────────────────────────
+@router.post("/invoices/{inv_id}/upload-pdf-to-drive")
+async def upload_pdf_bytes_to_drive(
+    inv_id: str,
+    payload: dict,
+    current_user: User = Depends(get_current_user)
+):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+
+    if not _drive_configured():
+        raise HTTPException(503, "Google Drive not configured")
+
+    inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(404, "Invoice not found")
+
+    try:
+        pdf_bytes = base64.b64decode(payload.get("pdf_base64"))
+    except Exception:
+        raise HTTPException(400, "Invalid PDF data")
+
+    filename = payload.get("filename") or f"Invoice_{inv.get('invoice_no','')}.pdf"
+
+    # optional: client folder
+    try:
+        client_folder_id = _get_or_create_client_folder(inv.get("client_name"))
+    except Exception:
+        client_folder_id = None
+
+    drive_link = await _upload_to_drive(
+        content_bytes=pdf_bytes,
+        filename=filename,
+        folder_key="invoices",
+        mime_type="application/pdf",
+        custom_parent_id=client_folder_id
+    )
+
+    if drive_link:
+        await db.invoices.update_one(
+            {"id": inv_id},
+            {"$set": {"pdf_drive_link": drive_link}}
+        )
+
+    return {
+        "drive_link": drive_link or ""
+    }
 
 # ═══════════════════════════════════════════════════════════
 # PRODUCT CATALOG
