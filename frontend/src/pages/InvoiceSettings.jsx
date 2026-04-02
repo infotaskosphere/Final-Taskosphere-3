@@ -137,9 +137,9 @@ function saveInvSettings(companyId, settings) {
   all[companyId] = settings;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
 }
-// ----Addition--------------------------------------------------
+
+// ─── Sample invoice builder for settings preview ──────────────────────────────
 function makeSampleInvoiceForSettings(companyId, settings) {
-  // Build a realistic sample invoice that uses real settings fields
   const items = [
     {
       description:   'GST Return Filing (Monthly)',
@@ -169,7 +169,7 @@ function makeSampleInvoiceForSettings(companyId, settings) {
       gst_rate:      settings.default_gst_rate ?? 18,
     },
   ];
- 
+
   return {
     invoice_no:       'INV/2025-26/0042',
     invoice_type:     'tax_invoice',
@@ -190,7 +190,7 @@ function makeSampleInvoiceForSettings(companyId, settings) {
     terms_conditions: settings.default_terms  || 'Goods once sold will not be returned.',
   };
 }
- 
+
 // ─── FY helper ────────────────────────────────────────────────────────────────
 function getIndianFY(date = new Date()) {
   const m = date.getMonth(), y = date.getFullYear();
@@ -300,7 +300,6 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
   const [copied, setCopied] = useState('');
   const [settingsPreviewHtml, setSettingsPreviewHtml] = useState('');
   const [previewKey, setPreviewKey]                   = useState(0);
- 
 
   useEffect(() => {
     if (open) {
@@ -316,60 +315,59 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
     if (cid) setForm(getInvSettings(cid));
     setSaved(false);
   }, [cid]);
+
   useEffect(() => {
-  if (tab !== 'preview' || !cid) return;
- 
-  const sampleInv = makeSampleInvoiceForSettings(cid, form);
-  const company   = {
-    // Real company fields
-    ...(companies.find(c => c.id === cid) || {}),
-    // Override with settings-panel values (bank, UPI, signatory)
-    bank_name:        form.bank_name,
-    bank_account_no:  form.bank_account_no,
-    bank_account:     form.bank_account_no,
-    bank_ifsc:        form.bank_ifsc,
-    bank_branch:      form.bank_branch,
-    upi_id:           form.upi_id,
-    show_qr_code:     form.show_qr_code,
-    invoice_title:    form.invoice_title,
-    signatory_name:   form.signatory_name,
-    signatory_label:  form.signatory_label,
-    footer_line:      form.footer_line,
-  };
- 
-  const html = generateInvoiceHTML(sampleInv, {
-    company,
-    template:    form.template    || 'classic',
-    theme:       form.theme       || 'classic_blue',
-    customColor: form.custom_color || '#0D3B66',
-  });
- 
-  setSettingsPreviewHtml(html);
-  setPreviewKey(k => k + 1);   // force iframe remount so srcDoc refreshes
-}, [tab, cid, form, companies]);
+    if (tab !== 'preview' || !cid) return;
+
+    const sampleInv = makeSampleInvoiceForSettings(cid, form);
+    const company   = {
+      ...(companies.find(c => c.id === cid) || {}),
+      bank_name:        form.bank_name,
+      bank_account_no:  form.bank_account_no,
+      bank_account:     form.bank_account_no,
+      bank_ifsc:        form.bank_ifsc,
+      bank_branch:      form.bank_branch,
+      upi_id:           form.upi_id,
+      show_qr_code:     form.show_qr_code,
+      invoice_title:    form.invoice_title,
+      signatory_name:   form.signatory_name,
+      signatory_label:  form.signatory_label,
+      footer_line:      form.footer_line,
+    };
+
+    const html = generateInvoiceHTML(sampleInv, {
+      company,
+      template:    form.template    || 'classic',
+      theme:       form.theme       || 'classic_blue',
+      customColor: form.custom_color || '#0D3B66',
+    });
+
+    setSettingsPreviewHtml(html);
+    setPreviewKey(k => k + 1);
+  }, [tab, cid, form, companies]);
+
   const set = useCallback((k, v) => setForm(p => ({ ...p, [k]: v })), []);
 
   const handleSave = useCallback(async () => {
-      if (!cid) { toast.error('Select a company first'); return; }
-      saveInvSettings(cid, form);
+    if (!cid) { toast.error('Select a company first'); return; }
+    saveInvSettings(cid, form);
 
-      // Also push bank/UPI fields to the company API so invoices can read them
-      try {
-        await api.put(`/companies/${cid}`, {
-          bank_name:       form.bank_name,
-          bank_account_no: form.bank_account_no,
-          bank_ifsc:       form.bank_ifsc,
-          bank_branch:     form.bank_branch,
-          upi_id:          form.upi_id,
-        });
-      } catch (err) {
-        toast.warning('Settings saved locally but failed to sync bank/UPI to server');
-      }
+    try {
+      await api.put(`/companies/${cid}`, {
+        bank_name:       form.bank_name,
+        bank_account_no: form.bank_account_no,
+        bank_ifsc:       form.bank_ifsc,
+        bank_branch:     form.bank_branch,
+        upi_id:          form.upi_id,
+      });
+    } catch (err) {
+      toast.warning('Settings saved locally but failed to sync bank/UPI to server');
+    }
 
-      setSaved(true);
-      toast.success(`Saved — ${companies.find(c => c.id === cid)?.name}`);
-      setTimeout(() => setSaved(false), 2500);
-    }, [cid, form, companies]);
+    setSaved(true);
+    toast.success(`Saved — ${companies.find(c => c.id === cid)?.name}`);
+    setTimeout(() => setSaved(false), 2500);
+  }, [cid, form, companies]);
 
   const handleReset = useCallback(() => {
     if (!window.confirm('Reset all settings for this company to defaults?')) return;
@@ -412,18 +410,11 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      {/*
-        CRITICAL: fixed height, flex column, overflow-hidden on root.
-        DialogContent must NOT overflow viewport.
-      */}
       <DialogContent
         className={[
-          // dimensions — fixed viewport-relative so nothing overflows
           'max-w-[min(1120px,96vw)] w-[1120px]',
           'h-[min(700px,92vh)]',
-          // layout
           'flex flex-col overflow-hidden',
-          // style
           'rounded-2xl border shadow-2xl p-0',
           '[&>button.absolute]:hidden',
           D ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200',
@@ -432,12 +423,11 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
         <DialogTitle className="sr-only">Invoice Settings</DialogTitle>
         <DialogDescription className="sr-only">Per-company invoice configuration</DialogDescription>
 
-        {/* ══ HEADER — flex-shrink-0 ════════════════════════════════════════ */}
+        {/* ══ HEADER ════════════════════════════════════════════════════════ */}
         <div
           className="flex-shrink-0 px-6 py-4 relative overflow-hidden"
           style={{ background: 'linear-gradient(135deg,#0D3B66 0%,#1a5fa8 60%,#2176c7 100%)' }}
         >
-          {/* decorative blobs */}
           <div className="absolute -right-10 -top-10 w-48 h-48 rounded-full opacity-[.08]"
             style={{ background: 'radial-gradient(circle,white 0%,transparent 70%)' }} />
           <div className="absolute right-32 bottom-0 w-24 h-24 rounded-full opacity-[.06]"
@@ -470,10 +460,10 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
           </div>
         </div>
 
-        {/* ══ BODY — flex-1, overflow-hidden, flex row ═════════════════════ */}
+        {/* ══ BODY ══════════════════════════════════════════════════════════ */}
         <div className="flex-1 overflow-hidden flex min-h-0">
 
-          {/* ── LEFT: company list ──────────────────────────────────────── */}
+          {/* ── LEFT: company list ─────────────────────────────────────────── */}
           <aside className={`w-52 flex-shrink-0 border-r flex flex-col overflow-hidden ${D ? 'border-slate-700 bg-slate-800/40' : 'border-slate-200 bg-white'}`}>
             <div className={`px-4 py-2.5 border-b flex-shrink-0 ${D ? 'border-slate-700' : 'border-slate-200'}`}>
               <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Companies</p>
@@ -514,7 +504,7 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
             </div>
           </aside>
 
-          {/* ── RIGHT: settings ──────────────────────────────────────────── */}
+          {/* ── RIGHT: settings ────────────────────────────────────────────── */}
           {!cid ? (
             <div className="flex-1 flex items-center justify-center flex-col gap-3">
               <Settings className="h-10 w-10 opacity-15" />
@@ -523,7 +513,7 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
           ) : (
             <div className="flex-1 overflow-hidden flex flex-col min-w-0">
 
-              {/* Tab bar — flex-shrink-0 */}
+              {/* Tab bar */}
               <div className={`flex border-b flex-shrink-0 overflow-x-auto scrollbar-none ${D ? 'border-slate-700 bg-slate-800/60' : 'border-slate-200 bg-white'}`}>
                 {TABS.map(t => (
                   <button key={t.id} onClick={() => setTab(t.id)}
@@ -539,12 +529,10 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                 ))}
               </div>
 
-              {/* Scrollable content — flex-1, overflow-y-auto */}
+              {/* Scrollable content */}
               <div className="flex-1 overflow-y-auto p-5 space-y-4">
 
-                {/* ═══════════════════════════════════════════════════════
-                    TAB: NUMBERING
-                ════════════════════════════════════════════════════════ */}
+                {/* ══ TAB: NUMBERING ══════════════════════════════════════════ */}
                 {tab === 'numbering' && (
                   <>
                     {/* Live preview strip */}
@@ -663,7 +651,7 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                       </div>
                     </div>
 
-                    {/* Doc-specific prefixes + separate counters */}
+                    {/* Doc-specific prefixes */}
                     <div className={card}>
                       {secH('Document-Specific Prefixes', 'Override prefix per document type')}
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -693,9 +681,7 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                   </>
                 )}
 
-                {/* ═══════════════════════════════════════════════════════
-                    TAB: IDENTITY
-                ════════════════════════════════════════════════════════ */}
+                {/* ══ TAB: IDENTITY ═══════════════════════════════════════════ */}
                 {tab === 'identity' && (
                   <>
                     {/* Company identity preview */}
@@ -704,14 +690,9 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                         Company Identity Preview
                       </p>
                       <div className="flex items-center gap-4">
-                        {/* Logo box */}
                         <div className={`w-16 h-16 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden border-2 ${D ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-slate-50'}`}>
                           {selectedCompany?.logo_base64 ? (
-                            <img
-                              src={selectedCompany.logo_base64}
-                              alt="Company logo"
-                              className="w-full h-full object-contain p-1"
-                            />
+                            <img src={selectedCompany.logo_base64} alt="Company logo" className="w-full h-full object-contain p-1" />
                           ) : (
                             <div className="flex flex-col items-center gap-1">
                               <Building2 className={`h-6 w-6 ${D ? 'text-slate-500' : 'text-slate-300'}`} />
@@ -719,15 +700,12 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                             </div>
                           )}
                         </div>
-                        {/* Company info */}
                         <div className="flex-1 min-w-0">
                           <p className={`font-bold text-base truncate ${D ? 'text-slate-100' : 'text-slate-800'}`}>
                             {selectedCompany?.name || '—'}
                           </p>
                           {selectedCompany?.gstin && (
-                            <p className="font-mono text-xs text-slate-400 mt-0.5">
-                              GSTIN: {selectedCompany.gstin}
-                            </p>
+                            <p className="font-mono text-xs text-slate-400 mt-0.5">GSTIN: {selectedCompany.gstin}</p>
                           )}
                           {selectedCompany?.address && (
                             <p className="text-xs text-slate-400 mt-0.5 truncate">{selectedCompany.address}</p>
@@ -738,7 +716,6 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                             </p>
                           )}
                         </div>
-                        {/* Badges */}
                         <div className="flex flex-col gap-1.5 flex-shrink-0">
                           {selectedCompany?.logo_base64 ? (
                             <span className="text-[9px] font-bold px-2 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400">
@@ -758,7 +735,7 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                       </div>
                       {!selectedCompany?.logo_base64 && (
                         <p className={`text-[10px] mt-3 pt-3 border-t ${D ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-400'}`}>
-                          Upload a logo in <strong>Manage Companies</strong> on the Quotations page. The logo is stored on the company profile and automatically used on all invoices and PDFs.
+                          Upload a logo in <strong>Manage Companies</strong> on the Quotations page.
                         </p>
                       )}
                     </div>
@@ -767,12 +744,12 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                       {secH('Document Titles', 'Heading printed at the top of each document type')}
                       <div className="grid grid-cols-2 gap-3.5">
                         {[
-                          { key: 'invoice_title',     label: 'Tax Invoice',         ph: 'Tax Invoice' },
-                          { key: 'proforma_title',    label: 'Proforma Invoice',    ph: 'Proforma Invoice' },
-                          { key: 'estimate_title',    label: 'Estimate / Quotation',ph: 'Estimate / Quotation' },
-                          { key: 'credit_note_title', label: 'Credit Note',         ph: 'Credit Note' },
-                          { key: 'debit_note_title',  label: 'Debit Note',          ph: 'Debit Note' },
-                          { key: 'footer_line',       label: 'Footer Line',         ph: 'Thank you for your business!' },
+                          { key: 'invoice_title',     label: 'Tax Invoice',          ph: 'Tax Invoice' },
+                          { key: 'proforma_title',    label: 'Proforma Invoice',     ph: 'Proforma Invoice' },
+                          { key: 'estimate_title',    label: 'Estimate / Quotation', ph: 'Estimate / Quotation' },
+                          { key: 'credit_note_title', label: 'Credit Note',          ph: 'Credit Note' },
+                          { key: 'debit_note_title',  label: 'Debit Note',           ph: 'Debit Note' },
+                          { key: 'footer_line',       label: 'Footer Line',          ph: 'Thank you for your business!' },
                         ].map(({ key, label, ph }) => (
                           <div key={key}>
                             <label className={lbl}>{label}</label>
@@ -826,9 +803,7 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                   </>
                 )}
 
-                {/* ═══════════════════════════════════════════════════════
-                    TAB: DEFAULTS
-                ════════════════════════════════════════════════════════ */}
+                {/* ══ TAB: DEFAULTS ═══════════════════════════════════════════ */}
                 {tab === 'defaults' && (
                   <>
                     <div className={card}>
@@ -916,9 +891,7 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                   </>
                 )}
 
-                {/* ═══════════════════════════════════════════════════════
-                    TAB: BANK / UPI
-                ════════════════════════════════════════════════════════ */}
+                {/* ══ TAB: BANK / UPI ═════════════════════════════════════════ */}
                 {tab === 'bank' && (
                   <>
                     <div className={`rounded-2xl p-3.5 border flex items-start gap-3 ${D ? 'bg-amber-900/20 border-amber-700/50' : 'bg-amber-50 border-amber-200'}`}>
@@ -997,9 +970,7 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                   </>
                 )}
 
-                {/* ═══════════════════════════════════════════════════════
-                    TAB: DESIGN
-                ════════════════════════════════════════════════════════ */}
+                {/* ══ TAB: DESIGN ═════════════════════════════════════════════ */}
                 {tab === 'design' && (
                   <>
                     {/* Logo + color preview strip */}
@@ -1015,7 +986,6 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                         <p className={`font-semibold text-sm truncate ${D ? 'text-slate-200' : 'text-slate-700'}`}>{selectedCompany?.name}</p>
                         <p className="text-xs text-slate-400 mt-0.5">Template and theme below apply to this company's invoices</p>
                       </div>
-                      {/* Active theme color swatch */}
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <div className="w-8 h-8 rounded-lg shadow-sm"
                           style={{ background: form.theme === 'custom' ? form.custom_color : ((COLOR_THEMES || []).find(t => t.id === form.theme)?.primary || '#0D3B66') }} />
@@ -1039,7 +1009,6 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                                 ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30'
                                 : (D ? 'border-slate-600 hover:border-slate-500 bg-slate-700/30' : 'border-slate-200 hover:border-blue-300 bg-white'),
                             ].join(' ')}>
-                            {/* Mini template thumbnail */}
                             <div className={`w-14 h-18 rounded-lg overflow-hidden border flex flex-col gap-1 p-1.5 ${D ? 'bg-slate-600 border-slate-500' : 'bg-slate-100 border-slate-200'}`}
                               style={{ height: '4.5rem' }}>
                               <div className="h-3 rounded w-full" style={{ background: form.template === t.id ? '#1F6FB2' : (D ? '#4b5563' : '#cbd5e1') }} />
@@ -1100,187 +1069,64 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                   </>
                 )}
 
-                {/* ═══════════════════════════════════════════════════════
-                    TAB: PREVIEW
-                ════════════════════════════════════════════════════════ */}
-{tab === 'preview' && (
-  <div className="space-y-3">
- 
-    {/* Toolbar */}
-    <div className="flex items-center justify-between px-1 flex-wrap gap-2">
-      <div>
-        <p className={`text-xs font-semibold ${D ? 'text-slate-300' : 'text-slate-600'}`}>
-          Live preview — uses real template engine, reflects every setting change
-        </p>
-        <p className={`text-[10px] mt-0.5 ${D ? 'text-slate-500' : 'text-slate-400'}`}>
-          This is pixel-identical to the PDF &amp; Google Drive output
-        </p>
-      </div>
-      <span className={`text-[10px] px-2.5 py-1 rounded-full font-medium flex-shrink-0
-        ${D ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-50 text-blue-600'}`}>
-        Sample data · live render
-      </span>
-    </div>
- 
-    {/* iframe — same engine as PDF / Drive */}
-    {settingsPreviewHtml ? (
-      <div className={`rounded-2xl border overflow-hidden shadow-xl
-        ${D ? 'border-slate-600' : 'border-slate-200'}`}
-        style={{ background: D ? '#1e293b' : '#e2e8f0', padding: 12 }}>
-        <div style={{
-          maxWidth: 794,
-          margin:   '0 auto',
-          boxShadow:'0 8px 32px rgba(0,0,0,0.18)',
-          borderRadius: 4,
-          overflow: 'hidden',
-          background: 'white',
-        }}>
-          <iframe
-            key={previewKey}
-            srcDoc={settingsPreviewHtml}
-            title="Settings Invoice Preview"
-            style={{ width: '100%', height: 1050, border: 'none', display: 'block' }}
-            sandbox="allow-scripts"
-          />
-        </div>
-      </div>
-    ) : (
-      <div className={`rounded-2xl border p-12 text-center
-        ${D ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-        <p className="text-sm text-slate-400">Select a company and configure settings to see the live preview.</p>
-      </div>
-    )}
- 
-    <p className={`text-center text-[10px] ${D ? 'text-slate-500' : 'text-slate-400'}`}>
-      Preview uses sample data. Actual invoices will show real client &amp; item details.
-    </p>
-  </div>
-)}
+                {/* ══ TAB: PREVIEW ════════════════════════════════════════════ */}
+                {tab === 'preview' && (
+                  <div className="space-y-3">
+                    {/* Toolbar */}
+                    <div className="flex items-center justify-between px-1 flex-wrap gap-2">
+                      <div>
+                        <p className={`text-xs font-semibold ${D ? 'text-slate-300' : 'text-slate-600'}`}>
+                          Live preview — uses real template engine, reflects every setting change
+                        </p>
+                        <p className={`text-[10px] mt-0.5 ${D ? 'text-slate-500' : 'text-slate-400'}`}>
+                          This is pixel-identical to the PDF &amp; Google Drive output
+                        </p>
+                      </div>
+                      <span className={`text-[10px] px-2.5 py-1 rounded-full font-medium flex-shrink-0
+                        ${D ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-50 text-blue-600'}`}>
+                        Sample data · live render
+                      </span>
+                    </div>
 
-                          {/* Rows */}
-                          {sampleItems.map((item, idx) => (
-                            <div key={idx} style={{
-                              display: 'grid',
-                              gridTemplateColumns: form.show_hsn_column
-                                ? (form.show_discount_column ? '1fr 70px 60px 60px 70px 70px' : '1fr 70px 60px 70px 70px')
-                                : (form.show_discount_column ? '1fr 70px 60px 70px 70px' : '1fr 70px 60px 70px'),
-                              gap: 0,
-                              padding: '7px 0',
-                              borderBottom: '1px solid #f1f5f9',
-                              background: idx % 2 === 1 ? brandLight : 'white',
-                              marginLeft: -24, marginRight: -24,
-                              paddingLeft: 24, paddingRight: 24,
-                            }}>
-                              <div>
-                                <div style={{ fontWeight: 600, fontSize: 11 }}>{item.desc}</div>
-                                <div style={{ color: '#94a3b8', fontSize: 10 }}>{item.qty} {item.unit}</div>
-                              </div>
-                              {form.show_hsn_column && <div style={{ textAlign: 'right', color: '#64748b', fontSize: 10, paddingTop: 2 }}>998311</div>}
-                              <div style={{ textAlign: 'right', fontSize: 11, paddingTop: 2 }}>{item.qty}</div>
-                              {form.show_discount_column && <div style={{ textAlign: 'right', color: '#64748b', fontSize: 10, paddingTop: 2 }}>0%</div>}
-                              <div style={{ textAlign: 'right', fontSize: 11, paddingTop: 2 }}>₹{item.price.toLocaleString()}</div>
-                              <div style={{ textAlign: 'right', fontWeight: 600, fontSize: 11, paddingTop: 2 }}>₹{item.amt.toLocaleString()}</div>
-                            </div>
-                          ))}
-
-                          {/* Totals */}
-                          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '12px 0 0' }}>
-                            <div style={{ minWidth: 220 }}>
-                              {[
-                                { label: 'Subtotal', val: `₹${subtotal.toLocaleString()}`, bold: false },
-                                ...(half
-                                  ? [
-                                      { label: `CGST @ ${(form.default_gst_rate || 18) / 2}%`, val: `₹${(gstAmt / 2).toLocaleString()}`, bold: false },
-                                      { label: `SGST @ ${(form.default_gst_rate || 18) / 2}%`, val: `₹${(gstAmt / 2).toLocaleString()}`, bold: false },
-                                    ]
-                                  : [{ label: `IGST @ ${form.default_gst_rate || 18}%`, val: `₹${gstAmt.toLocaleString()}`, bold: false }]
-                                ),
-                              ].map(row => (
-                                <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', gap: 24, padding: '3px 0', fontSize: 11, color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>
-                                  <span>{row.label}</span><span>{row.val}</span>
-                                </div>
-                              ))}
-                              {/* Grand total */}
-                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24, padding: '8px 12px', marginTop: 4, background: brandColor, borderRadius: 8, color: 'white', fontWeight: 700, fontSize: 13 }}>
-                                <span>Total Payable</span>
-                                <span>₹{total.toLocaleString()}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* ── Bank details ── */}
-                        {form.show_bank_details && (form.bank_name || form.bank_account_no) && (
-                          <div style={{ margin: '16px 24px 0', padding: '10px 14px', background: brandLight, borderRadius: 10, borderLeft: `3px solid ${brandColor}` }}>
-                            <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: brandColor, marginBottom: 6 }}>Bank Details</div>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 16px', fontSize: 10 }}>
-                              {[
-                                ['Account Name', form.bank_account_holder],
-                                ['Bank', form.bank_name],
-                                ['Account No.', form.bank_account_no],
-                                ['IFSC', form.bank_ifsc],
-                                ...(form.upi_id ? [['UPI', form.upi_id]] : []),
-                              ].filter(([, v]) => v).map(([label, val]) => (
-                                <div key={label} style={{ display: 'flex', gap: 4 }}>
-                                  <span style={{ color: '#94a3b8', minWidth: 70 }}>{label}:</span>
-                                  <span style={{ fontWeight: 600, fontFamily: 'monospace' }}>{val}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* ── Notes ── */}
-                        {form.default_notes && (
-                          <div style={{ margin: '12px 24px 0', padding: '8px 12px', background: '#fffbeb', borderRadius: 8, fontSize: 10, color: '#92400e', borderLeft: '3px solid #fbbf24' }}>
-                            <strong>Note:</strong> {form.default_notes}
-                          </div>
-                        )}
-
-                        {/* ── Signature + footer ── */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', padding: '16px 24px 16px', marginTop: 12 }}>
-                          {/* Terms snippet */}
-                          <div style={{ fontSize: 9, color: '#94a3b8', maxWidth: 260 }}>
-                            {form.default_terms
-                              ? form.default_terms.slice(0, 120) + (form.default_terms.length > 120 ? '…' : '')
-                              : 'Goods once sold will not be taken back. Subject to local jurisdiction.'}
-                          </div>
-                          {/* Signature box */}
-                          {form.show_signature_box && (
-                            <div style={{ textAlign: 'center', minWidth: 140 }}>
-                              {selectedCompany?.signature_base64 ? (
-                                <img src={selectedCompany.signature_base64} alt="sig" style={{ height: 36, objectFit: 'contain', marginBottom: 4 }} />
-                              ) : (
-                                <div style={{ height: 36, borderBottom: `1.5px solid ${brandColor}`, marginBottom: 4, width: 130 }} />
-                              )}
-                              <div style={{ fontSize: 10, fontWeight: 700, color: '#1e293b' }}>
-                                {form.signatory_name || `For ${selectedCompany?.name || 'Company'}`}
-                              </div>
-                              <div style={{ fontSize: 9, color: '#94a3b8' }}>{form.signatory_label || 'Authorised Signatory'}</div>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* ── Footer band ── */}
-                        <div style={{ background: brandColor, padding: '8px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: 10, fontStyle: 'italic' }}>
-                            {form.footer_line || 'Thank you for your business!'}
-                          </span>
-                          <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 9 }}>Page 1 of 1</span>
+                    {/* iframe — same engine as PDF / Drive */}
+                    {settingsPreviewHtml ? (
+                      <div className={`rounded-2xl border overflow-hidden shadow-xl
+                        ${D ? 'border-slate-600' : 'border-slate-200'}`}
+                        style={{ background: D ? '#1e293b' : '#e2e8f0', padding: 12 }}>
+                        <div style={{
+                          maxWidth: 794,
+                          margin:   '0 auto',
+                          boxShadow:'0 8px 32px rgba(0,0,0,0.18)',
+                          borderRadius: 4,
+                          overflow: 'hidden',
+                          background: 'white',
+                        }}>
+                          <iframe
+                            key={previewKey}
+                            srcDoc={settingsPreviewHtml}
+                            title="Settings Invoice Preview"
+                            style={{ width: '100%', height: 1050, border: 'none', display: 'block' }}
+                            sandbox="allow-scripts"
+                          />
                         </div>
                       </div>
+                    ) : (
+                      <div className={`rounded-2xl border p-12 text-center
+                        ${D ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                        <p className="text-sm text-slate-400">Select a company and configure settings to see the live preview.</p>
+                      </div>
+                    )}
 
-                      <p className={`text-center text-[10px] ${D ? 'text-slate-500' : 'text-slate-400'}`}>
-                        Preview uses sample data. Actual invoice will use real client & item details.
-                      </p>
-                    </div>
-                  );
-                })()}
+                    <p className={`text-center text-[10px] ${D ? 'text-slate-500' : 'text-slate-400'}`}>
+                      Preview uses sample data. Actual invoices will show real client &amp; item details.
+                    </p>
+                  </div>
+                )}
 
               </div>
-              {/* ── END scrollable content ─────────────────────────────── */}
+              {/* ── END scrollable content ──────────────────────────────────── */}
 
-              {/* ── FOOTER — flex-shrink-0 ──────────────────────────────── */}
+              {/* ── FOOTER ──────────────────────────────────────────────────── */}
               <div className={`flex-shrink-0 flex items-center justify-between gap-3 px-5 py-3 border-t ${D ? 'border-slate-700 bg-slate-800/60' : 'border-slate-200 bg-white'}`}>
                 <p className="text-xs text-slate-400">
                   Configuring:&nbsp;
