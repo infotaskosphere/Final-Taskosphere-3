@@ -2725,7 +2725,7 @@ export default function Invoicing() {
 
       {/* DIALOGS */}
       <InvoiceForm open={formOpen} onClose={() => { setFormOpen(false); setEditingInv(null); }} editingInv={editingInv} companies={companies} clients={clients} leads={leads} onSuccess={fetchAll} isDark={isDark} />
-      <InvoiceDetailPanel invoice={detailInv} open={detailOpen} onClose={() => setDetailOpen(false)} onPayment={(inv) => { setPayInv(inv); setPayOpen(true); }} onEdit={handleEdit} onDelete={handleDelete} onDownloadPdf={handleDownloadPdf} onSendEmail={handleSendEmail} isDark={isDark} />
+      <InvoiceDetailPanel invoice={detailInv} open={detailOpen} onClose={() => setDetailOpen(false)} onPayment={(inv) => { setPayInv(inv); setPayOpen(true); }} onEdit={handleEdit} onDelete={handleDelete} onDownloadPdf={handleDownloadPdf} onSendEmail={handleSendEmail} isDark={isDark} companies={companies} />
       <PaymentModal invoice={payInv} open={payOpen} onClose={() => { setPayOpen(false); setPayInv(null); }} onSuccess={fetchAll} isDark={isDark} />
       <ProductModal open={catOpen} onClose={() => setCatOpen(false)} isDark={isDark} onSaved={() => {}} />
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} isDark={isDark} companies={companies} onImportComplete={fetchAll} />
