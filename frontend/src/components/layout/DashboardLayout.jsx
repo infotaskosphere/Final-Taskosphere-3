@@ -46,7 +46,7 @@ const NAV_GROUPS = [
       { path: '/attendance', icon: Clock,           label: 'Attendance' },
       { path: '/duedates',   icon: Calendar,        label: 'Compliance Calendar' },
       { path: '/visits',     icon: MapPin,          label: 'Client Visits' },
-      { path: "/identix", label: "Identix Machine", icon: Fingerprint },
+      
     ],
   },
   {
