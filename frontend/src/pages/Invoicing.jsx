@@ -1468,7 +1468,7 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
               const wb = XLSX.read(ev.target.result, { type: 'array' });
               const ws = wb.Sheets[wb.SheetNames[0]];
               const rows = XLSX.utils.sheet_to_json(ws, { defval: '', header: 1 });
-              res(String(r[0]?.[0] || ''));
+              res(String(rows[0]?.[0] || ''));
             } catch { res(''); }
           };
           sniffReader.readAsArrayBuffer(file);
@@ -1498,53 +1498,74 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
     }
   };
 
-  const handleImport = async () => {
-    if (!parsed) return;
-    setStep('importing'); setProgress(0);
-    const res = { imported: 0, clients: 0, skipped: 0, errors: [] };
-    const companyId = selectedCompanyId === '__none__' ? '' : selectedCompanyId;
-    if (parsed.mode !== 'excel' && importClients && (parsed.clients?.length || 0) > 0) {
-      const clientsToImport = parsed.clients.slice(0, 500);
-      let done = 0;
-      for (const c of clientsToImport) {
-        try {
-          await api.post('/clients', {
-            company_name: c.full_name || 'Unknown', email: c.email || null, phone: c.phone_number || null,
-            address: c.address || '', notes: `Imported from ${parsed.mode.toUpperCase()}. GSTIN: ${c.name_gstin_number || 'N/A'}`,
-            client_type: 'other', status: 'active', assigned_to: null,
-          });
-          res.clients++;
-        } catch { res.skipped++; }
-        done++;
-        setProgress(Math.round((done / clientsToImport.length) * 40));
-      }
-    }
-    const invToImport = parsed.mode === 'excel'
+const handleImport = async () => {
+  if (!parsed) return;
+  setStep('importing');
+  setProgress(10);
+
+  const companyId = selectedCompanyId === '__none__' ? '' : selectedCompanyId;
+
+  // Filter invoices by selected firm (for VYP multi-firm backups)
+  const invToImport = parsed.mode === 'excel'
+    ? (parsed.invoices || [])
+    : selectedFirm === '__none__'
       ? (parsed.invoices || [])
-      : (selectedFirm === '__none__' ? (parsed.invoices || []) : (parsed.invoices || []).filter(i => String(i.company_id) === selectedFirm));
-    let done = 0;
-    for (const inv of invToImport) {
-      try {
-        const payload = {
-          ...inv, company_id: companyId, invoice_type: inv.invoice_type || 'tax_invoice',
-          items: (inv.items?.length || 0) > 0 ? inv.items : [{ ...emptyItem(), description: 'Imported service', unit_price: inv.grand_total || 0 }],
-        };
-        delete payload._kb_id;
-        await api.post('/invoices', payload);
-        res.imported++;
-      } catch (err) {
-        res.skipped++;
-        res.errors.push(`${inv.invoice_no || 'Unknown'}: ${err.response?.data?.detail || err.message}`);
-      }
-      done++;
-      const base = parsed.mode !== 'excel' && importClients ? 40 : 0;
-      setProgress(base + Math.round((done / (invToImport.length || 1)) * (100 - base)));
-    }
-    setResults(res);
+      : (parsed.invoices || []).filter(i => String(i.company_id) === selectedFirm);
+
+  try {
+    // Use bulk import endpoint — much faster than one-by-one
+    const payload = {
+      company_id: companyId,
+      source: parsed.source || parsed.mode || 'unknown',
+      invoices: invToImport.map(inv => {
+        const clean = { ...inv };
+        delete clean._kb_id;
+        // Ensure items have at least one entry
+        if (!clean.items?.length) {
+          clean.items = [{
+            description: 'Imported service',
+            hsn_sac: '',
+            quantity: 1,
+            unit: 'service',
+            unit_price: clean.grand_total || 0,
+            discount_pct: 0,
+            gst_rate: 18,
+            taxable_value: clean.grand_total || 0,
+            cgst_rate: 9, sgst_rate: 9, igst_rate: 0,
+            cgst_amount: 0, sgst_amount: 0, igst_amount: 0,
+            total_amount: clean.grand_total || 0,
+          }];
+        }
+        return clean;
+      }),
+      clients: importClients && parsed.mode !== 'excel' ? (parsed.clients || []) : [],
+      items: parsed.items || [],
+      payments: parsed.payments || [],
+      skip_duplicates: true,
+    };
+
+    setProgress(30);
+
+    const resp = await api.post('/invoices/import-backup', payload);
+    const data = resp.data;
+
+    setProgress(100);
+    setResults({
+      imported: data.invoices_imported || 0,
+      clients: data.clients_imported || 0,
+      skipped: data.invoices_skipped || 0,
+      errors: data.errors || [],
+    });
     setStep('done');
     onImportComplete?.();
-    toast.success(`Imported ${res.imported} invoice${res.imported !== 1 ? 's' : ''} successfully`);
-  };
+    toast.success(`Imported ${data.invoices_imported} invoice${data.invoices_imported !== 1 ? 's' : ''} successfully`);
+  } catch (err) {
+    const detail = err.response?.data?.detail || err.message || 'Import failed';
+    setResults({ imported: 0, clients: 0, skipped: 0, errors: [detail] });
+    setStep('done');
+    toast.error(`Import failed: ${detail}`);
+  }
+};
 
   const inputCls = `h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
 
@@ -1670,49 +1691,146 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
               </Button>
             </div>
           )}
-          {/* STEP: PREVIEW */}
-          {step === 'preview' && parsed && (
-            <div className="space-y-5">
-              <button type="button" onClick={() => setStep('upload')} className="flex items-center gap-1 text-xs font-semibold text-emerald-600 hover:text-emerald-700">← Back to upload</button>
-              <div className={`rounded-xl border p-4 ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-emerald-50 border-emerald-200'}`}>
-                <p className={`text-xs font-bold uppercase tracking-widest mb-2 ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>Parsed: {parsed.source_label || parsed.mode}</p>
-                <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
-                  {[{ label: 'Firms', val: parsed.stats?.firms ?? parsed.firms?.length ?? 0 },
-                    { label: 'Clients', val: parsed.stats?.clients ?? parsed.clients?.length ?? 0 },
-                    { label: 'Items', val: parsed.stats?.items ?? parsed.items?.length ?? 0 },
-                    { label: 'Invoices', val: parsed.stats?.invoices ?? parsed.invoices?.length ?? 0 },
-                    { label: 'Payments', val: parsed.stats?.payments ?? parsed.payments?.length ?? 0 },
-                  ].map(s => (<div key={s.label} className="text-center"><p className={`text-xl font-black ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{s.val}</p><p className="text-[10px] font-semibold text-slate-400 uppercase">{s.label}</p></div>))}
-                </div>
-              </div>
-              {(parsed.firms?.length || 0) > 1 && (
-                <div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Select Firm</label>
-                  <Select value={selectedFirm} onValueChange={setSelectedFirm}><SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
-                    <SelectContent><SelectItem value="__none__">All firms</SelectItem>{(parsed.firms || []).map(f => <SelectItem key={f.firm_id} value={String(f.firm_id)}>{f.firm_name}</SelectItem>)}</SelectContent></Select></div>
-              )}
-              <div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Import Into Company Profile</label>
-                <Select value={selectedCompanyId} onValueChange={setSelectedCompanyId}><SelectTrigger className={inputCls}><SelectValue placeholder="Select target company" /></SelectTrigger>
-                  <SelectContent><SelectItem value="__none__">— Select later —</SelectItem>{(companies || []).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></div>
-              {parsed.mode !== 'excel' && (parsed.clients?.length || 0) > 0 && (
-                <div className="flex items-center gap-3"><Switch checked={importClients} onCheckedChange={setImportClients} />
-                  <div><p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Import Clients ({parsed.clients.length})</p><p className="text-xs text-slate-400">Add as client records</p></div></div>
-              )}
-              {(parsed.invoices?.length || 0) > 0 && (
-                <div className={`rounded-xl border max-h-48 overflow-y-auto ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
-                  <div className={`px-4 py-2 border-b sticky top-0 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Invoice Preview ({parsed.invoices.length})</p></div>
-                  {(parsed.invoices || []).slice(0, 20).map((inv, i) => (
-                    <div key={i} className={`flex items-center justify-between px-4 py-2 border-b last:border-0 ${isDark ? 'border-slate-700' : 'border-slate-50'}`}>
-                      <div className="flex-1 min-w-0"><p className={`text-xs font-semibold truncate ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{inv.client_name || 'Unknown'}</p><p className="text-[10px] text-slate-400">{inv.invoice_no || `#${i+1}`} · {inv.invoice_date || '—'}</p></div>
-                      <p className={`text-xs font-bold ${isDark ? 'text-slate-100' : 'text-slate-700'}`}>{fmtC(inv.grand_total || 0)}</p></div>
-                  ))}
-                  {parsed.invoices.length > 20 && <div className="px-4 py-2 text-center text-xs text-slate-400">+{parsed.invoices.length - 20} more…</div>}
-                </div>
-              )}
-              <Button onClick={handleImport} className="w-full h-11 rounded-xl text-white font-semibold" style={{ background: 'linear-gradient(135deg, #065f46, #059669)' }}>
-                <CheckSquare className="h-4 w-4 mr-2" /> Import {parsed.invoices?.length || 0} Invoices{importClients && (parsed.clients?.length || 0) > 0 ? ` + ${parsed.clients.length} Clients` : ''}</Button>
+{step === 'preview' && parsed && (
+  <div className="space-y-5">
+    <button
+      type="button"
+      onClick={() => setStep('upload')}
+      className="flex items-center gap-1 text-xs font-semibold text-emerald-600 hover:text-emerald-700"
+    >
+      ← Back to upload
+    </button>
+
+    <div className={`rounded-xl border p-4 ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-emerald-50 border-emerald-200'}`}>
+      <p className={`text-xs font-bold uppercase tracking-widest mb-2 ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>
+        Parsed: {parsed.source_label || parsed.mode}
+      </p>
+
+      <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
+        {[
+          { label: 'Firms', val: parsed.stats?.firms ?? parsed.firms?.length ?? 0 },
+          { label: 'Clients', val: parsed.stats?.clients ?? parsed.clients?.length ?? 0 },
+          { label: 'Items', val: parsed.stats?.items ?? parsed.items?.length ?? 0 },
+          { label: 'Invoices', val: parsed.stats?.invoices ?? parsed.invoices?.length ?? 0 },
+          { label: 'Payments', val: parsed.stats?.payments ?? parsed.payments?.length ?? 0 },
+        ].map(s => (
+          <div key={s.label} className="text-center">
+            <p className={`text-xl font-black ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{s.val}</p>
+            <p className="text-[10px] font-semibold text-slate-400 uppercase">{s.label}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    {(parsed.firms?.length || 0) > 1 && (
+      <div>
+        <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">
+          Select Firm
+        </label>
+        <Select value={selectedFirm} onValueChange={setSelectedFirm}>
+          <SelectTrigger className={inputCls}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">All firms</SelectItem>
+            {(parsed.firms || []).map(f => (
+              <SelectItem key={f.firm_id} value={String(f.firm_id)}>
+                {f.firm_name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    )}
+
+    <div>
+      <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">
+        Import Into Company Profile
+      </label>
+      <Select value={selectedCompanyId} onValueChange={setSelectedCompanyId}>
+        <SelectTrigger className={inputCls}>
+          <SelectValue placeholder="Select target company" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__">— Select later —</SelectItem>
+          {(companies || []).map(c => (
+            <SelectItem key={c.id} value={c.id}>
+              {c.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+
+    {parsed.mode !== 'excel' && (parsed.clients?.length || 0) > 0 && (
+      <div className="flex items-center gap-3">
+        <Switch checked={importClients} onCheckedChange={setImportClients} />
+        <div>
+          <p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+            Import Clients ({parsed.clients.length})
+          </p>
+          <p className="text-xs text-slate-400">Add as client records</p>
+        </div>
+      </div>
+    )}
+
+    {(parsed.invoices?.length || 0) > 0 && (
+      <div className={`rounded-xl border max-h-48 overflow-y-auto ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+        <div className={`px-4 py-2 border-b sticky top-0 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+            Invoice Preview ({parsed.invoices.length})
+          </p>
+        </div>
+
+        {(parsed.invoices || []).slice(0, 20).map((inv, i) => (
+          <div
+            key={i}
+            className={`flex items-center justify-between px-4 py-2 border-b last:border-0 ${isDark ? 'border-slate-700' : 'border-slate-50'}`}
+          >
+            <div className="flex-1 min-w-0">
+              <p className={`text-xs font-semibold truncate ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                {inv.client_name || 'Unknown'}
+              </p>
+              <p className="text-[10px] text-slate-400">
+                {inv.invoice_no || `#${i + 1}`} · {inv.invoice_date || '—'}
+              </p>
             </div>
-          )}
+            <p className={`text-xs font-bold ${isDark ? 'text-slate-100' : 'text-slate-700'}`}>
+              {fmtC(inv.grand_total || 0)}
+            </p>
+          </div>
+        ))}
+
+        {parsed.invoices.length > 20 && (
+          <div className="px-4 py-2 text-center text-xs text-slate-400">
+            +{parsed.invoices.length - 20} more…
+          </div>
+        )}
+      </div>
+    )}
+
+    <Button
+      onClick={handleImport}
+      className="w-full h-11 rounded-xl text-white font-semibold"
+      style={{ background: 'linear-gradient(135deg, #065f46, #059669)' }}
+    >
+      <CheckSquare className="h-4 w-4 mr-2" />
+
+      Import {
+        parsed.mode === 'excel' || selectedFirm === '__none__'
+          ? parsed.invoices?.length || 0
+          : (parsed.invoices || []).filter(
+              i => String(i.company_id) === selectedFirm
+            ).length
+      } Invoices
+      {
+        importClients && (parsed.clients?.length || 0) > 0
+          ? ` + ${parsed.clients.length} Clients`
+          : ''
+      }
+    </Button>
+  </div>
+)}
           {/* STEP: IMPORTING */}
           {step === 'importing' && (
             <div className="flex flex-col items-center justify-center py-10 gap-6">
