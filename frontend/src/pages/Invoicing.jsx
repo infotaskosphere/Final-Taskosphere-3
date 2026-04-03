@@ -1417,13 +1417,8 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
   const reset = () => {
     setStep('choose'); setImportMode(''); setFile(null); setParsed(null);
     setError(''); setLoading(false); setProgress(0);
-    setResults({
-      imported: data.invoices_imported || 0,
-      clients: data.clients_imported || 0,
-      skipped: data.invoices_skipped || 0,
-      errors: data.errors || [],
-      clients_updated: data.clients_updated || 0,
-    });
+    setResults({ imported: 0, clients: 0, skipped: 0, errors: [], clients_updated: 0 });
+  }; 
 
   const handleClose = () => { reset(); onClose(); };
 
