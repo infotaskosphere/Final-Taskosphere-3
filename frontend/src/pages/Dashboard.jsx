@@ -1,20 +1,50 @@
-import useDark from '../hooks/useDark';
 import React, { useState, useEffect, useMemo } from 'react';
+import useDark from '../hooks/useDark';
+
 import { motion, AnimatePresence } from 'framer-motion';
 import { format, parseISO, isToday, isTomorrow, startOfDay } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
 import { toast } from 'sonner';
+
+// ✅ UI COMPONENTS (correct paths + correct types)
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
+
+// ✅ ICONS
 import {
-  CheckSquare, FileText, Clock, TrendingUp, AlertCircle,
-  LogIn, LogOut, Calendar as CalendarIcon, Users, Key,
-  Briefcase, ArrowUpRight, Building2, ChevronRight, Target,
-  Activity, MapPin, Repeat, Plus,
-  X, CheckCircle2, User as UserIcon, Tag, Layers, Star,
-  Zap, Shield, BarChart2, Sun, Moon, Sunset,
+  CheckSquare,
+  FileText,
+  Clock,
+  TrendingUp,
+  AlertCircle,
+  LogIn,
+  LogOut,
+  Calendar as CalendarIcon,
+  Users,
+  Key,
+  Briefcase,
+  ArrowUpRight,
+  Building2,
+  ChevronRight,
+  Target,
+  Activity,
+  MapPin,
+  Repeat,
+  Plus,
+  X,
+  CheckCircle2,
+  User as UserIcon,
+  Tag,
+  Layers,
+  Star,
+  Zap,
+  Shield,
+  BarChart2,
+  Sun,
+  Moon,
+  Sunset,
 } from 'lucide-react';
 
 // ── Timezone ──────────────────────────────────────────────────────────────────
