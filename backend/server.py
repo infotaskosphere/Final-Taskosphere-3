@@ -3729,29 +3729,40 @@ _DEPT_SERVICE_MAP: Dict[str, List[str]] = {
  
 @api_router.get("/clients", response_model=List[Client])
 async def get_clients(current_user: User = Depends(get_current_user)):
-    query = {}
-    if current_user.role == "admin":
+
+    permissions = get_user_permissions(current_user)
+
+    # 🔥 FIX: PRIORITY TO GLOBAL ACCESS
+    if current_user.role == "admin" or permissions.get("can_view_all_clients", False):
         query = {}
+
     elif current_user.role == "manager":
         team_ids = await get_team_user_ids(current_user.id)
-        query = {"assigned_to": {"$in": team_ids + [current_user.id]}}
+        query = {
+            "$or": [
+                {"assigned_to": current_user.id},
+                {"assigned_to": {"$in": team_ids}},
+                {"created_by": current_user.id}
+            ]
+        }
+
     else:
-        permissions = get_user_permissions(current_user)
-        if permissions.get("can_view_all_clients", False):
-            query = {}
-        else:
-            extra_clients = permissions.get("assigned_clients", [])
-            if extra_clients:
-                query = {"$or": [
+        extra_clients = permissions.get("assigned_clients", [])
+        if extra_clients:
+            query = {
+                "$or": [
                     {"assigned_to": current_user.id},
                     {"created_by": current_user.id},
                     {"id": {"$in": extra_clients}},
-                ]}
-            else:
-                query = {"$or": [
+                ]
+            }
+        else:
+            query = {
+                "$or": [
                     {"assigned_to": current_user.id},
                     {"created_by": current_user.id},
-                ]}
+                ]
+            }
 
     clients = await db.clients.find(query, {"_id": 0}).to_list(1000)
 
