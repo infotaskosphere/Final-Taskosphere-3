@@ -20,163 +20,167 @@ class UserRole(str, Enum):
 # DEFAULT ROLE PERMISSION TEMPLATES
 # ────────────────────────────────────────────────
 DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
-    "admin": {
-        "can_view_all_tasks": True,
-        "can_view_all_clients": True,
-        "can_view_all_dsc": True,
-        "can_view_documents": True,
-        "can_view_all_duedates": True,
-        "can_view_reports": True,
-        "can_view_attendance": True,
-        "can_view_all_leads": True,
-        "can_edit_tasks": True,
-        "can_edit_clients": True,
-        "can_edit_dsc": True,
-        "can_edit_documents": True,
-        "can_edit_due_dates": True,
-        "can_edit_users": True,
-        "can_download_reports": True,
-        "can_manage_users": True,
-        "can_manage_settings": True,
-        "can_assign_tasks": True,
-        "can_assign_clients": True,
-        "can_view_staff_activity": True,
-        "can_send_reminders": True,
-        "can_view_user_page": True,
-        "can_view_audit_logs": True,
-        "can_view_selected_users_reports": True,
-        "can_view_todo_dashboard": True,
-        "can_use_chat": True,
-        "can_view_staff_rankings": True,
-        "can_delete_data": True,
-        "can_delete_tasks": True,
-        "can_connect_email": True,
-        "can_view_own_data": True,
-        "can_create_quotations": True,
-        # ── Invoicing Module ─────────────────────────────────────────────────
-        "can_manage_invoices": True,
-        # ── Password Repository ──────────────────────────────────────────────
-        "can_view_passwords": True,
-        "can_edit_passwords": True,
-        "view_password_departments": [],   # empty = all (admin sees everything)
-        # ── Visit delete permissions ──
-        "can_view_all_visits": True,
-        "can_edit_visits": True,
-        "can_delete_visits": True,
-        "can_delete_own_visits": True,
-        "view_other_visits": [],
-        "view_other_tasks": [],
-        "view_other_attendance": [],
-        "view_other_reports": [],
-        "view_other_todos": [],
-        "view_other_activity": [],
-        "assigned_clients": [],
-    },
-    "manager": {
-        "can_view_all_tasks": False,
-        "can_view_all_clients": False,
-        "can_view_all_dsc": False,
-        "can_view_documents": True,
-        "can_view_all_duedates": False,
-        "can_view_reports": True,
-        "can_view_attendance": True,
-        "can_view_all_leads": False,
-        "can_edit_tasks": True,
-        "can_edit_clients": False,
-        "can_edit_dsc": False,
-        "can_edit_documents": False,
-        "can_edit_due_dates": True,
-        "can_edit_users": False,
-        "can_download_reports": True,
-        "can_manage_users": False,
-        "can_manage_settings": False,
-        "can_assign_tasks": True,
-        "can_assign_clients": False,
-        "can_view_staff_activity": True,
-        "can_send_reminders": False,
-        "can_view_user_page": False,
-        "can_view_audit_logs": False,
-        "can_view_selected_users_reports": True,
-        "can_view_todo_dashboard": True,
-        "can_use_chat": True,
-        "can_view_staff_rankings": True,
-        "can_delete_data": False,
-        "can_delete_tasks": False,
-        "can_connect_email": True,
-        "can_view_own_data": True,
-        "can_create_quotations": False,
-        # ── Invoicing Module ─────────────────────────────────────────────────
-        "can_manage_invoices": False,
-        # ── Password Repository ──────────────────────────────────────────────
-        "can_view_passwords": True,
-        "can_edit_passwords": False,
-        "view_password_departments": [],   # defaults to own departments
-        # ── Visit delete permissions ──
-        "can_view_all_visits": False,
-        "can_edit_visits": True,
-        "can_delete_visits": False,
-        "can_delete_own_visits": True,
-        "view_other_visits": [],
-        "view_other_tasks": [],
-        "view_other_attendance": [],
-        "view_other_reports": [],
-        "view_other_todos": [],
-        "view_other_activity": [],
-        "assigned_clients": [],
-    },
-    "staff": {
-        "can_view_all_tasks": False,
-        "can_view_all_clients": False,
-        "can_view_all_dsc": False,
-        "can_view_documents": False,
-        "can_view_all_duedates": False,
-        "can_view_reports": True,
-        "can_view_attendance": True,
-        "can_view_all_leads": False,
-        "can_edit_tasks": False,
-        "can_edit_clients": False,
-        "can_edit_dsc": False,
-        "can_edit_documents": False,
-        "can_edit_due_dates": False,
-        "can_edit_users": False,
-        "can_download_reports": True,
-        "can_manage_users": False,
-        "can_manage_settings": False,
-        "can_assign_tasks": False,
-        "can_assign_clients": False,
-        "can_view_staff_activity": False,
-        "can_send_reminders": False,
-        "can_view_user_page": False,
-        "can_view_audit_logs": False,
-        "can_view_selected_users_reports": False,
-        "can_view_todo_dashboard": True,
-        "can_use_chat": True,
-        "can_view_staff_rankings": False,
-        "can_delete_data": False,
-        "can_delete_tasks": False,
-        "can_connect_email": True,
-        "can_view_own_data": True,
-        "can_create_quotations": False,
-        # ── Invoicing Module ─────────────────────────────────────────────────
-        "can_manage_invoices": False,
-        # ── Password Repository ──────────────────────────────────────────────
-        "can_view_passwords": False,
-        "can_edit_passwords": False,
-        "view_password_departments": [],
-        # ── Visit delete permissions ──
-        "can_view_all_visits": False,
-        "can_edit_visits": False,
-        "can_delete_visits": False,
-        "can_delete_own_visits": True,
-        "view_other_visits": [],
-        "view_other_tasks": [],
-        "view_other_attendance": [],
-        "view_other_reports": [],
-        "view_other_todos": [],
-        "view_other_activity": [],
-        "assigned_clients": [],
-    },
-}
+      "admin": {
+          # Admin has GLOBAL scope with ALL permissions (VIEW CREATE EDIT DELETE UPDATE)
+          "can_view_all_tasks": True,
+          "can_view_all_clients": True,
+          "can_view_all_dsc": True,
+          "can_view_documents": True,
+          "can_view_all_duedates": True,
+          "can_view_reports": True,
+          "can_view_attendance": True,
+          "can_view_all_leads": True,
+          "can_edit_tasks": True,
+          "can_edit_clients": True,
+          "can_edit_dsc": True,
+          "can_edit_documents": True,
+          "can_edit_due_dates": True,
+          "can_edit_users": True,
+          "can_download_reports": True,
+          "can_manage_users": True,
+          "can_manage_settings": True,
+          "can_assign_tasks": True,
+          "can_assign_clients": True,
+          "can_view_staff_activity": True,
+          "can_send_reminders": True,
+          "can_view_user_page": True,
+          "can_view_audit_logs": True,
+          "can_view_selected_users_reports": True,
+          "can_view_todo_dashboard": True,
+          "can_use_chat": True,
+          "can_view_staff_rankings": True,
+          "can_delete_data": True,
+          "can_delete_tasks": True,
+          "can_connect_email": True,
+          "can_view_own_data": True,
+          "can_create_quotations": True,
+          "can_manage_invoices": True,
+          "can_view_passwords": True,
+          "can_edit_passwords": True,
+          "view_password_departments": [],   # empty = all (admin sees everything)
+          "can_view_all_visits": True,
+          "can_edit_visits": True,
+          "can_delete_visits": True,
+          "can_delete_own_visits": True,
+          "view_other_visits": [],
+          "view_other_tasks": [],
+          "view_other_attendance": [],
+          "view_other_reports": [],
+          "view_other_todos": [],
+          "view_other_activity": [],
+          "assigned_clients": [],
+      },
+      "manager": {
+          # Manager: SCOPE = OWN + SAME_DEPARTMENT
+          # CROSS_VISIBILITY = SAME_DEPARTMENT_USERS
+          # DEFAULT_MODULES = TASK, TODO, CLIENT_VISIT, CLIENT_PAGE, GENERAL_SETTINGS, COMPLIANCE, CALENDAR, ATTENDANCE
+          # PERMISSIONS = VIEW CREATE EDIT UPDATE (no DELETE by default)
+          # OTHER_MODULES = ADMIN_GRANTED_ONLY (all False below)
+          # DATA_ACCESS_RULE: resource.department == user.department
+          #   AND (resource.user_id == user.id OR resource.user_id IN SAME_DEPARTMENT_USERS)
+          "can_view_all_tasks": False,      # SCOPE handled server-side by department query
+          "can_view_all_clients": False,    # Client access via assigned_clients
+          "can_view_all_dsc": False,        # ADMIN_GRANTED_ONLY
+          "can_view_documents": True,       # DEFAULT_MODULE (compliance/docs)
+          "can_view_all_duedates": True,    # DEFAULT_MODULE (compliance)
+          "can_view_reports": True,         # DEFAULT_MODULE
+          "can_view_attendance": True,      # DEFAULT_MODULE (calendar/attendance)
+          "can_view_all_leads": False,      # ADMIN_GRANTED_ONLY
+          "can_edit_tasks": True,           # DEFAULT_MODULE (task)
+          "can_edit_clients": False,        # ADMIN_GRANTED_ONLY
+          "can_edit_dsc": False,            # ADMIN_GRANTED_ONLY
+          "can_edit_documents": True,       # DEFAULT_MODULE
+          "can_edit_due_dates": True,       # DEFAULT_MODULE (compliance)
+          "can_edit_users": False,          # ADMIN_GRANTED_ONLY
+          "can_download_reports": True,     # DEFAULT_MODULE
+          "can_manage_users": False,        # ADMIN_GRANTED_ONLY
+          "can_manage_settings": True,      # DEFAULT_MODULE (general_settings)
+          "can_assign_tasks": True,         # DEFAULT_MODULE (task)
+          "can_assign_clients": False,      # ADMIN_GRANTED_ONLY
+          "can_view_staff_activity": True,  # DEFAULT_MODULE (same-department scope enforced server-side)
+          "can_send_reminders": False,      # ADMIN_GRANTED_ONLY
+          "can_view_user_page": False,      # ADMIN_GRANTED_ONLY
+          "can_view_audit_logs": False,     # ADMIN_GRANTED_ONLY
+          "can_view_selected_users_reports": True,  # DEFAULT_MODULE
+          "can_view_todo_dashboard": True,  # DEFAULT_MODULE (todo)
+          "can_use_chat": True,             # DEFAULT_MODULE
+          "can_view_staff_rankings": True,  # DEFAULT_MODULE
+          "can_delete_data": False,         # ADMIN_GRANTED_ONLY
+          "can_delete_tasks": False,        # ADMIN_GRANTED_ONLY
+          "can_connect_email": True,        # DEFAULT_MODULE
+          "can_view_own_data": True,        # DEFAULT_MODULE
+          "can_create_quotations": False,   # ADMIN_GRANTED_ONLY
+          "can_manage_invoices": False,     # ADMIN_GRANTED_ONLY
+          "can_view_passwords": True,       # DEFAULT_MODULE (general_settings)
+          "can_edit_passwords": False,      # ADMIN_GRANTED_ONLY
+          "view_password_departments": [],  # defaults to own departments
+          "can_view_all_visits": False,     # SCOPE handled server-side by department query
+          "can_edit_visits": True,          # DEFAULT_MODULE (client_visit)
+          "can_delete_visits": False,       # ADMIN_GRANTED_ONLY
+          "can_delete_own_visits": True,    # Always allowed
+          "view_other_visits": [],
+          "view_other_tasks": [],
+          "view_other_attendance": [],
+          "view_other_reports": [],
+          "view_other_todos": [],
+          "view_other_activity": [],
+          "assigned_clients": [],
+      },
+      "staff": {
+          # Staff: SCOPE = OWN only
+          # DEFAULT_MODULES = TASK, TODO, CLIENT_VISIT, CLIENT_PAGE, GENERAL_SETTINGS, COMPLIANCE, CALENDAR, ATTENDANCE
+          # PERMISSIONS = VIEW CREATE EDIT UPDATE (own records only)
+          # OTHER_MODULES = ADMIN_GRANTED_ONLY (all False below)
+          # DATA_ACCESS_RULE: resource.department == user.department AND resource.user_id == user.id
+          "can_view_all_tasks": False,      # SCOPE: own only
+          "can_view_all_clients": False,    # SCOPE: assigned only
+          "can_view_all_dsc": False,        # ADMIN_GRANTED_ONLY
+          "can_view_documents": True,       # DEFAULT_MODULE
+          "can_view_all_duedates": True,    # DEFAULT_MODULE (compliance)
+          "can_view_reports": True,         # DEFAULT_MODULE (own reports only, server-side scoped)
+          "can_view_attendance": True,      # DEFAULT_MODULE (own attendance only, server-side scoped)
+          "can_view_all_leads": False,      # ADMIN_GRANTED_ONLY
+          "can_edit_tasks": True,           # DEFAULT_MODULE (own/assigned tasks only)
+          "can_edit_clients": False,        # ADMIN_GRANTED_ONLY
+          "can_edit_dsc": False,            # ADMIN_GRANTED_ONLY
+          "can_edit_documents": False,      # ADMIN_GRANTED_ONLY
+          "can_edit_due_dates": False,      # ADMIN_GRANTED_ONLY
+          "can_edit_users": False,          # ADMIN_GRANTED_ONLY
+          "can_download_reports": True,     # DEFAULT_MODULE (own data only)
+          "can_manage_users": False,        # ADMIN_GRANTED_ONLY
+          "can_manage_settings": True,      # DEFAULT_MODULE (general_settings, own profile)
+          "can_assign_tasks": False,        # ADMIN_GRANTED_ONLY
+          "can_assign_clients": False,      # ADMIN_GRANTED_ONLY
+          "can_view_staff_activity": False, # ADMIN_GRANTED_ONLY
+          "can_send_reminders": False,      # ADMIN_GRANTED_ONLY
+          "can_view_user_page": False,      # ADMIN_GRANTED_ONLY
+          "can_view_audit_logs": False,     # ADMIN_GRANTED_ONLY
+          "can_view_selected_users_reports": False,  # ADMIN_GRANTED_ONLY
+          "can_view_todo_dashboard": True,  # DEFAULT_MODULE
+          "can_use_chat": True,             # DEFAULT_MODULE
+          "can_view_staff_rankings": False, # ADMIN_GRANTED_ONLY
+          "can_delete_data": False,         # ADMIN_GRANTED_ONLY
+          "can_delete_tasks": False,        # ADMIN_GRANTED_ONLY
+          "can_connect_email": True,        # DEFAULT_MODULE
+          "can_view_own_data": True,        # DEFAULT_MODULE
+          "can_create_quotations": False,   # ADMIN_GRANTED_ONLY
+          "can_manage_invoices": False,     # ADMIN_GRANTED_ONLY
+          "can_view_passwords": False,      # ADMIN_GRANTED_ONLY
+          "can_edit_passwords": False,      # ADMIN_GRANTED_ONLY
+          "view_password_departments": [],
+          "can_view_all_visits": False,     # SCOPE: own visits only
+          "can_edit_visits": True,          # DEFAULT_MODULE (own visits)
+          "can_delete_visits": False,       # ADMIN_GRANTED_ONLY
+          "can_delete_own_visits": True,    # Always allowed
+          "view_other_visits": [],
+          "view_other_tasks": [],
+          "view_other_attendance": [],
+          "view_other_reports": [],
+          "view_other_todos": [],
+          "view_other_activity": [],
+          "assigned_clients": [],
+      },
+  }
 
 # ======================
 # CORE USER & PERMISSIONS
