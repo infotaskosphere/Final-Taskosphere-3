@@ -590,17 +590,46 @@ const ModernClientCard = React.memo(({ client, index, isDark, users, getClientAs
 // ═══════════════════════════════════════════════════════════════════════════
 // CLIENT DETAIL POPUP — lifted outside so it never re-creates on render
 // ═══════════════════════════════════════════════════════════════════════════
+const GST_TREATMENT_LABELS = { regular: 'Regular Taxpayer', composition: 'Composition Scheme', unregistered: 'Unregistered', consumer: 'Consumer (B2C)', overseas: 'Overseas / SEZ' };
+const INV_STATUS_COLORS = { paid: { bg: '#f0fdf4', text: '#166534', border: '#bbf7d0' }, sent: { bg: '#eff6ff', text: '#1e40af', border: '#bfdbfe' }, draft: { bg: '#f8fafc', text: '#475569', border: '#e2e8f0' }, overdue: { bg: '#fef2f2', text: '#dc2626', border: '#fecaca' }, partially_paid: { bg: '#fefce8', text: '#92400e', border: '#fde68a' }, cancelled: { bg: '#fafafa', text: '#9ca3af', border: '#e5e7eb' } };
+
 const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDetailDialogOpen, isDark, users, getClientAssignments, openWhatsApp, handleEdit }) => {
+  const [activeTab, setActiveTab] = React.useState('details');
+  const [clientInvoices, setClientInvoices] = React.useState([]);
+  const [invoicesLoading, setInvoicesLoading] = React.useState(false);
+
+  React.useEffect(() => { setActiveTab('details'); setClientInvoices([]); }, [selectedClient?.id]);
+
+  React.useEffect(() => {
+    if (activeTab !== 'invoices' || !selectedClient) return;
+    setInvoicesLoading(true);
+    api.get('/invoices', { params: { search: selectedClient.company_name, page_size: 100 } })
+      .then(r => {
+        const all = r.data?.invoices || [];
+        setClientInvoices(all.filter(inv =>
+          inv.client_id === selectedClient.id ||
+          inv.client_name?.toLowerCase() === selectedClient.company_name?.toLowerCase()
+        ));
+      })
+      .catch(() => {})
+      .finally(() => setInvoicesLoading(false));
+  }, [activeTab, selectedClient]);
+
   if (!selectedClient) return null;
   const cfg = TYPE_CONFIG[selectedClient.client_type] || TYPE_CONFIG.proprietor;
   const avatarGrad = getAvatarGradient(selectedClient.company_name);
   const clientAssignments = getClientAssignments(selectedClient);
+  const hasTaxInfo = selectedClient.gstin || selectedClient.pan || selectedClient.gst_treatment || selectedClient.website || selectedClient.msme_number || selectedClient.credit_limit || selectedClient.opening_balance || selectedClient.tally_ledger_name;
+  const totalInvValue = clientInvoices.reduce((s, i) => s + (i.grand_total || 0), 0);
+  const totalOutstanding = clientInvoices.reduce((s, i) => s + (i.amount_due || 0), 0);
 
   return (
     <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
       <DialogContent className={`max-w-2xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <DialogTitle className="sr-only">Client Details</DialogTitle>
         <DialogDescription className="sr-only">View complete client information</DialogDescription>
+
+        {/* ── Header ── */}
         <div className="sticky top-0 z-10 pt-6 px-8 pb-6 border-b border-slate-100" style={{ background: `linear-gradient(135deg, ${cfg.bg}, white)` }}>
           <div className="flex items-start gap-4">
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-2xl font-bold flex-shrink-0 shadow-md" style={{ background: avatarGrad }}>{selectedClient.company_name?.charAt(0).toUpperCase() || '?'}</div>
@@ -616,123 +645,387 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
             </div>
           </div>
         </div>
+
+        {/* ── Tab Bar ── */}
+        <div className={`flex items-center gap-1 px-8 py-2.5 border-b flex-shrink-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+          {[
+            { key: 'details', label: 'Details', icon: <User className="h-3.5 w-3.5" /> },
+            { key: 'invoices', label: 'Invoices', icon: <FileText className="h-3.5 w-3.5" /> },
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex items-center gap-1.5 h-8 px-4 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === tab.key
+                  ? 'text-white shadow-sm'
+                  : isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-slate-500 hover:bg-slate-100'
+              }`}
+              style={activeTab === tab.key ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' } : {}}>
+              {tab.icon}
+              <span className="ml-1">{tab.label}</span>
+              {tab.key === 'invoices' && clientInvoices.length > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ background: activeTab === 'invoices' ? 'rgba(255,255,255,0.25)' : '#e2e8f0', color: activeTab === 'invoices' ? '#fff' : '#64748b' }}>
+                  {clientInvoices.length}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Scrollable Body ── */}
         <div className="flex-1 overflow-y-auto">
-          <div className="p-8 space-y-6">
-            {/* Contact info */}
-            <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
-              <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-4 flex items-center gap-2`}><Mail className="h-4 w-4" /> Contact Information</h3>
-              <div className="space-y-3">
-                {selectedClient.email && (
-                  <div className="flex items-center gap-3">
-                    <Mail className="h-4 w-4 text-blue-500 flex-shrink-0" />
-                    <a href={`mailto:${selectedClient.email}`} className="text-blue-600 hover:underline text-sm flex-1">{selectedClient.email}</a>
-                    <button onClick={() => copyToClipboard(selectedClient.email, 'Email')} className="text-slate-300 hover:text-slate-600 transition-colors"><Copy className="h-3.5 w-3.5" /></button>
+
+          {/* ════════════════ INVOICES TAB ════════════════ */}
+          {activeTab === 'invoices' && (
+            <div className="p-6 space-y-4">
+              {invoicesLoading ? (
+                <div className="flex flex-col items-center justify-center py-16 gap-3">
+                  <div className="w-8 h-8 rounded-full border-2 border-slate-200 border-t-blue-500 animate-spin" />
+                  <p className="text-xs text-slate-400">Loading invoices…</p>
+                </div>
+              ) : clientInvoices.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+                  <FileText className="h-10 w-10 mb-3 opacity-25" />
+                  <p className="text-sm font-medium">No invoices found</p>
+                  <p className="text-xs mt-1 text-slate-300">Create an invoice for this client to see it here</p>
+                </div>
+              ) : (
+                <>
+                  {/* Summary strip */}
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { label: 'Total Invoices', value: clientInvoices.length, color: '#1F6FB2' },
+                      { label: 'Total Billed', value: `₹${totalInvValue.toLocaleString('en-IN')}`, color: '#059669' },
+                      { label: 'Outstanding', value: `₹${totalOutstanding.toLocaleString('en-IN')}`, color: totalOutstanding > 0 ? '#dc2626' : '#059669' },
+                    ].map((s, i) => (
+                      <div key={i} className={`rounded-xl p-3 border text-center ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">{s.label}</p>
+                        <p className="text-sm font-bold" style={{ color: s.color }}>{s.value}</p>
+                      </div>
+                    ))}
                   </div>
-                )}
-                {selectedClient.phone && (
-                  <div className="flex items-center gap-3">
-                    <Phone className="h-4 w-4 text-green-500 flex-shrink-0" />
-                    <a href={`tel:${selectedClient.phone}`} className="text-slate-700 font-medium text-sm flex-1">{selectedClient.phone}</a>
-                    <button onClick={() => copyToClipboard(selectedClient.phone, 'Phone')} className="text-slate-300 hover:text-slate-600 transition-colors"><Copy className="h-3.5 w-3.5" /></button>
-                  </div>
-                )}
-                {selectedClient.address && (
-                  <div className="flex items-start gap-3"><MapPin className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" /><div className="text-slate-700 text-sm"><p>{selectedClient.address}</p>{(selectedClient.city || selectedClient.state) && <p className="text-slate-500 text-xs mt-1">{[selectedClient.city, selectedClient.state].filter(Boolean).join(', ')}</p>}</div></div>
-                )}
-              </div>
-            </div>
-            {/* Services */}
-            {selectedClient.services?.length > 0 && (
-              <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
-                <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-4 flex items-center gap-2`}><BarChart3 className="h-4 w-4" /> Services</h3>
-                <div className="flex flex-wrap gap-2">{selectedClient.services.map((svc, i) => <span key={i} className="text-xs font-semibold px-3 py-2 rounded-xl border" style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>{svc.replace('Other: ', '')}</span>)}</div>
-              </div>
-            )}
-            {/* Contact persons */}
-            {selectedClient.contact_persons?.length > 0 && (
-              <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
-                <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-4 flex items-center gap-2`}><Users className="h-4 w-4" /> Contact Persons ({selectedClient.contact_persons.length})</h3>
-                <div className="space-y-3">{selectedClient.contact_persons.map((cp, i) => cp.name && (
-                  <div key={i} className={`border rounded-xl p-4 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
-                    <p className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{cp.name}</p>
-                    {cp.designation && <p className="text-xs text-slate-500 mt-1">{cp.designation}</p>}
-                    <div className="flex flex-col gap-1.5 mt-2 text-xs">
-                      {cp.email && <div className="flex items-center gap-2"><a href={`mailto:${cp.email}`} className="text-blue-600 hover:underline flex-1">{cp.email}</a><button onClick={() => copyToClipboard(cp.email, 'Email')} className="text-slate-300 hover:text-slate-500"><Copy className="h-3 w-3" /></button></div>}
-                      {cp.phone && <div className="flex items-center gap-2"><a href={`tel:${cp.phone}`} className="text-slate-700 flex-1">{cp.phone}</a><button onClick={() => copyToClipboard(cp.phone, 'Phone')} className="text-slate-300 hover:text-slate-500"><Copy className="h-3 w-3" /></button></div>}
-                      {cp.birthday && <p className="text-slate-500">Birthday: {format(new Date(cp.birthday), 'MMM d, yyyy')}</p>}
-                      {cp.din && <p className="text-slate-500">DIN: {cp.din}</p>}
-                    </div>
-                  </div>
-                ))}</div>
-              </div>
-            )}
-            {/* DSC details with countdown */}
-            {selectedClient.dsc_details?.length > 0 && (
-              <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
-                <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-4 flex items-center gap-2`}><Shield className="h-4 w-4" /> DSC Details ({selectedClient.dsc_details.length})</h3>
-                <div className="space-y-3">{selectedClient.dsc_details.map((dsc, i) => dsc.certificate_number && (
-                  <div key={i} className={`border rounded-xl p-4 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
-                    <div className="flex items-start justify-between gap-2">
-                      <p className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{dsc.certificate_number}</p>
-                      <DscBadge daysLeft={getDscDaysLeft(dsc.expiry_date)} />
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">Holder: {dsc.holder_name}</p>
-                    <div className="flex gap-4 mt-2 text-xs text-slate-600">
-                      {dsc.issue_date && <p>Issued: {format(new Date(dsc.issue_date), 'MMM d, yyyy')}</p>}
-                      {dsc.expiry_date && <p>Expires: {format(new Date(dsc.expiry_date), 'MMM d, yyyy')}</p>}
-                    </div>
-                    {dsc.notes && <p className="text-xs text-slate-500 mt-2 italic">{dsc.notes}</p>}
-                  </div>
-                ))}</div>
-              </div>
-            )}
-            {/* Assignments & notes */}
-            {(clientAssignments.length > 0 || selectedClient.notes) && (
-              <div className="grid grid-cols-2 gap-4">
-                {clientAssignments.length > 0 && (
-                  <div className={`border rounded-2xl p-5 col-span-2 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
-                    <h3 className={`text-xs font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-3 flex items-center gap-2`}><Briefcase className="h-3.5 w-3.5" /> Staff Assignments</h3>
-                    <div className="flex flex-col gap-2">
-                      {clientAssignments.map((a, i) => {
-                        const u = users.find(x => x.id === a.user_id);
-                        if (!u) return null;
-                        return (
-                          <div key={i} className={`flex items-start gap-3 border rounded-xl px-4 py-2.5 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-white border-slate-100'}`}>
-                            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: getAvatarGradient(u.full_name || u.name || '') }}>{(u.full_name || u.name || '?').charAt(0).toUpperCase()}</div>
-                            <div className="flex-1 min-w-0">
-                              <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{u.full_name || u.name}</p>
-                              {a.services?.length > 0 ? (
-                                <div className="flex flex-wrap gap-1 mt-1">{a.services.map((svc, si) => <span key={si} className="text-[10px] font-semibold px-2 py-0.5 rounded-full border" style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>{svc}</span>)}</div>
-                              ) : <p className="text-xs text-slate-400 mt-0.5">All services</p>}
+
+                  {/* Invoice rows */}
+                  <div className="space-y-2">
+                    {clientInvoices.slice(0, 15).map(inv => {
+                      const sc = INV_STATUS_COLORS[inv.status] || INV_STATUS_COLORS.draft;
+                      return (
+                        <div key={inv.id} className={`border rounded-xl p-3.5 transition-colors ${isDark ? 'bg-slate-700 border-slate-600 hover:bg-slate-600/60' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{inv.invoice_no}</p>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border" style={{ background: sc.bg, color: sc.text, borderColor: sc.border }}>
+                                  {(inv.status || 'draft').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-400 mt-0.5">
+                                {inv.invoice_date}
+                                {inv.invoice_type && <span className="ml-1 opacity-60">· {inv.invoice_type.replace(/_/g, ' ')}</span>}
+                                {inv.due_date && <span className="ml-1 opacity-60">· Due {inv.due_date}</span>}
+                              </p>
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                                ₹{(inv.grand_total || 0).toLocaleString('en-IN')}
+                              </p>
+                              {(inv.amount_due || 0) > 0 && (
+                                <p className="text-xs text-red-500 font-semibold">
+                                  Due ₹{(inv.amount_due || 0).toLocaleString('en-IN')}
+                                </p>
+                              )}
+                              {inv.status === 'paid' && (
+                                <p className="text-xs text-emerald-600 font-semibold">Paid ✓</p>
+                              )}
                             </div>
                           </div>
-                        );
-                      })}
+                        </div>
+                      );
+                    })}
+                    {clientInvoices.length > 15 && (
+                      <p className="text-xs text-slate-400 text-center py-2">
+                        +{clientInvoices.length - 15} more invoices
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ════════════════ DETAILS TAB ════════════════ */}
+          {activeTab === 'details' && (
+            <div className="p-8 space-y-6">
+
+              {/* Contact info */}
+              <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
+                <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-4 flex items-center gap-2`}><Mail className="h-4 w-4" /> Contact Information</h3>
+                <div className="space-y-3">
+                  {selectedClient.email && (
+                    <div className="flex items-center gap-3">
+                      <Mail className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                      <a href={`mailto:${selectedClient.email}`} className="text-blue-600 hover:underline text-sm flex-1">{selectedClient.email}</a>
+                      <button onClick={() => copyToClipboard(selectedClient.email, 'Email')} className="text-slate-300 hover:text-slate-600 transition-colors"><Copy className="h-3.5 w-3.5" /></button>
                     </div>
-                  </div>
-                )}
-                {selectedClient.notes && (
-                  <div className={`border rounded-2xl p-5 col-span-2 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
-                    <h3 className={`text-xs font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-3`}>Notes</h3>
-                    <p className="text-sm text-slate-700 leading-relaxed">{selectedClient.notes}</p>
-                  </div>
-                )}
+                  )}
+                  {selectedClient.phone && (
+                    <div className="flex items-center gap-3">
+                      <Phone className="h-4 w-4 text-green-500 flex-shrink-0" />
+                      <a href={`tel:${selectedClient.phone}`} className="text-slate-700 font-medium text-sm flex-1">{selectedClient.phone}</a>
+                      <button onClick={() => copyToClipboard(selectedClient.phone, 'Phone')} className="text-slate-300 hover:text-slate-600 transition-colors"><Copy className="h-3.5 w-3.5" /></button>
+                    </div>
+                  )}
+                  {selectedClient.address && (
+                    <div className="flex items-start gap-3">
+                      <MapPin className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" />
+                      <div className="text-slate-700 text-sm">
+                        <p>{selectedClient.address}</p>
+                        {(selectedClient.city || selectedClient.state) && <p className="text-slate-500 text-xs mt-1">{[selectedClient.city, selectedClient.state].filter(Boolean).join(', ')}</p>}
+                      </div>
+                    </div>
+                  )}
+                  {selectedClient.website && (
+                    <div className="flex items-center gap-3">
+                      <ExternalLink className="h-4 w-4 text-purple-500 flex-shrink-0" />
+                      <a href={selectedClient.website} target="_blank" rel="noopener noreferrer" className="text-purple-600 hover:underline text-sm flex-1 truncate">
+                        {selectedClient.website.replace(/^https?:\/\//, '')}
+                      </a>
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
+
+              {/* Tax & Billing */}
+              {hasTaxInfo && (
+                <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
+                  <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-4 flex items-center gap-2`}>
+                    <FileCheck className="h-4 w-4" /> Tax & Billing
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    {selectedClient.gstin && (
+                      <div className={`rounded-xl p-3 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">GSTIN</p>
+                        <div className="flex items-center gap-2">
+                          <p className={`text-sm font-mono font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{selectedClient.gstin}</p>
+                          <button onClick={() => copyToClipboard(selectedClient.gstin, 'GSTIN')} className="text-slate-300 hover:text-slate-600 transition-colors flex-shrink-0"><Copy className="h-3 w-3" /></button>
+                        </div>
+                      </div>
+                    )}
+                    {selectedClient.pan && (
+                      <div className={`rounded-xl p-3 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">PAN</p>
+                        <div className="flex items-center gap-2">
+                          <p className={`text-sm font-mono font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{selectedClient.pan}</p>
+                          <button onClick={() => copyToClipboard(selectedClient.pan, 'PAN')} className="text-slate-300 hover:text-slate-600 transition-colors flex-shrink-0"><Copy className="h-3 w-3" /></button>
+                        </div>
+                      </div>
+                    )}
+                    {selectedClient.gst_treatment && (
+                      <div className={`rounded-xl p-3 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">GST Treatment</p>
+                        <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                          {GST_TREATMENT_LABELS[selectedClient.gst_treatment] || selectedClient.gst_treatment}
+                        </p>
+                      </div>
+                    )}
+                    {selectedClient.default_payment_terms && (
+                      <div className={`rounded-xl p-3 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Payment Terms</p>
+                        <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{selectedClient.default_payment_terms}</p>
+                      </div>
+                    )}
+                    {selectedClient.credit_limit && (
+                      <div className={`rounded-xl p-3 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Credit Limit</p>
+                        <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                          ₹{Number(selectedClient.credit_limit).toLocaleString('en-IN')}
+                        </p>
+                      </div>
+                    )}
+                    {selectedClient.opening_balance && (
+                      <div className={`rounded-xl p-3 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Opening Balance</p>
+                        <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                          ₹{Number(selectedClient.opening_balance).toLocaleString('en-IN')}
+                          <span className="ml-1 text-xs text-slate-400">{selectedClient.opening_balance_type || 'Dr'}</span>
+                        </p>
+                      </div>
+                    )}
+                    {selectedClient.msme_number && (
+                      <div className={`rounded-xl p-3 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">MSME / Udyam</p>
+                        <p className={`text-xs font-mono font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{selectedClient.msme_number}</p>
+                      </div>
+                    )}
+                    {selectedClient.place_of_supply && (
+                      <div className={`rounded-xl p-3 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Place of Supply</p>
+                        <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{selectedClient.place_of_supply}</p>
+                      </div>
+                    )}
+                  </div>
+                  {/* Tally sub-card */}
+                  {(selectedClient.tally_ledger_name || selectedClient.tally_group) && (
+                    <div className={`mt-3 rounded-xl p-3 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 flex items-center gap-1.5">
+                        <Building2 className="h-3 w-3" /> Tally Sync
+                      </p>
+                      <div className="flex flex-wrap gap-5 text-sm">
+                        {selectedClient.tally_ledger_name && (
+                          <span>
+                            <span className="text-xs text-slate-400">Ledger: </span>
+                            <span className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{selectedClient.tally_ledger_name}</span>
+                          </span>
+                        )}
+                        {selectedClient.tally_group && (
+                          <span>
+                            <span className="text-xs text-slate-400">Group: </span>
+                            <span className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{selectedClient.tally_group}</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Services */}
+              {selectedClient.services?.length > 0 && (
+                <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
+                  <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-4 flex items-center gap-2`}><BarChart3 className="h-4 w-4" /> Services</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedClient.services.map((svc, i) => (
+                      <span key={i} className="text-xs font-semibold px-3 py-2 rounded-xl border" style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>
+                        {svc.replace('Other: ', '')}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Contact persons */}
+              {selectedClient.contact_persons?.length > 0 && (
+                <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
+                  <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-4 flex items-center gap-2`}>
+                    <Users className="h-4 w-4" /> Contact Persons ({selectedClient.contact_persons.length})
+                  </h3>
+                  <div className="space-y-3">
+                    {selectedClient.contact_persons.map((cp, i) => cp.name && (
+                      <div key={i} className={`border rounded-xl p-4 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                        <p className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{cp.name}</p>
+                        {cp.designation && <p className="text-xs text-slate-500 mt-1">{cp.designation}</p>}
+                        <div className="flex flex-col gap-1.5 mt-2 text-xs">
+                          {cp.email && (
+                            <div className="flex items-center gap-2">
+                              <a href={`mailto:${cp.email}`} className="text-blue-600 hover:underline flex-1">{cp.email}</a>
+                              <button onClick={() => copyToClipboard(cp.email, 'Email')} className="text-slate-300 hover:text-slate-500"><Copy className="h-3 w-3" /></button>
+                            </div>
+                          )}
+                          {cp.phone && (
+                            <div className="flex items-center gap-2">
+                              <a href={`tel:${cp.phone}`} className="text-slate-700 flex-1">{cp.phone}</a>
+                              <button onClick={() => copyToClipboard(cp.phone, 'Phone')} className="text-slate-300 hover:text-slate-500"><Copy className="h-3 w-3" /></button>
+                            </div>
+                          )}
+                          {cp.birthday && <p className="text-slate-500">Birthday: {format(new Date(cp.birthday), 'MMM d, yyyy')}</p>}
+                          {cp.din && <p className="text-slate-500">DIN: {cp.din}</p>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* DSC details */}
+              {selectedClient.dsc_details?.length > 0 && (
+                <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
+                  <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-4 flex items-center gap-2`}>
+                    <Shield className="h-4 w-4" /> DSC Details ({selectedClient.dsc_details.length})
+                  </h3>
+                  <div className="space-y-3">
+                    {selectedClient.dsc_details.map((dsc, i) => dsc.certificate_number && (
+                      <div key={i} className={`border rounded-xl p-4 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <p className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{dsc.certificate_number}</p>
+                          <DscBadge daysLeft={getDscDaysLeft(dsc.expiry_date)} />
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1">Holder: {dsc.holder_name}</p>
+                        <div className="flex gap-4 mt-2 text-xs text-slate-600">
+                          {dsc.issue_date && <p>Issued: {format(new Date(dsc.issue_date), 'MMM d, yyyy')}</p>}
+                          {dsc.expiry_date && <p>Expires: {format(new Date(dsc.expiry_date), 'MMM d, yyyy')}</p>}
+                        </div>
+                        {dsc.notes && <p className="text-xs text-slate-500 mt-2 italic">{dsc.notes}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Assignments & notes */}
+              {(clientAssignments.length > 0 || selectedClient.notes) && (
+                <div className="grid grid-cols-2 gap-4">
+                  {clientAssignments.length > 0 && (
+                    <div className={`border rounded-2xl p-5 col-span-2 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
+                      <h3 className={`text-xs font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-3 flex items-center gap-2`}>
+                        <Briefcase className="h-3.5 w-3.5" /> Staff Assignments
+                      </h3>
+                      <div className="flex flex-col gap-2">
+                        {clientAssignments.map((a, i) => {
+                          const u = users.find(x => x.id === a.user_id);
+                          if (!u) return null;
+                          return (
+                            <div key={i} className={`flex items-start gap-3 border rounded-xl px-4 py-2.5 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-white border-slate-100'}`}>
+                              <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: getAvatarGradient(u.full_name || u.name || '') }}>
+                                {(u.full_name || u.name || '?').charAt(0).toUpperCase()}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{u.full_name || u.name}</p>
+                                {a.services?.length > 0 ? (
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {a.services.map((svc, si) => (
+                                      <span key={si} className="text-[10px] font-semibold px-2 py-0.5 rounded-full border" style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>{svc}</span>
+                                    ))}
+                                  </div>
+                                ) : <p className="text-xs text-slate-400 mt-0.5">All services</p>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {selectedClient.notes && (
+                    <div className={`border rounded-2xl p-5 col-span-2 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
+                      <h3 className={`text-xs font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-3`}>Notes</h3>
+                      <p className="text-sm text-slate-700 leading-relaxed">{selectedClient.notes}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+            </div>
+          )}
+          {/* ════════════════ END DETAILS TAB ════════════════ */}
+
         </div>
-        <div className={`sticky bottom-0 flex items-center justify-between gap-2 p-6 border-t ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+
+        {/* ── Footer ── */}
+        <div className={`sticky bottom-0 flex items-center justify-between gap-2 p-6 border-t flex-shrink-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           <Button type="button" variant="ghost" onClick={() => setDetailDialogOpen(false)} className="h-10 px-5 text-sm rounded-xl text-slate-500">Close</Button>
           <div className="flex gap-2">
-            <Button onClick={() => { setDetailDialogOpen(false); openWhatsApp(selectedClient.phone, selectedClient.company_name); }} className="h-10 px-4 text-sm rounded-xl text-white gap-2" style={{ background: '#25D366' }}><MessageCircle className="h-4 w-4" /> WhatsApp</Button>
-            <Button onClick={() => { setDetailDialogOpen(false); handleEdit(selectedClient); }} className="h-10 px-4 text-sm rounded-xl text-white gap-2" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}><Edit className="h-4 w-4" /> Edit</Button>
+            <Button onClick={() => { setDetailDialogOpen(false); openWhatsApp(selectedClient.phone, selectedClient.company_name); }} className="h-10 px-4 text-sm rounded-xl text-white gap-2" style={{ background: '#25D366' }}>
+              <MessageCircle className="h-4 w-4" /> WhatsApp
+            </Button>
+            <Button onClick={() => { setDetailDialogOpen(false); handleEdit(selectedClient); }} className="h-10 px-4 text-sm rounded-xl text-white gap-2" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+              <Edit className="h-4 w-4" /> Edit
+            </Button>
           </div>
         </div>
+
       </DialogContent>
     </Dialog>
   );
 });
-
 // ═══════════════════════════════════════════════════════════════════════════
 // PAGINATION BAR — reusable
 // ═══════════════════════════════════════════════════════════════════════════
@@ -842,6 +1135,11 @@ export default function Clients() {
     contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
     email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [],
     dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '',
+    // Tax & Billing
+    gstin: '', pan: '', gst_treatment: 'regular', place_of_supply: '',
+    default_payment_terms: 'Due on receipt', credit_limit: '', opening_balance: '',
+    opening_balance_type: 'Dr', tally_ledger_name: '', tally_group: 'Sundry Debtors',
+    website: '', msme_number: '',
   });
   const [formErrors, setFormErrors]     = useState({});
   const [contactErrors, setContactErrors] = useState([]);
@@ -1100,6 +1398,7 @@ export default function Clients() {
       const cleanedAssignments = (formData.assignments || []).filter(a => a.user_id && a.user_id !== 'unassigned').map(a => ({ user_id: a.user_id, services: a.services || [] }));
       const finalReferredBy = formData.referred_by?.trim() || null;
       if (finalReferredBy && finalReferredBy !== 'Our Client' && !savedReferrers.includes(finalReferredBy)) await saveReferrer(finalReferredBy);
+      
       const payload = {
         company_name: formData.company_name.trim(), client_type: formData.client_type,
         ...(formData.client_type === 'other' ? { client_type_label: formData.client_type_other?.trim() || 'Other' } : { client_type_label: null }),
@@ -1110,6 +1409,19 @@ export default function Clients() {
         assigned_to: cleanedAssignments[0]?.user_id || null, assignments: cleanedAssignments,
         status: formData.status, contact_persons: cleanedContacts, dsc_details: cleanedDSC,
         referred_by: finalReferredBy || null,
+        // Tax & Billing
+        gstin: formData.gstin?.trim().toUpperCase() || null,
+        pan: formData.pan?.trim().toUpperCase() || null,
+        gst_treatment: formData.gst_treatment || 'regular',
+        place_of_supply: formData.place_of_supply?.trim() || null,
+        default_payment_terms: formData.default_payment_terms || 'Due on receipt',
+        credit_limit: formData.credit_limit ? Number(formData.credit_limit) : null,
+        opening_balance: formData.opening_balance ? Number(formData.opening_balance) : null,
+        opening_balance_type: formData.opening_balance_type || 'Dr',
+        tally_ledger_name: formData.tally_ledger_name?.trim() || null,
+        tally_group: formData.tally_group || 'Sundry Debtors',
+        website: formData.website?.trim() || null,
+        msme_number: formData.msme_number?.trim() || null,
       };
       if (!editingClient) {
         const dup = clients.find(c => c.company_name?.toLowerCase().trim() === payload.company_name?.toLowerCase().trim());
@@ -1149,7 +1461,7 @@ export default function Clients() {
   }, []);
 
   const resetForm = useCallback(() => {
-    setFormData({ company_name: '', client_type: 'proprietor', client_type_other: '', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '' });
+    setFormData({ company_name: '', client_type: 'proprietor', client_type_other: '', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '', gstin: '', pan: '', gst_treatment: 'regular', place_of_supply: '', default_payment_terms: 'Due on receipt', credit_limit: '', opening_balance: '', opening_balance_type: 'Dr', tally_ledger_name: '', tally_group: 'Sundry Debtors', website: '', msme_number: '' });
     setOtherService(''); setEditingClient(null); setFormErrors({}); setContactErrors([]); setReferrerInput(''); setReferrerSelectValue('');
   }, []);
 
