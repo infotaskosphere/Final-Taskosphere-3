@@ -3694,9 +3694,16 @@ async def get_clients(current_user: User = Depends(get_current_user)):
         else:
             extra_clients = permissions.get("assigned_clients", [])
             if extra_clients:
-                query = {"$or": [{"assigned_to": current_user.id}, {"id": {"$in": extra_clients}}]}
+                query = {"$or": [
+                    {"assigned_to": current_user.id},
+                    {"created_by": current_user.id},
+                    {"id": {"$in": extra_clients}},
+                ]}
             else:
-                query = {"assigned_to": current_user.id}
+                query = {"$or": [
+                    {"assigned_to": current_user.id},
+                    {"created_by": current_user.id},
+                ]}
 
     clients = await db.clients.find(query, {"_id": 0}).to_list(1000)
 
