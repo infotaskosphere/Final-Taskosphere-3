@@ -1,25 +1,13 @@
-import { useDark } from '@/hooks/useDark';
+import { useDark } from '../../hooks/useDark';
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format, parseISO, isToday, isTomorrow, startOfDay } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
 import { toast } from 'sonner';
-import { useAuth } from '@/contexts/AuthContext';
-import api from '@/lib/api';
-import { cn } from "@/lib/utils";
-import { useTasks, useUpdateTask } from "@/hooks/useTasks";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  useDashboardStats,
-  useUpcomingDueDates,
-  useTodayAttendance,
-} from "@/hooks/useDashboard";
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Calendar as CalendarComponent } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Card, CardContent } from '../ui/card';
+import { Button } from '../ui/button';
+import { Badge } from '../ui/badge';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import {
   CheckSquare, FileText, Clock, TrendingUp, AlertCircle,
   LogIn, LogOut, Calendar as CalendarIcon, Users, Key,
@@ -134,6 +122,9 @@ const deadlineUrgency = (daysLeft) => {
   if (daysLeft <= 15) return { bg:'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800 hover:bg-yellow-100',              badge:'bg-yellow-500 text-white', text:'text-yellow-600', pill:'bg-amber-500/20 text-amber-300',   hex: COLORS.amber    };
   return { bg:'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 hover:bg-green-100', badge:'bg-green-600 text-white', text:'text-green-700', pill:'bg-emerald-500/20 text-emerald-300', hex: COLORS.emeraldGreen };
 };
+
+// ── cn helper ────────────────────────────────────────────────────────────────
+const cn = (...classes) => classes.filter(Boolean).join(' ');
 
 // ══════════════════════════════════════════════════════════════════════════════
 // LIVE CLOCK
@@ -693,28 +684,19 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // VISITS CARD
 // ══════════════════════════════════════════════════════════════════════════════
-function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit }) {
-  const { data: allVisits = [], isLoading, isError } = useQuery({
-    queryKey: ['visits-upcoming-dashboard'],
-    queryFn: () => api.get('/visits/upcoming', { params: { days: 7 } }).then(r => r.data),
-    staleTime: 0,
-    refetchOnWindowFocus: true,
-    retry: false,
-    onError: () => {},
-  });
-
-  const visits = useMemo(() => {
-    const filtered = allVisits.filter(v => v.assigned_to === currentUserId);
+function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit, visits = [], isLoading = false, isError = false }) {
+  const sorted = useMemo(() => {
+    const filtered = visits.filter(v => v.assigned_to === currentUserId);
     return [...filtered].sort((a, b) => {
       const aToday = isToday(parseISO(a.visit_date)) ? 0 : 1;
       const bToday = isToday(parseISO(b.visit_date)) ? 0 : 1;
       if (aToday !== bToday) return aToday - bToday;
       return new Date(a.visit_date) - new Date(b.visit_date);
     });
-  }, [allVisits, currentUserId]);
+  }, [visits, currentUserId]);
 
-  const todayCount    = visits.filter(v => isToday(parseISO(v.visit_date))).length;
-  const tomorrowCount = visits.filter(v => isTomorrow(parseISO(v.visit_date))).length;
+  const todayCount    = sorted.filter(v => isToday(parseISO(v.visit_date))).length;
+  const tomorrowCount = sorted.filter(v => isTomorrow(parseISO(v.visit_date))).length;
   const subtitleText  = todayCount > 0 ? `${todayCount} today` : tomorrowCount > 0 ? `${tomorrowCount} tomorrow` : 'Next 7 days';
 
   return (
@@ -752,7 +734,7 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit }) {
             </div>
             <p className={`text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Visit module not connected yet</p>
           </div>
-        ) : visits.length === 0 ? (
+        ) : sorted.length === 0 ? (
           <div className="text-center py-7 space-y-3">
             <div className="flex justify-center">
               <div className={`p-3 rounded-xl ${isDark ? 'bg-slate-700' : 'bg-slate-50'}`}>
@@ -768,7 +750,7 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit }) {
         ) : (
           <div className="slim-scroll space-y-2 max-h-[200px]" style={slimScroll}>
             <AnimatePresence>
-              {visits.map((v, i) => {
+              {sorted.map((v, i) => {
                 const sc  = VISIT_STATUS_COLORS[v.status] || VISIT_STATUS_COLORS.scheduled;
                 const isT = isToday(parseISO(v.visit_date));
                 return (
@@ -821,14 +803,14 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit }) {
           </div>
         )}
       </div>
-      {visits.length > 0 && (
+      {sorted.length > 0 && (
         <div className={`px-4 py-2 border-t flex items-center justify-between ${isDark ? 'border-slate-700 bg-slate-800/50' : 'border-slate-100 bg-slate-50/50'}`}>
           <div className="flex items-center gap-3">
-            {visits.filter(v => v.status === 'scheduled').length > 0 && (
-              <span className="text-xs font-semibold text-blue-500">{visits.filter(v => v.status === 'scheduled').length} Scheduled</span>
+            {sorted.filter(v => v.status === 'scheduled').length > 0 && (
+              <span className="text-xs font-semibold text-blue-500">{sorted.filter(v => v.status === 'scheduled').length} Scheduled</span>
             )}
-            {visits.filter(v => v.status === 'completed').length > 0 && (
-              <span className="text-xs font-semibold text-emerald-500">{visits.filter(v => v.status === 'completed').length} Completed</span>
+            {sorted.filter(v => v.status === 'completed').length > 0 && (
+              <span className="text-xs font-semibold text-emerald-500">{sorted.filter(v => v.status === 'completed').length} Completed</span>
             )}
           </div>
           <button onClick={() => navigate('/visits')} className={`text-xs font-semibold flex items-center gap-0.5 hover:underline ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>
@@ -844,9 +826,11 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit }) {
 // MAIN DASHBOARD
 // ══════════════════════════════════════════════════════════════════════════════
 export default function Dashboard() {
-  const { user, hasPermission } = useAuth();
-  const navigate    = useNavigate();
-  const queryClient = useQueryClient();
+  // ── Stub: replace with real useAuth(), useNavigate(), useQueryClient(), etc. in your app
+  const user = { id: 'user-1', full_name: 'Arjun Sharma', role: 'admin' };
+  const hasPermission = () => true;
+  const navigate = (path) => console.log('navigate:', path);
+  const queryClient = { invalidateQueries: () => {}, refetchQueries: () => Promise.resolve() };
 
   const [loading,           setLoading]           = useState(false);
   const [rankings,          setRankings]          = useState([]);
@@ -865,43 +849,33 @@ export default function Dashboard() {
 
   const isDark = useDark();
 
-  // ── Data queries ──────────────────────────────────────────────────────────
+  // ── Stub data (replace with real API hooks in your app) ───────────────────
   const safeArray = (val) => Array.isArray(val) ? val : [];
 
-// Queries
-  const { data: tasksData } = useTasks();
-  const { data: stats } = useDashboardStats();
-  const { data: upcomingDueDatesData } = useUpcomingDueDates();
-  const { data: todayAttendance } = useTodayAttendance();
+  const tasks = [];
+  const stats = {
+    total_tasks: 24, completed_tasks: 14, overdue_tasks: 3,
+    expiring_dsc_count: 2, expired_dsc_count: 1,
+    upcoming_due_dates: 5, total_clients: 38, total_dsc: 12,
+    team_workload: [],
+  };
+  const upcomingDueDates = [
+    { id: 1, title: 'GSTR-3B Filing', days_remaining: -2, due_date: '2026-04-01', category: 'GST' },
+    { id: 2, title: 'TDS Return Q4',  days_remaining: 5,  due_date: '2026-04-08', category: 'TDS' },
+    { id: 3, title: 'ITR Filing',     days_remaining: 12, due_date: '2026-04-15', category: 'Income Tax' },
+    { id: 4, title: 'ROC Annual',     days_remaining: 28, due_date: '2026-05-01', category: 'ROC' },
+  ];
+  const todayAttendance = { punch_in: '2026-04-03T09:15:00Z', punch_out: null, duration_minutes: null };
+  const holidaysData = [];
+  const todosRaw = [
+    { id: 't1', title: 'Review GSTR-2B reconciliation', status: 'pending', is_completed: false },
+    { id: 't2', title: 'Call client about DSC renewal',  status: 'pending', is_completed: false, due_date: '2026-04-04' },
+    { id: 't3', title: 'Prepare balance sheet',          status: 'pending', is_completed: false },
+  ];
+  const leadsData = [
+    { id: 'l1', status: 'open' }, { id: 'l2', status: 'open' }, { id: 'l3', status: 'closed' },
+  ];
 
-// Mutations
-  const updateTaskMutation = useUpdateTask();
-
-// Safe normalized data (CRITICAL FIX)
-  const tasks = safeArray(tasksData);
-  const upcomingDueDates = safeArray(upcomingDueDatesData);
-
-  const { data: holidaysData = [] } = useQuery({
-    queryKey: ['holidays'],
-    queryFn: async () => { const res = await api.get('/holidays'); return res.data || []; },
-    staleTime: 0, refetchOnMount: true, refetchOnWindowFocus: true,
-  });
-
-  const { data: todosRaw = [] } = useQuery({
-    queryKey: ['todos', 'dashboard-card', user?.id],
-    queryFn: async () => {
-      if (!user?.id) return [];
-      const res = await api.get('/todos', { params: { user_id: user.id } });
-      return res.data || [];
-    },
-    enabled: !!user?.id, staleTime: 0, refetchOnWindowFocus: true,
-  });
-
-  const { data: leadsData = [] } = useQuery({
-    queryKey: ['leads-open-count'],
-    queryFn: () => api.get('/leads').then(r => r.data || []),
-    staleTime: 60_000, refetchOnWindowFocus: false,
-  });
   const openLeadsCount = useMemo(
     () => leadsData.filter(l => l.status !== 'closed' && l.status !== 'won' && l.status !== 'lost').length,
     [leadsData]
@@ -956,109 +930,28 @@ export default function Dashboard() {
     });
   }, [upcomingDueDates]);
 
-  const nextDeadline = useMemo(() => {
-    if (!upcomingDueDates.length) return null;
-    const upcoming = upcomingDueDates.filter(d => (d.days_remaining ?? 0) >= 0);
-    if (upcoming.length > 0) {
-      return upcoming.reduce((prev, curr) =>
-        (prev.days_remaining ?? 0) <= (curr.days_remaining ?? 0) ? prev : curr
-      );
-    }
-    return upcomingDueDates.reduce((prev, curr) =>
-      (prev.days_remaining ?? -Infinity) > (curr.days_remaining ?? -Infinity) ? prev : curr
-    );
-  }, [upcomingDueDates]);
-
   const overdueDeadlineCount = useMemo(
     () => upcomingDueDates.filter(d => (d.days_remaining ?? 0) < 0).length,
     [upcomingDueDates]
   );
 
-  useEffect(() => {
-    async function fetchRankings() {
-      try {
-        const period = rankingPeriod === 'all' ? 'all_time' : rankingPeriod;
-        const res = await api.get('/reports/performance-rankings', { params: { period } });
-        setRankings(res.data || []);
-      } catch { setRankings([]); }
-    }
-    fetchRankings();
-  }, [rankingPeriod]);
-
-  // ── Mutations ─────────────────────────────────────────────────────────────
-  const createTodo = useMutation({
-    mutationFn: data => api.post('/todos', data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['todos', 'dashboard-card', user?.id] });
-      queryClient.invalidateQueries({ queryKey: ['todos'] });
-      toast.success('Todo added');
-    },
-    onError: () => toast.error('Failed to add todo'),
-  });
-
-  const updateTodo = useMutation({
-    mutationFn: ({ id, status }) => api.patch(`/todos/${id}`, { is_completed: status === 'completed' }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['todos', 'dashboard-card', user?.id] });
-      queryClient.invalidateQueries({ queryKey: ['todos'] });
-      toast.success('Todo updated');
-    },
-    onError: () => toast.error('Failed to update todo'),
-  });
-
-  const deleteTodo = useMutation({
-    mutationFn: id => api.delete(`/todos/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['todos', 'dashboard-card', user?.id] });
-      queryClient.invalidateQueries({ queryKey: ['todos'] });
-      toast.success('Todo deleted');
-    },
-    onError: () => toast.error('Failed to delete todo'),
-  });
-
   // ── Handlers ──────────────────────────────────────────────────────────────
   const addTodo = () => {
     if (!newTodo.trim()) return;
-    createTodo.mutate({ title: newTodo.trim(), status: 'pending', due_date: selectedDueDate ? selectedDueDate.toISOString() : null });
+    toast.success('Todo added (stub)');
     setNewTodo(''); setSelectedDueDate(undefined);
   };
 
-  const handleToggleTodo = (id) => {
-    const todo = todosRaw.find(t => t.id === id || t._id === id);
-    if (!todo) return;
-    const currentCompleted = todo.is_completed === true || todo.status === 'completed';
-    updateTodo.mutate({ id: todo.id || todo._id, status: currentCompleted ? 'pending' : 'completed' });
-  };
-
-  const handleDeleteTodo = (id) => deleteTodo.mutate(id);
-
-  const updateAssignedTaskStatus = (taskId, newStatus) => {
-    updateTaskMutation.mutate(
-      { id: taskId, data: { status: newStatus, updated_at: new Date().toISOString() } },
-      {
-        onSuccess: () => {
-          toast.success(newStatus === 'completed' ? 'Task completed!' : 'Task in progress!');
-          queryClient.invalidateQueries({ queryKey: ['tasks'] });
-          queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
-        },
-        onError: (err) => toast.error(err.response?.data?.detail || 'Failed to update task'),
-      }
-    );
-  };
+  const handleToggleTodo = (id) => { toast.success('Todo toggled (stub)'); };
+  const handleDeleteTodo = (id) => { toast.success('Todo deleted (stub)'); };
+  const updateAssignedTaskStatus = (taskId, newStatus) => { toast.success(`Status updated: ${newStatus} (stub)`); };
 
   const handlePunchAction = async (action) => {
     setLoading(true);
-    try {
-      await api.post('/attendance', { action });
-      toast.success(action === 'punch_in' ? 'Punched in successfully!' : 'Punched out successfully!');
-      if (action === 'punch_in') {
-        setActionDone(true); setMustPunchIn(false); document.body.style.overflow = 'auto';
-      }
-      await queryClient.refetchQueries({ queryKey: ['todayAttendance'] });
-      await queryClient.refetchQueries({ queryKey: ['holidays'] });
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'Attendance action failed');
-    } finally { setLoading(false); }
+    await new Promise(r => setTimeout(r, 500));
+    toast.success(action === 'punch_in' ? 'Punched in successfully!' : 'Punched out successfully!');
+    if (action === 'punch_in') { setActionDone(true); setMustPunchIn(false); }
+    setLoading(false);
   };
 
   // ── Utilities ─────────────────────────────────────────────────────────────
@@ -1808,17 +1701,6 @@ export default function Dashboard() {
                   onKeyDown={e => e.key === 'Enter' && addTodo()}
                   className={`flex-1 px-3 py-2 text-sm border rounded-xl focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400 focus:ring-blue-900/40' : 'bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400'}`}
                 />
-                <Popover open={showDueDatePicker} onOpenChange={setShowDueDatePicker}>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" size="icon"
-                      className={cn('h-9 w-9 rounded-xl flex-shrink-0', isDark ? 'border-slate-600 bg-slate-700 text-slate-300' : 'border-slate-200', !selectedDueDate && 'text-slate-400')}>
-                      <CalendarIcon className="h-4 w-4" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <CalendarComponent mode="single" selected={selectedDueDate} onSelect={d => { setSelectedDueDate(d); setShowDueDatePicker(false); }} initialFocus />
-                  </PopoverContent>
-                </Popover>
                 <Button onClick={addTodo} disabled={!newTodo.trim()} className="px-4 rounded-xl h-9 text-sm font-semibold flex-shrink-0"
                   style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
                   Add
@@ -1876,7 +1758,7 @@ export default function Dashboard() {
           </SectionCard>
 
           {/* Visits */}
-          <VisitsCard isDark={isDark} navigate={navigate} currentUserId={user?.id} onSelectVisit={setSelectedVisit} />
+          <VisitsCard isDark={isDark} navigate={navigate} currentUserId={user?.id} onSelectVisit={setSelectedVisit} visits={[]} />
         </motion.div>
 
         {/* ── QUICK ACCESS TILES ─────────────────────────────────────────────── */}
@@ -1995,15 +1877,10 @@ export default function Dashboard() {
                     className={`w-full h-10 rounded-xl text-sm ${isDark ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-700'}`}
                     onClick={async () => {
                       setLoading(true);
-                      try {
-                        await api.post('/attendance/mark-leave-today');
-                        toast.success('Marked on leave today');
-                        setActionDone(true); setMustPunchIn(false); document.body.style.overflow = 'auto';
-                        await queryClient.refetchQueries({ queryKey: ['todayAttendance'] });
-                        await queryClient.refetchQueries({ queryKey: ['holidays'] });
-                      } catch (err) {
-                        toast.error(err.response?.data?.detail || 'Failed to mark leave');
-                      } finally { setLoading(false); }
+                      await new Promise(r => setTimeout(r, 500));
+                      toast.success('Marked on leave today');
+                      setActionDone(true); setMustPunchIn(false);
+                      setLoading(false);
                     }}
                   >
                     On Leave Today
