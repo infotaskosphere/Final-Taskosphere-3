@@ -1293,10 +1293,20 @@ export default function VisitsPage() {
   const { data: clients = [] } = useQuery({ queryKey: ["clients"], queryFn: fetchClients });
   const hasCrossVisibility = !!(user?.permissions?.view_other_visits?.length || user?.permissions?.can_view_all_visits);
   const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: fetchUsers, enabled: isAdmin || isMgr || hasCrossVisibility });
-  const { data: summary } = useQuery({
-    queryKey: ["visits-summary", filterUser !== "all" ? filterUser : user?.id, monthStr],
-    queryFn: () => fetchSummary(filterUser !== "all" ? filterUser : user?.id, monthStr),
-  });
+  const summary = useMemo(() => {
+    const total = visits.length;
+    const by_status = {};
+    visits.forEach(v => {
+      const s = v.status || "scheduled";
+      by_status[s] = (by_status[s] || 0) + 1;
+    });
+    const completed = by_status.completed || 0;
+    return {
+      total,
+      by_status,
+      completion_rate: total ? Math.round((completed / total) * 1000) / 10 : 0,
+    };
+  }, [visits]);
 
   useEffect(() => {
     if (selectedVisit) {
