@@ -3097,7 +3097,7 @@ const ProductModal = ({ open, onClose, isDark, onSaved }) => {
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════════
 const LIST_PAGE_SIZE = 20;
-export default function Invoicing() {
+function Invoicing() {
   // ── A. ALL useState (top of component) ──────────────────────────────────────
   const [invoices, setInvoices] = useState([]);
   const [companies, setCompanies] = useState([]);
@@ -3587,3 +3587,5 @@ const fetchAll = useCallback(async () => {
     </div>
   );
 }
+
+export default Invoicing;
