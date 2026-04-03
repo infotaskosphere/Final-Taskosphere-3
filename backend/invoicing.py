@@ -1583,6 +1583,216 @@ async def parse_backup_file(
                 pass
 
 
+# ═══════════════════════════════════════════════════════════
+# IMPORT BACKUP → SAVE TO MONGODB  (v6.3 addition)
+# ═══════════════════════════════════════════════════════════
+
+class ImportBackupRequest(BaseModel):
+    company_id: str
+    source: str = "unknown"
+    invoices: List[dict] = []
+    clients: List[dict] = []
+    items: List[dict] = []
+    payments: List[dict] = []
+    skip_duplicates: bool = True
+
+
+class ImportBackupResult(BaseModel):
+    invoices_imported: int = 0
+    invoices_skipped: int = 0
+    clients_imported: int = 0
+    items_imported: int = 0
+    payments_imported: int = 0
+    errors: List[str] = []
+
+
+@router.post("/invoices/import-backup", response_model=ImportBackupResult)
+async def import_backup(
+    data: ImportBackupRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Bulk-saves the JSON output of /invoices/parse-backup into MongoDB.
+
+    Frontend flow:
+      1. POST /invoices/parse-backup  → preview JSON
+      2. User reviews
+      3. POST /invoices/import-backup → save to DB  ← this endpoint
+    """
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+
+    now = datetime.now(timezone.utc).isoformat()
+    result = ImportBackupResult()
+
+    # ── 1. Clients ─────────────────────────────────────────
+    client_name_to_id: dict = {}
+    for c in data.clients:
+        name = (c.get("full_name") or c.get("client_name") or "").strip()
+        if not name:
+            continue
+        try:
+            existing = await db.clients.find_one({
+                "company_id": data.company_id,
+                "company_name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}
+            })
+            if existing:
+                client_name_to_id[name] = existing["id"]
+                continue
+            cid = str(uuid.uuid4())
+            await db.clients.insert_one({
+                "id": cid,
+                "company_id": data.company_id,
+                "company_name": name,
+                "phone": c.get("phone_number", ""),
+                "email": c.get("email", ""),
+                "address": c.get("address", ""),
+                "client_gstin": c.get("name_gstin_number", ""),
+                "state": c.get("name_state", ""),
+                "client_type": "other",
+                "status": "active",
+                "imported_from": data.source,
+                "created_by": current_user.id,
+                "created_at": now,
+                "updated_at": now,
+            })
+            client_name_to_id[name] = cid
+            result.clients_imported += 1
+        except Exception as e:
+            result.errors.append(f"Client '{name}': {e}")
+
+    # ── 2. Items / Products ────────────────────────────────
+    for item in data.items:
+        item_name = (item.get("name") or "").strip()
+        if not item_name:
+            continue
+        try:
+            existing = await db.products.find_one({
+                "company_id": data.company_id,
+                "name": {"$regex": f"^{re.escape(item_name)}$", "$options": "i"}
+            })
+            if existing:
+                continue
+            await db.products.insert_one({
+                "id": str(uuid.uuid4()),
+                "company_id": data.company_id,
+                "name": item_name,
+                "description": item.get("description", ""),
+                "hsn_sac": item.get("hsn_sac", ""),
+                "unit": "service",
+                "unit_price": float(item.get("sale_price", 0)),
+                "gst_rate": float(item.get("gst_rate", 18)),
+                "is_service": False,
+                "imported_from": data.source,
+                "created_by": current_user.id,
+                "created_at": now,
+            })
+            result.items_imported += 1
+        except Exception as e:
+            result.errors.append(f"Item '{item_name}': {e}")
+
+    # ── 3. Invoices ────────────────────────────────────────
+    for inv in data.invoices:
+        inv_no = (inv.get("invoice_no") or "").strip()
+        try:
+            # Duplicate check
+            if data.skip_duplicates and inv_no:
+                existing = await db.invoices.find_one({
+                    "company_id": data.company_id,
+                    "invoice_no": inv_no,
+                })
+                if existing:
+                    result.invoices_skipped += 1
+                    continue
+
+            client_name = (inv.get("client_name") or "").strip()
+            invoice_doc = {
+                "id": str(uuid.uuid4()),
+                "company_id": data.company_id,
+                "client_id": client_name_to_id.get(client_name),
+                "invoice_no": inv_no or f"IMP-{str(uuid.uuid4())[:8].upper()}",
+                "invoice_type": inv.get("invoice_type", "tax_invoice"),
+                "invoice_date": inv.get("invoice_date", date.today().isoformat()),
+                "due_date": inv.get("due_date", date.today().isoformat()),
+                "client_name": client_name,
+                "client_email": inv.get("client_email", ""),
+                "client_phone": inv.get("client_phone", ""),
+                "client_gstin": inv.get("client_gstin", ""),
+                "client_address": inv.get("client_address", ""),
+                "client_state": inv.get("client_state", ""),
+                "is_interstate": inv.get("is_interstate", False),
+                "items": inv.get("items", []),
+                "subtotal": float(inv.get("subtotal", 0)),
+                "total_discount": float(inv.get("total_discount", 0)),
+                "total_taxable": float(inv.get("total_taxable", 0)),
+                "total_cgst": float(inv.get("total_cgst", 0)),
+                "total_sgst": float(inv.get("total_sgst", 0)),
+                "total_igst": float(inv.get("total_igst", 0)),
+                "total_gst": float(inv.get("total_gst", 0)),
+                "grand_total": float(inv.get("grand_total", 0)),
+                "amount_paid": float(inv.get("amount_paid", 0)),
+                "amount_due": float(inv.get("amount_due", 0)),
+                "status": inv.get("status", "draft"),
+                "payment_terms": inv.get("payment_terms", "Imported"),
+                "notes": inv.get("notes", ""),
+                "reference_no": inv.get("reference_no", ""),
+                "supply_state": inv.get("client_state", ""),
+                "discount_amount": 0.0,
+                "shipping_charges": 0.0,
+                "other_charges": 0.0,
+                "terms_conditions": "",
+                "is_recurring": False,
+                "recurrence_pattern": "monthly",
+                "recurrence_end": None,
+                "next_invoice_date": None,
+                "invoice_template": "prestige",
+                "invoice_theme": "classic_blue",
+                "invoice_custom_color": "#0D3B66",
+                "pdf_drive_link": "",
+                "imported_from": data.source,
+                "created_by": current_user.id,
+                "created_at": now,
+                "updated_at": now,
+            }
+            await db.invoices.insert_one(invoice_doc)
+            result.invoices_imported += 1
+        except Exception as e:
+            result.errors.append(f"Invoice '{inv_no}': {e}")
+
+    # ── 4. Payments (orphaned — no invoice_id match) ───────
+    for pay in data.payments:
+        try:
+            amount = float(pay.get("amount", 0))
+            if amount <= 0:
+                continue
+            await db.payments.insert_one({
+                "id": str(uuid.uuid4()),
+                "invoice_id": "",
+                "company_id": data.company_id,
+                "client_name": (pay.get("client_name") or "").strip(),
+                "amount": amount,
+                "payment_date": pay.get("payment_date", date.today().isoformat()),
+                "payment_mode": pay.get("payment_mode", "other"),
+                "reference_no": "",
+                "notes": f"Imported from {data.source}",
+                "imported_from": data.source,
+                "created_by": current_user.id,
+                "created_at": now,
+            })
+            result.payments_imported += 1
+        except Exception as e:
+            result.errors.append(f"Payment: {e}")
+
+    result.errors = result.errors[:50]
+    logger.info(
+        f"Import [{data.source}]: {result.invoices_imported} invoices, "
+        f"{result.clients_imported} clients, {result.items_imported} items, "
+        f"{result.invoices_skipped} skipped, {len(result.errors)} errors"
+    )
+    return result
+
+
+
 # ─────────────────────────────────────────────
 # ✅ NEW ENDPOINT (CHANGE 3 — ADD THIS HERE)
 # ─────────────────────────────────────────────
