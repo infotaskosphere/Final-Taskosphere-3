@@ -227,9 +227,11 @@ def can_edit_task(user: User, task: dict) -> bool:
 def can_delete_task(user: User, task: dict) -> bool:
     """
     TASKS – Delete permission matrix:
-      Admin only OR task creator
+      Admin only OR task creator OR can_delete_tasks permission
     """
     if user.role == "admin":
+        return True
+    if _get_perm(user, "can_delete_tasks"):
         return True
     if task.get("created_by") == user.id:
         return True
@@ -393,10 +395,13 @@ def can_view_activity(user: User, target_user_id: str) -> bool:
     """
     STAFF ACTIVITY – View:
       1. Admin → allow
-      2. Specific: target_user_id in view_other_activity → allow
-      3. Deny (staff cannot view their own in the summary endpoint)
+      2. Universal: can_view_staff_activity → allow (manager default)
+      3. Specific: target_user_id in view_other_activity → allow
+      4. Deny (staff cannot view others without explicit grant)
     """
     if user.role == "admin":
+        return True
+    if _get_perm(user, "can_view_staff_activity"):
         return True
     view_other = _get_perm(user, "view_other_activity", [])
     if target_user_id in (view_other or []):
@@ -475,11 +480,15 @@ def can_manage_user(user: User) -> bool:
 # $or/$and chains every time.
 # ==========================================================
 
-def build_task_query(user: User) -> dict:
+def build_task_query(user: User, department_user_ids: Optional[List[str]] = None) -> dict:
     """
     Returns a MongoDB query filter for tasks based on the permission matrix.
+
     Admin → {}  (no filter = all tasks)
-    Others → filtered by universal / specific / ownership rules
+    Manager → own tasks + same-department staff tasks (SCOPE: OWN + SAME_DEPARTMENT)
+    Staff   → own tasks only (SCOPE: OWN)
+
+    department_user_ids: list of same-department user IDs (required for manager scope)
     """
     if user.role == "admin":
         return {}
@@ -494,15 +503,25 @@ def build_task_query(user: User) -> dict:
         {"created_by": user.id},
         {"sub_assignees": user.id},
     ]
+
+    # Manager: also include same-department staff tasks
+    if user.role == "manager" and department_user_ids:
+        or_clauses.append({"assigned_to": {"$in": department_user_ids}})
+        or_clauses.append({"created_by": {"$in": department_user_ids}})
+
+    # Admin-granted cross-user view
     if view_other:
         or_clauses.append({"assigned_to": {"$in": view_other}})
 
     return {"$or": or_clauses}
 
 
-def build_todo_query(user: User, target_user_id: Optional[str] = None) -> dict:
+def build_todo_query(user: User, target_user_id: Optional[str] = None, department_user_ids: Optional[List[str]] = None) -> dict:
     """
     Returns a MongoDB query filter for todos based on the permission matrix.
+
+    Manager scope: OWN + SAME_DEPARTMENT users' todos
+    Staff scope:   OWN only
     """
     if user.role == "admin":
         return {"user_id": target_user_id} if target_user_id else {}
@@ -512,7 +531,8 @@ def build_todo_query(user: User, target_user_id: Optional[str] = None) -> dict:
         if target_user_id == user.id:
             return {"user_id": target_user_id}
         view_other = _get_perm(user, "view_other_todos", []) or []
-        if target_user_id in view_other:
+        dept_ids = department_user_ids or []
+        if target_user_id in view_other or (user.role == "manager" and target_user_id in dept_ids):
             return {"user_id": target_user_id}
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -521,8 +541,14 @@ def build_todo_query(user: User, target_user_id: Optional[str] = None) -> dict:
 
     view_other = _get_perm(user, "view_other_todos", []) or []
     or_clauses: List[dict] = [{"user_id": user.id}]
+
+    # Manager: include same-department users
+    if user.role == "manager" and department_user_ids:
+        or_clauses.append({"user_id": {"$in": department_user_ids}})
+
     if view_other:
         or_clauses.append({"user_id": {"$in": view_other}})
+
     return {"$or": or_clauses}
 
 
@@ -545,24 +571,34 @@ def build_client_query(user: User) -> dict:
     return {"$or": or_clauses}
 
 
-def build_attendance_query(user: User, target_user_id: Optional[str] = None) -> dict:
+def build_attendance_query(user: User, target_user_id: Optional[str] = None, department_user_ids: Optional[List[str]] = None) -> dict:
     """
     Returns a MongoDB query filter for attendance based on the permission matrix.
+
+    Manager scope: OWN + SAME_DEPARTMENT users' attendance (when can_view_attendance=True)
+    Staff scope:   OWN only
     """
     if user.role == "admin":
         return {"user_id": target_user_id} if target_user_id else {}
 
     if target_user_id:
         if not can_view_attendance(user, target_user_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You do not have access to this user's attendance"
-            )
+            # Manager can view same-department users even without can_view_attendance flag
+            dept_ids = department_user_ids or []
+            if not (user.role == "manager" and target_user_id in dept_ids):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You do not have access to this user's attendance"
+                )
         return {"user_id": target_user_id}
 
     # No specific user requested — return what the user is allowed to see
     if _get_perm(user, "can_view_attendance"):
-        return {}  # Universal access — all attendance records
+        if user.role == "manager" and department_user_ids:
+            # Manager sees own + same-department staff attendance
+            dept_ids = department_user_ids or []
+            return {"user_id": {"$in": [user.id] + dept_ids}}
+        return {}  # Universal access (admin-granted)
 
     view_other = _get_perm(user, "view_other_attendance", []) or []
     or_clauses: List[dict] = [{"user_id": user.id}]
@@ -588,22 +624,97 @@ def build_report_query(user: User, target_user_id: Optional[str] = None) -> Opti
 # ==========================================================
 # DATA SCOPE & TEAM HELPERS
 # ==========================================================
+
+async def get_same_department_user_ids(user_id: str, include_managers: bool = False) -> List[str]:
+    """
+    Returns list of user IDs that belong to the same departments as the given user.
+    By default returns only staff-role users (exclude the user themselves).
+    Set include_managers=True to also include manager-role users.
+
+    Used for:
+      - Manager cross-visibility: manager sees same-department staff's data
+      - Data access rule: resource.department == user.department
+    """
+    user = await db.users.find_one({"id": user_id})
+    if not user or not user.get("departments"):
+        return []
+
+    role_filter = ["staff"] if not include_managers else ["staff", "manager"]
+
+    team = await db.users.find(
+        {
+            "departments": {"$in": user["departments"]},
+            "id": {"$ne": user_id},
+            "role": {"$in": role_filter}
+        },
+        {"_id": 0, "id": 1}
+    ).to_list(500)
+    return [u["id"] for u in team]
+
+
 async def get_team_user_ids(manager_id: str) -> List[str]:
     """
     Returns list of user IDs that belong to the same departments as the manager.
     Only staff-role users are returned.
+
+    This is the primary helper used throughout routes for manager-scoped queries.
+    Alias for get_same_department_user_ids(manager_id, include_managers=False).
     """
-    manager = await db.users.find_one({"id": manager_id})
-    if not manager or not manager.get("departments"):
-        return []
-    team = await db.users.find(
-        {
-            "departments": {"$in": manager["departments"]},
-            "id": {"$ne": manager_id},
-            "role": "staff"
-        }
-    ).to_list(100)
-    return [u["id"] for u in team]
+    return await get_same_department_user_ids(manager_id, include_managers=False)
+
+# ==========================================================
+# DEPARTMENT-SCOPED DATA ACCESS RULE ENFORCEMENT
+#
+# Rule (from permission matrix):
+#   ALLOW IF resource.department == user.department
+#   AND (resource.user_id == user.id OR resource.user_id IN SAME_DEPARTMENT_USERS)
+#
+# For managers: resource.user_id can be own OR same-department staff
+# For staff:    resource.user_id must be own
+# ==========================================================
+
+def check_department_data_access(user: User, resource: dict, dept_user_ids: List[str]) -> bool:
+    """
+    Enforces the DATA_ACCESS_RULE from the permission matrix.
+
+    Manager rule:
+      ALLOW IF resource.department == user.department
+      AND (resource.user_id == user.id OR resource.user_id IN SAME_DEPARTMENT_USERS)
+
+    Staff rule:
+      ALLOW IF resource.department == user.department
+      AND resource.user_id == user.id
+
+    Returns True if access is allowed, False otherwise.
+    Admin always allowed (caller must check role == admin separately).
+    """
+    if user.role == "admin":
+        return True
+
+    # Check department match (if resource has department field)
+    resource_dept = resource.get("department") or resource.get("departments")
+    if resource_dept:
+        user_depts = user.departments or []
+        if isinstance(resource_dept, list):
+            if not any(d in user_depts for d in resource_dept):
+                return False
+        else:
+            if resource_dept not in user_depts:
+                return False
+
+    # Check user_id ownership
+    resource_user = resource.get("user_id") or resource.get("assigned_to") or resource.get("created_by")
+
+    if user.role == "manager":
+        # Manager can see own + same-department staff
+        if resource_user == user.id:
+            return True
+        if resource_user in dept_user_ids:
+            return True
+        return False
+    else:
+        # Staff: own only
+        return resource_user == user.id
 
 # ==========================================================
 # LEGACY COMPAT HELPERS (kept so existing route code that
