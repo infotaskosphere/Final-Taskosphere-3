@@ -1700,7 +1700,7 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(get_c
 @router.get("/invoices")
 async def list_invoices(
     page: int = Query(1, ge=1, description="Page number (1-based)"),
-    page_size: int = Query(20, ge=1, le=100, description="Results per page"),
+    page_size: int = Query(20, ge=1, le=10000, description="Results per page"),
     status: Optional[str] = Query(None, description="Filter by status"),
     search: Optional[str] = Query(None, description="Search by client name or invoice number"),
     current_user: User = Depends(get_current_user),
