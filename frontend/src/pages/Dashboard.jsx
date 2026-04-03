@@ -866,11 +866,20 @@ export default function Dashboard() {
   const isDark = useDark();
 
   // ── Data queries ──────────────────────────────────────────────────────────
-  const { data: tasks = [] }            = useTasks();
-  const { data: stats }                 = useDashboardStats();
-  const { data: upcomingDueDates = [] } = useUpcomingDueDates();
-  const { data: todayAttendance }       = useTodayAttendance();
-  const updateTaskMutation              = useUpdateTask();
+  const safeArray = (val) => Array.isArray(val) ? val : [];
+
+// Queries
+  const { data: tasksData } = useTasks();
+  const { data: stats } = useDashboardStats();
+  const { data: upcomingDueDatesData } = useUpcomingDueDates();
+  const { data: todayAttendance } = useTodayAttendance();
+
+// Mutations
+  const updateTaskMutation = useUpdateTask();
+
+// Safe normalized data (CRITICAL FIX)
+  const tasks = safeArray(tasksData);
+  const upcomingDueDates = safeArray(upcomingDueDatesData);
 
   const { data: holidaysData = [] } = useQuery({
     queryKey: ['holidays'],
@@ -883,7 +892,7 @@ export default function Dashboard() {
     queryFn: async () => {
       if (!user?.id) return [];
       const res = await api.get('/todos', { params: { user_id: user.id } });
-      return res.data;
+      return res.data || [];
     },
     enabled: !!user?.id, staleTime: 0, refetchOnWindowFocus: true,
   });
@@ -910,7 +919,10 @@ export default function Dashboard() {
   }, [holidaysData]);
 
   const todos = useMemo(() =>
-    todosRaw.map(todo => ({ ...todo, completed: todo.status === 'completed' || todo.is_completed === true })),
+    (Array.isArray(todosRaw) ? todosRaw : []).map(todo => ({
+      ...todo,
+      completed: todo.status === 'completed' || todo.is_completed === true
+    })),
     [todosRaw]
   );
   const pendingTodos = useMemo(() => todos.filter(todo => !todo.completed), [todos]);
