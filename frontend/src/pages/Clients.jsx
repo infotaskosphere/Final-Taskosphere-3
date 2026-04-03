@@ -2109,14 +2109,54 @@ export default function Clients() {
               <Button variant="outline" onClick={() => setPreviewOpen(false)} className="h-9 px-4 text-sm rounded-xl border-slate-200">Cancel</Button>
               <Button className="h-9 px-5 text-sm rounded-xl text-white font-semibold" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
                 onClick={async () => {
-                  setImportLoading(true); let success = 0;
+                  setImportLoading(true); let success = 0; let updated = 0;
                   for (const row of previewData) {
-                    if (clients.find(c => c.company_name?.toLowerCase().trim() === row.company_name?.toLowerCase().trim())) continue;
+                    const existing = clients.find(c => c.company_name?.toLowerCase().trim() === row.company_name?.toLowerCase().trim());
+                    if (existing) {
+                      // Upsert: fill only missing fields in the existing client
+                      const updatePayload = {};
+                      if (!existing.email && row.email?.trim()) updatePayload.email = row.email.trim();
+                      if (!existing.phone && row.phone?.trim()) updatePayload.phone = row.phone.replace(/\D/g, '');
+                      if (!existing.address && row.address?.trim()) updatePayload.address = row.address.trim();
+                      if (!existing.city && row.city?.trim()) updatePayload.city = row.city.trim();
+                      if (!existing.state && row.state?.trim()) updatePayload.state = row.state.trim();
+                      if (!existing.referred_by && row.referred_by?.trim()) updatePayload.referred_by = row.referred_by.trim();
+                      if ((!existing.services || existing.services.length === 0) && row.services) updatePayload.services = row.services.split(',').map(s => s.trim()).filter(Boolean);
+                      if (!existing.notes && row.notes?.trim()) updatePayload.notes = row.notes.trim();
+                      if (Object.keys(updatePayload).length > 0) {
+                        try { await api.put(`/clients/${existing.id}`, updatePayload); updated++; } catch(err) { console.error(err); }
+                      }
+                      continue;
+                    }
                     try {
-                      await api.post('/clients', { company_name: row.company_name?.trim(), client_type: ['proprietor','pvt_ltd','llp','partnership','huf','trust','other'].includes(row.client_type) ? row.client_type : 'proprietor', email: row.email?.trim() || null, phone: row.phone?.replace(/\D/g, '') || null, birthday: row.birthday || null, address: row.address?.trim() || null, city: row.city?.trim() || null, state: row.state?.trim() || null, services: row.services ? row.services.split(',').map(s => s.trim()) : [], notes: row.notes?.trim() || null, status: row.status || 'active', referred_by: row.referred_by?.trim() || null, assigned_to: null, assignments: [], contact_persons: [1,2,3].reduce((acc,n) => { const name = row[`contact_name_${n}`]?.trim(); if (name) acc.push({ name, designation: row[`contact_designation_${n}`]?.trim() || null, email: row[`contact_email_${n}`]?.trim() || null, phone: row[`contact_phone_${n}`]?.replace(/\D/g,'') || null, birthday: row[`contact_birthday_${n}`] || null, din: row[`contact_din_${n}`]?.trim() || null }); return acc; }, []), dsc_details: [] });
+                      await api.post('/clients', {
+                        company_name: row.company_name?.trim(),
+                        client_type: ['proprietor','pvt_ltd','llp','partnership','huf','trust','other'].includes(row.client_type) ? row.client_type : 'proprietor',
+                        email: row.email?.trim() || null,
+                        phone: row.phone?.replace(/\D/g, '') || null,
+                        birthday: row.birthday || null,
+                        address: row.address?.trim() || null,
+                        city: row.city?.trim() || null,
+                        state: row.state?.trim() || null,
+                        services: row.services ? row.services.split(',').map(s => s.trim()).filter(Boolean) : [],
+                        notes: row.notes?.trim() || null,
+                        status: row.status || 'active',
+                        referred_by: row.referred_by?.trim() || null,
+                        assigned_to: null,
+                        assignments: [],
+                        contact_persons: [1,2,3].reduce((acc,n) => {
+                          const name = row[`contact_name_${n}`]?.trim();
+                          if (name) acc.push({ name, designation: row[`contact_designation_${n}`]?.trim() || null, email: row[`contact_email_${n}`]?.trim() || null, phone: row[`contact_phone_${n}`]?.replace(/\D/g,'') || null, birthday: row[`contact_birthday_${n}`] || null, din: row[`contact_din_${n}`]?.trim() || null });
+                          return acc;
+                        }, []),
+                        dsc_details: [],
+                      });
                       success++;
                     } catch(err) { console.error(err); }
                   }
+                  toast.success(`${success} clients imported, ${updated} updated`);
+                  fetchClients(); setPreviewOpen(false); setImportLoading(false);
+                }}
                   toast.success(`${success} clients imported`); fetchClients(); setPreviewOpen(false); setImportLoading(false);
                 }}>Confirm &amp; Import All</Button>
             </div>
