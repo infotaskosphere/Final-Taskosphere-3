@@ -1404,7 +1404,7 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [results, setResults] = useState({ imported: 0, clients: 0, skipped: 0, errors: [] });
+  const [results, setResults] = useState({ imported: 0, clients: 0, clients_updated: 0, skipped: 0, errors: [] });
   const [selectedFirm, setSelectedFirm] = useState('__none__');
   const [importClients, setImportClients] = useState(true);
   const [importInvoices, setImportInvoices] = useState(true);
