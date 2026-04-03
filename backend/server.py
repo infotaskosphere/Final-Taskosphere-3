@@ -3648,7 +3648,10 @@ async def create_client(payload: dict, current_user: User = Depends(get_current_
         # Persist extra fields from frontend that live outside Pydantic schema
         for key in ("address", "city", "state", "client_type_label",
                     "contact_persons", "dsc_details", "assignments",
-                    "referred_by"):
+                    "referred_by", "gstin", "pan", "gst_treatment",
+                    "place_of_supply", "default_payment_terms", "credit_limit",
+                    "opening_balance", "opening_balance_type", "tally_ledger_name",
+                    "tally_group", "website", "msme_number"):
             val = payload.get(key)
             if val is not None:
                 doc[key] = val
@@ -3766,6 +3769,11 @@ async def update_client(
         "address", "city", "state",
         "services", "notes", "assigned_to", "assignments",
         "status", "contact_persons", "dsc_details", "referred_by",
+        # Tax & Billing
+        "gstin", "pan", "gst_treatment", "place_of_supply",
+        "default_payment_terms", "credit_limit", "opening_balance",
+        "opening_balance_type", "tally_ledger_name", "tally_group",
+        "website", "msme_number",
     }
     update_data = {k: v for k, v in client_data.items() if k in ALLOWED_FIELDS}
  
@@ -3774,6 +3782,9 @@ async def update_client(
         "email", "phone", "referred_by", "notes", "assigned_to",
         "birthday", "date_of_incorporation", "address", "city",
         "state", "client_type_label",
+        "gstin", "pan", "place_of_supply", "default_payment_terms",
+        "credit_limit", "opening_balance", "tally_ledger_name",
+        "tally_group", "website", "msme_number",
     }
     for field in NULLABLE_FIELDS:
         if field in update_data and update_data[field] == "":
