@@ -614,9 +614,12 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
   };
 
   // When lead is selected, auto-fill if lead has client info
-  const handleLeadSelect = (leadId) => {
+const handleLeadSelect = (leadId) => {
+    if (!leadId || leadId === 'none') {
+      setForm(prev => ({ ...prev, lead_id: '' }));
+      return;
+    }
     setForm(prev => ({ ...prev, lead_id: leadId }));
-    if (!leadId) return;
     const selectedLead = leads.find(l => l.id === leadId);
     if (selectedLead && !form.client_name) {
       setForm(prev => ({
@@ -741,10 +744,10 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
 
                 <div className="space-y-1.5">
                   <Label className="text-xs font-semibold">Link to Lead (Optional)</Label>
-                  <Select value={form.lead_id || ''} onValueChange={handleLeadSelect}>
+                  <Select value={form.lead_id || 'none'} onValueChange={handleLeadSelect}>
                     <SelectTrigger className="h-9 rounded-xl text-sm"><SelectValue placeholder="Select a lead" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">-- No Lead --</SelectItem>
+                      <SelectItem value="none">-- No Lead --</SelectItem>
                       {leads.map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.email})</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -756,10 +759,10 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
                 <Label className="text-xs font-semibold text-blue-700 flex items-center gap-1 mb-2">
                   <Users className="h-3.5 w-3.5" />Select from Client List (auto-fills details)
                 </Label>
-                <Select value={form.client_id || ''} onValueChange={handleClientSelect}>
+                <Select value={form.client_id || 'none'} onValueChange={handleClientSelect}>
                   <SelectTrigger className="h-9 rounded-xl text-sm bg-white"><SelectValue placeholder="Choose existing client…" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">-- Enter manually below --</SelectItem>
+                    <SelectItem value="none">-- Enter manually below --</SelectItem>
                     {clients.map(c => (
                       <SelectItem key={c.id} value={c.id}>
                         {c.company_name}{c.phone ? ` — ${c.phone}` : ''}{c.email ? ` — ${c.email}` : ''}
