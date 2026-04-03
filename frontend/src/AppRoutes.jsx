@@ -4,7 +4,8 @@ import { useAuth } from "@/contexts/AuthContext.jsx";
 import DashboardLayout from "@/components/layout/DashboardLayout.jsx";
 
 /* ── Lazy Loaded Pages ──────────────────────────────────────────────────── */
-const IdentixAttendance = lazy(() => import("@/pages/IdentixAttendance.jsx"));
+// ❌ REMOVED: IdentixAttendance (file does not exist)
+
 const Login             = lazy(() => import("@/pages/Login.jsx"));
 const TaskAudit         = lazy(() => import("@/pages/TaskAudit.jsx"));
 const Register          = lazy(() => import("@/pages/Register.jsx"));
@@ -16,7 +17,7 @@ const DocumentsRegister = lazy(() => import("@/pages/DocumentsRegister.jsx"));
 const Attendance        = lazy(() => import("@/pages/Attendance.jsx"));
 const Reports           = lazy(() => import("@/pages/Reports.jsx"));
 const Clients           = lazy(() => import("@/pages/Clients.jsx"));
-const Users             = lazy(() => import("@/pages/Users.jsx"));
+const Users             = lazy(() => import("@/pages/Users.jsx")); // ✅ contains Identix
 const DueDates          = lazy(() => import("@/pages/DueDates.jsx"));
 const StaffActivity     = lazy(() => import("@/pages/StaffActivity.jsx"));
 const LeadsPage         = lazy(() => import("@/pages/Leads.jsx"));
@@ -29,7 +30,6 @@ const Invoicing         = lazy(() => import("@/pages/Invoicing.jsx"));
 
 /* ── Route Guards ───────────────────────────────────────────────────────── */
 
-/* ✅ FIXED: Never return null */
 const Protected = ({ children }) => {
   const { user, loading } = useAuth();
 
@@ -113,13 +113,9 @@ function AppRoutes() {
       <Route path="/invoicing" element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><Invoicing /></PageLoader></Permission>} />
       <Route path="/staff-activity" element={<Permission permission="can_view_staff_activity"><PageLoader><StaffActivity /></PageLoader></Permission>} />
       <Route path="/task-audit" element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
-      <Route path="/identix" element={
-        <Permission>
-          <PageLoader><IdentixAttendance /></PageLoader>
-        </Permission>
-      } />
-      
-      
+
+      {/* ❌ REMOVED IDENTIX ROUTE (now inside Users page) */}
+
       {/* Settings */}
       <Route path="/settings/email" element={<Protected><PageLoader><EmailSettings /></PageLoader></Protected>} />
       <Route path="/settings/general" element={<Protected><PageLoader><GeneralSettings /></PageLoader></Protected>} />
