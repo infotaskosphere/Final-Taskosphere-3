@@ -12,6 +12,7 @@ import {
   Phone, Mail, Globe, CreditCard, User, Tag, Info,
   IndianRupee, Percent, Hash, Calendar, Link, ExternalLink,
   Send, MessageCircle, Settings, Eye, ArrowRight, Users,
+  Printer
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -22,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { motion, AnimatePresence } from 'framer-motion';
+import { generateQuotationHTML } from './QuotationTemplates';
 
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A' };
 
@@ -162,7 +164,7 @@ function WhatsAppModal({ open, onClose, quotation, company, pdfType = 'quotation
       : `Hi ${quotation.client_name || ''},\n\nPlease find our quotation *${quotation.quotation_no}* for *${quotation.service}*.\n\n💰 *Total: Rs. ${(quotation.total || 0).toLocaleString()}*\n📅 Valid for ${quotation.validity_days || 30} days\n\nLooking forward to working with you.\n\nRegards,\n${company?.name || ''}`;
     setMessage(base);
   }, [open, quotation, company, pdfType]);
-
+ 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
       <DialogContent className="max-w-lg">
@@ -1050,7 +1052,25 @@ export default function Quotations() {
       toast.error(err?.response?.data?.detail || 'Failed to delete quotation');
     }
   };
+  // 🔥 ADD EXACTLY HERE (AFTER handleDeleteQuotation)
 
+const handlePreviewQuotation = (quotation, company = {}) => {
+  const html = generateQuotationHTML(quotation, { company });
+
+  const win = window.open('', '_blank');
+  win.document.write(html);
+  win.document.close();
+};
+
+const handlePrintQuotation = (quotation, company = {}) => {
+  const html = generateQuotationHTML(quotation, { company });
+
+  const win = window.open('', '_blank');
+  win.document.write(html);
+  win.document.close();
+
+  win.print();
+};
   const handleDownloadPdf = async (qtnId, qtnNo) => {
     setDownloading(qtnId + '-pdf');
     try {
@@ -1240,18 +1260,75 @@ export default function Quotations() {
                     </div>
 
                     {/* Quotation PDF actions */}
-                    <div className="flex flex-wrap gap-1.5 mb-2">
-                      <Button variant="outline" size="sm" onClick={() => handleDownloadPdf(q.id, q.quotation_no)} disabled={downloading === q.id + '-pdf'} className="rounded-lg gap-1 text-xs text-blue-600 border-blue-200 hover:bg-blue-50">
-                        {downloading === q.id + '-pdf' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}PDF
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => { setEmailModalQuotation(q); setEmailModalPdfType('quotation'); setIsEmailModalOpen(true); }} className="rounded-lg gap-1 text-xs text-blue-600 border-blue-200 hover:bg-blue-50">
-                        <Mail className="h-3.5 w-3.5" />Email
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => { setWhatsAppModalQuotation(q); setWhatsAppModalPdfType('quotation'); setIsWhatsAppModalOpen(true); }} className="rounded-lg gap-1 text-xs text-green-600 border-green-200 hover:bg-green-50">
-                        <MessageCircle className="h-3.5 w-3.5" />WA
-                      </Button>
-                    </div>
+<div className="flex flex-wrap gap-1.5 mb-2">
+  
+  {/* PDF (optional backend) */}
+  <Button
+    variant="outline"
+    size="sm"
+    onClick={() => handleDownloadPdf(q.id, q.quotation_no)}
+    disabled={downloading === q.id + '-pdf'}
+    className="rounded-lg gap-1 text-xs text-blue-600 border-blue-200 hover:bg-blue-50"
+  >
+    {downloading === q.id + '-pdf'
+      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      : <Download className="h-3.5 w-3.5" />}
+    PDF
+  </Button>
 
+  {/* Preview */}
+  <Button
+    variant="outline"
+    size="sm"
+    onClick={() => handlePreviewQuotation(q, getCompanyById(q.company_id) || {})}
+    className="rounded-lg gap-1 text-xs text-purple-600 border-purple-200 hover:bg-purple-50"
+  >
+    <Eye className="h-3.5 w-3.5" />
+    Preview
+  </Button>
+
+  {/* Print */}
+  <Button
+    variant="outline"
+    size="sm"
+    onClick={() => handlePrintQuotation(q, getCompanyById(q.company_id) || {})}
+    className="rounded-lg gap-1 text-xs text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+  >
+    <Printer className="h-3.5 w-3.5" />
+    Print
+  </Button>
+
+  {/* Email */}
+  <Button
+    variant="outline"
+    size="sm"
+    onClick={() => {
+      setEmailModalQuotation(q);
+      setEmailModalPdfType('quotation');
+      setIsEmailModalOpen(true);
+    }}
+    className="rounded-lg gap-1 text-xs text-blue-600 border-blue-200 hover:bg-blue-50"
+  >
+    <Mail className="h-3.5 w-3.5" />
+    Email
+  </Button>
+
+  {/* WhatsApp */}
+  <Button
+    variant="outline"
+    size="sm"
+    onClick={() => {
+      setWhatsAppModalQuotation(q);
+      setWhatsAppModalPdfType('quotation');
+      setIsWhatsAppModalOpen(true);
+    }}
+    className="rounded-lg gap-1 text-xs text-green-600 border-green-200 hover:bg-green-50"
+  >
+    <MessageCircle className="h-3.5 w-3.5" />
+    WA
+  </Button>
+
+</div>
                     {/* Checklist PDF actions */}
                     <div className="border-t pt-2 mb-2">
                       <p className="text-[10px] text-slate-400 mb-1.5 font-semibold uppercase tracking-wide">Document Checklist</p>
