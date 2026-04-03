@@ -759,27 +759,31 @@ const ClientSearchCombobox = ({ clients = [], value, onSelect, onAddNew, isDark 
 // ════════════════════════════════════════════════════════════════════════════════
 // GST REPORTS MODAL
 // ════════════════════════════════════════════════════════════════════════════════
-const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
-  // ── useState ──
+const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark }) => {
   const [tab, setTab] = useState('gstr1');
   const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
+  const [companyFilter, setCompanyFilter] = useState('all');
+  const [exporting, setExporting] = useState(false);
 
-  // ── useMemo: BASE DATA (always first) ──
-  const monthInvoices = useMemo(() => {
-    return (invoices || []).filter(inv =>
-      inv.invoice_date?.startsWith(month) &&
-      ['tax_invoice','credit_note','debit_note'].includes(inv.invoice_type) &&
-      inv.status !== 'cancelled'
-    );
-  }, [invoices, month]);
+  // ── Base filtered data ──────────────────────────────────────────────────
+  const baseInvoices = useMemo(() => {
+    return (invoices || []).filter(inv => {
+      if (companyFilter !== 'all' && inv.company_id !== companyFilter) return false;
+      if (!inv.invoice_date?.startsWith(month)) return false;
+      if (!['tax_invoice', 'credit_note', 'debit_note'].includes(inv.invoice_type)) return false;
+      if (inv.status === 'cancelled') return false;
+      return true;
+    });
+  }, [invoices, month, companyFilter]);
 
-  // ── useMemo: GSTR-1 (depends on monthInvoices) ──
+  // ── GSTR-1 data ─────────────────────────────────────────────────────────
   const gstr1 = useMemo(() => {
-    const b2b = [], b2cL = [], b2cS = [], cdnr = [], hsnMap = {};
+    const b2b = [], b2cL = [], b2cS = [], cdnr = [];
+    const hsnMap = {};
 
-    for (const inv of monthInvoices) {
+    for (const inv of baseInvoices) {
       const hasGstin = !!inv.client_gstin?.trim();
-      const isCDN = ['credit_note','debit_note'].includes(inv.invoice_type);
+      const isCDN = ['credit_note', 'debit_note'].includes(inv.invoice_type);
       const total = inv.grand_total || 0;
 
       if (isCDN && hasGstin) cdnr.push(inv);
@@ -788,95 +792,422 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
       else b2cS.push(inv);
 
       for (const item of (inv.items || [])) {
-        const key = item.hsn_sac || 'UNKNOWN';
-        if (!hsnMap[key]) {
-          hsnMap[key] = { hsn_sac: key, description: item.description || '', quantity: 0, taxable: 0, igst: 0, cgst: 0, sgst: 0, total_tax: 0 };
-        }
-        hsnMap[key].quantity += item.quantity || 0;
-        hsnMap[key].taxable += item.taxable_value || 0;
-        hsnMap[key].igst += item.igst_amount || 0;
-        hsnMap[key].cgst += item.cgst_amount || 0;
-        hsnMap[key].sgst += item.sgst_amount || 0;
-        hsnMap[key].total_tax += (item.igst_amount || 0) + (item.cgst_amount || 0) + (item.sgst_amount || 0);
+        const key = item.hsn_sac?.trim() || 'UNKNOWN';
+        if (!hsnMap[key]) hsnMap[key] = {
+          hsn_sac: key, description: item.description || '',
+          quantity: 0, taxable: 0, igst: 0, cgst: 0, sgst: 0,
+        };
+        hsnMap[key].quantity  += item.quantity || 0;
+        hsnMap[key].taxable   += item.taxable_value || 0;
+        hsnMap[key].igst      += item.igst_amount || 0;
+        hsnMap[key].cgst      += item.cgst_amount || 0;
+        hsnMap[key].sgst      += item.sgst_amount || 0;
       }
     }
 
-    const b2cSTotal = b2cS.reduce((acc, inv) => ({
-      taxable: acc.taxable + (inv.total_taxable || 0),
-      igst: acc.igst + (inv.total_igst || 0),
-      cgst: acc.cgst + (inv.total_cgst || 0),
-      sgst: acc.sgst + (inv.total_sgst || 0),
+    const b2cSTotal = b2cS.reduce((a, inv) => ({
+      taxable: a.taxable + (inv.total_taxable || 0),
+      igst:    a.igst    + (inv.total_igst    || 0),
+      cgst:    a.cgst    + (inv.total_cgst    || 0),
+      sgst:    a.sgst    + (inv.total_sgst    || 0),
     }), { taxable: 0, igst: 0, cgst: 0, sgst: 0 });
 
     return { b2b, b2cL, b2cS, b2cSTotal, cdnr, hsnSummary: Object.values(hsnMap) };
-  }, [monthInvoices]);
+  }, [baseInvoices]);
 
-  // ── useMemo: GSTR-3B (depends on monthInvoices) ──
+  // ── GSTR-3B data ────────────────────────────────────────────────────────
   const gstr3b = useMemo(() => {
-    const outward = monthInvoices.reduce((acc, inv) => {
-      if (inv.invoice_type !== 'tax_invoice') return acc;
-      return {
-        taxable: acc.taxable + (inv.total_taxable || 0),
-        igst: acc.igst + (inv.total_igst || 0),
-        cgst: acc.cgst + (inv.total_cgst || 0),
-        sgst: acc.sgst + (inv.total_sgst || 0),
-        cess: 0
-      };
-    }, { taxable: 0, igst: 0, cgst: 0, sgst: 0, cess: 0 });
+    const outward = baseInvoices
+      .filter(i => i.invoice_type === 'tax_invoice')
+      .reduce((a, inv) => ({
+        taxable: a.taxable + (inv.total_taxable || 0),
+        igst:    a.igst    + (inv.total_igst    || 0),
+        cgst:    a.cgst    + (inv.total_cgst    || 0),
+        sgst:    a.sgst    + (inv.total_sgst    || 0),
+      }), { taxable: 0, igst: 0, cgst: 0, sgst: 0 });
 
-    const credits = monthInvoices
+    const credits = baseInvoices
       .filter(i => i.invoice_type === 'credit_note')
-      .reduce((acc, inv) => ({
-        taxable: acc.taxable + (inv.total_taxable || 0),
-        igst: acc.igst + (inv.total_igst || 0),
-        cgst: acc.cgst + (inv.total_cgst || 0),
-        sgst: acc.sgst + (inv.total_sgst || 0),
+      .reduce((a, inv) => ({
+        taxable: a.taxable + (inv.total_taxable || 0),
+        igst:    a.igst    + (inv.total_igst    || 0),
+        cgst:    a.cgst    + (inv.total_cgst    || 0),
+        sgst:    a.sgst    + (inv.total_sgst    || 0),
       }), { taxable: 0, igst: 0, cgst: 0, sgst: 0 });
 
     const netIGST = outward.igst - credits.igst;
     const netCGST = outward.cgst - credits.cgst;
     const netSGST = outward.sgst - credits.sgst;
 
-    return { outward, credits, netIGST, netCGST, netSGST, netTotal: netIGST + netCGST + netSGST };
-  }, [monthInvoices]);
+    return {
+      outward, credits, netIGST, netCGST, netSGST,
+      netTotal: netIGST + netCGST + netSGST,
+    };
+  }, [baseInvoices]);
+
+  // ── Export helpers ──────────────────────────────────────────────────────
+  const handleExport = () => {
+    setExporting(true);
+    try {
+      if (tab === 'gstr1') {
+        const rows = [
+          ['GSTR-1 Export', `Month: ${month}`, `Company: ${companyFilter === 'all' ? 'All' : (companies.find(c=>c.id===companyFilter)?.name || companyFilter)}`],
+          [],
+          ['== B2B Invoices =='],
+          ['Invoice No', 'Date', 'Client', 'GSTIN', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total'],
+          ...gstr1.b2b.map(inv => [
+            inv.invoice_no, inv.invoice_date, inv.client_name, inv.client_gstin,
+            inv.total_taxable, inv.total_cgst, inv.total_sgst, inv.total_igst, inv.grand_total,
+          ]),
+          [],
+          ['== B2C Large (>2.5L) =='],
+          ['Invoice No', 'Date', 'Client', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total'],
+          ...gstr1.b2cL.map(inv => [
+            inv.invoice_no, inv.invoice_date, inv.client_name,
+            inv.total_taxable, inv.total_cgst, inv.total_sgst, inv.total_igst, inv.grand_total,
+          ]),
+          [],
+          ['== B2C Small Summary =='],
+          ['Taxable', 'CGST', 'SGST', 'IGST'],
+          [gstr1.b2cSTotal.taxable, gstr1.b2cSTotal.cgst, gstr1.b2cSTotal.sgst, gstr1.b2cSTotal.igst],
+          [],
+          ['== HSN Summary =='],
+          ['HSN/SAC', 'Description', 'Quantity', 'Taxable', 'CGST', 'SGST', 'IGST'],
+          ...gstr1.hsnSummary.map(h => [h.hsn_sac, h.description, h.quantity, h.taxable, h.cgst, h.sgst, h.igst]),
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'GSTR-1');
+        XLSX.writeFile(wb, `GSTR1_${month}.xlsx`);
+      } else {
+        const rows = [
+          ['GSTR-3B Export', `Month: ${month}`],
+          [],
+          ['Section', 'Taxable Value', 'IGST', 'CGST', 'SGST'],
+          ['3.1 Outward Taxable Supplies', gstr3b.outward.taxable, gstr3b.outward.igst, gstr3b.outward.cgst, gstr3b.outward.sgst],
+          ['Credit Notes Adjustment', gstr3b.credits.taxable, gstr3b.credits.igst, gstr3b.credits.cgst, gstr3b.credits.sgst],
+          ['Net Tax Liability', '', gstr3b.netIGST, gstr3b.netCGST, gstr3b.netSGST],
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'GSTR-3B');
+        XLSX.writeFile(wb, `GSTR3B_${month}.xlsx`);
+      }
+      toast.success('GST report exported!');
+    } catch (e) {
+      toast.error('Export failed');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // ── Shared table styles ─────────────────────────────────────────────────
+  const thCls = `px-3 py-2.5 text-left text-[9px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`;
+  const tdCls = `px-3 py-2 text-xs ${isDark ? 'text-slate-300' : 'text-slate-700'}`;
+  const trCls = `border-b last:border-0 ${isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50'}`;
+  const cardCls = `rounded-xl border ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`;
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className={`max-w-5xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 [&>button.absolute]:hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+      <DialogContent className={`max-w-5xl max-h-[94vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 [&>button.absolute]:hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <DialogTitle className="sr-only">GST Returns</DialogTitle>
-        <DialogDescription className="sr-only">Generate GSTR-1, GSTR-3B, GSTR-2B reports</DialogDescription>
-        <div className="px-7 py-5 flex items-center justify-between"
+        <DialogDescription className="sr-only">GSTR-1 and GSTR-3B reports</DialogDescription>
+
+        {/* Header */}
+        <div className="px-6 py-4 flex items-center justify-between gap-4 flex-wrap flex-shrink-0"
           style={{ background: 'linear-gradient(135deg, #064e3b, #065f46, #047857)' }}>
           <div className="flex items-center gap-3">
             <FileSpreadsheet className="h-5 w-5 text-white" />
             <div>
-              <h2 className="text-white font-bold text-xl">GST Returns</h2>
-              <p className="text-emerald-200 text-xs">GSTR-1 · GSTR-3B · GSTR-2B</p>
+              <h2 className="text-white font-bold text-lg leading-tight">GST Returns</h2>
+              <p className="text-emerald-200 text-xs">GSTR-1 · GSTR-3B · {baseInvoices.length} invoices in view</p>
             </div>
           </div>
-          <div className="flex gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Company filter */}
+            {(companies || []).length > 1 && (
+              <select
+                value={companyFilter}
+                onChange={e => setCompanyFilter(e.target.value)}
+                className="h-9 px-3 rounded-xl bg-white/15 text-white text-xs border border-white/20 focus:outline-none"
+              >
+                <option value="all" className="text-slate-800 bg-white">All Companies</option>
+                {companies.map(c => (
+                  <option key={c.id} value={c.id} className="text-slate-800 bg-white">{c.name}</option>
+                ))}
+              </select>
+            )}
             <input
-              type="month"
-              value={month}
+              type="month" value={month}
               onChange={e => setMonth(e.target.value)}
-              className="h-9 px-3 rounded-xl bg-white/15 text-white text-sm"
+              className="h-9 px-3 rounded-xl bg-white/15 text-white text-xs border border-white/20 [color-scheme:dark] focus:outline-none"
             />
-            <button onClick={onClose}>
+            <button
+              onClick={handleExport} disabled={exporting}
+              className="h-9 px-3 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-semibold flex items-center gap-1.5 border border-white/20 transition-colors disabled:opacity-50"
+            >
+              <Download className="h-3.5 w-3.5" />
+              {exporting ? 'Exporting…' : 'Export Excel'}
+            </button>
+            <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center">
               <X className="h-4 w-4 text-white" />
             </button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-6">
-          {monthInvoices.length === 0 ? (
-            <div className="text-center text-slate-400 py-10">No invoices found</div>
+
+        {/* Tabs */}
+        <div className={`flex border-b flex-shrink-0 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          {[
+            { id: 'gstr1',  label: 'GSTR-1',  sub: 'Outward Supplies' },
+            { id: 'gstr3b', label: 'GSTR-3B', sub: 'Tax Summary' },
+          ].map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`flex items-center gap-2 px-6 py-3.5 text-sm font-semibold border-b-2 transition-all ${
+                tab === t.id
+                  ? `border-emerald-500 ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`
+                  : `border-transparent ${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'}`
+              }`}>
+              {t.label}
+              <span className={`text-[10px] font-normal ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{t.sub}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {baseInvoices.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-3">
+              <FileSpreadsheet className="h-10 w-10 opacity-20" />
+              <p className="text-sm font-medium">No invoices for {month}{companyFilter !== 'all' ? ' · selected company' : ''}</p>
+              <p className="text-xs">Adjust the month or company filter above</p>
+            </div>
           ) : tab === 'gstr1' ? (
-            <div>
-              <p>B2B Count: {gstr1.b2b.length}</p>
-              <p>B2C Small: {gstr1.b2cS.length}</p>
+            <div className="space-y-5">
+              {/* Summary pills */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { label: 'B2B Invoices',    value: gstr1.b2b.length,   color: COLORS.mediumBlue,   desc: 'Registered buyers (GSTIN)' },
+                  { label: 'B2C Large',        value: gstr1.b2cL.length,  color: COLORS.amber,        desc: 'Unregistered > ₹2.5L' },
+                  { label: 'B2C Small',        value: gstr1.b2cS.length,  color: COLORS.emeraldGreen, desc: 'Unregistered ≤ ₹2.5L' },
+                  { label: 'Credit/Debit Notes', value: gstr1.cdnr.length, color: COLORS.coral,       desc: 'CDNR' },
+                ].map(s => (
+                  <div key={s.label} className={`${cardCls} p-3`}>
+                    <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1">{s.label}</p>
+                    <p className="text-2xl font-black" style={{ color: s.color }}>{s.value}</p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">{s.desc}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* B2B */}
+              {gstr1.b2b.length > 0 && (
+                <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                  <div className={`px-4 py-2.5 border-b ${isDark ? 'bg-slate-700/60 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                      B2B — Registered Buyers ({gstr1.b2b.length})
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto max-h-56 overflow-y-auto">
+                    <table className="w-full">
+                      <thead className={`sticky top-0 ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+                        <tr>
+                          {['Invoice No','Date','Client','GSTIN','Taxable','CGST','SGST','IGST','Total'].map(h => (
+                            <th key={h} className={thCls}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {gstr1.b2b.map((inv, i) => (
+                          <tr key={inv.id || i} className={trCls}>
+                            <td className={`${tdCls} font-mono font-semibold`}>{inv.invoice_no}</td>
+                            <td className={tdCls}>{inv.invoice_date}</td>
+                            <td className={`${tdCls} max-w-[140px] truncate`}>{inv.client_name}</td>
+                            <td className={`${tdCls} font-mono text-[10px]`}>{inv.client_gstin}</td>
+                            <td className={`${tdCls} text-right`}>{fmtC(inv.total_taxable)}</td>
+                            <td className={`${tdCls} text-right`}>{fmtC(inv.total_cgst)}</td>
+                            <td className={`${tdCls} text-right`}>{fmtC(inv.total_sgst)}</td>
+                            <td className={`${tdCls} text-right`}>{fmtC(inv.total_igst)}</td>
+                            <td className={`${tdCls} text-right font-bold`}>{fmtC(inv.grand_total)}</td>
+                          </tr>
+                        ))}
+                        <tr className={`border-t-2 font-bold ${isDark ? 'border-slate-600 bg-slate-700/40' : 'border-slate-200 bg-slate-50'}`}>
+                          <td colSpan={4} className={`${tdCls} font-bold`}>B2B Total</td>
+                          <td className={`${tdCls} text-right font-bold`} style={{ color: COLORS.mediumBlue }}>{fmtC(gstr1.b2b.reduce((s,i)=>s+(i.total_taxable||0),0))}</td>
+                          <td className={`${tdCls} text-right font-bold`}>{fmtC(gstr1.b2b.reduce((s,i)=>s+(i.total_cgst||0),0))}</td>
+                          <td className={`${tdCls} text-right font-bold`}>{fmtC(gstr1.b2b.reduce((s,i)=>s+(i.total_sgst||0),0))}</td>
+                          <td className={`${tdCls} text-right font-bold`}>{fmtC(gstr1.b2b.reduce((s,i)=>s+(i.total_igst||0),0))}</td>
+                          <td className={`${tdCls} text-right font-bold`} style={{ color: COLORS.mediumBlue }}>{fmtC(gstr1.b2b.reduce((s,i)=>s+(i.grand_total||0),0))}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* B2C Large */}
+              {gstr1.b2cL.length > 0 && (
+                <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                  <div className={`px-4 py-2.5 border-b ${isDark ? 'bg-slate-700/60 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">B2C Large — &gt;₹2.5L ({gstr1.b2cL.length})</p>
+                  </div>
+                  <div className="overflow-x-auto max-h-44 overflow-y-auto">
+                    <table className="w-full">
+                      <thead className={`sticky top-0 ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+                        <tr>{['Invoice No','Date','Client','Taxable','CGST','SGST','IGST','Total'].map(h=><th key={h} className={thCls}>{h}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {gstr1.b2cL.map((inv,i)=>(
+                          <tr key={inv.id||i} className={trCls}>
+                            <td className={`${tdCls} font-mono`}>{inv.invoice_no}</td>
+                            <td className={tdCls}>{inv.invoice_date}</td>
+                            <td className={`${tdCls} max-w-[160px] truncate`}>{inv.client_name}</td>
+                            <td className={`${tdCls} text-right`}>{fmtC(inv.total_taxable)}</td>
+                            <td className={`${tdCls} text-right`}>{fmtC(inv.total_cgst)}</td>
+                            <td className={`${tdCls} text-right`}>{fmtC(inv.total_sgst)}</td>
+                            <td className={`${tdCls} text-right`}>{fmtC(inv.total_igst)}</td>
+                            <td className={`${tdCls} text-right font-bold`}>{fmtC(inv.grand_total)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* B2C Small Summary */}
+              {gstr1.b2cS.length > 0 && (
+                <div className={`${cardCls} p-4`}>
+                  <p className={`text-xs font-bold uppercase tracking-wider mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    B2C Small Summary — {gstr1.b2cS.length} invoices (≤₹2.5L each, consolidated)
+                  </p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {[
+                      { label: 'Taxable',  val: gstr1.b2cSTotal.taxable, color: COLORS.deepBlue },
+                      { label: 'CGST',     val: gstr1.b2cSTotal.cgst,    color: COLORS.mediumBlue },
+                      { label: 'SGST',     val: gstr1.b2cSTotal.sgst,    color: COLORS.mediumBlue },
+                      { label: 'IGST',     val: gstr1.b2cSTotal.igst,    color: COLORS.amber },
+                    ].map(s => (
+                      <div key={s.label} className={`rounded-lg p-2.5 ${isDark ? 'bg-slate-800' : 'bg-white'} border ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+                        <p className="text-[9px] text-slate-400 uppercase tracking-wider">{s.label}</p>
+                        <p className="text-sm font-black mt-0.5" style={{ color: s.color }}>{fmtC(s.val)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* HSN Summary */}
+              {gstr1.hsnSummary.length > 0 && (
+                <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                  <div className={`px-4 py-2.5 border-b ${isDark ? 'bg-slate-700/60 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">HSN/SAC Summary</p>
+                  </div>
+                  <div className="overflow-x-auto max-h-48 overflow-y-auto">
+                    <table className="w-full">
+                      <thead className={`sticky top-0 ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+                        <tr>{['HSN/SAC','Description','Qty','Taxable Value','CGST','SGST','IGST'].map(h=><th key={h} className={thCls}>{h}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {gstr1.hsnSummary.sort((a,b)=>b.taxable-a.taxable).map((h,i)=>(
+                          <tr key={h.hsn_sac||i} className={trCls}>
+                            <td className={`${tdCls} font-mono font-bold`}>{h.hsn_sac}</td>
+                            <td className={`${tdCls} max-w-[180px] truncate`}>{h.description || '—'}</td>
+                            <td className={`${tdCls} text-right`}>{h.quantity.toFixed(2)}</td>
+                            <td className={`${tdCls} text-right font-semibold`}>{fmtC(h.taxable)}</td>
+                            <td className={`${tdCls} text-right`}>{fmtC(h.cgst)}</td>
+                            <td className={`${tdCls} text-right`}>{fmtC(h.sgst)}</td>
+                            <td className={`${tdCls} text-right`}>{fmtC(h.igst)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
-            <div>
-              <p>Net Tax: {fmtC(gstr3b.netTotal)}</p>
+            // GSTR-3B
+            <div className="space-y-5">
+              {/* Net Tax Summary cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { label: 'Net IGST',     value: gstr3b.netIGST, color: COLORS.coral },
+                  { label: 'Net CGST',     value: gstr3b.netCGST, color: COLORS.mediumBlue },
+                  { label: 'Net SGST',     value: gstr3b.netSGST, color: COLORS.teal },
+                  { label: 'Total Tax Liability', value: gstr3b.netTotal, color: COLORS.deepBlue },
+                ].map(s => (
+                  <div key={s.label} className={`${cardCls} p-3`}>
+                    <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1">{s.label}</p>
+                    <p className="text-xl font-black" style={{ color: s.color }}>{fmtC(s.value)}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* 3.1 Outward Supplies */}
+              <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                <div className={`px-4 py-2.5 border-b ${isDark ? 'bg-slate-700/60 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">3.1 — Outward Taxable Supplies</p>
+                </div>
+                <table className="w-full">
+                  <thead><tr className={isDark ? 'bg-slate-700/30' : 'bg-slate-50/60'}>
+                    {['Description','Taxable Value','IGST','CGST','SGST','Total Tax'].map(h=><th key={h} className={thCls}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {[
+                      ['Outward Taxable Supplies (Tax Invoice)', gstr3b.outward],
+                      ['Credit Note Adjustments (−)',           gstr3b.credits],
+                    ].map(([label, d]) => (
+                      <tr key={label} className={trCls}>
+                        <td className={`${tdCls} font-semibold`}>{label}</td>
+                        <td className={`${tdCls} text-right`}>{fmtC(d.taxable)}</td>
+                        <td className={`${tdCls} text-right`}>{fmtC(d.igst)}</td>
+                        <td className={`${tdCls} text-right`}>{fmtC(d.cgst)}</td>
+                        <td className={`${tdCls} text-right`}>{fmtC(d.sgst)}</td>
+                        <td className={`${tdCls} text-right font-bold`}>{fmtC(d.igst + d.cgst + d.sgst)}</td>
+                      </tr>
+                    ))}
+                    <tr className={`border-t-2 ${isDark ? 'border-slate-600 bg-slate-700/40' : 'border-slate-200 bg-emerald-50/60'}`}>
+                      <td className={`${tdCls} font-black`} style={{ color: COLORS.emeraldGreen }}>Net Tax Payable</td>
+                      <td className={`${tdCls} text-right font-bold`}>{fmtC(gstr3b.outward.taxable - gstr3b.credits.taxable)}</td>
+                      <td className={`${tdCls} text-right font-bold`} style={{ color: COLORS.coral }}>{fmtC(gstr3b.netIGST)}</td>
+                      <td className={`${tdCls} text-right font-bold`} style={{ color: COLORS.mediumBlue }}>{fmtC(gstr3b.netCGST)}</td>
+                      <td className={`${tdCls} text-right font-bold`} style={{ color: COLORS.teal }}>{fmtC(gstr3b.netSGST)}</td>
+                      <td className="px-3 py-2 text-right text-sm font-black" style={{ color: COLORS.deepBlue }}>{fmtC(gstr3b.netTotal)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Invoice list for the month */}
+              <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                <div className={`px-4 py-2.5 border-b ${isDark ? 'bg-slate-700/60 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    All Invoices in {month} ({baseInvoices.length})
+                  </p>
+                </div>
+                <div className="overflow-x-auto max-h-64 overflow-y-auto">
+                  <table className="w-full">
+                    <thead className={`sticky top-0 ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+                      <tr>{['Invoice No','Type','Client','Date','Taxable','CGST','SGST','IGST','Total'].map(h=><th key={h} className={thCls}>{h}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {baseInvoices.map((inv,i)=>(
+                        <tr key={inv.id||i} className={trCls}>
+                          <td className={`${tdCls} font-mono font-semibold`}>{inv.invoice_no}</td>
+                          <td className={tdCls}><span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${isDark?'bg-slate-700 text-slate-300':'bg-slate-100 text-slate-600'}`}>{INV_TYPES.find(t=>t.value===inv.invoice_type)?.label||inv.invoice_type}</span></td>
+                          <td className={`${tdCls} max-w-[160px] truncate`}>{inv.client_name}</td>
+                          <td className={tdCls}>{inv.invoice_date}</td>
+                          <td className={`${tdCls} text-right`}>{fmtC(inv.total_taxable)}</td>
+                          <td className={`${tdCls} text-right`}>{fmtC(inv.total_cgst)}</td>
+                          <td className={`${tdCls} text-right`}>{fmtC(inv.total_sgst)}</td>
+                          <td className={`${tdCls} text-right`}>{fmtC(inv.total_igst)}</td>
+                          <td className={`${tdCls} text-right font-bold`}>{fmtC(inv.grand_total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -884,7 +1215,6 @@ const GSTReportsModal = ({ open, onClose, invoices = [], isDark }) => {
     </Dialog>
   );
 };
-
 // ════════════════════════════════════════════════════════════════════════════════
 // EXCEL IMPORT — parse Excel/CSV invoice template
 // ════════════════════════════════════════════════════════════════════════════════
@@ -2662,12 +2992,17 @@ export default function Invoicing() {
   }, [enrichedFiltered]);
 
   // fetchAll declared before handleBulkDelete ✓
-  const fetchAll = useCallback(async () => {
+const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
       const [invR, compR, clientR, leadR, statR] = await Promise.allSettled([
-        api.get('/invoices'), api.get('/companies'), api.get('/clients'), api.get('/leads'), api.get('/invoices/stats'),
+        api.get('/invoices', { params: { page: 1, page_size: 5000 } }),
+        api.get('/companies'),
+        api.get('/clients'),
+        api.get('/leads'),
+        api.get('/invoices/stats'),
       ]);
+
       if (invR.status === 'fulfilled') {
         const invPayload = invR.value.data;
         setInvoices(Array.isArray(invPayload) ? invPayload : (invPayload?.invoices || []));
@@ -2676,18 +3011,25 @@ export default function Invoicing() {
         toast.error('Failed to load invoices');
         setInvoices([]);
       }
+
       if (compR.status === 'fulfilled') setCompanies(compR.value.data || []);
       else { console.error('Failed to load companies:', compR.reason); setCompanies([]); }
+
       if (clientR.status === 'fulfilled') setClients(clientR.value.data || []);
       else { console.error('Failed to load clients:', clientR.reason); setClients([]); }
+
       if (leadR.status === 'fulfilled') setLeads(leadR.value.data || []);
       else { console.error('Failed to load leads:', leadR.reason); setLeads([]); }
+
       if (statR.status === 'fulfilled') setStats(statR.value.data || null);
       else { console.error('Failed to load stats:', statR.reason); setStats(null); }
+
     } catch (err) {
       console.error('fetchAll unexpected error:', err);
       toast.error('Failed to load invoicing data');
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   // handleBulkDelete depends on fetchAll — declared AFTER it ✓
