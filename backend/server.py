@@ -802,17 +802,34 @@ async def get_todos(
             query = {"user_id": user_id}
         else:
             query = {"user_id": current_user.id}
-
-    elif current_user.role == "manager":
-        team_ids = await get_team_user_ids(current_user.id)
-        if user_id:
-            if user_id not in team_ids and user_id != current_user.id:
-                raise HTTPException(status_code=403, detail="Not allowed")
+@api_router.get("/todos")
+async def get_todos(
+    user_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role == "admin":
+        if user_id == "all":
+            query = {}
+        elif user_id:
             query = {"user_id": user_id}
         else:
             query = {"user_id": current_user.id}
 
+    elif current_user.role == "manager":
+        # SCOPE: OWN + SAME_DEPARTMENT
+        # DATA_ACCESS_RULE: resource.user_id == user.id OR resource.user_id IN SAME_DEPARTMENT_USERS
+        team_ids = await get_team_user_ids(current_user.id)
+        if user_id:
+            if user_id not in team_ids and user_id != current_user.id:
+                raise HTTPException(status_code=403, detail="Not allowed — user not in your department")
+            query = {"user_id": user_id}
+        else:
+            # Show own todos + same-department staff todos
+            visible_ids = list(set(team_ids + [current_user.id]))
+            query = {"user_id": {"$in": visible_ids}}
+
     else:
+        # SCOPE: OWN only
         permissions = current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else (current_user.permissions or {})
         allowed_others = permissions.get("view_other_todos", []) if isinstance(permissions, dict) else []
         if user_id:
@@ -820,14 +837,17 @@ async def get_todos(
                 raise HTTPException(status_code=403, detail="Not allowed")
             query = {"user_id": user_id}
         else:
-            query = {"user_id": current_user.id}
+            # Staff: own todos only (+ admin-granted cross-user todos)
+            if allowed_others:
+                query = {"user_id": {"$in": list(set(allowed_others + [current_user.id]))}}
+            else:
+                query = {"user_id": current_user.id}
 
     todos = await db.todos.find(query).to_list(1000)
     for t in todos:
         t["id"] = str(t["_id"])
         del t["_id"]
     return todos
-
 @api_router.get("/dashboard/todo-overview")
 async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
     is_admin = current_user.role == "admin"
@@ -1580,9 +1600,25 @@ async def get_staff_attendance_report(
     now = datetime.now(IST)
     target_month = month or now.strftime("%Y-%m")
     users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
+
+    now = datetime.now(IST)
+    target_month = month or now.strftime("%Y-%m")
+    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
     user_map = {u["id"]: u for u in users}
+
+    # SCOPE: Manager sees only same-department staff attendance
+    # DATA_ACCESS_RULE: resource.department == user.department AND resource.user_id IN SAME_DEPARTMENT_USERS
+    attendance_query = {"date": {"$regex": f"^{target_month}"}}
+    if current_user.role == "manager":
+        team_ids = await get_team_user_ids(current_user.id)
+        visible_ids = list(set(team_ids + [current_user.id]))
+        attendance_query["user_id"] = {"$in": visible_ids}
+    elif current_user.role == "staff":
+        # Staff can only see their own attendance in this report
+        attendance_query["user_id"] = current_user.id
+
     attendance_list = await db.attendance.find(
-        {"date": {"$regex": f"^{target_month}"}},
+        attendance_query,
         {"_id": 0}
     ).to_list(5000)
     staff_report = {}
@@ -1939,22 +1975,34 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
     if current_user.role == "admin":
         pass
     elif current_user.role == "manager":
+        # SCOPE: OWN + SAME_DEPARTMENT
+        # DATA_ACCESS_RULE: resource.user_id == user.id OR resource.user_id IN SAME_DEPARTMENT_USERS
         team_ids = await get_team_user_ids(current_user.id)
-        query["$or"] = [
-            {"assigned_to": current_user.id},
-            {"assigned_to": {"$in": team_ids}},
-            {"sub_assignees": current_user.id},
-            {"created_by": current_user.id}
-        ]
-    else:
         permissions = get_user_permissions(current_user)
-        allowed_users = permissions.get("view_other_tasks", [])
-        query["$or"] = [
+        extra_users = permissions.get("view_other_tasks", []) or []
+        visible_ids = list(set(team_ids + extra_users))
+        or_clauses = [
             {"assigned_to": current_user.id},
             {"sub_assignees": current_user.id},
             {"created_by": current_user.id},
-            {"assigned_to": {"$in": allowed_users}}
         ]
+        if visible_ids:
+            or_clauses.append({"assigned_to": {"$in": visible_ids}})
+            or_clauses.append({"created_by": {"$in": visible_ids}})
+        query["$or"] = or_clauses
+    else:
+        # SCOPE: OWN only
+        # DATA_ACCESS_RULE: resource.user_id == user.id
+        permissions = get_user_permissions(current_user)
+        allowed_users = permissions.get("view_other_tasks", []) or []
+        or_clauses = [
+            {"assigned_to": current_user.id},
+            {"sub_assignees": current_user.id},
+            {"created_by": current_user.id},
+        ]
+        if allowed_users:
+            or_clauses.append({"assigned_to": {"$in": allowed_users}})
+        query["$or"] = or_clauses
     tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
     user_ids = {
         task.get("assigned_to") for task in tasks if task.get("assigned_to")
@@ -4080,7 +4128,18 @@ async def get_activity_summary(
         raise HTTPException(status_code=403, detail="Not allowed")
     query = {}
     if user_id:
+        # SCOPE: Manager sees only same-department users
+        # DATA_ACCESS_RULE: resource.user_id == user.id OR resource.user_id IN SAME_DEPARTMENT_USERS
+        if current_user.role == "manager":
+            team_ids = await get_team_user_ids(current_user.id)
+            if user_id != current_user.id and user_id not in team_ids:
+                raise HTTPException(status_code=403, detail="User not in your department")
         query["user_id"] = user_id
+    elif current_user.role == "manager":
+        # Manager without specific user_id: restrict to same-department users
+        team_ids = await get_team_user_ids(current_user.id)
+        visible_ids = list(set(team_ids + [current_user.id]))
+        query["user_id"] = {"$in": visible_ids}
     if date_from or date_to:
         query["timestamp"] = {}
     if date_from:
