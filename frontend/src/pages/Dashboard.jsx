@@ -1,4 +1,4 @@
-import { useDark } from '../../hooks/useDark';
+import useDark from '../hooks/useDark';
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format, parseISO, isToday, isTomorrow, startOfDay } from 'date-fns';
