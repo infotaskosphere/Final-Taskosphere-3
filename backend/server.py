@@ -13,7 +13,6 @@ import requests
 import httpx
 import pandas as pd
 from datetime import datetime, date, timezone, timedelta
-from backend.attendance_identix import identix_router, sync_user_to_identix_devices
 
 # --- FIXED ROUTER IMPORTS ---
 # Added 'backend.' to invoicing to match the others
@@ -1002,28 +1001,35 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
     await db.users.insert_one(new_user)
 
     # Background sync (NON-BLOCKING)
+   # Safe background runner (kept for future use if needed)
     async def run_safe_background(coro, name="task"):
         try:
             await coro
         except Exception as e:
             logger.error(f"{name} failed: {e}", exc_info=True)
 
-    asyncio.create_task(run_safe_background(
-        sync_user_to_identix_devices(new_user),
-        "identix_sync"
-    ))
+
+    # ─────────────────────────────────────────────
+    # AUTH RESPONSE LOGIC (CLEANED)
+    # ─────────────────────────────────────────────
+
     access_token = create_access_token({"sub": user_id})
 
     # Remove sensitive fields
     new_user.pop("password", None)
     new_user.pop("_id", None)
 
+    # ❌ REMOVED (Identix sync — no longer exists)
+    # asyncio.create_task(run_safe_background(
+    #     sync_user_to_identix_devices(new_user),
+    #     "identix_sync"
+    # ))
+
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "user": new_user
     }
-
 
 @api_router.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin):
@@ -4883,5 +4889,4 @@ api_router.include_router(leads_router)
 api_router.include_router(notification_router)
 api_router.include_router(email_router)
 app.include_router(google_auth_router)
-api_router.include_router(identix_router)
 app.include_router(api_router)
