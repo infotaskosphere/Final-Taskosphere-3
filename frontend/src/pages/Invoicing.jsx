@@ -3587,3 +3587,6 @@ const fetchAll = useCallback(async () => {
     </div>
   );
 }
+
+export default Invoicing;
+
