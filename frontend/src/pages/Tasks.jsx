@@ -1,20 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useDark } from '@/hooks/useDark';
-import { useLocation } from "react-router-dom";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from '@/contexts/AuthContext';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
-import api from '@/lib/api';
-import Papa from "papaparse/papaparse.js";
+import { useDark } from '../../hooks/useDark';
+import { Card, CardContent } from '../ui/card';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Label } from '../ui/label';
+import { Textarea } from '../ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
+import { Checkbox } from '../ui/checkbox';
+import { Badge } from '../ui/badge';
+import { Switch } from '../ui/switch';
 import { toast } from 'sonner';
 import {
   Plus, Edit, Trash2, Search, Calendar, Building2, User,
@@ -25,9 +20,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 
 // ─── Brand Colors ────────────────────────────────────────────────────────────
 const COLORS = {
@@ -653,9 +646,12 @@ const StatCard = ({ label, value, color, icon: Icon, active, onClick, activeClas
 // Main Tasks Component
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Tasks() {
-  const { user, hasPermission } = useAuth();
+  // ── Stub: replace with real useAuth(), useNavigate(), etc. in your app
+  const user = { id: 'user-1', full_name: 'Arjun Sharma', email: 'arjun@example.com', role: 'admin' };
+  const hasPermission = () => true;
+  const navigate = (path) => console.log('navigate:', path);
+
   const isAdmin = user?.role === 'admin';
-  const navigate = useNavigate();
   const isDark = useDark();
 
   // ── Permissions ──────────────────────────────────────────────────────────────
@@ -670,9 +666,24 @@ export default function Tasks() {
   const canDeleteTasks = isAdmin || hasPermission('can_edit_tasks');
 
   // ── State ────────────────────────────────────────────────────────────────────
-  const [tasks,   setTasks]   = useState([]);
-  const [users,   setUsers]   = useState([]);
-  const [clients, setClients] = useState([]);
+  const [tasks,   setTasks]   = useState([
+    { id: '1', title: 'File GSTR-3B for March 2026', description: '- Reconcile GSTR-2B with purchase register\n- Prepare GSTR-3B\n- Pay tax & generate challan\n- Reconcile ITC', assigned_to: 'user-1', created_by: 'user-1', due_date: '2026-04-01', priority: 'high', status: 'pending', category: 'gst', is_recurring: true, recurrence_pattern: 'monthly', recurrence_interval: 1, created_at: '2026-03-28T10:00:00Z', client_id: 'c1' },
+    { id: '2', title: 'Quarterly TDS Return Q4',      description: '- Download Form 16A from TRACES\n- Reconcile TDS with books\n- File 26Q return',                             assigned_to: 'user-2', created_by: 'user-1', due_date: '2026-04-15', priority: 'critical', status: 'in_progress', category: 'tds', is_recurring: true, recurrence_pattern: 'monthly', recurrence_interval: 3, created_at: '2026-03-25T09:00:00Z', client_id: 'c2' },
+    { id: '3', title: 'ITR-6 Filing — ABC Pvt Ltd',   description: '- Reconcile 26AS & AIS\n- Prepare ITR-6\n- Upload balance sheet',                                        assigned_to: 'user-1', created_by: 'user-1', due_date: '2026-05-31', priority: 'medium', status: 'pending', category: 'income_tax', is_recurring: false, created_at: '2026-03-20T08:00:00Z', client_id: 'c3' },
+    { id: '4', title: 'PF & ESIC March Contribution', description: '- Calculate PF & ESIC on salary\n- Deposit contribution by 15th\n- File ECR return',                      assigned_to: 'user-2', created_by: 'user-1', due_date: '2026-04-15', priority: 'high', status: 'completed', category: 'accounts', is_recurring: true, recurrence_pattern: 'monthly', recurrence_interval: 1, created_at: '2026-03-10T11:00:00Z', client_id: null },
+    { id: '5', title: 'DSC Renewal — XYZ Corp',        description: '- Check DSC expiry\n- Renew Class 3 DSC\n- Update in MCA portal',                                        assigned_to: 'user-1', created_by: 'user-1', due_date: '2026-03-31', priority: 'critical', status: 'pending', category: 'dsc', is_recurring: false, created_at: '2026-03-15T07:00:00Z', client_id: 'c1' },
+    { id: '6', title: 'ROC Annual Filing — MGT-7',     description: '- Prepare financial statements\n- File AOC-4 XBRL\n- File MGT-7',                                        assigned_to: 'user-3', created_by: 'user-1', due_date: '2026-06-30', priority: 'high', status: 'pending', category: 'roc', is_recurring: true, recurrence_pattern: 'yearly', recurrence_interval: 1, created_at: '2026-03-01T09:00:00Z', client_id: 'c2' },
+  ]);
+  const [users,   setUsers]   = useState([
+    { id: 'user-1', full_name: 'Arjun Sharma' },
+    { id: 'user-2', full_name: 'Priya Mehta' },
+    { id: 'user-3', full_name: 'Rahul Gupta' },
+  ]);
+  const [clients, setClients] = useState([
+    { id: 'c1', company_name: 'ABC Pvt Ltd' },
+    { id: 'c2', company_name: 'XYZ Corp' },
+    { id: 'c3', company_name: 'PQR Enterprises' },
+  ]);
   const [loading, setLoading] = useState(false);
 
   const [dialogOpen,   setDialogOpen]   = useState(false);
@@ -689,10 +700,11 @@ export default function Tasks() {
   const [newComment,         setNewComment]         = useState('');
   const [openCommentTaskId,  setOpenCommentTaskId]  = useState(null);
 
-  const [notifications,     setNotifications]     = useState([]);
+  const [notifications,     setNotifications]     = useState([
+    { id: 'n1', title: '📋 New Task Assigned', message: 'GSTR-3B filing assigned to you', type: 'task', is_read: false, created_at: new Date().toISOString() },
+    { id: 'n2', title: '✅ Task Completed',    message: 'PF & ESIC March was marked done', type: 'task', is_read: true,  created_at: new Date().toISOString() },
+  ]);
   const [showNotifications, setShowNotifications] = useState(false);
-
-  const location = useLocation();
 
   // ── Filters & sorting ────────────────────────────────────────────────────────
   const [searchQuery,     setSearchQuery]     = useState('');
@@ -767,57 +779,39 @@ export default function Tasks() {
     return format(due, 'MMM dd');
   };
 
-  // ── Data fetching ─────────────────────────────────────────────────────────────
-  useEffect(() => { fetchTasks(); fetchClients(); fetchUsers(); fetchNotifications(); }, [user]);
-
-  const fetchTasks         = async () => { try { const r = await api.get('/tasks');         setTasks(r.data);                 } catch { toast.error('Failed to fetch tasks'); } };
-  const fetchUsers         = async () => { try { const r = await api.get('/users');         setUsers(r.data);                 } catch { console.error('Failed to fetch users'); } };
-  const fetchClients       = async () => { try { const r = await api.get('/clients');       setClients(r.data);               } catch { console.error('Failed to fetch clients'); } };
-  const fetchNotifications = async () => { try { const r = await api.get('/notifications'); setNotifications(r.data || []);   } catch {} };
-
+  // ── Stub fetch functions (replace with real API calls in your app) ──────────
   const fetchComments = async (taskId) => {
-    try { const r = await api.get(`/tasks/${taskId}/comments`); setComments(prev => ({ ...prev, [taskId]: r.data })); }
-    catch { toast.error('Failed to fetch comments'); }
+    setComments(prev => ({ ...prev, [taskId]: prev[taskId] || [] }));
   };
 
   const markAllAsRead = async () => {
     setNotifications(p => p.map(n => ({ ...n, is_read: true })));
     toast.success('Marked all as read');
-    api.put('/notifications/read-all').catch(() => {});
   };
 
   // ── CRUD ──────────────────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    try {
-      const taskData = {
-        ...formData,
-        assigned_to:   formData.assigned_to === 'unassigned' ? null : formData.assigned_to,
-        sub_assignees: formData.sub_assignees || [],
-        client_id:     formData.client_id || null,
-        due_date:      formData.due_date ? new Date(formData.due_date).toISOString() : null,
-      };
-      if (editingTask) {
-        await api.patch(`/tasks/${editingTask.id}`, taskData);
-        toast.success('Task updated!');
-        const newAssignee = taskData.assigned_to, oldAssignee = editingTask.assigned_to;
-        if (newAssignee && newAssignee !== oldAssignee) {
-          api.post('/notifications/send', { title: '📋 Task Reassigned', message: `You've been assigned "${taskData.title}" by ${user?.full_name || user?.email}.`, type: 'task', user_id: newAssignee }).catch(() => {});
-        }
-        if (taskData.status === 'completed' && editingTask.status !== 'completed') {
-          api.post('/notifications/send', { title: '✅ Task Completed', message: `"${taskData.title}" was completed.`, type: 'task' }).catch(() => {});
-        }
-      } else {
-        await api.post('/tasks', taskData);
-        toast.success('Task created!');
-        if (taskData.assigned_to) {
-          api.post('/notifications/send', { title: '📋 New Task Assigned', message: `New task: "${taskData.title}" assigned by ${user?.full_name || user?.email}.`, type: 'task', user_id: taskData.assigned_to }).catch(() => {});
-        }
-      }
-      setDialogOpen(false); resetForm(); fetchTasks(); fetchNotifications();
-    } catch { toast.error('Failed to save task'); }
-    finally { setLoading(false); }
+    await new Promise(r => setTimeout(r, 400));
+    const taskData = {
+      ...formData,
+      id: editingTask?.id || String(Date.now()),
+      assigned_to:   formData.assigned_to === 'unassigned' ? null : formData.assigned_to,
+      sub_assignees: formData.sub_assignees || [],
+      client_id:     formData.client_id || null,
+      due_date:      formData.due_date ? new Date(formData.due_date).toISOString() : null,
+      created_at:    editingTask?.created_at || new Date().toISOString(),
+      created_by:    user.id,
+    };
+    if (editingTask) {
+      setTasks(prev => prev.map(t => t.id === editingTask.id ? taskData : t));
+      toast.success('Task updated!');
+    } else {
+      setTasks(prev => [taskData, ...prev]);
+      toast.success('Task created!');
+    }
+    setDialogOpen(false); resetForm(); setLoading(false);
   };
 
   const handleEdit = (task) => {
@@ -836,38 +830,31 @@ export default function Tasks() {
 
   const handleDelete = async (taskId) => {
     if (!window.confirm('Delete this task?')) return;
-    try { await api.delete(`/tasks/${taskId}`); toast.success('Task deleted!'); fetchTasks(); }
-    catch { toast.error('Failed to delete task'); }
+    setTasks(prev => prev.filter(t => t.id !== taskId));
+    toast.success('Task deleted!');
   };
 
   const handleQuickStatusChange = async (task, newStatus) => {
-    try {
-      await api.patch(`/tasks/${task.id}`, { status: newStatus });
-      toast.success(`Marked as ${STATUS_STYLES[newStatus]?.label || newStatus}`);
-      api.post('/notifications/send', {
-        title:   newStatus === 'completed' ? '✅ Task Completed' : '🔄 Status Updated',
-        message: `"${task.title}" → ${STATUS_STYLES[newStatus]?.label || newStatus}`,
-        type: 'task',
-      }).catch(() => {});
-      fetchTasks(); fetchNotifications();
-    } catch { toast.error('Failed to update status'); }
+    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
+    toast.success(`Marked as ${STATUS_STYLES[newStatus]?.label || newStatus}`);
   };
 
   const handleAddComment = async () => {
     if (!newComment.trim()) return;
-    try {
-      await api.post(`/tasks/${selectedTask.id}/comments`, { text: newComment });
-      setNewComment(''); fetchComments(selectedTask.id); toast.success('Comment added!');
-      if (selectedTask.assigned_to && selectedTask.assigned_to !== user?.id) {
-        api.post('/notifications/send', { title: '💬 New Comment', message: `${user?.full_name} commented on "${selectedTask.title}".`, type: 'task', user_id: selectedTask.assigned_to }).catch(() => {});
-      }
-      fetchNotifications();
-    } catch { toast.error('Failed to add comment'); }
+    const taskId = selectedTask?.id;
+    if (!taskId) return;
+    setComments(prev => ({
+      ...prev,
+      [taskId]: [...(prev[taskId] || []), { text: newComment, user_id: user.id, created_at: new Date().toISOString() }]
+    }));
+    setNewComment('');
+    toast.success('Comment added!');
   };
 
   const handleDuplicateTask = async (task) => {
-    try { await api.post('/tasks', { ...task, title: `${task.title} (Copy)`, status: 'pending' }); toast.success('Task duplicated!'); fetchTasks(); }
-    catch { toast.error('Failed to duplicate'); }
+    const dupe = { ...task, id: String(Date.now()), title: `${task.title} (Copy)`, status: 'pending', created_at: new Date().toISOString() };
+    setTasks(prev => [dupe, ...prev]);
+    toast.success('Task duplicated!');
   };
 
   const resetForm = () => { setFormData({ ...EMPTY_FORM }); setEditingTask(null); };
@@ -991,41 +978,12 @@ export default function Tasks() {
     toast.success(`Template loaded: ${wf.name}`);
   };
 
-  // ── Export ────────────────────────────────────────────────────────────────────
-  const handleCsvUpload = (e) => {
-    const file = e.target.files[0]; if (!file) return;
-    Papa.parse(file, {
-      header: true, complete: async (res) => {
-        try { await api.post('/tasks/bulk', { tasks: res.data }); toast.success('Tasks uploaded!'); fetchTasks(); }
-        catch { toast.error('Upload failed'); }
-      }
-    });
-  };
+  // ── Export (stub) ─────────────────────────────────────────────────────────────
+  const handleCsvUpload = (e) => { toast.success('CSV upload (stub)'); };
+  const handleExportCsv = () => { toast.success('Exporting CSV (stub)'); };
+  const handleExportPdf = () => { toast.success('Exporting PDF (stub)'); };
 
-  const handleExportCsv = () => {
-    const csv = Papa.unparse(tasks.map(t => ({
-      title: t.title, description: t.description,
-      assigned_to: getUserName(t.assigned_to),
-      due_date: t.due_date ? format(new Date(t.due_date), 'yyyy-MM-dd') : '',
-      priority: t.priority, status: t.status, category: t.category, client: getClientName(t.client_id),
-    })));
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    a.download = 'tasks.csv'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  };
-
-  const handleExportPdf = () => {
-    const doc = new jsPDF();
-    doc.autoTable({
-      head: [['Title', 'Client', 'Priority', 'Status', 'Due Date']],
-      body: tasks.map(t => [t.title, getClientName(t.client_id), t.priority.toUpperCase(),
-        t.status.toUpperCase(), t.due_date ? format(new Date(t.due_date), 'MMM dd, yyyy') : ''])
-    });
-    doc.save('tasks.pdf');
-  };
-
-  const unreadCount = notifications.filter(n => !n.read).length;
-
+  const unreadCount = notifications.filter(n => !n.is_read).length;
   const getBoardColumnTasks = (colStatus) => displayTasks.filter(t => t.status === colStatus);
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -1049,7 +1007,7 @@ export default function Tasks() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => fileInputRef.current.click()} className="h-8 text-xs rounded-lg">Upload CSV</Button>
+              <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} className="h-8 text-xs rounded-lg">Upload CSV</Button>
               <Button variant="outline" size="sm" onClick={handleExportCsv} className="h-8 text-xs rounded-lg">Export CSV</Button>
               <Button variant="outline" size="sm" onClick={handleExportPdf} className="h-8 text-xs rounded-lg">Export PDF</Button>
 
@@ -1090,12 +1048,12 @@ export default function Tasks() {
                         <p className="text-sm text-slate-400">No notifications</p>
                       </div>
                     ) : notifications.map((n) => (
-                      <div key={n.id} className={`px-5 py-3.5 transition-colors ${!n.read ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/40') : ''} ${isDark ? 'hover:bg-slate-700/50' : 'hover:bg-slate-50'}`}>
+                      <div key={n.id} className={`px-5 py-3.5 transition-colors ${!n.is_read ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/40') : ''} ${isDark ? 'hover:bg-slate-700/50' : 'hover:bg-slate-50'}`}>
                         <div className="flex gap-3">
-                          {!n.read && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-2 flex-shrink-0" />}
-                          <div className={`flex-1 ${n.read ? 'pl-4' : ''}`}>
-                            <p className={`text-xs leading-relaxed ${!n.read ? (isDark ? 'font-semibold text-slate-100' : 'font-semibold text-slate-800') : (isDark ? 'text-slate-400' : 'text-slate-600')}`}>
-                              {n.message}
+                          {!n.is_read && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-2 flex-shrink-0" />}
+                          <div className={`flex-1 ${n.is_read ? 'pl-4' : ''}`}>
+                            <p className={`text-xs leading-relaxed ${!n.is_read ? (isDark ? 'font-semibold text-slate-100' : 'font-semibold text-slate-800') : (isDark ? 'text-slate-400' : 'text-slate-600')}`}>
+                              {n.title}
                             </p>
                             <p className="text-[10px] text-slate-400 mt-1">{format(new Date(n.created_at), 'MMM dd, hh:mm a')}</p>
                           </div>
@@ -1145,15 +1103,11 @@ export default function Tasks() {
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Client</Label>
                           <Select value={formData.client_id || 'no_client'}
-                            onValueChange={(v) => {
-                              if (v === '__add_new_client__') navigate('/clients?openAddClient=true&returnTo=tasks');
-                              else setFormData(p => ({ ...p, client_id: v === 'no_client' ? '' : v }));
-                            }}>
+                            onValueChange={(v) => setFormData(p => ({ ...p, client_id: v === 'no_client' ? '' : v }))}>
                             <SelectTrigger className="h-9 text-sm border-slate-300"><SelectValue placeholder="No Client" /></SelectTrigger>
                             <SelectContent className="max-h-52 overflow-y-auto">
                               <SelectItem value="no_client">No Client</SelectItem>
                               {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.company_name}</SelectItem>)}
-                              <SelectItem value="__add_new_client__" className="text-blue-600 font-semibold">+ Add New Client</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
