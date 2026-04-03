@@ -845,6 +845,11 @@ export default function Dashboard() {
     typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL
   ) || 'https://final-taskosphere-backend.onrender.com/api';
 
+  // Safety check — log the base URL once on mount
+  React.useEffect(() => {
+    console.log('API_BASE in use:', API_BASE);
+  }, []);
+  
   const getAuthHeader = React.useCallback(() => {
     const token =
       localStorage.getItem('access_token') ||
