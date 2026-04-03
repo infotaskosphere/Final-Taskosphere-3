@@ -934,6 +934,12 @@ export default function Tasks() {
   }, [tasks, isAdmin, hasCrossVisibility, user, crossVisibilityUserIds]);
 
   // ── Stats (based on scoped tasks so numbers match what the user can see) ──────
+  const myTasks = React.useMemo(() =>
+    tasks.filter(t => t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id)),
+    [tasks, user]
+  );
+
+  const myTaskCount = myTasks.length;
   const stats = {
     myTask:     myTasks.length,
     total:      scopedTasks.length,
@@ -992,15 +998,7 @@ export default function Tasks() {
     return result;
   }, [filteredTasks, showMyTasksOnly, sortBy, sortDirection, user]);
 
-  // ── Stats ─────────────────────────────────────────────────────────────────────
-  //    "My Task" = tasks assigned to or sub-assigned to the current user
-  //    "Team Task" = pending tasks assigned to cross-visible team members
-  //                  (0 if cross_visibility is off; actual count if on or admin)
-  const myTasks = React.useMemo(() =>
-    tasks.filter(t => t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id)),
-    [tasks, user]
-  );
-
+  
   const teamTaskBreakdown = React.useMemo(() => {
     if (!hasCrossVisibility || crossVisibilityUserIds.length === 0) return [];
     return crossVisibilityUserIds.map(uid => {
