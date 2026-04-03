@@ -970,7 +970,7 @@ async def sync_single_user_to_devices(
 async def iclock_getrequest(request: Request):
     params = dict(request.query_params)
     print("📡 GETREQUEST:", params)
-    return "OK"
+    return "OK\n"
 
 
 # 🔹 Main attendance data endpoint
@@ -1021,7 +1021,7 @@ async def iclock_cdata(request: Request):
             await db.identix_attendance.insert_one(record)
             inserted += 1
 
-        return "OK"
+        return "OK\n"
 
     except Exception as e:
         print("❌ ERROR:", str(e))
