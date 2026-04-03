@@ -3588,4 +3588,4 @@ const fetchAll = useCallback(async () => {
   );
 }
 
-export default Invoicing;
+export default function Invoicing() {}
