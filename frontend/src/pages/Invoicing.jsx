@@ -792,7 +792,8 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark 
       else b2cS.push(inv);
 
       for (const item of (inv.items || [])) {
-        const key = item.hsn_sac?.trim() || 'UNKNOWN';
+        // ✅ FIX 2: 'UNKNOWN' → '—'
+        const key = item.hsn_sac?.trim() || '—';
         if (!hsnMap[key]) hsnMap[key] = {
           hsn_sac: key, description: item.description || '',
           quantity: 0, taxable: 0, igst: 0, cgst: 0, sgst: 0,
@@ -968,12 +969,13 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark 
         XLSX.writeFile(wb, `GSTR3B_${month}.xlsx`);
       }
       toast.success('GST report exported!');
-     } catch (e) {
-        toast.error('Export failed');
-      } finally {
-        setExporting(null);
-      }
-    };
+    } catch (e) {
+      toast.error('Export failed');
+    } finally {
+      setExporting(null);
+    }
+  };
+
   // ── Shared table styles ─────────────────────────────────────────────────
   const thCls = `px-3 py-2.5 text-left text-[9px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`;
   const tdCls = `px-3 py-2 text-xs ${isDark ? 'text-slate-300' : 'text-slate-700'}`;
@@ -987,8 +989,10 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark 
         <DialogDescription className="sr-only">GSTR-1 and GSTR-3B reports</DialogDescription>
 
         {/* Header */}
-        <div className="px-6 py-4 flex items-center justify-between gap-4 flex-wrap flex-shrink-0"
-          style={{ background: 'linear-gradient(135deg, #064e3b, #065f46, #047857)' }}>
+        <div
+          className="px-6 py-4 flex items-center justify-between gap-4 flex-wrap flex-shrink-0"
+          style={{ background: 'linear-gradient(135deg, #064e3b, #065f46, #047857)' }}
+        >
           <div className="flex items-center gap-3">
             <FileSpreadsheet className="h-5 w-5 text-white" />
             <div>
@@ -996,37 +1000,48 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark 
               <p className="text-emerald-200 text-xs">GSTR-1 · GSTR-3B · {baseInvoices.length} invoices in view</p>
             </div>
           </div>
+
+          {/* ✅ FIX 1: removed stray }), FIX 3: added close button */}
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Company filter — always visible */}
-              <select
-                value={companyFilter}
-                onChange={e => setCompanyFilter(e.target.value)}
-                className="h-9 px-3 rounded-xl bg-white/15 text-white text-xs border border-white/20 focus:outline-none"
-              >
-                <option value="all" className="text-slate-800 bg-white">All Companies</option>
-                {(companies || []).map(c => (
-                  <option key={c.id} value={c.id} className="text-slate-800 bg-white">{c.name}</option>
-                ))}
-              </select>
-            )}
+            <select
+              value={companyFilter}
+              onChange={e => setCompanyFilter(e.target.value)}
+              className="h-9 px-3 rounded-xl bg-white/15 text-white text-xs border border-white/20 focus:outline-none"
+            >
+              <option value="all" className="text-slate-800 bg-white">All Companies</option>
+              {(companies || []).map(c => (
+                <option key={c.id} value={c.id} className="text-slate-800 bg-white">{c.name}</option>
+              ))}
+            </select>
             <input
-              type="month" value={month}
+              type="month"
+              value={month}
               onChange={e => setMonth(e.target.value)}
               className="h-9 px-3 rounded-xl bg-white/15 text-white text-xs border border-white/20 [color-scheme:dark] focus:outline-none"
             />
             <button
-              onClick={() => handleExport('excel')} disabled={exporting}
+              onClick={() => handleExport('excel')}
+              disabled={exporting}
               className="h-9 px-3 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-semibold flex items-center gap-1.5 border border-white/20 transition-colors disabled:opacity-50"
             >
               <Download className="h-3.5 w-3.5" />
               {exporting === 'excel' ? 'Exporting…' : 'Excel'}
             </button>
             <button
-              onClick={() => handleExport('json')} disabled={exporting}
+              onClick={() => handleExport('json')}
+              disabled={exporting}
               className="h-9 px-3 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-semibold flex items-center gap-1.5 border border-white/20 transition-colors disabled:opacity-50"
             >
               <FileText className="h-3.5 w-3.5" />
               {exporting === 'json' ? 'Exporting…' : 'JSON'}
+            </button>
+            {/* ✅ FIX 3: Close button */}
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors flex-shrink-0"
+              title="Close"
+            >
+              <X className="h-4 w-4 text-white" />
             </button>
           </div>
         </div>
@@ -1062,10 +1077,10 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark 
               {/* Summary pills */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
-                  { label: 'B2B Invoices',    value: gstr1.b2b.length,   color: COLORS.mediumBlue,   desc: 'Registered buyers (GSTIN)' },
-                  { label: 'B2C Large',        value: gstr1.b2cL.length,  color: COLORS.amber,        desc: 'Unregistered > ₹2.5L' },
-                  { label: 'B2C Small',        value: gstr1.b2cS.length,  color: COLORS.emeraldGreen, desc: 'Unregistered ≤ ₹2.5L' },
-                  { label: 'Credit/Debit Notes', value: gstr1.cdnr.length, color: COLORS.coral,       desc: 'CDNR' },
+                  { label: 'B2B Invoices',      value: gstr1.b2b.length,  color: COLORS.mediumBlue,   desc: 'Registered buyers (GSTIN)' },
+                  { label: 'B2C Large',          value: gstr1.b2cL.length, color: COLORS.amber,        desc: 'Unregistered > ₹2.5L' },
+                  { label: 'B2C Small',          value: gstr1.b2cS.length, color: COLORS.emeraldGreen, desc: 'Unregistered ≤ ₹2.5L' },
+                  { label: 'Credit/Debit Notes', value: gstr1.cdnr.length, color: COLORS.coral,        desc: 'CDNR' },
                 ].map(s => (
                   <div key={s.label} className={`${cardCls} p-3`}>
                     <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1">{s.label}</p>
@@ -1158,10 +1173,10 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark 
                   </p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     {[
-                      { label: 'Taxable',  val: gstr1.b2cSTotal.taxable, color: COLORS.deepBlue },
-                      { label: 'CGST',     val: gstr1.b2cSTotal.cgst,    color: COLORS.mediumBlue },
-                      { label: 'SGST',     val: gstr1.b2cSTotal.sgst,    color: COLORS.mediumBlue },
-                      { label: 'IGST',     val: gstr1.b2cSTotal.igst,    color: COLORS.amber },
+                      { label: 'Taxable', val: gstr1.b2cSTotal.taxable, color: COLORS.deepBlue },
+                      { label: 'CGST',    val: gstr1.b2cSTotal.cgst,    color: COLORS.mediumBlue },
+                      { label: 'SGST',    val: gstr1.b2cSTotal.sgst,    color: COLORS.mediumBlue },
+                      { label: 'IGST',    val: gstr1.b2cSTotal.igst,    color: COLORS.amber },
                     ].map(s => (
                       <div key={s.label} className={`rounded-lg p-2.5 ${isDark ? 'bg-slate-800' : 'bg-white'} border ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
                         <p className="text-[9px] text-slate-400 uppercase tracking-wider">{s.label}</p>
@@ -1207,9 +1222,9 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark 
               {/* Net Tax Summary cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
-                  { label: 'Net IGST',     value: gstr3b.netIGST, color: COLORS.coral },
-                  { label: 'Net CGST',     value: gstr3b.netCGST, color: COLORS.mediumBlue },
-                  { label: 'Net SGST',     value: gstr3b.netSGST, color: COLORS.teal },
+                  { label: 'Net IGST',           value: gstr3b.netIGST,  color: COLORS.coral },
+                  { label: 'Net CGST',           value: gstr3b.netCGST,  color: COLORS.mediumBlue },
+                  { label: 'Net SGST',           value: gstr3b.netSGST,  color: COLORS.teal },
                   { label: 'Total Tax Liability', value: gstr3b.netTotal, color: COLORS.deepBlue },
                 ].map(s => (
                   <div key={s.label} className={`${cardCls} p-3`}>
@@ -1225,9 +1240,11 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark 
                   <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">3.1 — Outward Taxable Supplies</p>
                 </div>
                 <table className="w-full">
-                  <thead><tr className={isDark ? 'bg-slate-700/30' : 'bg-slate-50/60'}>
-                    {['Description','Taxable Value','IGST','CGST','SGST','Total Tax'].map(h=><th key={h} className={thCls}>{h}</th>)}
-                  </tr></thead>
+                  <thead>
+                    <tr className={isDark ? 'bg-slate-700/30' : 'bg-slate-50/60'}>
+                      {['Description','Taxable Value','IGST','CGST','SGST','Total Tax'].map(h=><th key={h} className={thCls}>{h}</th>)}
+                    </tr>
+                  </thead>
                   <tbody>
                     {[
                       ['Outward Taxable Supplies (Tax Invoice)', gstr3b.outward],
@@ -1270,7 +1287,11 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark 
                       {baseInvoices.map((inv,i)=>(
                         <tr key={inv.id||i} className={trCls}>
                           <td className={`${tdCls} font-mono font-semibold`}>{inv.invoice_no}</td>
-                          <td className={tdCls}><span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${isDark?'bg-slate-700 text-slate-300':'bg-slate-100 text-slate-600'}`}>{INV_TYPES.find(t=>t.value===inv.invoice_type)?.label||inv.invoice_type}</span></td>
+                          <td className={tdCls}>
+                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${isDark?'bg-slate-700 text-slate-300':'bg-slate-100 text-slate-600'}`}>
+                              {INV_TYPES.find(t=>t.value===inv.invoice_type)?.label||inv.invoice_type}
+                            </span>
+                          </td>
                           <td className={`${tdCls} max-w-[160px] truncate`}>{inv.client_name}</td>
                           <td className={tdCls}>{inv.invoice_date}</td>
                           <td className={`${tdCls} text-right`}>{fmtC(inv.total_taxable)}</td>
