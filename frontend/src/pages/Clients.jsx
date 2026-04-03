@@ -2089,80 +2089,164 @@ export default function Clients() {
       <input type="file" ref={excelInputRef} accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" />
 
       {/* CSV PREVIEW DIALOG */}
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border border-slate-200 shadow-2xl">
-          <DialogTitle className={`text-lg font-bold px-6 pt-5 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Review Excel Import</DialogTitle>
-          <DialogDescription className="text-sm text-slate-400 px-6">Preview and confirm data before bulk import</DialogDescription>
-          <div className="flex-1 overflow-auto mx-6 mt-4 rounded-xl border border-slate-100">
-            <table className="min-w-full text-xs">
-              <thead className={`sticky top-0 border-b ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
-                <tr>{previewHeaders.map(h => <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400 whitespace-nowrap">{h}</th>)}</tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {previewData.map((row, ri) => (<tr key={ri} className={isDark ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50'}>{previewHeaders.map(h => (<td key={h} className="p-2"><Input value={row[h] || ''} onChange={e => { const u = [...previewData]; u[ri][h] = e.target.value; setPreviewData(u); }} className="h-8 text-xs rounded-lg border-slate-200" /></td>))}</tr>))}
-              </tbody>
-            </table>
-          </div>
-          <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100">
-            <span className="text-xs text-slate-400">{previewData.length} rows ready</span>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setPreviewOpen(false)} className="h-9 px-4 text-sm rounded-xl border-slate-200">Cancel</Button>
-              <Button className="h-9 px-5 text-sm rounded-xl text-white font-semibold" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
-                onClick={async () => {
-                  setImportLoading(true); let success = 0; let updated = 0;
-                  for (const row of previewData) {
-                    const existing = clients.find(c => c.company_name?.toLowerCase().trim() === row.company_name?.toLowerCase().trim());
-                    if (existing) {
-                      // Upsert: fill only missing fields in the existing client
-                      const updatePayload = {};
-                      if (!existing.email && row.email?.trim()) updatePayload.email = row.email.trim();
-                      if (!existing.phone && row.phone?.trim()) updatePayload.phone = row.phone.replace(/\D/g, '');
-                      if (!existing.address && row.address?.trim()) updatePayload.address = row.address.trim();
-                      if (!existing.city && row.city?.trim()) updatePayload.city = row.city.trim();
-                      if (!existing.state && row.state?.trim()) updatePayload.state = row.state.trim();
-                      if (!existing.referred_by && row.referred_by?.trim()) updatePayload.referred_by = row.referred_by.trim();
-                      if ((!existing.services || existing.services.length === 0) && row.services) updatePayload.services = row.services.split(',').map(s => s.trim()).filter(Boolean);
-                      if (!existing.notes && row.notes?.trim()) updatePayload.notes = row.notes.trim();
-                      if (Object.keys(updatePayload).length > 0) {
-                        try { await api.put(`/clients/${existing.id}`, updatePayload); updated++; } catch(err) { console.error(err); }
-                      }
-                      continue;
-                    }
-                    try {
-                      await api.post('/clients', {
-                        company_name: row.company_name?.trim(),
-                        client_type: ['proprietor','pvt_ltd','llp','partnership','huf','trust','other'].includes(row.client_type) ? row.client_type : 'proprietor',
-                        email: row.email?.trim() || null,
-                        phone: row.phone?.replace(/\D/g, '') || null,
-                        birthday: row.birthday || null,
-                        address: row.address?.trim() || null,
-                        city: row.city?.trim() || null,
-                        state: row.state?.trim() || null,
-                        services: row.services ? row.services.split(',').map(s => s.trim()).filter(Boolean) : [],
-                        notes: row.notes?.trim() || null,
-                        status: row.status || 'active',
-                        referred_by: row.referred_by?.trim() || null,
-                        assigned_to: null,
-                        assignments: [],
-                        contact_persons: [1,2,3].reduce((acc,n) => {
-                          const name = row[`contact_name_${n}`]?.trim();
-                          if (name) acc.push({ name, designation: row[`contact_designation_${n}`]?.trim() || null, email: row[`contact_email_${n}`]?.trim() || null, phone: row[`contact_phone_${n}`]?.replace(/\D/g,'') || null, birthday: row[`contact_birthday_${n}`] || null, din: row[`contact_din_${n}`]?.trim() || null });
-                          return acc;
-                        }, []),
-                        dsc_details: [],
-                      });
-                      success++;
-                    } catch(err) { console.error(err); }
+<Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+  <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border border-slate-200 shadow-2xl">
+    <DialogTitle className={`text-lg font-bold px-6 pt-5 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+      Review Excel Import
+    </DialogTitle>
+    <DialogDescription className="text-sm text-slate-400 px-6">
+      Preview and confirm data before bulk import
+    </DialogDescription>
+
+    <div className="flex-1 overflow-auto mx-6 mt-4 rounded-xl border border-slate-100">
+      <table className="min-w-full text-xs">
+        <thead className={`sticky top-0 border-b ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
+          <tr>
+            {previewHeaders.map(h => (
+              <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400 whitespace-nowrap">
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+
+        <tbody className="divide-y divide-slate-50">
+          {previewData.map((row, ri) => (
+            <tr key={ri} className={isDark ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50'}>
+              {previewHeaders.map(h => (
+                <td key={h} className="p-2">
+                  <Input
+                    value={row[h] || ''}
+                    onChange={e => {
+                      const u = [...previewData];
+                      u[ri][h] = e.target.value;
+                      setPreviewData(u);
+                    }}
+                    className="h-8 text-xs rounded-lg border-slate-200"
+                  />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+
+    <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100">
+      <span className="text-xs text-slate-400">
+        {previewData.length} rows ready
+      </span>
+
+      <div className="flex gap-2">
+        <Button
+          variant="outline"
+          onClick={() => setPreviewOpen(false)}
+          className="h-9 px-4 text-sm rounded-xl border-slate-200"
+        >
+          Cancel
+        </Button>
+
+        <Button
+          className="h-9 px-5 text-sm rounded-xl text-white font-semibold"
+          style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
+          onClick={async () => {
+            try {
+              setImportLoading(true);
+
+              let success = 0;
+              let updated = 0;
+
+              for (const row of previewData) {
+                const existing = clients.find(
+                  c => c.company_name?.toLowerCase().trim() === row.company_name?.toLowerCase().trim()
+                );
+
+                if (existing) {
+                  const updatePayload = {};
+
+                  if (!existing.email && row.email?.trim()) updatePayload.email = row.email.trim();
+                  if (!existing.phone && row.phone?.trim()) updatePayload.phone = row.phone.replace(/\D/g, '');
+                  if (!existing.address && row.address?.trim()) updatePayload.address = row.address.trim();
+                  if (!existing.city && row.city?.trim()) updatePayload.city = row.city.trim();
+                  if (!existing.state && row.state?.trim()) updatePayload.state = row.state.trim();
+                  if (!existing.referred_by && row.referred_by?.trim()) updatePayload.referred_by = row.referred_by.trim();
+                  if ((!existing.services || existing.services.length === 0) && row.services) {
+                    updatePayload.services = row.services.split(',').map(s => s.trim()).filter(Boolean);
                   }
-                  toast.success(`${success} clients imported, ${updated} updated`);
-                  fetchClients(); setPreviewOpen(false); setImportLoading(false);
-                }}
-                  toast.success(`${success} clients imported`); fetchClients(); setPreviewOpen(false); setImportLoading(false);
-                }}>Confirm &amp; Import All</Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+                  if (!existing.notes && row.notes?.trim()) updatePayload.notes = row.notes.trim();
+
+                  if (Object.keys(updatePayload).length > 0) {
+                    try {
+                      await api.put(`/clients/${existing.id}`, updatePayload);
+                      updated++;
+                    } catch (err) {
+                      console.error(err);
+                    }
+                  }
+                  continue;
+                }
+
+                try {
+                  await api.post('/clients', {
+                    company_name: row.company_name?.trim(),
+                    client_type: ['proprietor','pvt_ltd','llp','partnership','huf','trust','other'].includes(row.client_type)
+                      ? row.client_type
+                      : 'proprietor',
+                    email: row.email?.trim() || null,
+                    phone: row.phone?.replace(/\D/g, '') || null,
+                    birthday: row.birthday || null,
+                    address: row.address?.trim() || null,
+                    city: row.city?.trim() || null,
+                    state: row.state?.trim() || null,
+                    services: row.services
+                      ? row.services.split(',').map(s => s.trim()).filter(Boolean)
+                      : [],
+                    notes: row.notes?.trim() || null,
+                    status: row.status || 'active',
+                    referred_by: row.referred_by?.trim() || null,
+                    assigned_to: null,
+                    assignments: [],
+                    contact_persons: [1,2,3].reduce((acc, n) => {
+                      const name = row[`contact_name_${n}`]?.trim();
+                      if (name) {
+                        acc.push({
+                          name,
+                          designation: row[`contact_designation_${n}`]?.trim() || null,
+                          email: row[`contact_email_${n}`]?.trim() || null,
+                          phone: row[`contact_phone_${n}`]?.replace(/\D/g,'') || null,
+                          birthday: row[`contact_birthday_${n}`] || null,
+                          din: row[`contact_din_${n}`]?.trim() || null
+                        });
+                      }
+                      return acc;
+                    }, []),
+                    dsc_details: [],
+                  });
+
+                  success++;
+                } catch (err) {
+                  console.error(err);
+                }
+              }
+
+              toast.success(`${success} clients imported, ${updated} updated`);
+              fetchClients();
+              setPreviewOpen(false);
+              setImportLoading(false);
+
+            } catch (err) {
+              console.error(err);
+              toast.error("Import failed");
+              setImportLoading(false);
+            }
+          }}
+        >
+          Confirm &amp; Import All
+        </Button>
+      </div>
+    </div>
+  </DialogContent>
+</Dialog>
 
       {/* MDS PREVIEW DIALOG */}
       <Dialog open={mdsPreviewOpen} onOpenChange={(open) => { if (!open) { setMdsPreviewOpen(false); setMdsData(null); setMdsForm(null); } }}>
