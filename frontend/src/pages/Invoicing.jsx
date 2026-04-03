@@ -763,7 +763,7 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark 
   const [tab, setTab] = useState('gstr1');
   const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
   const [companyFilter, setCompanyFilter] = useState('all');
-  const [exporting, setExporting] = useState(false);
+  const [exporting, setExporting] = useState(null);
 
   // ── Base filtered data ──────────────────────────────────────────────────
   const baseInvoices = useMemo(() => {
@@ -846,9 +846,83 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark 
   }, [baseInvoices]);
 
   // ── Export helpers ──────────────────────────────────────────────────────
-  const handleExport = () => {
-    setExporting(true);
+  const handleExport = (exportFormat = 'excel') => {
+    setExporting(exportFormat);
     try {
+      const companyName = companyFilter === 'all'
+        ? 'All'
+        : (companies.find(c => c.id === companyFilter)?.name || companyFilter);
+
+      if (exportFormat === 'json') {
+        const jsonData = {
+          generated_at: new Date().toISOString(),
+          month,
+          company: companyName,
+          gstr1: {
+            b2b: gstr1.b2b.map(inv => ({
+              invoice_no: inv.invoice_no,
+              invoice_date: inv.invoice_date,
+              client_name: inv.client_name,
+              client_gstin: inv.client_gstin,
+              total_taxable: inv.total_taxable,
+              total_cgst: inv.total_cgst,
+              total_sgst: inv.total_sgst,
+              total_igst: inv.total_igst,
+              grand_total: inv.grand_total,
+            })),
+            b2c_large: gstr1.b2cL.map(inv => ({
+              invoice_no: inv.invoice_no,
+              invoice_date: inv.invoice_date,
+              client_name: inv.client_name,
+              total_taxable: inv.total_taxable,
+              total_cgst: inv.total_cgst,
+              total_sgst: inv.total_sgst,
+              total_igst: inv.total_igst,
+              grand_total: inv.grand_total,
+            })),
+            b2c_small_summary: gstr1.b2cSTotal,
+            hsn_summary: gstr1.hsnSummary,
+            cdnr: gstr1.cdnr.map(inv => ({
+              invoice_no: inv.invoice_no,
+              invoice_date: inv.invoice_date,
+              client_name: inv.client_name,
+              client_gstin: inv.client_gstin,
+              grand_total: inv.grand_total,
+            })),
+          },
+          gstr3b: {
+            outward_supplies: gstr3b.outward,
+            credit_note_adjustments: gstr3b.credits,
+            net_igst: gstr3b.netIGST,
+            net_cgst: gstr3b.netCGST,
+            net_sgst: gstr3b.netSGST,
+            total_tax_liability: gstr3b.netTotal,
+          },
+          all_invoices: baseInvoices.map(inv => ({
+            invoice_no: inv.invoice_no,
+            invoice_type: inv.invoice_type,
+            invoice_date: inv.invoice_date,
+            client_name: inv.client_name,
+            client_gstin: inv.client_gstin || '',
+            total_taxable: inv.total_taxable,
+            total_cgst: inv.total_cgst,
+            total_sgst: inv.total_sgst,
+            total_igst: inv.total_igst,
+            grand_total: inv.grand_total,
+            status: inv.status,
+          })),
+        };
+        const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: 'application/json' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `GST_${month}_${companyName.replace(/\s+/g,'_')}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+        toast.success('GST data exported as JSON!');
+        return;
+      }
       if (tab === 'gstr1') {
         const rows = [
           ['GSTR-1 Export', `Month: ${month}`, `Company: ${companyFilter === 'all' ? 'All' : (companies.find(c=>c.id===companyFilter)?.name || companyFilter)}`],
@@ -894,13 +968,12 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark 
         XLSX.writeFile(wb, `GSTR3B_${month}.xlsx`);
       }
       toast.success('GST report exported!');
-    } catch (e) {
-      toast.error('Export failed');
-    } finally {
-      setExporting(false);
-    }
-  };
-
+     } catch (e) {
+        toast.error('Export failed');
+      } finally {
+        setExporting(null);
+      }
+    };
   // ── Shared table styles ─────────────────────────────────────────────────
   const thCls = `px-3 py-2.5 text-left text-[9px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`;
   const tdCls = `px-3 py-2 text-xs ${isDark ? 'text-slate-300' : 'text-slate-700'}`;
@@ -924,15 +997,14 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark 
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Company filter */}
-            {(companies || []).length > 1 && (
+            {/* Company filter — always visible */}
               <select
                 value={companyFilter}
                 onChange={e => setCompanyFilter(e.target.value)}
                 className="h-9 px-3 rounded-xl bg-white/15 text-white text-xs border border-white/20 focus:outline-none"
               >
                 <option value="all" className="text-slate-800 bg-white">All Companies</option>
-                {companies.map(c => (
+                {(companies || []).map(c => (
                   <option key={c.id} value={c.id} className="text-slate-800 bg-white">{c.name}</option>
                 ))}
               </select>
@@ -943,14 +1015,18 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark 
               className="h-9 px-3 rounded-xl bg-white/15 text-white text-xs border border-white/20 [color-scheme:dark] focus:outline-none"
             />
             <button
-              onClick={handleExport} disabled={exporting}
+              onClick={() => handleExport('excel')} disabled={exporting}
               className="h-9 px-3 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-semibold flex items-center gap-1.5 border border-white/20 transition-colors disabled:opacity-50"
             >
               <Download className="h-3.5 w-3.5" />
-              {exporting ? 'Exporting…' : 'Export Excel'}
+              {exporting === 'excel' ? 'Exporting…' : 'Excel'}
             </button>
-            <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center">
-              <X className="h-4 w-4 text-white" />
+            <button
+              onClick={() => handleExport('json')} disabled={exporting}
+              className="h-9 px-3 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-semibold flex items-center gap-1.5 border border-white/20 transition-colors disabled:opacity-50"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              {exporting === 'json' ? 'Exporting…' : 'JSON'}
             </button>
           </div>
         </div>
