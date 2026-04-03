@@ -614,20 +614,20 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
   };
 
   // When lead is selected, auto-fill if lead has client info
-const handleLeadSelect = (leadId) => {
-    if (!leadId || leadId === 'none') { setForm(prev => ({ ...prev, lead_id: '' })); return; }
-    setForm(prev => ({ ...prev, lead_id: leadId }));
-    const selectedLead = leads.find(l => l.id === leadId);
-    if (selectedLead && !form.client_name) {
-      setForm(prev => ({
-        ...prev,
-        lead_id: leadId,
-        client_name: selectedLead.company_name || selectedLead.name || prev.client_name,
-        client_email: selectedLead.email || prev.client_email,
-        client_phone: selectedLead.phone || prev.client_phone,
-      }));
-    }
-  };
+  const handleLeadSelect = (leadId) => {
+      if (!leadId || leadId === 'none') { setForm(prev => ({ ...prev, lead_id: '' })); return; }
+      setForm(prev => ({ ...prev, lead_id: leadId }));
+      const selectedLead = leads.find(l => l.id === leadId);
+      if (selectedLead && !form.client_name) {
+        setForm(prev => ({
+          ...prev,
+          lead_id: leadId,
+          client_name: selectedLead.company_name || selectedLead.name || prev.client_name,
+          client_email: selectedLead.email || prev.client_email,
+          client_phone: selectedLead.phone || prev.client_phone,
+        }));
+      }
+    };
     setForm(prev => ({ ...prev, lead_id: leadId }));
     const selectedLead = leads.find(l => l.id === leadId);
     if (selectedLead && !form.client_name) {
