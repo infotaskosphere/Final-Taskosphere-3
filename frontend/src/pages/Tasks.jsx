@@ -35,57 +35,6 @@ const COLORS = {
   lightGreen: '#5CCB5F',
 };
 
-//----------------------------------- ✅ REQUIRED CONSTANTS
-
-const EMPTY_FORM = {
-  title: '',
-  description: '',
-  assigned_to: 'unassigned',
-  sub_assignees: [],
-  due_date: '',
-  priority: 'medium',
-  status: 'pending',
-  category: 'other',
-  client_id: '',
-  is_recurring: false,
-  recurrence_pattern: 'monthly',
-  recurrence_interval: 1,
-};
-
-const STATUS_STYLES = {
-  pending: { label: 'To Do' },
-  in_progress: { label: 'In Progress' },
-  completed: { label: 'Completed' },
-  overdue: { label: 'Overdue' },
-};
-
-const PRIORITY_STYLES = {
-  low: { label: 'LOW' },
-  medium: { label: 'MED' },
-  high: { label: 'HIGH' },
-  critical: { label: 'CRIT' },
-};
-
-const TASK_CATEGORIES = [
-  { value: 'gst', label: 'GST' },
-  { value: 'income_tax', label: 'INCOME TAX' },
-  { value: 'accounts', label: 'ACCOUNTS' },
-  { value: 'tds', label: 'TDS' },
-  { value: 'roc', label: 'ROC' },
-  { value: 'other', label: 'OTHER' },
-];
-
-const COMPLIANCE_WORKFLOWS = [];
-
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1 }
-};
-
-const itemVariants = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1 }
-};
 // ─── Department categories ───────────────────────────────────────────────────
 const DEPARTMENTS = [
   { value: 'gst',          label: 'GST' },
