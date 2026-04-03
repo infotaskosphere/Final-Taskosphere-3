@@ -1417,9 +1417,13 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
   const reset = () => {
     setStep('choose'); setImportMode(''); setFile(null); setParsed(null);
     setError(''); setLoading(false); setProgress(0);
-    setResults({ imported: 0, clients: 0, skipped: 0, errors: [] });
-    setSelectedFirm('__none__'); setSelectedCompanyId('__none__');
-  };
+    setResults({
+      imported: data.invoices_imported || 0,
+      clients: data.clients_imported || 0,
+      skipped: data.invoices_skipped || 0,
+      errors: data.errors || [],
+      clients_updated: data.clients_updated || 0,
+    });
 
   const handleClose = () => { reset(); onClose(); };
 
@@ -1850,12 +1854,18 @@ const handleImport = async () => {
                 <div className="w-16 h-16 rounded-2xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center"><CheckCircle2 className="h-8 w-8 text-emerald-600" /></div>
                 <p className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Import Complete!</p>
               </div>
-              <div className="grid grid-cols-3 gap-3">
-                {[{ label: 'Invoices Imported', val: results.imported, color: '#1FAF5A' },
-                  { label: 'Clients Added', val: results.clients, color: '#1F6FB2' },
-                  { label: 'Skipped', val: results.skipped, color: '#F59E0B' },
-                ].map(s => (<div key={s.label} className={`rounded-xl border p-4 text-center ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                  <p className="text-2xl font-black" style={{ color: s.color }}>{s.val}</p><p className="text-[10px] font-semibold text-slate-400 uppercase mt-1">{s.label}</p></div>))}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { label: 'Invoices Imported', val: results.imported, color: '#1FAF5A' },
+                  { label: 'Clients Added/Updated', val: results.clients, color: '#1F6FB2' },
+                  { label: 'Inv Skipped (Dup)', val: results.skipped, color: '#F59E0B' },
+                  { label: 'Errors', val: results.errors?.length || 0, color: results.errors?.length ? '#EF4444' : '#94A3B8' },
+                ].map(s => (
+                  <div key={s.label} className={`rounded-xl border p-4 text-center ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                    <p className="text-2xl font-black" style={{ color: s.color }}>{s.val}</p>
+                    <p className="text-[10px] font-semibold text-slate-400 uppercase mt-1">{s.label}</p>
+                  </div>
+                ))}
               </div>
               {(results.errors?.length || 0) > 0 && (
                 <div className={`rounded-xl border p-3 max-h-32 overflow-y-auto ${isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-200'}`}>
