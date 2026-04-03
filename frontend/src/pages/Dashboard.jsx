@@ -1294,20 +1294,7 @@ export default function Dashboard() {
     return Moon;
   };
 
-  // ── Loading skeleton while first fetch runs ────────────────────────────────
-  if (dataLoading) {
-    return (
-      <div className={`min-h-screen flex items-center justify-center ${isDark ? 'bg-[#0f172a]' : 'bg-slate-50'}`}>
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-10 w-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-          <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            Loading dashboard…
-          </p>
-        </div>
-      </div>
-    );
-  }
-
+ 
   const RankingItem = React.memo(({ member, index, period }) => {
     const isGold   = index === 0;
     const isSilver = index === 1;
@@ -1391,6 +1378,17 @@ export default function Dashboard() {
 
   return (
     <>
+      {/* Loading overlay */}
+      {dataLoading && (
+        <div className={`fixed inset-0 z-[99999] flex items-center justify-center ${isDark ? 'bg-[#0f172a]' : 'bg-slate-50'}`}>
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-10 w-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              Loading dashboard…
+            </p>
+          </div>
+        </div>
+      )}
       <AnimatePresence>
         {selectedTask && (
           <TaskDetailModal isDark={isDark} task={selectedTask}
