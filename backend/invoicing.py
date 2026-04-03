@@ -1625,7 +1625,7 @@ async def import_backup(
     now = datetime.now(timezone.utc).isoformat()
     result = ImportBackupResult()
 
-    # ── 1. Clients ─────────────────────────────────────────
+    # ── 1. Clients ─────────────────────────────────────────────────────────
     client_name_to_id: dict = {}
     for c in data.clients:
         name = (c.get("full_name") or c.get("client_name") or "").strip()
@@ -1633,22 +1633,42 @@ async def import_backup(
             continue
         try:
             existing = await db.clients.find_one({
-                "company_id": data.company_id,
                 "company_name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}
             })
             if existing:
                 client_name_to_id[name] = existing["id"]
+                # Build update dict: only fill fields that are missing/empty in existing record
+                update_fields = {}
+                field_map = {
+                    "phone":         c.get("phone_number", ""),
+                    "email":         c.get("email", ""),
+                    "address":       c.get("address", ""),
+                    "client_gstin":  c.get("name_gstin_number", ""),
+                    "state":         c.get("name_state", ""),
+                }
+                for field, backup_val in field_map.items():
+                    backup_val = (backup_val or "").strip()
+                    existing_val = (existing.get(field) or "").strip()
+                    # Only update if backup has a value AND existing is empty/missing
+                    if backup_val and not existing_val:
+                        update_fields[field] = backup_val
+                if update_fields:
+                    update_fields["updated_at"] = now
+                    await db.clients.update_one(
+                        {"id": existing["id"]},
+                        {"$set": update_fields}
+                    )
+                    result.clients_imported += 1  # count as updated
                 continue
             cid = str(uuid.uuid4())
             await db.clients.insert_one({
                 "id": cid,
-                "company_id": data.company_id,
                 "company_name": name,
-                "phone": c.get("phone_number", ""),
-                "email": c.get("email", ""),
-                "address": c.get("address", ""),
-                "client_gstin": c.get("name_gstin_number", ""),
-                "state": c.get("name_state", ""),
+                "phone": (c.get("phone_number") or "").strip(),
+                "email": (c.get("email") or "").strip(),
+                "address": (c.get("address") or "").strip(),
+                "client_gstin": (c.get("name_gstin_number") or "").strip(),
+                "state": (c.get("name_state") or "").strip(),
                 "client_type": "other",
                 "status": "active",
                 "imported_from": data.source,
