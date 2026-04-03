@@ -615,10 +615,19 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
 
   // When lead is selected, auto-fill if lead has client info
 const handleLeadSelect = (leadId) => {
-    if (!leadId || leadId === 'none') {
-      setForm(prev => ({ ...prev, lead_id: '' }));
-      return;
+    if (!leadId || leadId === 'none') { setForm(prev => ({ ...prev, lead_id: '' })); return; }
+    setForm(prev => ({ ...prev, lead_id: leadId }));
+    const selectedLead = leads.find(l => l.id === leadId);
+    if (selectedLead && !form.client_name) {
+      setForm(prev => ({
+        ...prev,
+        lead_id: leadId,
+        client_name: selectedLead.company_name || selectedLead.name || prev.client_name,
+        client_email: selectedLead.email || prev.client_email,
+        client_phone: selectedLead.phone || prev.client_phone,
+      }));
     }
+  };
     setForm(prev => ({ ...prev, lead_id: leadId }));
     const selectedLead = leads.find(l => l.id === leadId);
     if (selectedLead && !form.client_name) {
@@ -751,7 +760,7 @@ const handleLeadSelect = (leadId) => {
                     <SelectTrigger className="h-9 rounded-xl text-sm"><SelectValue placeholder="Select a lead" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">-- No Lead --</SelectItem>
-                      {leads.map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.email})</SelectItem>)}
+                      {leads.map(l => <SelectItem key={l.id} value={l.id}>{l.company_name || l.name || 'Unnamed'}{(l.contact_name || l.email) ? ` — ${l.contact_name || l.email}` : ''}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
