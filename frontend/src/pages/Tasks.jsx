@@ -21,7 +21,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 // ✅ ICONS
 import {
-  Plus, Edit, Trash2, Search, Calendar, Building2, User,
+  Plus, Edit, Trash2, Search, Calendar, Building2, User, Users,
   LayoutGrid, List, Circle, ArrowRight, Check, Repeat,
   MessageSquare, Bell, FileText, Calendar as CalendarIcon,
   X, ChevronDown, Filter, Clock, AlertCircle, CheckCircle2,
@@ -652,7 +652,17 @@ const StatCard = ({ label, value, color, icon: Icon, active, onClick, activeClas
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Tasks() {
   // ── Stub: replace with real useAuth(), useNavigate(), etc. in your app
-  const user = { id: 'user-1', full_name: 'Arjun Sharma', email: 'arjun@example.com', role: 'admin' };
+  //    cross_visibility: non-admin users with view_other_tasks[] set can see team tasks
+  const user = {
+    id: 'user-1',
+    full_name: 'Arjun Sharma',
+    email: 'arjun@example.com',
+    role: 'admin',
+    permissions: {
+      can_view_all_tasks: true,
+      view_other_tasks: [],   // array of user IDs a manager can see; empty for regular staff
+    },
+  };
   const hasPermission = () => true;
   const navigate = (path) => console.log('navigate:', path);
 
@@ -684,6 +694,36 @@ export default function Tasks() {
     { id: 'user-2', full_name: 'Priya Mehta' },
     { id: 'user-3', full_name: 'Rahul Gupta' },
   ]);
+
+  // ── Cross-visibility: who can the current user see? ──────────────────────────
+  //    Admin     → sees ALL users (all tasks)
+  //    Manager   → sees own + users listed in permissions.view_other_tasks
+  //    Staff     → sees only themselves
+  const hasCrossVisibility = React.useMemo(() => {
+    if (isAdmin) return true;
+    const perms = user?.permissions || {};
+    return (perms.view_other_tasks && perms.view_other_tasks.length > 0) || perms.can_view_all_tasks === true;
+  }, [isAdmin, user]);
+
+  const crossVisibilityUserIds = React.useMemo(() => {
+    if (isAdmin) return users.map(u => u.id).filter(id => id !== user?.id);
+    const perms = user?.permissions || {};
+    return (perms.view_other_tasks || []).filter(id => id !== user?.id);
+  }, [isAdmin, user, users]);
+
+  // ── Users visible in filters (assignee dropdown) ─────────────────────────────
+  //    Admin                    → all users
+  //    Manager w/ cross_vis     → self + team members they can see
+  //    Regular staff            → only self
+  const visibleUsers = React.useMemo(() => {
+    if (isAdmin) return users;
+    if (hasCrossVisibility) {
+      const ids = new Set([user?.id, ...crossVisibilityUserIds]);
+      return users.filter(u => ids.has(u.id));
+    }
+    return users.filter(u => u.id === user?.id);
+  }, [isAdmin, hasCrossVisibility, crossVisibilityUserIds, users, user]);
+
   const [clients, setClients] = useState([
     { id: 'c1', company_name: 'ABC Pvt Ltd' },
     { id: 'c2', company_name: 'XYZ Corp' },
@@ -876,7 +916,37 @@ export default function Tasks() {
   const openTaskDetail = (task) => { setSelectedDetailTask(task); setTaskDetailOpen(true); };
 
   // ── Filtering & sorting ──────────────────────────────────────────────────────
-  const filteredTasks = tasks.filter(task => {
+  //    Scope: restrict visible tasks based on permission level before applying UI filters
+  //      Admin            → see all tasks
+  //      Manager/cross_vis → see own + team members' tasks
+  //      Regular staff    → see only own tasks (assigned_to === self OR sub_assignees includes self)
+  const scopedTasks = React.useMemo(() => {
+    if (isAdmin) return tasks;
+    if (hasCrossVisibility) {
+      const visibleIds = new Set([user?.id, ...crossVisibilityUserIds]);
+      return tasks.filter(t =>
+        visibleIds.has(t.assigned_to) || t.sub_assignees?.some(id => visibleIds.has(id))
+      );
+    }
+    return tasks.filter(t =>
+      t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id) || t.created_by === user?.id
+    );
+  }, [tasks, isAdmin, hasCrossVisibility, user, crossVisibilityUserIds]);
+
+  // ── Stats (based on scoped tasks so numbers match what the user can see) ──────
+  const stats = {
+    myTask:     myTasks.length,
+    total:      scopedTasks.length,
+    todo:       scopedTasks.filter(t => t.status === 'pending').length,
+    inProgress: scopedTasks.filter(t => t.status === 'in_progress').length,
+    completed:  scopedTasks.filter(t => t.status === 'completed').length,
+    overdue:    scopedTasks.filter(t => isOverdue(t)).length,
+    teamTask:   hasCrossVisibility
+      ? tasks.filter(t => crossVisibilityUserIds.includes(t.assigned_to) && t.status !== 'completed').length
+      : 0,
+  };
+
+  const filteredTasks = scopedTasks.filter(task => {
     const matchesSearch   = task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                             task.description?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesPriority = filterPriority === 'all' || task.priority  === filterPriority;
@@ -923,13 +993,28 @@ export default function Tasks() {
   }, [filteredTasks, showMyTasksOnly, sortBy, sortDirection, user]);
 
   // ── Stats ─────────────────────────────────────────────────────────────────────
-  const stats = {
-    total:      tasks.length,
-    todo:       tasks.filter(t => t.status === 'pending').length,
-    inProgress: tasks.filter(t => t.status === 'in_progress').length,
-    completed:  tasks.filter(t => t.status === 'completed').length,
-    overdue:    tasks.filter(t => isOverdue(t)).length,
-  };
+  //    "My Task" = tasks assigned to or sub-assigned to the current user
+  //    "Team Task" = pending tasks assigned to cross-visible team members
+  //                  (0 if cross_visibility is off; actual count if on or admin)
+  const myTasks = React.useMemo(() =>
+    tasks.filter(t => t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id)),
+    [tasks, user]
+  );
+
+  const teamTaskBreakdown = React.useMemo(() => {
+    if (!hasCrossVisibility || crossVisibilityUserIds.length === 0) return [];
+    return crossVisibilityUserIds.map(uid => {
+      const member = users.find(u => u.id === uid);
+      const pendingCount = tasks.filter(t =>
+        (t.assigned_to === uid || t.sub_assignees?.includes(uid)) && t.status !== 'completed'
+      ).length;
+      return { id: uid, name: member?.full_name || 'Unknown', pendingCount };
+    }).filter(m => m.pendingCount > 0);
+  }, [hasCrossVisibility, crossVisibilityUserIds, tasks, users]);
+
+  // Note: stats are computed after scopedTasks is defined below (moved to after scopedTasks)
+  // Placeholder that gets overridden — actual stats object is defined further down after scopedTasks
+  const _statsPlaceholder = null;
 
   // ── Active filter pills ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -1008,7 +1093,8 @@ export default function Tasks() {
                 Task Management
               </h1>
               <p className="text-xs text-slate-400 mt-0.5">
-                {stats.total} tasks · {stats.overdue} overdue · {stats.inProgress} in progress
+                {stats.myTask} my tasks · {stats.overdue} overdue · {stats.inProgress} in progress
+                {hasCrossVisibility && ` · ${stats.teamTask} team pending`}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -1251,28 +1337,96 @@ export default function Tasks() {
         </Card>
       </motion.div>
 
-      {/* ── Stat Cards ───────────────────────────────────────────────────────── */}
-      <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <StatCard label="Total"       value={stats.total}      color={isDark ? 'text-slate-300' : 'text-slate-800'} icon={SlidersHorizontal}
-          active={filterStatus === 'all'}
+      {/* ── Stat Cards — 6 equal cards ───────────────────────────────────────── */}
+      <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+
+        {/* 1. My Task */}
+        <StatCard label="My Task"     value={stats.myTask}     color={isDark ? 'text-slate-300' : 'text-slate-800'} icon={SlidersHorizontal}
+          active={filterStatus === 'all' && filterAssignee === (user?.id || 'all')}
           activeClasses={{ bg: isDark ? 'bg-slate-700' : 'bg-slate-50', border: 'border-slate-400', ring: 'ring-slate-200', icon: 'bg-slate-200', iconFg: 'text-slate-700', bar: 'bg-slate-600' }}
-          onClick={() => setFilterStatus('all')} />
+          onClick={() => { setFilterStatus('all'); setFilterAssignee(user?.id || 'all'); }} />
+
+        {/* 2. To Do */}
         <StatCard label="To Do"       value={stats.todo}       color="text-red-600"   icon={Circle}
           active={filterStatus === 'pending'}
           activeClasses={{ bg: 'bg-red-50', border: 'border-red-300', ring: 'ring-red-100', icon: 'bg-red-100', iconFg: 'text-red-600', bar: 'bg-red-500' }}
           onClick={() => setFilterStatus(filterStatus === 'pending' ? 'all' : 'pending')} />
+
+        {/* 3. In Progress */}
         <StatCard label="In Progress" value={stats.inProgress} color="text-amber-600" icon={TrendingUp}
           active={filterStatus === 'in_progress'}
           activeClasses={{ bg: 'bg-amber-50', border: 'border-amber-300', ring: 'ring-amber-100', icon: 'bg-amber-100', iconFg: 'text-amber-600', bar: 'bg-amber-500' }}
           onClick={() => setFilterStatus(filterStatus === 'in_progress' ? 'all' : 'in_progress')} />
+
+        {/* 4. Completed */}
         <StatCard label="Completed"   value={stats.completed}  color="text-blue-600"  icon={CheckCircle2}
           active={filterStatus === 'completed'}
           activeClasses={{ bg: 'bg-blue-50', border: 'border-blue-300', ring: 'ring-blue-100', icon: 'bg-blue-100', iconFg: 'text-blue-600', bar: 'bg-blue-600' }}
           onClick={() => setFilterStatus(filterStatus === 'completed' ? 'all' : 'completed')} />
+
+        {/* 5. Overdue */}
         <StatCard label="Overdue"     value={stats.overdue}    color="text-red-700"   icon={AlertCircle}
           active={filterStatus === 'overdue'}
           activeClasses={{ bg: 'bg-red-50', border: 'border-red-400', ring: 'ring-red-200', icon: 'bg-red-100', iconFg: 'text-red-700', bar: 'bg-red-700' }}
           onClick={() => setFilterStatus(filterStatus === 'overdue' ? 'all' : 'overdue')} />
+
+        {/* 6. Team Task — shows 0 when cross_visibility is OFF; actual count + breakdown when ON or admin */}
+        <motion.button
+          whileHover={{ y: -2, boxShadow: '0 6px 20px 0 rgba(0,0,0,0.07)' }}
+          whileTap={{ scale: 0.97 }}
+          transition={{ type: 'spring', stiffness: 420, damping: 26 }}
+          onClick={() => hasCrossVisibility ? setFilterAssignee('all') : undefined}
+          className={`relative rounded-xl border p-4 text-left w-full overflow-hidden transition-colors duration-200
+            ${hasCrossVisibility && stats.teamTask > 0
+              ? isDark
+                ? 'bg-violet-900/20 border-violet-700 ring-1 ring-violet-800'
+                : 'bg-violet-50 border-violet-300 ring-1 ring-violet-200 shadow-sm'
+              : isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
+            }`}
+        >
+          <motion.div
+            initial={false}
+            animate={{ scaleX: hasCrossVisibility && stats.teamTask > 0 ? 1 : 0, opacity: hasCrossVisibility && stats.teamTask > 0 ? 1 : 0 }}
+            transition={{ duration: 0.22, ease: 'easeOut' }}
+            className="absolute top-0 left-0 right-0 h-[3px] origin-left rounded-t-xl bg-violet-500"
+          />
+          <div className="flex items-start justify-between">
+            <div className="flex-1 min-w-0 mr-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Team Task</p>
+              <motion.p
+                key={stats.teamTask}
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, ease: 'easeOut' }}
+                className={`text-3xl font-bold leading-none ${hasCrossVisibility ? (isDark ? 'text-violet-400' : 'text-violet-700') : (isDark ? 'text-slate-600' : 'text-slate-300')}`}
+              >
+                {stats.teamTask}
+              </motion.p>
+              {/* Per-member breakdown in small text */}
+              {hasCrossVisibility && teamTaskBreakdown.length > 0 && (
+                <div className="mt-1.5 space-y-0.5">
+                  {teamTaskBreakdown.slice(0, 3).map(m => (
+                    <p key={m.id} className={`text-[9px] font-medium truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                      {m.name.split(' ')[0].toLowerCase()}: {m.pendingCount} pending
+                    </p>
+                  ))}
+                  {teamTaskBreakdown.length > 3 && (
+                    <p className={`text-[9px] ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>
+                      +{teamTaskBreakdown.length - 3} more
+                    </p>
+                  )}
+                </div>
+              )}
+              {!hasCrossVisibility && (
+                <p className={`text-[9px] mt-1 ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>cross visibility off</p>
+              )}
+            </div>
+            <div className={`p-2 rounded-lg transition-colors duration-200 ${hasCrossVisibility && stats.teamTask > 0 ? (isDark ? 'bg-violet-900/40' : 'bg-violet-100') : 'bg-slate-100'}`}>
+              <Users className={`h-4 w-4 ${hasCrossVisibility && stats.teamTask > 0 ? (isDark ? 'text-violet-400' : 'text-violet-600') : 'text-slate-400'}`} />
+            </div>
+          </div>
+        </motion.button>
+
       </motion.div>
 
       {/* ── Toolbar ──────────────────────────────────────────────────────────── */}
@@ -1319,7 +1473,7 @@ export default function Tasks() {
             <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Assignee" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Assignees</SelectItem>
-              {users.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
+              {visibleUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
             </SelectContent>
           </Select>
 
