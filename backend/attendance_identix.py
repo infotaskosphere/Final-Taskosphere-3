@@ -40,7 +40,7 @@ import logging
 import traceback
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
-
+from fastapi import Request
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel
 
@@ -49,7 +49,7 @@ logger = logging.getLogger("identix")
 from backend.dependencies import db, get_current_user, require_admin
 from backend.models import User
 
-identix_router = APIRouter(prefix="/identix", tags=["Identix"])
+identix_router = APIRouter()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # IN-MEMORY SCAN STATE  (keyed by scan_id UUID)
@@ -965,3 +965,68 @@ async def sync_single_user_to_devices(
     return {
         "message": f"Syncing {user['full_name']} to all active devices in background"
     }
+# 🔹 Device handshake (VERY IMPORTANT)
+@identix_router.api_route("/iclock/getrequest", methods=["GET", "POST"])
+async def iclock_getrequest(request: Request):
+    params = dict(request.query_params)
+    print("📡 GETREQUEST:", params)
+    return "OK"
+
+
+# 🔹 Main attendance data endpoint
+@identix_router.api_route("/iclock/cdata", methods=["GET", "POST"])
+async def iclock_cdata(request: Request):
+    try:
+        params = dict(request.query_params)
+        body = await request.body()
+
+        raw = body.decode("utf-8")
+
+        print("✅ DEVICE CONNECTED")
+        print("PARAMS:", params)
+        print("RAW DATA:\n", raw)
+
+        inserted = 0
+
+        lines = raw.strip().split("\n")
+
+        for line in lines:
+            parts = line.split("\t")
+
+            if len(parts) < 4:
+                continue
+
+            device_user_id = parts[0]
+            punch_time = parts[1]
+            punch_type = "in" if parts[2] == "0" else "out"
+
+            # avoid duplicates
+            existing = await db.identix_attendance.find_one({
+                "device_user_id": device_user_id,
+                "punch_time": punch_time
+            })
+
+            if existing:
+                continue
+
+            record = {
+                "id": str(uuid.uuid4()),
+                "device_user_id": device_user_id,
+                "punch_time": punch_time,
+                "punch_type": punch_type,
+                "source": "machine_push",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+
+            await db.identix_attendance.insert_one(record)
+            inserted += 1
+
+        return "OK"
+
+    except Exception as e:
+        print("❌ ERROR:", str(e))
+        return "ERROR"
+
+  @identix_router.get("/")
+  async def root_test():
+      return {"status": "API LIVE"}
