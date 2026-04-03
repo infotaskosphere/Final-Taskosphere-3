@@ -628,18 +628,6 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
         }));
       }
     };
-    setForm(prev => ({ ...prev, lead_id: leadId }));
-    const selectedLead = leads.find(l => l.id === leadId);
-    if (selectedLead && !form.client_name) {
-      setForm(prev => ({
-        ...prev,
-        lead_id: leadId,
-        client_name: selectedLead.name || prev.client_name,
-        client_email: selectedLead.email || prev.client_email,
-        client_phone: selectedLead.phone || prev.client_phone,
-      }));
-    }
-  };
 
   const handleItemChange = (index, field, value) => {
     const newItems = [...form.items];
