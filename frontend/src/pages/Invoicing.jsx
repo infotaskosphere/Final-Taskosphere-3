@@ -1003,16 +1003,19 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark 
 
           {/* ✅ FIX 1: removed stray }), FIX 3: added close button */}
           <div className="flex items-center gap-2 flex-wrap">
-            <select
-              value={companyFilter}
-              onChange={e => setCompanyFilter(e.target.value)}
-              className="h-9 px-3 rounded-xl bg-white/15 text-white text-xs border border-white/20 focus:outline-none"
-            >
-              <option value="all" className="text-slate-800 bg-white">All Companies</option>
-              {(companies || []).map(c => (
-                <option key={c.id} value={c.id} className="text-slate-800 bg-white">{c.name}</option>
-              ))}
-            </select>
+            <Select value={companyFilter} onValueChange={setCompanyFilter}>
+              <SelectTrigger className={`h-9 w-[160px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-blue-50 text-blue-700'}`}>
+                <Building2 className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" />
+                <SelectValue placeholder="Select Company" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Companies</SelectItem>
+                {(companies || []).map(c => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          
             <input
               type="month"
               value={month}
