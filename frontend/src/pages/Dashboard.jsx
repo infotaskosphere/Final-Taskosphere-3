@@ -4,10 +4,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { format, parseISO, isToday, isTomorrow, startOfDay } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
 import { toast } from 'sonner';
-import { Card, CardContent } from '../ui/card';
-import { Button } from '../ui/button';
-import { Badge } from '../ui/badge';
-import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
+import { Card, CardContent } from '../components/components/components/ui/card';
+import { Button } from '../components/ui/button';
+import { Badge } from '../components/ui/badge';
+import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
 import {
   CheckSquare, FileText, Clock, TrendingUp, AlertCircle,
   LogIn, LogOut, Calendar as CalendarIcon, Users, Key,
