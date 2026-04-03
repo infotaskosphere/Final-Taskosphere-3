@@ -1601,6 +1601,7 @@ class ImportBackupResult(BaseModel):
     invoices_imported: int = 0
     invoices_skipped: int = 0
     clients_imported: int = 0
+    clients_updated: int = 0
     items_imported: int = 0
     payments_imported: int = 0
     errors: List[str] = []
@@ -1626,6 +1627,7 @@ async def import_backup(
     result = ImportBackupResult()
 
     # ── 1. Clients ─────────────────────────────────────────────────────────
+    # ── 1. Clients ─────────────────────────────────────────────────────────
     client_name_to_id: dict = {}
     for c in data.clients:
         name = (c.get("full_name") or c.get("client_name") or "").strip()
@@ -1637,19 +1639,17 @@ async def import_backup(
             })
             if existing:
                 client_name_to_id[name] = existing["id"]
-                # Build update dict: only fill fields that are missing/empty in existing record
+                # Upsert: fill only fields that are missing/empty in the existing record
                 update_fields = {}
                 field_map = {
-                    "phone":         c.get("phone_number", ""),
-                    "email":         c.get("email", ""),
-                    "address":       c.get("address", ""),
-                    "client_gstin":  c.get("name_gstin_number", ""),
-                    "state":         c.get("name_state", ""),
+                    "phone":        (c.get("phone_number") or "").strip(),
+                    "email":        (c.get("email") or "").strip(),
+                    "address":      (c.get("address") or "").strip(),
+                    "client_gstin": (c.get("name_gstin_number") or "").strip(),
+                    "state":        (c.get("name_state") or "").strip(),
                 }
                 for field, backup_val in field_map.items():
-                    backup_val = (backup_val or "").strip()
                     existing_val = (existing.get(field) or "").strip()
-                    # Only update if backup has a value AND existing is empty/missing
                     if backup_val and not existing_val:
                         update_fields[field] = backup_val
                 if update_fields:
@@ -1658,23 +1658,23 @@ async def import_backup(
                         {"id": existing["id"]},
                         {"$set": update_fields}
                     )
-                    result.clients_imported += 1  # count as updated
+                    result.clients_updated += 1
                 continue
             cid = str(uuid.uuid4())
             await db.clients.insert_one({
                 "id": cid,
                 "company_name": name,
-                "phone": (c.get("phone_number") or "").strip(),
-                "email": (c.get("email") or "").strip(),
-                "address": (c.get("address") or "").strip(),
+                "phone":        (c.get("phone_number") or "").strip(),
+                "email":        (c.get("email") or "").strip(),
+                "address":      (c.get("address") or "").strip(),
                 "client_gstin": (c.get("name_gstin_number") or "").strip(),
-                "state": (c.get("name_state") or "").strip(),
-                "client_type": "other",
-                "status": "active",
+                "state":        (c.get("name_state") or "").strip(),
+                "client_type":  "other",
+                "status":       "active",
                 "imported_from": data.source,
-                "created_by": current_user.id,
-                "created_at": now,
-                "updated_at": now,
+                "created_by":   current_user.id,
+                "created_at":   now,
+                "updated_at":   now,
             })
             client_name_to_id[name] = cid
             result.clients_imported += 1
@@ -1806,10 +1806,9 @@ async def import_backup(
     result.errors = result.errors[:50]
     logger.info(
         f"Import [{data.source}]: {result.invoices_imported} invoices, "
-        f"{result.clients_imported} clients, {result.items_imported} items, "
-        f"{result.invoices_skipped} skipped, {len(result.errors)} errors"
+        f"{result.clients_imported} clients new, {result.clients_updated} clients updated, "
+        f"{result.items_imported} items, {result.invoices_skipped} skipped, {len(result.errors)} errors"
     )
-    return result
 
 
 
