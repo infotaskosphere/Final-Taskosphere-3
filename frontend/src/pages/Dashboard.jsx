@@ -822,11 +822,50 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit, visits = [
 }
 
 export default function Dashboard() {
-  const user = { id: 'user-1', full_name: 'Arjun Sharma', role: 'admin', permissions: { view_other_tasks: [], can_view_all_tasks: true } };
-  const hasPermission = () => true;
-  const navigate = (path) => console.log('navigate:', path);
-  const queryClient = { invalidateQueries: () => {}, refetchQueries: () => Promise.resolve() };
+  const isDark = useDark();
 
+  // ── Auth & Navigation (replace with your real hooks) ──────────────────────
+  const storedUser = React.useMemo(() => {
+    try {
+      const u = localStorage.getItem('user');
+      return u ? JSON.parse(u) : null;
+    } catch { return null; }
+  }, []);
+
+  const user = storedUser || {
+    id: '', full_name: 'User', role: 'staff',
+    permissions: { view_other_tasks: [], can_view_all_tasks: false }
+  };
+
+  const hasPermission = () => true;
+  const navigate = (path) => { window.location.href = path; };
+
+  // ── API Base ───────────────────────────────────────────────────────────────
+  const API_BASE = (
+    typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL
+  ) || 'https://final-taskosphere-backend.onrender.com/api';
+
+  const getAuthHeader = React.useCallback(() => {
+    const token =
+      localStorage.getItem('access_token') ||
+      localStorage.getItem('token') ||
+      sessionStorage.getItem('access_token') ||
+      sessionStorage.getItem('token') ||
+      '';
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, []);
+
+  const apiFetch = React.useCallback(async (endpoint) => {
+    try {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() }
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch { return null; }
+  }, [API_BASE, getAuthHeader]);
+
+  // ── Core State ─────────────────────────────────────────────────────────────
   const [loading,           setLoading]           = useState(false);
   const [rankings,          setRankings]          = useState([]);
   const [rankingPeriod,     setRankingPeriod]     = useState('monthly');
@@ -842,45 +881,87 @@ export default function Dashboard() {
   const [selectedTodo,      setSelectedTodo]      = useState(null);
   const [selectedPerformer, setSelectedPerformer] = useState(null);
 
-  const isDark = useDark();
-
-  const safeArray = (val) => Array.isArray(val) ? val : [];
-
-  const tasks = [];
-  const allUsers = [
-    { id: 'user-1', full_name: 'Arjun Sharma' },
-    { id: 'user-2', full_name: 'Priya Mehta' },
-    { id: 'user-3', full_name: 'Rahul Gupta' },
-  ];
-  const stats = {
-    total_tasks: 24, completed_tasks: 14, overdue_tasks: 3,
-    expiring_dsc_count: 2, expired_dsc_count: 1,
-    upcoming_due_dates: 5, total_clients: 38, total_dsc: 12,
+  // ── Real Data State (replaces all stubs) ──────────────────────────────────
+  const [tasks,            setTasks]            = useState([]);
+  const [allUsers,         setAllUsers]         = useState([]);
+  const [stats,            setStats]            = useState({
+    total_tasks: 0, completed_tasks: 0, overdue_tasks: 0,
+    expiring_dsc_count: 0, expired_dsc_count: 0,
+    upcoming_due_dates: 0, total_clients: 0, total_dsc: 0,
     team_workload: [],
-  };
-  const upcomingDueDates = [
-    { id: 1, title: 'GSTR-3B Filing', days_remaining: -2, due_date: '2026-04-01', category: 'GST' },
-    { id: 2, title: 'TDS Return Q4',  days_remaining: 5,  due_date: '2026-04-08', category: 'TDS' },
-    { id: 3, title: 'ITR Filing',     days_remaining: 12, due_date: '2026-04-15', category: 'Income Tax' },
-    { id: 4, title: 'ROC Annual',     days_remaining: 28, due_date: '2026-05-01', category: 'ROC' },
-  ];
-  const todayAttendance = { punch_in: '2026-04-03T09:15:00Z', punch_out: null, duration_minutes: null };
-  const holidaysData = [];
-  const todosRaw = [
-    { id: 't1', title: 'Review GSTR-2B reconciliation', status: 'pending', is_completed: false },
-    { id: 't2', title: 'Call client about DSC renewal',  status: 'pending', is_completed: false, due_date: '2026-04-04' },
-    { id: 't3', title: 'Prepare balance sheet',          status: 'pending', is_completed: false },
-  ];
-  const leadsData = [
-    { id: 'l1', status: 'open' }, { id: 'l2', status: 'open' }, { id: 'l3', status: 'closed' },
-  ];
+  });
+  const [upcomingDueDates, setUpcomingDueDates] = useState([]);
+  const [todayAttendance,  setTodayAttendance]  = useState(null);
+  const [holidaysData,     setHolidaysData]     = useState([]);
+  const [todosRaw,         setTodosRaw]         = useState([]);
+  const [leadsData,        setLeadsData]        = useState([]);
+  const [dataLoading,      setDataLoading]      = useState(true);
+
+  // ── Fetch All Dashboard Data ───────────────────────────────────────────────
+  const fetchDashboardData = React.useCallback(async () => {
+    setDataLoading(true);
+    try {
+      const [
+        tasksData,
+        usersData,
+        statsData,
+        dueDatesData,
+        attendanceData,
+        holidaysRes,
+        todosData,
+        leadsRes,
+        rankingsData,
+      ] = await Promise.all([
+        apiFetch('/tasks'),
+        apiFetch('/users'),
+        apiFetch('/dashboard/stats'),
+        apiFetch('/duedates/upcoming?days=30'),
+        apiFetch('/attendance/today'),
+        apiFetch('/holidays'),
+        apiFetch('/todos'),
+        apiFetch('/leads'),
+        apiFetch(`/reports/performance-rankings?period=${rankingPeriod}`),
+      ]);
+
+      if (Array.isArray(tasksData))    setTasks(tasksData);
+      if (Array.isArray(usersData))    setAllUsers(usersData);
+      if (statsData && typeof statsData === 'object' && !Array.isArray(statsData))
+                                       setStats(statsData);
+      if (Array.isArray(dueDatesData)) setUpcomingDueDates(dueDatesData);
+      if (attendanceData)              setTodayAttendance(attendanceData);
+      if (Array.isArray(holidaysRes))  setHolidaysData(holidaysRes);
+      if (Array.isArray(todosData))    setTodosRaw(todosData);
+      if (Array.isArray(leadsRes))     setLeadsData(leadsRes);
+      if (Array.isArray(rankingsData)) setRankings(rankingsData);
+    } catch (e) {
+      console.error('Dashboard fetch error:', e);
+    }
+    setDataLoading(false);
+  }, [apiFetch, rankingPeriod]);
+
+  // Initial load
+  useEffect(() => {
+    fetchDashboardData();
+  }, [fetchDashboardData]);
+
+  // Re-fetch rankings when period changes
+  useEffect(() => {
+    const fetchRankings = async () => {
+      const data = await apiFetch(`/reports/performance-rankings?period=${rankingPeriod}`);
+      if (Array.isArray(data)) setRankings(data);
+    };
+    fetchRankings();
+  }, [rankingPeriod, apiFetch]);
 
   const isAdmin = user?.role === 'admin';
 
   const hasCrossVisibility = useMemo(() => {
     if (isAdmin) return true;
     const perms = user?.permissions || {};
-    return (perms.view_other_tasks && perms.view_other_tasks.length > 0) || perms.can_view_all_tasks === true;
+    return (
+      (perms.view_other_tasks && perms.view_other_tasks.length > 0) ||
+      perms.can_view_all_tasks === true
+    );
   }, [user, isAdmin]);
 
   const crossVisibilityUserIds = useMemo(() => {
@@ -890,7 +971,9 @@ export default function Dashboard() {
   }, [user, isAdmin, allUsers]);
 
   const openLeadsCount = useMemo(
-    () => leadsData.filter(l => l.status !== 'closed' && l.status !== 'won' && l.status !== 'lost').length,
+    () => leadsData.filter(
+      l => l.status !== 'closed' && l.status !== 'won' && l.status !== 'lost'
+    ).length,
     [leadsData]
   );
 
@@ -901,7 +984,9 @@ export default function Dashboard() {
 
   const todayHolidayName = useMemo(() => {
     const today = format(new Date(), 'yyyy-MM-dd');
-    return holidaysData.find(h => h.date === today && h.status === 'confirmed')?.name || '';
+    return holidaysData.find(
+      h => h.date === today && h.status === 'confirmed'
+    )?.name || '';
   }, [holidaysData]);
 
   const todos = useMemo(() =>
@@ -913,22 +998,28 @@ export default function Dashboard() {
   );
   const pendingTodos = useMemo(() => todos.filter(todo => !todo.completed), [todos]);
 
-  const myTasks = useMemo(() => {
-    return tasks.filter(t => t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id));
-  }, [tasks, user?.id]);
+  const myTasks = useMemo(() =>
+    tasks.filter(
+      t => t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id)
+    ),
+    [tasks, user?.id]
+  );
 
   const myTaskCount = myTasks.length;
 
   const tasksAssignedToMe = useMemo(() => {
-    const filtered = tasks.filter(t =>
-      t.assigned_to === user?.id && !isTaskHiddenAsCompleted(t)
+    const filtered = tasks.filter(
+      t => t.assigned_to === user?.id && !isTaskHiddenAsCompleted(t)
     );
     return sortNewestFirst(filtered).slice(0, 6);
   }, [tasks, user?.id]);
 
   const tasksAssignedByMe = useMemo(() => {
-    const filtered = tasks.filter(t =>
-      t.created_by === user?.id && t.assigned_to !== user?.id && !isTaskHiddenAsCompleted(t)
+    const filtered = tasks.filter(
+      t =>
+        t.created_by === user?.id &&
+        t.assigned_to !== user?.id &&
+        !isTaskHiddenAsCompleted(t)
     );
     return sortNewestFirst(filtered).slice(0, 6);
   }, [tasks, user?.id]);
@@ -940,24 +1031,25 @@ export default function Dashboard() {
 
   const teamTaskBreakdown = useMemo(() => {
     if (!hasCrossVisibility || crossVisibilityUserIds.length === 0) return [];
-    return crossVisibilityUserIds.map(uid => {
-      const memberUser = allUsers.find(u => u.id === uid);
-      const pendingCount = tasks.filter(t =>
-        (t.assigned_to === uid || t.sub_assignees?.includes(uid)) &&
-        t.status !== 'completed'
-      ).length;
-      return {
-        id: uid,
-        name: memberUser?.full_name || 'Unknown',
-        pendingCount,
-      };
-    }).filter(m => m.pendingCount > 0);
+    return crossVisibilityUserIds
+      .map(uid => {
+        const memberUser = allUsers.find(u => u.id === uid);
+        const pendingCount = tasks.filter(
+          t =>
+            (t.assigned_to === uid || t.sub_assignees?.includes(uid)) &&
+            t.status !== 'completed'
+        ).length;
+        return { id: uid, name: memberUser?.full_name || 'Unknown', pendingCount };
+      })
+      .filter(m => m.pendingCount > 0);
   }, [hasCrossVisibility, crossVisibilityUserIds, tasks, allUsers]);
 
   const teamTaskTotal = useMemo(() => {
     if (!hasCrossVisibility) return 0;
-    return tasks.filter(t =>
-      crossVisibilityUserIds.includes(t.assigned_to) && t.status !== 'completed'
+    return tasks.filter(
+      t =>
+        crossVisibilityUserIds.includes(t.assigned_to) &&
+        t.status !== 'completed'
     ).length;
   }, [hasCrossVisibility, crossVisibilityUserIds, tasks]);
 
@@ -976,24 +1068,143 @@ export default function Dashboard() {
     [upcomingDueDates]
   );
 
-  const addTodo = () => {
+  // ── Todo Actions (real API) ────────────────────────────────────────────────
+  const addTodo = async () => {
     if (!newTodo.trim()) return;
-    toast.success('Todo added (stub)');
-    setNewTodo(''); setSelectedDueDate(undefined);
+    try {
+      const res = await fetch(`${API_BASE}/todos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify({
+          title: newTodo.trim(),
+          due_date: selectedDueDate
+            ? selectedDueDate.toISOString().split('T')[0]
+            : null,
+        }),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        setTodosRaw(prev => [created, ...prev]);
+        toast.success('Todo added!');
+        setNewTodo('');
+        setSelectedDueDate(undefined);
+      } else {
+        toast.error('Failed to add todo');
+      }
+    } catch {
+      toast.error('Network error');
+    }
   };
 
-  const handleToggleTodo = (id) => { toast.success('Todo toggled (stub)'); };
-  const handleDeleteTodo = (id) => { toast.success('Todo deleted (stub)'); };
-  const updateAssignedTaskStatus = (taskId, newStatus) => { toast.success(`Status updated: ${newStatus} (stub)`); };
+  const handleToggleTodo = async (id) => {
+    const todo = todosRaw.find(t => (t._id || t.id) === id);
+    if (!todo) return;
+    const nowCompleted = !(todo.is_completed || todo.status === 'completed');
+    // Optimistic update
+    setTodosRaw(prev =>
+      prev.map(t =>
+        (t._id || t.id) === id
+          ? { ...t, is_completed: nowCompleted, status: nowCompleted ? 'completed' : 'pending' }
+          : t
+      )
+    );
+    try {
+      await fetch(`${API_BASE}/todos/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify({
+          is_completed: nowCompleted,
+          status: nowCompleted ? 'completed' : 'pending',
+        }),
+      });
+    } catch {
+      toast.error('Failed to update todo');
+      // Revert on failure
+      setTodosRaw(prev =>
+        prev.map(t =>
+          (t._id || t.id) === id
+            ? { ...t, is_completed: !nowCompleted, status: !nowCompleted ? 'completed' : 'pending' }
+            : t
+        )
+      );
+    }
+  };
 
+  const handleDeleteTodo = async (id) => {
+    // Optimistic remove
+    setTodosRaw(prev => prev.filter(t => (t._id || t.id) !== id));
+    try {
+      await fetch(`${API_BASE}/todos/${id}`, {
+        method: 'DELETE',
+        headers: { ...getAuthHeader() },
+      });
+      toast.success('Todo deleted');
+    } catch {
+      toast.error('Failed to delete todo');
+      // Re-fetch to restore
+      const data = await apiFetch('/todos');
+      if (Array.isArray(data)) setTodosRaw(data);
+    }
+  };
+
+  // ── Task Status Update (real API) ─────────────────────────────────────────
+  const updateAssignedTaskStatus = async (taskId, newStatus) => {
+    // Optimistic update
+    setTasks(prev =>
+      prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t)
+    );
+    try {
+      const res = await fetch(`${API_BASE}/tasks/${taskId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) {
+        toast.error('Failed to update status');
+        // Revert — re-fetch tasks
+        const data = await apiFetch('/tasks');
+        if (Array.isArray(data)) setTasks(data);
+      } else {
+        toast.success(`Marked as ${newStatus.replace('_', ' ')}`);
+      }
+    } catch {
+      toast.error('Network error');
+    }
+  };
+
+  // ── Punch In / Out (real API) ─────────────────────────────────────────────
   const handlePunchAction = async (action) => {
     setLoading(true);
-    await new Promise(r => setTimeout(r, 500));
-    toast.success(action === 'punch_in' ? 'Punched in successfully!' : 'Punched out successfully!');
-    if (action === 'punch_in') { setActionDone(true); setMustPunchIn(false); }
+    try {
+      const res = await fetch(`${API_BASE}/attendance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify({ action }),
+      });
+      if (res.ok) {
+        toast.success(
+          action === 'punch_in'
+            ? 'Punched in successfully!'
+            : 'Punched out successfully!'
+        );
+        if (action === 'punch_in') {
+          setActionDone(true);
+          setMustPunchIn(false);
+        }
+        // Refresh attendance record
+        const updated = await apiFetch('/attendance/today');
+        if (updated) setTodayAttendance(updated);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.detail || 'Action failed');
+      }
+    } catch {
+      toast.error('Network error');
+    }
     setLoading(false);
   };
 
+  // ── Duration Helper ────────────────────────────────────────────────────────
   const getTodayDuration = () => {
     if (!todayAttendance?.punch_in) return '0h 0m';
     if (todayAttendance.punch_out) {
@@ -1001,39 +1212,71 @@ export default function Dashboard() {
       return `${Math.floor(mins / 60)}h ${mins % 60}m`;
     }
     const punchInStr  = todayAttendance.punch_in;
-    const punchInDate = new Date(punchInStr.endsWith('Z') ? punchInStr : punchInStr + 'Z');
+    const punchInDate = new Date(
+      punchInStr.endsWith('Z') ? punchInStr : punchInStr + 'Z'
+    );
     const diffMs = Date.now() - punchInDate.getTime();
     return `${Math.floor(diffMs / 3600000)}h ${Math.floor((diffMs % 3600000) / 60000)}m`;
   };
 
-  const myCompletedTasks = useMemo(() => myTasks.filter(t => t.status === 'completed').length, [myTasks]);
-  const completionRate = myTaskCount > 0
-    ? Math.round((myCompletedTasks / myTaskCount) * 100) : 0;
+  const myCompletedTasks = useMemo(
+    () => myTasks.filter(t => t.status === 'completed').length,
+    [myTasks]
+  );
+  const completionRate =
+    myTaskCount > 0 ? Math.round((myCompletedTasks / myTaskCount) * 100) : 0;
 
-  const showTaskSection = isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
+  const showTaskSection =
+    isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
   const isOverdue = (dueDate) => dueDate && new Date(dueDate) < new Date();
 
   const getStatusStyle = (status) => {
     const styles = {
-      completed:   { bg:'bg-emerald-100 dark:bg-emerald-900/40', text:'text-emerald-700 dark:text-emerald-400', dot:'bg-emerald-500' },
-      in_progress: { bg:'bg-blue-100 dark:bg-blue-900/40',       text:'text-blue-700 dark:text-blue-400',       dot:'bg-blue-500'    },
-      pending:     { bg:'bg-slate-100 dark:bg-slate-700',         text:'text-slate-600 dark:text-slate-300',     dot:'bg-slate-400'   },
+      completed:   {
+        bg:   'bg-emerald-100 dark:bg-emerald-900/40',
+        text: 'text-emerald-700 dark:text-emerald-400',
+        dot:  'bg-emerald-500',
+      },
+      in_progress: {
+        bg:   'bg-blue-100 dark:bg-blue-900/40',
+        text: 'text-blue-700 dark:text-blue-400',
+        dot:  'bg-blue-500',
+      },
+      pending: {
+        bg:   'bg-slate-100 dark:bg-slate-700',
+        text: 'text-slate-600 dark:text-slate-300',
+        dot:  'bg-slate-400',
+      },
     };
     return styles[status] || styles.pending;
   };
 
   const getPriorityStyle = (priority) => {
     const styles = {
-      high:   { bg:'bg-red-50 dark:bg-red-900/20',    text:'text-red-600',    border:'border-red-200 dark:border-red-800'    },
-      medium: { bg:'bg-amber-50 dark:bg-amber-900/20', text:'text-amber-600', border:'border-amber-200 dark:border-amber-800' },
-      low:    { bg:'bg-blue-50 dark:bg-blue-900/20',   text:'text-blue-600',  border:'border-blue-200 dark:border-blue-800'  },
+      high: {
+        bg:     'bg-red-50 dark:bg-red-900/20',
+        text:   'text-red-600',
+        border: 'border-red-200 dark:border-red-800',
+      },
+      medium: {
+        bg:     'bg-amber-50 dark:bg-amber-900/20',
+        text:   'text-amber-600',
+        border: 'border-amber-200 dark:border-amber-800',
+      },
+      low: {
+        bg:     'bg-blue-50 dark:bg-blue-900/20',
+        text:   'text-blue-600',
+        border: 'border-blue-200 dark:border-blue-800',
+      },
     };
     return styles[priority?.toLowerCase()] || styles.medium;
   };
 
   const formatToLocalTime = (dateString) => {
     if (!dateString) return '--:--';
-    const d = new Date(dateString.endsWith('Z') ? dateString : dateString + 'Z');
+    const d = new Date(
+      dateString.endsWith('Z') ? dateString : dateString + 'Z'
+    );
     return format(d, 'hh:mm a');
   };
 
@@ -1047,11 +1290,23 @@ export default function Dashboard() {
 
   const getGreetingIcon = () => {
     const h = new Date().getHours();
-    if (h < 12) return Sun;
-    if (h < 17) return Sun;
-    if (h < 21) return Sunset;
+    if (h < 21) return Sun;
     return Moon;
   };
+
+  // ── Loading skeleton while first fetch runs ────────────────────────────────
+  if (dataLoading) {
+    return (
+      <div className={`min-h-screen flex items-center justify-center ${isDark ? 'bg-[#0f172a]' : 'bg-slate-50'}`}>
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-10 w-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            Loading dashboard…
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const RankingItem = React.memo(({ member, index, period }) => {
     const isGold   = index === 0;
@@ -1061,11 +1316,14 @@ export default function Dashboard() {
     const medal    = isGold ? '🥇' : isSilver ? '🥈' : isBronze ? '🥉' : null;
 
     const rowStyle = isGold
-      ? { background:'linear-gradient(135deg, #7B5A0A 0%, #C9920A 40%, #FFD700 100%)', border:'1px solid #E2AA00' }
-      : isSilver ? { background:'linear-gradient(135deg, #3A3A3A 0%, #707070 40%, #C0C0C0 100%)', border:'1px solid #A8A8A8' }
-      : isBronze ? { background:'linear-gradient(135deg, #5C2E00 0%, #A0521A 40%, #CD7F32 100%)', border:'1px solid #B87030' }
-      : isDark   ? { background:'#1e293b', border:'1px solid #334155' }
-      :             { background:'#f8fafc', border:'1px solid #e2e8f0' };
+      ? { background: 'linear-gradient(135deg, #7B5A0A 0%, #C9920A 40%, #FFD700 100%)', border: '1px solid #E2AA00' }
+      : isSilver
+      ? { background: 'linear-gradient(135deg, #3A3A3A 0%, #707070 40%, #C0C0C0 100%)', border: '1px solid #A8A8A8' }
+      : isBronze
+      ? { background: 'linear-gradient(135deg, #5C2E00 0%, #A0521A 40%, #CD7F32 100%)', border: '1px solid #B87030' }
+      : isDark
+      ? { background: '#1e293b', border: '1px solid #334155' }
+      : { background: '#f8fafc', border: '1px solid #e2e8f0' };
 
     return (
       <motion.div
