@@ -103,55 +103,103 @@ const ROLE_CONFIG = {
 };
 
 const DEFAULT_ROLE_PERMISSIONS = {
-  admin: {
-    can_view_all_tasks: true, can_view_all_clients: true, can_view_all_dsc: true,
-    can_view_documents: true, can_view_all_duedates: true, can_view_reports: true,
-    can_manage_users: true, can_assign_tasks: true, can_view_staff_activity: true,
-    can_view_attendance: true, can_send_reminders: true, can_view_user_page: true,
-    can_view_audit_logs: true, can_edit_tasks: true, can_edit_dsc: true,
-    can_edit_documents: true, can_edit_due_dates: true, can_edit_users: true,
-    can_download_reports: true, can_view_selected_users_reports: true,
-    can_view_todo_dashboard: true, can_edit_clients: true, can_use_chat: true,
-    can_view_all_leads: true, can_manage_settings: true, can_assign_clients: true,
-    can_view_staff_rankings: true, can_delete_data: true, can_delete_tasks: true,
-    can_connect_email: true, can_view_own_data: true, can_create_quotations: true,
-    can_manage_invoices: true, can_view_passwords: true, can_edit_passwords: true,
-    view_password_departments: [], assigned_clients: [], view_other_tasks: [],
-    view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
-  },
-  manager: {
-    can_view_all_tasks: false, can_view_all_clients: false, can_view_all_dsc: false,
-    can_view_documents: true, can_view_all_duedates: false, can_view_reports: false,
-    can_manage_users: false, can_assign_tasks: true, can_view_staff_activity: true,
-    can_view_attendance: true, can_send_reminders: false, can_view_user_page: false,
-    can_view_audit_logs: false, can_edit_tasks: true, can_edit_dsc: false,
-    can_edit_documents: false, can_edit_due_dates: true, can_edit_users: false,
-    can_download_reports: true, can_view_selected_users_reports: true,
-    can_view_todo_dashboard: true, can_edit_clients: false, can_use_chat: true,
-    can_view_all_leads: false, can_manage_settings: false, can_assign_clients: false,
-    can_view_staff_rankings: true, can_delete_data: false, can_delete_tasks: false,
-    can_connect_email: true, can_view_own_data: true, can_create_quotations: false,
-    can_manage_invoices: false, can_view_passwords: true, can_edit_passwords: false,
-    view_password_departments: [], assigned_clients: [], view_other_tasks: [],
-    view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
-  },
-  staff: {
-    can_view_all_tasks: false, can_view_all_clients: false, can_view_all_dsc: false,
-    can_view_documents: false, can_view_all_duedates: false, can_view_reports: false,
-    can_manage_users: false, can_assign_tasks: false, can_view_staff_activity: false,
-    can_view_attendance: false, can_send_reminders: false, can_view_user_page: false,
-    can_view_audit_logs: false, can_edit_tasks: false, can_edit_dsc: false,
-    can_edit_documents: false, can_edit_due_dates: false, can_edit_users: false,
-    can_download_reports: false, can_view_selected_users_reports: false,
-    can_view_todo_dashboard: true, can_edit_clients: false, can_use_chat: true,
-    can_view_all_leads: false, can_manage_settings: false, can_assign_clients: false,
-    can_view_staff_rankings: true, can_delete_data: false, can_delete_tasks: false,
-    can_connect_email: true, can_view_own_data: true, can_create_quotations: false,
-    can_manage_invoices: false, can_view_passwords: false, can_edit_passwords: false,
-    view_password_departments: [], assigned_clients: [], view_other_tasks: [],
-    view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
-  },
-};
+    admin: {
+      can_view_all_tasks: true, can_view_all_clients: true, can_view_all_dsc: true,
+      can_view_documents: true, can_view_all_duedates: true, can_view_reports: true,
+      can_manage_users: true, can_assign_tasks: true, can_view_staff_activity: true,
+      can_view_attendance: true, can_send_reminders: true, can_view_user_page: true,
+      can_view_audit_logs: true, can_edit_tasks: true, can_edit_dsc: true,
+      can_edit_documents: true, can_edit_due_dates: true, can_edit_users: true,
+      can_download_reports: true, can_view_selected_users_reports: true,
+      can_view_todo_dashboard: true, can_edit_clients: true, can_use_chat: true,
+      can_view_all_leads: true, can_manage_settings: true, can_assign_clients: true,
+      can_view_staff_rankings: true, can_delete_data: true, can_delete_tasks: true,
+      can_connect_email: true, can_view_own_data: true, can_create_quotations: true,
+      can_manage_invoices: true, can_view_passwords: true, can_edit_passwords: true,
+      view_password_departments: [], assigned_clients: [], view_other_tasks: [],
+      view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
+    },
+    // SCOPE: OWN + SAME_DEPARTMENT | DEFAULT_MODULES enabled | OTHER_MODULES: admin-granted only
+    manager: {
+      can_view_all_tasks: false,      // scope handled server-side by department query
+      can_view_all_clients: false,    // access via assigned_clients
+      can_view_all_dsc: false,        // admin-granted only
+      can_view_documents: true,       // default module
+      can_view_all_duedates: true,    // default module (compliance)
+      can_view_reports: true,         // default module
+      can_view_attendance: true,      // default module (scoped to department server-side)
+      can_view_all_leads: false,      // admin-granted only
+      can_edit_tasks: true,           // default module
+      can_edit_clients: false,        // admin-granted only
+      can_edit_dsc: false,            // admin-granted only
+      can_edit_documents: true,       // default module
+      can_edit_due_dates: true,       // default module
+      can_edit_users: false,          // admin-granted only
+      can_download_reports: true,     // default module
+      can_manage_users: false,        // admin-granted only
+      can_manage_settings: true,      // default module (general_settings)
+      can_assign_tasks: true,         // default module
+      can_assign_clients: false,      // admin-granted only
+      can_view_staff_activity: true,  // default module (scoped to department server-side)
+      can_send_reminders: false,      // admin-granted only
+      can_view_user_page: false,      // admin-granted only
+      can_view_audit_logs: false,     // admin-granted only
+      can_view_selected_users_reports: true,  // default module
+      can_view_todo_dashboard: true,  // default module
+      can_use_chat: true,             // default module
+      can_view_staff_rankings: true,  // default module
+      can_delete_data: false,         // admin-granted only
+      can_delete_tasks: false,        // admin-granted only
+      can_connect_email: true,        // default module
+      can_view_own_data: true,        // default module
+      can_create_quotations: false,   // admin-granted only
+      can_manage_invoices: false,     // admin-granted only
+      can_view_passwords: true,       // default module
+      can_edit_passwords: false,      // admin-granted only
+      view_password_departments: [], assigned_clients: [], view_other_tasks: [],
+      view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
+    },
+    // SCOPE: OWN only | DEFAULT_MODULES enabled | OTHER_MODULES: admin-granted only
+    staff: {
+      can_view_all_tasks: false,      // scope: own only
+      can_view_all_clients: false,    // scope: assigned only
+      can_view_all_dsc: false,        // admin-granted only
+      can_view_documents: true,       // default module
+      can_view_all_duedates: true,    // default module (compliance)
+      can_view_reports: true,         // default module (own data only server-side)
+      can_view_attendance: true,      // default module (own data only server-side)
+      can_view_all_leads: false,      // admin-granted only
+      can_edit_tasks: true,           // default module (own/assigned tasks)
+      can_edit_clients: false,        // admin-granted only
+      can_edit_dsc: false,            // admin-granted only
+      can_edit_documents: false,      // admin-granted only
+      can_edit_due_dates: false,      // admin-granted only
+      can_edit_users: false,          // admin-granted only
+      can_download_reports: true,     // default module (own data)
+      can_manage_users: false,        // admin-granted only
+      can_manage_settings: true,      // default module (own profile/general settings)
+      can_assign_tasks: false,        // admin-granted only
+      can_assign_clients: false,      // admin-granted only
+      can_view_staff_activity: false, // admin-granted only
+      can_send_reminders: false,      // admin-granted only
+      can_view_user_page: false,      // admin-granted only
+      can_view_audit_logs: false,     // admin-granted only
+      can_view_selected_users_reports: false,  // admin-granted only
+      can_view_todo_dashboard: true,  // default module
+      can_use_chat: true,             // default module
+      can_view_staff_rankings: false, // admin-granted only
+      can_delete_data: false,         // admin-granted only
+      can_delete_tasks: false,        // admin-granted only
+      can_connect_email: true,        // default module
+      can_view_own_data: true,        // default module
+      can_create_quotations: false,   // admin-granted only
+      can_manage_invoices: false,     // admin-granted only
+      can_view_passwords: false,      // admin-granted only
+      can_edit_passwords: false,      // admin-granted only
+      view_password_departments: [], assigned_clients: [], view_other_tasks: [],
+      view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
+    },
+  }
 
 const EMPTY_PERMISSIONS = {
   can_view_all_tasks: false, can_view_all_clients: false, can_view_all_dsc: false,
