@@ -1012,7 +1012,7 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark 
                 <SelectItem value="all">All Companies</SelectItem>
                 {(companies || []).map(c => (
                   <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
+                ))}
               </SelectContent>
             </Select>
           
@@ -3453,7 +3453,7 @@ const fetchAll = useCallback(async () => {
       />
       <ProductModal open={catOpen} onClose={() => setCatOpen(false)} isDark={isDark} onSaved={fetchAll} />
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} isDark={isDark} companies={companies} onImportComplete={fetchAll} />
-      <GSTReportsModal open={gstOpen} onClose={() => setGstOpen(false)} invoices={invoices} isDark={isDark} />
+      <GSTReportsModal open={gstOpen} onClose={() => setGstOpen(false)} invoices={invoices} companies={companies} isDark={isDark} />
       {settingsOpen && <InvoiceSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} companies={companies} isDark={isDark} />}
       {ledgerOpen && <PartyLedger open={ledgerOpen} onClose={() => setLedgerOpen(false)} invoices={invoices} clients={clients} companies={companies} isDark={isDark} initialClient={ledgerClient} />}
     </div>
