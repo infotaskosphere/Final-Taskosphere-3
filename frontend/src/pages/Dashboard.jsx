@@ -6,13 +6,11 @@ import { format, parseISO, isToday, isTomorrow, startOfDay } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
 import { toast } from 'sonner';
 
-// ✅ UI COMPONENTS (correct paths + correct types)
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
 
-// ✅ ICONS
 import {
   CheckSquare,
   FileText,
@@ -47,10 +45,8 @@ import {
   Sunset,
 } from 'lucide-react';
 
-// ── Timezone ──────────────────────────────────────────────────────────────────
 const IST_TIMEZONE = 'Asia/Kolkata';
 
-// ── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
   deepBlue:     '#0D3B66',
   mediumBlue:   '#1F6FB2',
@@ -60,7 +56,6 @@ const COLORS = {
   amber:        '#F59E0B',
 };
 
-// ── Inject Roboto Mono for clock ──────────────────────────────────────────────
 if (typeof document !== 'undefined' && !document.getElementById('roboto-mono-font')) {
   const link = document.createElement('link');
   link.id   = 'roboto-mono-font';
@@ -69,7 +64,6 @@ if (typeof document !== 'undefined' && !document.getElementById('roboto-mono-fon
   document.head.appendChild(link);
 }
 
-// ── Slim scrollbar ────────────────────────────────────────────────────────────
 const slimScroll = {
   overflowY:      'auto',
   scrollbarWidth: 'thin',
@@ -89,7 +83,6 @@ if (typeof document !== 'undefined' && !document.getElementById('dash-slim-scrol
   document.head.appendChild(s);
 }
 
-// ── Spring Physics ────────────────────────────────────────────────────────────
 const springPhysics = {
   card:   { type: "spring", stiffness: 280, damping: 22, mass: 0.85 },
   lift:   { type: "spring", stiffness: 320, damping: 24, mass: 0.9  },
@@ -98,7 +91,6 @@ const springPhysics = {
   tap:    { type: "spring", stiffness: 500, damping: 30 },
 };
 
-// ── Animation Variants ────────────────────────────────────────────────────────
 const containerVariants = {
   hidden:  { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
@@ -109,7 +101,6 @@ const itemVariants = {
   exit:    { opacity: 0, y: 12, transition: { duration: 0.3 } },
 };
 
-// ── Priority Stripe Helper ────────────────────────────────────────────────────
 const getPriorityStripeClass = (priority) => {
   const p = (priority || '').toLowerCase().trim();
   if (p === 'critical') return 'border-l-[3px] border-l-red-500';
@@ -119,7 +110,6 @@ const getPriorityStripeClass = (priority) => {
   return 'border-l-[3px] border-l-slate-200';
 };
 
-// ── Visit Status meta ─────────────────────────────────────────────────────────
 const VISIT_STATUS_COLORS = {
   scheduled:   { bg:'bg-blue-50 dark:bg-blue-900/30',     text:'text-blue-600 dark:text-blue-400',     dot:'bg-blue-500'    },
   completed:   { bg:'bg-emerald-50 dark:bg-emerald-900/30',text:'text-emerald-600 dark:text-emerald-400',dot:'bg-emerald-500'},
@@ -128,7 +118,6 @@ const VISIT_STATUS_COLORS = {
   rescheduled: { bg:'bg-purple-50 dark:bg-purple-900/20',  text:'text-purple-500 dark:text-purple-400', dot:'bg-purple-500'  },
 };
 
-// ── isTaskHiddenAsCompleted ───────────────────────────────────────────────────
 const isTaskHiddenAsCompleted = (task) => {
   if (task.status !== 'completed') return false;
   if (!task.updated_at) return false;
@@ -137,7 +126,6 @@ const isTaskHiddenAsCompleted = (task) => {
   return completedAt < todayStart;
 };
 
-// ── Sort tasks newest-first ───────────────────────────────────────────────────
 const sortNewestFirst = (arr) =>
   [...arr].sort((a, b) => {
     const da = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -145,7 +133,6 @@ const sortNewestFirst = (arr) =>
     return db - da;
   });
 
-// ── Deadline urgency colour (shared) ─────────────────────────────────────────
 const deadlineUrgency = (daysLeft) => {
   if (daysLeft <= 0)  return { bg:'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/30',   badge:'bg-red-500 text-white',    text:'text-red-600',    pill:'bg-red-500/20 text-red-300',    hex: COLORS.coral   };
   if (daysLeft <= 7)  return { bg:'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800 hover:bg-orange-100',              badge:'bg-orange-500 text-white', text:'text-orange-600', pill:'bg-orange-500/20 text-orange-300', hex: '#EA580C'       };
@@ -153,12 +140,8 @@ const deadlineUrgency = (daysLeft) => {
   return { bg:'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 hover:bg-green-100', badge:'bg-green-600 text-white', text:'text-green-700', pill:'bg-emerald-500/20 text-emerald-300', hex: COLORS.emeraldGreen };
 };
 
-// ── cn helper ────────────────────────────────────────────────────────────────
 const cn = (...classes) => classes.filter(Boolean).join(' ');
 
-// ══════════════════════════════════════════════════════════════════════════════
-// LIVE CLOCK
-// ══════════════════════════════════════════════════════════════════════════════
 function LiveClock({ compact = false }) {
   const [time, setTime] = useState(new Date());
   useEffect(() => {
@@ -203,9 +186,6 @@ function LiveClock({ compact = false }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// DETAIL MODAL PRIMITIVES
-// ══════════════════════════════════════════════════════════════════════════════
 function DetailModal({ onClose, headerGradient, headerIcon, headerEyebrow, headerTitle, children, footer, isDark }) {
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose(); };
@@ -316,9 +296,6 @@ function FooterBtn({ onClick, color, icon: Icon, label, muted, isDark }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// DETAIL MODALS
-// ══════════════════════════════════════════════════════════════════════════════
 function TaskDetailModal({ task, onClose, onUpdateStatus, navigate, isDark }) {
   if (!task) return null;
   const isCompleted  = task.status === 'completed';
@@ -599,9 +576,6 @@ function PerformerDetailModal({ member, index, period, onClose, isDark }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// TASK STRIP
-// ══════════════════════════════════════════════════════════════════════════════
 function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate, onSelect }) {
   const status       = task.status || 'pending';
   const isCompleted  = status === 'completed';
@@ -679,7 +653,6 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate, onSel
   );
 }
 
-// ── Shared Card Shell ─────────────────────────────────────────────────────────
 function SectionCard({ children, className = '' }) {
   return (
     <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm ${className}`}>
@@ -688,7 +661,6 @@ function SectionCard({ children, className = '' }) {
   );
 }
 
-// ── Card Header Row ───────────────────────────────────────────────────────────
 function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
   return (
     <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
@@ -711,9 +683,6 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// VISITS CARD
-// ══════════════════════════════════════════════════════════════════════════════
 function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit, visits = [], isLoading = false, isError = false }) {
   const sorted = useMemo(() => {
     const filtered = visits.filter(v => v.assigned_to === currentUserId);
@@ -852,12 +821,8 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit, visits = [
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// MAIN DASHBOARD
-// ══════════════════════════════════════════════════════════════════════════════
 export default function Dashboard() {
-  // ── Stub: replace with real useAuth(), useNavigate(), useQueryClient(), etc. in your app
-  const user = { id: 'user-1', full_name: 'Arjun Sharma', role: 'admin' };
+  const user = { id: 'user-1', full_name: 'Arjun Sharma', role: 'admin', permissions: { view_other_tasks: [], can_view_all_tasks: true } };
   const hasPermission = () => true;
   const navigate = (path) => console.log('navigate:', path);
   const queryClient = { invalidateQueries: () => {}, refetchQueries: () => Promise.resolve() };
@@ -879,10 +844,14 @@ export default function Dashboard() {
 
   const isDark = useDark();
 
-  // ── Stub data (replace with real API hooks in your app) ───────────────────
   const safeArray = (val) => Array.isArray(val) ? val : [];
 
   const tasks = [];
+  const allUsers = [
+    { id: 'user-1', full_name: 'Arjun Sharma' },
+    { id: 'user-2', full_name: 'Priya Mehta' },
+    { id: 'user-3', full_name: 'Rahul Gupta' },
+  ];
   const stats = {
     total_tasks: 24, completed_tasks: 14, overdue_tasks: 3,
     expiring_dsc_count: 2, expired_dsc_count: 1,
@@ -906,12 +875,25 @@ export default function Dashboard() {
     { id: 'l1', status: 'open' }, { id: 'l2', status: 'open' }, { id: 'l3', status: 'closed' },
   ];
 
+  const isAdmin = user?.role === 'admin';
+
+  const hasCrossVisibility = useMemo(() => {
+    if (isAdmin) return true;
+    const perms = user?.permissions || {};
+    return (perms.view_other_tasks && perms.view_other_tasks.length > 0) || perms.can_view_all_tasks === true;
+  }, [user, isAdmin]);
+
+  const crossVisibilityUserIds = useMemo(() => {
+    if (isAdmin) return allUsers.map(u => u.id).filter(id => id !== user?.id);
+    const perms = user?.permissions || {};
+    return (perms.view_other_tasks || []).filter(id => id !== user?.id);
+  }, [user, isAdmin, allUsers]);
+
   const openLeadsCount = useMemo(
     () => leadsData.filter(l => l.status !== 'closed' && l.status !== 'won' && l.status !== 'lost').length,
     [leadsData]
   );
 
-  // ── Derived values ────────────────────────────────────────────────────────
   const todayIsHoliday = useMemo(() => {
     const today = format(new Date(), 'yyyy-MM-dd');
     return holidaysData.some(h => h.date === today && h.status === 'confirmed');
@@ -930,6 +912,12 @@ export default function Dashboard() {
     [todosRaw]
   );
   const pendingTodos = useMemo(() => todos.filter(todo => !todo.completed), [todos]);
+
+  const myTasks = useMemo(() => {
+    return tasks.filter(t => t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id));
+  }, [tasks, user?.id]);
+
+  const myTaskCount = myTasks.length;
 
   const tasksAssignedToMe = useMemo(() => {
     const filtered = tasks.filter(t =>
@@ -950,6 +938,29 @@ export default function Dashboard() {
     return sortNewestFirst(filtered).slice(0, 5);
   }, [tasks]);
 
+  const teamTaskBreakdown = useMemo(() => {
+    if (!hasCrossVisibility || crossVisibilityUserIds.length === 0) return [];
+    return crossVisibilityUserIds.map(uid => {
+      const memberUser = allUsers.find(u => u.id === uid);
+      const pendingCount = tasks.filter(t =>
+        (t.assigned_to === uid || t.sub_assignees?.includes(uid)) &&
+        t.status !== 'completed'
+      ).length;
+      return {
+        id: uid,
+        name: memberUser?.full_name || 'Unknown',
+        pendingCount,
+      };
+    }).filter(m => m.pendingCount > 0);
+  }, [hasCrossVisibility, crossVisibilityUserIds, tasks, allUsers]);
+
+  const teamTaskTotal = useMemo(() => {
+    if (!hasCrossVisibility) return 0;
+    return tasks.filter(t =>
+      crossVisibilityUserIds.includes(t.assigned_to) && t.status !== 'completed'
+    ).length;
+  }, [hasCrossVisibility, crossVisibilityUserIds, tasks]);
+
   const sortedDueDates = useMemo(() => {
     return [...upcomingDueDates].sort((a, b) => {
       const aOD = (a.days_remaining ?? 0) <= 0;
@@ -965,7 +976,6 @@ export default function Dashboard() {
     [upcomingDueDates]
   );
 
-  // ── Handlers ──────────────────────────────────────────────────────────────
   const addTodo = () => {
     if (!newTodo.trim()) return;
     toast.success('Todo added (stub)');
@@ -984,7 +994,6 @@ export default function Dashboard() {
     setLoading(false);
   };
 
-  // ── Utilities ─────────────────────────────────────────────────────────────
   const getTodayDuration = () => {
     if (!todayAttendance?.punch_in) return '0h 0m';
     if (todayAttendance.punch_out) {
@@ -997,10 +1006,10 @@ export default function Dashboard() {
     return `${Math.floor(diffMs / 3600000)}h ${Math.floor((diffMs % 3600000) / 60000)}m`;
   };
 
-  const completionRate = stats?.total_tasks > 0
-    ? Math.round((stats.completed_tasks / stats.total_tasks) * 100) : 0;
+  const myCompletedTasks = useMemo(() => myTasks.filter(t => t.status === 'completed').length, [myTasks]);
+  const completionRate = myTaskCount > 0
+    ? Math.round((myCompletedTasks / myTaskCount) * 100) : 0;
 
-  const isAdmin        = user?.role === 'admin';
   const showTaskSection = isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
   const isOverdue = (dueDate) => dueDate && new Date(dueDate) < new Date();
 
@@ -1044,7 +1053,6 @@ export default function Dashboard() {
     return Moon;
   };
 
-  // ── Ranking Item ──────────────────────────────────────────────────────────
   const RankingItem = React.memo(({ member, index, period }) => {
     const isGold   = index === 0;
     const isSilver = index === 1;
@@ -1104,7 +1112,6 @@ export default function Dashboard() {
     );
   });
 
-  // ── Punch gate effect ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!todayAttendance) { setMustPunchIn(false); document.body.style.overflow = 'auto'; return; }
     if (actionDone)                             { setMustPunchIn(false); document.body.style.overflow = 'auto'; return; }
@@ -1122,12 +1129,10 @@ export default function Dashboard() {
 
   const GreetIcon = getGreetingIcon();
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // RENDER
-  // ══════════════════════════════════════════════════════════════════════════
+  const overdueTaskCount = useMemo(() => myTasks.filter(t => t.status !== 'completed' && t.due_date && new Date(t.due_date) < new Date()).length, [myTasks]);
+
   return (
     <>
-      {/* ── DETAIL MODALS ──────────────────────────────────────────────────── */}
       <AnimatePresence>
         {selectedTask && (
           <TaskDetailModal isDark={isDark} task={selectedTask}
@@ -1164,9 +1169,7 @@ export default function Dashboard() {
 
       <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
 
-        {/* ════════════════════════════════════════════════════════════════════
-            WELCOME BANNER
-        ════════════════════════════════════════════════════════════════════ */}
+        {/* WELCOME BANNER */}
         <motion.div variants={itemVariants}>
           <div
             className="relative overflow-hidden rounded-2xl px-6 pt-5 pb-4"
@@ -1175,7 +1178,6 @@ export default function Dashboard() {
               boxShadow: `0 8px 32px rgba(13,59,102,0.28)`,
             }}
           >
-            {/* Decorative blobs */}
             <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10"
               style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
             <div className="absolute right-28 bottom-0 w-40 h-40 rounded-full mb-[-40px] opacity-5"
@@ -1184,9 +1186,7 @@ export default function Dashboard() {
               style={{ background: 'white' }} />
 
             <div className="relative">
-              {/* ── Row 1: greeting · clock · punch pill ── */}
               <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-                {/* Greeting */}
                 <div className="flex-1 min-w-0">
                   <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1 flex items-center gap-1.5">
                     <GreetIcon className="h-3 w-3" />
@@ -1202,12 +1202,10 @@ export default function Dashboard() {
                   )}
                 </div>
 
-                {/* Clock (hidden on mobile, shown md+) */}
                 <div className="hidden md:block flex-shrink-0">
                   <LiveClock compact />
                 </div>
 
-                {/* Punch status pill */}
                 {!todayIsHoliday && todayAttendance?.punch_in && (
                   <motion.div
                     initial={{ opacity: 0, scale: 0.9 }}
@@ -1226,7 +1224,6 @@ export default function Dashboard() {
                 )}
               </div>
 
-              {/* ── Row 2: deadline pills ── */}
               {sortedDueDates.length > 0 && (
                 <div className="mt-4 flex items-center gap-2 flex-wrap">
                   {sortedDueDates.slice(0, 4).map(due => {
@@ -1267,17 +1264,15 @@ export default function Dashboard() {
           </div>
         </motion.div>
 
-        {/* ════════════════════════════════════════════════════════════════════
-            KEY METRICS — 5 EQUAL CARDS
-            Cards: Total Tasks | Pending Todos | Overdue | Completion | DSC Alerts
-            All cards use identical padding, flex layout, and min-h to stay same size.
-        ════════════════════════════════════════════════════════════════════ */}
+        {/* KEY METRICS — 6 EQUAL CARDS
+            Cards: My Task | Todo | Overdue | DSC | Completion | Team Task
+            All cards use identical padding, flex layout, and min-h to stay same size. */}
         <motion.div
-          className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 [&>*]:min-w-0"
+          className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 [&>*]:min-w-0"
           variants={itemVariants}
         >
 
-          {/* ── 1. Total Tasks ── */}
+          {/* 1. My Task */}
           <motion.div
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
@@ -1287,9 +1282,9 @@ export default function Dashboard() {
             <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
               <div className="flex items-start justify-between">
                 <div className="min-w-0 flex-1 mr-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Total Tasks</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">My Task</p>
                   <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
-                    {stats?.total_tasks || 0}
+                    {myTaskCount}
                   </p>
                 </div>
                 <div
@@ -1306,7 +1301,7 @@ export default function Dashboard() {
             </CardContent>
           </motion.div>
 
-          {/* ── 2. Pending Todos ── */}
+          {/* 2. Pending Todos */}
           <motion.div
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
@@ -1322,7 +1317,7 @@ export default function Dashboard() {
             <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
               <div className="flex items-start justify-between">
                 <div className="min-w-0 flex-1 mr-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Pending Todos</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Todo</p>
                   <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: isDark ? '#93c5fd' : COLORS.mediumBlue }}>
                     {pendingTodos.length}
                   </p>
@@ -1341,13 +1336,13 @@ export default function Dashboard() {
             </CardContent>
           </motion.div>
 
-          {/* ── 3. Overdue ── */}
+          {/* 3. Overdue */}
           <motion.div
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
             onClick={() => navigate('/tasks?filter=overdue')}
             className={`${metricCardCls} ${
-              stats?.overdue_tasks > 0
+              overdueTaskCount > 0
                 ? isDark
                   ? 'bg-red-900/20 border-red-800 hover:border-red-700'
                   : 'bg-red-50/60 border-red-200 hover:border-red-300'
@@ -1356,14 +1351,14 @@ export default function Dashboard() {
           >
             <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
               <div className="flex items-start justify-between">
-                <div>
+                <div className="min-w-0 flex-1 mr-2">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Overdue</p>
                   <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.coral }}>
-                    {stats?.overdue_tasks || 0}
+                    {overdueTaskCount}
                   </p>
                 </div>
                 <div
-                  className="p-2 rounded-xl group-hover:scale-110 transition-transform"
+                  className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
                   style={{ backgroundColor: `${COLORS.coral}18` }}
                 >
                   <AlertCircle className="h-4 w-4" style={{ color: COLORS.coral }} />
@@ -1376,7 +1371,45 @@ export default function Dashboard() {
             </CardContent>
           </motion.div>
 
-          {/* ── 4. Completion ── */}
+          {/* 4. DSC Alerts */}
+          <motion.div
+            whileHover={{ y: -3, transition: springPhysics.card }}
+            whileTap={{ scale: 0.985 }}
+            onClick={() => navigate('/dsc?tab=expired')}
+            className={`${metricCardCls} ${
+              stats?.expiring_dsc_count > 0
+                ? isDark
+                  ? 'bg-red-900/20 border-red-800'
+                  : 'bg-red-50/50 border-red-200'
+                : metricCardDefault
+            }`}
+          >
+            <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
+              <div className="flex items-start justify-between">
+                <div className="min-w-0 flex-1 mr-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">DSC</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight text-red-500">
+                    {(stats?.expiring_dsc_count || 0) + (stats?.expired_dsc_count || 0)}
+                  </p>
+                  <p className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    {stats?.expired_dsc_count || 0} expired
+                  </p>
+                </div>
+                <div
+                  className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
+                  style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.15)' : '#fef2f2' }}
+                >
+                  <Key className="h-4 w-4 text-red-500" />
+                </div>
+              </div>
+              <div className={`flex items-center gap-1 mt-3 text-xs font-medium group-hover:text-red-500 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                <span>View all</span>
+                <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
+              </div>
+            </CardContent>
+          </motion.div>
+
+          {/* 5. Completion */}
           <motion.div
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
@@ -1385,14 +1418,14 @@ export default function Dashboard() {
           >
             <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
               <div className="flex items-start justify-between">
-                <div>
+                <div className="min-w-0 flex-1 mr-2">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Completion</p>
                   <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.emeraldGreen }}>
                     {completionRate}%
                   </p>
                 </div>
                 <div
-                  className="p-2 rounded-xl group-hover:scale-110 transition-transform"
+                  className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
                   style={{ backgroundColor: `${COLORS.emeraldGreen}12` }}
                 >
                   <TrendingUp className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />
@@ -1410,44 +1443,65 @@ export default function Dashboard() {
             </CardContent>
           </motion.div>
 
-          {/* ── 5. DSC Alerts ── */}
+          {/* 6. Team Task */}
           <motion.div
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
-            onClick={() => navigate('/dsc?tab=expired')}
+            onClick={() => hasCrossVisibility && navigate('/tasks')}
             className={`${metricCardCls} ${
-              stats?.expiring_dsc_count > 0
+              hasCrossVisibility && teamTaskTotal > 0
                 ? isDark
-                  ? 'bg-red-900/20 border-red-800'
-                  : 'bg-red-50/50 border-red-200'
+                  ? 'bg-violet-900/20 border-violet-800 hover:border-violet-700'
+                  : 'bg-violet-50/60 border-violet-200 hover:border-violet-300'
                 : metricCardDefault
             }`}
           >
             <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
               <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">DSC Alerts</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight text-red-500">
-                    {(stats?.expiring_dsc_count || 0) + (stats?.expired_dsc_count || 0)}
+                <div className="min-w-0 flex-1 mr-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Team Task</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: hasCrossVisibility ? (isDark ? '#a78bfa' : '#7c3aed') : (isDark ? '#475569' : '#94a3b8') }}>
+                    {hasCrossVisibility ? teamTaskTotal : 0}
                   </p>
-                  <p className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    {stats?.expired_dsc_count || 0} expired · {stats?.expiring_dsc_count || 0} expiring
-                  </p>
+                  {hasCrossVisibility && teamTaskBreakdown.length > 0 && (
+                    <div className="mt-1 space-y-0.5 max-h-[36px] overflow-hidden">
+                      {teamTaskBreakdown.slice(0, 2).map(m => (
+                        <p key={m.id} className="text-[9px] text-slate-400 truncate">
+                          {m.name.split(' ')[0].toLowerCase()}: {m.pendingCount}
+                        </p>
+                      ))}
+                      {teamTaskBreakdown.length > 2 && (
+                        <p className="text-[9px] text-slate-400">+{teamTaskBreakdown.length - 2} more</p>
+                      )}
+                    </div>
+                  )}
+                  {!hasCrossVisibility && (
+                    <p className="text-[9px] text-slate-400 mt-0.5">no access</p>
+                  )}
                 </div>
-                <div className={`p-2 rounded-xl group-hover:scale-110 transition-transform ${isDark ? 'bg-red-900/40' : 'bg-red-100'}`}>
-                  <Key className="h-4 w-4 text-red-500" />
+                <div
+                  className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
+                  style={{ backgroundColor: hasCrossVisibility ? (isDark ? 'rgba(167,139,250,0.15)' : '#ede9fe') : (isDark ? 'rgba(71,85,105,0.2)' : '#f8fafc') }}
+                >
+                  <Users className="h-4 w-4" style={{ color: hasCrossVisibility ? '#7c3aed' : (isDark ? '#475569' : '#cbd5e1') }} />
                 </div>
               </div>
-              <div className={`flex items-center gap-1 mt-3 text-xs font-medium group-hover:text-red-500 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                <span>View all</span>
-                <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
+              <div className={`flex items-center gap-1 mt-3 text-xs font-medium transition-colors ${hasCrossVisibility ? 'group-hover:text-violet-500' : ''} ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                {hasCrossVisibility ? (
+                  <>
+                    <span>View team</span>
+                    <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
+                  </>
+                ) : (
+                  <span>cross visibility off</span>
+                )}
               </div>
             </CardContent>
           </motion.div>
 
         </motion.div>
 
-        {/* ── RECENT TASKS + DEADLINES + ATTENDANCE ─────────────────────────── */}
+        {/* RECENT TASKS + DEADLINES + ATTENDANCE */}
         <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-3" variants={itemVariants}>
 
           {/* Recent Tasks */}
@@ -1618,7 +1672,7 @@ export default function Dashboard() {
           </SectionCard>
         </motion.div>
 
-        {/* ── ASSIGNED TASKS ─────────────────────────────────────────────────── */}
+        {/* ASSIGNED TASKS */}
         {showTaskSection && (
           <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-3">
             <SectionCard className="hover:shadow-md transition">
@@ -1677,7 +1731,7 @@ export default function Dashboard() {
           </motion.div>
         )}
 
-        {/* ── STAR PERFORMERS + TO-DO + VISITS ──────────────────────────────── */}
+        {/* STAR PERFORMERS + TO-DO + VISITS */}
         <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
 
           {/* Star Performers */}
@@ -1738,7 +1792,7 @@ export default function Dashboard() {
               </div>
               {selectedDueDate && (
                 <p className="text-xs text-amber-500 font-medium mb-2 -mt-1 ml-1">
-                  📅 Due: {format(selectedDueDate, 'MMM d, yyyy')}
+                  Due: {format(selectedDueDate, 'MMM d, yyyy')}
                 </p>
               )}
               {pendingTodos.length === 0
@@ -1777,7 +1831,7 @@ export default function Dashboard() {
                           </div>
                           <button onClick={e => { e.stopPropagation(); handleDeleteTodo(todo._id || todo.id); }}
                             className={`text-xs font-medium transition-colors px-2 py-1 rounded-lg flex-shrink-0 ${isDark ? 'text-slate-500 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}>
-                            ✕
+                            x
                           </button>
                         </motion.div>
                       ))}
@@ -1791,7 +1845,7 @@ export default function Dashboard() {
           <VisitsCard isDark={isDark} navigate={navigate} currentUserId={user?.id} onSelectVisit={setSelectedVisit} visits={[]} />
         </motion.div>
 
-        {/* ── QUICK ACCESS TILES ─────────────────────────────────────────────── */}
+        {/* QUICK ACCESS TILES */}
         <motion.div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 [&>*]:min-w-0" variants={itemVariants}>
           {[
             {
@@ -1854,7 +1908,7 @@ export default function Dashboard() {
           )}
         </motion.div>
 
-        {/* ── PUNCH-IN GATE OVERLAY ──────────────────────────────────────────── */}
+        {/* PUNCH-IN GATE OVERLAY */}
         <AnimatePresence>
           {mustPunchIn && !todayIsHoliday && (
             <motion.div
