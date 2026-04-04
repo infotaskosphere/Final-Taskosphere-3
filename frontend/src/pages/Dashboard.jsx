@@ -910,43 +910,55 @@ export default function Dashboard() {
   const fetchDashboardData = React.useCallback(async () => {
     setDataLoading(true);
 
-  // ── Wave 1: critical path ──────────────────────────────────────────────
-  try {
-    // ✅ ADD 'visitsData' to this array list so the variable exists
-    const [tasksData, statsData, dueDatesData, attendanceData, todosData, visitsData] =
-      await Promise.all([
-        apiFetch('/tasks'),
-        apiFetch('/dashboard/stats'),
-        apiFetch('/duedates/upcoming?days=30'),
-        apiFetch('/attendance/today'),
-        apiFetch(`/todos${user?.id ? `?user_id=${user.id}` : ''}`),
-        apiFetch('/visits'), // ✅ Ensure this endpoint is called
+    // ── Wave 1: critical path ──
+    try {
+      const [tasksData, statsData, dueDatesData, attendanceData, todosData, visitsData] =
+        await Promise.all([
+          apiFetch('/tasks'),
+          apiFetch('/dashboard/stats'),
+          apiFetch('/duedates/upcoming?days=30'),
+          apiFetch('/attendance/today'),
+          apiFetch(`/todos${user?.id ? `?user_id=${user.id}` : ''}`),
+          apiFetch('/visits'),
+        ]);
+        
+      if (Array.isArray(tasksData)) setTasks(tasksData);
+      if (Array.isArray(visitsData)) setVisits(visitsData);
+      
+      if (statsData && typeof statsData === 'object' && !Array.isArray(statsData)) {
+        setStats(statsData);
+      }
+      if (Array.isArray(dueDatesData)) setUpcomingDueDates(dueDatesData);
+      if (attendanceData) setTodayAttendance(attendanceData);
+      if (Array.isArray(todosData)) setTodosRaw(todosData);
+      
+    } catch (e) {
+      console.error('Dashboard wave-1 fetch error:', e);
+    }
+    
+    setDataLoading(false); // <--- Line 941 (from your error log)
+
+    // ── Wave 2: secondary ──
+    try {
+      const [usersData, holidaysRes, leadsRes, rankingsData] = await Promise.all([
+        apiFetch('/users'),
+        apiFetch('/holidays'),
+        apiFetch('/leads'),
+        apiFetch(`/reports/performance-rankings?period=${rankingPeriod}`),
       ]);
       
-    // Now these variables exist and won't throw a ReferenceError
-    if (Array.isArray(tasksData)) setTasks(tasksData);
-    if (Array.isArray(visitsData)) setVisits(visitsData); 
-    
-    if (statsData && typeof statsData === 'object' && !Array.isArray(statsData)) {
-      setStats(statsData);
-    }
-    if (Array.isArray(dueDatesData)) setUpcomingDueDates(dueDatesData);
-    if (attendanceData) setTodayAttendance(attendanceData);
-    if (Array.isArray(todosData)) setTodosRaw(todosData);
-    
-  } catch (e) {
-    console.error('Dashboard wave-1 fetch error:', e);
-  }
-  
-  setDataLoading(false);
+      if (Array.isArray(usersData)) { 
+        setAllUsers(usersData);   
+        setUsersLoading(false); 
       }
+      // CHECK HERE: Ensure the line below isn't "trapped" outside a block
       if (Array.isArray(holidaysRes)) setHolidaysData(holidaysRes);
       if (Array.isArray(leadsRes)) setLeadsData(leadsRes);
       if (Array.isArray(rankingsData)) setRankings(rankingsData);
       
     } catch (e) {
       console.error('Dashboard wave-2 fetch error:', e);
-      setUsersLoading(false); // always clear loading even on error
+      setUsersLoading(false);
     }
   }, [apiFetch, rankingPeriod, user?.id]);
 
