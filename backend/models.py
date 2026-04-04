@@ -71,48 +71,47 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "assigned_clients": [],
       },
       "manager": {
-          # Manager: SCOPE = OWN + SAME_DEPARTMENT
+          # Manager: SCOPE = OWN + SAME_DEPARTMENT (Own + Team)
           # CROSS_VISIBILITY = SAME_DEPARTMENT_USERS
-          # DEFAULT_MODULES = TASK, TODO, CLIENT_VISIT, CLIENT_PAGE, GENERAL_SETTINGS, COMPLIANCE, CALENDAR, ATTENDANCE
-          # PERMISSIONS = VIEW CREATE EDIT UPDATE (no DELETE by default)
-          # OTHER_MODULES = ADMIN_GRANTED_ONLY (all False below)
+          # ALL MODULES: VIEW, CREATE, EDIT, UPDATE (Permission-based — admin can revoke)
+          # NO DELETE by default
           # DATA_ACCESS_RULE: resource.department == user.department
           #   AND (resource.user_id == user.id OR resource.user_id IN SAME_DEPARTMENT_USERS)
           "can_view_all_tasks": False,      # SCOPE handled server-side by department query
-          "can_view_all_clients": False,    # Client access via assigned_clients
-          "can_view_all_dsc": False,        # ADMIN_GRANTED_ONLY
+          "can_view_all_clients": True,     # DEFAULT_MODULE (Assigned + Permission-based)
+          "can_view_all_dsc": True,         # DEFAULT_MODULE (Permission-based)
           "can_view_documents": True,       # DEFAULT_MODULE (compliance/docs)
           "can_view_all_duedates": True,    # DEFAULT_MODULE (compliance)
-          "can_view_reports": True,         # DEFAULT_MODULE
+          "can_view_reports": True,         # DEFAULT_MODULE (Own + Team scope)
           "can_view_attendance": True,      # DEFAULT_MODULE (calendar/attendance)
-          "can_view_all_leads": False,      # ADMIN_GRANTED_ONLY
+          "can_view_all_leads": True,       # DEFAULT_MODULE (Permission-based)
           "can_edit_tasks": True,           # DEFAULT_MODULE (task)
-          "can_edit_clients": False,        # ADMIN_GRANTED_ONLY
-          "can_edit_dsc": False,            # ADMIN_GRANTED_ONLY
+          "can_edit_clients": True,         # DEFAULT_MODULE (Permission-based)
+          "can_edit_dsc": True,             # DEFAULT_MODULE (Permission-based)
           "can_edit_documents": True,       # DEFAULT_MODULE
           "can_edit_due_dates": True,       # DEFAULT_MODULE (compliance)
-          "can_edit_users": False,          # ADMIN_GRANTED_ONLY
+          "can_edit_users": True,           # DEFAULT_MODULE (Permission-based)
           "can_download_reports": True,     # DEFAULT_MODULE
-          "can_manage_users": False,        # ADMIN_GRANTED_ONLY
+          "can_manage_users": True,         # DEFAULT_MODULE (Permission-based)
           "can_manage_settings": True,      # DEFAULT_MODULE (general_settings)
           "can_assign_tasks": True,         # DEFAULT_MODULE (task)
-          "can_assign_clients": False,      # ADMIN_GRANTED_ONLY
-          "can_view_staff_activity": True,  # DEFAULT_MODULE (same-department scope enforced server-side)
+          "can_assign_clients": True,       # DEFAULT_MODULE (Permission-based)
+          "can_view_staff_activity": True,  # DEFAULT_MODULE (Own + Team scope enforced server-side)
           "can_send_reminders": False,      # ADMIN_GRANTED_ONLY
-          "can_view_user_page": False,      # ADMIN_GRANTED_ONLY
-          "can_view_audit_logs": False,     # ADMIN_GRANTED_ONLY
+          "can_view_user_page": True,       # DEFAULT_MODULE (Permission-based)
+          "can_view_audit_logs": True,      # DEFAULT_MODULE (Permission-based)
           "can_view_selected_users_reports": True,  # DEFAULT_MODULE
           "can_view_todo_dashboard": True,  # DEFAULT_MODULE (todo)
           "can_use_chat": True,             # DEFAULT_MODULE
           "can_view_staff_rankings": True,  # DEFAULT_MODULE
           "can_delete_data": False,         # ADMIN_GRANTED_ONLY
           "can_delete_tasks": False,        # ADMIN_GRANTED_ONLY
-          "can_connect_email": True,        # DEFAULT_MODULE
+          "can_connect_email": True,        # DEFAULT_MODULE (Email Accounts — Own + Team)
           "can_view_own_data": True,        # DEFAULT_MODULE
-          "can_create_quotations": False,   # ADMIN_GRANTED_ONLY
-          "can_manage_invoices": False,     # ADMIN_GRANTED_ONLY
-          "can_view_passwords": True,       # DEFAULT_MODULE (general_settings)
-          "can_edit_passwords": False,      # ADMIN_GRANTED_ONLY
+          "can_create_quotations": True,    # DEFAULT_MODULE (Permission-based)
+          "can_manage_invoices": True,      # DEFAULT_MODULE (Permission-based)
+          "can_view_passwords": True,       # DEFAULT_MODULE (Permission-based)
+          "can_edit_passwords": True,       # DEFAULT_MODULE (Permission-based)
           "view_password_departments": [],  # defaults to own departments
           "can_view_all_visits": False,     # SCOPE handled server-side by department query
           "can_edit_visits": True,          # DEFAULT_MODULE (client_visit)
@@ -128,45 +127,44 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
       },
       "staff": {
           # Staff: SCOPE = OWN only
-          # DEFAULT_MODULES = TASK, TODO, CLIENT_VISIT, CLIENT_PAGE, GENERAL_SETTINGS, COMPLIANCE, CALENDAR, ATTENDANCE
-          # PERMISSIONS = VIEW CREATE EDIT UPDATE (own records only)
-          # OTHER_MODULES = ADMIN_GRANTED_ONLY (all False below)
+          # ALL MODULES: VIEW, CREATE, EDIT, UPDATE (Permission-based — admin can revoke)
+          # NO DELETE by default
           # DATA_ACCESS_RULE: resource.department == user.department AND resource.user_id == user.id
           "can_view_all_tasks": False,      # SCOPE: own only
-          "can_view_all_clients": False,    # SCOPE: assigned only
-          "can_view_all_dsc": False,        # ADMIN_GRANTED_ONLY
+          "can_view_all_clients": True,     # DEFAULT_MODULE (Assigned + Permission-based)
+          "can_view_all_dsc": True,         # DEFAULT_MODULE (Permission-based)
           "can_view_documents": True,       # DEFAULT_MODULE
           "can_view_all_duedates": True,    # DEFAULT_MODULE (compliance)
           "can_view_reports": True,         # DEFAULT_MODULE (own reports only, server-side scoped)
           "can_view_attendance": True,      # DEFAULT_MODULE (own attendance only, server-side scoped)
-          "can_view_all_leads": False,      # ADMIN_GRANTED_ONLY
+          "can_view_all_leads": True,       # DEFAULT_MODULE (Permission-based)
           "can_edit_tasks": True,           # DEFAULT_MODULE (own/assigned tasks only)
-          "can_edit_clients": False,        # ADMIN_GRANTED_ONLY
-          "can_edit_dsc": False,            # ADMIN_GRANTED_ONLY
-          "can_edit_documents": False,      # ADMIN_GRANTED_ONLY
-          "can_edit_due_dates": False,      # ADMIN_GRANTED_ONLY
-          "can_edit_users": False,          # ADMIN_GRANTED_ONLY
+          "can_edit_clients": True,         # DEFAULT_MODULE (Permission-based)
+          "can_edit_dsc": True,             # DEFAULT_MODULE (Permission-based)
+          "can_edit_documents": True,       # DEFAULT_MODULE (Permission-based)
+          "can_edit_due_dates": True,       # DEFAULT_MODULE (Permission-based)
+          "can_edit_users": True,           # DEFAULT_MODULE (Permission-based)
           "can_download_reports": True,     # DEFAULT_MODULE (own data only)
-          "can_manage_users": False,        # ADMIN_GRANTED_ONLY
+          "can_manage_users": True,         # DEFAULT_MODULE (Permission-based)
           "can_manage_settings": True,      # DEFAULT_MODULE (general_settings, own profile)
           "can_assign_tasks": False,        # ADMIN_GRANTED_ONLY
           "can_assign_clients": False,      # ADMIN_GRANTED_ONLY
-          "can_view_staff_activity": False, # ADMIN_GRANTED_ONLY
+          "can_view_staff_activity": True,  # DEFAULT_MODULE (own activity only, server-side scoped)
           "can_send_reminders": False,      # ADMIN_GRANTED_ONLY
-          "can_view_user_page": False,      # ADMIN_GRANTED_ONLY
-          "can_view_audit_logs": False,     # ADMIN_GRANTED_ONLY
-          "can_view_selected_users_reports": False,  # ADMIN_GRANTED_ONLY
+          "can_view_user_page": True,       # DEFAULT_MODULE (Permission-based)
+          "can_view_audit_logs": True,      # DEFAULT_MODULE (Permission-based)
+          "can_view_selected_users_reports": True,  # DEFAULT_MODULE (own data)
           "can_view_todo_dashboard": True,  # DEFAULT_MODULE
           "can_use_chat": True,             # DEFAULT_MODULE
           "can_view_staff_rankings": False, # ADMIN_GRANTED_ONLY
           "can_delete_data": False,         # ADMIN_GRANTED_ONLY
           "can_delete_tasks": False,        # ADMIN_GRANTED_ONLY
-          "can_connect_email": True,        # DEFAULT_MODULE
+          "can_connect_email": True,        # DEFAULT_MODULE (Email Accounts)
           "can_view_own_data": True,        # DEFAULT_MODULE
-          "can_create_quotations": False,   # ADMIN_GRANTED_ONLY
-          "can_manage_invoices": False,     # ADMIN_GRANTED_ONLY
-          "can_view_passwords": False,      # ADMIN_GRANTED_ONLY
-          "can_edit_passwords": False,      # ADMIN_GRANTED_ONLY
+          "can_create_quotations": True,    # DEFAULT_MODULE (Permission-based)
+          "can_manage_invoices": True,      # DEFAULT_MODULE (Permission-based)
+          "can_view_passwords": True,       # DEFAULT_MODULE (Permission-based)
+          "can_edit_passwords": True,       # DEFAULT_MODULE (Permission-based)
           "view_password_departments": [],
           "can_view_all_visits": False,     # SCOPE: own visits only
           "can_edit_visits": True,          # DEFAULT_MODULE (own visits)
