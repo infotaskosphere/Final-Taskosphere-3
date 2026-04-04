@@ -918,7 +918,7 @@ export default function Dashboard() {
           apiFetch('/dashboard/stats'),
           apiFetch('/duedates/upcoming?days=30'),
           apiFetch('/attendance/today'),
-          apiFetch(`/todos${user?.id ? `?user_id=${user.id}` : ''}`),
+          apiFetch('/todos'),   // ← FIX: backend scopes by JWT; no user_id param needed
           apiFetch('/visits'),
         ]);
         
@@ -1480,7 +1480,51 @@ export default function Dashboard() {
                   )}
                 </div>
 
-                <div className="hidden md:block flex-shrink-0">
+                <div className="hidden md:flex items-center gap-4 flex-shrink-0">
+                  {isAdmin && (
+                    <>
+                      <motion.button
+                        whileHover={{ scale: 1.04, y: -1, transition: springPhysics.card }}
+                        whileTap={{ scale: 0.97 }}
+                        onClick={() => navigate('/tasks')}
+                        className="flex flex-col items-center justify-center px-4 py-2 rounded-xl cursor-pointer transition-all"
+                        style={{
+                          background: 'rgba(255,255,255,0.12)',
+                          border: '1px solid rgba(255,255,255,0.2)',
+                          backdropFilter: 'blur(8px)',
+                          minWidth: 90,
+                        }}
+                      >
+                        <span
+                          className="font-black leading-none tracking-tight text-white"
+                          style={{ fontSize: '2rem', fontFamily: "'Roboto Mono', monospace" }}
+                        >
+                          {stats?.total_tasks ?? tasks.length}
+                        </span>
+                        <span className="text-white/60 text-[10px] font-semibold uppercase tracking-widest mt-1">
+                          Total Tasks
+                        </span>
+                        <span
+                          className="mt-1.5 flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full"
+                          style={{ background: 'rgba(31,175,90,0.25)', color: '#5CCB5F' }}
+                        >
+                          <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#5CCB5F', display: 'inline-block' }} />
+                          View All
+                        </span>
+                      </motion.button>
+ 
+                      {/* Vertical divider */}
+                      <div
+                        className="self-stretch"
+                        style={{
+                          width: 1,
+                          background: 'rgba(255,255,255,0.18)',
+                          borderRadius: 99,
+                        }}
+                      />
+                    </>
+                  )}
+ 
                   <LiveClock compact />
                 </div>
 
