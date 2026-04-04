@@ -1772,7 +1772,7 @@ async def export_attendance_pdf(
 @api_router.post("/attendance/mark-absent-bulk")
 async def mark_absent_bulk(
     data: dict = {},
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(require_admin())
 ):
     """
     Manually trigger absent-marking for a given date.
@@ -4449,7 +4449,7 @@ async def auto_sync_holidays(current_user: User = Depends(get_current_user)):
 @api_router.post("/holidays", response_model=HolidayResponse)
 async def create_holiday(
     holiday: HolidayCreate,
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(require_admin())
 ):
     """
     Create a holiday entry.
@@ -4528,7 +4528,7 @@ async def create_holiday(
 async def update_holiday_status(
     holiday_date: str,
     data: dict,
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(require_admin())
 ):
     new_status = data.get("status")
     if new_status not in ["confirmed", "rejected", "pending"]:
@@ -4543,7 +4543,7 @@ async def update_holiday_status(
 
 
 @api_router.delete("/holidays/{holiday_date}")
-async def delete_holiday(holiday_date: str, current_user: User = Depends(require_admin)):
+async def delete_holiday(holiday_date: str, current_user: User = Depends(require_admin())):
     result = await db.holidays.delete_one({"date": holiday_date})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Holiday not found")
