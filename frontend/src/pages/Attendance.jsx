@@ -2647,48 +2647,95 @@ export default function Attendance() {
             </div>
 
               {/* ══ MONTHLY PUNCTUALITY INSIGHTS — always visible, fills remaining space ══ */}
-              <SectionCard className="flex-1">
-                <CardHeaderRow
-                  iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
-                  icon={<BarChart3 className="h-4 w-4 text-emerald-500" />}
-                  title="Monthly Insights"
-                  subtitle={format(selectedDate, 'MMMM yyyy')}
-                  action={
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                      style={{
-                        backgroundColor: totalDaysLateThisMonth === 0
-                          ? (isDark ? 'rgba(31,175,90,0.18)' : '#dcfce7')
-                          : (isDark ? 'rgba(239,68,68,0.15)' : '#fee2e2'),
-                        color: totalDaysLateThisMonth === 0 ? COLORS.emeraldGreen : COLORS.red,
-                      }}>
-                      {totalDaysLateThisMonth === 0 ? '✓ On Time' : `${totalDaysLateThisMonth} Late`}
-                    </span>
-                  }
-                />
-                <div className="p-4 space-y-3">
-                  {/* On-time rate bar */}
-                  {(() => {
-                    const onTimeCount = monthDaysPresent - totalDaysLateThisMonth;
-                    const onTimePct = monthDaysPresent > 0 ? Math.round((onTimeCount / monthDaysPresent) * 100) : 0;
-                    return (
-                      <>
-                        <div>
-                          <div className="flex items-center justify-between mb-1.5">
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Punctuality Rate</span>
-                            <span className="text-sm font-black tabular-nums"
-                              style={{ color: onTimePct >= 80 ? COLORS.emeraldGreen : onTimePct >= 60 ? COLORS.amber : COLORS.red }}>
-                              {onTimePct}%
-                            </span>
-                          </div>
-                          <div className="h-2 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-700">
-                            <motion.div className="h-full rounded-full"
-                              style={{ background: onTimePct >= 80 ? `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})` : onTimePct >= 60 ? `linear-gradient(90deg, ${COLORS.amber}, #fbbf24)` : `linear-gradient(90deg, ${COLORS.red}, #f87171)` }}
-                              initial={{ width: 0 }}
-                              animate={{ width: `${onTimePct}%` }}
-                              transition={{ duration: 0.8, ease: 'easeOut', delay: 0.2 }}
-                            />
-                          </div>
-                        </div>
+<SectionCard className="flex-1">
+  <CardHeaderRow
+    iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
+    icon={<BarChart3 className="h-4 w-4 text-emerald-500" />}
+    title="Monthly Insights"
+    subtitle={format(selectedDate, 'MMMM yyyy')}
+    action={
+      <span
+        className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+        style={{
+          backgroundColor:
+            totalDaysLateThisMonth === 0
+              ? isDark
+                ? 'rgba(31,175,90,0.18)'
+                : '#dcfce7'
+              : isDark
+                ? 'rgba(239,68,68,0.15)'
+                : '#fee2e2',
+          color:
+            totalDaysLateThisMonth === 0
+              ? COLORS.emeraldGreen
+              : COLORS.red,
+        }}
+      >
+        {totalDaysLateThisMonth === 0
+          ? '✓ On Time'
+          : `${totalDaysLateThisMonth} Late`}
+      </span>
+    }
+  />
+
+  <div className="p-4 space-y-3">
+    {/* On-time rate bar */}
+    {(() => {
+      const onTimeCount = monthDaysPresent - totalDaysLateThisMonth;
+      const onTimePct =
+        monthDaysPresent > 0
+          ? Math.round((onTimeCount / monthDaysPresent) * 100)
+          : 0;
+
+      return (
+        <>
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                Punctuality Rate
+              </span>
+
+              <span
+                className="text-sm font-black tabular-nums"
+                style={{
+                  color:
+                    onTimePct >= 80
+                      ? COLORS.emeraldGreen
+                      : onTimePct >= 60
+                      ? COLORS.amber
+                      : COLORS.red,
+                }}
+              >
+                {onTimePct}%
+              </span>
+            </div>
+
+            <div className="h-2 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-700">
+              <motion.div
+                className="h-full rounded-full"
+                style={{
+                  background:
+                    onTimePct >= 80
+                      ? `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`
+                      : onTimePct >= 60
+                      ? `linear-gradient(90deg, ${COLORS.amber}, #fbbf24)`
+                      : `linear-gradient(90deg, ${COLORS.red}, #f87171)`,
+                }}
+                initial={{ width: 0 }}
+                animate={{ width: `${onTimePct}%` }}
+                transition={{
+                  duration: 0.8,
+                  ease: 'easeOut',
+                  delay: 0.2,
+                }}
+              />
+            </div>
+          </div>
+        </>
+      );
+    })()}
+  </div>
+</SectionCard>
 
                         {/* Stat grid */}
                         <div className="grid grid-cols-3 gap-2">
