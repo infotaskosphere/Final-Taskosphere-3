@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import GifLoader from '@/components/ui/GifLoader.jsx';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
@@ -435,15 +436,7 @@ export default function Reports() {
   };
 
   // ── Loading ───────────────────────────────────────────────────────────────
-  if (loading) return (
-    <div className="flex items-center justify-center h-96" style={{background:t.pageBg}}>
-      <div className="text-center">
-        <div className="w-12 h-12 rounded-full border-4 border-t-blue-600 animate-spin mx-auto mb-4"
-          style={{borderColor:`${t.border} ${t.border} ${t.border} ${C.mediumBlue}`}}/>
-        <p className="text-sm font-medium" style={{color:t.textSub}}>Loading reports…</p>
-      </div>
-    </div>
-  );
+  if (loading) return <GifLoader />;
 
   const tabs=[
     {id:'overview',   label:'Overview',    icon:BarChart3 },
