@@ -218,7 +218,7 @@ const DashboardLayout = ({ children }) => {
     return () => clearInterval(interval);
   }, []);
 
-  if (loading) return null;
+  if (loading) return <GifLoader />;
   if (!user) { navigate('/login', { replace: true }); return null; }
 
   const handleLogout = () => {
