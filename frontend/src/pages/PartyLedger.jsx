@@ -18,6 +18,7 @@ import React, {
   useCallback,
   useRef,
 } from 'react';
+import GifLoader from '@/components/ui/GifLoader.jsx';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -1434,9 +1435,8 @@ export default function PartyLedger({
               {/* ── LEDGER TABLE ── */}
               <div className="flex-1 overflow-auto px-7 py-5">
                 {loadingPmts ? (
-                  <div className="flex items-center justify-center h-48 text-slate-400 gap-3">
-                    <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                    <span>Loading payment records…</span>
+                  <div className="flex items-center justify-center h-48">
+                    <GifLoader />
                   </div>
                 ) : !hasData ? (
                   <div className="flex flex-col items-center justify-center h-48 text-slate-400 gap-2">
