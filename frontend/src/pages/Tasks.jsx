@@ -651,90 +651,75 @@ const StatCard = ({ label, value, color, icon: Icon, active, onClick, activeClas
 // Main Tasks Component
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Tasks() {
-  // ── Stub: replace with real useAuth(), useNavigate(), etc. in your app
-  //    cross_visibility: non-admin users with view_other_tasks[] set can see team tasks
-  const user = {
-    id: 'user-1',
-    full_name: 'Arjun Sharma',
-    email: 'arjun@example.com',
-    role: 'admin',
-    permissions: {
-      can_view_all_tasks: true,
-      view_other_tasks: [],   // array of user IDs a manager can see; empty for regular staff
-    },
+
+  // ── Auth ────────────────────────────────────────────────────────────────────
+  const storedUser = React.useMemo(() => {
+    try {
+      const u = localStorage.getItem('user');
+      return u ? JSON.parse(u) : null;
+    } catch { return null; }
+  }, []);
+
+  const user = storedUser || {
+    id: '', full_name: 'User', role: 'staff',
+    permissions: { view_other_tasks: [], can_view_all_tasks: false }
   };
+
   const hasPermission = () => true;
-  const navigate = (path) => console.log('navigate:', path);
+  const navigate = (path) => { window.location.href = path; };
+
+  // ── API ─────────────────────────────────────────────────────────────────────
+  const API_BASE = (
+    typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL
+  ) || 'https://final-taskosphere-backend.onrender.com/api';
+
+  const getAuthHeader = React.useCallback(() => {
+    const token =
+      localStorage.getItem('access_token') ||
+      localStorage.getItem('token') ||
+      sessionStorage.getItem('access_token') ||
+      sessionStorage.getItem('token') || '';
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, []);
+
+  const apiFetch = React.useCallback(async (endpoint) => {
+    try {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() }
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch { return null; }
+  }, [API_BASE, getAuthHeader]);
 
   const isAdmin = user?.role === 'admin';
-  const isDark = useDark();
+  const isDark  = useDark();
 
-  // ── Permissions ──────────────────────────────────────────────────────────────
+  // ── Permissions ─────────────────────────────────────────────────────────────
   const canModifyTask = (task) => {
     if (isAdmin) return true;
-    return task.assigned_to === user?.id ||
+    return (
+      task.assigned_to === user?.id ||
       task.sub_assignees?.includes(user?.id) ||
-      task.created_by === user?.id;
+      task.created_by === user?.id
+    );
   };
   const canAssignTasks = hasPermission('can_assign_tasks');
   const canEditTasks   = hasPermission('can_edit_tasks');
   const canDeleteTasks = isAdmin || hasPermission('can_edit_tasks');
 
-  // ── State ────────────────────────────────────────────────────────────────────
-  const [tasks,   setTasks]   = useState([
-    { id: '1', title: 'File GSTR-3B for March 2026', description: '- Reconcile GSTR-2B with purchase register\n- Prepare GSTR-3B\n- Pay tax & generate challan\n- Reconcile ITC', assigned_to: 'user-1', created_by: 'user-1', due_date: '2026-04-01', priority: 'high', status: 'pending', category: 'gst', is_recurring: true, recurrence_pattern: 'monthly', recurrence_interval: 1, created_at: '2026-03-28T10:00:00Z', client_id: 'c1' },
-    { id: '2', title: 'Quarterly TDS Return Q4',      description: '- Download Form 16A from TRACES\n- Reconcile TDS with books\n- File 26Q return',                             assigned_to: 'user-2', created_by: 'user-1', due_date: '2026-04-15', priority: 'critical', status: 'in_progress', category: 'tds', is_recurring: true, recurrence_pattern: 'monthly', recurrence_interval: 3, created_at: '2026-03-25T09:00:00Z', client_id: 'c2' },
-    { id: '3', title: 'ITR-6 Filing — ABC Pvt Ltd',   description: '- Reconcile 26AS & AIS\n- Prepare ITR-6\n- Upload balance sheet',                                        assigned_to: 'user-1', created_by: 'user-1', due_date: '2026-05-31', priority: 'medium', status: 'pending', category: 'income_tax', is_recurring: false, created_at: '2026-03-20T08:00:00Z', client_id: 'c3' },
-    { id: '4', title: 'PF & ESIC March Contribution', description: '- Calculate PF & ESIC on salary\n- Deposit contribution by 15th\n- File ECR return',                      assigned_to: 'user-2', created_by: 'user-1', due_date: '2026-04-15', priority: 'high', status: 'completed', category: 'accounts', is_recurring: true, recurrence_pattern: 'monthly', recurrence_interval: 1, created_at: '2026-03-10T11:00:00Z', client_id: null },
-    { id: '5', title: 'DSC Renewal — XYZ Corp',        description: '- Check DSC expiry\n- Renew Class 3 DSC\n- Update in MCA portal',                                        assigned_to: 'user-1', created_by: 'user-1', due_date: '2026-03-31', priority: 'critical', status: 'pending', category: 'dsc', is_recurring: false, created_at: '2026-03-15T07:00:00Z', client_id: 'c1' },
-    { id: '6', title: 'ROC Annual Filing — MGT-7',     description: '- Prepare financial statements\n- File AOC-4 XBRL\n- File MGT-7',                                        assigned_to: 'user-3', created_by: 'user-1', due_date: '2026-06-30', priority: 'high', status: 'pending', category: 'roc', is_recurring: true, recurrence_pattern: 'yearly', recurrence_interval: 1, created_at: '2026-03-01T09:00:00Z', client_id: 'c2' },
-  ]);
-  const [users,   setUsers]   = useState([
-    { id: 'user-1', full_name: 'Arjun Sharma' },
-    { id: 'user-2', full_name: 'Priya Mehta' },
-    { id: 'user-3', full_name: 'Rahul Gupta' },
-  ]);
+  // ── Core state ───────────────────────────────────────────────────────────────
+  const [tasks,       setTasks]       = useState([]);
+  const [users,       setUsers]       = useState([]);
+  const [clients,     setClients]     = useState([]);
+  const [loading,     setLoading]     = useState(false);
+  const [dataLoading, setDataLoading] = useState(true);
 
-  // ── Cross-visibility: who can the current user see? ──────────────────────────
-  //    Admin     → sees ALL users (all tasks)
-  //    Manager   → sees own + users listed in permissions.view_other_tasks
-  //    Staff     → sees only themselves
-  const hasCrossVisibility = React.useMemo(() => {
-    if (isAdmin) return true;
-    const perms = user?.permissions || {};
-    return (perms.view_other_tasks && perms.view_other_tasks.length > 0) || perms.can_view_all_tasks === true;
-  }, [isAdmin, user]);
-
-  const crossVisibilityUserIds = React.useMemo(() => {
-    if (isAdmin) return users.map(u => u.id).filter(id => id !== user?.id);
-    const perms = user?.permissions || {};
-    return (perms.view_other_tasks || []).filter(id => id !== user?.id);
-  }, [isAdmin, user, users]);
-
-  // ── Users visible in filters (assignee dropdown) ─────────────────────────────
-  //    Admin                    → all users
-  //    Manager w/ cross_vis     → self + team members they can see
-  //    Regular staff            → only self
-  const visibleUsers = React.useMemo(() => {
-    if (isAdmin) return users;
-    if (hasCrossVisibility) {
-      const ids = new Set([user?.id, ...crossVisibilityUserIds]);
-      return users.filter(u => ids.has(u.id));
-    }
-    return users.filter(u => u.id === user?.id);
-  }, [isAdmin, hasCrossVisibility, crossVisibilityUserIds, users, user]);
-
-  const [clients, setClients] = useState([
-    { id: 'c1', company_name: 'ABC Pvt Ltd' },
-    { id: 'c2', company_name: 'XYZ Corp' },
-    { id: 'c3', company_name: 'PQR Enterprises' },
-  ]);
-  const [loading, setLoading] = useState(false);
-
-  const [dialogOpen,   setDialogOpen]   = useState(false);
-  const [editingTask,  setEditingTask]  = useState(null);
-  const [formData,     setFormData]     = useState({ ...EMPTY_FORM });
-  const [viewMode,     setViewMode]     = useState('list');
+  // ── Dialog / form state ──────────────────────────────────────────────────────
+  const [dialogOpen,         setDialogOpen]         = useState(false);
+  const [editingTask,        setEditingTask]        = useState(null);
+  const [formData,           setFormData]           = useState({ ...EMPTY_FORM });
+  const [viewMode,           setViewMode]           = useState('list');
 
   const [taskDetailOpen,     setTaskDetailOpen]     = useState(false);
   const [selectedDetailTask, setSelectedDetailTask] = useState(null);
@@ -745,35 +730,70 @@ export default function Tasks() {
   const [newComment,         setNewComment]         = useState('');
   const [openCommentTaskId,  setOpenCommentTaskId]  = useState(null);
 
-  const [notifications,     setNotifications]     = useState([
-    { id: 'n1', title: '📋 New Task Assigned', message: 'GSTR-3B filing assigned to you', type: 'task', is_read: false, created_at: new Date().toISOString() },
-    { id: 'n2', title: '✅ Task Completed',    message: 'PF & ESIC March was marked done', type: 'task', is_read: true,  created_at: new Date().toISOString() },
-  ]);
-  const [showNotifications, setShowNotifications] = useState(false);
+  const [notifications,      setNotifications]      = useState([]);
+  const [showNotifications,  setShowNotifications]  = useState(false);
 
-  // ── Filters & sorting ────────────────────────────────────────────────────────
-  const [searchQuery,     setSearchQuery]     = useState('');
-  const [filterStatus,    setFilterStatus]    = useState('all');
-  const [filterPriority,  setFilterPriority]  = useState('all');
-  const [filterCategory,  setFilterCategory]  = useState('all');
-  const [filterAssignee,  setFilterAssignee]  = useState('all');
-  const [sortBy,          setSortBy]          = useState('due_date');
-  const [sortDirection,   setSortDirection]   = useState('asc');
-  const [showMyTasksOnly, setShowMyTasksOnly] = useState(false);
-  const [activeFilters,   setActiveFilters]   = useState([]);
-
-  // ── Checklist state ──────────────────────────────────────────────────────────
-  const [taskChecklists, setTaskChecklists] = useState({});
-
-  // ── Workflow library ─────────────────────────────────────────────────────────
-  const [showWorkflowLibrary,     setShowWorkflowLibrary]     = useState(false);
-  const [workflowSearch,          setWorkflowSearch]          = useState('');
-  const [workflowDeptFilter,      setWorkflowDeptFilter]      = useState('all');
-  const [workflowFrequencyFilter, setWorkflowFrequencyFilter] = useState('all');
+  // ── Filter / sort state ──────────────────────────────────────────────────────
+  const [searchQuery,            setSearchQuery]            = useState('');
+  const [filterStatus,           setFilterStatus]           = useState('all');
+  const [filterPriority,         setFilterPriority]         = useState('all');
+  const [filterCategory,         setFilterCategory]         = useState('all');
+  const [filterAssignee,         setFilterAssignee]         = useState('all');
+  const [sortBy,                 setSortBy]                 = useState('due_date');
+  const [sortDirection,          setSortDirection]          = useState('asc');
+  const [showMyTasksOnly,        setShowMyTasksOnly]        = useState(false);
+  const [activeFilters,          setActiveFilters]          = useState([]);
+  const [taskChecklists,         setTaskChecklists]         = useState({});
+  const [showWorkflowLibrary,    setShowWorkflowLibrary]    = useState(false);
+  const [workflowSearch,         setWorkflowSearch]         = useState('');
+  const [workflowDeptFilter,     setWorkflowDeptFilter]     = useState('all');
+  const [workflowFrequencyFilter,setWorkflowFrequencyFilter]= useState('all');
 
   const fileInputRef = useRef(null);
 
-  // ── Helpers ───────────────────────────────────────────────────────────────────
+  // ── Cross-visibility ─────────────────────────────────────────────────────────
+  const hasCrossVisibility = React.useMemo(() => {
+    if (isAdmin) return true;
+    const perms = user?.permissions || {};
+    return (
+      (perms.view_other_tasks && perms.view_other_tasks.length > 0) ||
+      perms.can_view_all_tasks === true
+    );
+  }, [isAdmin, user]);
+
+  const crossVisibilityUserIds = React.useMemo(() => {
+    if (isAdmin) return users.map(u => u.id).filter(id => id !== user?.id);
+    const perms = user?.permissions || {};
+    return (perms.view_other_tasks || []).filter(id => id !== user?.id);
+  }, [isAdmin, user, users]);
+
+  const visibleUsers = React.useMemo(() => {
+    if (isAdmin) return users;
+    if (hasCrossVisibility) {
+      const ids = new Set([user?.id, ...crossVisibilityUserIds]);
+      return users.filter(u => ids.has(u.id));
+    }
+    return users.filter(u => u.id === user?.id);
+  }, [isAdmin, hasCrossVisibility, crossVisibilityUserIds, users, user]);
+
+  // ── Fetch all data on mount ──────────────────────────────────────────────────
+  useEffect(() => {
+    const loadAll = async () => {
+      setDataLoading(true);
+      const [tasksData, usersData, clientsData] = await Promise.all([
+        apiFetch('/tasks'),
+        apiFetch('/users'),
+        apiFetch('/clients'),
+      ]);
+      if (Array.isArray(tasksData))   setTasks(tasksData);
+      if (Array.isArray(usersData))   setUsers(usersData);
+      if (Array.isArray(clientsData)) setClients(clientsData);
+      setDataLoading(false);
+    };
+    loadAll();
+  }, [apiFetch]);
+
+  // ── Helpers ──────────────────────────────────────────────────────────────────
   const parseChecklist = (description) => {
     if (!description) return [];
     return description.split('\n')
@@ -785,7 +805,9 @@ export default function Tasks() {
   const toggleChecklistItem = (taskId, index) => {
     setTaskChecklists(prev => {
       const current = prev[taskId] || [];
-      const next = current.includes(index) ? current.filter(i => i !== index) : [...current, index];
+      const next = current.includes(index)
+        ? current.filter(i => i !== index)
+        : [...current, index];
       return { ...prev, [taskId]: next };
     });
   };
@@ -814,95 +836,25 @@ export default function Tasks() {
 
   const getRelativeDueDate = (dueDate) => {
     if (!dueDate) return '';
-    const due = new Date(dueDate);
-    const now = new Date();
+    const due      = new Date(dueDate);
+    const now      = new Date();
     const diffDays = Math.ceil((due - now) / 86400000);
-    if (diffDays < 0)   return `${Math.abs(diffDays)}d overdue`;
+    if (diffDays < 0)  return `${Math.abs(diffDays)}d overdue`;
     if (diffDays === 0) return 'Today';
     if (diffDays === 1) return 'Tomorrow';
     if (diffDays <= 7)  return `In ${diffDays}d`;
     return format(due, 'MMM dd');
   };
 
-  // ── Stub fetch functions (replace with real API calls in your app) ──────────
-  const fetchComments = async (taskId) => {
-    setComments(prev => ({ ...prev, [taskId]: prev[taskId] || [] }));
+  const openTaskDetail = (task) => {
+    setSelectedDetailTask(task);
+    setTaskDetailOpen(true);
   };
 
-  const markAllAsRead = async () => {
-    setNotifications(p => p.map(n => ({ ...n, is_read: true })));
-    toast.success('Marked all as read');
+  const resetForm = () => {
+    setFormData({ ...EMPTY_FORM });
+    setEditingTask(null);
   };
-
-  // ── CRUD ──────────────────────────────────────────────────────────────────────
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    await new Promise(r => setTimeout(r, 400));
-    const taskData = {
-      ...formData,
-      id: editingTask?.id || String(Date.now()),
-      assigned_to:   formData.assigned_to === 'unassigned' ? null : formData.assigned_to,
-      sub_assignees: formData.sub_assignees || [],
-      client_id:     formData.client_id || null,
-      due_date:      formData.due_date ? new Date(formData.due_date).toISOString() : null,
-      created_at:    editingTask?.created_at || new Date().toISOString(),
-      created_by:    user.id,
-    };
-    if (editingTask) {
-      setTasks(prev => prev.map(t => t.id === editingTask.id ? taskData : t));
-      toast.success('Task updated!');
-    } else {
-      setTasks(prev => [taskData, ...prev]);
-      toast.success('Task created!');
-    }
-    setDialogOpen(false); resetForm(); setLoading(false);
-  };
-
-  const handleEdit = (task) => {
-    setEditingTask(task);
-    setFormData({
-      title: task.title, description: task.description || '',
-      assigned_to: task.assigned_to || 'unassigned', sub_assignees: task.sub_assignees || [],
-      due_date: task.due_date ? format(new Date(task.due_date), 'yyyy-MM-dd') : '',
-      priority: task.priority, status: task.status, category: task.category || 'other',
-      client_id: task.client_id || '', is_recurring: task.is_recurring || false,
-      recurrence_pattern: task.recurrence_pattern || 'monthly',
-      recurrence_interval: task.recurrence_interval || 1,
-    });
-    setDialogOpen(true);
-  };
-
-  const handleDelete = async (taskId) => {
-    if (!window.confirm('Delete this task?')) return;
-    setTasks(prev => prev.filter(t => t.id !== taskId));
-    toast.success('Task deleted!');
-  };
-
-  const handleQuickStatusChange = async (task, newStatus) => {
-    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
-    toast.success(`Marked as ${STATUS_STYLES[newStatus]?.label || newStatus}`);
-  };
-
-  const handleAddComment = async () => {
-    if (!newComment.trim()) return;
-    const taskId = selectedTask?.id;
-    if (!taskId) return;
-    setComments(prev => ({
-      ...prev,
-      [taskId]: [...(prev[taskId] || []), { text: newComment, user_id: user.id, created_at: new Date().toISOString() }]
-    }));
-    setNewComment('');
-    toast.success('Comment added!');
-  };
-
-  const handleDuplicateTask = async (task) => {
-    const dupe = { ...task, id: String(Date.now()), title: `${task.title} (Copy)`, status: 'pending', created_at: new Date().toISOString() };
-    setTasks(prev => [dupe, ...prev]);
-    toast.success('Task duplicated!');
-  };
-
-  const resetForm = () => { setFormData({ ...EMPTY_FORM }); setEditingTask(null); };
 
   const toggleSubAssignee = (userId) => {
     setFormData(prev => ({
@@ -913,33 +865,175 @@ export default function Tasks() {
     }));
   };
 
-  const openTaskDetail = (task) => { setSelectedDetailTask(task); setTaskDetailOpen(true); };
+  const markAllAsRead = () => {
+    setNotifications(p => p.map(n => ({ ...n, is_read: true })));
+    toast.success('Marked all as read');
+  };
 
-  // ── Filtering & sorting ──────────────────────────────────────────────────────
-  //    Scope: restrict visible tasks based on permission level before applying UI filters
-  //      Admin            → see all tasks
-  //      Manager/cross_vis → see own + team members' tasks
-  //      Regular staff    → see only own tasks (assigned_to === self OR sub_assignees includes self)
+  // ── CRUD — all real API ──────────────────────────────────────────────────────
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    const taskData = {
+      ...formData,
+      assigned_to:   formData.assigned_to === 'unassigned' ? null : formData.assigned_to,
+      sub_assignees: formData.sub_assignees || [],
+      client_id:     formData.client_id || null,
+      due_date:      formData.due_date || null,
+    };
+    try {
+      if (editingTask) {
+        const res = await fetch(`${API_BASE}/tasks/${editingTask.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+          body: JSON.stringify(taskData),
+        });
+        if (res.ok) {
+          const updated = await res.json();
+          setTasks(prev => prev.map(t => t.id === editingTask.id ? updated : t));
+          toast.success('Task updated!');
+        } else { toast.error('Failed to update task'); }
+      } else {
+        const res = await fetch(`${API_BASE}/tasks`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+          body: JSON.stringify(taskData),
+        });
+        if (res.ok) {
+          const created = await res.json();
+          setTasks(prev => [created, ...prev]);
+          toast.success('Task created!');
+        } else { toast.error('Failed to create task'); }
+      }
+    } catch { toast.error('Network error'); }
+    setDialogOpen(false);
+    resetForm();
+    setLoading(false);
+  };
+
+  const handleEdit = (task) => {
+    setEditingTask(task);
+    setFormData({
+      title:               task.title,
+      description:         task.description || '',
+      assigned_to:         task.assigned_to || 'unassigned',
+      sub_assignees:       task.sub_assignees || [],
+      due_date:            task.due_date ? format(new Date(task.due_date), 'yyyy-MM-dd') : '',
+      priority:            task.priority,
+      status:              task.status,
+      category:            task.category || 'other',
+      client_id:           task.client_id || '',
+      is_recurring:        task.is_recurring || false,
+      recurrence_pattern:  task.recurrence_pattern || 'monthly',
+      recurrence_interval: task.recurrence_interval || 1,
+    });
+    setDialogOpen(true);
+  };
+
+  const handleDelete = async (taskId) => {
+    if (!window.confirm('Delete this task?')) return;
+    try {
+      const res = await fetch(`${API_BASE}/tasks/${taskId}`, {
+        method: 'DELETE',
+        headers: { ...getAuthHeader() },
+      });
+      if (res.ok) {
+        setTasks(prev => prev.filter(t => t.id !== taskId));
+        toast.success('Task deleted!');
+      } else { toast.error('Failed to delete task'); }
+    } catch { toast.error('Network error'); }
+  };
+
+  const handleQuickStatusChange = async (task, newStatus) => {
+    // Optimistic update
+    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
+    try {
+      await fetch(`${API_BASE}/tasks/${task.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      toast.success(`Marked as ${STATUS_STYLES[newStatus]?.label || newStatus}`);
+    } catch { toast.error('Network error'); }
+  };
+
+  const handleAddComment = async () => {
+    if (!newComment.trim()) return;
+    const taskId = selectedTask?.id;
+    if (!taskId) return;
+    try {
+      const res = await fetch(`${API_BASE}/tasks/${taskId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify({ text: newComment }),
+      });
+      if (res.ok) {
+        const comment = await res.json();
+        setComments(prev => ({
+          ...prev,
+          [taskId]: [...(prev[taskId] || []), comment]
+        }));
+        setNewComment('');
+        toast.success('Comment added!');
+      }
+    } catch { toast.error('Network error'); }
+  };
+
+  const fetchComments = async (taskId) => {
+    const data = await apiFetch(`/tasks/${taskId}/comments`);
+    if (Array.isArray(data)) {
+      setComments(prev => ({ ...prev, [taskId]: data }));
+    } else {
+      setComments(prev => ({ ...prev, [taskId]: prev[taskId] || [] }));
+    }
+  };
+
+  const handleDuplicateTask = async (task) => {
+    const { id, created_at, updated_at, ...rest } = task;
+    const dupeData = { ...rest, title: `${task.title} (Copy)`, status: 'pending' };
+    try {
+      const res = await fetch(`${API_BASE}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify(dupeData),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        setTasks(prev => [created, ...prev]);
+        toast.success('Task duplicated!');
+      }
+    } catch { toast.error('Network error'); }
+  };
+
+  // ── Export stubs ─────────────────────────────────────────────────────────────
+  const handleCsvUpload = () => { toast.success('CSV upload (stub)'); };
+  const handleExportCsv = () => { toast.success('Exporting CSV (stub)'); };
+  const handleExportPdf = () => { toast.success('Exporting PDF (stub)'); };
+
+  // ── Scoping & stats ──────────────────────────────────────────────────────────
   const scopedTasks = React.useMemo(() => {
     if (isAdmin) return tasks;
     if (hasCrossVisibility) {
       const visibleIds = new Set([user?.id, ...crossVisibilityUserIds]);
       return tasks.filter(t =>
-        visibleIds.has(t.assigned_to) || t.sub_assignees?.some(id => visibleIds.has(id))
+        visibleIds.has(t.assigned_to) ||
+        t.sub_assignees?.some(id => visibleIds.has(id))
       );
     }
     return tasks.filter(t =>
-      t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id) || t.created_by === user?.id
+      t.assigned_to === user?.id ||
+      t.sub_assignees?.includes(user?.id) ||
+      t.created_by === user?.id
     );
   }, [tasks, isAdmin, hasCrossVisibility, user, crossVisibilityUserIds]);
 
-  // ── Stats (based on scoped tasks so numbers match what the user can see) ──────
   const myTasks = React.useMemo(() =>
-    tasks.filter(t => t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id)),
+    tasks.filter(t =>
+      t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id)
+    ),
     [tasks, user]
   );
 
-  const myTaskCount = myTasks.length;
   const stats = {
     myTask:     myTasks.length,
     total:      scopedTasks.length,
@@ -948,24 +1042,39 @@ export default function Tasks() {
     completed:  scopedTasks.filter(t => t.status === 'completed').length,
     overdue:    scopedTasks.filter(t => isOverdue(t)).length,
     teamTask:   hasCrossVisibility
-      ? tasks.filter(t => crossVisibilityUserIds.includes(t.assigned_to) && t.status !== 'completed').length
+      ? tasks.filter(t =>
+          crossVisibilityUserIds.includes(t.assigned_to) &&
+          t.status !== 'completed'
+        ).length
       : 0,
   };
 
+  const teamTaskBreakdown = React.useMemo(() => {
+    if (!hasCrossVisibility || crossVisibilityUserIds.length === 0) return [];
+    return crossVisibilityUserIds.map(uid => {
+      const member = users.find(u => u.id === uid);
+      const pendingCount = tasks.filter(t =>
+        (t.assigned_to === uid || t.sub_assignees?.includes(uid)) &&
+        t.status !== 'completed'
+      ).length;
+      return { id: uid, name: member?.full_name || 'Unknown', pendingCount };
+    }).filter(m => m.pendingCount > 0);
+  }, [hasCrossVisibility, crossVisibilityUserIds, tasks, users]);
+
+  // ── Filtering ────────────────────────────────────────────────────────────────
   const filteredTasks = scopedTasks.filter(task => {
-    const matchesSearch   = task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                            task.description?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = (
+      task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      task.description?.toLowerCase().includes(searchQuery.toLowerCase())
+    );
     const matchesPriority = filterPriority === 'all' || task.priority  === filterPriority;
     const matchesCategory = filterCategory === 'all' || task.category  === filterCategory;
     const matchesAssignee = filterAssignee === 'all' || task.assigned_to === filterAssignee;
-
     let matchesStatus = true;
     if (filterStatus !== 'all') {
-      if (filterStatus === 'overdue') {
-        matchesStatus = isOverdue(task);
-      } else {
-        matchesStatus = task.status === filterStatus;
-      }
+      matchesStatus = filterStatus === 'overdue'
+        ? isOverdue(task)
+        : task.status === filterStatus;
     }
     return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee;
   });
@@ -998,23 +1107,7 @@ export default function Tasks() {
     return result;
   }, [filteredTasks, showMyTasksOnly, sortBy, sortDirection, user]);
 
-  
-  const teamTaskBreakdown = React.useMemo(() => {
-    if (!hasCrossVisibility || crossVisibilityUserIds.length === 0) return [];
-    return crossVisibilityUserIds.map(uid => {
-      const member = users.find(u => u.id === uid);
-      const pendingCount = tasks.filter(t =>
-        (t.assigned_to === uid || t.sub_assignees?.includes(uid)) && t.status !== 'completed'
-      ).length;
-      return { id: uid, name: member?.full_name || 'Unknown', pendingCount };
-    }).filter(m => m.pendingCount > 0);
-  }, [hasCrossVisibility, crossVisibilityUserIds, tasks, users]);
-
-  // Note: stats are computed after scopedTasks is defined below (moved to after scopedTasks)
-  // Placeholder that gets overridden — actual stats object is defined further down after scopedTasks
-  const _statsPlaceholder = null;
-
-  // ── Active filter pills ───────────────────────────────────────────────────────
+  // ── Active filter pills ──────────────────────────────────────────────────────
   useEffect(() => {
     const pills = [];
     if (searchQuery)              pills.push({ key: 'search',   label: `"${searchQuery}"` });
@@ -1042,44 +1135,58 @@ export default function Tasks() {
     toast.success('Filters cleared');
   };
 
-  // ── Workflow library ──────────────────────────────────────────────────────────
+  // ── Workflow library ─────────────────────────────────────────────────────────
   const filteredWorkflows = COMPLIANCE_WORKFLOWS.filter(wf => {
-    const matchSearch = wf.name.toLowerCase().includes(workflowSearch.toLowerCase()) ||
-                        wf.title.toLowerCase().includes(workflowSearch.toLowerCase());
-    const matchDept   = workflowDeptFilter      === 'all' || wf.category  === workflowDeptFilter;
-    const matchFreq   = workflowFrequencyFilter === 'all' || wf.frequency.toLowerCase().includes(workflowFrequencyFilter.toLowerCase());
+    const matchSearch = (
+      wf.name.toLowerCase().includes(workflowSearch.toLowerCase()) ||
+      wf.title.toLowerCase().includes(workflowSearch.toLowerCase())
+    );
+    const matchDept = workflowDeptFilter      === 'all' || wf.category  === workflowDeptFilter;
+    const matchFreq = workflowFrequencyFilter === 'all' || wf.frequency.toLowerCase().includes(workflowFrequencyFilter.toLowerCase());
     return matchSearch && matchDept && matchFreq;
   });
 
   const applyComplianceWorkflow = (wf) => {
-    const due = new Date(); due.setDate(due.getDate() + wf.estimatedDays);
+    const due = new Date();
+    due.setDate(due.getDate() + wf.estimatedDays);
     setFormData({
       title: wf.title, description: wf.description,
       assigned_to: 'unassigned', sub_assignees: [],
-      due_date: format(due, 'yyyy-MM-dd'), priority: wf.priority, status: 'pending',
-      category: wf.category, client_id: '',
+      due_date: format(due, 'yyyy-MM-dd'), priority: wf.priority,
+      status: 'pending', category: wf.category, client_id: '',
       is_recurring: true, recurrence_pattern: wf.recurrence_pattern,
       recurrence_interval: wf.recurrence_interval,
     });
-    setShowWorkflowLibrary(false); setDialogOpen(true);
-    setWorkflowSearch(''); setWorkflowDeptFilter('all'); setWorkflowFrequencyFilter('all');
+    setShowWorkflowLibrary(false);
+    setDialogOpen(true);
+    setWorkflowSearch('');
+    setWorkflowDeptFilter('all');
+    setWorkflowFrequencyFilter('all');
     toast.success(`Template loaded: ${wf.name}`);
   };
 
-  // ── Export (stub) ─────────────────────────────────────────────────────────────
-  const handleCsvUpload = (e) => { toast.success('CSV upload (stub)'); };
-  const handleExportCsv = () => { toast.success('Exporting CSV (stub)'); };
-  const handleExportPdf = () => { toast.success('Exporting PDF (stub)'); };
-
-  const unreadCount = notifications.filter(n => !n.is_read).length;
+  const unreadCount        = notifications.filter(n => !n.is_read).length;
   const getBoardColumnTasks = (colStatus) => displayTasks.filter(t => t.status === colStatus);
 
   // ════════════════════════════════════════════════════════════════════════════
   // RENDER
   // ════════════════════════════════════════════════════════════════════════════
   return (
-    <motion.div className={`space-y-5 min-h-screen p-5 rounded-2xl ${isDark ? 'bg-[#0f172a]' : 'bg-slate-50'}`}
-      variants={containerVariants} initial="hidden" animate="visible">
+    <motion.div
+      className={`space-y-5 min-h-screen p-5 rounded-2xl ${isDark ? 'bg-[#0f172a]' : 'bg-slate-50'}`}
+      variants={containerVariants} initial="hidden" animate="visible"
+    >
+      {/* Loading overlay */}
+      {dataLoading && (
+        <div className={`fixed inset-0 z-[99999] flex items-center justify-center ${isDark ? 'bg-[#0f172a]' : 'bg-slate-50'}`}>
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-10 w-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              Loading tasks…
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ── Page Header ──────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
@@ -1099,7 +1206,6 @@ export default function Tasks() {
               <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} className="h-8 text-xs rounded-lg">Upload CSV</Button>
               <Button variant="outline" size="sm" onClick={handleExportCsv} className="h-8 text-xs rounded-lg">Export CSV</Button>
               <Button variant="outline" size="sm" onClick={handleExportPdf} className="h-8 text-xs rounded-lg">Export PDF</Button>
-
               {canEditTasks && (
                 <Button variant="outline" size="sm" onClick={() => setShowWorkflowLibrary(true)}
                   className="h-8 text-xs rounded-lg gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50">
