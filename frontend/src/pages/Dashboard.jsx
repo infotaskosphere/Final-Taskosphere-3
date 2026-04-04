@@ -873,6 +873,8 @@ export default function Dashboard() {
   }, [API_BASE, getAuthHeader]);
 
   // ── Core State ─────────────────────────────────────────────────────────────
+  const [tasks,             setTasks]             = useState([]);   // ✅ ADD THIS
+  const [visits,            setVisits]            = useState([]); // ✅ ADD THIS
   const [loading,           setLoading]           = useState(false);
   const [rankings,          setRankings]          = useState([]);
   const [rankingPeriod,     setRankingPeriod]     = useState('monthly');
@@ -917,9 +919,11 @@ export default function Dashboard() {
           apiFetch('/duedates/upcoming?days=30'),
           apiFetch('/attendance/today'),
           apiFetch(`/todos${user?.id ? `?user_id=${user.id}` : ''}`),
+          apiFetch('/visits'),
         ]);
         
       if (Array.isArray(tasksData)) setTasks(tasksData);
+      if (Array.isArray(visitsData)) setVisits(visitsData);
       if (statsData && typeof statsData === 'object' && !Array.isArray(statsData)) {
         setStats(statsData);
       }
@@ -2142,9 +2146,16 @@ export default function Dashboard() {
             </div>
           </SectionCard>
 
-          {/* Visits */}
-          <VisitsCard isDark={isDark} navigate={navigate} currentUserId={user?.id} onSelectVisit={setSelectedVisit} visits={[]} />
-        </motion.div>
+          {/* Visits Section */}
+          <VisitsCard 
+            isDark={isDark} 
+            navigate={navigate} 
+            currentUserId={user?.id} 
+            onSelectVisit={setSelectedVisit} 
+            visits={visits} // ✅ FIXED: Changed from [] to visits
+            isLoading={dataLoading} 
+          />
+          </motion.div>
 
         {/* QUICK ACCESS TILES */}
         <motion.div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 [&>*]:min-w-0" variants={itemVariants}>
