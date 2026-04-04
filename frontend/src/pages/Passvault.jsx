@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import GifLoader from '@/components/ui/GifLoader.jsx';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -1053,11 +1054,7 @@ export default function PasswordRepository() {
       )}
 
       {isLoading ? (
-        <div className="flex flex-col items-center justify-center py-20 gap-3">
-          <div className="h-8 w-8 border-2 border-t-transparent rounded-full animate-spin"
-            style={{ borderColor: C.medBlue, borderTopColor: 'transparent' }} />
-          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Loading vault…</p>
-        </div>
+        <GifLoader />
       ) : isError ? (
         <motion.div variants={iv}
           className={`text-center py-14 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
