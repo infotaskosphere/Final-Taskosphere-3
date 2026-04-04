@@ -28,13 +28,18 @@ const SIDEBAR_COLLAPSED = 80;
 /*
  * NAV_GROUPS — defines every sidebar link.
  *
- * `permission` can be:
- *   • a string  → user must have that single permission (existing behaviour)
- *   • an array  → user must have ANY of those permissions (OR logic)
- *                 used for items accessible via multiple permission paths
+ * Permission matrix (updated):
+ *   Admin   → all modules, all data (no permission flag needed)
+ *   Manager → all modules, Own + Team scope (permission-based, all True by default)
+ *   Staff   → all modules, Own scope only (permission-based, all True by default)
  *
- * NEW: Invoicing & Billing added to the 'proposals' group.
- * Visible when user holds can_manage_invoices OR can_create_quotations.
+ * `permission` can be:
+ *   • a string  → user must have that single permission flag = true
+ *   • an array  → user must have ANY of those permissions (OR logic)
+ *   • undefined → visible to all authenticated users
+ *
+ * Since Manager and Staff now have all permission flags set to True by default,
+ * all permission-gated items will be visible unless admin explicitly revokes.
  */
 const NAV_GROUPS = [
   {
@@ -46,7 +51,6 @@ const NAV_GROUPS = [
       { path: '/attendance', icon: Clock,           label: 'Attendance' },
       { path: '/duedates',   icon: Calendar,        label: 'Compliance Calendar' },
       { path: '/visits',     icon: MapPin,          label: 'Client Visits' },
-      
     ],
   },
   {
@@ -63,11 +67,8 @@ const NAV_GROUPS = [
     id: 'proposals',
     dividerLabel: 'Client Proposals',
     items: [
-      { path: '/leads',      icon: Target,       label: 'Lead Management', permission: 'can_view_all_leads'    },
-      { path: '/quotations', icon: Receipt,      label: 'Quotations',      permission: 'can_create_quotations' },
-      // ── NEW: Invoicing & Billing ──────────────────────────────────────
-      // Array permission = OR logic (handled in checkNavPermission below).
-      // Mirrors AppRoutes.jsx Permission guard and invoicing backend _perm().
+      { path: '/leads',      icon: Target,   label: 'Lead Management', permission: 'can_view_all_leads'    },
+      { path: '/quotations', icon: Receipt,  label: 'Quotations',      permission: 'can_create_quotations' },
       {
         path:       '/invoicing',
         icon:       CreditCard,
@@ -80,10 +81,10 @@ const NAV_GROUPS = [
     id: 'admin',
     dividerLabel: 'Admin',
     items: [
-      { path: '/staff-activity', icon: Activity,  label: 'Staff Activity',  permission: 'can_view_staff_activity' },
-      { path: '/reports',        icon: BarChart3,  label: 'Reports' },
-      { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log',  permission: 'can_view_audit_logs'     },
-      { path: '/users',          icon: Users,      label: 'Users',           permission: 'can_view_user_page'      },
+      { path: '/staff-activity', icon: Activity, label: 'Staff Activity',  permission: 'can_view_staff_activity' },
+      { path: '/reports',        icon: BarChart3, label: 'Reports' },
+      { path: '/task-audit',     icon: Activity,  label: 'Task Audit Log',  permission: 'can_view_audit_logs'     },
+      { path: '/users',          icon: Users,     label: 'Users',           permission: 'can_view_user_page'      },
     ],
   },
   {
