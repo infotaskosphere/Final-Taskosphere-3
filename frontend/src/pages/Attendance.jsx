@@ -2750,11 +2750,11 @@ export default function Attendance() {
             </div>
           )}
 
-          {/* ══ RIGHT COLUMN: Recent Attendance + Punch Location History ══════ */}
-          <div className={isEveryoneView ? '' : 'xl:col-span-2 grid grid-cols-1 xl:grid-cols-2 gap-4'}>
+          {/* ══ RIGHT COLUMN: Recent Attendance (top) + Location History (bottom) ══ */}
+          <div className={isEveryoneView ? '' : 'xl:col-span-2 flex flex-col gap-4'}>
 
-            {/* ── Recent Attendance ──────────────────────────────────────────── */}
-            <SectionCard className="flex flex-col" style={{ height: 480 }}>
+            {/* ── Recent Attendance ─────────────────────────────────────────── */}
+            <SectionCard className="flex-1 flex flex-col min-h-0">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
                 icon={<Clock className="h-4 w-4 text-blue-500" />}
@@ -2780,9 +2780,8 @@ export default function Attendance() {
                   const isAbsent    = record.status === 'absent';
                   const isLeave     = record.status === 'leave';
                   const isPresent   = record.punch_in && record.status === 'present';
-                  const isOngoing   = isPresent && !record.punch_out;  // ← no punch-out
+                  const isOngoing   = isPresent && !record.punch_out;
                   const recordDate  = safeParseISO(record.date);
-
                   return (
                     <motion.div
                       key={`${record.date}-${record.user_id || idx}`}
@@ -2863,14 +2862,13 @@ export default function Attendance() {
               </div>
             </SectionCard>
 
-            {/* ── Punch Location History ─────────────────────────────────────── */}
+            {/* ── Punch Location History ────────────────────────────────────── */}
             {!isEveryoneView && (() => {
               const locRecords = (Array.isArray(attendanceHistory) ? attendanceHistory : [])
                 .filter(r => r.punch_in && r.status === 'present')
                 .slice(0, 5);
-
               return (
-                <SectionCard className="flex flex-col" style={{ height: 480 }}>
+                <SectionCard className="flex-1 flex flex-col min-h-0">
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-teal-900/40' : 'bg-teal-50'}
                     icon={<MapPin className="h-4 w-4 text-teal-500" />}
@@ -2888,9 +2886,7 @@ export default function Attendance() {
                       <div className="flex flex-col items-center justify-center h-full gap-2">
                         <MapPin className="w-8 h-8 text-slate-300 dark:text-slate-600" />
                         <p className="text-sm font-medium text-slate-400">No location data yet</p>
-                        <p className="text-xs text-slate-400 text-center max-w-[180px]">
-                          Enable GPS when clocking in/out
-                        </p>
+                        <p className="text-xs text-slate-400 text-center max-w-[180px]">Enable GPS when clocking in/out</p>
                       </div>
                     ) : locRecords.map((record, idx) => {
                       const recordDate   = safeParseISO(record.date);
@@ -2900,10 +2896,9 @@ export default function Attendance() {
                       const outLabel     = getLocationLabel(record, 'out');
                       const hasInCoords  = inLoc?.latitude && inLoc?.longitude;
                       const hasOutCoords = outLoc?.latitude && outLoc?.longitude;
-                      const isOngoing    = !record.punch_out;  // ← highlight missing punch-out
+                      const isOngoing    = !record.punch_out;
                       const inMapsUrl    = hasInCoords ? `https://www.google.com/maps?q=${inLoc.latitude},${inLoc.longitude}` : null;
                       const outMapsUrl   = hasOutCoords ? `https://www.google.com/maps?q=${outLoc.latitude},${outLoc.longitude}` : null;
-
                       return (
                         <motion.div
                           key={record.date}
@@ -2912,22 +2907,18 @@ export default function Attendance() {
                           transition={{ delay: idx * 0.05, duration: 0.25 }}
                           className="rounded-xl border overflow-hidden"
                           style={{
-                            borderColor: isOngoing
-                              ? isDark ? '#92400e' : '#fde68a'
-                              : isDark ? D.border : '#e2e8f0',
-                            backgroundColor: isOngoing
-                              ? isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb'
-                              : isDark ? D.raised : '#fafafa',
+                            borderColor: isOngoing ? isDark ? '#92400e' : '#fde68a' : isDark ? D.border : '#e2e8f0',
+                            backgroundColor: isOngoing ? isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb' : isDark ? D.raised : '#fafafa',
                             borderLeftWidth: 3,
-                            borderLeftColor: isOngoing ? COLORS.amber : COLORS.teal || '#0d9488',
+                            borderLeftColor: isOngoing ? COLORS.amber : '#0d9488',
                           }}
                         >
-                          {/* Compact header row */}
+                          {/* Compact header */}
                           <div className="flex items-center justify-between px-2.5 py-1.5 border-b"
                             style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#f8fafc' }}>
                             <div className="flex items-center gap-1.5">
                               <div className="w-5 h-5 rounded flex items-center justify-center text-white text-[9px] font-black"
-                                style={{ background: isOngoing ? `linear-gradient(135deg, ${COLORS.amber}, #d97706)` : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                                style={{ background: isOngoing ? `linear-gradient(135deg,${COLORS.amber},#d97706)` : `linear-gradient(135deg,${COLORS.deepBlue},${COLORS.mediumBlue})` }}>
                                 {idx + 1}
                               </div>
                               <span className="text-xs font-bold" style={{ color: isDark ? D.text : '#1e293b' }}>
@@ -2950,7 +2941,6 @@ export default function Attendance() {
                               )}
                             </div>
                           </div>
-
                           {/* IN row */}
                           <div className="px-2.5 py-1.5 flex items-center gap-2 border-b"
                             style={{ borderColor: isDark ? 'rgba(255,255,255,0.04)' : '#f1f5f9' }}>
@@ -2960,28 +2950,23 @@ export default function Attendance() {
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-1.5">
-                                <span className="text-[9px] font-black uppercase text-emerald-500 flex-shrink-0">IN</span>
-                                <span className="text-[10px] font-mono font-semibold flex-shrink-0" style={{ color: isDark ? D.muted : '#64748b' }}>
+                                <span className="text-[9px] font-black uppercase text-emerald-500">IN</span>
+                                <span className="text-[10px] font-mono font-semibold" style={{ color: isDark ? D.muted : '#64748b' }}>
                                   {formatAttendanceTime(record.punch_in)}
                                 </span>
                                 {hasInCoords && (
                                   <a href={inMapsUrl} target="_blank" rel="noopener noreferrer"
-                                    className="text-[9px] font-semibold flex items-center gap-0.5 flex-shrink-0 hover:underline"
+                                    className="text-[9px] font-semibold flex items-center gap-0.5 hover:underline"
                                     style={{ color: COLORS.mediumBlue }}>
                                     <ExternalLink className="w-2 h-2" />Maps
                                   </a>
                                 )}
                               </div>
-                              {hasInCoords ? (
-                                <p className="text-[10px] leading-tight truncate" style={{ color: isDark ? D.dimmer : '#64748b' }}>
-                                  {inLabel}
-                                </p>
-                              ) : (
-                                <p className="text-[10px] italic text-slate-400">Location not recorded</p>
-                              )}
+                              <p className="text-[10px] leading-tight truncate" style={{ color: isDark ? D.dimmer : '#64748b' }}>
+                                {hasInCoords ? inLabel : <span className="italic text-slate-400">Location not recorded</span>}
+                              </p>
                             </div>
                           </div>
-
                           {/* OUT row */}
                           <div className="px-2.5 py-1.5 flex items-center gap-2">
                             <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0"
@@ -2990,27 +2975,23 @@ export default function Attendance() {
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-1.5">
-                                <span className={`text-[9px] font-black uppercase flex-shrink-0 ${isOngoing ? 'text-amber-500' : 'text-orange-400'}`}>OUT</span>
-                                <span className="text-[10px] font-mono font-semibold flex-shrink-0" style={{ color: isDark ? D.muted : '#64748b' }}>
+                                <span className={`text-[9px] font-black uppercase ${isOngoing ? 'text-amber-500' : 'text-orange-400'}`}>OUT</span>
+                                <span className="text-[10px] font-mono font-semibold" style={{ color: isDark ? D.muted : '#64748b' }}>
                                   {record.punch_out ? formatAttendanceTime(record.punch_out) : '—'}
                                 </span>
                                 {hasOutCoords && (
                                   <a href={outMapsUrl} target="_blank" rel="noopener noreferrer"
-                                    className="text-[9px] font-semibold flex items-center gap-0.5 flex-shrink-0 hover:underline"
+                                    className="text-[9px] font-semibold flex items-center gap-0.5 hover:underline"
                                     style={{ color: COLORS.mediumBlue }}>
                                     <ExternalLink className="w-2 h-2" />Maps
                                   </a>
                                 )}
                               </div>
-                              {hasOutCoords ? (
-                                <p className="text-[10px] leading-tight truncate" style={{ color: isDark ? D.dimmer : '#64748b' }}>
-                                  {outLabel}
-                                </p>
-                              ) : (
-                                <p className="text-[10px] italic" style={{ color: isOngoing ? COLORS.amber : '#94a3b8' }}>
-                                  {record.punch_out ? 'Location not recorded' : '⏳ Still clocked in'}
-                                </p>
-                              )}
+                              <p className="text-[10px] leading-tight" style={{ color: isOngoing ? COLORS.amber : isDark ? D.dimmer : '#64748b' }}>
+                                {hasOutCoords ? <span className="truncate">{outLabel}</span>
+                                  : record.punch_out ? <span className="italic text-slate-400">Location not recorded</span>
+                                  : <span className="italic">⏳ Still clocked in</span>}
+                              </p>
                             </div>
                           </div>
                         </motion.div>
