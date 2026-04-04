@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import GifLoader from '@/components/ui/GifLoader.jsx';
 import { useNavigate } from 'react-router-dom';
 import useDark from '../hooks/useDark';
 
@@ -724,9 +725,7 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit, visits = [
       />
       <div className="p-3">
         {isLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <div className="h-5 w-5 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
-          </div>
+          <GifLoader />
         ) : isError ? (
           <div className="text-center py-7 space-y-3">
             <div className="flex justify-center">
