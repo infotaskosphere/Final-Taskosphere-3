@@ -3,6 +3,7 @@
 // =============================================================================
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import GifLoader from "@/components/ui/GifLoader.jsx";
 import { useDark } from "@/hooks/useDark";
 import api from "@/lib/api";
 import {
@@ -85,15 +86,7 @@ export default function TaskAudit() {
   const selectBdr= isDark ? "#334155"  : "#e2e8f0";
 
   if (isLoading) {
-    return (
-      <div style={{ background: pageBg, minHeight: "100vh" }} className="p-12 flex flex-col items-center justify-center space-y-4">
-        <div className="relative">
-          <RefreshCcw className="h-10 w-10 text-blue-500 animate-spin" />
-          <History className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-4 w-4 text-blue-800" />
-        </div>
-        <p style={{ color: subTxt }} className="font-bold animate-pulse">Retrieving Audit Trail...</p>
-      </div>
-    );
+    return <GifLoader />;
   }
 
   return (
