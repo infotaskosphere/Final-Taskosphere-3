@@ -25,14 +25,26 @@ import {
   LayoutGrid, List, Circle, ArrowRight, Check, Repeat,
   MessageSquare, Bell, FileText, Calendar as CalendarIcon,
   X, ChevronDown, Filter, Clock, AlertCircle, CheckCircle2,
-  TrendingUp, MoreHorizontal, Copy, SlidersHorizontal
+  TrendingUp, MoreHorizontal, Copy, SlidersHorizontal,
+  Briefcase, Target, Activity, ChevronRight, Sun,
 } from 'lucide-react';
+
 // ─── Brand Colors ────────────────────────────────────────────────────────────
 const COLORS = {
-  deepBlue: '#0D3B66',
-  mediumBlue: '#1F6FB2',
+  deepBlue:     '#0D3B66',
+  mediumBlue:   '#1F6FB2',
   emeraldGreen: '#1FAF5A',
-  lightGreen: '#5CCB5F',
+  lightGreen:   '#5CCB5F',
+  coral:        '#FF6B6B',
+  amber:        '#F59E0B',
+};
+
+// ─── Spring Physics (matches Dashboard) ─────────────────────────────────────
+const springPhysics = {
+  card:   { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
+  lift:   { type: 'spring', stiffness: 320, damping: 24, mass: 0.9  },
+  button: { type: 'spring', stiffness: 400, damping: 28 },
+  tap:    { type: 'spring', stiffness: 500, damping: 30 },
 };
 
 // ─── Department categories ───────────────────────────────────────────────────
@@ -58,7 +70,7 @@ const RECURRENCE_PATTERNS = [
   { value: 'yearly',  label: 'Yearly' },
 ];
 
-// ─── CA/CS Compliance Workflow Templates ────────────────────────────────────
+// ─── CA/CS Compliance Workflow Templates ─────────────────────────────────────
 const COMPLIANCE_WORKFLOWS = [
   {
     id: 1, name: "Monthly GST Compliance", category: "gst",
@@ -146,7 +158,7 @@ const COMPLIANCE_WORKFLOWS = [
   },
 ];
 
-// ─── Status & Priority Styles ────────────────────────────────────────────────
+// ─── Status & Priority Styles ─────────────────────────────────────────────────
 const STATUS_STYLES = {
   pending:     { bg: 'bg-red-50',    text: 'text-red-700',    border: 'border-red-200',    dot: 'bg-red-500',    label: 'To Do' },
   in_progress: { bg: 'bg-amber-50',  text: 'text-amber-700',  border: 'border-amber-200',  dot: 'bg-amber-500',  label: 'In Progress' },
@@ -161,7 +173,6 @@ const PRIORITY_STYLES = {
   critical: { bg: 'bg-red-50',    text: 'text-red-700',    bar: 'bg-red-600',    label: 'CRIT' },
 };
 
-// ─── Stripe color for left accent bar ───────────────────────────────────────
 const getStripeColor = (task, overdue) => {
   if (overdue) return 'bg-red-700';
   const s = (task.status || '').toLowerCase();
@@ -176,17 +187,16 @@ const getStripeColor = (task, overdue) => {
   return 'bg-slate-300';
 };
 
-// ─── Animation variants ──────────────────────────────────────────────────────
+// ─── Animation variants ───────────────────────────────────────────────────────
 const containerVariants = {
-  hidden: { opacity: 0 },
+  hidden:  { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.055, delayChildren: 0.04 } },
 };
 const itemVariants = {
-  hidden: { opacity: 0, y: 18, scale: 0.98 },
+  hidden:  { opacity: 0, y: 18, scale: 0.98 },
   visible: { opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 28 } },
 };
 
-// ─── Empty form state ────────────────────────────────────────────────────────
 const EMPTY_FORM = {
   title: '', description: '', assigned_to: 'unassigned', sub_assignees: [],
   due_date: '', priority: 'medium', status: 'pending', category: 'other',
@@ -194,7 +204,150 @@ const EMPTY_FORM = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TaskRow — compact list row
+// MetricCard — matches Dashboard card design exactly
+// ═══════════════════════════════════════════════════════════════════════════════
+const MetricCard = ({ label, value, sub, accent, icon: Icon, active, onClick, progress, isDark }) => (
+  <motion.div
+    whileHover={{ y: -3, transition: springPhysics.card }}
+    whileTap={{ scale: 0.985 }}
+    onClick={onClick}
+    className={`rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border
+      ${active
+        ? 'ring-2'
+        : ''
+      }
+      ${isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200/80 hover:border-slate-300'}
+    `}
+    style={active ? { ringColor: accent, borderColor: accent } : {}}
+  >
+    <div className="p-4 flex flex-col justify-between min-h-[110px]">
+      <div className="flex items-start justify-between">
+        <div className="min-w-0 flex-1 mr-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+          <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: accent }}>
+            {value}
+          </p>
+          {sub && <p className="text-[10px] mt-0.5 text-slate-400">{sub}</p>}
+        </div>
+        <div
+          className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
+          style={{ backgroundColor: `${accent}18` }}
+        >
+          <Icon className="h-4 w-4" style={{ color: accent }} />
+        </div>
+      </div>
+      {progress !== undefined ? (
+        <div className={`mt-2.5 h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+          <motion.div
+            className="h-full rounded-full"
+            style={{ background: `linear-gradient(90deg, ${accent}, ${accent}bb)` }}
+            initial={{ width: 0 }}
+            animate={{ width: `${Math.min(progress, 100)}%` }}
+            transition={{ duration: 0.9, ease: 'easeOut', delay: 0.2 }}
+          />
+        </div>
+      ) : (
+        <div className={`flex items-center gap-1 mt-3 text-xs font-medium group-hover:opacity-80 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+          <span>{active ? '✓ filtered' : 'click to filter'}</span>
+          <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
+        </div>
+      )}
+    </div>
+  </motion.div>
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TeamTaskCard — matches other MetricCards exactly, proper alignment
+// ═══════════════════════════════════════════════════════════════════════════════
+const TeamTaskCard = ({ stats, hasCrossVisibility, usersLoading, filterTeamOnly, setFilterTeamOnly, setFilterAssignee, setShowMyTasksOnly, teamTaskBreakdown, isDark }) => (
+  <motion.div
+    whileHover={{ y: -3, transition: springPhysics.card }}
+    whileTap={{ scale: 0.985 }}
+    onClick={() => {
+      if (!hasCrossVisibility || usersLoading) return;
+      setFilterTeamOnly(prev => !prev);
+      setFilterAssignee('all');
+      setShowMyTasksOnly(false);
+    }}
+    className={`rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border
+      ${filterTeamOnly
+        ? isDark
+          ? 'bg-violet-900/20 border-violet-700'
+          : 'bg-violet-50/60 border-violet-300'
+        : hasCrossVisibility && stats.teamTask > 0
+          ? isDark
+            ? 'bg-violet-900/10 border-violet-800 hover:border-violet-700'
+            : 'bg-violet-50/40 border-violet-200 hover:border-violet-300'
+          : isDark
+            ? 'bg-slate-800 border-slate-700 hover:border-slate-600'
+            : 'bg-white border-slate-200/80 hover:border-slate-300'
+      }
+    `}
+  >
+    <div className="p-4 flex flex-col justify-between min-h-[110px]">
+      {/* TOP ROW — identical layout to other cards */}
+      <div className="flex items-start justify-between">
+        <div className="min-w-0 flex-1 mr-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Team Task</p>
+          {usersLoading && hasCrossVisibility ? (
+            <div className="mt-1 h-8 w-12 rounded-lg animate-pulse bg-slate-200 dark:bg-slate-700" />
+          ) : (
+            <motion.p
+              key={stats.teamTask}
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.25 }}
+              className="text-2xl font-bold mt-1 tracking-tight"
+              style={{ color: hasCrossVisibility ? (isDark ? '#a78bfa' : '#7c3aed') : (isDark ? '#475569' : '#94a3b8') }}
+            >
+              {hasCrossVisibility ? stats.teamTask : 0}
+            </motion.p>
+          )}
+
+          {/* Per-member breakdown — compact, matches dashboard */}
+          {!usersLoading && hasCrossVisibility && teamTaskBreakdown.length > 0 && (
+            <div className="mt-1 space-y-0.5">
+              {teamTaskBreakdown.slice(0, 2).map(m => (
+                <p key={m.id} className="text-[9px] text-slate-400 truncate">
+                  {m.name.split(' ')[0].toLowerCase()}: {m.pendingCount}
+                </p>
+              ))}
+              {teamTaskBreakdown.length > 2 && (
+                <p className="text-[9px] text-slate-400">+{teamTaskBreakdown.length - 2} more</p>
+              )}
+            </div>
+          )}
+          {!hasCrossVisibility && (
+            <p className="text-[9px] text-slate-400 mt-0.5">no access</p>
+          )}
+        </div>
+
+        {/* Icon — same size/style as other cards */}
+        <div
+          className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
+          style={{ backgroundColor: hasCrossVisibility ? (isDark ? 'rgba(167,139,250,0.15)' : '#ede9fe') : (isDark ? 'rgba(71,85,105,0.2)' : '#f8fafc') }}
+        >
+          <Users className="h-4 w-4" style={{ color: hasCrossVisibility ? '#7c3aed' : (isDark ? '#475569' : '#cbd5e1') }} />
+        </div>
+      </div>
+
+      {/* BOTTOM ROW — identical to other cards */}
+      <div className={`flex items-center gap-1 mt-3 text-xs font-medium transition-colors ${hasCrossVisibility ? 'group-hover:text-violet-500' : ''} ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+        {hasCrossVisibility ? (
+          <>
+            <span>{usersLoading ? 'Loading…' : filterTeamOnly ? '✓ filtering team' : 'click to filter'}</span>
+            {!usersLoading && <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />}
+          </>
+        ) : (
+          <span>cross visibility off</span>
+        )}
+      </div>
+    </div>
+  </motion.div>
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TaskRow — unchanged logic, same compact list row
 // ═══════════════════════════════════════════════════════════════════════════════
 const TaskRow = ({
   task, index, isOverdue, statusStyle, priorityStyle, stripeColor,
@@ -207,7 +360,6 @@ const TaskRow = ({
   selectedTask, setSelectedTask, handleAddComment,
   user,
 }) => {
-  // FIX: each sub-component must call useDark() itself
   const isDark = useDark();
   const [expanded, setExpanded] = useState(false);
   const checklistItems = parseChecklist(task.description);
@@ -222,20 +374,16 @@ const TaskRow = ({
           ? (isDark ? 'bg-slate-800/60 border-slate-700 opacity-70' : 'bg-slate-50 border-slate-200 opacity-70')
           : (isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-sm' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm')}`}>
 
-        {/* Left accent stripe */}
         <div className={`absolute left-0 top-0 h-full w-1 ${stripeColor}`} />
 
-        {/* Main row */}
         <div
           className="pl-5 pr-3 py-2.5 grid items-center gap-0"
           style={{ gridTemplateColumns: '24px 24px minmax(0,1fr) 160px 88px 64px 72px 110px 110px 88px 100px' }}
         >
-          {/* 1 · index */}
           <span className="text-[11px] font-medium text-slate-400 select-none">
             {String(index + 1).padStart(2, '0')}
           </span>
 
-          {/* 2 · cycle-dot */}
           <button
             onClick={() => {
               const next = task.status === 'pending' ? 'in_progress'
@@ -251,7 +399,6 @@ const TaskRow = ({
             </span>
           </button>
 
-          {/* 3 · Title */}
           <button
             className={`min-w-0 text-left font-medium truncate transition-colors pl-1 pr-2 text-sm
               ${isCompleted
@@ -262,7 +409,6 @@ const TaskRow = ({
             {task.title}
           </button>
 
-          {/* 4 · STATUS PILLS */}
           <div className="flex items-center justify-center gap-1 overflow-hidden">
             {canModifyTask(task) ? (
               <>
@@ -285,21 +431,18 @@ const TaskRow = ({
             )}
           </div>
 
-          {/* 5 · DEPT */}
           <div className="flex items-center justify-center overflow-hidden">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded truncate max-w-full">
               {task.category?.toUpperCase() || 'OTHER'}
             </span>
           </div>
 
-          {/* 6 · PRIORITY */}
           <div className="flex items-center justify-center overflow-hidden">
             <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${priorityStyle.bg} ${priorityStyle.text}`}>
               {priorityStyle.label}
             </span>
           </div>
 
-          {/* 7 · OVERDUE */}
           <div className="flex items-center justify-center overflow-hidden">
             {isOverdue ? (
               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700 whitespace-nowrap">OVERDUE</span>
@@ -308,13 +451,11 @@ const TaskRow = ({
             )}
           </div>
 
-          {/* 8 · ASSIGNEE */}
           <div className="flex items-center justify-start gap-1 overflow-hidden px-1">
             <User className="h-3 w-3 flex-shrink-0 text-slate-400" />
             <span className="text-[10px] text-slate-600 truncate">{getUserName(task.assigned_to)}</span>
           </div>
 
-          {/* 9 · ASSIGNOR */}
           <div className="flex items-center justify-start gap-1 overflow-hidden px-1">
             <User className="h-3 w-3 flex-shrink-0 text-slate-300" />
             <span className="text-[10px] text-slate-400 truncate">
@@ -322,7 +463,6 @@ const TaskRow = ({
             </span>
           </div>
 
-          {/* 10 · DUE */}
           <div className={`flex items-center justify-center gap-1 overflow-hidden px-1 ${isOverdue ? 'text-red-600' : 'text-slate-500'}`}>
             {task.due_date ? (
               <>
@@ -332,7 +472,6 @@ const TaskRow = ({
             ) : <span className="text-slate-300 text-[10px]">—</span>}
           </div>
 
-          {/* 11 · ACTIONS */}
           <div className="flex items-center justify-end gap-0 opacity-0 group-hover:opacity-100 transition-opacity overflow-hidden">
             {canModifyTask(task) && (
               <button onClick={() => setExpanded(v => !v)}
@@ -367,7 +506,6 @@ const TaskRow = ({
           </div>
         </div>
 
-        {/* Expanded panel */}
         <AnimatePresence>
           {(expanded || openCommentTaskId === task.id) && (
             <motion.div
@@ -378,7 +516,6 @@ const TaskRow = ({
               className="overflow-hidden"
             >
               <div className={`mx-5 mb-4 space-y-3 border-t pt-3 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-                {/* Checklist */}
                 {checklistItems.length > 0 && (
                   <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-100">
                     <div className="flex items-center justify-between mb-2">
@@ -396,7 +533,7 @@ const TaskRow = ({
                       {checklistItems.map((item, idx) => (
                         <label key={idx} className="flex items-start gap-2 cursor-pointer group/check">
                           <Checkbox checked={checkedItems.includes(idx)} onCheckedChange={() => toggleChecklistItem(task.id, idx)} className="mt-0.5 flex-shrink-0" />
-                          <span className={`text-xs leading-relaxed ${checkedItems.includes(idx) ? 'line-through text-slate-400' : (isDark ? 'text-slate-300 group-hover/check:text-slate-100' : 'text-slate-700 group-hover/check:text-slate-900')}`}>
+                          <span className={`text-xs leading-relaxed ${checkedItems.includes(idx) ? 'line-through text-slate-400' : (isDark ? 'text-slate-300' : 'text-slate-700')}`}>
                             {item}
                           </span>
                         </label>
@@ -405,7 +542,6 @@ const TaskRow = ({
                   </div>
                 )}
 
-                {/* Comments */}
                 {openCommentTaskId === task.id && (
                   <div className="space-y-2">
                     <div className="max-h-28 overflow-y-auto space-y-1">
@@ -433,7 +569,7 @@ const TaskRow = ({
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// BoardCard — kanban-style card
+// BoardCard — unchanged
 // ═══════════════════════════════════════════════════════════════════════════════
 const BoardCard = ({
   task, index, isOverdue, stripeColor, statusStyle, priorityStyle,
@@ -445,7 +581,6 @@ const BoardCard = ({
   fetchComments, comments, newComment, setNewComment,
   selectedTask, setSelectedTask, handleAddComment,
 }) => {
-  // FIX: each sub-component must call useDark() itself
   const isDark = useDark();
   const checklistItems = parseChecklist(task.description);
   const checkedItems   = taskChecklists[task.id] || [];
@@ -459,11 +594,9 @@ const BoardCard = ({
           ? (isDark ? 'bg-slate-800/60 border-slate-700 opacity-75' : 'bg-slate-50 border-slate-200 opacity-75')
           : (isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-md' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-md')}`}>
 
-        {/* Top accent stripe */}
         <div className={`h-1 w-full ${stripeColor}`} />
 
         <div className="p-4 space-y-3">
-          {/* Header */}
           <div className="flex items-start justify-between gap-2">
             <button
               onClick={() => openTaskDetail(task)}
@@ -488,7 +621,6 @@ const BoardCard = ({
             )}
           </div>
 
-          {/* Badges */}
           <div className="flex flex-wrap gap-1.5">
             <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md ${priorityStyle.bg} ${priorityStyle.text}`}>
               {priorityStyle.label}
@@ -498,7 +630,6 @@ const BoardCard = ({
             {task.category && <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{task.category}</span>}
           </div>
 
-          {/* Checklist mini preview */}
           {checklistItems.length > 0 && (
             <div className="space-y-1">
               <div className="flex items-center justify-between">
@@ -508,21 +639,9 @@ const BoardCard = ({
               <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
                 <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${progress}%` }} />
               </div>
-              <div className="space-y-0.5 max-h-20 overflow-hidden">
-                {checklistItems.slice(0, 3).map((item, idx) => (
-                  <div key={idx} className="flex items-center gap-1.5 text-[10px] text-slate-500 truncate">
-                    <div className={`w-2.5 h-2.5 rounded-sm border flex-shrink-0 flex items-center justify-center ${checkedItems.includes(idx) ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`}>
-                      {checkedItems.includes(idx) && <Check className="h-1.5 w-1.5 text-white" />}
-                    </div>
-                    <span className={checkedItems.includes(idx) ? 'line-through text-slate-400' : ''}>{item}</span>
-                  </div>
-                ))}
-                {checklistItems.length > 3 && <div className="text-[10px] text-slate-400 pl-4">+{checklistItems.length - 3} more</div>}
-              </div>
             </div>
           )}
 
-          {/* Meta */}
           <div className={`pt-2 border-t space-y-1.5 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-xs text-slate-500">
@@ -536,15 +655,8 @@ const BoardCard = ({
                 </span>
               )}
             </div>
-            {task.client_id && (
-              <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                <Building2 className="h-3.5 w-3.5 flex-shrink-0" />
-                <span className="truncate">{getClientName(task.client_id)}</span>
-              </div>
-            )}
           </div>
 
-          {/* Status switcher */}
           {canModifyTask(task) && (
             <div className="grid grid-cols-3 gap-1 pt-1">
               {[
@@ -554,19 +666,18 @@ const BoardCard = ({
               ].map(({ s, label, active }) => (
                 <button key={s} onClick={() => handleQuickStatusChange(task, s)}
                   className={`h-6 text-[10px] font-semibold rounded-lg border transition-all
-                    ${task.status === s ? active : (isDark ? 'bg-slate-700 border-slate-600 text-slate-400 hover:border-slate-500' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300')}`}>
+                    ${task.status === s ? active : (isDark ? 'bg-slate-700 border-slate-600 text-slate-400' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300')}`}>
                   {label}
                 </button>
               ))}
             </div>
           )}
 
-          {/* Comment toggle */}
           {canModifyTask(task) && (
             <button
               onClick={() => { setOpenCommentTaskId(openCommentTaskId === task.id ? null : task.id); fetchComments(task.id); }}
               className={`w-full flex items-center justify-center gap-1.5 text-[10px] font-medium text-slate-400 hover:text-indigo-600 py-1 rounded-lg transition-colors border border-dashed
-                ${isDark ? 'border-slate-600 hover:bg-indigo-900/30 hover:border-indigo-700' : 'border-slate-200 hover:bg-indigo-50 hover:border-indigo-200'}`}>
+                ${isDark ? 'border-slate-600 hover:bg-indigo-900/30' : 'border-slate-200 hover:bg-indigo-50'}`}>
               <MessageSquare className="h-3 w-3" />
               {openCommentTaskId === task.id ? 'Close Comments' : 'Add Comment'}
             </button>
@@ -596,97 +707,29 @@ const BoardCard = ({
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// StatCard
-// ═══════════════════════════════════════════════════════════════════════════════
-const StatCard = ({ label, value, color, icon: Icon, active, onClick, activeClasses }) => {
-  // FIX: each sub-component must call useDark() itself
-  const isDark = useDark();
-
-  const activeBg     = activeClasses?.bg     || 'bg-blue-50';
-  const activeBorder = activeClasses?.border || 'border-blue-300';
-  const activeRing   = activeClasses?.ring   || 'ring-blue-200';
-  const activeIcon   = activeClasses?.icon   || 'bg-blue-100';
-  const activeIconFg = activeClasses?.iconFg || 'text-blue-600';
-  const activeBar    = activeClasses?.bar    || 'bg-blue-500';
-
-  return (
-    <motion.button
-      onClick={onClick}
-      whileHover={{ y: -2, boxShadow: '0 6px 20px 0 rgba(0,0,0,0.07)' }}
-      whileTap={{ scale: 0.97 }}
-      transition={{ type: 'spring', stiffness: 420, damping: 26 }}
-      className={`relative rounded-xl border p-4 text-left w-full overflow-hidden transition-colors duration-200
-        ${active
-          ? `${activeBg} ${activeBorder} ring-1 ${activeRing} shadow-sm`
-          : isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'}`}
-    >
-      <motion.div
-        initial={false}
-        animate={{ scaleX: active ? 1 : 0, opacity: active ? 1 : 0 }}
-        transition={{ duration: 0.22, ease: 'easeOut' }}
-        className={`absolute top-0 left-0 right-0 h-[3px] origin-left rounded-t-xl ${activeBar}`}
-      />
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">{label}</p>
-          <motion.p
-            key={value}
-            initial={{ opacity: 0, y: 5 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.25, ease: 'easeOut' }}
-            className={`text-3xl font-bold leading-none ${color}`}
-          >
-            {value}
-          </motion.p>
-        </div>
-        <div className={`p-2 rounded-lg transition-colors duration-200 ${active ? activeIcon : 'bg-slate-100'}`}>
-          <Icon className={`h-4 w-4 transition-colors duration-200 ${active ? activeIconFg : 'text-slate-400'}`} />
-        </div>
-      </div>
-    </motion.button>
-  );
-};
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // Main Tasks Component
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Tasks() {
 
-  // ── Auth ────────────────────────────────────────────────────────────────────
   const storedUser = React.useMemo(() => {
-    try {
-      const u = localStorage.getItem('user');
-      return u ? JSON.parse(u) : null;
-    } catch { return null; }
+    try { const u = localStorage.getItem('user'); return u ? JSON.parse(u) : null; } catch { return null; }
   }, []);
 
-  const user = storedUser || {
-    id: '', full_name: 'User', role: 'staff',
-    permissions: { view_other_tasks: [], can_view_all_tasks: false }
-  };
-
+  const user = storedUser || { id: '', full_name: 'User', role: 'staff', permissions: { view_other_tasks: [], can_view_all_tasks: false } };
   const hasPermission = () => true;
   const navigate = (path) => { window.location.href = path; };
 
-  // ── API ─────────────────────────────────────────────────────────────────────
-  const RAW_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL)
-    || 'https://final-taskosphere-backend.onrender.com';
+  const RAW_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) || 'https://final-taskosphere-backend.onrender.com';
   const API_BASE = RAW_URL.replace(/\/api\/?$/, '') + '/api';
-  
+
   const getAuthHeader = React.useCallback(() => {
-    const token =
-      localStorage.getItem('access_token') ||
-      localStorage.getItem('token') ||
-      sessionStorage.getItem('access_token') ||
-      sessionStorage.getItem('token') || '';
+    const token = localStorage.getItem('access_token') || localStorage.getItem('token') || sessionStorage.getItem('access_token') || sessionStorage.getItem('token') || '';
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
 
   const apiFetch = React.useCallback(async (endpoint) => {
     try {
-      const res = await fetch(`${API_BASE}${endpoint}`, {
-        headers: { 'Content-Type': 'application/json', ...getAuthHeader() }
-      });
+      const res = await fetch(`${API_BASE}${endpoint}`, { headers: { 'Content-Type': 'application/json', ...getAuthHeader() } });
       if (!res.ok) return null;
       return await res.json();
     } catch { return null; }
@@ -695,20 +738,15 @@ export default function Tasks() {
   const isAdmin = user?.role === 'admin';
   const isDark  = useDark();
 
-  // ── Permissions ─────────────────────────────────────────────────────────────
   const canModifyTask = (task) => {
     if (isAdmin) return true;
-    return (
-      task.assigned_to === user?.id ||
-      task.sub_assignees?.includes(user?.id) ||
-      task.created_by === user?.id
-    );
+    return task.assigned_to === user?.id || task.sub_assignees?.includes(user?.id) || task.created_by === user?.id;
   };
   const canAssignTasks = hasPermission('can_assign_tasks');
   const canEditTasks   = hasPermission('can_edit_tasks');
   const canDeleteTasks = isAdmin || hasPermission('can_edit_tasks');
 
-  // ── Core state ───────────────────────────────────────────────────────────────
+  // ── Core state ────────────────────────────────────────────────────────────
   const [tasks,          setTasks]          = useState([]);
   const [users,          setUsers]          = useState([]);
   const [clients,        setClients]        = useState([]);
@@ -716,52 +754,42 @@ export default function Tasks() {
   const [dataLoading,    setDataLoading]    = useState(true);
   const [usersLoading,   setUsersLoading]   = useState(true);
   const [filterTeamOnly, setFilterTeamOnly] = useState(false);
-  
 
-  // ── Dialog / form state ──────────────────────────────────────────────────────
   const [dialogOpen,         setDialogOpen]         = useState(false);
-  const [editingTask,        setEditingTask]        = useState(null);
+  const [editingTask,        setEditingTask]         = useState(null);
   const [formData,           setFormData]           = useState({ ...EMPTY_FORM });
   const [viewMode,           setViewMode]           = useState('list');
-
   const [taskDetailOpen,     setTaskDetailOpen]     = useState(false);
   const [selectedDetailTask, setSelectedDetailTask] = useState(null);
-
   const [comments,           setComments]           = useState({});
   const [showCommentsDialog, setShowCommentsDialog] = useState(false);
   const [selectedTask,       setSelectedTask]       = useState(null);
   const [newComment,         setNewComment]         = useState('');
   const [openCommentTaskId,  setOpenCommentTaskId]  = useState(null);
-
   const [notifications,      setNotifications]      = useState([]);
   const [showNotifications,  setShowNotifications]  = useState(false);
 
-  // ── Filter / sort state ──────────────────────────────────────────────────────
-  const [searchQuery,            setSearchQuery]            = useState('');
-  const [filterStatus,           setFilterStatus]           = useState('all');
-  const [filterPriority,         setFilterPriority]         = useState('all');
-  const [filterCategory,         setFilterCategory]         = useState('all');
-  const [filterAssignee,         setFilterAssignee]         = useState('all');
-  const [sortBy,                 setSortBy]                 = useState('due_date');
-  const [sortDirection,          setSortDirection]          = useState('asc');
-  const [showMyTasksOnly,        setShowMyTasksOnly]        = useState(false);
-  const [activeFilters,          setActiveFilters]          = useState([]);
-  const [taskChecklists,         setTaskChecklists]         = useState({});
-  const [showWorkflowLibrary,    setShowWorkflowLibrary]    = useState(false);
-  const [workflowSearch,         setWorkflowSearch]         = useState('');
-  const [workflowDeptFilter,     setWorkflowDeptFilter]     = useState('all');
-  const [workflowFrequencyFilter,setWorkflowFrequencyFilter]= useState('all');
+  const [searchQuery,             setSearchQuery]             = useState('');
+  const [filterStatus,            setFilterStatus]            = useState('all');
+  const [filterPriority,          setFilterPriority]          = useState('all');
+  const [filterCategory,          setFilterCategory]          = useState('all');
+  const [filterAssignee,          setFilterAssignee]          = useState('all');
+  const [sortBy,                  setSortBy]                  = useState('due_date');
+  const [sortDirection,           setSortDirection]           = useState('asc');
+  const [showMyTasksOnly,         setShowMyTasksOnly]         = useState(false);
+  const [activeFilters,           setActiveFilters]           = useState([]);
+  const [taskChecklists,          setTaskChecklists]          = useState({});
+  const [showWorkflowLibrary,     setShowWorkflowLibrary]     = useState(false);
+  const [workflowSearch,          setWorkflowSearch]          = useState('');
+  const [workflowDeptFilter,      setWorkflowDeptFilter]      = useState('all');
+  const [workflowFrequencyFilter, setWorkflowFrequencyFilter] = useState('all');
 
   const fileInputRef = useRef(null);
 
-  // ── Cross-visibility ─────────────────────────────────────────────────────────
   const hasCrossVisibility = React.useMemo(() => {
     if (isAdmin) return true;
     const perms = user?.permissions || {};
-    return (
-      (perms.view_other_tasks && perms.view_other_tasks.length > 0) ||
-      perms.can_view_all_tasks === true
-    );
+    return (perms.view_other_tasks && perms.view_other_tasks.length > 0) || perms.can_view_all_tasks === true;
   }, [isAdmin, user]);
 
   const crossVisibilityUserIds = React.useMemo(() => {
@@ -779,276 +807,139 @@ export default function Tasks() {
     return users.filter(u => u.id === user?.id);
   }, [isAdmin, hasCrossVisibility, crossVisibilityUserIds, users, user]);
 
-  // ── Fetch all data on mount ──────────────────────────────────────────────
   useEffect(() => {
     const loadAll = async () => {
       setDataLoading(true);
-
-      // ── Wave 1: tasks only — renders list immediately ──────────────────
       try {
         const tasksData = await apiFetch('/tasks');
         if (Array.isArray(tasksData)) setTasks(tasksData);
-      } catch (e) {
-        console.error('Tasks wave-1 fetch error:', e);
-      }
-      setDataLoading(false); // ← unblocks the list after wave 1
-
-      // ── Wave 2: users + clients — fills names & team data ──────────────
+      } catch (e) { console.error('Tasks wave-1 fetch error:', e); }
+      setDataLoading(false);
       try {
-        const [usersData, clientsData] = await Promise.all([
-          apiFetch('/users'),
-          apiFetch('/clients'),
-        ]);
+        const [usersData, clientsData] = await Promise.all([apiFetch('/users'), apiFetch('/clients')]);
         if (Array.isArray(usersData))   { setUsers(usersData);   setUsersLoading(false); }
         if (Array.isArray(clientsData))   setClients(clientsData);
-      } catch (e) {
-        console.error('Tasks wave-2 fetch error:', e);
-        setUsersLoading(false); // always clear loading even on error
-      }
+      } catch (e) { console.error('Tasks wave-2 fetch error:', e); setUsersLoading(false); }
     };
     loadAll();
   }, [apiFetch]);
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
   const parseChecklist = (description) => {
     if (!description) return [];
-    return description.split('\n')
-      .map(l => l.trim())
-      .filter(l => l.startsWith('-') || l.startsWith('•'))
-      .map(l => l.replace(/^[-•]\s*/, '').trim());
+    return description.split('\n').map(l => l.trim()).filter(l => l.startsWith('-') || l.startsWith('•')).map(l => l.replace(/^[-•]\s*/, '').trim());
   };
-
   const toggleChecklistItem = (taskId, index) => {
     setTaskChecklists(prev => {
       const current = prev[taskId] || [];
-      const next = current.includes(index)
-        ? current.filter(i => i !== index)
-        : [...current, index];
+      const next = current.includes(index) ? current.filter(i => i !== index) : [...current, index];
       return { ...prev, [taskId]: next };
     });
   };
-
   const getChecklistProgress = (task) => {
     const items = parseChecklist(task.description);
     if (!items.length) return 0;
-    const checked = taskChecklists[task.id] || [];
-    return Math.round((checked.length / items.length) * 100);
+    return Math.round(((taskChecklists[task.id] || []).length / items.length) * 100);
   };
-
   const getUserName      = (id) => users.find(u => u.id === id)?.full_name || 'Unassigned';
   const getClientName    = (id) => clients.find(c => c.id === id)?.company_name || 'No Client';
   const getCategoryLabel = (v)  => TASK_CATEGORIES.find(c => c.value === v)?.label || v || 'Other';
-
-  const isOverdue = (task) => {
-    if (task.status === 'completed') return false;
-    if (!task.due_date) return false;
-    return new Date(task.due_date) < new Date();
-  };
-
-  const getDisplayStatus = (task) => {
-    if (isOverdue(task)) return 'overdue';
-    return task.status || 'pending';
-  };
-
+  const isOverdue = (task) => { if (task.status === 'completed' || !task.due_date) return false; return new Date(task.due_date) < new Date(); };
+  const getDisplayStatus = (task) => isOverdue(task) ? 'overdue' : task.status || 'pending';
   const getRelativeDueDate = (dueDate) => {
     if (!dueDate) return '';
-    const due      = new Date(dueDate);
-    const now      = new Date();
-    const diffDays = Math.ceil((due - now) / 86400000);
-    if (diffDays < 0)  return `${Math.abs(diffDays)}d overdue`;
+    const due = new Date(dueDate); const now = new Date(); const diffDays = Math.ceil((due - now) / 86400000);
+    if (diffDays < 0)   return `${Math.abs(diffDays)}d overdue`;
     if (diffDays === 0) return 'Today';
     if (diffDays === 1) return 'Tomorrow';
     if (diffDays <= 7)  return `In ${diffDays}d`;
     return format(due, 'MMM dd');
   };
-
-  const openTaskDetail = (task) => {
-    setSelectedDetailTask(task);
-    setTaskDetailOpen(true);
-  };
-
-  const resetForm = () => {
-    setFormData({ ...EMPTY_FORM });
-    setEditingTask(null);
-  };
-
+  const openTaskDetail = (task) => { setSelectedDetailTask(task); setTaskDetailOpen(true); };
+  const resetForm = () => { setFormData({ ...EMPTY_FORM }); setEditingTask(null); };
   const toggleSubAssignee = (userId) => {
-    setFormData(prev => ({
-      ...prev,
-      sub_assignees: prev.sub_assignees.includes(userId)
-        ? prev.sub_assignees.filter(id => id !== userId)
-        : [...prev.sub_assignees, userId],
-    }));
+    setFormData(prev => ({ ...prev, sub_assignees: prev.sub_assignees.includes(userId) ? prev.sub_assignees.filter(id => id !== userId) : [...prev.sub_assignees, userId] }));
   };
+  const markAllAsRead = () => { setNotifications(p => p.map(n => ({ ...n, is_read: true }))); toast.success('Marked all as read'); };
 
-  const markAllAsRead = () => {
-    setNotifications(p => p.map(n => ({ ...n, is_read: true })));
-    toast.success('Marked all as read');
-  };
-
-  // ── CRUD — all real API ──────────────────────────────────────────────────────
+  // ── CRUD ──────────────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    const taskData = {
-      ...formData,
-      assigned_to:   formData.assigned_to === 'unassigned' ? null : formData.assigned_to,
-      sub_assignees: formData.sub_assignees || [],
-      client_id:     formData.client_id || null,
-      due_date:      formData.due_date || null,
-    };
+    e.preventDefault(); setLoading(true);
+    const taskData = { ...formData, assigned_to: formData.assigned_to === 'unassigned' ? null : formData.assigned_to, sub_assignees: formData.sub_assignees || [], client_id: formData.client_id || null, due_date: formData.due_date || null };
     try {
       if (editingTask) {
-        const res = await fetch(`${API_BASE}/tasks/${editingTask.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-          body: JSON.stringify(taskData),
-        });
-        if (res.ok) {
-          const updated = await res.json();
-          setTasks(prev => prev.map(t => t.id === editingTask.id ? updated : t));
-          toast.success('Task updated!');
-        } else { toast.error('Failed to update task'); }
+        const res = await fetch(`${API_BASE}/tasks/${editingTask.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...getAuthHeader() }, body: JSON.stringify(taskData) });
+        if (res.ok) { const updated = await res.json(); setTasks(prev => prev.map(t => t.id === editingTask.id ? updated : t)); toast.success('Task updated!'); }
+        else toast.error('Failed to update task');
       } else {
-        const res = await fetch(`${API_BASE}/tasks`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-          body: JSON.stringify(taskData),
-        });
-        if (res.ok) {
-          const created = await res.json();
-          setTasks(prev => [created, ...prev]);
-          toast.success('Task created!');
-        } else { toast.error('Failed to create task'); }
+        const res = await fetch(`${API_BASE}/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeader() }, body: JSON.stringify(taskData) });
+        if (res.ok) { const created = await res.json(); setTasks(prev => [created, ...prev]); toast.success('Task created!'); }
+        else toast.error('Failed to create task');
       }
     } catch { toast.error('Network error'); }
-    setDialogOpen(false);
-    resetForm();
-    setLoading(false);
+    setDialogOpen(false); resetForm(); setLoading(false);
   };
 
   const handleEdit = (task) => {
     setEditingTask(task);
-    setFormData({
-      title:               task.title,
-      description:         task.description || '',
-      assigned_to:         task.assigned_to || 'unassigned',
-      sub_assignees:       task.sub_assignees || [],
-      due_date:            task.due_date ? format(new Date(task.due_date), 'yyyy-MM-dd') : '',
-      priority:            task.priority,
-      status:              task.status,
-      category:            task.category || 'other',
-      client_id:           task.client_id || '',
-      is_recurring:        task.is_recurring || false,
-      recurrence_pattern:  task.recurrence_pattern || 'monthly',
-      recurrence_interval: task.recurrence_interval || 1,
-    });
+    setFormData({ title: task.title, description: task.description || '', assigned_to: task.assigned_to || 'unassigned', sub_assignees: task.sub_assignees || [], due_date: task.due_date ? format(new Date(task.due_date), 'yyyy-MM-dd') : '', priority: task.priority, status: task.status, category: task.category || 'other', client_id: task.client_id || '', is_recurring: task.is_recurring || false, recurrence_pattern: task.recurrence_pattern || 'monthly', recurrence_interval: task.recurrence_interval || 1 });
     setDialogOpen(true);
   };
 
   const handleDelete = async (taskId) => {
     if (!window.confirm('Delete this task?')) return;
     try {
-      const res = await fetch(`${API_BASE}/tasks/${taskId}`, {
-        method: 'DELETE',
-        headers: { ...getAuthHeader() },
-      });
-      if (res.ok) {
-        setTasks(prev => prev.filter(t => t.id !== taskId));
-        toast.success('Task deleted!');
-      } else { toast.error('Failed to delete task'); }
+      const res = await fetch(`${API_BASE}/tasks/${taskId}`, { method: 'DELETE', headers: { ...getAuthHeader() } });
+      if (res.ok) { setTasks(prev => prev.filter(t => t.id !== taskId)); toast.success('Task deleted!'); }
+      else toast.error('Failed to delete task');
     } catch { toast.error('Network error'); }
   };
 
   const handleQuickStatusChange = async (task, newStatus) => {
-    // Optimistic update
     setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
     try {
-      await fetch(`${API_BASE}/tasks/${task.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-        body: JSON.stringify({ status: newStatus }),
-      });
+      await fetch(`${API_BASE}/tasks/${task.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...getAuthHeader() }, body: JSON.stringify({ status: newStatus }) });
       toast.success(`Marked as ${STATUS_STYLES[newStatus]?.label || newStatus}`);
     } catch { toast.error('Network error'); }
   };
 
   const handleAddComment = async () => {
     if (!newComment.trim()) return;
-    const taskId = selectedTask?.id;
-    if (!taskId) return;
+    const taskId = selectedTask?.id; if (!taskId) return;
     try {
-      const res = await fetch(`${API_BASE}/tasks/${taskId}/comments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-        body: JSON.stringify({ text: newComment }),
-      });
-      if (res.ok) {
-        const comment = await res.json();
-        setComments(prev => ({
-          ...prev,
-          [taskId]: [...(prev[taskId] || []), comment]
-        }));
-        setNewComment('');
-        toast.success('Comment added!');
-      }
+      const res = await fetch(`${API_BASE}/tasks/${taskId}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeader() }, body: JSON.stringify({ text: newComment }) });
+      if (res.ok) { const comment = await res.json(); setComments(prev => ({ ...prev, [taskId]: [...(prev[taskId] || []), comment] })); setNewComment(''); toast.success('Comment added!'); }
     } catch { toast.error('Network error'); }
   };
 
   const fetchComments = async (taskId) => {
     const data = await apiFetch(`/tasks/${taskId}/comments`);
-    if (Array.isArray(data)) {
-      setComments(prev => ({ ...prev, [taskId]: data }));
-    } else {
-      setComments(prev => ({ ...prev, [taskId]: prev[taskId] || [] }));
-    }
+    setComments(prev => ({ ...prev, [taskId]: Array.isArray(data) ? data : (prev[taskId] || []) }));
   };
 
   const handleDuplicateTask = async (task) => {
     const { id, created_at, updated_at, ...rest } = task;
-    const dupeData = { ...rest, title: `${task.title} (Copy)`, status: 'pending' };
     try {
-      const res = await fetch(`${API_BASE}/tasks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-        body: JSON.stringify(dupeData),
-      });
-      if (res.ok) {
-        const created = await res.json();
-        setTasks(prev => [created, ...prev]);
-        toast.success('Task duplicated!');
-      }
+      const res = await fetch(`${API_BASE}/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeader() }, body: JSON.stringify({ ...rest, title: `${task.title} (Copy)`, status: 'pending' }) });
+      if (res.ok) { const created = await res.json(); setTasks(prev => [created, ...prev]); toast.success('Task duplicated!'); }
     } catch { toast.error('Network error'); }
   };
 
-  // ── Export stubs ─────────────────────────────────────────────────────────────
   const handleCsvUpload = () => { toast.success('CSV upload (stub)'); };
   const handleExportCsv = () => { toast.success('Exporting CSV (stub)'); };
   const handleExportPdf = () => { toast.success('Exporting PDF (stub)'); };
 
-  // ── Scoping & stats ──────────────────────────────────────────────────────────
+  // ── Scoping & stats ───────────────────────────────────────────────────────
   const scopedTasks = React.useMemo(() => {
     if (isAdmin) return tasks;
     if (hasCrossVisibility) {
       const visibleIds = new Set([user?.id, ...crossVisibilityUserIds]);
-      return tasks.filter(t =>
-        visibleIds.has(t.assigned_to) ||
-        t.sub_assignees?.some(id => visibleIds.has(id))
-      );
+      return tasks.filter(t => visibleIds.has(t.assigned_to) || t.sub_assignees?.some(id => visibleIds.has(id)));
     }
-    return tasks.filter(t =>
-      t.assigned_to === user?.id ||
-      t.sub_assignees?.includes(user?.id) ||
-      t.created_by === user?.id
-    );
+    return tasks.filter(t => t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id) || t.created_by === user?.id);
   }, [tasks, isAdmin, hasCrossVisibility, user, crossVisibilityUserIds]);
 
-  const myTasks = React.useMemo(() =>
-    tasks.filter(t =>
-      t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id)
-    ),
-    [tasks, user]
-  );
+  const myTasks = React.useMemo(() => tasks.filter(t => t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id)), [tasks, user]);
 
   const stats = {
     myTask:     myTasks.length,
@@ -1057,75 +948,46 @@ export default function Tasks() {
     inProgress: scopedTasks.filter(t => t.status === 'in_progress').length,
     completed:  scopedTasks.filter(t => t.status === 'completed').length,
     overdue:    scopedTasks.filter(t => isOverdue(t)).length,
-    teamTask:   hasCrossVisibility
-      ? tasks.filter(t =>
-          crossVisibilityUserIds.includes(t.assigned_to) &&
-          t.status !== 'completed'
-        ).length
-      : 0,
+    teamTask:   hasCrossVisibility ? tasks.filter(t => crossVisibilityUserIds.includes(t.assigned_to) && t.status !== 'completed').length : 0,
   };
+
+  const completionRate = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
 
   const teamTaskBreakdown = React.useMemo(() => {
     if (!hasCrossVisibility || crossVisibilityUserIds.length === 0) return [];
     return crossVisibilityUserIds.map(uid => {
       const member = users.find(u => u.id === uid);
-      const pendingCount = tasks.filter(t =>
-        (t.assigned_to === uid || t.sub_assignees?.includes(uid)) &&
-        t.status !== 'completed'
-      ).length;
+      const pendingCount = tasks.filter(t => (t.assigned_to === uid || t.sub_assignees?.includes(uid)) && t.status !== 'completed').length;
       return { id: uid, name: member?.full_name || 'Unknown', pendingCount };
     }).filter(m => m.pendingCount > 0);
   }, [hasCrossVisibility, crossVisibilityUserIds, tasks, users]);
 
-  // ── Filtering ────────────────────────────────────────────────────────────────
+  // ── Filtering ─────────────────────────────────────────────────────────────
   const filteredTasks = scopedTasks.filter(task => {
-    const matchesSearch = (
-      task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      task.description?.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-    const matchesPriority = filterPriority === 'all' || task.priority  === filterPriority;
-    const matchesCategory = filterCategory === 'all' || task.category  === filterCategory;
+    const matchesSearch   = task.title.toLowerCase().includes(searchQuery.toLowerCase()) || task.description?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesPriority = filterPriority === 'all' || task.priority   === filterPriority;
+    const matchesCategory = filterCategory === 'all' || task.category   === filterCategory;
     const matchesAssignee = filterAssignee === 'all' || task.assigned_to === filterAssignee;
-    // Team-only filter: show only tasks assigned to cross-visibility members
-    const matchesTeam = !filterTeamOnly || crossVisibilityUserIds.includes(task.assigned_to);
+    const matchesTeam     = !filterTeamOnly || crossVisibilityUserIds.includes(task.assigned_to);
     let matchesStatus = true;
-    if (filterStatus !== 'all') {
-      matchesStatus = filterStatus === 'overdue'
-        ? isOverdue(task)
-        : task.status === filterStatus;
-    }
+    if (filterStatus !== 'all') matchesStatus = filterStatus === 'overdue' ? isOverdue(task) : task.status === filterStatus;
     return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee && matchesTeam;
   });
 
   const displayTasks = React.useMemo(() => {
     let result = [...filteredTasks];
-    if (showMyTasksOnly && user?.id) {
-      result = result.filter(t =>
-        t.assigned_to === user.id ||
-        t.sub_assignees?.includes(user.id) ||
-        t.created_by === user.id
-      );
-    }
+    if (showMyTasksOnly && user?.id) result = result.filter(t => t.assigned_to === user.id || t.sub_assignees?.includes(user.id) || t.created_by === user.id);
     result.sort((a, b) => {
       let cmp = 0;
-      if (sortBy === 'due_date') {
-        const dA = a.due_date ? new Date(a.due_date).getTime() : Infinity;
-        const dB = b.due_date ? new Date(b.due_date).getTime() : Infinity;
-        cmp = dA - dB;
-      } else if (sortBy === 'priority') {
-        const prioOrder = { critical: 4, high: 3, medium: 2, low: 1 };
-        cmp = (prioOrder[b.priority] || 0) - (prioOrder[a.priority] || 0);
-      } else if (sortBy === 'title') {
-        cmp = a.title.localeCompare(b.title);
-      } else if (sortBy === 'status') {
-        cmp = (a.status || '').localeCompare(b.status || '');
-      }
+      if (sortBy === 'due_date') { const dA = a.due_date ? new Date(a.due_date).getTime() : Infinity; const dB = b.due_date ? new Date(b.due_date).getTime() : Infinity; cmp = dA - dB; }
+      else if (sortBy === 'priority') { const prioOrder = { critical: 4, high: 3, medium: 2, low: 1 }; cmp = (prioOrder[b.priority] || 0) - (prioOrder[a.priority] || 0); }
+      else if (sortBy === 'title')  cmp = a.title.localeCompare(b.title);
+      else if (sortBy === 'status') cmp = (a.status || '').localeCompare(b.status || '');
       return sortDirection === 'asc' ? cmp : -cmp;
     });
     return result;
   }, [filteredTasks, showMyTasksOnly, sortBy, sortDirection, user]);
 
-  // ── Active filter pills ──────────────────────────────────────────────────────
   useEffect(() => {
     const pills = [];
     if (searchQuery)              pills.push({ key: 'search',   label: `"${searchQuery}"` });
@@ -1137,7 +999,7 @@ export default function Tasks() {
     if (filterTeamOnly)           pills.push({ key: 'teamonly', label: 'Team Tasks' });
     setActiveFilters(pills);
   }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, users]);
-  
+
   const removeFilter = (key) => {
     if (key === 'search')   setSearchQuery('');
     if (key === 'status')   setFilterStatus('all');
@@ -1149,84 +1011,110 @@ export default function Tasks() {
   };
 
   const clearAllFilters = () => {
-    setSearchQuery(''); setFilterStatus('all'); setFilterPriority('all');
-    setFilterCategory('all'); setFilterAssignee('all');
-    setShowMyTasksOnly(false); setFilterTeamOnly(false);
-    setSortBy('due_date'); setSortDirection('asc');
+    setSearchQuery(''); setFilterStatus('all'); setFilterPriority('all'); setFilterCategory('all'); setFilterAssignee('all');
+    setShowMyTasksOnly(false); setFilterTeamOnly(false); setSortBy('due_date'); setSortDirection('asc');
     toast.success('Filters cleared');
   };
 
-  // ── Workflow library ─────────────────────────────────────────────────────────
   const filteredWorkflows = COMPLIANCE_WORKFLOWS.filter(wf => {
-    const matchSearch = (
-      wf.name.toLowerCase().includes(workflowSearch.toLowerCase()) ||
-      wf.title.toLowerCase().includes(workflowSearch.toLowerCase())
-    );
-    const matchDept = workflowDeptFilter      === 'all' || wf.category  === workflowDeptFilter;
-    const matchFreq = workflowFrequencyFilter === 'all' || wf.frequency.toLowerCase().includes(workflowFrequencyFilter.toLowerCase());
+    const matchSearch = wf.name.toLowerCase().includes(workflowSearch.toLowerCase()) || wf.title.toLowerCase().includes(workflowSearch.toLowerCase());
+    const matchDept   = workflowDeptFilter      === 'all' || wf.category  === workflowDeptFilter;
+    const matchFreq   = workflowFrequencyFilter === 'all' || wf.frequency.toLowerCase().includes(workflowFrequencyFilter.toLowerCase());
     return matchSearch && matchDept && matchFreq;
   });
 
   const applyComplianceWorkflow = (wf) => {
-    const due = new Date();
-    due.setDate(due.getDate() + wf.estimatedDays);
-    setFormData({
-      title: wf.title, description: wf.description,
-      assigned_to: 'unassigned', sub_assignees: [],
-      due_date: format(due, 'yyyy-MM-dd'), priority: wf.priority,
-      status: 'pending', category: wf.category, client_id: '',
-      is_recurring: true, recurrence_pattern: wf.recurrence_pattern,
-      recurrence_interval: wf.recurrence_interval,
-    });
-    setShowWorkflowLibrary(false);
-    setDialogOpen(true);
-    setWorkflowSearch('');
-    setWorkflowDeptFilter('all');
-    setWorkflowFrequencyFilter('all');
+    const due = new Date(); due.setDate(due.getDate() + wf.estimatedDays);
+    setFormData({ title: wf.title, description: wf.description, assigned_to: 'unassigned', sub_assignees: [], due_date: format(due, 'yyyy-MM-dd'), priority: wf.priority, status: 'pending', category: wf.category, client_id: '', is_recurring: true, recurrence_pattern: wf.recurrence_pattern, recurrence_interval: wf.recurrence_interval });
+    setShowWorkflowLibrary(false); setDialogOpen(true); setWorkflowSearch(''); setWorkflowDeptFilter('all'); setWorkflowFrequencyFilter('all');
     toast.success(`Template loaded: ${wf.name}`);
   };
 
-  const unreadCount        = notifications.filter(n => !n.is_read).length;
+  const unreadCount         = notifications.filter(n => !n.is_read).length;
   const getBoardColumnTasks = (colStatus) => displayTasks.filter(t => t.status === colStatus);
 
-  // ════════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
   // RENDER
-  // ════════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
   return (
     <motion.div
-      className={`space-y-5 min-h-screen p-5 rounded-2xl ${isDark ? 'bg-[#0f172a]' : 'bg-slate-50'}`}
+      className={`space-y-4 min-h-screen p-5 rounded-2xl ${isDark ? 'bg-[#0f172a]' : 'bg-slate-50'}`}
       variants={containerVariants} initial="hidden" animate="visible"
     >
-      {/* Non-blocking top bar loader */}
+      {/* Non-blocking loader */}
       {dataLoading && (
         <div className="fixed top-0 left-0 right-0 z-[99999] h-0.5 overflow-hidden">
-          <div
-            className="h-full w-full animate-pulse"
-            style={{ background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue}, ${COLORS.emeraldGreen})` }}
-          />
+          <div className="h-full w-full animate-pulse"
+            style={{ background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue}, ${COLORS.emeraldGreen})` }} />
         </div>
       )}
-      {/* ── Page Header ──────────────────────────────────────────────────────── */}
+
+      {/* ── WELCOME BANNER (matches Dashboard exactly) ───────────────────── */}
       <motion.div variants={itemVariants}>
-        <Card className={`border shadow-sm rounded-2xl overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-          <div className="h-1 w-full bg-gradient-to-r from-blue-700 via-indigo-600 to-emerald-500" />
-          <CardContent className="px-6 py-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h1 className="text-xl font-bold tracking-tight" style={{ color: isDark ? '#93c5fd' : COLORS.deepBlue }}>
-                Task Management
-              </h1>
-              <p className="text-xs text-slate-400 mt-0.5">
+        <div
+          className="relative overflow-hidden rounded-2xl px-6 pt-5 pb-4"
+          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`, boxShadow: `0 8px 32px rgba(13,59,102,0.28)` }}
+        >
+          {/* Decorative blobs */}
+          <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10" style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+          <div className="absolute right-28 bottom-0 w-40 h-40 rounded-full mb-[-40px] opacity-5" style={{ background: 'white' }} />
+          <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5" style={{ background: 'white' }} />
+
+          <div className="relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+            {/* Left — title */}
+            <div className="flex-1 min-w-0">
+              <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                <Briefcase className="h-3 w-3" />
+                {format(new Date(), 'EEEE, MMMM d, yyyy')}
+              </p>
+              <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">Task Management</h1>
+              <p className="text-white/60 text-sm mt-1">
                 {stats.myTask} my tasks · {stats.overdue} overdue · {stats.inProgress} in progress
                 {hasCrossVisibility && ` · ${stats.teamTask} team pending`}
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} className="h-8 text-xs rounded-lg">Upload CSV</Button>
-              <Button variant="outline" size="sm" onClick={handleExportCsv} className="h-8 text-xs rounded-lg">Export CSV</Button>
-              <Button variant="outline" size="sm" onClick={handleExportPdf} className="h-8 text-xs rounded-lg">Export PDF</Button>
+
+            {/* Right — action buttons */}
+            <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+              {/* Total Tasks — admin only */}
+              {isAdmin && (
+                <motion.button
+                  whileHover={{ scale: 1.04, y: -1, transition: springPhysics.card }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => { setFilterStatus('all'); setFilterAssignee('all'); setShowMyTasksOnly(false); setFilterTeamOnly(false); }}
+                  className="flex items-center gap-2 px-3.5 py-2 rounded-xl transition-all"
+                  style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.25)', backdropFilter: 'blur(6px)' }}
+                >
+                  <div className="p-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.15)' }}>
+                    <Target className="h-3.5 w-3.5 text-white" />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-[9px] font-semibold uppercase tracking-wider text-white/60">Total Tasks</p>
+                    <p className="text-sm font-bold text-white leading-none mt-0.5">{stats.total}</p>
+                  </div>
+                  <ChevronRight className="h-3.5 w-3.5 text-white/40 flex-shrink-0" />
+                </motion.button>
+              )}
+
+              {/* Separator */}
+              <div className="h-8 w-px bg-white/20 hidden md:block" />
+
+              {/* Action buttons */}
+              <Button variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()}
+                className="h-8 text-xs rounded-xl text-white/80 hover:text-white hover:bg-white/15 border border-white/20">
+                Upload CSV
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleExportCsv}
+                className="h-8 text-xs rounded-xl text-white/80 hover:text-white hover:bg-white/15 border border-white/20">
+                Export CSV
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleExportPdf}
+                className="h-8 text-xs rounded-xl text-white/80 hover:text-white hover:bg-white/15 border border-white/20">
+                Export PDF
+              </Button>
               {canEditTasks && (
-                <Button variant="outline" size="sm" onClick={() => setShowWorkflowLibrary(true)}
-                  className="h-8 text-xs rounded-lg gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                <Button variant="ghost" size="sm" onClick={() => setShowWorkflowLibrary(true)}
+                  className="h-8 text-xs rounded-xl gap-1.5 text-white/80 hover:text-white hover:bg-white/15 border border-white/20">
                   <FileText className="h-3.5 w-3.5" /> CA/CS Templates
                 </Button>
               )}
@@ -1234,7 +1122,7 @@ export default function Tasks() {
               {/* Notifications */}
               <Popover open={showNotifications} onOpenChange={setShowNotifications}>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm" className="relative h-8 w-8 p-0 rounded-lg">
+                  <Button variant="ghost" size="sm" className="relative h-8 w-8 p-0 rounded-xl text-white/80 hover:text-white hover:bg-white/15 border border-white/20">
                     <Bell className="h-3.5 w-3.5" />
                     {unreadCount > 0 && (
                       <span className="absolute -top-1 -right-1 min-w-[16px] h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-1">
@@ -1250,27 +1138,15 @@ export default function Tasks() {
                       <h3 className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Notifications</h3>
                       {unreadCount > 0 && <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">{unreadCount} new</span>}
                     </div>
-                    {unreadCount > 0 && (
-                      <button onClick={markAllAsRead} className="text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors">Mark all read</button>
-                    )}
+                    {unreadCount > 0 && <button onClick={markAllAsRead} className="text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors">Mark all read</button>}
                   </div>
-                  <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                  <div className="max-h-80 overflow-y-auto">
                     {notifications.length === 0 ? (
-                      <div className="py-12 text-center">
-                        <Bell className="h-8 w-8 text-slate-200 mx-auto mb-2" />
-                        <p className="text-sm text-slate-400">No notifications</p>
-                      </div>
+                      <div className="py-12 text-center"><Bell className="h-8 w-8 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400">No notifications</p></div>
                     ) : notifications.map((n) => (
-                      <div key={n.id} className={`px-5 py-3.5 transition-colors ${!n.is_read ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/40') : ''} ${isDark ? 'hover:bg-slate-700/50' : 'hover:bg-slate-50'}`}>
-                        <div className="flex gap-3">
-                          {!n.is_read && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-2 flex-shrink-0" />}
-                          <div className={`flex-1 ${n.is_read ? 'pl-4' : ''}`}>
-                            <p className={`text-xs leading-relaxed ${!n.is_read ? (isDark ? 'font-semibold text-slate-100' : 'font-semibold text-slate-800') : (isDark ? 'text-slate-400' : 'text-slate-600')}`}>
-                              {n.title}
-                            </p>
-                            <p className="text-[10px] text-slate-400 mt-1">{format(new Date(n.created_at), 'MMM dd, hh:mm a')}</p>
-                          </div>
-                        </div>
+                      <div key={n.id} className={`px-5 py-3.5 border-b border-slate-100 transition-colors ${!n.is_read ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/40') : ''}`}>
+                        <p className={`text-xs ${!n.is_read ? 'font-semibold' : ''} ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{n.title}</p>
+                        <p className="text-[10px] text-slate-400 mt-1">{format(new Date(n.created_at), 'MMM dd, hh:mm a')}</p>
                       </div>
                     ))}
                   </div>
@@ -1282,11 +1158,13 @@ export default function Tasks() {
                 <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
                   <DialogTrigger asChild>
                     <Button size="sm" onClick={() => { setEditingTask(null); setFormData({ ...EMPTY_FORM }); }}
-                      className="h-8 px-3 text-xs rounded-lg bg-blue-700 hover:bg-blue-800 text-white gap-1.5">
+                      className="h-8 px-4 text-xs rounded-xl font-semibold gap-1.5"
+                      style={{ background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.35)', color: 'white' }}>
                       <Plus className="h-3.5 w-3.5" /> New Task
                     </Button>
                   </DialogTrigger>
 
+                  {/* Dialog form — unchanged */}
                   <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle className="text-xl font-bold" style={{ color: COLORS.deepBlue }}>
@@ -1296,27 +1174,19 @@ export default function Tasks() {
                         {editingTask ? 'Update task details below.' : 'Fill in the details to create a new task.'}
                       </DialogDescription>
                     </DialogHeader>
-
                     <form onSubmit={handleSubmit} className="space-y-4 mt-2">
                       <div className="space-y-1.5">
                         <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Task Title <span className="text-red-500">*</span></Label>
-                        <Input placeholder="Enter task title" value={formData.title}
-                          onChange={(e) => setFormData(p => ({ ...p, title: e.target.value }))}
-                          required className="h-9 text-sm border-slate-300" />
+                        <Input placeholder="Enter task title" value={formData.title} onChange={(e) => setFormData(p => ({ ...p, title: e.target.value }))} required className="h-9 text-sm border-slate-300" />
                       </div>
-
                       <div className="space-y-1.5">
                         <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Description</Label>
-                        <Textarea placeholder="Describe the task (use - for checklist items)…" value={formData.description}
-                          onChange={(e) => setFormData(p => ({ ...p, description: e.target.value }))}
-                          rows={3} className="text-sm border-slate-300 resize-none" />
+                        <Textarea placeholder="Describe the task (use - for checklist items)…" value={formData.description} onChange={(e) => setFormData(p => ({ ...p, description: e.target.value }))} rows={3} className="text-sm border-slate-300 resize-none" />
                       </div>
-
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Client</Label>
-                          <Select value={formData.client_id || 'no_client'}
-                            onValueChange={(v) => setFormData(p => ({ ...p, client_id: v === 'no_client' ? '' : v }))}>
+                          <Select value={formData.client_id || 'no_client'} onValueChange={(v) => setFormData(p => ({ ...p, client_id: v === 'no_client' ? '' : v }))}>
                             <SelectTrigger className="h-9 text-sm border-slate-300"><SelectValue placeholder="No Client" /></SelectTrigger>
                             <SelectContent className="max-h-52 overflow-y-auto">
                               <SelectItem value="no_client">No Client</SelectItem>
@@ -1326,12 +1196,9 @@ export default function Tasks() {
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Due Date</Label>
-                          <Input type="date" value={formData.due_date}
-                            onChange={(e) => setFormData(p => ({ ...p, due_date: e.target.value }))}
-                            className="h-9 text-sm border-slate-300" />
+                          <Input type="date" value={formData.due_date} onChange={(e) => setFormData(p => ({ ...p, due_date: e.target.value }))} className="h-9 text-sm border-slate-300" />
                         </div>
                       </div>
-
                       {canAssignTasks && (
                         <div className="grid grid-cols-2 gap-3">
                           <div className="space-y-1.5">
@@ -1366,31 +1233,25 @@ export default function Tasks() {
                           </div>
                         </div>
                       )}
-
                       <div className="space-y-1.5">
                         <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Department</Label>
                         <div className="flex flex-wrap gap-1.5">
                           {DEPARTMENTS.map(dept => (
-                            <button key={dept.value} type="button"
-                              onClick={() => setFormData(p => ({ ...p, category: dept.value }))}
-                              className={`h-7 px-3 rounded-lg text-xs font-semibold transition-all
-                                ${formData.category === dept.value ? 'bg-blue-700 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                            <button key={dept.value} type="button" onClick={() => setFormData(p => ({ ...p, category: dept.value }))}
+                              className={`h-7 px-3 rounded-lg text-xs font-semibold transition-all ${formData.category === dept.value ? 'bg-blue-700 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
                               {dept.label}
                             </button>
                           ))}
                         </div>
                       </div>
-
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Priority</Label>
                           <Select value={formData.priority} onValueChange={(v) => setFormData(p => ({ ...p, priority: v }))}>
                             <SelectTrigger className="h-9 text-sm border-slate-300"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="low">Low</SelectItem>
-                              <SelectItem value="medium">Medium</SelectItem>
-                              <SelectItem value="high">High</SelectItem>
-                              <SelectItem value="critical">Critical</SelectItem>
+                              <SelectItem value="low">Low</SelectItem><SelectItem value="medium">Medium</SelectItem>
+                              <SelectItem value="high">High</SelectItem><SelectItem value="critical">Critical</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -1399,20 +1260,14 @@ export default function Tasks() {
                           <Select value={formData.status} onValueChange={(v) => setFormData(p => ({ ...p, status: v }))}>
                             <SelectTrigger className="h-9 text-sm border-slate-300"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="pending">To Do</SelectItem>
-                              <SelectItem value="in_progress">In Progress</SelectItem>
-                              <SelectItem value="completed">Completed</SelectItem>
+                              <SelectItem value="pending">To Do</SelectItem><SelectItem value="in_progress">In Progress</SelectItem><SelectItem value="completed">Completed</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
                       </div>
-
                       <div className={`border rounded-xl p-4 space-y-3 ${isDark ? 'border-slate-600 bg-slate-700/40' : 'border-slate-200 bg-slate-50'}`}>
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Repeat className="h-4 w-4 text-slate-500" />
-                            <Label className="font-semibold text-sm">Recurring Task</Label>
-                          </div>
+                          <div className="flex items-center gap-2"><Repeat className="h-4 w-4 text-slate-500" /><Label className="font-semibold text-sm">Recurring Task</Label></div>
                           <Switch checked={formData.is_recurring} onCheckedChange={(c) => setFormData(p => ({ ...p, is_recurring: c }))} />
                         </div>
                         {formData.is_recurring && (
@@ -1421,29 +1276,19 @@ export default function Tasks() {
                               <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Repeat</Label>
                               <Select value={formData.recurrence_pattern} onValueChange={(v) => setFormData(p => ({ ...p, recurrence_pattern: v }))}>
                                 <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  {RECURRENCE_PATTERNS.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
-                                </SelectContent>
+                                <SelectContent>{RECURRENCE_PATTERNS.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}</SelectContent>
                               </Select>
                             </div>
                             <div className="space-y-1.5">
                               <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Every (interval)</Label>
                               <div className="flex items-center gap-2">
-                                <Input type="number" min="1" max="365" value={formData.recurrence_interval}
-                                  onChange={(e) => setFormData(p => ({ ...p, recurrence_interval: parseInt(e.target.value) || 1 }))}
-                                  className="w-20 h-9 text-sm" />
-                                <span className="text-xs text-slate-500">
-                                  {formData.recurrence_pattern === 'daily'   && 'day(s)'}
-                                  {formData.recurrence_pattern === 'weekly'  && 'week(s)'}
-                                  {formData.recurrence_pattern === 'monthly' && 'month(s)'}
-                                  {formData.recurrence_pattern === 'yearly'  && 'year(s)'}
-                                </span>
+                                <Input type="number" min="1" max="365" value={formData.recurrence_interval} onChange={(e) => setFormData(p => ({ ...p, recurrence_interval: parseInt(e.target.value) || 1 }))} className="w-20 h-9 text-sm" />
+                                <span className="text-xs text-slate-500">{formData.recurrence_pattern === 'daily' && 'day(s)'}{formData.recurrence_pattern === 'weekly' && 'week(s)'}{formData.recurrence_pattern === 'monthly' && 'month(s)'}{formData.recurrence_pattern === 'yearly' && 'year(s)'}</span>
                               </div>
                             </div>
                           </div>
                         )}
                       </div>
-
                       <DialogFooter className={`pt-3 border-t ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
                         <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }} className="h-9 text-sm rounded-lg">Cancel</Button>
                         <Button type="submit" disabled={loading} className="h-9 text-sm rounded-lg bg-blue-700 hover:bg-blue-800">
@@ -1455,132 +1300,83 @@ export default function Tasks() {
                 </Dialog>
               )}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </motion.div>
 
-      {/* ── Stat Cards — 6 equal cards ───────────────────────────────────────── */}
-      <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-
+      {/* ── METRIC CARDS — 6 equal, all same height/layout ──────────────── */}
+      <motion.div
+        variants={itemVariants}
+        className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 [&>*]:min-w-0"
+      >
         {/* 1. My Task */}
-        <StatCard label="My Task"     value={stats.myTask}     color={isDark ? 'text-slate-300' : 'text-slate-800'} icon={SlidersHorizontal}
-          active={filterStatus === 'all' && filterAssignee === (user?.id || 'all')}
-          activeClasses={{ bg: isDark ? 'bg-slate-700' : 'bg-slate-50', border: 'border-slate-400', ring: 'ring-slate-200', icon: 'bg-slate-200', iconFg: 'text-slate-700', bar: 'bg-slate-600' }}
-          onClick={() => { setFilterStatus('all'); setFilterAssignee(user?.id || 'all'); }} />
+        <MetricCard
+          label="My Task" value={stats.myTask} icon={SlidersHorizontal}
+          accent={isDark ? '#60a5fa' : COLORS.deepBlue}
+          active={showMyTasksOnly} isDark={isDark}
+          onClick={() => setShowMyTasksOnly(p => !p)}
+        />
 
         {/* 2. To Do */}
-        <StatCard label="To Do"       value={stats.todo}       color="text-red-600"   icon={Circle}
-          active={filterStatus === 'pending'}
-          activeClasses={{ bg: 'bg-red-50', border: 'border-red-300', ring: 'ring-red-100', icon: 'bg-red-100', iconFg: 'text-red-600', bar: 'bg-red-500' }}
-          onClick={() => setFilterStatus(filterStatus === 'pending' ? 'all' : 'pending')} />
+        <MetricCard
+          label="To Do" value={stats.todo} icon={Circle}
+          accent="#EF4444"
+          active={filterStatus === 'pending'} isDark={isDark}
+          onClick={() => setFilterStatus(filterStatus === 'pending' ? 'all' : 'pending')}
+        />
 
         {/* 3. In Progress */}
-        <StatCard label="In Progress" value={stats.inProgress} color="text-amber-600" icon={TrendingUp}
-          active={filterStatus === 'in_progress'}
-          activeClasses={{ bg: 'bg-amber-50', border: 'border-amber-300', ring: 'ring-amber-100', icon: 'bg-amber-100', iconFg: 'text-amber-600', bar: 'bg-amber-500' }}
-          onClick={() => setFilterStatus(filterStatus === 'in_progress' ? 'all' : 'in_progress')} />
+        <MetricCard
+          label="In Progress" value={stats.inProgress} icon={TrendingUp}
+          accent={COLORS.amber}
+          active={filterStatus === 'in_progress'} isDark={isDark}
+          onClick={() => setFilterStatus(filterStatus === 'in_progress' ? 'all' : 'in_progress')}
+        />
 
         {/* 4. Completed */}
-        <StatCard label="Completed"   value={stats.completed}  color="text-blue-600"  icon={CheckCircle2}
-          active={filterStatus === 'completed'}
-          activeClasses={{ bg: 'bg-blue-50', border: 'border-blue-300', ring: 'ring-blue-100', icon: 'bg-blue-100', iconFg: 'text-blue-600', bar: 'bg-blue-600' }}
-          onClick={() => setFilterStatus(filterStatus === 'completed' ? 'all' : 'completed')} />
+        <MetricCard
+          label="Completed" value={stats.completed} icon={CheckCircle2}
+          accent={COLORS.mediumBlue}
+          active={filterStatus === 'completed'} isDark={isDark}
+          progress={completionRate}
+          onClick={() => setFilterStatus(filterStatus === 'completed' ? 'all' : 'completed')}
+        />
 
         {/* 5. Overdue */}
-        <StatCard label="Overdue"     value={stats.overdue}    color="text-red-700"   icon={AlertCircle}
-          active={filterStatus === 'overdue'}
-          activeClasses={{ bg: 'bg-red-50', border: 'border-red-400', ring: 'ring-red-200', icon: 'bg-red-100', iconFg: 'text-red-700', bar: 'bg-red-700' }}
-          onClick={() => setFilterStatus(filterStatus === 'overdue' ? 'all' : 'overdue')} />
+        <MetricCard
+          label="Overdue" value={stats.overdue} icon={AlertCircle}
+          accent={COLORS.coral}
+          active={filterStatus === 'overdue'} isDark={isDark}
+          onClick={() => setFilterStatus(filterStatus === 'overdue' ? 'all' : 'overdue')}
+        />
 
-        {/* 6. Team Task — shows skeleton while users load; correct count + filter click when ready */}
-        <motion.button
-          whileHover={{ y: -2, boxShadow: '0 6px 20px 0 rgba(0,0,0,0.07)' }}
-          whileTap={{ scale: 0.97 }}
-          transition={{ type: 'spring', stiffness: 420, damping: 26 }}
-          onClick={() => {
-            if (!hasCrossVisibility || usersLoading) return;
-            // Toggle: if already filtering team, clear it; otherwise activate team filter
-            setFilterTeamOnly(prev => !prev);
-            setFilterAssignee('all');
-            setShowMyTasksOnly(false);
-          }}
-          className={`relative rounded-xl border p-4 text-left w-full overflow-hidden transition-colors duration-200
-            ${filterTeamOnly
-              ? isDark
-                ? 'bg-violet-900/20 border-violet-700 ring-1 ring-violet-800 shadow-sm'
-                : 'bg-violet-50 border-violet-300 ring-1 ring-violet-200 shadow-sm'
-              : hasCrossVisibility && stats.teamTask > 0
-              ? isDark
-                ? 'bg-violet-900/10 border-violet-800'
-                : 'bg-violet-50/50 border-violet-200'
-              : isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
-            }`}
-        >
-          <motion.div
-            initial={false}
-            animate={{ scaleX: filterTeamOnly ? 1 : 0, opacity: filterTeamOnly ? 1 : 0 }}
-            transition={{ duration: 0.22, ease: 'easeOut' }}
-            className="absolute top-0 left-0 right-0 h-[3px] origin-left rounded-t-xl bg-violet-500"
-          />
-          <div className="flex items-start justify-between">
-            <div className="flex-1 min-w-0 mr-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Team Task</p>
-              {usersLoading && hasCrossVisibility ? (
-                <div className="mt-1 h-8 w-12 rounded-lg animate-pulse bg-slate-200 dark:bg-slate-700" />
-              ) : (
-                <motion.p
-                  key={stats.teamTask}
-                  initial={{ opacity: 0, y: 5 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.25, ease: 'easeOut' }}
-                  className={`text-3xl font-bold leading-none ${hasCrossVisibility ? (isDark ? 'text-violet-400' : 'text-violet-700') : (isDark ? 'text-slate-600' : 'text-slate-300')}`}
-                >
-                  {stats.teamTask}
-                </motion.p>
-              )}
-              {/* Per-member breakdown */}
-              {!usersLoading && hasCrossVisibility && teamTaskBreakdown.length > 0 && (
-                <div className="mt-1.5 space-y-0.5">
-                  {teamTaskBreakdown.slice(0, 3).map(m => (
-                    <p key={m.id} className={`text-[9px] font-medium truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                      {m.name.split(' ')[0].toLowerCase()}: {m.pendingCount} pending
-                    </p>
-                  ))}
-                  {teamTaskBreakdown.length > 3 && (
-                    <p className={`text-[9px] ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>
-                      +{teamTaskBreakdown.length - 3} more
-                    </p>
-                  )}
-                </div>
-              )}
-              {!hasCrossVisibility && (
-                <p className={`text-[9px] mt-1 ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>cross visibility off</p>
-              )}
-              {hasCrossVisibility && !usersLoading && (
-                <p className={`text-[9px] mt-1 font-medium ${filterTeamOnly ? 'text-violet-500' : (isDark ? 'text-slate-500' : 'text-slate-400')}`}>
-                  {filterTeamOnly ? '✓ filtering team' : 'click to filter'}
-                </p>
-              )}
-            </div>
-            <div className={`p-2 rounded-lg transition-colors duration-200 ${hasCrossVisibility && (filterTeamOnly || stats.teamTask > 0) ? (isDark ? 'bg-violet-900/40' : 'bg-violet-100') : 'bg-slate-100'}`}>
-              <Users className={`h-4 w-4 ${hasCrossVisibility && (filterTeamOnly || stats.teamTask > 0) ? (isDark ? 'text-violet-400' : 'text-violet-600') : 'text-slate-400'}`} />
-            </div>
-          </div>
-        </motion.button>
+        {/* 6. Team Task — now uses TeamTaskCard for perfect alignment */}
+        <TeamTaskCard
+          stats={stats}
+          hasCrossVisibility={hasCrossVisibility}
+          usersLoading={usersLoading}
+          filterTeamOnly={filterTeamOnly}
+          setFilterTeamOnly={setFilterTeamOnly}
+          setFilterAssignee={setFilterAssignee}
+          setShowMyTasksOnly={setShowMyTasksOnly}
+          teamTaskBreakdown={teamTaskBreakdown}
+          isDark={isDark}
+        />
       </motion.div>
 
-      {/* ── Toolbar ──────────────────────────────────────────────────────────── */}
+      {/* ── TOOLBAR — removed My Tasks toggle, kept all filters ─────────── */}
       <motion.div variants={itemVariants}
-        className={`flex flex-wrap items-center gap-2 border rounded-xl px-4 py-3 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        className={`flex flex-wrap items-center gap-2 border rounded-2xl px-4 py-3 shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        {/* Search */}
         <div className="relative flex-1 min-w-40">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
           <Input placeholder="Search tasks…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-            className={`pl-9 h-8 text-sm rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400' : 'bg-slate-50 border-slate-200'}`} />
+            className={`pl-9 h-8 text-sm rounded-xl ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400' : 'bg-slate-50 border-slate-200'}`} />
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
           <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Status" /></SelectTrigger>
+            <SelectTrigger className={`h-8 w-32 text-xs rounded-xl ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Status" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
               <SelectItem value="pending">To Do</SelectItem>
@@ -1591,7 +1387,7 @@ export default function Tasks() {
           </Select>
 
           <Select value={filterPriority} onValueChange={setFilterPriority}>
-            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Priority" /></SelectTrigger>
+            <SelectTrigger className={`h-8 w-32 text-xs rounded-xl ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Priority" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Priorities</SelectItem>
               <SelectItem value="low">Low</SelectItem>
@@ -1602,7 +1398,7 @@ export default function Tasks() {
           </Select>
 
           <Select value={filterCategory} onValueChange={setFilterCategory}>
-            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Department" /></SelectTrigger>
+            <SelectTrigger className={`h-8 w-32 text-xs rounded-xl ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Department" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Depts</SelectItem>
               {TASK_CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
@@ -1610,16 +1406,15 @@ export default function Tasks() {
           </Select>
 
           <Select value={filterAssignee} onValueChange={setFilterAssignee}>
-            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Assignee" /></SelectTrigger>
+            <SelectTrigger className={`h-8 w-32 text-xs rounded-xl ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Assignee" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Assignees</SelectItem>
               {visibleUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
             </SelectContent>
           </Select>
 
-          <Select value={`${sortBy}-${sortDirection}`}
-            onValueChange={(v) => { const [sb, sd] = v.split('-'); setSortBy(sb); setSortDirection(sd); }}>
-            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Sort" /></SelectTrigger>
+          <Select value={`${sortBy}-${sortDirection}`} onValueChange={(v) => { const [sb, sd] = v.split('-'); setSortBy(sb); setSortDirection(sd); }}>
+            <SelectTrigger className={`h-8 w-32 text-xs rounded-xl ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Sort" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="due_date-asc">Due Date ↑</SelectItem>
               <SelectItem value="due_date-desc">Due Date ↓</SelectItem>
@@ -1628,27 +1423,21 @@ export default function Tasks() {
             </SelectContent>
           </Select>
 
-          <label className="flex items-center gap-1.5 cursor-pointer">
-            <Switch checked={showMyTasksOnly} onCheckedChange={setShowMyTasksOnly} className="scale-75" />
-            <span className="text-xs text-slate-500 whitespace-nowrap">My Tasks</span>
-          </label>
-
-          <div className="flex bg-slate-100 p-0.5 rounded-lg">
+          {/* View toggle */}
+          <div className={`flex p-0.5 rounded-xl ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
             <button onClick={() => setViewMode('list')}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all
-                ${viewMode === 'list' ? (isDark ? 'bg-slate-600 shadow-sm text-slate-100' : 'bg-white shadow-sm text-slate-800') : 'text-slate-500 hover:text-slate-700'}`}>
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${viewMode === 'list' ? (isDark ? 'bg-slate-600 shadow-sm text-slate-100' : 'bg-white shadow-sm text-slate-800') : 'text-slate-500 hover:text-slate-700'}`}>
               <List className="h-3.5 w-3.5" />
             </button>
             <button onClick={() => setViewMode('board')}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all
-                ${viewMode === 'board' ? (isDark ? 'bg-slate-600 shadow-sm text-slate-100' : 'bg-white shadow-sm text-slate-800') : 'text-slate-500 hover:text-slate-700'}`}>
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${viewMode === 'board' ? (isDark ? 'bg-slate-600 shadow-sm text-slate-100' : 'bg-white shadow-sm text-slate-800') : 'text-slate-500 hover:text-slate-700'}`}>
               <LayoutGrid className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>
       </motion.div>
 
-      {/* ── Active Filter Pills ───────────────────────────────────────────────── */}
+      {/* ── Active Filter Pills ──────────────────────────────────────────── */}
       <AnimatePresence>
         {activeFilters.length > 0 && (
           <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
@@ -1659,18 +1448,15 @@ export default function Tasks() {
                 {pill.label} <X className="h-3 w-3 ml-0.5" />
               </button>
             ))}
-            <button onClick={clearAllFilters} className="text-[11px] font-medium text-slate-400 hover:text-slate-600 px-2 py-1 transition-colors">
-              Clear all
-            </button>
+            <button onClick={clearAllFilters} className="text-[11px] font-medium text-slate-400 hover:text-slate-600 px-2 py-1 transition-colors">Clear all</button>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── List / Board view ─────────────────────────────────────────────────── */}
+      {/* ── List / Board ─────────────────────────────────────────────────── */}
       <div className="overflow-y-auto max-h-[calc(100vh-360px)]">
         {viewMode === 'list' ? (
           <motion.div className="space-y-1.5" variants={containerVariants}>
-            {/* Column headers */}
             <div
               className={`hidden sm:grid items-center pl-5 pr-3 py-2 text-[10px] font-bold uppercase tracking-widest select-none border-b mb-1.5
                 ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-100'}`}
@@ -1696,25 +1482,16 @@ export default function Tasks() {
               const stripeColor   = getStripeColor(task, taskIsOverdue);
               return (
                 <TaskRow key={task.id} task={task} index={index}
-                  isOverdue={taskIsOverdue} statusStyle={statusStyle}
-                  priorityStyle={priorityStyle} stripeColor={stripeColor}
-                  getUserName={getUserName} getClientName={getClientName}
-                  getRelativeDueDate={getRelativeDueDate}
-                  getChecklistProgress={getChecklistProgress}
-                  parseChecklist={parseChecklist}
-                  taskChecklists={taskChecklists}
-                  toggleChecklistItem={toggleChecklistItem}
+                  isOverdue={taskIsOverdue} statusStyle={statusStyle} priorityStyle={priorityStyle} stripeColor={stripeColor}
+                  getUserName={getUserName} getClientName={getClientName} getRelativeDueDate={getRelativeDueDate}
+                  getChecklistProgress={getChecklistProgress} parseChecklist={parseChecklist}
+                  taskChecklists={taskChecklists} toggleChecklistItem={toggleChecklistItem}
                   canModifyTask={canModifyTask} canDeleteTasks={canDeleteTasks}
-                  handleEdit={handleEdit} handleDelete={handleDelete}
-                  handleDuplicateTask={handleDuplicateTask}
-                  handleQuickStatusChange={handleQuickStatusChange}
-                  openTaskDetail={openTaskDetail}
-                  openCommentTaskId={openCommentTaskId}
-                  setOpenCommentTaskId={setOpenCommentTaskId}
-                  fetchComments={fetchComments}
-                  comments={comments} newComment={newComment}
-                  setNewComment={setNewComment}
-                  selectedTask={selectedTask} setSelectedTask={setSelectedTask}
+                  handleEdit={handleEdit} handleDelete={handleDelete} handleDuplicateTask={handleDuplicateTask}
+                  handleQuickStatusChange={handleQuickStatusChange} openTaskDetail={openTaskDetail}
+                  openCommentTaskId={openCommentTaskId} setOpenCommentTaskId={setOpenCommentTaskId}
+                  fetchComments={fetchComments} comments={comments} newComment={newComment}
+                  setNewComment={setNewComment} selectedTask={selectedTask} setSelectedTask={setSelectedTask}
                   handleAddComment={handleAddComment} user={user}
                 />
               );
@@ -1731,7 +1508,6 @@ export default function Tasks() {
             )}
           </motion.div>
         ) : (
-          /* Board View */
           <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-5" variants={containerVariants}>
             {[
               { status: 'pending',     title: 'To Do',       color: 'text-red-600',   bg: 'bg-red-500',   count: stats.todo },
@@ -1755,25 +1531,16 @@ export default function Tasks() {
                       const stripeColor   = getStripeColor(task, taskIsOverdue);
                       return (
                         <BoardCard key={task.id} task={task} index={index}
-                          isOverdue={taskIsOverdue} statusStyle={statusStyle}
-                          priorityStyle={priorityStyle} stripeColor={stripeColor}
-                          getUserName={getUserName} getClientName={getClientName}
-                          getRelativeDueDate={getRelativeDueDate}
-                          getChecklistProgress={getChecklistProgress}
-                          parseChecklist={parseChecklist}
-                          taskChecklists={taskChecklists}
-                          toggleChecklistItem={toggleChecklistItem}
+                          isOverdue={taskIsOverdue} statusStyle={statusStyle} priorityStyle={priorityStyle} stripeColor={stripeColor}
+                          getUserName={getUserName} getClientName={getClientName} getRelativeDueDate={getRelativeDueDate}
+                          getChecklistProgress={getChecklistProgress} parseChecklist={parseChecklist}
+                          taskChecklists={taskChecklists} toggleChecklistItem={toggleChecklistItem}
                           canModifyTask={canModifyTask} canDeleteTasks={canDeleteTasks}
-                          handleEdit={handleEdit} handleDelete={handleDelete}
-                          handleDuplicateTask={handleDuplicateTask}
-                          handleQuickStatusChange={handleQuickStatusChange}
-                          openTaskDetail={openTaskDetail}
-                          openCommentTaskId={openCommentTaskId}
-                          setOpenCommentTaskId={setOpenCommentTaskId}
-                          fetchComments={fetchComments}
-                          comments={comments} newComment={newComment}
-                          setNewComment={setNewComment}
-                          selectedTask={selectedTask} setSelectedTask={setSelectedTask}
+                          handleEdit={handleEdit} handleDelete={handleDelete} handleDuplicateTask={handleDuplicateTask}
+                          handleQuickStatusChange={handleQuickStatusChange} openTaskDetail={openTaskDetail}
+                          openCommentTaskId={openCommentTaskId} setOpenCommentTaskId={setOpenCommentTaskId}
+                          fetchComments={fetchComments} comments={comments} newComment={newComment}
+                          setNewComment={setNewComment} selectedTask={selectedTask} setSelectedTask={setSelectedTask}
                           handleAddComment={handleAddComment}
                         />
                       );
@@ -1791,14 +1558,13 @@ export default function Tasks() {
         )}
       </div>
 
-      {/* ── Task Detail Dialog ────────────────────────────────────────────────── */}
+      {/* ── Task Detail Dialog ───────────────────────────────────────────── */}
       <Dialog open={taskDetailOpen} onOpenChange={setTaskDetailOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl font-bold" style={{ color: COLORS.deepBlue }}>Task Details</DialogTitle>
             <DialogDescription className="sr-only">Full task details</DialogDescription>
           </DialogHeader>
-
           {selectedDetailTask && (() => {
             const taskIsOverdue  = isOverdue(selectedDetailTask);
             const displayStatus  = getDisplayStatus(selectedDetailTask);
@@ -1807,48 +1573,31 @@ export default function Tasks() {
             const checklistItems = parseChecklist(selectedDetailTask.description);
             const checkedItems   = taskChecklists[selectedDetailTask.id] || [];
             const progress       = getChecklistProgress(selectedDetailTask);
-
             return (
               <div className="space-y-5 mt-2">
                 <div>
                   <h2 className={`text-xl font-bold mb-2 leading-snug ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{selectedDetailTask.title}</h2>
                   <div className="flex flex-wrap gap-1.5">
-                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg ${statusStyle.bg} ${statusStyle.text}`}>
-                      {taskIsOverdue ? 'Overdue' : statusStyle.label}
-                    </span>
-                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg ${priorityStyle.bg} ${priorityStyle.text}`}>
-                      {priorityStyle.label} Priority
-                    </span>
-                    {selectedDetailTask.is_recurring && (
-                      <span className="text-xs font-semibold bg-purple-50 text-purple-700 px-2.5 py-1 rounded-lg">↺ Recurring</span>
-                    )}
-                    {selectedDetailTask.category && (
-                      <span className="text-xs font-semibold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-lg uppercase">
-                        {getCategoryLabel(selectedDetailTask.category)}
-                      </span>
-                    )}
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg ${statusStyle.bg} ${statusStyle.text}`}>{taskIsOverdue ? 'Overdue' : statusStyle.label}</span>
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg ${priorityStyle.bg} ${priorityStyle.text}`}>{priorityStyle.label} Priority</span>
+                    {selectedDetailTask.is_recurring && <span className="text-xs font-semibold bg-purple-50 text-purple-700 px-2.5 py-1 rounded-lg">↺ Recurring</span>}
+                    {selectedDetailTask.category && <span className="text-xs font-semibold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-lg uppercase">{getCategoryLabel(selectedDetailTask.category)}</span>}
                   </div>
                 </div>
-
                 {selectedDetailTask.description && (
                   <div className={`border rounded-xl p-4 ${isDark ? 'border-slate-600 bg-slate-700/40' : 'border-slate-200 bg-slate-50'}`}>
                     <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Notes</p>
                     <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{selectedDetailTask.description}</div>
                   </div>
                 )}
-
                 <div className="grid grid-cols-2 gap-3">
                   {[
                     { label: 'Assigned To', value: getUserName(selectedDetailTask.assigned_to) },
                     { label: 'Created By',  value: selectedDetailTask.created_by ? getUserName(selectedDetailTask.created_by) : '—' },
                     { label: 'Department',  value: getCategoryLabel(selectedDetailTask.category) },
                     { label: 'Client',      value: selectedDetailTask.client_id ? getClientName(selectedDetailTask.client_id) : '—' },
-                    { label: 'Due Date',    value: selectedDetailTask.due_date
-                        ? `${format(new Date(selectedDetailTask.due_date), 'MMM dd, yyyy')} · ${getRelativeDueDate(selectedDetailTask.due_date)}`
-                        : 'No due date' },
-                    { label: 'Recurrence', value: selectedDetailTask.is_recurring
-                        ? `Every ${selectedDetailTask.recurrence_interval} ${selectedDetailTask.recurrence_pattern}(s)`
-                        : 'One-time' },
+                    { label: 'Due Date',    value: selectedDetailTask.due_date ? `${format(new Date(selectedDetailTask.due_date), 'MMM dd, yyyy')} · ${getRelativeDueDate(selectedDetailTask.due_date)}` : 'No due date' },
+                    { label: 'Recurrence', value: selectedDetailTask.is_recurring ? `Every ${selectedDetailTask.recurrence_interval} ${selectedDetailTask.recurrence_pattern}(s)` : 'One-time' },
                   ].map(({ label, value }) => (
                     <div key={label} className={`border rounded-xl p-3.5 ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-white'}`}>
                       <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">{label}</p>
@@ -1856,24 +1605,10 @@ export default function Tasks() {
                     </div>
                   ))}
                 </div>
-
-                {selectedDetailTask.sub_assignees?.length > 0 && (
-                  <div className={`border rounded-xl p-3.5 ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Co-assignees</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {selectedDetailTask.sub_assignees.map(uid => (
-                        <span key={uid} className="text-xs font-medium bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg">{getUserName(uid)}</span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 {checklistItems.length > 0 && (
                   <div className="border border-emerald-200 rounded-xl p-4 bg-emerald-50">
                     <div className="flex items-center justify-between mb-3">
-                      <p className="text-xs font-bold uppercase tracking-widest text-emerald-700 flex items-center gap-1.5">
-                        <Check className="h-3.5 w-3.5" /> Compliance Checklist
-                      </p>
+                      <p className="text-xs font-bold uppercase tracking-widest text-emerald-700 flex items-center gap-1.5"><Check className="h-3.5 w-3.5" /> Compliance Checklist</p>
                       <span className="text-xs font-bold text-emerald-700">{checkedItems.length}/{checklistItems.length} · {progress}%</span>
                     </div>
                     <div className="h-1.5 bg-emerald-200 rounded-full mb-3 overflow-hidden">
@@ -1881,7 +1616,7 @@ export default function Tasks() {
                     </div>
                     <div className="space-y-2 max-h-60 overflow-y-auto">
                       {checklistItems.map((item, idx) => (
-                        <label key={idx} className="flex items-start gap-2.5 cursor-pointer group">
+                        <label key={idx} className="flex items-start gap-2.5 cursor-pointer">
                           <Checkbox checked={checkedItems.includes(idx)} onCheckedChange={() => toggleChecklistItem(selectedDetailTask.id, idx)} className="mt-0.5 flex-shrink-0" />
                           <span className={`text-sm leading-relaxed ${checkedItems.includes(idx) ? 'line-through text-slate-400' : 'text-slate-700'}`}>{item}</span>
                         </label>
@@ -1889,26 +1624,10 @@ export default function Tasks() {
                     </div>
                   </div>
                 )}
-
                 <div className={`flex gap-2 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-                  {canModifyTask(selectedDetailTask) && (
-                    <Button onClick={() => { handleEdit(selectedDetailTask); setTaskDetailOpen(false); }}
-                      className="h-9 text-sm rounded-lg bg-blue-700 hover:bg-blue-800 text-white gap-1.5">
-                      <Edit className="h-3.5 w-3.5" /> Edit
-                    </Button>
-                  )}
-                  {canModifyTask(selectedDetailTask) && (
-                    <Button variant="outline" onClick={() => { handleDuplicateTask(selectedDetailTask); setTaskDetailOpen(false); }}
-                      className="h-9 text-sm rounded-lg gap-1.5">
-                      <Copy className="h-3.5 w-3.5" /> Duplicate
-                    </Button>
-                  )}
-                  {canDeleteTasks && (
-                    <Button variant="outline" onClick={() => { handleDelete(selectedDetailTask.id); setTaskDetailOpen(false); }}
-                      className="h-9 text-sm rounded-lg text-red-600 hover:bg-red-50 border-red-200 gap-1.5">
-                      <Trash2 className="h-3.5 w-3.5" /> Delete
-                    </Button>
-                  )}
+                  {canModifyTask(selectedDetailTask) && <Button onClick={() => { handleEdit(selectedDetailTask); setTaskDetailOpen(false); }} className="h-9 text-sm rounded-lg bg-blue-700 hover:bg-blue-800 text-white gap-1.5"><Edit className="h-3.5 w-3.5" /> Edit</Button>}
+                  {canModifyTask(selectedDetailTask) && <Button variant="outline" onClick={() => { handleDuplicateTask(selectedDetailTask); setTaskDetailOpen(false); }} className="h-9 text-sm rounded-lg gap-1.5"><Copy className="h-3.5 w-3.5" /> Duplicate</Button>}
+                  {canDeleteTasks && <Button variant="outline" onClick={() => { handleDelete(selectedDetailTask.id); setTaskDetailOpen(false); }} className="h-9 text-sm rounded-lg text-red-600 hover:bg-red-50 border-red-200 gap-1.5"><Trash2 className="h-3.5 w-3.5" /> Delete</Button>}
                 </div>
               </div>
             );
@@ -1916,28 +1635,21 @@ export default function Tasks() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Workflow Library Dialog ───────────────────────────────────────────── */}
+      {/* ── Workflow Library ─────────────────────────────────────────────── */}
       <Dialog open={showWorkflowLibrary} onOpenChange={setShowWorkflowLibrary}>
         <DialogContent className="max-w-5xl max-h-[88vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold" style={{ color: COLORS.deepBlue }}>CA/CS Compliance Workflow Library</DialogTitle>
-            <DialogDescription className="text-sm text-slate-500">
-              14 professionally curated compliance workflows. Click any template to pre-fill a task.
-            </DialogDescription>
+            <DialogDescription className="text-sm text-slate-500">14 professionally curated compliance workflows. Click any template to pre-fill a task.</DialogDescription>
           </DialogHeader>
-
           <div className={`flex gap-3 sticky top-0 z-10 py-3 border-b ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-              <Input placeholder="Search templates…" value={workflowSearch}
-                onChange={(e) => setWorkflowSearch(e.target.value)} className="pl-9 h-9 text-sm" />
+              <Input placeholder="Search templates…" value={workflowSearch} onChange={(e) => setWorkflowSearch(e.target.value)} className="pl-9 h-9 text-sm" />
             </div>
             <Select value={workflowDeptFilter} onValueChange={setWorkflowDeptFilter}>
               <SelectTrigger className="w-44 h-9 text-sm"><SelectValue placeholder="Department" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                {DEPARTMENTS.map(d => <SelectItem key={d.value} value={d.value}>{d.label}</SelectItem>)}
-              </SelectContent>
+              <SelectContent><SelectItem value="all">All Departments</SelectItem>{DEPARTMENTS.map(d => <SelectItem key={d.value} value={d.value}>{d.label}</SelectItem>)}</SelectContent>
             </Select>
             <Select value={workflowFrequencyFilter} onValueChange={setWorkflowFrequencyFilter}>
               <SelectTrigger className="w-40 h-9 text-sm"><SelectValue placeholder="Frequency" /></SelectTrigger>
@@ -1946,11 +1658,9 @@ export default function Tasks() {
                 <SelectItem value="monthly">Monthly</SelectItem>
                 <SelectItem value="quarterly">Quarterly</SelectItem>
                 <SelectItem value="annual">Annual</SelectItem>
-                <SelectItem value="every 10 years">Every 10 Years</SelectItem>
               </SelectContent>
             </Select>
           </div>
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
             {filteredWorkflows.map((wf) => {
               const steps = parseChecklist(wf.description);
@@ -1961,12 +1671,8 @@ export default function Tasks() {
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">
-                          {getCategoryLabel(wf.category)}
-                        </span>
-                        <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md ${priorityStyle.bg} ${priorityStyle.text}`}>
-                          {priorityStyle.label}
-                        </span>
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">{getCategoryLabel(wf.category)}</span>
+                        <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md ${priorityStyle.bg} ${priorityStyle.text}`}>{priorityStyle.label}</span>
                       </div>
                       <h3 className={`font-bold group-hover:text-emerald-600 transition-colors leading-snug ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{wf.name}</h3>
                     </div>
@@ -1975,48 +1681,37 @@ export default function Tasks() {
                       <div className="text-[10px] text-slate-400">{wf.frequency}</div>
                     </div>
                   </div>
-                  <p className="text-xs text-slate-500 mb-3 line-clamp-1">{wf.title}</p>
                   <div className={`rounded-lg p-3 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
                     <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">Key Steps</p>
                     <div className="space-y-1">
                       {steps.slice(0, 4).map((s, i) => (
-                        <div key={i} className="flex items-center gap-1.5 text-[11px] text-slate-600 truncate">
-                          <Check className="h-3 w-3 text-emerald-500 flex-shrink-0" /> {s}
-                        </div>
+                        <div key={i} className="flex items-center gap-1.5 text-[11px] text-slate-600 truncate"><Check className="h-3 w-3 text-emerald-500 flex-shrink-0" /> {s}</div>
                       ))}
                       {steps.length > 4 && <div className="text-[11px] text-emerald-600 pl-4">+{steps.length - 4} more steps</div>}
                     </div>
                   </div>
                   <div className="flex items-center justify-between mt-3">
                     <span className="text-[11px] text-slate-400">Due in ~{wf.estimatedDays} days</span>
-                    <span className="text-[11px] font-semibold text-emerald-600 group-hover:underline flex items-center gap-1">
-                      Use Template <ArrowRight className="h-3 w-3" />
-                    </span>
+                    <span className="text-[11px] font-semibold text-emerald-600 group-hover:underline flex items-center gap-1">Use Template <ArrowRight className="h-3 w-3" /></span>
                   </div>
                 </button>
               );
             })}
-            {filteredWorkflows.length === 0 && (
-              <div className="col-span-2 text-center py-16 text-slate-400">No templates match your filters</div>
-            )}
+            {filteredWorkflows.length === 0 && <div className="col-span-2 text-center py-16 text-slate-400">No templates match your filters</div>}
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* ── Comments full dialog ──────────────────────────────────────────────── */}
+      {/* ── Comments dialog ──────────────────────────────────────────────── */}
       <Dialog open={showCommentsDialog} onOpenChange={setShowCommentsDialog}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="text-base font-bold">Comments — {selectedTask?.title}</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle className="text-base font-bold">Comments — {selectedTask?.title}</DialogTitle></DialogHeader>
           <div className="space-y-3 mt-2">
             <div className="max-h-60 overflow-y-auto space-y-2">
               {(comments[selectedTask?.id] || []).map((c, i) => (
                 <div key={i} className={`rounded-lg px-3 py-2.5 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
                   <p className="text-sm text-slate-700">{c.text}</p>
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    {getUserName(c.user_id)} · {format(new Date(c.created_at), 'MMM dd, hh:mm a')}
-                  </p>
+                  <p className="text-[10px] text-slate-400 mt-1">{getUserName(c.user_id)} · {format(new Date(c.created_at), 'MMM dd, hh:mm a')}</p>
                 </div>
               ))}
             </div>
@@ -2028,7 +1723,6 @@ export default function Tasks() {
         </DialogContent>
       </Dialog>
 
-      {/* Hidden CSV input */}
       <input type="file" accept=".csv" ref={fileInputRef} style={{ display: 'none' }} onChange={handleCsvUpload} />
     </motion.div>
   );
