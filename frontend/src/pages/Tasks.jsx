@@ -289,7 +289,7 @@ const TeamTaskCard = ({ stats, hasCrossVisibility, usersLoading, filterTeamOnly,
       <div className="flex items-start justify-between">
         <div className="min-w-0 flex-1 mr-2">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Team Task</p>
-          // NEW (fixed)
+          
           <motion.p
             key={stats.teamTask}
             initial={{ opacity: 0, y: 5 }}
