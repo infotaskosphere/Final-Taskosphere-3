@@ -841,9 +841,9 @@ export default function Dashboard() {
   const navigate = (path) => { window.location.href = path; };
 
   // ── API Base ───────────────────────────────────────────────────────────────
-  const API_BASE = (
-    typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL
-  ) || 'https://final-taskosphere-backend.onrender.com/api';
+  const RAW_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL)
+    || 'https://final-taskosphere-backend.onrender.com';
+  const API_BASE = RAW_URL.replace(/\/api\/?$/, '') + '/api';
 
   // Safety check — log the base URL once on mount
   React.useEffect(() => {
