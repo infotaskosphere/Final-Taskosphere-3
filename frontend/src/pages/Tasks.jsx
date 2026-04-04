@@ -289,20 +289,17 @@ const TeamTaskCard = ({ stats, hasCrossVisibility, usersLoading, filterTeamOnly,
       <div className="flex items-start justify-between">
         <div className="min-w-0 flex-1 mr-2">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Team Task</p>
-          {usersLoading && hasCrossVisibility ? (
-            <div className="mt-1 h-8 w-12 rounded-lg animate-pulse bg-slate-200 dark:bg-slate-700" />
-          ) : (
-            <motion.p
-              key={stats.teamTask}
-              initial={{ opacity: 0, y: 5 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.25 }}
-              className="text-2xl font-bold mt-1 tracking-tight"
-              style={{ color: hasCrossVisibility ? (isDark ? '#a78bfa' : '#7c3aed') : (isDark ? '#475569' : '#94a3b8') }}
-            >
-              {hasCrossVisibility ? stats.teamTask : 0}
-            </motion.p>
-          )}
+          // NEW (fixed)
+          <motion.p
+            key={stats.teamTask}
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25 }}
+            className="text-2xl font-bold mt-1 tracking-tight"
+            style={{ color: hasCrossVisibility ? (isDark ? '#a78bfa' : '#7c3aed') : (isDark ? '#475569' : '#94a3b8') }}
+          >
+            {hasCrossVisibility ? stats.teamTask : 0}
+          </motion.p>
 
           {/* Per-member breakdown — compact, matches dashboard */}
           {!usersLoading && hasCrossVisibility && teamTaskBreakdown.length > 0 && (
@@ -335,8 +332,9 @@ const TeamTaskCard = ({ stats, hasCrossVisibility, usersLoading, filterTeamOnly,
       <div className={`flex items-center gap-1 mt-3 text-xs font-medium transition-colors ${hasCrossVisibility ? 'group-hover:text-violet-500' : ''} ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
         {hasCrossVisibility ? (
           <>
-            <span>{usersLoading ? 'Loading…' : filterTeamOnly ? '✓ filtering team' : 'click to filter'}</span>
-            {!usersLoading && <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />}
+            <span>{filterTeamOnly ? '✓ filtering team' : 'click to filter'}</span>
+            <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
+           
           </>
         ) : (
           <span>cross visibility off</span>
@@ -793,10 +791,12 @@ export default function Tasks() {
   }, [isAdmin, user]);
 
   const crossVisibilityUserIds = React.useMemo(() => {
-    if (isAdmin) return users.map(u => u.id).filter(id => id !== user?.id);
+    if (isAdmin) {
+      return [...new Set(tasks.map(t => t.assigned_to).filter(id => id && id !== user?.id))];
+    }
     const perms = user?.permissions || {};
     return (perms.view_other_tasks || []).filter(id => id !== user?.id);
-  }, [isAdmin, user, users]);
+  }, [isAdmin, user, users, tasks]);
 
   const visibleUsers = React.useMemo(() => {
     if (isAdmin) return users;
@@ -957,8 +957,9 @@ export default function Tasks() {
     if (!hasCrossVisibility || crossVisibilityUserIds.length === 0) return [];
     return crossVisibilityUserIds.map(uid => {
       const member = users.find(u => u.id === uid);
+      const nameFromTask = tasks.find(t => t.assigned_to === uid)?.assigned_to_name;
       const pendingCount = tasks.filter(t => (t.assigned_to === uid || t.sub_assignees?.includes(uid)) && t.status !== 'completed').length;
-      return { id: uid, name: member?.full_name || 'Unknown', pendingCount };
+      return { id: uid, name: member?.full_name || nameFromTask || 'Unknown', pendingCount };
     }).filter(m => m.pendingCount > 0);
   }, [hasCrossVisibility, crossVisibilityUserIds, tasks, users]);
 
@@ -1076,26 +1077,17 @@ export default function Tasks() {
 
             {/* Right — action buttons */}
             <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
-              {/* Total Tasks — admin only */}
-              {isAdmin && (
-                <motion.button
-                  whileHover={{ scale: 1.04, y: -1, transition: springPhysics.card }}
-                  whileTap={{ scale: 0.97 }}
+            {/* Total Tasks — admin only */}
+            {isAdmin && (
+              <>
+                <Button variant="ghost" size="sm"
                   onClick={() => { setFilterStatus('all'); setFilterAssignee('all'); setShowMyTasksOnly(false); setFilterTeamOnly(false); }}
-                  className="flex items-center gap-2 px-3.5 py-2 rounded-xl transition-all"
-                  style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.25)', backdropFilter: 'blur(6px)' }}
-                >
-                  <div className="p-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.15)' }}>
-                    <Target className="h-3.5 w-3.5 text-white" />
-                  </div>
-                  <div className="text-left">
-                    <p className="text-[9px] font-semibold uppercase tracking-wider text-white/60">Total Tasks</p>
-                    <p className="text-sm font-bold text-white leading-none mt-0.5">{stats.total}</p>
-                  </div>
-                  <ChevronRight className="h-3.5 w-3.5 text-white/40 flex-shrink-0" />
-                </motion.button>
-              )}
-
+                  className="h-8 text-xs rounded-xl gap-1.5 text-white/80 hover:text-white hover:bg-white/15 border border-white/20">
+                  <Target className="h-3.5 w-3.5" /> Total: {stats.total}
+                </Button>
+                <div className="h-8 w-px bg-white/20 hidden md:block" />
+              </>
+            )}
               {/* Separator */}
               <div className="h-8 w-px bg-white/20 hidden md:block" />
 
