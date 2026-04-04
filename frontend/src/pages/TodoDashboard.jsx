@@ -950,14 +950,24 @@ export default function TodoDashboard() {
   const permittedUsers = useMemo(() => {
     const selfId = user?.id;
     if (isAdmin) return allUsers.filter(u => (u.id || u._id) !== selfId);
-    if (isManager) return allUsers.filter(u => (u.id || u._id) !== selfId);
+    // Managers only see others if they have explicit view_other_todos permission
+    if (isManager) {
+      const list = Array.isArray(user?.permissions?.view_other_todos)
+        ? user.permissions.view_other_todos.filter(id => id !== 'everyone')
+        : [];
+      if (canSeeEveryone) return allUsers.filter(u => (u.id || u._id) !== selfId);
+      if (list.length > 0) return allUsers.filter(u => list.includes(u.id || u._id) && (u.id || u._id) !== selfId);
+      return []; // No cross-visibility → no dropdown entries
+    }
+    // Regular staff: only show users explicitly listed in permissions
     const list = Array.isArray(user?.permissions?.view_other_todos)
       ? user.permissions.view_other_todos.filter(id => id !== 'everyone')
       : [];
     return allUsers.filter(u => list.includes(u.id || u._id) && (u.id || u._id) !== selfId);
-  }, [isAdmin, isManager, allUsers, user]);
+  }, [isAdmin, isManager, allUsers, user, canSeeEveryone]);
 
-  const showDropdown = isAdmin || isManager || permittedUsers.length > 0 || canSeeEveryone;
+  // Only show the dropdown if the user actually has someone else to view
+  const showDropdown = isAdmin || canSeeEveryone || permittedUsers.length > 0;
 
   // ── Resolved user id ───────────────────────────────────────────────────────
   const resolvedUserId = useMemo(() => {
