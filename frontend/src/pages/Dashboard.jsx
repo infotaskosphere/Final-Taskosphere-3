@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import useDark from '../hooks/useDark';
 
 import { motion, AnimatePresence } from 'framer-motion';
@@ -840,7 +841,7 @@ export default function Dashboard() {
   };
 
   const hasPermission = () => true;
-  const navigate = (path) => { window.location.href = path; };
+  const navigate = useNavigate();
 
   // ── API Base ───────────────────────────────────────────────────────────────
   const RAW_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL)
