@@ -320,6 +320,9 @@ async def startup_event():
     # Scheduled jobs=====================================================================
     try:
         scheduler.add_job(fetch_indian_holidays_task, 'cron', day=1, hour=0, minute=5)
+        # Also run immediately on startup so holidays are available from day 1
+        scheduler.add_job(fetch_indian_holidays_task, 'date',
+                          run_date=datetime.now(pytz.timezone("Asia/Kolkata")))
         # Absent marking job — fires every working day at 19:00 IST
         scheduler.add_job(
             mark_absent_users_task,
@@ -474,30 +477,34 @@ def fetch_indian_holidays_task():
         async def _async_fetch():
             try:
                 now = datetime.now(IST)
-                year = now.year
-                month = now.month
-                url = f"https://date.nager.at/api/v3/PublicHolidays/{year}/IN"
-                response = requests.get(url, timeout=10)
-                if response.status_code == 200:
+                # Sync current + next year so holidays are never missing mid-year
+                for year in [now.year, now.year + 1]:
+                    url = f"https://date.nager.at/api/v3/PublicHolidays/{year}/IN"
+                    response = requests.get(url, timeout=10)
+                    if response.status_code != 200:
+                        continue
                     external_holidays = response.json()
                     count = 0
                     for h in external_holidays:
-                        h_date_obj = datetime.strptime(h['date'], '%Y-%m-%d').date()
-                        if h_date_obj.month == month:
-                            date_str = h_date_obj.isoformat()
-                            # FIX: {"_id": 0} projection
-                            existing = await db.holidays.find_one({"date": date_str}, {"_id": 0})
-                            if not existing:
-                                new_holiday = {
-                                    "date": date_str,
-                                    "name": h['localName'],
-                                    "status": "pending",
-                                    "type": "public",
-                                    "created_at": datetime.now(IST).isoformat()
-                                }
-                                await db.holidays.insert_one(new_holiday)
-                                count += 1
-                    logger.info(f"Auto-fetched {count} holidays for {now.strftime('%B %Y')}")
+                        date_str = h['date']
+                        existing = await db.holidays.find_one({"date": date_str}, {"_id": 0})
+                        if not existing:
+                            new_holiday = {
+                                "date": date_str,
+                                "name": h.get('localName') or h.get('name', 'Holiday'),
+                                "status": "confirmed",
+                                "type": "public",
+                                "created_at": datetime.now(IST).isoformat()
+                            }
+                            await db.holidays.insert_one(new_holiday)
+                            count += 1
+                        elif existing.get("status") not in ("confirmed", "rejected"):
+                            # Upgrade any pending / unset → confirmed automatically
+                            await db.holidays.update_one(
+                                {"date": date_str},
+                                {"$set": {"status": "confirmed"}}
+                            )
+                    logger.info(f"Auto-synced holidays for {year}: {count} new")
             except Exception as e:
                 logger.error(f"Holiday Autofetch Failed: {str(e)}")
 
@@ -4342,12 +4349,58 @@ async def auto_daily_reminder(request: Request, call_next):
 # ==================== HOLIDAY ROUTES ====================
 @api_router.get("/holidays", response_model=list[HolidayResponse])
 async def get_holidays(current_user: User = Depends(get_current_user)):
-    if current_user.role == "admin":
-        query = {}
-    else:
-        query = {"status": "confirmed"}
+    # Return all non-rejected holidays to all users — no manual confirmation step
+    query = {"status": {"$ne": "rejected"}}
     holidays = await db.holidays.find(query, {"_id": 0}).sort("date", 1).to_list(500)
     return holidays
+
+
+@api_router.post("/holidays/auto-sync")
+async def auto_sync_holidays(current_user: User = Depends(get_current_user)):
+    """
+    Fetches Indian public holidays for current + next year from date.nager.at
+    and saves them as 'confirmed'. Idempotent — safe to call any number of times.
+    Also upgrades any existing 'pending' holidays to 'confirmed' automatically.
+    """
+    import httpx as _httpx
+    now = datetime.now(IST)
+    added = 0
+    upgraded = 0
+    errors = []
+
+    for year in [now.year, now.year + 1]:
+        try:
+            async with _httpx.AsyncClient(timeout=10) as http:
+                resp = await http.get(
+                    f"https://date.nager.at/api/v3/PublicHolidays/{year}/IN"
+                )
+            if resp.status_code != 200:
+                errors.append(f"API {resp.status_code} for {year}")
+                continue
+            for h in resp.json():
+                date_str = h["date"]
+                name     = h.get("localName") or h.get("name", "Holiday")
+                existing = await db.holidays.find_one({"date": date_str}, {"_id": 0})
+                if not existing:
+                    await db.holidays.insert_one({
+                        "date": date_str,
+                        "name": name,
+                        "status": "confirmed",
+                        "type": "public",
+                        "created_at": now.isoformat(),
+                    })
+                    added += 1
+                elif existing.get("status") not in ("confirmed", "rejected"):
+                    await db.holidays.update_one(
+                        {"date": date_str},
+                        {"$set": {"status": "confirmed"}}
+                    )
+                    upgraded += 1
+        except Exception as e:
+            errors.append(f"{year}: {e}")
+
+    logger.info(f"auto-sync holidays: +{added} new, {upgraded} upgraded — by {current_user.email}")
+    return {"added": added, "upgraded": upgraded, "errors": errors}
 
 
 @api_router.post("/holidays", response_model=HolidayResponse)
