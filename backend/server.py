@@ -962,8 +962,16 @@ async def update_todo(
 # REGISTER Endpoint
 @api_router.post("/auth/register", response_model=Token)
 async def register(user_data: UserCreate, current_user: User = Depends(get_current_user)):
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    # PERMISSION MATRIX (updated):
+    # Admin   → can register users with any role
+    # Manager → can register staff users only (if can_manage_users is True)
+    # Staff   → can register staff users only (if can_manage_users is True)
+    perms = get_user_permissions(current_user)
+    is_admin = current_user.role == "admin"
+    can_manage = perms.get("can_manage_users", False)
+
+    if not is_admin and not can_manage:
+        raise HTTPException(status_code=403, detail="You do not have permission to register users")
 
     existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
     if existing:
@@ -977,7 +985,7 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
         if current_user.role != "admin":
             raise HTTPException(
                 status_code=400,
-                detail="Only staff role can be assigned during registration"
+                detail="Only staff role can be assigned during registration by non-admin users"
             )
 
     role_val = requested_role
@@ -1075,7 +1083,12 @@ async def get_me(current_user: User = Depends(get_current_user)):
 
 
 @api_router.post("/users/{user_id}/approve")
-async def approve_user(user_id: str, current_user: User = Depends(require_admin)):
+async def approve_user(user_id: str, current_user: User = Depends(get_current_user)):
+    # PERMISSION MATRIX (updated): Admin or users with can_manage_users can approve
+    perms = get_user_permissions(current_user)
+    if current_user.role != "admin" and not perms.get("can_manage_users", False):
+        raise HTTPException(status_code=403, detail="You do not have permission to approve users")
+
     existing = await db.users.find_one({"id": user_id}, {"_id": 0})
 
     if not existing:
@@ -1109,7 +1122,12 @@ async def approve_user(user_id: str, current_user: User = Depends(require_admin)
 
 
 @api_router.post("/users/{user_id}/reject")
-async def reject_user(user_id: str, current_user: User = Depends(require_admin)):
+async def reject_user(user_id: str, current_user: User = Depends(get_current_user)):
+    # PERMISSION MATRIX (updated): Admin or users with can_manage_users can reject
+    perms = get_user_permissions(current_user)
+    if current_user.role != "admin" and not perms.get("can_manage_users", False):
+        raise HTTPException(status_code=403, detail="You do not have permission to reject users")
+
     existing = await db.users.find_one({"id": user_id}, {"_id": 0})
 
     if not existing:
@@ -4123,10 +4141,15 @@ async def get_activity_summary(
     date_to: Optional[str] = None,
     current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
-    if current_user.role == "staff":
-        raise HTTPException(status_code=403, detail="Not allowed")
+    # PERMISSION MATRIX (updated):
+    # Staff   → can view own activity only
+    # Manager → can view own + same-department team activity (Own + Team)
+    # Admin   → can view all activity
     query = {}
-    if user_id:
+    if current_user.role == "staff":
+        # Staff: always restrict to own data regardless of user_id param
+        query["user_id"] = current_user.id
+    elif user_id:
         # SCOPE: Manager sees only same-department users
         # DATA_ACCESS_RULE: resource.user_id == user.id OR resource.user_id IN SAME_DEPARTMENT_USERS
         if current_user.role == "manager":
@@ -4224,8 +4247,17 @@ async def get_user_activity(
     limit: int = 100,
     current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    # PERMISSION MATRIX (updated):
+    # Staff   → own activity only
+    # Manager → own + same-department team activity (Own + Team)
+    # Admin   → any user's activity
+    if current_user.role == "staff":
+        if user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="You can only view your own activity")
+    elif current_user.role == "manager":
+        team_ids = await get_team_user_ids(current_user.id)
+        if user_id != current_user.id and user_id not in team_ids:
+            raise HTTPException(status_code=403, detail="User not in your department")
     activities = await db.staff_activity.find({"user_id": user_id}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
     return activities
 
