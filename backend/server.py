@@ -802,18 +802,6 @@ async def get_todos(
             query = {"user_id": user_id}
         else:
             query = {"user_id": current_user.id}
-@api_router.get("/todos")
-async def get_todos(
-    user_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    if current_user.role == "admin":
-        if user_id == "all":
-            query = {}
-        elif user_id:
-            query = {"user_id": user_id}
-        else:
-            query = {"user_id": current_user.id}
 
     elif current_user.role == "manager":
         # SCOPE: OWN + SAME_DEPARTMENT
