@@ -908,7 +908,7 @@ export default function Dashboard() {
 
   // ── Fetch All Dashboard Data ───────────────────────────────────────────────
   const fetchDashboardData = React.useCallback(async () => {
-  setDataLoading(true);
+    setDataLoading(true);
 
   // ── Wave 1: critical path ──────────────────────────────────────────────
   try {
