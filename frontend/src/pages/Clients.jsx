@@ -1,5 +1,6 @@
 import Papa from 'papaparse/papaparse.js';
 import { useDark } from '@/hooks/useDark';
+import GifLoader from '@/components/ui/GifLoader.jsx';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -679,10 +680,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
           {activeTab === 'invoices' && (
             <div className="p-6 space-y-4">
               {invoicesLoading ? (
-                <div className="flex flex-col items-center justify-center py-16 gap-3">
-                  <div className="w-8 h-8 rounded-full border-2 border-slate-200 border-t-blue-500 animate-spin" />
-                  <p className="text-xs text-slate-400">Loading invoices…</p>
-                </div>
+                <GifLoader />
               ) : clientInvoices.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 text-slate-400">
                   <FileText className="h-10 w-10 mb-3 opacity-25" />
@@ -2260,7 +2258,7 @@ export default function Clients() {
               </div>
             </div>
           </div>
-          {mdsPreviewLoading && <div className="flex flex-col items-center justify-center py-20 gap-4"><div className="w-10 h-10 rounded-full border-2 border-slate-200 border-t-blue-500 animate-spin" /><p className="text-sm text-slate-500 font-medium">Parsing Excel sheets…</p></div>}
+          {mdsPreviewLoading && <GifLoader />}
           {!mdsPreviewLoading && mdsForm && (
             <div className="p-7 space-y-6">
               <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
