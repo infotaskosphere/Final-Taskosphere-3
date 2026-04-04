@@ -338,6 +338,49 @@ async def startup_event():
     except Exception as e:
         logger.error(f"APScheduler startup failed: {e}")
 
+    # ── AUTO-SYNC HOLIDAYS ON EVERY BOOT ─────────────────────────────────────
+    # Runs async in the background — never blocks startup.
+    # Fetches Indian public holidays (current + next year) from date.nager.at
+    # and saves them all as 'confirmed'. Any existing 'pending' ones are upgraded.
+    async def _boot_holiday_sync():
+        try:
+            import httpx as _httpx
+            now_ist = datetime.now(pytz.timezone("Asia/Kolkata"))
+            total_added = 0
+            for year in [now_ist.year, now_ist.year + 1]:
+                try:
+                    async with _httpx.AsyncClient(timeout=10) as http:
+                        resp = await http.get(
+                            f"https://date.nager.at/api/v3/PublicHolidays/{year}/IN"
+                        )
+                    if resp.status_code != 200:
+                        continue
+                    for h in resp.json():
+                        date_str = h["date"]
+                        name     = h.get("localName") or h.get("name", "Holiday")
+                        existing = await db.holidays.find_one({"date": date_str}, {"_id": 0})
+                        if not existing:
+                            await db.holidays.insert_one({
+                                "date":       date_str,
+                                "name":       name,
+                                "status":     "confirmed",
+                                "type":       "public",
+                                "created_at": now_ist.isoformat(),
+                            })
+                            total_added += 1
+                        elif existing.get("status") not in ("confirmed", "rejected"):
+                            await db.holidays.update_one(
+                                {"date": date_str},
+                                {"$set": {"status": "confirmed"}}
+                            )
+                except Exception as year_err:
+                    logger.warning(f"Holiday sync for {year} failed: {year_err}")
+            logger.info(f"Boot holiday sync complete: {total_added} new holidays added")
+        except Exception as e:
+            logger.warning(f"Boot holiday sync failed (non-fatal): {e}")
+
+    asyncio.create_task(_boot_holiday_sync())
+
         # 🔥 AUTO MIGRATION: Add consent_given for old users
     try:
         result = await db.users.update_many(
