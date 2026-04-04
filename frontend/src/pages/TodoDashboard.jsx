@@ -1497,9 +1497,9 @@ export default function TodoDashboard() {
                 </motion.div>
 
                 {/* AI Audit */}
-                <motion.div variants={itemVariants}>
-                  <SectionCard>
-                    <div className="p-4">
+                <motion.div variants={itemVariants} className="flex-1">
+                  <SectionCard className="h-full">
+                    <div className="p-4 h-full flex flex-col">
                       <div className="flex items-center gap-3">
                         <div className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-900/40">
                           <Sparkles className="h-4 w-4 text-purple-500" />
@@ -1538,131 +1538,7 @@ export default function TodoDashboard() {
                     </div>
                   </SectionCard>
                 </motion.div>
-
-                {/* Focus Board — fills remaining height to align with todo list */}
-                <motion.div variants={itemVariants} className="flex-1 flex flex-col min-h-0">
-                  <SectionCard className="flex-1 flex flex-col h-full">
-                    <CardHeaderRow
-                      iconBg="bg-amber-50 dark:bg-amber-900/40"
-                      icon={<Target className="h-4 w-4 text-amber-500" />}
-                      title="Focus Board"
-                      subtitle="Today's priority queue"
-                      action={
-                        stats.overdue > 0 ? (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400">
-                            {stats.overdue} overdue
-                          </span>
-                        ) : stats.pending > 0 ? (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400">
-                            {stats.pending} pending
-                          </span>
-                        ) : null
-                      }
-                    />
-                    <div className="flex-1 flex flex-col p-4 gap-3 min-h-0">
-                      {/* Priority score ring */}
-                      <div className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-700/30">
-                        <div className="relative w-12 h-12 flex-shrink-0">
-                          <svg viewBox="0 0 44 44" className="w-12 h-12 -rotate-90">
-                            <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none"
-                              stroke={isDark ? '#334155' : '#e2e8f0'} />
-                            <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none"
-                              strokeDasharray={`${(stats.healthScore / 100) * 106.8} 106.8`}
-                              strokeLinecap="round"
-                              stroke={stats.healthScore >= 80 ? COLORS.emeraldGreen : stats.healthScore >= 50 ? COLORS.amber : COLORS.coral} />
-                          </svg>
-                          <span className="absolute inset-0 flex items-center justify-center text-[11px] font-black"
-                            style={{ color: stats.healthScore >= 80 ? COLORS.emeraldGreen : stats.healthScore >= 50 ? COLORS.amber : COLORS.coral }}>
-                            {stats.healthScore}
-                          </span>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Health Score</p>
-                          <p className="text-sm font-bold mt-0.5" style={{ color: stats.healthScore >= 80 ? COLORS.emeraldGreen : stats.healthScore >= 50 ? COLORS.amber : COLORS.coral }}>
-                            {stats.healthScore >= 80 ? 'Excellent' : stats.healthScore >= 50 ? 'Fair' : 'Needs Work'}
-                          </p>
-                          <p className="text-[10px] text-slate-400 mt-0.5">
-                            {stats.completed}/{stats.total} done
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Top priority todos */}
-                      <div className="flex-1 flex flex-col min-h-0">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
-                          {stats.overdue > 0 ? '🔥 Clear These First' : '📌 Up Next'}
-                        </p>
-                        <div className="flex-1 overflow-y-auto todo-slim space-y-1.5" style={{ maxHeight: 180 }}>
-                          {(() => {
-                            const overdueTodos = todos.filter(t => {
-                              if (t.is_completed === true || t.status === 'completed') return false;
-                              if (!t.due_date) return false;
-                              try { return isPast(parseISO(t.due_date)); } catch { return false; }
-                            });
-                            const pendingTodos = todos.filter(t => {
-                              if (t.is_completed === true || t.status === 'completed') return false;
-                              if (!t.due_date) return true;
-                              try { return !isPast(parseISO(t.due_date)); } catch { return true; }
-                            });
-                            const focusList = [...overdueTodos, ...pendingTodos].slice(0, 5);
-                            if (focusList.length === 0) return (
-                              <div className="flex flex-col items-center justify-center py-6 gap-2">
-                                <CheckCircle2 size={22} className="text-emerald-400" />
-                                <p className="text-xs font-semibold text-slate-400">All clear — nothing pending!</p>
-                              </div>
-                            );
-                            return focusList.map((t, i) => {
-                              const isOvrd = t.due_date && !t.is_completed ? (() => { try { return isPast(parseISO(t.due_date)); } catch { return false; } })() : false;
-                              return (
-                                <motion.div
-                                  key={t.id || t._id}
-                                  initial={{ opacity: 0, x: -6 }}
-                                  animate={{ opacity: 1, x: 0 }}
-                                  transition={{ delay: i * 0.04 }}
-                                  onClick={() => setSelectedTodo(t)}
-                                  className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border cursor-pointer group transition-all hover:shadow-sm"
-                                  style={{
-                                    borderColor: isOvrd ? (isDark ? '#7f1d1d' : '#fecaca') : (isDark ? '#334155' : '#e2e8f0'),
-                                    backgroundColor: isOvrd ? (isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2') : (isDark ? 'rgba(255,255,255,0.02)' : '#fafafa'),
-                                  }}
-                                >
-                                  <span className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-black"
-                                    style={{ backgroundColor: isOvrd ? `${COLORS.coral}18` : `${COLORS.mediumBlue}12`, color: isOvrd ? COLORS.coral : COLORS.mediumBlue }}>
-                                    {i + 1}
-                                  </span>
-                                  <span className="flex-1 text-xs font-medium truncate" style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>
-                                    {t.title}
-                                  </span>
-                                  {isOvrd && (
-                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-500 flex-shrink-0">
-                                      Late
-                                    </span>
-                                  )}
-                                  <ChevronRight size={11} className="text-slate-300 dark:text-slate-600 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                </motion.div>
-                              );
-                            });
-                          })()}
-                        </div>
-                      </div>
-
-                      {/* Quick tip */}
-                      {stats.total > 0 && (
-                        <div className="pt-3 border-t border-slate-100 dark:border-slate-700 flex items-start gap-2">
-                          <Zap size={11} className="text-amber-400 mt-0.5 flex-shrink-0" />
-                          <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 leading-relaxed">
-                            {stats.overdue > 0
-                              ? `Tip: Knock out ${Math.min(stats.overdue, 3)} overdue items today to boost your score by ${Math.min(stats.overdue, 3) * 10}pts.`
-                              : stats.pending > 3
-                              ? `Tip: Focus on 3 todos at a time. You have ${stats.pending} pending — pick the most impactful ones.`
-                              : `Tip: You're almost there! Complete your last ${stats.pending} ${stats.pending === 1 ? 'todo' : 'todos'} to hit 100%.`
-                            }
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </SectionCard>
-                </motion.div>
+                
               </div>
 
               {/* RIGHT — Todo list */}
@@ -1763,9 +1639,157 @@ export default function TodoDashboard() {
                 </motion.div>
               </div>
             </div>
+
+            {/* ── Focus Board — Full-width horizontal card below both columns ── */}
+            <motion.div variants={itemVariants}>
+              <SectionCard>
+                <div className="p-5">
+                  <div className="flex flex-col lg:flex-row gap-6">
+
+                    {/* Left section: header + health score ring */}
+                    <div className="flex items-start gap-4 lg:w-64 flex-shrink-0">
+                      <div className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-900/40 flex-shrink-0 mt-0.5">
+                        <Target className="h-4 w-4 text-amber-500" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Focus Board</h3>
+                        <p className="text-xs text-slate-400 dark:text-slate-500 mb-3">Today's priority queue</p>
+                        <div className="flex items-center gap-3">
+                          <div className="relative w-14 h-14 flex-shrink-0">
+                            <svg viewBox="0 0 44 44" className="w-14 h-14 -rotate-90">
+                              <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none"
+                                stroke={isDark ? '#334155' : '#e2e8f0'} />
+                              <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none"
+                                strokeDasharray={`${(stats.healthScore / 100) * 106.8} 106.8`}
+                                strokeLinecap="round"
+                                stroke={stats.healthScore >= 80 ? COLORS.emeraldGreen : stats.healthScore >= 50 ? COLORS.amber : COLORS.coral} />
+                            </svg>
+                            <span className="absolute inset-0 flex items-center justify-center text-[12px] font-black"
+                              style={{ color: stats.healthScore >= 80 ? COLORS.emeraldGreen : stats.healthScore >= 50 ? COLORS.amber : COLORS.coral }}>
+                              {stats.healthScore}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Health Score</p>
+                            <p className="text-sm font-bold mt-0.5" style={{ color: stats.healthScore >= 80 ? COLORS.emeraldGreen : stats.healthScore >= 50 ? COLORS.amber : COLORS.coral }}>
+                              {stats.healthScore >= 80 ? 'Excellent' : stats.healthScore >= 50 ? 'Fair' : 'Needs Work'}
+                            </p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">{stats.completed}/{stats.total} done</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Vertical divider */}
+                    <div className="hidden lg:block w-px bg-slate-100 dark:bg-slate-700 flex-shrink-0" />
+
+                    {/* Middle section: priority todo grid */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2.5">
+                        {stats.overdue > 0 ? '🔥 Clear These First' : '📌 Up Next'}
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {(() => {
+                          const overdueTodos = todos.filter(t => {
+                            if (t.is_completed === true || t.status === 'completed') return false;
+                            if (!t.due_date) return false;
+                            try { return isPast(parseISO(t.due_date)); } catch { return false; }
+                          });
+                          const pendingTodos = todos.filter(t => {
+                            if (t.is_completed === true || t.status === 'completed') return false;
+                            if (!t.due_date) return true;
+                            try { return !isPast(parseISO(t.due_date)); } catch { return true; }
+                          });
+                          const focusList = [...overdueTodos, ...pendingTodos].slice(0, 6);
+                          if (focusList.length === 0) return (
+                            <div className="col-span-3 flex flex-col items-center justify-center py-4 gap-2">
+                              <CheckCircle2 size={20} className="text-emerald-400" />
+                              <p className="text-xs font-semibold text-slate-400">All clear — nothing pending!</p>
+                            </div>
+                          );
+                          return focusList.map((t, i) => {
+                            const isOvrd = t.due_date && !t.is_completed
+                              ? (() => { try { return isPast(parseISO(t.due_date)); } catch { return false; } })()
+                              : false;
+                            return (
+                              <motion.div
+                                key={t.id || t._id}
+                                initial={{ opacity: 0, y: 6 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: i * 0.04 }}
+                                onClick={() => setSelectedTodo(t)}
+                                className="flex items-center gap-2 px-2.5 py-2 rounded-lg border cursor-pointer group transition-all hover:shadow-sm"
+                                style={{
+                                  borderColor: isOvrd ? (isDark ? '#7f1d1d' : '#fecaca') : (isDark ? '#334155' : '#e2e8f0'),
+                                  backgroundColor: isOvrd
+                                    ? (isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2')
+                                    : (isDark ? 'rgba(255,255,255,0.02)' : '#fafafa'),
+                                }}
+                              >
+                                <span
+                                  className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-black"
+                                  style={{
+                                    backgroundColor: isOvrd ? `${COLORS.coral}18` : `${COLORS.mediumBlue}12`,
+                                    color: isOvrd ? COLORS.coral : COLORS.mediumBlue,
+                                  }}
+                                >
+                                  {i + 1}
+                                </span>
+                                <span className="flex-1 text-xs font-medium truncate" style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>
+                                  {t.title}
+                                </span>
+                                {isOvrd && (
+                                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-500 flex-shrink-0">
+                                    Late
+                                  </span>
+                                )}
+                              </motion.div>
+                            );
+                          });
+                        })()}
+                      </div>
+                    </div>
+
+                    {/* Vertical divider */}
+                    <div className="hidden lg:block w-px bg-slate-100 dark:bg-slate-700 flex-shrink-0" />
+
+                    {/* Right section: tip + overdue alert */}
+                    <div className="lg:w-52 flex-shrink-0 flex flex-col justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Quick Tip</p>
+                        <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/40">
+                          <Zap size={12} className="text-amber-500 mt-0.5 flex-shrink-0" />
+                          <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300 leading-relaxed">
+                            {stats.total === 0
+                              ? 'Add your first todo to get started tracking your work.'
+                              : stats.overdue > 0
+                              ? `Knock out ${Math.min(stats.overdue, 3)} overdue items today to boost your score by ${Math.min(stats.overdue, 3) * 10}pts.`
+                              : stats.pending > 3
+                              ? `Focus on 3 todos at a time. You have ${stats.pending} pending — pick the most impactful ones.`
+                              : stats.pending > 0
+                              ? `You're almost there! Complete your last ${stats.pending} ${stats.pending === 1 ? 'todo' : 'todos'} to hit 100%.`
+                              : 'Perfect score! Consider adding new goals to keep the momentum.'
+                            }
+                          </p>
+                        </div>
+                      </div>
+                      {stats.overdue > 0 && (
+                        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/40">
+                          <AlertCircle size={12} className="text-red-500 flex-shrink-0" />
+                          <p className="text-[11px] font-semibold text-red-600 dark:text-red-400">
+                            {stats.overdue} overdue · health at {stats.healthScore}%
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                  </div>
+                </div>
+              </SectionCard>
+            </motion.div>
+
           </motion.div>
         )}
-
         {/* ─────────────── LOG TAB ─────────────────────────────────────────── */}
         {activeTab === 'log' && (
           <motion.div key="log" variants={containerVariants} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
