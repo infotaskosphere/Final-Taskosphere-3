@@ -1174,7 +1174,20 @@ export default function Attendance() {
       const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes] = await Promise.all(requests);
 
       const allHolidays = holidaysRes.data || [];
-      setHolidays((Array.isArray(allHolidays) ? allHolidays : []).filter(h => h.status !== 'rejected'));
+      // Show holidays that are confirmed OR have no status (manually added holidays
+      // often come without an explicit 'confirmed' status from the backend)
+      const allConfirmed = (Array.isArray(allHolidays) ? allHolidays : []).filter(h => h.status !== 'rejected');
+      setHolidays(allConfirmed);
+
+      // If no holidays exist at all, trigger a background auto-sync so the
+      // Indian public holiday calendar self-populates without any admin action.
+      if (allConfirmed.length === 0) {
+        api.post('/holidays/auto-sync').then(async () => {
+          // Re-fetch after sync so the calendar shows holidays immediately
+          const refreshed = await api.get('/holidays').catch(() => ({ data: [] }));
+          setHolidays((refreshed.data || []).filter(h => h.status !== 'rejected'));
+        }).catch(() => {/* non-fatal — holidays will appear on next page load */});
+      }
       if (isAdmin) setPendingHolidays((Array.isArray(allHolidays) ? allHolidays : []).filter(h => h.status === 'pending'));
 
       if (isAdmin && allUsers.length === 0) {
@@ -2294,10 +2307,20 @@ export default function Attendance() {
                 subtitle={`${monthHolidaysGrid.length} holiday${monthHolidaysGrid.length !== 1 ? 's' : ''} this month`}
                 badge={monthHolidaysGrid.length}
                 action={isAdmin && (
-                  <Button size="sm" onClick={() => { setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); setShowHolidayModal(true); }}
+                  <Button size="sm" onClick={async () => {
+                    try {
+                      const r = await api.post('/holidays/auto-sync');
+                      const { added = 0, upgraded = 0 } = r.data || {};
+                      const msg = added + upgraded > 0
+                        ? `${added} new · ${upgraded} confirmed`
+                        : 'Already up to date';
+                      toast.success(`Holidays synced — ${msg}`);
+                      await fetchData();
+                    } catch { toast.error('Sync failed'); }
+                  }}
                     className="h-8 px-3 text-xs font-semibold text-white rounded-lg"
                     style={{ backgroundColor: COLORS.amber }}>
-                    <Plus className="w-3 h-3 mr-1" /> Add
+                    <Zap className="w-3 h-3 mr-1" /> Auto Sync
                   </Button>
                 )}
               />
