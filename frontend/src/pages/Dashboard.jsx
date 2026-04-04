@@ -918,16 +918,20 @@ export default function Dashboard() {
           apiFetch('/attendance/today'),
           apiFetch(`/todos${user?.id ? `?user_id=${user.id}` : ''}`),
         ]);
-      if (Array.isArray(tasksData))    setTasks(tasksData);
-      if (statsData && typeof statsData === 'object' && !Array.isArray(statsData))
-                                       setStats(statsData);
+        
+      if (Array.isArray(tasksData)) setTasks(tasksData);
+      if (statsData && typeof statsData === 'object' && !Array.isArray(statsData)) {
+        setStats(statsData);
+      }
       if (Array.isArray(dueDatesData)) setUpcomingDueDates(dueDatesData);
-      if (attendanceData)              setTodayAttendance(attendanceData);
-      if (Array.isArray(todosData))    setTodosRaw(todosData);
+      if (attendanceData) setTodayAttendance(attendanceData);
+      if (Array.isArray(todosData)) setTodosRaw(todosData);
+      
     } catch (e) {
       console.error('Dashboard wave-1 fetch error:', e);
     }
-    setDataLoading(false); // ← unblocks UI after wave 1
+    
+    setDataLoading(false); // Unblocks UI after wave 1
 
     // ── Wave 2: secondary — fills team tasks, rankings, leads ─────────────
     try {
@@ -937,31 +941,20 @@ export default function Dashboard() {
         apiFetch('/leads'),
         apiFetch(`/reports/performance-rankings?period=${rankingPeriod}`),
       ]);
-      if (Array.isArray(usersData))   { setAllUsers(usersData);   setUsersLoading(false); }
-      if (Array.isArray(holidaysRes))   setHolidaysData(holidaysRes);
-      if (Array.isArray(leadsRes))      setLeadsData(leadsRes);
-      if (Array.isArray(rankingsData))  setRankings(rankingsData);
+      
+      if (Array.isArray(usersData)) { 
+        setAllUsers(usersData);   
+        setUsersLoading(false); 
+      }
+      if (Array.isArray(holidaysRes)) setHolidaysData(holidaysRes);
+      if (Array.isArray(leadsRes)) setLeadsData(leadsRes);
+      if (Array.isArray(rankingsData)) setRankings(rankingsData);
+      
     } catch (e) {
       console.error('Dashboard wave-2 fetch error:', e);
       setUsersLoading(false); // always clear loading even on error
     }
   }, [apiFetch, rankingPeriod, user?.id]);
-
-      if (Array.isArray(tasksData))    setTasks(tasksData);
-      if (Array.isArray(usersData))    setAllUsers(usersData);
-      if (statsData && typeof statsData === 'object' && !Array.isArray(statsData))
-                                       setStats(statsData);
-      if (Array.isArray(dueDatesData)) setUpcomingDueDates(dueDatesData);
-      if (attendanceData)              setTodayAttendance(attendanceData);
-      if (Array.isArray(holidaysRes))  setHolidaysData(holidaysRes);
-      if (Array.isArray(todosData))    setTodosRaw(todosData);
-      if (Array.isArray(leadsRes))     setLeadsData(leadsRes);
-      if (Array.isArray(rankingsData)) setRankings(rankingsData);
-    } catch (e) {
-      console.error('Dashboard fetch error:', e);
-    }
-    setDataLoading(false);
-  }, [apiFetch, rankingPeriod]);
 
   // Initial load
   useEffect(() => {
