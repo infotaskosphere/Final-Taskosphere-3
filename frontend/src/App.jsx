@@ -4,31 +4,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { Toaster } from "@/components/ui/sonner";
 import AppRoutes from "./AppRoutes.jsx";
-import { useLoading } from "./lib/api";
 import { AnimatePresence } from "framer-motion";
+import GifLoader from "@/components/ui/GifLoader.jsx";
+import { useLoading } from "./lib/api";
 
-/* ── Bottom loading bar ─────────────────────────────────────────────── */
-function BottomLoadingBar() {
+/* ── GIF-based global loader (shows on any API call) ────────────────── */
+function GlobalLoader() {
   const loading = useLoading();
-
-  // ✅ Do not render anything when not loading
   if (!loading) return null;
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        bottom: 0, // moved to bottom
-        left: 0,
-        width: "30%",
-        height: 3,
-        background: "linear-gradient(90deg, #7F77DD, #1F6FB2)",
-        zIndex: 9999,
-        animation: "loadingBar 1.2s infinite ease-in-out",
-        pointerEvents: "none",
-      }}
-    />
-  );
+  return <GifLoader />;
 }
 
 /* ── AnimatePresence wrapper ───────────────────────────────────────── */
@@ -58,10 +42,9 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <BrowserRouter>
-          {/* ✅ Bottom loader */}
-          <BottomLoadingBar />
+          <GlobalLoader />
 
-          <Suspense fallback={<div style={{padding: 20}}>Loading...</div>}>
+          <Suspense fallback={<GifLoader />}>
             <AnimatedRoutes />
           </Suspense>
 
