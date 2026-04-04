@@ -5,7 +5,6 @@
 // • All v8 bug-fixes preserved (triple-fallback id, normalizeReminder, etc.)
 // • v9: Apply for Leave moved to dedicated card below calendar detail
 // • v9: Feature enhancements — streak counter, avg hours, weekly summary, overtime alert
-// • v10: Fixed layout — right column uses CSS grid rows for equal-height cards
 
 import { useDark } from '@/hooks/useDark';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -91,6 +90,7 @@ const COLORS = {
   slate200:     '#E2E8F0',
 };
 
+// Dark palette (mirrors Dashboard)
 const D = {
   bg:        '#0f172a',
   card:      '#1e293b',
@@ -103,7 +103,7 @@ const D = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ANIMATIONS
+// ANIMATIONS (identical to Dashboard)
 // ─────────────────────────────────────────────────────────────────────────────
 const containerVariants = {
   hidden:  { opacity: 0 },
@@ -120,7 +120,7 @@ const springPhysics = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SLIM SCROLL
+// SLIM SCROLL (same id-guard as Dashboard)
 // ─────────────────────────────────────────────────────────────────────────────
 const slimScroll = {
   overflowY:      'auto',
@@ -141,6 +141,7 @@ if (typeof document !== 'undefined' && !document.getElementById('dash-slim-scrol
   document.head.appendChild(s);
 }
 
+// Pulse animations for punch-in / absent
 if (typeof document !== 'undefined' && !document.getElementById('att-pulse-styles')) {
   const s = document.createElement('style');
   s.id = 'att-pulse-styles';
@@ -160,7 +161,7 @@ if (typeof document !== 'undefined' && !document.getElementById('att-pulse-style
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SHARED LAYOUT PRIMITIVES
+// SHARED LAYOUT PRIMITIVES (matches Dashboard)
 // ─────────────────────────────────────────────────────────────────────────────
 function SectionCard({ children, className = '', style = {} }) {
   return (
@@ -196,7 +197,7 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ID HELPERS
+// ID HELPERS (bug-fix preserved from v8)
 // ─────────────────────────────────────────────────────────────────────────────
 function resolveId(r) {
   if (!r) return null;
@@ -209,7 +210,7 @@ function normalizeReminder(r) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SESSION STORAGE
+// SESSION STORAGE (fired reminder ids)
 // ─────────────────────────────────────────────────────────────────────────────
 function getFiredIds() {
   try {
@@ -308,6 +309,7 @@ const buildGCalURL = (reminder) => {
   } catch { return 'https://calendar.google.com'; }
 };
 
+// Safe parseISO — returns null instead of throwing
 const safeParseISO = (dateStr) => {
   if (!dateStr) return null;
   try {
@@ -316,6 +318,7 @@ const safeParseISO = (dateStr) => {
   } catch { return null; }
 };
 
+// Safe format with parseISO — returns fallback string instead of throwing
 const safeFormatDate = (dateStr, fmt, fallback = '—') => {
   const d = safeParseISO(dateStr);
   if (!d) return fallback;
@@ -347,12 +350,12 @@ const extractHolidaysFromPDF = async (file) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STAT CARD
+// STAT CARD (Dashboard metric-card style)
 // ─────────────────────────────────────────────────────────────────────────────
 function StatCard({ icon: Icon, label, value, unit, color, trend, isDark }) {
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -3, transition: springPhysics.lift }} whileTap={{ scale: 0.985 }}>
-      <div className="rounded-2xl shadow-sm border h-full bg-white dark:bg-slate-800 border-slate-200/80 dark:border-slate-700 hover:shadow-md transition-all">
+      <div className={`rounded-2xl shadow-sm border h-full bg-white dark:bg-slate-800 border-slate-200/80 dark:border-slate-700 hover:shadow-md transition-all`}>
         <div className="p-4">
           <div className="flex items-start justify-between mb-3">
             <div>
@@ -444,7 +447,7 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// REMINDER POPUP
+// REMINDER POPUP (floating toast-style)
 // ─────────────────────────────────────────────────────────────────────────────
 function ReminderPopup({ reminder, onDismiss, isDark }) {
   return (
@@ -516,7 +519,10 @@ function ReminderPopup({ reminder, onDismiss, isDark }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete, isDark }) {
   if (!holiday) return null;
+
+  // Safe date formatting
   const dayOfWeek = safeFormatDate(holiday.date, 'EEEE, MMMM d, yyyy', holiday.date || '—');
+
   const daysLeft = (() => {
     try {
       const hDate = safeParseISO(holiday.date);
@@ -538,11 +544,15 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete, isDar
     >
       <motion.div
         className="w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
-        style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
+        style={{
+          backgroundColor: isDark ? D.card : '#ffffff',
+          border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0',
+        }}
         initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }}
         transition={{ type: 'spring', stiffness: 220, damping: 22 }}
         onClick={e => e.stopPropagation()}
       >
+        {/* Header */}
         <div className="px-6 py-5 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
           <div className="absolute top-0 right-0 w-32 h-32 rounded-full opacity-10" style={{ background: 'white', transform: 'translate(30%,-30%)' }} />
           <div className="relative flex items-start justify-between">
@@ -560,6 +570,8 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete, isDar
             </button>
           </div>
         </div>
+
+        {/* Body */}
         <div className="p-6 space-y-3">
           <div className="flex items-center gap-3 p-3.5 rounded-xl border"
             style={{ backgroundColor: isDark ? `${COLORS.amber}12` : `${COLORS.amber}08`, borderColor: `${COLORS.amber}30` }}>
@@ -590,12 +602,16 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete, isDar
             </div>
           )}
         </div>
+
+        {/* Footer */}
         <div className="px-6 py-4 flex justify-between items-center border-t"
           style={{ borderColor: isDark ? D.border : '#f1f5f9', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
           {isAdmin ? (
             <>
-              <button onClick={() => { onDelete(holiday.date, holiday.name); onClose(); }}
-                className="flex items-center gap-1.5 text-sm font-semibold text-red-500 hover:text-red-400 active:scale-95 transition-all">
+              <button
+                onClick={() => { onDelete(holiday.date, holiday.name); onClose(); }}
+                className="flex items-center gap-1.5 text-sm font-semibold text-red-500 hover:text-red-400 active:scale-95 transition-all"
+              >
                 <Trash2 className="w-3.5 h-3.5" /> Delete
               </button>
               <div className="flex gap-2">
@@ -641,6 +657,7 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
         transition={{ type: 'spring', stiffness: 220, damping: 22 }}
         onClick={e => e.stopPropagation()}
       >
+        {/* Header */}
         <div
           className="px-6 py-5 text-white relative overflow-hidden flex-shrink-0"
           style={{ background: isDue ? `linear-gradient(135deg, ${COLORS.red}, #B91C1C)` : `linear-gradient(135deg, ${COLORS.purple}, #6D28D9)` }}
@@ -666,6 +683,8 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
             </button>
           </div>
         </div>
+
+        {/* Body */}
         <div className="p-6 space-y-3 overflow-y-auto slim-scroll flex-1" style={slimScroll}>
           <div className="flex items-center gap-3 p-3.5 rounded-xl border"
             style={{
@@ -681,6 +700,7 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
               {isDue && <p className="text-xs text-red-500 font-semibold mt-0.5">This reminder is overdue</p>}
             </div>
           </div>
+
           {descLines.length > 0 && (
             <div className="p-3.5 rounded-xl border"
               style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}>
@@ -703,12 +723,15 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
               </div>
             </div>
           )}
+
           <a href={gcalUrl} target="_blank" rel="noopener noreferrer"
             className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-semibold text-white hover:opacity-90 active:scale-95 transition-all"
             style={{ backgroundColor: COLORS.deepBlue }}>
             <CalendarPlus className="w-4 h-4" /> Add to Google Calendar
           </a>
         </div>
+
+        {/* Footer */}
         <div className="px-6 py-4 flex justify-between items-center flex-shrink-0 border-t"
           style={{ borderColor: isDark ? D.border : '#f1f5f9', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
           {!isViewingOther ? (
@@ -785,8 +808,8 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave, isDark }) {
         </div>
         <div className="p-6 space-y-4">
           {[
-            { label: 'Title',      type: 'text',           val: title,    set: setTitle,    placeholder: 'Reminder title' },
-            { label: 'Remind At',  type: 'datetime-local', val: remindAt, set: setRemindAt, placeholder: '' },
+            { label: 'Title', type: 'text',           val: title,       set: setTitle,       placeholder: 'Reminder title' },
+            { label: 'Remind At', type: 'datetime-local', val: remindAt,    set: setRemindAt,    placeholder: '' },
           ].map(({ label, type, val, set, placeholder }) => (
             <div key={label}>
               <label className="text-sm font-semibold mb-1.5 block text-slate-600 dark:text-slate-400">{label}</label>
@@ -869,6 +892,7 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
         transition={{ type: 'spring', stiffness: 220, damping: 22 }}
         onClick={e => e.stopPropagation()}
       >
+        {/* Header */}
         <div className="px-5 py-4 flex items-center justify-between flex-shrink-0"
           style={{ background: `linear-gradient(135deg, ${COLORS.purple}, #6D28D9)` }}>
           <div className="flex items-center gap-3">
@@ -885,6 +909,8 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
             <button onClick={onClose}  className="w-7 h-7 rounded-lg bg-white/20 hover:bg-white/30 flex items-center justify-center text-white ml-1"><X className="w-3.5 h-3.5" /></button>
           </div>
         </div>
+
+        {/* Calendar Grid */}
         <div className="flex-1 overflow-y-auto p-4" style={slimScroll}>
           <div className="grid grid-cols-7 mb-1">
             {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
@@ -945,6 +971,8 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
             })}
           </div>
         </div>
+
+        {/* Footer */}
         <div className="px-5 py-3 flex justify-between items-center flex-shrink-0 border-t"
           style={{ borderColor: isDark ? D.border : '#f1f5f9', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
           <p className="text-xs font-medium text-slate-400">{safeReminders.length} total · click a chip to open details</p>
@@ -1004,7 +1032,7 @@ export default function Attendance() {
   const [editName,           setEditName]           = useState('');
   const [editDate,           setEditDate]           = useState('');
   const [editLoading,        setEditLoading]        = useState(false);
-  const pdfInputRef     = useRef(null);
+  const pdfInputRef    = useRef(null);
   const trademarkPdfRef = useRef(null);
 
   const [exportingPDF,       setExportingPDF]       = useState(false);
@@ -1065,6 +1093,7 @@ export default function Attendance() {
     }
   }, [todayAttendance]);
 
+  // Reminder popup checker
   useEffect(() => {
     const check = () => {
       const now = new Date();
@@ -1130,9 +1159,9 @@ export default function Attendance() {
 
     try {
       let historyUrl;
-      if (isEveryoneReq)       historyUrl = '/attendance/history';
+      if (isEveryoneReq)      historyUrl = '/attendance/history';
       else if (resolvedUserId) historyUrl = `/attendance/history?user_id=${resolvedUserId}`;
-      else                     historyUrl = '/attendance/history';
+      else                    historyUrl = '/attendance/history';
 
       const requests = [
         api.get(historyUrl).catch(() => ({ data: [] })),
@@ -1144,15 +1173,20 @@ export default function Attendance() {
       ];
       const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes] = await Promise.all(requests);
 
-      const allHolidays  = holidaysRes.data || [];
+      const allHolidays = holidaysRes.data || [];
+      // Show holidays that are confirmed OR have no status (manually added holidays
+      // often come without an explicit 'confirmed' status from the backend)
       const allConfirmed = (Array.isArray(allHolidays) ? allHolidays : []).filter(h => h.status !== 'rejected');
       setHolidays(allConfirmed);
 
+      // If no holidays exist at all, trigger a background auto-sync so the
+      // Indian public holiday calendar self-populates without any admin action.
       if (allConfirmed.length === 0) {
         api.post('/holidays/auto-sync').then(async () => {
+          // Re-fetch after sync so the calendar shows holidays immediately
           const refreshed = await api.get('/holidays').catch(() => ({ data: [] }));
           setHolidays((refreshed.data || []).filter(h => h.status !== 'rejected'));
-        }).catch(() => {});
+        }).catch(() => {/* non-fatal — holidays will appear on next page load */});
       }
       if (isAdmin) setPendingHolidays((Array.isArray(allHolidays) ? allHolidays : []).filter(h => h.status === 'pending'));
 
@@ -1193,7 +1227,7 @@ export default function Attendance() {
         setMySummary(summaryRes?.data ?? null);
       }
 
-      const allTasksData  = tasksRes.data || [];
+      const allTasksData = tasksRes.data || [];
       const safeTasksData = Array.isArray(allTasksData) ? allTasksData : [];
       const relevantTasks = isOtherReq ? safeTasksData.filter(t => t.assigned_to === rawTargetId) : safeTasksData;
       setTasksCompleted(relevantTasks.filter(t => t.status === 'completed').length);
@@ -1341,13 +1375,14 @@ export default function Attendance() {
     if (!reminderTitle.trim() || !reminderDatetime) { toast.error('Title and date/time are required'); return; }
     try {
       const res = await api.post('/email/save-as-reminder', {
-        event_id:    `manual-${Date.now()}`,
+        event_id:    `manual-${Date.now()}`,         // required by backend model
         title:       reminderTitle.trim(),
         description: reminderDesc.trim() || '',
         remind_at:   reminderDatetime ? new Date(reminderDatetime).toISOString() : undefined,
       });
       toast.success(res.data?.status === 'already_exists' ? 'Reminder already exists' : 'Reminder set');
       setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null);
+      // Re-fetch reminders since the response is {status, id} not a full reminder doc
       await fetchReminders();
     } catch { toast.error('Failed to create reminder'); }
   }, [reminderTitle, reminderDesc, reminderDatetime]);
@@ -1560,7 +1595,7 @@ export default function Attendance() {
 
   const upcomingReminders = useMemo(() =>
     (Array.isArray(reminders) ? reminders : [])
-      .filter(r => r.is_dismissed !== true)
+      .filter(r => r.is_dismissed !== true)   // null / undefined → show; only true → hide
       .sort((a, b) => {
         const da = a.remind_at ? new Date(a.remind_at) : new Date(0);
         const db = b.remind_at ? new Date(b.remind_at) : new Date(0);
@@ -1600,7 +1635,7 @@ export default function Attendance() {
     return hLeft > 0 ? `${hLeft}h ${mLeft}m until auto-absent at 7:00 PM` : `${mLeft} minute(s) until auto-absent at 7:00 PM`;
   }, [todayAttendance, isViewingOther, isEveryoneView, todayIsHoliday]);
 
-  // Attendance Streak
+  // ── FEATURE ENHANCEMENT: Attendance Streak ──────────────────────────────────
   const attendanceStreak = useMemo(() => {
     const safeHistory = Array.isArray(attendanceHistory) ? attendanceHistory : [];
     const presentDates = safeHistory
@@ -1611,21 +1646,34 @@ export default function Attendance() {
     if (presentDates.length === 0) return 0;
     let streak = 0;
     let checkDate = new Date();
+    // If today has attendance or is ongoing, count it
     const todayStr = format(checkDate, 'yyyy-MM-dd');
     const hasTodayRecord = displayTodayAttendance?.punch_in && displayTodayAttendance?.status === 'present';
-    if (hasTodayRecord) { streak = 1; checkDate = subDays(checkDate, 1); }
+    if (hasTodayRecord) {
+      streak = 1;
+      checkDate = subDays(checkDate, 1);
+    }
+    // Walk backward
     for (let i = 0; i < 365; i++) {
-      const dateStr    = format(checkDate, 'yyyy-MM-dd');
-      const dayOfWeek  = checkDate.getDay();
+      const dateStr = format(checkDate, 'yyyy-MM-dd');
+      const dayOfWeek = checkDate.getDay();
+      // Skip Sundays (or holidays)
       const isHolidayDate = (Array.isArray(holidays) ? holidays : []).some(h => h.date === dateStr);
-      if (dayOfWeek === 0 || isHolidayDate) { checkDate = subDays(checkDate, 1); continue; }
-      if (presentDates.includes(dateStr)) { streak++; checkDate = subDays(checkDate, 1); }
-      else { break; }
+      if (dayOfWeek === 0 || isHolidayDate) {
+        checkDate = subDays(checkDate, 1);
+        continue;
+      }
+      if (presentDates.includes(dateStr)) {
+        streak++;
+        checkDate = subDays(checkDate, 1);
+      } else {
+        break;
+      }
     }
     return streak;
   }, [attendanceHistory, displayTodayAttendance, holidays]);
 
-  // Average Daily Hours
+  // ── FEATURE ENHANCEMENT: Average Daily Hours ───────────────────────────────
   const avgDailyHours = useMemo(() => {
     const presentDays = monthAttendance.filter(a => a.punch_in && a.status === 'present' && a.duration_minutes > 0);
     if (presentDays.length === 0) return '0.0';
@@ -1633,40 +1681,49 @@ export default function Attendance() {
     return (totalMins / presentDays.length / 60).toFixed(1);
   }, [monthAttendance]);
 
-  // Week Summary
+  // ── FEATURE ENHANCEMENT: This Week's Summary ──────────────────────────────
   const weekSummary = useMemo(() => {
-    const today    = new Date();
-    const weekStart = startOfWeek(today, { weekStartsOn: 1 });
-    const weekEnd   = endOfWeek(today,   { weekStartsOn: 1 });
-    const weekDays  = eachDayOfInterval({ start: weekStart, end: weekEnd });
+    const today = new Date();
+    const weekStart = startOfWeek(today, { weekStartsOn: 1 }); // Monday
+    const weekEnd = endOfWeek(today, { weekStartsOn: 1 });
+    const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd });
     const safeHistory = Array.isArray(attendanceHistory) ? attendanceHistory : [];
+
     return weekDays.map(day => {
       const dateStr = format(day, 'yyyy-MM-dd');
-      const record  = safeHistory.find(a => a.date === dateStr)
+      const record = safeHistory.find(a => a.date === dateStr)
         || (displayTodayAttendance?.date === dateStr ? displayTodayAttendance : null);
-      const isHol    = (Array.isArray(holidays) ? holidays : []).some(h => h.date === dateStr);
+      const isHol = (Array.isArray(holidays) ? holidays : []).some(h => h.date === dateStr);
       const isFuture = isAfter(day, today);
-      const isToday  = dateFnsIsToday(day);
+      const isToday = dateFnsIsToday(day);
+
       let status = 'none';
       if (isHol) status = 'holiday';
       else if (record?.status === 'absent') status = 'absent';
-      else if (record?.status === 'leave')  status = 'leave';
-      else if (record?.punch_in)            status = 'present';
-      else if (isFuture)                    status = 'future';
-      return { day: format(day, 'EEE'), dateStr, status, isToday, hours: record?.duration_minutes ? (record.duration_minutes / 60).toFixed(1) : null };
+      else if (record?.status === 'leave') status = 'leave';
+      else if (record?.punch_in) status = 'present';
+      else if (isFuture) status = 'future';
+
+      return {
+        day: format(day, 'EEE'),
+        dateStr,
+        status,
+        isToday,
+        hours: record?.duration_minutes ? (record.duration_minutes / 60).toFixed(1) : null,
+      };
     });
   }, [attendanceHistory, displayTodayAttendance, holidays]);
 
-  // Overtime
+  // ── FEATURE ENHANCEMENT: Overtime detection ─────────────────────────────────
   const overtimeToday = useMemo(() => {
     if (!displayTodayAttendance?.punch_in) return null;
     const hrs = parseDurationToHours(displayLiveDuration);
-    if (hrs > 10)  return { hours: hrs, level: 'high' };
+    if (hrs > 10) return { hours: hrs, level: 'high' };
     if (hrs > 8.5) return { hours: hrs, level: 'mild' };
     return null;
   }, [displayTodayAttendance, displayLiveDuration]);
 
-  // Shared input styles
+  // ── Shared input styles ────────────────────────────────────────────────────
   const inputStyle = {
     backgroundColor: isDark ? D.raised : '#ffffff',
     borderColor: isDark ? D.border : '#d1d5db',
@@ -1682,6 +1739,7 @@ export default function Attendance() {
     [holidays, selectedDate]
   );
 
+  // Count upcoming leaves from attendance history
   const upcomingLeaves = useMemo(() => {
     const safe = Array.isArray(attendanceHistory) ? attendanceHistory : [];
     return safe.filter(a => {
@@ -1700,12 +1758,12 @@ export default function Attendance() {
   // ════════════════════════════════════════════════════════════════════════════
   return (
     <TooltipProvider>
-      {/* Floating reminder popup */}
+      {/* ── Floating reminder popup ── */}
       <AnimatePresence>
         {firedReminder && <ReminderPopup reminder={firedReminder} onDismiss={handleDismissPopup} isDark={isDark} />}
       </AnimatePresence>
 
-      {/* Holiday detail */}
+      {/* ── Holiday detail ── */}
       <AnimatePresence>
         {selectedHolidayDetail && (
           <HolidayDetailPopup
@@ -1717,7 +1775,7 @@ export default function Attendance() {
         )}
       </AnimatePresence>
 
-      {/* Reminder detail */}
+      {/* ── Reminder detail ── */}
       <AnimatePresence>
         {selectedReminderDetail && (
           <ReminderDetailPopup
@@ -1729,7 +1787,7 @@ export default function Attendance() {
         )}
       </AnimatePresence>
 
-      {/* Reminder edit */}
+      {/* ── Reminder edit ── */}
       <AnimatePresence>
         {isEditModalOpen && editingReminder && (
           <ReminderEditModal
@@ -1741,7 +1799,7 @@ export default function Attendance() {
         )}
       </AnimatePresence>
 
-      {/* Reminder calendar */}
+      {/* ── Reminder calendar ── */}
       <AnimatePresence>
         {showReminderCalendar && (
           <ReminderCalendarModal
@@ -1758,7 +1816,7 @@ export default function Attendance() {
         style={{ background: isDark ? D.bg : '#f8fafc' }}
         variants={containerVariants} initial="hidden" animate="visible"
       >
-        {/* ══ PAGE HEADER ══ */}
+        {/* ══ PAGE HEADER ══════════════════════════════════════════════════════ */}
         <motion.div variants={itemVariants}>
           <div
             className="relative overflow-hidden rounded-2xl px-6 py-5"
@@ -1834,11 +1892,14 @@ export default function Attendance() {
           </div>
         </motion.div>
 
-        {/* ══ ALERT BANNERS ══ */}
+        {/* ══ ALERT BANNERS ════════════════════════════════════════════════════ */}
         {dataError && (
           <motion.div variants={itemVariants}
             className="flex items-center gap-3 px-4 py-3 rounded-xl border text-sm"
-            style={{ borderColor: isDark ? '#7f1d1d' : '#fecaca', backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2' }}>
+            style={{
+              borderColor: isDark ? '#7f1d1d' : '#fecaca',
+              backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2',
+            }}>
             <ShieldAlert className="w-4 h-4 text-red-500 flex-shrink-0" />
             <span className="font-semibold text-red-500">Connection error: </span>
             <span style={{ color: isDark ? '#fca5a5' : '#dc2626' }} className="flex-1">{dataError}</span>
@@ -1878,16 +1939,24 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ══ OVERTIME ALERT ══ */}
+        {/* ══ OVERTIME ALERT (Feature Enhancement) ═════════════════════════════ */}
         {overtimeToday && !isViewingOther && !isEveryoneView && (
           <motion.div variants={itemVariants}
             className="flex items-center gap-3 px-4 py-3 rounded-xl border text-sm"
             style={{
-              borderColor: overtimeToday.level === 'high' ? isDark ? '#7f1d1d' : '#fecaca' : isDark ? 'rgba(245,158,11,0.35)' : '#fde68a',
-              backgroundColor: overtimeToday.level === 'high' ? isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2' : isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb',
+              borderColor: overtimeToday.level === 'high'
+                ? isDark ? '#7f1d1d' : '#fecaca'
+                : isDark ? 'rgba(245,158,11,0.35)' : '#fde68a',
+              backgroundColor: overtimeToday.level === 'high'
+                ? isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2'
+                : isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb',
             }}>
             <Zap className="w-4 h-4 flex-shrink-0" style={{ color: overtimeToday.level === 'high' ? COLORS.red : COLORS.amber }} />
-            <span className="font-semibold flex-1" style={{ color: overtimeToday.level === 'high' ? isDark ? '#f87171' : '#991b1b' : isDark ? '#fbbf24' : '#92400e' }}>
+            <span className="font-semibold flex-1" style={{
+              color: overtimeToday.level === 'high'
+                ? isDark ? '#f87171' : '#991b1b'
+                : isDark ? '#fbbf24' : '#92400e',
+            }}>
               {overtimeToday.level === 'high'
                 ? `You've been working for ${overtimeToday.hours.toFixed(1)}h — consider wrapping up!`
                 : `${overtimeToday.hours.toFixed(1)}h logged — you've exceeded the 8.5h daily goal`}
@@ -1895,7 +1964,7 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ══ TODAY STATUS ══ */}
+        {/* ══ TODAY STATUS ═════════════════════════════════════════════════════ */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants}>
             <SectionCard>
@@ -1906,6 +1975,7 @@ export default function Attendance() {
                 subtitle={isViewingOther ? 'Read-only view' : 'Real-time • Auto-absent at 7:00 PM IST'}
               />
               <div className="p-5">
+                {/* Holiday notice */}
                 {todayIsHoliday && (
                   <div className="mb-4 flex items-center gap-3 px-4 py-3 rounded-xl border"
                     style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.10)' : '#fffbeb', borderColor: isDark ? 'rgba(245,158,11,0.25)' : '#fde68a' }}>
@@ -1915,6 +1985,8 @@ export default function Attendance() {
                     </p>
                   </div>
                 )}
+
+                {/* Absent notice */}
                 {displayTodayAttendance?.status === 'absent' && (
                   <div className="mb-4 flex items-center gap-3 px-4 py-3 rounded-xl border"
                     style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.10)' : '#fef2f2', borderColor: isDark ? '#7f1d1d' : '#fecaca' }}>
@@ -1924,6 +1996,8 @@ export default function Attendance() {
                     </p>
                   </div>
                 )}
+
+                {/* Leave notice */}
                 {displayTodayAttendance?.status === 'leave' && (
                   <div className="mb-4 flex items-center gap-3 px-4 py-3 rounded-xl border"
                     style={{ backgroundColor: isDark ? 'rgba(249,115,22,0.08)' : '#fff7ed', borderColor: isDark ? '#7c2d12' : '#fed7aa' }}>
@@ -1931,6 +2005,7 @@ export default function Attendance() {
                     <p className="text-sm font-semibold" style={{ color: isDark ? '#fb923c' : '#c2410c' }}>On leave today</p>
                   </div>
                 )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
                   {/* Duration / progress */}
                   <div>
@@ -1939,25 +2014,48 @@ export default function Attendance() {
                       key={displayLiveDuration}
                       initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
                       className="text-4xl font-black tracking-tight mb-1"
-                      style={{ color: displayTodayAttendance?.status === 'absent' ? COLORS.red : todayIsHoliday ? COLORS.amber : COLORS.emeraldGreen }}
+                      style={{
+                        color: displayTodayAttendance?.status === 'absent' ? COLORS.red
+                          : todayIsHoliday ? COLORS.amber
+                          : COLORS.emeraldGreen,
+                      }}
                     >
-                      {displayTodayAttendance?.status === 'absent' ? 'Absent' : todayIsHoliday ? 'Holiday' : displayLiveDuration}
+                      {displayTodayAttendance?.status === 'absent' ? 'Absent'
+                        : todayIsHoliday ? 'Holiday'
+                        : displayLiveDuration}
                     </motion.p>
                     <p className="text-xs font-semibold uppercase tracking-wider mb-4"
-                      style={{ color: displayTodayAttendance?.status === 'absent' ? COLORS.red : todayIsHoliday ? COLORS.amber : COLORS.emeraldGreen }}>
+                      style={{
+                        color: displayTodayAttendance?.status === 'absent' ? COLORS.red
+                          : todayIsHoliday ? COLORS.amber
+                          : COLORS.emeraldGreen,
+                      }}>
                       {displayTodayAttendance?.status === 'absent' ? 'Auto-marked absent'
                         : todayIsHoliday ? 'Office closed'
-                        : (!isViewingOther && displayTodayAttendance?.punch_in && !displayTodayAttendance?.punch_out ? 'Live — updating every minute' : 'Total for today')}
+                        : (!isViewingOther && displayTodayAttendance?.punch_in && !displayTodayAttendance?.punch_out
+                            ? 'Live — updating every minute'
+                            : 'Total for today')}
                     </p>
-                    <div className="h-2 rounded-full overflow-hidden mb-4" style={{ backgroundColor: isDark ? D.raised : '#f1f5f9' }}>
+
+                    {/* Progress bar */}
+                    <div className="h-2 rounded-full overflow-hidden mb-4"
+                      style={{ backgroundColor: isDark ? D.raised : '#f1f5f9' }}>
                       <motion.div
                         className="h-full rounded-full"
-                        style={{ background: displayTodayAttendance?.status === 'absent' ? `linear-gradient(90deg, ${COLORS.red}, #fca5a5)` : todayIsHoliday ? `linear-gradient(90deg, ${COLORS.amber}, #fcd34d)` : `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})` }}
+                        style={{
+                          background: displayTodayAttendance?.status === 'absent'
+                            ? `linear-gradient(90deg, ${COLORS.red}, #fca5a5)`
+                            : todayIsHoliday
+                              ? `linear-gradient(90deg, ${COLORS.amber}, #fcd34d)`
+                              : `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`,
+                        }}
                         initial={{ width: 0 }}
                         animate={{ width: `${displayTodayAttendance?.status === 'absent' ? 100 : todayIsHoliday ? 100 : progressPct}%` }}
                         transition={{ duration: 1.2, ease: 'easeOut' }}
                       />
                     </div>
+
+                    {/* Goal / progress chips */}
                     <div className="flex gap-3">
                       <div className="flex-1 px-3.5 py-2.5 rounded-xl border text-center"
                         style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff', borderColor: isDark ? '#1d4ed8' : '#bfdbfe' }}>
@@ -1974,7 +2072,7 @@ export default function Attendance() {
                     </div>
                   </div>
 
-                  {/* Punch controls */}
+                  {/* Punch controls — "Apply for Leave" REMOVED from here */}
                   <div className="space-y-3">
                     {displayTodayAttendance?.punch_in && (
                       <>
@@ -2008,6 +2106,7 @@ export default function Attendance() {
                         )}
                       </>
                     )}
+
                     {!isViewingOther && (
                       <div className="flex flex-col gap-2 pt-1">
                         {!displayTodayAttendance?.punch_in && displayTodayAttendance?.status !== 'absent' ? (
@@ -2018,7 +2117,9 @@ export default function Attendance() {
                               className={`flex items-center justify-center gap-2 w-full h-11 rounded-xl text-sm font-bold text-white transition-all ${!loading ? 'punch-in-pulse' : ''}`}
                               style={{ backgroundColor: COLORS.emeraldGreen }}
                             >
-                              {loading ? <><Loader2 className="w-4 h-4 animate-spin" />Punching In…</> : <><LogIn className="w-4 h-4" />Punch In</>}
+                              {loading
+                                ? <><Loader2 className="w-4 h-4 animate-spin" />Punching In…</>
+                                : <><LogIn className="w-4 h-4" />Punch In</>}
                             </motion.button>
                           )
                         ) : !displayTodayAttendance?.punch_out && displayTodayAttendance?.punch_in && isTodaySelected ? (
@@ -2028,7 +2129,9 @@ export default function Attendance() {
                             className="flex items-center justify-center gap-2 w-full h-11 rounded-xl text-sm font-bold text-white transition-all"
                             style={{ backgroundColor: COLORS.red }}
                           >
-                            {loading ? <><Loader2 className="w-4 h-4 animate-spin" />Punching Out…</> : <><LogOut className="w-4 h-4" />Punch Out</>}
+                            {loading
+                              ? <><Loader2 className="w-4 h-4 animate-spin" />Punching Out…</>
+                              : <><LogOut className="w-4 h-4" />Punch Out</>}
                           </motion.button>
                         ) : displayTodayAttendance?.punch_out ? (
                           <div className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border"
@@ -2039,25 +2142,36 @@ export default function Attendance() {
                       </div>
                     )}
 
-                    {/* Weekly mini-bar chart */}
+                    {/* FEATURE ENHANCEMENT: Weekly mini-bar chart */}
                     <div className="pt-2">
                       <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">This Week</p>
                       <div className="flex items-end gap-1.5 h-12">
                         {weekSummary.map((d) => {
                           const barHeight = d.hours ? Math.min(100, (parseFloat(d.hours) / 10) * 100) : 0;
-                          const barColor  = d.status === 'present' ? COLORS.emeraldGreen : d.status === 'absent' ? COLORS.red : d.status === 'leave' ? COLORS.orange : d.status === 'holiday' ? COLORS.amber : isDark ? D.border : '#e2e8f0';
+                          const barColor = d.status === 'present' ? COLORS.emeraldGreen
+                            : d.status === 'absent' ? COLORS.red
+                            : d.status === 'leave' ? COLORS.orange
+                            : d.status === 'holiday' ? COLORS.amber
+                            : isDark ? D.border : '#e2e8f0';
+
                           return (
                             <Tooltip key={d.dateStr}>
                               <TooltipTrigger asChild>
                                 <div className="flex-1 flex flex-col items-center gap-0.5">
                                   <motion.div
                                     className="w-full rounded-t-md"
-                                    style={{ backgroundColor: barColor, opacity: d.status === 'future' ? 0.25 : d.status === 'none' ? 0.3 : 0.85, minHeight: 3 }}
+                                    style={{
+                                      backgroundColor: barColor,
+                                      opacity: d.status === 'future' ? 0.25 : d.status === 'none' ? 0.3 : 0.85,
+                                      minHeight: 3,
+                                    }}
                                     initial={{ height: 0 }}
                                     animate={{ height: `${Math.max(6, barHeight)}%` }}
                                     transition={{ duration: 0.6, delay: 0.1 }}
                                   />
-                                  <span className={`text-[9px] font-bold ${d.isToday ? 'text-blue-500' : 'text-slate-400 dark:text-slate-500'}`}>{d.day}</span>
+                                  <span className={`text-[9px] font-bold ${d.isToday ? 'text-blue-500' : 'text-slate-400 dark:text-slate-500'}`}>
+                                    {d.day}
+                                  </span>
                                 </div>
                               </TooltipTrigger>
                               <TooltipContent side="top" className="text-xs">
@@ -2076,7 +2190,7 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ══ PENDING HOLIDAY REVIEW ══ */}
+        {/* ══ PENDING HOLIDAY REVIEW ═══════════════════════════════════════════ */}
         {isAdmin && Array.isArray(pendingHolidays) && pendingHolidays.length > 0 && (
           <motion.div variants={itemVariants}>
             <SectionCard>
@@ -2089,7 +2203,8 @@ export default function Attendance() {
               />
               <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {pendingHolidays.map(holiday => (
-                  <div key={holiday.date} className="p-4 rounded-xl border"
+                  <div key={holiday.date}
+                    className="p-4 rounded-xl border"
                     style={{ backgroundColor: isDark ? D.raised : '#fffbeb', borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#fde68a' }}>
                     <p className="font-semibold text-sm mb-1" style={{ color: isDark ? D.text : '#1e293b' }}>{holiday.name}</p>
                     <p className="text-xs mb-3" style={{ color: isDark ? D.muted : '#78716c' }}>
@@ -2109,7 +2224,7 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ══ ABSENT SUMMARY ══ */}
+        {/* ══ ABSENT SUMMARY ═══════════════════════════════════════════════════ */}
         {isAdmin && Array.isArray(absentSummary) && absentSummary.length > 0 && (
           <motion.div variants={itemVariants}>
             <SectionCard>
@@ -2124,7 +2239,10 @@ export default function Attendance() {
                 {absentSummary.map(item => (
                   <motion.div key={item.user_id} whileHover={{ scale: 1.02 }}
                     className="flex items-center gap-2.5 p-3 rounded-xl border"
-                    style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2', borderColor: isDark ? '#7f1d1d' : '#fecaca' }}>
+                    style={{
+                      backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2',
+                      borderColor: isDark ? '#7f1d1d' : '#fecaca',
+                    }}>
                     <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
                       style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.20)' : '#fecaca' }}>
                       <span className="font-bold text-sm text-red-500">{(item.user_name || '?')[0]}</span>
@@ -2140,7 +2258,7 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ══ STAT CARDS ══ */}
+        {/* ══ STAT CARDS (Enhanced with Streak + Avg Hours) ═════════════════════ */}
         <motion.div
           className={`grid gap-3 ${canViewRankings ? 'grid-cols-2 md:grid-cols-3 lg:grid-cols-6' : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-5'}`}
           variants={itemVariants}
@@ -2150,12 +2268,15 @@ export default function Attendance() {
             value={Math.floor(monthTotalMinutes / 60)} unit="hours worked" color={COLORS.deepBlue}
             trend={`${monthDaysPresent} days present`} />
           <StatCard isDark={isDark} icon={CheckCircle2}
-            label="Tasks Done" value={tasksCompleted} unit="completed" color={COLORS.emeraldGreen} trend=" " />
+            label="Tasks Done" value={tasksCompleted} unit="completed" color={COLORS.emeraldGreen}
+            trend=" " />
           <StatCard isDark={isDark} icon={CalendarX}
-            label="Days Late" value={totalDaysLateThisMonth} unit="this month" color={COLORS.orange} trend=" " />
+            label="Days Late" value={totalDaysLateThisMonth} unit="this month" color={COLORS.orange}
+            trend=" " />
           <StatCard isDark={isDark} icon={UserX}
             label="Days Absent" value={monthDaysAbsent} unit="this month" color={COLORS.red}
             trend={monthDaysAbsent > 0 ? 'Auto-marked at 7 PM' : 'Perfect attendance'} />
+          {/* FEATURE ENHANCEMENT: Streak + Avg Hours cards */}
           <StatCard isDark={isDark} icon={Flame}
             label="Streak" value={attendanceStreak} unit="consecutive days" color="#f59e0b"
             trend={attendanceStreak >= 5 ? 'Keep it up!' : 'Build momentum'} />
@@ -2167,7 +2288,7 @@ export default function Attendance() {
           )}
         </motion.div>
 
-        {/* ══ HOLIDAYS + REMINDERS ══ */}
+        {/* ══ HOLIDAYS + REMINDERS ═════════════════════════════════════════════ */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-5">
 
@@ -2184,7 +2305,9 @@ export default function Attendance() {
                     try {
                       const r = await api.post('/holidays/auto-sync');
                       const { added = 0, upgraded = 0 } = r.data || {};
-                      const msg = added + upgraded > 0 ? `${added} new · ${upgraded} confirmed` : 'Already up to date';
+                      const msg = added + upgraded > 0
+                        ? `${added} new · ${upgraded} confirmed`
+                        : 'Already up to date';
                       toast.success(`Holidays synced — ${msg}`);
                       await fetchData();
                     } catch { toast.error('Sync failed'); }
@@ -2203,8 +2326,11 @@ export default function Attendance() {
                   </div>
                 ) : monthHolidaysGrid.map(h => (
                   <motion.div key={h.date}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer group transition-all hover:shadow-sm relative"
-                    style={{ borderColor: isDark ? 'rgba(245,158,11,0.22)' : `${COLORS.amber}35`, backgroundColor: isDark ? 'rgba(245,158,11,0.06)' : `${COLORS.amber}05` }}
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer group transition-all hover:shadow-sm"
+                    style={{
+                      borderColor: isDark ? 'rgba(245,158,11,0.22)' : `${COLORS.amber}35`,
+                      backgroundColor: isDark ? 'rgba(245,158,11,0.06)' : `${COLORS.amber}05`,
+                    }}
                     whileHover={{ backgroundColor: isDark ? 'rgba(245,158,11,0.12)' : `${COLORS.amber}10`, y: -1 }}
                     onClick={() => setSelectedHolidayDetail(h)}
                   >
@@ -2215,7 +2341,9 @@ export default function Attendance() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold truncate" style={{ color: isDark ? D.text : '#1e293b' }}>{h.name}</p>
-                      <p className="text-xs" style={{ color: isDark ? D.muted : '#64748b' }}>{safeFormatDate(h.date, 'EEEE', '—')}</p>
+                      <p className="text-xs" style={{ color: isDark ? D.muted : '#64748b' }}>
+                        {safeFormatDate(h.date, 'EEEE', '—')}
+                      </p>
                     </div>
                     <ChevronRight className="w-4 h-4 flex-shrink-0 text-slate-300 dark:text-slate-600" />
                     {isAdmin && (
@@ -2241,14 +2369,19 @@ export default function Attendance() {
                 iconBg={isDark ? 'bg-purple-900/40' : 'bg-purple-50'}
                 icon={<AlarmClock className="h-4 w-4 text-purple-500" />}
                 title={
-                  <span className="cursor-pointer hover:underline" onClick={() => setShowReminderCalendar(true)} title="Click for calendar view">
+                  <span
+                    className="cursor-pointer hover:underline"
+                    onClick={() => setShowReminderCalendar(true)}
+                    title="Click for calendar view"
+                  >
                     {isViewingOther ? `${viewedUserName?.split(' ')[0]}'s Reminders` : 'Reminders & Meetings'}
                   </span>
                 }
                 subtitle={
                   <span>
                     {upcomingReminders.length} upcoming ·{' '}
-                    <span className="cursor-pointer hover:underline" style={{ color: COLORS.purple }} onClick={() => setShowReminderCalendar(true)}>
+                    <span className="cursor-pointer hover:underline" style={{ color: COLORS.purple }}
+                      onClick={() => setShowReminderCalendar(true)}>
                       calendar view
                     </span>
                   </span>
@@ -2291,7 +2424,10 @@ export default function Attendance() {
                       onClick={() => setSelectedReminderDetail(r)}
                     >
                       <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-xs font-black"
-                        style={{ backgroundColor: isDue ? isDark ? 'rgba(239,68,68,0.18)' : `${COLORS.red}15` : isDark ? 'rgba(139,92,246,0.18)' : `${COLORS.purple}15`, color: isDue ? COLORS.red : COLORS.purple }}>
+                        style={{
+                          backgroundColor: isDue ? isDark ? 'rgba(239,68,68,0.18)' : `${COLORS.red}15` : isDark ? 'rgba(139,92,246,0.18)' : `${COLORS.purple}15`,
+                          color: isDue ? COLORS.red : COLORS.purple,
+                        }}>
                         {index + 1}
                       </div>
                       <div className="flex-1 min-w-0">
@@ -2302,7 +2438,9 @@ export default function Attendance() {
                       </div>
                       {isDue && (
                         <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase flex-shrink-0 hidden sm:block"
-                          style={{ color: COLORS.red, backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>Due</span>
+                          style={{ color: COLORS.red, backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>
+                          Due
+                        </span>
                       )}
                       <ChevronRight className="w-4 h-4 flex-shrink-0 text-slate-300 dark:text-slate-600" />
                       {!isViewingOther && (
@@ -2321,17 +2459,14 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ══ CALENDAR + APPLY LEAVE + RECENT ATTENDANCE ══ */}
+        {/* ══ CALENDAR + APPLY LEAVE + RECENT ATTENDANCE ═══════════════════════ */}
         <motion.div
-          className={`grid gap-5 ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-3'}`}
+          className={`grid gap-5 items-stretch ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-3'}`}
           variants={itemVariants}
-          style={{ alignItems: 'start' }}
         >
-          {/* LEFT COLUMN */}
+          {/* Calendar column */}
           {!isEveryoneView && (
-            <div className="xl:col-span-1 flex flex-col gap-4" style={{ minHeight: 0 }}>
-
-              {/* Attendance Calendar */}
+            <div className="xl:col-span-1 flex flex-col gap-4">
               <SectionCard>
                 <CardHeaderRow
                   iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
@@ -2362,6 +2497,7 @@ export default function Attendance() {
                     }}
                     components={{ Day: props => <CustomDay {...props} attendance={attendanceMap} holidays={holidays} /> }}
                   />
+                  {/* Legend */}
                   <div className="flex flex-wrap gap-x-3 gap-y-1.5 mt-4 pt-4 border-t border-slate-100 dark:border-slate-700 text-xs justify-center">
                     {[
                       { color: COLORS.emeraldGreen, label: 'Present'     },
@@ -2435,7 +2571,7 @@ export default function Attendance() {
                 </div>
               </SectionCard>
 
-              {/* Apply for Leave */}
+              {/* ══ APPLY FOR LEAVE CARD — Always visible, below calendar detail ══ */}
               {!isViewingOther && (
                 <SectionCard>
                   <CardHeaderRow
@@ -2445,6 +2581,7 @@ export default function Attendance() {
                     subtitle={upcomingLeaves.length > 0 ? `${upcomingLeaves.length} upcoming leave${upcomingLeaves.length !== 1 ? 's' : ''}` : 'Request time off'}
                   />
                   <div className="p-4 space-y-3">
+                    {/* Upcoming leaves preview */}
                     {upcomingLeaves.length > 0 && (
                       <div className="space-y-1.5 mb-1">
                         {upcomingLeaves.slice(0, 3).map(leave => {
@@ -2452,7 +2589,10 @@ export default function Attendance() {
                           return (
                             <div key={leave.date}
                               className="flex items-center justify-between px-3 py-2 rounded-lg border text-xs"
-                              style={{ backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed', borderColor: isDark ? '#7c2d12' : '#fed7aa' }}>
+                              style={{
+                                backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed',
+                                borderColor: isDark ? '#7c2d12' : '#fed7aa',
+                              }}>
                               <div className="flex items-center gap-2">
                                 <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: COLORS.orange }} />
                                 <span className="font-semibold" style={{ color: isDark ? D.text : '#1e293b' }}>
@@ -2474,17 +2614,29 @@ export default function Attendance() {
                         )}
                       </div>
                     )}
+
+                    {/* Apply button */}
                     <motion.button
                       whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
                       onClick={() => setShowLeaveForm(true)}
                       className="flex items-center justify-center gap-2.5 w-full py-3 rounded-xl text-sm font-bold transition-all border-2"
-                      style={{ borderColor: isDark ? 'rgba(249,115,22,0.4)' : `${COLORS.orange}40`, color: isDark ? '#fb923c' : COLORS.orange, backgroundColor: isDark ? 'rgba(249,115,22,0.08)' : `${COLORS.orange}06` }}
+                      style={{
+                        borderColor: isDark ? 'rgba(249,115,22,0.4)' : `${COLORS.orange}40`,
+                        color: isDark ? '#fb923c' : COLORS.orange,
+                        backgroundColor: isDark ? 'rgba(249,115,22,0.08)' : `${COLORS.orange}06`,
+                      }}
                     >
                       <Send className="w-4 h-4" />
                       Request Leave
                     </motion.button>
+
+                    {/* Quick leave chips */}
                     <div className="flex gap-2 flex-wrap">
-                      {[{ label: 'Tomorrow', days: 1 }, { label: '3 Days', days: 3 }, { label: '1 Week', days: 7 }].map(({ label, days }) => (
+                      {[
+                        { label: 'Tomorrow', days: 1 },
+                        { label: '3 Days', days: 3 },
+                        { label: '1 Week', days: 7 },
+                      ].map(({ label, days }) => (
                         <button
                           key={label}
                           onClick={() => {
@@ -2492,10 +2644,16 @@ export default function Attendance() {
                             from.setDate(from.getDate() + (label === 'Tomorrow' ? 1 : 0));
                             const to = new Date(from);
                             to.setDate(from.getDate() + days - 1);
-                            setLeaveFrom(from); setLeaveTo(to); setShowLeaveForm(true);
+                            setLeaveFrom(from);
+                            setLeaveTo(to);
+                            setShowLeaveForm(true);
                           }}
                           className="text-[11px] font-semibold px-3 py-1.5 rounded-lg border transition-all hover:shadow-sm active:scale-95"
-                          style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.muted : '#64748b', backgroundColor: isDark ? D.raised : '#f8fafc' }}
+                          style={{
+                            borderColor: isDark ? D.border : '#e2e8f0',
+                            color: isDark ? D.muted : '#64748b',
+                            backgroundColor: isDark ? D.raised : '#f8fafc',
+                          }}
                         >
                           {label}
                         </button>
@@ -2505,9 +2663,9 @@ export default function Attendance() {
                 </SectionCard>
               )}
 
-              {/* Monthly Punctuality Insights */}
+              {/* ══ MONTHLY PUNCTUALITY INSIGHTS ══════════════════════════════════ */}
               {!isEveryoneView && (
-                <SectionCard className="flex flex-col" style={{ flex: '1 1 0', minHeight: 0 }}>
+                <SectionCard className="flex-1">
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
                     icon={<BarChart3 className="h-4 w-4 text-emerald-500" />}
@@ -2516,7 +2674,9 @@ export default function Attendance() {
                     action={
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
                         style={{
-                          backgroundColor: totalDaysLateThisMonth === 0 ? (isDark ? 'rgba(31,175,90,0.18)' : '#dcfce7') : (isDark ? 'rgba(239,68,68,0.15)' : '#fee2e2'),
+                          backgroundColor: totalDaysLateThisMonth === 0
+                            ? (isDark ? 'rgba(31,175,90,0.18)' : '#dcfce7')
+                            : (isDark ? 'rgba(239,68,68,0.15)' : '#fee2e2'),
                           color: totalDaysLateThisMonth === 0 ? COLORS.emeraldGreen : COLORS.red,
                         }}>
                         {totalDaysLateThisMonth === 0 ? '✓ On Time' : `${totalDaysLateThisMonth} Late`}
@@ -2526,7 +2686,7 @@ export default function Attendance() {
                   <div className="p-4 space-y-3">
                     {(() => {
                       const onTimeCount = monthDaysPresent - totalDaysLateThisMonth;
-                      const onTimePct   = monthDaysPresent > 0 ? Math.round((onTimeCount / monthDaysPresent) * 100) : 0;
+                      const onTimePct = monthDaysPresent > 0 ? Math.round((onTimeCount / monthDaysPresent) * 100) : 0;
                       return (
                         <>
                           <div>
@@ -2590,13 +2750,11 @@ export default function Attendance() {
             </div>
           )}
 
-          {/* RIGHT COLUMN — equal-height grid for both cards */}
-          <div
-            className={isEveryoneView ? '' : 'xl:col-span-2'}
-            style={!isEveryoneView ? { display: 'grid', gridTemplateRows: '1fr 1fr', gap: '1rem' } : {}}
-          >
-            {/* Recent Attendance */}
-            <SectionCard className="flex flex-col" style={{ minHeight: 0, overflow: 'hidden' }}>
+          {/* ══ RIGHT COLUMN: Recent Attendance (top) + Location History (bottom) ══ */}
+          <div className={isEveryoneView ? '' : 'xl:col-span-2 flex flex-col gap-4'}>
+
+            {/* ── Recent Attendance ─────────────────────────────────────────── */}
+            <SectionCard className="flex flex-col" style={{ height: 380, minHeight: 380, maxHeight: 380 }}>
               <CardHeaderRow
                 iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
                 icon={<Clock className="h-4 w-4 text-blue-500" />}
@@ -2614,16 +2772,16 @@ export default function Attendance() {
                     <p className="text-sm font-medium text-slate-400">No records yet</p>
                   </div>
                 ) : recentAttendance.map((record, idx) => {
-                  const inLocLabel     = getLocationLabel(record, 'in');
-                  const outLocLabel    = getLocationLabel(record, 'out');
+                  const inLocLabel   = getLocationLabel(record, 'in');
+                  const outLocLabel  = getLocationLabel(record, 'out');
                   const recordUserName = userMap[record.user_id]
                     || (record.user_id === user?.id ? (user?.full_name || 'Me') : null)
                     || (isEveryoneView ? (record.user_id || 'Unknown') : (user?.full_name || null));
-                  const isAbsent  = record.status === 'absent';
-                  const isLeave   = record.status === 'leave';
-                  const isPresent = record.punch_in && record.status === 'present';
-                  const isOngoing = isPresent && !record.punch_out;
-                  const recordDate = safeParseISO(record.date);
+                  const isAbsent    = record.status === 'absent';
+                  const isLeave     = record.status === 'leave';
+                  const isPresent   = record.punch_in && record.status === 'present';
+                  const isOngoing   = isPresent && !record.punch_out;
+                  const recordDate  = safeParseISO(record.date);
                   return (
                     <motion.div
                       key={`${record.date}-${record.user_id || idx}`}
@@ -2642,7 +2800,9 @@ export default function Attendance() {
                             ? isAbsent ? '#7f1d1d' : isLeave ? '#7c2d12' : isPresent ? '#14532d' : D.border
                             : isAbsent ? '#fecaca' : isLeave ? '#fed7aa' : isPresent ? '#bbf7d0' : '#e2e8f0',
                         borderLeftWidth: 3,
-                        borderLeftColor: isOngoing ? COLORS.amber : isAbsent ? COLORS.red : isLeave ? COLORS.orange : isPresent ? COLORS.emeraldGreen : isDark ? D.border : COLORS.slate200,
+                        borderLeftColor: isOngoing ? COLORS.amber
+                          : isAbsent ? COLORS.red : isLeave ? COLORS.orange
+                          : isPresent ? COLORS.emeraldGreen : isDark ? D.border : COLORS.slate200,
                         flexShrink: 0,
                       }}
                     >
@@ -2673,7 +2833,9 @@ export default function Attendance() {
                         <div className="flex flex-col items-end gap-1 flex-shrink-0">
                           {isOngoing ? (
                             <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full animate-pulse"
-                              style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.25)' : '#fef3c7', color: COLORS.amber }}>ONGOING</span>
+                              style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.25)' : '#fef3c7', color: COLORS.amber }}>
+                              ONGOING
+                            </span>
                           ) : isAbsent ? (
                             <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded text-red-500"
                               style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>Absent</span>
@@ -2701,13 +2863,13 @@ export default function Attendance() {
               </div>
             </SectionCard>
 
-            {/* Location History */}
+            {/* ── Punch Location History ────────────────────────────────────── */}
             {!isEveryoneView && (() => {
               const locRecords = (Array.isArray(attendanceHistory) ? attendanceHistory : [])
                 .filter(r => r.punch_in && r.status === 'present')
                 .slice(0, 5);
               return (
-                <SectionCard className="flex flex-col" style={{ minHeight: 0, overflow: 'hidden' }}>
+                <SectionCard className="flex flex-col" style={{ height: 380, minHeight: 380, maxHeight: 380 }}>
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-teal-900/40' : 'bg-teal-50'}
                     icon={<MapPin className="h-4 w-4 text-teal-500" />}
@@ -2736,12 +2898,13 @@ export default function Attendance() {
                       const hasInCoords  = inLoc?.latitude && inLoc?.longitude;
                       const hasOutCoords = outLoc?.latitude && outLoc?.longitude;
                       const isOngoing    = !record.punch_out;
-                      const inMapsUrl    = hasInCoords  ? `https://www.google.com/maps?q=${inLoc.latitude},${inLoc.longitude}`   : null;
+                      const inMapsUrl    = hasInCoords ? `https://www.google.com/maps?q=${inLoc.latitude},${inLoc.longitude}` : null;
                       const outMapsUrl   = hasOutCoords ? `https://www.google.com/maps?q=${outLoc.latitude},${outLoc.longitude}` : null;
                       return (
                         <motion.div
                           key={record.date}
-                          initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: idx * 0.05, duration: 0.25 }}
                           className="rounded-xl border overflow-hidden flex-shrink-0"
                           style={{
@@ -2751,6 +2914,7 @@ export default function Attendance() {
                             borderLeftColor: isOngoing ? COLORS.amber : '#0d9488',
                           }}
                         >
+                          {/* Compact header */}
                           <div className="flex items-center justify-between px-2.5 py-1.5 border-b"
                             style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#f8fafc' }}>
                             <div className="flex items-center gap-1.5">
@@ -2763,7 +2927,9 @@ export default function Attendance() {
                               </span>
                               {isOngoing && (
                                 <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full animate-pulse"
-                                  style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.25)' : '#fef3c7', color: COLORS.amber }}>ONGOING</span>
+                                  style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.25)' : '#fef3c7', color: COLORS.amber }}>
+                                  ONGOING
+                                </span>
                               )}
                             </div>
                             <div className="flex items-center gap-1.5">
@@ -2776,6 +2942,7 @@ export default function Attendance() {
                               )}
                             </div>
                           </div>
+                          {/* IN row */}
                           <div className="px-2.5 py-1.5 flex items-center gap-2 border-b"
                             style={{ borderColor: isDark ? 'rgba(255,255,255,0.04)' : '#f1f5f9' }}>
                             <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0"
@@ -2801,6 +2968,7 @@ export default function Attendance() {
                               </p>
                             </div>
                           </div>
+                          {/* OUT row */}
                           <div className="px-2.5 py-1.5 flex items-center gap-2">
                             <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0"
                               style={{ backgroundColor: isOngoing ? isDark ? 'rgba(245,158,11,0.20)' : '#fef3c7' : isDark ? 'rgba(249,115,22,0.15)' : '#ffedd5' }}>
@@ -2836,8 +3004,7 @@ export default function Attendance() {
             })()}
           </div>
         </motion.div>
-
-        {/* ══ MODALS ══ */}
+        {/* ══ MODALS ════════════════════════════════════════════════════════════ */}
 
         {/* Punch-In Modal */}
         <AnimatePresence>
@@ -2895,6 +3062,8 @@ export default function Attendance() {
                     <X className="w-4 h-4 text-slate-400" />
                   </button>
                 </div>
+
+                {/* Quick duration chips */}
                 <div className="flex flex-wrap gap-2 mb-6">
                   {[1, 3, 7, 15, 30].map(days => (
                     <Button key={days} variant="outline" size="sm"
@@ -2905,6 +3074,7 @@ export default function Attendance() {
                     </Button>
                   ))}
                 </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                   <div>
                     <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>From Date</label>
@@ -2921,6 +3091,7 @@ export default function Attendance() {
                       style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
                   </div>
                 </div>
+
                 {leaveFrom && (
                   <div className="px-4 py-3 rounded-xl mb-6 border-l-4" style={{ backgroundColor: isDark ? `${COLORS.deepBlue}18` : `${COLORS.deepBlue}08`, borderLeftColor: COLORS.deepBlue }}>
                     <p className="text-xs text-slate-400 mb-0.5">Total Duration</p>
@@ -2929,11 +3100,13 @@ export default function Attendance() {
                     </p>
                   </div>
                 )}
+
                 <div className="mb-6">
                   <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Reason</label>
                   <textarea value={leaveReason} onChange={e => setLeaveReason(e.target.value)}
                     placeholder="Reason for leave…" className={`${inputCls} min-h-[90px] resize-none`} style={inputStyle} />
                 </div>
+
                 <div className="flex justify-end gap-2">
                   <Button variant="ghost" onClick={() => setShowLeaveForm(false)} className="font-semibold rounded-xl" style={{ color: isDark ? D.muted : undefined }}>Cancel</Button>
                   <Button disabled={!leaveFrom} onClick={handleApplyLeave} className="font-semibold text-white rounded-xl" style={{ backgroundColor: COLORS.deepBlue }}>
@@ -2972,6 +3145,7 @@ export default function Attendance() {
                     </button>
                   </div>
                 </div>
+
                 <div className="p-6">
                   <div className="space-y-2.5 max-h-[45vh] overflow-y-auto slim-scroll mb-5" style={slimScroll}>
                     {holidayRows.map((row, idx) => (
@@ -2996,6 +3170,7 @@ export default function Attendance() {
                     Add Another
                   </button>
                 </div>
+
                 <div className="px-6 py-4 flex justify-end gap-2 border-t"
                   style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
                   <Button variant="ghost" onClick={() => setShowHolidayModal(false)} className="font-semibold rounded-xl" style={{ color: isDark ? D.muted : undefined }}>Cancel</Button>
@@ -3082,6 +3257,7 @@ export default function Attendance() {
                     </button>
                   </div>
                 </div>
+
                 <div className="p-6 space-y-4 overflow-y-auto slim-scroll flex-1" style={slimScroll}>
                   {trademarkData && (
                     <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
@@ -3095,9 +3271,9 @@ export default function Attendance() {
                       <div className="p-4 grid grid-cols-2 gap-3 text-xs">
                         {[
                           { label: 'Application No', value: trademarkData.application_no, bold: true },
-                          { label: 'Class',          value: trademarkData.class                     },
-                          { label: 'Applicant',      value: trademarkData.applicant_name,  bold: true },
-                          { label: 'Hearing Date',   value: trademarkData.hearing_date               },
+                          { label: 'Class',           value: trademarkData.class                     },
+                          { label: 'Applicant',       value: trademarkData.applicant_name,  bold: true },
+                          { label: 'Hearing Date',    value: trademarkData.hearing_date               },
                         ].filter(f => f.value).map(({ label, value, bold }) => (
                           <div key={label}>
                             <p className="text-[10px] uppercase font-bold text-slate-400 mb-0.5">{label}</p>
@@ -3107,6 +3283,7 @@ export default function Attendance() {
                       </div>
                     </motion.div>
                   )}
+
                   <div>
                     <label className="text-sm font-semibold mb-1.5 block text-slate-500 dark:text-slate-400">Title *</label>
                     <input type="text" value={reminderTitle} onChange={e => setReminderTitle(e.target.value)}
@@ -3124,6 +3301,7 @@ export default function Attendance() {
                       className={`${inputCls} resize-none font-mono`} style={inputStyle} />
                   </div>
                 </div>
+
                 <div className="px-6 py-4 flex justify-end gap-2 flex-shrink-0 border-t"
                   style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
                   <Button variant="ghost" onClick={() => { setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null); }}
