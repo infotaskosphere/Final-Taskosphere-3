@@ -417,16 +417,25 @@ const DashboardLayout = ({ children }) => {
           ref={sidebarNavRef}
           className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar py-4"
         >
-          {NAV_GROUPS.map((group) => (
-            <div key={group.id} className="mb-2">
-              {group.dividerLabel && <NavDivider label={group.dividerLabel} />}
-              <div className={`space-y-1 ${collapsed ? 'px-2' : 'px-3'}`}>
-                {group.items.map((item) => (
-                  <NavItem key={item.path} item={item} />
-                ))}
+          {NAV_GROUPS.map((group) => {
+            /* Hide the entire group (including its heading) if the user
+               has no permission to see any item within it.             */
+            const visibleGroupItems = group.items.filter(
+              (item) => checkNavPermission(item.permission)
+            );
+            if (visibleGroupItems.length === 0) return null;
+
+            return (
+              <div key={group.id} className="mb-2">
+                {group.dividerLabel && <NavDivider label={group.dividerLabel} />}
+                <div className={`space-y-1 ${collapsed ? 'px-2' : 'px-3'}`}>
+                  {group.items.map((item) => (
+                    <NavItem key={item.path} item={item} />
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Collapse button */}
