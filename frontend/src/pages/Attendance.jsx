@@ -2657,8 +2657,8 @@ export default function Attendance() {
                   </div>
                 </SectionCard>
               )}
-            </div> {/* ── END LEFT COLUMN ── */}
-
+            </div> 
+          
           {/* ── RIGHT COLUMN: Recent Attendance + Location History ── */}
           <div className={isEveryoneView ? '' : 'xl:col-span-2 flex flex-col gap-4'}>
 
