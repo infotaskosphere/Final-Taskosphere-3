@@ -4453,16 +4453,31 @@ async def create_holiday(
 ):
     """
     Create a holiday entry.
-    FIX: Build the dict carefully — HolidayCreate only has date, name, description.
-    Do NOT try to access holiday.type since that field does not exist on HolidayCreate.
-    Store the date as an ISO string for consistent MongoDB querying.
+    HolidayCreate.date is typed as Any — the frontend sends a plain string ("2026-04-05").
+    Calling .isoformat() on a str raises AttributeError → 500. Guard with isinstance check.
     """
+    # ── Safe date → ISO string conversion ───────────────────────────────────
+    raw_date = holiday.date
+    if isinstance(raw_date, str):
+        date_str = raw_date.strip()[:10]   # already "YYYY-MM-DD", just normalise
+    elif hasattr(raw_date, "isoformat"):
+        date_str = raw_date.isoformat()    # date / datetime object
+    else:
+        date_str = str(raw_date)[:10]
+
+    # Validate it actually looks like a date
+    try:
+        date.fromisoformat(date_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid date format: '{date_str}'. Use YYYY-MM-DD.")
+
     holiday_dict = {
-        "date": holiday.date.isoformat(),
-        "name": holiday.name,
-        "description": holiday.description,
-        "status": "confirmed",
-        "type": "manual",
+        "date":        date_str,
+        "name":        holiday.name,
+        "description": getattr(holiday, "description", None),
+        "status":      "confirmed",
+        "type":        getattr(holiday, "type", None) or "manual",
+        "created_at":  datetime.now(timezone.utc).isoformat(),
     }
 
     logger.info(f"Creating holiday: date={holiday_dict['date']}, name={holiday_dict.get('name')}, by={current_user.id}")
