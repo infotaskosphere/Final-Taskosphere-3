@@ -988,10 +988,12 @@ export default function Dashboard() {
   }, [user, isAdmin]);
 
   const crossVisibilityUserIds = useMemo(() => {
-    if (isAdmin) return allUsers.map(u => u.id).filter(id => id !== user?.id);
+    if (isAdmin) {
+      return [...new Set(tasks.map(t => t.assigned_to).filter(id => id && id !== user?.id))];
+    }
     const perms = user?.permissions || {};
     return (perms.view_other_tasks || []).filter(id => id !== user?.id);
-  }, [user, isAdmin, allUsers]);
+  }, [user, isAdmin, tasks]);
 
   const openLeadsCount = useMemo(
     () => leadsData.filter(
@@ -1057,6 +1059,7 @@ export default function Dashboard() {
     return crossVisibilityUserIds
       .map(uid => {
         const memberUser = allUsers.find(u => u.id === uid);
+        const nameFromTask = tasks.find(t => t.assigned_to === uid)?.assigned_to_name;
         const pendingCount = tasks.filter(
           t =>
             (t.assigned_to === uid || t.sub_assignees?.includes(uid)) &&
@@ -1782,14 +1785,10 @@ export default function Dashboard() {
               <div className="flex items-start justify-between">
                 <div className="min-w-0 flex-1 mr-2">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Team Task</p>
-                  {usersLoading && hasCrossVisibility ? (
-                    <div className="mt-2 h-7 w-12 rounded-lg animate-pulse bg-slate-200 dark:bg-slate-700" />
-                  ) : (
-                    <p className="text-2xl font-bold mt-1 tracking-tight"
-                      style={{ color: hasCrossVisibility ? (isDark ? '#a78bfa' : '#7c3aed') : (isDark ? '#475569' : '#94a3b8') }}>
-                      {hasCrossVisibility ? teamTaskTotal : 0}
-                    </p>
-                  )}
+                  <p className="text-2xl font-bold mt-1 tracking-tight"
+                    style={{ color: hasCrossVisibility ? (isDark ? '#a78bfa' : '#7c3aed') : (isDark ? '#475569' : '#94a3b8') }}>
+                    {hasCrossVisibility ? teamTaskTotal : 0}
+                  </p>
                   {!usersLoading && hasCrossVisibility && teamTaskBreakdown.length > 0 && (
                     <div className="mt-1 space-y-0.5 max-h-[36px] overflow-hidden">
                       {teamTaskBreakdown.slice(0, 2).map(m => (
@@ -1816,8 +1815,8 @@ export default function Dashboard() {
               <div className={`flex items-center gap-1 mt-3 text-xs font-medium transition-colors ${hasCrossVisibility ? 'group-hover:text-violet-500' : ''} ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                 {hasCrossVisibility ? (
                   <>
-                    <span>{usersLoading ? 'Loading…' : 'View team'}</span>
-                    {!usersLoading && <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />}
+                    <span>View team</span>
+                    <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
                   </>
                 ) : (
                   <span>cross visibility off</span>
