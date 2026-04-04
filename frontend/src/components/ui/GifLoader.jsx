@@ -2,7 +2,7 @@ import React from "react";
 
 /**
  * GifLoader — centered full-page loading overlay using the branded GIF.
- * Drop-in replacement for any "Loading..." text or spinner.
+ * No backdrop blur so the sidebar remains visible underneath.
  */
 export default function GifLoader() {
   return (
@@ -14,18 +14,18 @@ export default function GifLoader() {
         alignItems: "center",
         justifyContent: "center",
         zIndex: 9999,
-        background: "rgba(255, 255, 255, 0.6)",
-        backdropFilter: "blur(4px)",
-        WebkitBackdropFilter: "blur(4px)",
+        background: "rgba(255, 255, 255, 0.5)",
+        pointerEvents: "none",
       }}
     >
       <img
         src="/loader.gif"
         alt="Loading…"
         style={{
-          width: 120,
+          width: 150,
           height: "auto",
           objectFit: "contain",
+          pointerEvents: "none",
         }}
       />
     </div>
