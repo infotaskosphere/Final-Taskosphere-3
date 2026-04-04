@@ -54,12 +54,14 @@ import React, { Suspense, lazy } from "react";
   /**
    * Permission: Requires login + specific permission flag.
    * Admin always bypasses.
-   * Manager/Staff: must have the permission set (either by default role template or admin grant).
+   * Manager/Staff: access granted by default per permission matrix.
+   *                Admin can revoke by setting permission to false.
    *
-   * Per ACCESS_GOVERNANCE:
-   *   ADMIN: ALLOW_ALL
-   *   MANAGER: DEFAULT_MODULES auto-allowed | OTHER_MODULES require admin grant
-   *   STAFF:   DEFAULT_MODULES auto-allowed | OTHER_MODULES require admin grant
+   * Per ACCESS_GOVERNANCE (updated permission matrix):
+   *   ADMIN:   ALLOW_ALL (all modules, all data)
+   *   MANAGER: ALL MODULES — VIEW, CREATE, EDIT, UPDATE (Permission-based, Own + Team scope)
+   *   STAFF:   ALL MODULES — VIEW, CREATE, EDIT, UPDATE (Permission-based, Own scope only)
+   *            No DELETE for Manager or Staff by default.
    */
   const Permission = ({ permission, children }) => {
     const { user, loading, hasPermission } = useAuth();
@@ -96,21 +98,26 @@ import React, { Suspense, lazy } from "react";
 
   /* ── Routes ────────────────────────────────────────────────────────────── */
   /**
-   * PERMISSION MATRIX ROUTE MAPPING:
+   * PERMISSION MATRIX ROUTE MAPPING (Updated):
    *
    * DEFAULT_MODULES (all roles — server-side scopes data by role):
-   *   TASK, TODO, CLIENT_VISIT, CLIENT_PAGE, COMPLIANCE, CALENDAR, ATTENDANCE
+   *   TASK, TODO, CLIENT_VISIT, COMPLIANCE/CALENDAR, ATTENDANCE
    *   → Use <Protected> (accessible to all authenticated roles)
-   *   → Data is scoped server-side:
-   *       Admin  → all data
-   *       Manager → own + same-department data
+   *   → Data scoped server-side:
+   *       Admin   → all data
+   *       Manager → own + same-department data (Own + Team)
    *       Staff   → own data only
    *
-   * GENERAL_SETTINGS → <Protected> (all roles, own profile/settings)
+   * GENERAL_SETTINGS → <Protected> (all roles)
+   * REPORTS          → <Protected> (all roles, data scoped server-side)
+   * EMAIL_ACCOUNTS   → <Protected> (all roles, own email connections)
    *
-   * OTHER_MODULES (admin-granted only):
-   *   LEADS, QUOTATIONS, INVOICING, USER_DIRECTORY, STAFF_ACTIVITY, AUDIT_LOGS
-   *   → Use <Permission permission="..."> (requires admin to grant flag)
+   * PERMISSION-BASED MODULES (all roles by default — admin can revoke):
+   *   DSC, DOCUMENT_REGISTER, CLIENTS, PASSWORD_VAULT
+   *   LEADS, QUOTATIONS, INVOICING
+   *   STAFF_ACTIVITY, TASK_AUDIT_LOG, USERS
+   *   → Use <Permission permission="..."> (flag is True by default for Manager+Staff)
+   *   → Data scoped server-side by role scope
    */
   function AppRoutes() {
     return (
@@ -140,42 +147,48 @@ import React, { Suspense, lazy } from "react";
 
         {/* COMPLIANCE module */}
         <Route path="/duedates" element={<Protected><PageLoader><DueDates /></PageLoader></Protected>} />
-        <Route path="/documents" element={<Protected><PageLoader><DocumentsRegister /></PageLoader></Protected>} />
 
-        {/* CLIENT_PAGE module */}
-        <Route path="/clients" element={<Protected><PageLoader><Clients /></PageLoader></Protected>} />
+        {/* Reports — accessible to all (own data for staff, own+team for manager, all for admin) */}
+        <Route path="/reports" element={<Protected><PageLoader><Reports /></PageLoader></Protected>} />
 
         {/* GENERAL_SETTINGS module */}
         <Route path="/settings/general" element={<Protected><PageLoader><GeneralSettings /></PageLoader></Protected>} />
         <Route path="/settings/email" element={<Protected><PageLoader><EmailSettings /></PageLoader></Protected>} />
         <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
-        <Route path="/passwords" element={<Protected><PageLoader><Passvault /></PageLoader></Protected>} />
 
-        {/* Reports — accessible to all (own data for staff, dept data for manager) */}
-        <Route path="/reports" element={<Protected><PageLoader><Reports /></PageLoader></Protected>} />
+        {/* ── PERMISSION-BASED MODULES ── */
+        /* All roles have these permissions by default per updated matrix.   */
+        /* Admin can revoke any of these flags per-user via the Users page.  */}
 
-        {/* ── OTHER_MODULES — admin-granted only ── */}
+        {/* DOCUMENT_REGISTER — Permission-based */}
+        <Route path="/documents" element={<Permission permission="can_view_documents"><PageLoader><DocumentsRegister /></PageLoader></Permission>} />
 
-        {/* DSC — admin-granted */}
+        {/* CLIENTS — Assigned + Permission-based */}
+        <Route path="/clients" element={<Permission permission="can_view_all_clients"><PageLoader><Clients /></PageLoader></Permission>} />
+
+        {/* PASSWORD_VAULT — Permission-based */}
+        <Route path="/passwords" element={<Permission permission="can_view_passwords"><PageLoader><Passvault /></PageLoader></Permission>} />
+
+        {/* DSC_REGISTER — Permission-based */}
         <Route path="/dsc" element={<Permission permission="can_view_all_dsc"><PageLoader><DSCRegister /></PageLoader></Permission>} />
 
-        {/* USER_DIRECTORY — admin-granted */}
-        <Route path="/users" element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
-
-        {/* LEADS — admin-granted */}
+        {/* LEAD_MANAGEMENT — Permission-based */}
         <Route path="/leads" element={<Permission permission="can_view_all_leads"><PageLoader><LeadsPage /></PageLoader></Permission>} />
 
-        {/* QUOTATIONS — admin-granted */}
+        {/* QUOTATIONS — Permission-based */}
         <Route path="/quotations" element={<Permission permission={["can_create_quotations", "can_manage_invoices"]}><PageLoader><Quotations /></PageLoader></Permission>} />
 
-        {/* INVOICING — admin-granted */}
+        {/* INVOICING — Permission-based */}
         <Route path="/invoicing" element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><Invoicing /></PageLoader></Permission>} />
 
-        {/* STAFF_ACTIVITY — admin-granted (manager has it by default) */}
+        {/* STAFF_ACTIVITY — Permission-based (own data for staff, own+team for manager, all for admin) */}
         <Route path="/staff-activity" element={<Permission permission="can_view_staff_activity"><PageLoader><StaffActivity /></PageLoader></Permission>} />
 
-        {/* AUDIT_LOGS — admin-granted only */}
+        {/* TASK_AUDIT_LOG — Permission-based */}
         <Route path="/task-audit" element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
+
+        {/* USERS — Permission-based */}
+        <Route path="/users" element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/login" replace />} />
@@ -185,4 +198,3 @@ import React, { Suspense, lazy } from "react";
   }
 
   export default AppRoutes;
-  
