@@ -709,11 +709,14 @@ export default function Tasks() {
   const canDeleteTasks = isAdmin || hasPermission('can_edit_tasks');
 
   // ── Core state ───────────────────────────────────────────────────────────────
-  const [tasks,       setTasks]       = useState([]);
-  const [users,       setUsers]       = useState([]);
-  const [clients,     setClients]     = useState([]);
-  const [loading,     setLoading]     = useState(false);
-  const [dataLoading, setDataLoading] = useState(true);
+  const [tasks,          setTasks]          = useState([]);
+  const [users,          setUsers]          = useState([]);
+  const [clients,        setClients]        = useState([]);
+  const [loading,        setLoading]        = useState(false);
+  const [dataLoading,    setDataLoading]    = useState(true);
+  const [usersLoading,   setUsersLoading]   = useState(true);
+  const [filterTeamOnly, setFilterTeamOnly] = useState(false);
+  
 
   // ── Dialog / form state ──────────────────────────────────────────────────────
   const [dialogOpen,         setDialogOpen]         = useState(false);
@@ -776,19 +779,32 @@ export default function Tasks() {
     return users.filter(u => u.id === user?.id);
   }, [isAdmin, hasCrossVisibility, crossVisibilityUserIds, users, user]);
 
-  // ── Fetch all data on mount ──────────────────────────────────────────────────
+  // ── Fetch all data on mount ──────────────────────────────────────────────
   useEffect(() => {
     const loadAll = async () => {
       setDataLoading(true);
-      const [tasksData, usersData, clientsData] = await Promise.all([
-        apiFetch('/tasks'),
-        apiFetch('/users'),
-        apiFetch('/clients'),
-      ]);
-      if (Array.isArray(tasksData))   setTasks(tasksData);
-      if (Array.isArray(usersData))   setUsers(usersData);
-      if (Array.isArray(clientsData)) setClients(clientsData);
-      setDataLoading(false);
+
+      // ── Wave 1: tasks only — renders list immediately ──────────────────
+      try {
+        const tasksData = await apiFetch('/tasks');
+        if (Array.isArray(tasksData)) setTasks(tasksData);
+      } catch (e) {
+        console.error('Tasks wave-1 fetch error:', e);
+      }
+      setDataLoading(false); // ← unblocks the list after wave 1
+
+      // ── Wave 2: users + clients — fills names & team data ──────────────
+      try {
+        const [usersData, clientsData] = await Promise.all([
+          apiFetch('/users'),
+          apiFetch('/clients'),
+        ]);
+        if (Array.isArray(usersData))   { setUsers(usersData);   setUsersLoading(false); }
+        if (Array.isArray(clientsData))   setClients(clientsData);
+      } catch (e) {
+        console.error('Tasks wave-2 fetch error:', e);
+        setUsersLoading(false); // always clear loading even on error
+      }
     };
     loadAll();
   }, [apiFetch]);
@@ -1070,13 +1086,15 @@ export default function Tasks() {
     const matchesPriority = filterPriority === 'all' || task.priority  === filterPriority;
     const matchesCategory = filterCategory === 'all' || task.category  === filterCategory;
     const matchesAssignee = filterAssignee === 'all' || task.assigned_to === filterAssignee;
+    // Team-only filter: show only tasks assigned to cross-visibility members
+    const matchesTeam = !filterTeamOnly || crossVisibilityUserIds.includes(task.assigned_to);
     let matchesStatus = true;
     if (filterStatus !== 'all') {
       matchesStatus = filterStatus === 'overdue'
         ? isOverdue(task)
         : task.status === filterStatus;
     }
-    return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee;
+    return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee && matchesTeam;
   });
 
   const displayTasks = React.useMemo(() => {
@@ -1116,9 +1134,10 @@ export default function Tasks() {
     if (filterCategory !== 'all') pills.push({ key: 'category', label: getCategoryLabel(filterCategory) });
     if (filterAssignee !== 'all') pills.push({ key: 'assignee', label: users.find(u => u.id === filterAssignee)?.full_name || filterAssignee });
     if (showMyTasksOnly)          pills.push({ key: 'mytasks',  label: 'My Tasks' });
+    if (filterTeamOnly)           pills.push({ key: 'teamonly', label: 'Team Tasks' });
     setActiveFilters(pills);
-  }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, users]);
-
+  }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, users]);
+  
   const removeFilter = (key) => {
     if (key === 'search')   setSearchQuery('');
     if (key === 'status')   setFilterStatus('all');
@@ -1126,12 +1145,14 @@ export default function Tasks() {
     if (key === 'category') setFilterCategory('all');
     if (key === 'assignee') setFilterAssignee('all');
     if (key === 'mytasks')  setShowMyTasksOnly(false);
+    if (key === 'teamonly') setFilterTeamOnly(false);
   };
 
   const clearAllFilters = () => {
     setSearchQuery(''); setFilterStatus('all'); setFilterPriority('all');
     setFilterCategory('all'); setFilterAssignee('all');
-    setShowMyTasksOnly(false); setSortBy('due_date'); setSortDirection('asc');
+    setShowMyTasksOnly(false); setFilterTeamOnly(false);
+    setSortBy('due_date'); setSortDirection('asc');
     toast.success('Filters cleared');
   };
 
@@ -1176,18 +1197,15 @@ export default function Tasks() {
       className={`space-y-5 min-h-screen p-5 rounded-2xl ${isDark ? 'bg-[#0f172a]' : 'bg-slate-50'}`}
       variants={containerVariants} initial="hidden" animate="visible"
     >
-      {/* Loading overlay */}
+      {/* Non-blocking top bar loader */}
       {dataLoading && (
-        <div className={`fixed inset-0 z-[99999] flex items-center justify-center ${isDark ? 'bg-[#0f172a]' : 'bg-slate-50'}`}>
-          <div className="flex flex-col items-center gap-3">
-            <div className="h-10 w-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              Loading tasks…
-            </p>
-          </div>
+        <div className="fixed top-0 left-0 right-0 z-[99999] h-0.5 overflow-hidden">
+          <div
+            className="h-full w-full animate-pulse"
+            style={{ background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue}, ${COLORS.emeraldGreen})` }}
+          />
         </div>
       )}
-
       {/* ── Page Header ──────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
         <Card className={`border shadow-sm rounded-2xl overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
@@ -1474,40 +1492,54 @@ export default function Tasks() {
           activeClasses={{ bg: 'bg-red-50', border: 'border-red-400', ring: 'ring-red-200', icon: 'bg-red-100', iconFg: 'text-red-700', bar: 'bg-red-700' }}
           onClick={() => setFilterStatus(filterStatus === 'overdue' ? 'all' : 'overdue')} />
 
-        {/* 6. Team Task — shows 0 when cross_visibility is OFF; actual count + breakdown when ON or admin */}
+        {/* 6. Team Task — shows skeleton while users load; correct count + filter click when ready */}
         <motion.button
           whileHover={{ y: -2, boxShadow: '0 6px 20px 0 rgba(0,0,0,0.07)' }}
           whileTap={{ scale: 0.97 }}
           transition={{ type: 'spring', stiffness: 420, damping: 26 }}
-          onClick={() => hasCrossVisibility ? setFilterAssignee('all') : undefined}
+          onClick={() => {
+            if (!hasCrossVisibility || usersLoading) return;
+            // Toggle: if already filtering team, clear it; otherwise activate team filter
+            setFilterTeamOnly(prev => !prev);
+            setFilterAssignee('all');
+            setShowMyTasksOnly(false);
+          }}
           className={`relative rounded-xl border p-4 text-left w-full overflow-hidden transition-colors duration-200
-            ${hasCrossVisibility && stats.teamTask > 0
+            ${filterTeamOnly
               ? isDark
-                ? 'bg-violet-900/20 border-violet-700 ring-1 ring-violet-800'
+                ? 'bg-violet-900/20 border-violet-700 ring-1 ring-violet-800 shadow-sm'
                 : 'bg-violet-50 border-violet-300 ring-1 ring-violet-200 shadow-sm'
+              : hasCrossVisibility && stats.teamTask > 0
+              ? isDark
+                ? 'bg-violet-900/10 border-violet-800'
+                : 'bg-violet-50/50 border-violet-200'
               : isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
             }`}
         >
           <motion.div
             initial={false}
-            animate={{ scaleX: hasCrossVisibility && stats.teamTask > 0 ? 1 : 0, opacity: hasCrossVisibility && stats.teamTask > 0 ? 1 : 0 }}
+            animate={{ scaleX: filterTeamOnly ? 1 : 0, opacity: filterTeamOnly ? 1 : 0 }}
             transition={{ duration: 0.22, ease: 'easeOut' }}
             className="absolute top-0 left-0 right-0 h-[3px] origin-left rounded-t-xl bg-violet-500"
           />
           <div className="flex items-start justify-between">
             <div className="flex-1 min-w-0 mr-2">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Team Task</p>
-              <motion.p
-                key={stats.teamTask}
-                initial={{ opacity: 0, y: 5 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.25, ease: 'easeOut' }}
-                className={`text-3xl font-bold leading-none ${hasCrossVisibility ? (isDark ? 'text-violet-400' : 'text-violet-700') : (isDark ? 'text-slate-600' : 'text-slate-300')}`}
-              >
-                {stats.teamTask}
-              </motion.p>
-              {/* Per-member breakdown in small text */}
-              {hasCrossVisibility && teamTaskBreakdown.length > 0 && (
+              {usersLoading && hasCrossVisibility ? (
+                <div className="mt-1 h-8 w-12 rounded-lg animate-pulse bg-slate-200 dark:bg-slate-700" />
+              ) : (
+                <motion.p
+                  key={stats.teamTask}
+                  initial={{ opacity: 0, y: 5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25, ease: 'easeOut' }}
+                  className={`text-3xl font-bold leading-none ${hasCrossVisibility ? (isDark ? 'text-violet-400' : 'text-violet-700') : (isDark ? 'text-slate-600' : 'text-slate-300')}`}
+                >
+                  {stats.teamTask}
+                </motion.p>
+              )}
+              {/* Per-member breakdown */}
+              {!usersLoading && hasCrossVisibility && teamTaskBreakdown.length > 0 && (
                 <div className="mt-1.5 space-y-0.5">
                   {teamTaskBreakdown.slice(0, 3).map(m => (
                     <p key={m.id} className={`text-[9px] font-medium truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -1524,13 +1556,17 @@ export default function Tasks() {
               {!hasCrossVisibility && (
                 <p className={`text-[9px] mt-1 ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>cross visibility off</p>
               )}
+              {hasCrossVisibility && !usersLoading && (
+                <p className={`text-[9px] mt-1 font-medium ${filterTeamOnly ? 'text-violet-500' : (isDark ? 'text-slate-500' : 'text-slate-400')}`}>
+                  {filterTeamOnly ? '✓ filtering team' : 'click to filter'}
+                </p>
+              )}
             </div>
-            <div className={`p-2 rounded-lg transition-colors duration-200 ${hasCrossVisibility && stats.teamTask > 0 ? (isDark ? 'bg-violet-900/40' : 'bg-violet-100') : 'bg-slate-100'}`}>
-              <Users className={`h-4 w-4 ${hasCrossVisibility && stats.teamTask > 0 ? (isDark ? 'text-violet-400' : 'text-violet-600') : 'text-slate-400'}`} />
+            <div className={`p-2 rounded-lg transition-colors duration-200 ${hasCrossVisibility && (filterTeamOnly || stats.teamTask > 0) ? (isDark ? 'bg-violet-900/40' : 'bg-violet-100') : 'bg-slate-100'}`}>
+              <Users className={`h-4 w-4 ${hasCrossVisibility && (filterTeamOnly || stats.teamTask > 0) ? (isDark ? 'text-violet-400' : 'text-violet-600') : 'text-slate-400'}`} />
             </div>
           </div>
         </motion.button>
-
       </motion.div>
 
       {/* ── Toolbar ──────────────────────────────────────────────────────────── */}
