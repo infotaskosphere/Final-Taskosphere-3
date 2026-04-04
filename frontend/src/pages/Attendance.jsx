@@ -7,6 +7,7 @@
 // • v9: Feature enhancements — streak counter, avg hours, weekly summary, overtime alert
 
 import { useDark } from '@/hooks/useDark';
+import GifLoader from '@/components/ui/GifLoader.jsx';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatInTimeZone } from 'date-fns-tz';
@@ -2686,8 +2687,7 @@ export default function Attendance() {
               <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5" style={{ ...slimScroll, minHeight: 0 }}>
                 {loading && attendanceHistory.length === 0 ? (
                   <div className="flex items-center justify-center h-full">
-                    <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                    <span className="ml-2 text-xs text-slate-400">Loading…</span>
+                    <GifLoader />
                   </div>
                 ) : recentAttendance.length === 0 ? (
                   <div className="flex items-center justify-center h-full">
