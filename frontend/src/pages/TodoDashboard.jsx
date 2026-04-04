@@ -1301,7 +1301,10 @@ export default function TodoDashboard() {
             onClose={() => setPromoteTarget(null)}
             onConfirm={handleConfirmPromote}
             isLoading={promoteLoading}
-            allUsers={allUsers}
+            allUsers={isAdmin || isManager ? allUsers : [
+              ...(user ? [{ id: user.id, _id: user.id, full_name: user.full_name, role: user.role }] : []),
+              ...permittedUsers,
+            ]}
             allClients={allClients}
           />
         )}
@@ -1369,7 +1372,7 @@ export default function TodoDashboard() {
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
 
               {/* LEFT — Create form */}
-              <div className="xl:col-span-4 space-y-4">
+              <div className="xl:col-span-4 flex flex-col gap-4">
 
                 <motion.div variants={itemVariants}>
                   <SectionCard>
@@ -1518,6 +1521,131 @@ export default function TodoDashboard() {
                               : stats.pending > 0
                                 ? `${stats.pending} ${stats.pending === 1 ? 'todo' : 'todos'} left. Health score: ${stats.healthScore}% — keep the momentum!`
                                 : `Perfect score! Health at ${stats.healthScore}%. Consider adding new goals.`
+                            }
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </SectionCard>
+                </motion.div>
+
+                {/* Focus Board — fills remaining height to align with todo list */}
+                <motion.div variants={itemVariants} className="flex-1 flex flex-col min-h-0">
+                  <SectionCard className="flex-1 flex flex-col h-full">
+                    <CardHeaderRow
+                      iconBg="bg-amber-50 dark:bg-amber-900/40"
+                      icon={<Target className="h-4 w-4 text-amber-500" />}
+                      title="Focus Board"
+                      subtitle="Today's priority queue"
+                      action={
+                        stats.overdue > 0 ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400">
+                            {stats.overdue} overdue
+                          </span>
+                        ) : stats.pending > 0 ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400">
+                            {stats.pending} pending
+                          </span>
+                        ) : null
+                      }
+                    />
+                    <div className="flex-1 flex flex-col p-4 gap-3 min-h-0">
+                      {/* Priority score ring */}
+                      <div className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-700/30">
+                        <div className="relative w-12 h-12 flex-shrink-0">
+                          <svg viewBox="0 0 44 44" className="w-12 h-12 -rotate-90">
+                            <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none"
+                              stroke={isDark ? '#334155' : '#e2e8f0'} />
+                            <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none"
+                              strokeDasharray={`${(stats.healthScore / 100) * 106.8} 106.8`}
+                              strokeLinecap="round"
+                              stroke={stats.healthScore >= 80 ? COLORS.emeraldGreen : stats.healthScore >= 50 ? COLORS.amber : COLORS.coral} />
+                          </svg>
+                          <span className="absolute inset-0 flex items-center justify-center text-[11px] font-black"
+                            style={{ color: stats.healthScore >= 80 ? COLORS.emeraldGreen : stats.healthScore >= 50 ? COLORS.amber : COLORS.coral }}>
+                            {stats.healthScore}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Health Score</p>
+                          <p className="text-sm font-bold mt-0.5" style={{ color: stats.healthScore >= 80 ? COLORS.emeraldGreen : stats.healthScore >= 50 ? COLORS.amber : COLORS.coral }}>
+                            {stats.healthScore >= 80 ? 'Excellent' : stats.healthScore >= 50 ? 'Fair' : 'Needs Work'}
+                          </p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">
+                            {stats.completed}/{stats.total} done
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Top priority todos */}
+                      <div className="flex-1 flex flex-col min-h-0">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                          {stats.overdue > 0 ? '🔥 Clear These First' : '📌 Up Next'}
+                        </p>
+                        <div className="flex-1 overflow-y-auto todo-slim space-y-1.5" style={{ maxHeight: 180 }}>
+                          {(() => {
+                            const overdueTodos = todos.filter(t => {
+                              if (t.is_completed === true || t.status === 'completed') return false;
+                              if (!t.due_date) return false;
+                              try { return isPast(parseISO(t.due_date)); } catch { return false; }
+                            });
+                            const pendingTodos = todos.filter(t => {
+                              if (t.is_completed === true || t.status === 'completed') return false;
+                              if (!t.due_date) return true;
+                              try { return !isPast(parseISO(t.due_date)); } catch { return true; }
+                            });
+                            const focusList = [...overdueTodos, ...pendingTodos].slice(0, 5);
+                            if (focusList.length === 0) return (
+                              <div className="flex flex-col items-center justify-center py-6 gap-2">
+                                <CheckCircle2 size={22} className="text-emerald-400" />
+                                <p className="text-xs font-semibold text-slate-400">All clear — nothing pending!</p>
+                              </div>
+                            );
+                            return focusList.map((t, i) => {
+                              const isOvrd = t.due_date && !t.is_completed ? (() => { try { return isPast(parseISO(t.due_date)); } catch { return false; } })() : false;
+                              return (
+                                <motion.div
+                                  key={t.id || t._id}
+                                  initial={{ opacity: 0, x: -6 }}
+                                  animate={{ opacity: 1, x: 0 }}
+                                  transition={{ delay: i * 0.04 }}
+                                  onClick={() => setSelectedTodo(t)}
+                                  className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border cursor-pointer group transition-all hover:shadow-sm"
+                                  style={{
+                                    borderColor: isOvrd ? (isDark ? '#7f1d1d' : '#fecaca') : (isDark ? '#334155' : '#e2e8f0'),
+                                    backgroundColor: isOvrd ? (isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2') : (isDark ? 'rgba(255,255,255,0.02)' : '#fafafa'),
+                                  }}
+                                >
+                                  <span className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-black"
+                                    style={{ backgroundColor: isOvrd ? `${COLORS.coral}18` : `${COLORS.mediumBlue}12`, color: isOvrd ? COLORS.coral : COLORS.mediumBlue }}>
+                                    {i + 1}
+                                  </span>
+                                  <span className="flex-1 text-xs font-medium truncate" style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>
+                                    {t.title}
+                                  </span>
+                                  {isOvrd && (
+                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-500 flex-shrink-0">
+                                      Late
+                                    </span>
+                                  )}
+                                  <ChevronRight size={11} className="text-slate-300 dark:text-slate-600 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                </motion.div>
+                              );
+                            });
+                          })()}
+                        </div>
+                      </div>
+
+                      {/* Quick tip */}
+                      {stats.total > 0 && (
+                        <div className="pt-3 border-t border-slate-100 dark:border-slate-700 flex items-start gap-2">
+                          <Zap size={11} className="text-amber-400 mt-0.5 flex-shrink-0" />
+                          <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 leading-relaxed">
+                            {stats.overdue > 0
+                              ? `Tip: Knock out ${Math.min(stats.overdue, 3)} overdue items today to boost your score by ${Math.min(stats.overdue, 3) * 10}pts.`
+                              : stats.pending > 3
+                              ? `Tip: Focus on 3 todos at a time. You have ${stats.pending} pending — pick the most impactful ones.`
+                              : `Tip: You're almost there! Complete your last ${stats.pending} ${stats.pending === 1 ? 'todo' : 'todos'} to hit 100%.`
                             }
                           </p>
                         </div>
