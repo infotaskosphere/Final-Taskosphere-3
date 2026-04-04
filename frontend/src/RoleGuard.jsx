@@ -1,12 +1,13 @@
 import React from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Navigate } from "react-router-dom";
+import GifLoader from "@/components/ui/GifLoader.jsx";
 
 const RoleGuard = ({ children, permission }) => {
   const { user, loading, hasPermission } = useAuth();
 
   // While auth state is loading
-  if (loading) return null;
+  if (loading) return <GifLoader />;
 
   // If not logged in → redirect to login
   if (!user) {
