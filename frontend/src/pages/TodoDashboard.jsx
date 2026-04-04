@@ -961,7 +961,7 @@ export default function TodoDashboard() {
 
   // ── Resolved user id ───────────────────────────────────────────────────────
   const resolvedUserId = useMemo(() => {
-    if (selectedUser === 'self')     return user?.id ?? null;
+    if (selectedUser === 'self')     return user?.id || 'self';  // ← FIX: 'self' sentinel instead of null
     if (selectedUser === 'everyone') return 'all';
     return selectedUser;
   }, [selectedUser, user?.id]);
@@ -969,9 +969,16 @@ export default function TodoDashboard() {
   // ── Fetch todos ────────────────────────────────────────────────────────────
   const { data: todosRaw = [], isLoading } = useQuery({
     queryKey: ['todos', 'page', resolvedUserId],
-    enabled:  !!resolvedUserId,
+    enabled:  true,                               // ← FIX: always fetch; backend scopes by JWT
     queryFn:  async () => {
-      const res = await api.get('/todos', { params: { user_id: resolvedUserId } });
+      // Build params: 'all' → user_id=all, specific id → user_id=<id>, self → no param
+      const params = {};
+      if (resolvedUserId === 'all') {
+        params.user_id = 'all';
+      } else if (resolvedUserId && resolvedUserId !== user?.id) {
+        params.user_id = resolvedUserId;
+      }
+      const res = await api.get('/todos', { params });
       return res.data || [];
     },
   });
@@ -1179,15 +1186,13 @@ export default function TodoDashboard() {
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleAdd = () => {
     if (!title.trim()) return;
-
+ 
     addMutation.mutate({
-      title: title.trim(),
-      description: description.trim(),
-      due_date: dueDate && !isNaN(new Date(dueDate))
-        ? new Date(dueDate).toISOString()
-        : null,
+      title:        title.trim(),
+      description:  description.trim(),
+      due_date:     dueDate || null,   // ← FIX: send "YYYY-MM-DD" string directly, not ISO
       is_completed: false,
-      status: "pending"
+      status:       'pending',
     });
   };
 
