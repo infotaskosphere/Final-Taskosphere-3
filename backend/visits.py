@@ -578,21 +578,9 @@ async def list_visits(
         if user_id:
             query["assigned_to"] = user_id
 
-    elif current_user.role == "manager":
-        try:
-            raw_team_ids = await get_team_user_ids(current_user.id)
-            team_ids = [str(i) for i in (raw_team_ids or []) if i is not None]
-        except Exception:
-            team_ids = []
-        visible = list(set(team_ids + [str(current_user.id)]))
-        if user_id:
-            if user_id not in visible:
-                raise HTTPException(403, "User outside your team")
-            query["assigned_to"] = user_id
-        else:
-            query["assigned_to"] = {"$in": visible}
-
     else:
+        # SCOPE: OWN + CROSS-VISIBILITY only (same for Manager and Staff)
+        # "Team" = users explicitly listed in view_other_visits (cross-visibility), NOT all department members
         perms   = _get_perms(current_user)
         allowed = [str(x) for x in (perms.get("view_other_visits") or []) if x is not None]
         if perms.get("can_view_all_visits"):
@@ -700,15 +688,8 @@ async def upcoming_visits(
 
     if current_user.role == "admin":
         query: dict = {}
-    elif current_user.role == "manager":
-        try:
-            raw_team = await get_team_user_ids(current_user.id)
-            team_ids = [str(i) for i in (raw_team or []) if i is not None]
-        except Exception:
-            team_ids = []
-        visible = list(set(team_ids + [str(current_user.id)]))
-        query   = {"assigned_to": {"$in": visible}}
     else:
+        # SCOPE: OWN + CROSS-VISIBILITY only (same for Manager and Staff)
         visible = list(set([str(current_user.id)] + allowed))
         query   = {"assigned_to": {"$in": visible}}
 
