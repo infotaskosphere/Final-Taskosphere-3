@@ -1,4 +1,3 @@
-
 // Attendance.jsx — redesigned to match Dashboard design language
 // • LiveClock removed (lives in Dashboard)
 // • Layout, fonts, card shells, header rows match Dashboard exactly
@@ -3004,6 +3003,7 @@ export default function Attendance() {
               );
             })()}
           </div>
+        </motion.div>
         {/* ══ MODALS ════════════════════════════════════════════════════════════ */}
 
         {/* Punch-In Modal */}
