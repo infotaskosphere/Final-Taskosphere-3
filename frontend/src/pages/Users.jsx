@@ -119,83 +119,83 @@ const DEFAULT_ROLE_PERMISSIONS = {
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
     },
-    // SCOPE: OWN + SAME_DEPARTMENT | DEFAULT_MODULES enabled | OTHER_MODULES: admin-granted only
+    // SCOPE: OWN + SAME_DEPARTMENT (Own + Team) | ALL MODULES enabled (permission-based, admin can revoke)
     manager: {
       can_view_all_tasks: false,      // scope handled server-side by department query
-      can_view_all_clients: false,    // access via assigned_clients
-      can_view_all_dsc: false,        // admin-granted only
+      can_view_all_clients: true,     // default module (assigned + permission-based)
+      can_view_all_dsc: true,         // default module (permission-based)
       can_view_documents: true,       // default module
       can_view_all_duedates: true,    // default module (compliance)
-      can_view_reports: true,         // default module
+      can_view_reports: true,         // default module (own + team scope)
       can_view_attendance: true,      // default module (scoped to department server-side)
-      can_view_all_leads: false,      // admin-granted only
+      can_view_all_leads: true,       // default module (permission-based)
       can_edit_tasks: true,           // default module
-      can_edit_clients: false,        // admin-granted only
-      can_edit_dsc: false,            // admin-granted only
+      can_edit_clients: true,         // default module (permission-based)
+      can_edit_dsc: true,             // default module (permission-based)
       can_edit_documents: true,       // default module
       can_edit_due_dates: true,       // default module
-      can_edit_users: false,          // admin-granted only
+      can_edit_users: true,           // default module (permission-based)
       can_download_reports: true,     // default module
-      can_manage_users: false,        // admin-granted only
+      can_manage_users: true,         // default module (permission-based)
       can_manage_settings: true,      // default module (general_settings)
       can_assign_tasks: true,         // default module
-      can_assign_clients: false,      // admin-granted only
-      can_view_staff_activity: true,  // default module (scoped to department server-side)
+      can_assign_clients: true,       // default module (permission-based)
+      can_view_staff_activity: true,  // default module (own + team scope enforced server-side)
       can_send_reminders: false,      // admin-granted only
-      can_view_user_page: false,      // admin-granted only
-      can_view_audit_logs: false,     // admin-granted only
+      can_view_user_page: true,       // default module (permission-based)
+      can_view_audit_logs: true,      // default module (permission-based)
       can_view_selected_users_reports: true,  // default module
       can_view_todo_dashboard: true,  // default module
       can_use_chat: true,             // default module
       can_view_staff_rankings: true,  // default module
       can_delete_data: false,         // admin-granted only
       can_delete_tasks: false,        // admin-granted only
-      can_connect_email: true,        // default module
+      can_connect_email: true,        // default module (email accounts — own + team)
       can_view_own_data: true,        // default module
-      can_create_quotations: false,   // admin-granted only
-      can_manage_invoices: false,     // admin-granted only
-      can_view_passwords: true,       // default module
-      can_edit_passwords: false,      // admin-granted only
+      can_create_quotations: true,    // default module (permission-based)
+      can_manage_invoices: true,      // default module (permission-based)
+      can_view_passwords: true,       // default module (permission-based)
+      can_edit_passwords: true,       // default module (permission-based)
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
     },
-    // SCOPE: OWN only | DEFAULT_MODULES enabled | OTHER_MODULES: admin-granted only
+    // SCOPE: OWN only | ALL MODULES enabled (permission-based, admin can revoke)
     staff: {
       can_view_all_tasks: false,      // scope: own only
-      can_view_all_clients: false,    // scope: assigned only
-      can_view_all_dsc: false,        // admin-granted only
+      can_view_all_clients: true,     // default module (assigned + permission-based)
+      can_view_all_dsc: true,         // default module (permission-based)
       can_view_documents: true,       // default module
       can_view_all_duedates: true,    // default module (compliance)
       can_view_reports: true,         // default module (own data only server-side)
       can_view_attendance: true,      // default module (own data only server-side)
-      can_view_all_leads: false,      // admin-granted only
+      can_view_all_leads: true,       // default module (permission-based)
       can_edit_tasks: true,           // default module (own/assigned tasks)
-      can_edit_clients: false,        // admin-granted only
-      can_edit_dsc: false,            // admin-granted only
-      can_edit_documents: false,      // admin-granted only
-      can_edit_due_dates: false,      // admin-granted only
-      can_edit_users: false,          // admin-granted only
+      can_edit_clients: true,         // default module (permission-based)
+      can_edit_dsc: true,             // default module (permission-based)
+      can_edit_documents: true,       // default module (permission-based)
+      can_edit_due_dates: true,       // default module (permission-based)
+      can_edit_users: true,           // default module (permission-based)
       can_download_reports: true,     // default module (own data)
-      can_manage_users: false,        // admin-granted only
+      can_manage_users: true,         // default module (permission-based)
       can_manage_settings: true,      // default module (own profile/general settings)
       can_assign_tasks: false,        // admin-granted only
       can_assign_clients: false,      // admin-granted only
-      can_view_staff_activity: false, // admin-granted only
+      can_view_staff_activity: true,  // default module (own activity only, server-side scoped)
       can_send_reminders: false,      // admin-granted only
-      can_view_user_page: false,      // admin-granted only
-      can_view_audit_logs: false,     // admin-granted only
-      can_view_selected_users_reports: false,  // admin-granted only
+      can_view_user_page: true,       // default module (permission-based)
+      can_view_audit_logs: true,      // default module (permission-based)
+      can_view_selected_users_reports: true,  // default module (own data)
       can_view_todo_dashboard: true,  // default module
       can_use_chat: true,             // default module
       can_view_staff_rankings: false, // admin-granted only
       can_delete_data: false,         // admin-granted only
       can_delete_tasks: false,        // admin-granted only
-      can_connect_email: true,        // default module
+      can_connect_email: true,        // default module (email accounts)
       can_view_own_data: true,        // default module
-      can_create_quotations: false,   // admin-granted only
-      can_manage_invoices: false,     // admin-granted only
-      can_view_passwords: false,      // admin-granted only
-      can_edit_passwords: false,      // admin-granted only
+      can_create_quotations: true,    // default module (permission-based)
+      can_manage_invoices: true,      // default module (permission-based)
+      can_view_passwords: true,       // default module (permission-based)
+      can_edit_passwords: true,       // default module (permission-based)
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
     },
