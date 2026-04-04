@@ -1,5 +1,6 @@
 import Papa from 'papaparse/papaparse.js';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import GifLoader from '@/components/ui/GifLoader.jsx';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -1833,7 +1834,7 @@ const handleImport = async () => {
           {/* STEP: IMPORTING */}
           {step === 'importing' && (
             <div className="flex flex-col items-center justify-center py-10 gap-6">
-              <div className="w-16 h-16 rounded-2xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center"><RefreshCw className="h-8 w-8 text-emerald-600 animate-spin" /></div>
+              <GifLoader />
               <div className="text-center"><p className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Importing…</p><p className="text-sm text-slate-400 mt-1">Please wait while your data is being imported</p></div>
               <div className="w-full max-w-xs">
                 <div className={`h-3 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
@@ -3436,14 +3437,7 @@ const fetchAll = useCallback(async () => {
 
       {/* INVOICE LIST */}
       {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-              <RefreshCw className="h-5 w-5 text-white animate-spin" />
-            </div>
-            <p className="text-sm font-medium text-slate-500">Loading invoices…</p>
-          </div>
-        </div>
+        <GifLoader />
       ) : enrichedFiltered.length === 0 ? (
         <div className={`rounded-2xl border p-16 text-center ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center mb-4" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}20, ${COLORS.mediumBlue}20)` }}>
@@ -3584,4 +3578,3 @@ const fetchAll = useCallback(async () => {
 }
 
 export default Invoicing;
-
