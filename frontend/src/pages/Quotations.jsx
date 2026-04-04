@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import GifLoader from '@/components/ui/GifLoader.jsx';
 import { useNavigate } from 'react-router-dom';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
@@ -440,7 +441,7 @@ function CompanyListModal({ open, onClose, onRefresh }) {
           </div>
 
           {loading ? (
-            <div className="text-center py-8"><Loader2 className="h-6 w-6 animate-spin mx-auto text-slate-400" /></div>
+            <GifLoader />
           ) : companies.length === 0 ? (
             <div className="text-center py-10 text-slate-400">
               <Building2 className="h-12 w-12 mx-auto mb-3 opacity-30" />
@@ -693,8 +694,7 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
           <DialogDescription className="sr-only">Please wait while data is loading.</DialogDescription>
         </DialogHeader>
         <div className="flex items-center justify-center py-16 gap-3">
-          <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
-          <span className="text-slate-500">Loading data…</span>
+          <GifLoader />
         </div>
       </DialogContent>
     </Dialog>
@@ -1191,10 +1191,7 @@ const handlePrintQuotation = (quotation, company = {}) => {
 
       {/* Quotation Cards */}
       {loading ? (
-        <div className="flex items-center justify-center py-16 gap-3">
-          <Loader2 className="h-7 w-7 animate-spin text-blue-400" />
-          <span className="text-slate-500">Loading quotations…</span>
-        </div>
+        <GifLoader />
       ) : filteredQuotations.length === 0 ? (
         <div className="text-center py-16 text-slate-400">
           <Receipt className="h-14 w-14 mx-auto mb-4 opacity-20" />
