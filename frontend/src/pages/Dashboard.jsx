@@ -10,6 +10,8 @@ import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
+import { Calendar as CalendarComponent } from '../components/ui/calendar';
+
 
 import {
   CheckSquare,
@@ -887,8 +889,8 @@ export default function Dashboard() {
   const [selectedPerformer, setSelectedPerformer] = useState(null);
 
   // ── Real Data State (replaces all stubs) ──────────────────────────────────
-  const [tasks,            setTasks]            = useState([]);
   const [allUsers,         setAllUsers]         = useState([]);
+  const [usersLoading,     setUsersLoading]     = useState(true);
   const [stats,            setStats]            = useState({
     total_tasks: 0, completed_tasks: 0, overdue_tasks: 0,
     expiring_dsc_count: 0, expired_dsc_count: 0,
@@ -905,28 +907,45 @@ export default function Dashboard() {
   // ── Fetch All Dashboard Data ───────────────────────────────────────────────
   const fetchDashboardData = React.useCallback(async () => {
     setDataLoading(true);
+
+    // ── Wave 1: critical path — renders the page immediately ──────────────
     try {
-      const [
-        tasksData,
-        usersData,
-        statsData,
-        dueDatesData,
-        attendanceData,
-        holidaysRes,
-        todosData,
-        leadsRes,
-        rankingsData,
-      ] = await Promise.all([
-        apiFetch('/tasks'),
+      const [tasksData, statsData, dueDatesData, attendanceData, todosData] =
+        await Promise.all([
+          apiFetch('/tasks'),
+          apiFetch('/dashboard/stats'),
+          apiFetch('/duedates/upcoming?days=30'),
+          apiFetch('/attendance/today'),
+          apiFetch(`/todos${user?.id ? `?user_id=${user.id}` : ''}`),
+        ]);
+      if (Array.isArray(tasksData))    setTasks(tasksData);
+      if (statsData && typeof statsData === 'object' && !Array.isArray(statsData))
+                                       setStats(statsData);
+      if (Array.isArray(dueDatesData)) setUpcomingDueDates(dueDatesData);
+      if (attendanceData)              setTodayAttendance(attendanceData);
+      if (Array.isArray(todosData))    setTodosRaw(todosData);
+    } catch (e) {
+      console.error('Dashboard wave-1 fetch error:', e);
+    }
+    setDataLoading(false); // ← unblocks UI after wave 1
+
+    // ── Wave 2: secondary — fills team tasks, rankings, leads ─────────────
+    try {
+      const [usersData, holidaysRes, leadsRes, rankingsData] = await Promise.all([
         apiFetch('/users'),
-        apiFetch('/dashboard/stats'),
-        apiFetch('/duedates/upcoming?days=30'),
-        apiFetch('/attendance/today'),
         apiFetch('/holidays'),
-        apiFetch('/todos'),
         apiFetch('/leads'),
         apiFetch(`/reports/performance-rankings?period=${rankingPeriod}`),
       ]);
+      if (Array.isArray(usersData))   { setAllUsers(usersData);   setUsersLoading(false); }
+      if (Array.isArray(holidaysRes))   setHolidaysData(holidaysRes);
+      if (Array.isArray(leadsRes))      setLeadsData(leadsRes);
+      if (Array.isArray(rankingsData))  setRankings(rankingsData);
+    } catch (e) {
+      console.error('Dashboard wave-2 fetch error:', e);
+      setUsersLoading(false); // always clear loading even on error
+    }
+  }, [apiFetch, rankingPeriod, user?.id]);
 
       if (Array.isArray(tasksData))    setTasks(tasksData);
       if (Array.isArray(usersData))    setAllUsers(usersData);
@@ -1082,6 +1101,7 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
         body: JSON.stringify({
           title: newTodo.trim(),
+          status: 'pending',
           due_date: selectedDueDate
             ? selectedDueDate.toISOString().split('T')[0]
             : null,
@@ -1383,15 +1403,13 @@ export default function Dashboard() {
 
   return (
     <>
-      {/* Loading overlay */}
+      {/* Non-blocking top bar loader */}
       {dataLoading && (
-        <div className={`fixed inset-0 z-[99999] flex items-center justify-center ${isDark ? 'bg-[#0f172a]' : 'bg-slate-50'}`}>
-          <div className="flex flex-col items-center gap-3">
-            <div className="h-10 w-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              Loading dashboard…
-            </p>
-          </div>
+        <div className="fixed top-0 left-0 right-0 z-[99999] h-0.5">
+          <div
+            className="h-full animate-pulse"
+            style={{ background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue}, ${COLORS.emeraldGreen})` }}
+          />
         </div>
       )}
       <AnimatePresence>
@@ -1708,7 +1726,7 @@ export default function Dashboard() {
           <motion.div
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
-            onClick={() => hasCrossVisibility && navigate('/tasks')}
+            onClick={() => hasCrossVisibility && !usersLoading && navigate('/tasks?filter=team')}
             className={`${metricCardCls} ${
               hasCrossVisibility && teamTaskTotal > 0
                 ? isDark
@@ -1721,10 +1739,15 @@ export default function Dashboard() {
               <div className="flex items-start justify-between">
                 <div className="min-w-0 flex-1 mr-2">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Team Task</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: hasCrossVisibility ? (isDark ? '#a78bfa' : '#7c3aed') : (isDark ? '#475569' : '#94a3b8') }}>
-                    {hasCrossVisibility ? teamTaskTotal : 0}
-                  </p>
-                  {hasCrossVisibility && teamTaskBreakdown.length > 0 && (
+                  {usersLoading && hasCrossVisibility ? (
+                    <div className="mt-2 h-7 w-12 rounded-lg animate-pulse bg-slate-200 dark:bg-slate-700" />
+                  ) : (
+                    <p className="text-2xl font-bold mt-1 tracking-tight"
+                      style={{ color: hasCrossVisibility ? (isDark ? '#a78bfa' : '#7c3aed') : (isDark ? '#475569' : '#94a3b8') }}>
+                      {hasCrossVisibility ? teamTaskTotal : 0}
+                    </p>
+                  )}
+                  {!usersLoading && hasCrossVisibility && teamTaskBreakdown.length > 0 && (
                     <div className="mt-1 space-y-0.5 max-h-[36px] overflow-hidden">
                       {teamTaskBreakdown.slice(0, 2).map(m => (
                         <p key={m.id} className="text-[9px] text-slate-400 truncate">
@@ -1750,8 +1773,8 @@ export default function Dashboard() {
               <div className={`flex items-center gap-1 mt-3 text-xs font-medium transition-colors ${hasCrossVisibility ? 'group-hover:text-violet-500' : ''} ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                 {hasCrossVisibility ? (
                   <>
-                    <span>View team</span>
-                    <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
+                    <span>{usersLoading ? 'Loading…' : 'View team'}</span>
+                    {!usersLoading && <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />}
                   </>
                 ) : (
                   <span>cross visibility off</span>
@@ -1759,7 +1782,6 @@ export default function Dashboard() {
               </div>
             </CardContent>
           </motion.div>
-
         </motion.div>
 
         {/* RECENT TASKS + DEADLINES + ATTENDANCE */}
@@ -2046,6 +2068,31 @@ export default function Dashboard() {
                   onKeyDown={e => e.key === 'Enter' && addTodo()}
                   className={`flex-1 px-3 py-2 text-sm border rounded-xl focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400 focus:ring-blue-900/40' : 'bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400'}`}
                 />
+                <Popover open={showDueDatePicker} onOpenChange={setShowDueDatePicker}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className={`h-9 w-9 rounded-xl flex-shrink-0 ${
+                        selectedDueDate
+                          ? 'border-amber-400 text-amber-500'
+                          : isDark
+                          ? 'border-slate-600 bg-slate-700 text-slate-400'
+                          : 'border-slate-200 text-slate-400'
+                      }`}
+                    >
+                      <CalendarIcon className="h-4 w-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="end">
+                    <CalendarComponent
+                      mode="single"
+                      selected={selectedDueDate}
+                      onSelect={(d) => { setSelectedDueDate(d); setShowDueDatePicker(false); }}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
                 <Button onClick={addTodo} disabled={!newTodo.trim()} className="px-4 rounded-xl h-9 text-sm font-semibold flex-shrink-0"
                   style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
                   Add
