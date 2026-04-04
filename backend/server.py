@@ -803,33 +803,20 @@ async def get_todos(
         else:
             query = {"user_id": current_user.id}
 
-    elif current_user.role == "manager":
-        # SCOPE: OWN + SAME_DEPARTMENT
-        # DATA_ACCESS_RULE: resource.user_id == user.id OR resource.user_id IN SAME_DEPARTMENT_USERS
-        team_ids = await get_team_user_ids(current_user.id)
-        if user_id:
-            if user_id not in team_ids and user_id != current_user.id:
-                raise HTTPException(status_code=403, detail="Not allowed — user not in your department")
-            query = {"user_id": user_id}
-        else:
-            # Show own todos + same-department staff todos
-            visible_ids = list(set(team_ids + [current_user.id]))
-            query = {"user_id": {"$in": visible_ids}}
-
     else:
-        # SCOPE: OWN only
+        # SCOPE: OWN + CROSS-VISIBILITY only (same for Manager and Staff)
+        # "Team" = users explicitly listed in view_other_todos (cross-visibility), NOT all department members
         permissions = current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else (current_user.permissions or {})
-        allowed_others = permissions.get("view_other_todos", []) if isinstance(permissions, dict) else []
+        if not isinstance(permissions, dict):
+            permissions = {}
+        allowed_others = permissions.get("view_other_todos", []) or []
         if user_id:
             if user_id != current_user.id and user_id not in allowed_others:
                 raise HTTPException(status_code=403, detail="Not allowed")
             query = {"user_id": user_id}
         else:
-            # Staff: own todos only (+ admin-granted cross-user todos)
-            if allowed_others:
-                query = {"user_id": {"$in": list(set(allowed_others + [current_user.id]))}}
-            else:
-                query = {"user_id": current_user.id}
+            visible_ids = list(set(allowed_others + [current_user.id]))
+            query = {"user_id": {"$in": visible_ids}}
 
     todos = await db.todos.find(query).to_list(1000)
     for t in todos:
@@ -860,17 +847,9 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
             "todos": all_todos_flat,
             "grouped_todos": grouped_todos
         }
-    elif current_user.role == "manager":
-        team_ids = await get_team_user_ids(current_user.id)
-        visible_ids = list(set(team_ids + [current_user.id]))
-        todos = await db.todos.find({"user_id": {"$in": visible_ids}}).to_list(2000)
-        for todo in todos:
-            todo["_id"] = str(todo["_id"])
-        return {
-            "role": "manager",
-            "todos": todos
-        }
     else:
+        # SCOPE: OWN + CROSS-VISIBILITY only (same for Manager and Staff)
+        # "Team" = users explicitly listed in view_other_todos (cross-visibility), NOT all department members
         permissions = get_user_permissions(current_user)
         allowed_users = permissions.get("view_other_todos", [])
         if not isinstance(allowed_users, list):
@@ -880,7 +859,7 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
         for todo in todos:
             todo["_id"] = str(todo["_id"])
         return {
-            "role": "staff",
+            "role": current_user.role,
             "todos": todos
         }
 
@@ -1612,16 +1591,14 @@ async def get_staff_attendance_report(
     users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
     user_map = {u["id"]: u for u in users}
 
-    # SCOPE: Manager sees only same-department staff attendance
-    # DATA_ACCESS_RULE: resource.department == user.department AND resource.user_id IN SAME_DEPARTMENT_USERS
+    # SCOPE: OWN + CROSS-VISIBILITY only (same for Manager and Staff)
+    # "Team" = users explicitly listed in view_other_attendance (cross-visibility), NOT all department members
     attendance_query = {"date": {"$regex": f"^{target_month}"}}
-    if current_user.role == "manager":
-        team_ids = await get_team_user_ids(current_user.id)
-        visible_ids = list(set(team_ids + [current_user.id]))
+    if current_user.role != "admin":
+        permissions = get_user_permissions(current_user)
+        allowed_others = permissions.get("view_other_attendance", []) or []
+        visible_ids = list(set(allowed_others + [current_user.id]))
         attendance_query["user_id"] = {"$in": visible_ids}
-    elif current_user.role == "staff":
-        # Staff can only see their own attendance in this report
-        attendance_query["user_id"] = current_user.id
 
     attendance_list = await db.attendance.find(
         attendance_query,
@@ -1980,25 +1957,9 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
     query = {"type": {"$ne": "todo"}}
     if current_user.role == "admin":
         pass
-    elif current_user.role == "manager":
-        # SCOPE: OWN + SAME_DEPARTMENT
-        # DATA_ACCESS_RULE: resource.user_id == user.id OR resource.user_id IN SAME_DEPARTMENT_USERS
-        team_ids = await get_team_user_ids(current_user.id)
-        permissions = get_user_permissions(current_user)
-        extra_users = permissions.get("view_other_tasks", []) or []
-        visible_ids = list(set(team_ids + extra_users))
-        or_clauses = [
-            {"assigned_to": current_user.id},
-            {"sub_assignees": current_user.id},
-            {"created_by": current_user.id},
-        ]
-        if visible_ids:
-            or_clauses.append({"assigned_to": {"$in": visible_ids}})
-            or_clauses.append({"created_by": {"$in": visible_ids}})
-        query["$or"] = or_clauses
     else:
-        # SCOPE: OWN only
-        # DATA_ACCESS_RULE: resource.user_id == user.id
+        # SCOPE: OWN + CROSS-VISIBILITY only (same for Manager and Staff)
+        # "Team" = users explicitly listed in view_other_tasks (cross-visibility), NOT all department members
         permissions = get_user_permissions(current_user)
         allowed_users = permissions.get("view_other_tasks", []) or []
         or_clauses = [
@@ -2008,6 +1969,7 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
         ]
         if allowed_users:
             or_clauses.append({"assigned_to": {"$in": allowed_users}})
+            or_clauses.append({"created_by": {"$in": allowed_users}})
         query["$or"] = or_clauses
     tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
     user_ids = {
@@ -3738,21 +3700,12 @@ async def get_clients(current_user: User = Depends(get_current_user)):
 
     permissions = get_user_permissions(current_user)
 
-    # 🔥 FIX: PRIORITY TO GLOBAL ACCESS
+    # SCOPE: Admin = all; can_view_all_clients = all; else OWN + assigned_clients (same for Manager and Staff)
     if current_user.role == "admin" or permissions.get("can_view_all_clients", False):
         query = {}
 
-    elif current_user.role == "manager":
-        team_ids = await get_team_user_ids(current_user.id)
-        query = {
-            "$or": [
-                {"assigned_to": current_user.id},
-                {"assigned_to": {"$in": team_ids}},
-                {"created_by": current_user.id}
-            ]
-        }
-
     else:
+        # SCOPE: OWN + CROSS-VISIBILITY only (same for Manager and Staff when can_view_all_clients is revoked)
         extra_clients = permissions.get("assigned_clients", [])
         if extra_clients:
             query = {
@@ -4033,11 +3986,15 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
 
     if current_user.role == "admin":
         client_query = {}
-    elif current_user.role == "manager":
-        team_ids = await get_team_user_ids(current_user.id)
-        client_query = {"assigned_to": {"$in": team_ids + [current_user.id]}}
     else:
-        client_query = {"assigned_to": current_user.id}
+        # SCOPE: OWN + CROSS-VISIBILITY (same for Manager and Staff)
+        # Managers with can_view_all_clients=True already get all via /clients; dashboard shows own only
+        permissions = get_user_permissions(current_user)
+        extra_clients = permissions.get("assigned_clients", []) or []
+        or_clauses = [{"assigned_to": current_user.id}]
+        if extra_clients:
+            or_clauses.append({"id": {"$in": extra_clients}})
+        client_query = {"$or": or_clauses} if len(or_clauses) > 1 else {"assigned_to": current_user.id}
 
     clients = await db.clients.find(client_query, {"_id": 0}).to_list(1000)
     total_clients = len(clients)
@@ -4142,26 +4099,22 @@ async def get_activity_summary(
     current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
     # PERMISSION MATRIX (updated):
-    # Staff   → can view own activity only
-    # Manager → can view own + same-department team activity (Own + Team)
-    # Admin   → can view all activity
+    # Staff   → own activity + cross-visibility users (view_other_activity)
+    # Manager → own activity + cross-visibility users (view_other_activity)
+    # Admin   → all activity
     query = {}
-    if current_user.role == "staff":
-        # Staff: always restrict to own data regardless of user_id param
-        query["user_id"] = current_user.id
-    elif user_id:
-        # SCOPE: Manager sees only same-department users
-        # DATA_ACCESS_RULE: resource.user_id == user.id OR resource.user_id IN SAME_DEPARTMENT_USERS
-        if current_user.role == "manager":
-            team_ids = await get_team_user_ids(current_user.id)
-            if user_id != current_user.id and user_id not in team_ids:
-                raise HTTPException(status_code=403, detail="User not in your department")
-        query["user_id"] = user_id
-    elif current_user.role == "manager":
-        # Manager without specific user_id: restrict to same-department users
-        team_ids = await get_team_user_ids(current_user.id)
-        visible_ids = list(set(team_ids + [current_user.id]))
-        query["user_id"] = {"$in": visible_ids}
+    if current_user.role != "admin":
+        # SCOPE: OWN + CROSS-VISIBILITY only (same for Manager and Staff)
+        # "Team" = users explicitly listed in view_other_activity (cross-visibility), NOT all department members
+        permissions = get_user_permissions(current_user)
+        allowed_others = permissions.get("view_other_activity", []) or []
+        visible_ids = list(set(allowed_others + [current_user.id]))
+        if user_id:
+            if user_id != current_user.id and user_id not in allowed_others:
+                raise HTTPException(status_code=403, detail="Not authorised to view this user's activity")
+            query["user_id"] = user_id
+        else:
+            query["user_id"] = {"$in": visible_ids}
     if date_from or date_to:
         query["timestamp"] = {}
     if date_from:
@@ -4248,16 +4201,15 @@ async def get_user_activity(
     current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
     # PERMISSION MATRIX (updated):
-    # Staff   → own activity only
-    # Manager → own + same-department team activity (Own + Team)
+    # Staff   → own activity + cross-visibility users (view_other_activity)
+    # Manager → own activity + cross-visibility users (view_other_activity)
     # Admin   → any user's activity
-    if current_user.role == "staff":
-        if user_id != current_user.id:
-            raise HTTPException(status_code=403, detail="You can only view your own activity")
-    elif current_user.role == "manager":
-        team_ids = await get_team_user_ids(current_user.id)
-        if user_id != current_user.id and user_id not in team_ids:
-            raise HTTPException(status_code=403, detail="User not in your department")
+    if current_user.role != "admin":
+        # SCOPE: OWN + CROSS-VISIBILITY only (same for Manager and Staff)
+        permissions = get_user_permissions(current_user)
+        allowed_others = permissions.get("view_other_activity", []) or []
+        if user_id != current_user.id and user_id not in allowed_others:
+            raise HTTPException(status_code=403, detail="You are not authorised to view this user's activity")
     activities = await db.staff_activity.find({"user_id": user_id}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
     return activities
 
