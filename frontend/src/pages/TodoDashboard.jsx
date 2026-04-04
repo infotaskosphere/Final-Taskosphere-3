@@ -1,4 +1,5 @@
 import { useDark } from '@/hooks/useDark';
+import GifLoader from '@/components/ui/GifLoader.jsx';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from 'sonner';
@@ -1602,10 +1603,7 @@ export default function TodoDashboard() {
 
                     <div style={{ maxHeight: 560, overflowY: 'auto' }} className="todo-slim">
                       {isLoading ? (
-                        <div className="py-16 flex flex-col items-center gap-3">
-                          <RefreshCw size={22} className="animate-spin text-slate-400" />
-                          <p className="text-xs font-medium text-slate-400">Loading todos…</p>
-                        </div>
+                        <GifLoader />
                       ) : filteredTodos.length === 0 ? (
                         <div className="py-16 flex flex-col items-center gap-3">
                           <div className="w-14 h-14 rounded-2xl flex items-center justify-center bg-slate-100 dark:bg-slate-700">
