@@ -1297,7 +1297,7 @@ export default function Attendance() {
     let added = 0; const errors = [];
     for (const row of validRows) {
       try { await api.post('/holidays', { date: row.date, name: row.name.trim(), type: 'manual' }); added++; }
-      catch (err) { errors.push(`${row.name}: ${err?.response?.data?.detail || err?.message || 'Unknown error'}`); }
+      catch (err) { errors.push(`${row?.name || 'Unknown'}: ${err?.response?.data?.detail || err?.message || 'Unknown error'}`); }
     }
     if (added > 0) toast.success(`${added} holiday${added > 1 ? 's' : ''} saved`);
     if (errors.length > 0) errors.forEach(e => toast.error(e, { duration: 7000 }));
