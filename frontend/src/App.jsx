@@ -4,15 +4,29 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { Toaster } from "@/components/ui/sonner";
 import AppRoutes from "./AppRoutes.jsx";
+import { useLoading } from "./lib/api";
 import { AnimatePresence } from "framer-motion";
 import GifLoader from "@/components/ui/GifLoader.jsx";
-import { useLoading } from "./lib/api";
 
-/* ── GIF-based global loader (shows on any API call) ────────────────── */
-function GlobalLoader() {
+/* ── Bottom loading bar ─────────────────────────────────────────────── */
+function BottomLoadingBar() {
   const loading = useLoading();
   if (!loading) return null;
-  return <GifLoader />;
+  return (
+    <div
+      style={{
+        position: "fixed",
+        bottom: 0,
+        left: 0,
+        width: "30%",
+        height: 3,
+        background: "linear-gradient(90deg, #7F77DD, #1F6FB2)",
+        zIndex: 9999,
+        animation: "loadingBar 1.2s infinite ease-in-out",
+        pointerEvents: "none",
+      }}
+    />
+  );
 }
 
 /* ── AnimatePresence wrapper ───────────────────────────────────────── */
@@ -42,8 +56,10 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <BrowserRouter>
-          <GlobalLoader />
+          {/* ✅ Bottom loading bar — always kept */}
+          <BottomLoadingBar />
 
+          {/* ✅ GifLoader for lazy page chunk loading */}
           <Suspense fallback={<GifLoader />}>
             <AnimatedRoutes />
           </Suspense>
