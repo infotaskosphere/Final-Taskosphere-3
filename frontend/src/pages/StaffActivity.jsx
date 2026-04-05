@@ -63,7 +63,11 @@ import {
   Zap,
   BarChart2,
   Eye,
+  GripVertical,
+  Settings2,
 } from 'lucide-react';
+import LayoutCustomizer from '../components/layout/LayoutCustomizer';
+import { usePageLayout } from '../hooks/usePageLayout';
 // ─── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -154,6 +158,14 @@ const CAT_COLORS = {
 export default function StaffActivity() {
   const { user, hasPermission } = useAuth();
   const isDark = useDark();
+  const [showCustomize, setShowCustomize] = useState(false);
+  const SA_SECTIONS = ['key_metrics','intensity_radar','activity_tabs'];
+  const SA_LABELS = {
+    key_metrics:     { name:'Key Metrics',           icon:'📊', desc:'Active personnel, hours, productivity, intensity, idle time' },
+    intensity_radar: { name:'Intensity Map & Radar', icon:'🔥', desc:'24-hour heatmap and comparison radar chart' },
+    activity_tabs:   { name:'Activity Tabs',         icon:'📑', desc:'Activity log, task telemetry, app usage, executive intelligence' },
+  };
+  const { order: saOrder, moveSection: saMove, resetOrder: saReset } = usePageLayout('staffactivity', SA_SECTIONS);
   // ── Permissions ───────────────────────────────────────────────────────────
   const isAdmin = user?.role === 'admin';
   const canViewActivity = hasPermission('can_view_staff_activity') || isAdmin;
@@ -496,6 +508,15 @@ export default function StaffActivity() {
   }
   // ════════════════════════════════════════════════════════════════════════════
   return (
+    <LayoutCustomizer
+      isOpen={showCustomize}
+      onClose={() => setShowCustomize(false)}
+      order={saOrder}
+      sectionLabels={SA_LABELS}
+      onDragEnd={saMove}
+      onReset={saReset}
+      isDark={isDark}
+    />
     <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
       {/* ── BANNER ─────────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
@@ -567,6 +588,24 @@ export default function StaffActivity() {
           </div>
         </div>
       </motion.div>
+      {/* CUSTOMIZE BUTTON */}
+      <motion.div variants={itemVariants} className="flex justify-end">
+        <button
+          onClick={() => setShowCustomize(true)}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition-all hover:shadow-md ${
+            isDark
+              ? 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'
+              : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+          }`}
+        >
+          <Settings2 size={13} /> Customize Layout
+        </button>
+      </motion.div>
+
+      {/* ORDERED SECTIONS */}
+      {saOrder.map((sectionId) => {
+        if (sectionId === 'key_metrics') return (
+      <React.Fragment key="key_metrics">
       {/* ── KEY METRICS ────────────────────────────────────────────────────── */}
       <motion.div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3" variants={itemVariants}>
         {/* 1. Active Personnel */}
@@ -718,6 +757,10 @@ export default function StaffActivity() {
           </CardContent>
         </motion.div>
       </motion.div>
+      </React.Fragment>
+        );
+        if (sectionId === 'intensity_radar') return (
+      <React.Fragment key="intensity_radar">
       {/* ── INTENSITY MAP + COMPARISON RADAR ───────────────────────────────── */}
       <motion.div className="grid grid-cols-1 lg:grid-cols-5 gap-3" variants={itemVariants}>
         <SectionCard isDark={isDark} className="lg:col-span-3 flex flex-col">
@@ -874,6 +917,10 @@ export default function StaffActivity() {
           </div>
         </SectionCard>
       </motion.div>
+      </React.Fragment>
+        );
+        if (sectionId === 'activity_tabs') return (
+      <React.Fragment key="activity_tabs">
       {/* ── TABS ──────────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
         <div className={`inline-flex gap-0.5 rounded-xl p-1 mb-4 ${isDark ? 'bg-slate-800 border border-slate-700' : 'bg-white border border-slate-200/80 shadow-sm'}`}>
@@ -1889,6 +1936,10 @@ export default function StaffActivity() {
           <FileDown className="h-3.5 w-3.5" />Export Telemetry
         </Button>
       </motion.div>
+      </React.Fragment>
+        );
+        return null;
+      })}
     </motion.div>
   );
 }
