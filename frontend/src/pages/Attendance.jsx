@@ -7,7 +7,6 @@
 // • v9: Feature enhancements — streak counter, avg hours, weekly summary, overtime alert
 
 import { useDark } from '@/hooks/useDark';
-import GifLoader from '@/components/ui/GifLoader.jsx';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatInTimeZone } from 'date-fns-tz';
@@ -1013,6 +1012,15 @@ export default function Attendance() {
 
   const [showPunchInModal,  setShowPunchInModal]  = useState(false);
   const [modalActionDone,   setModalActionDone]   = useState(false);
+  const [geoError,          setGeoError]          = useState(null);
+  const [geoChecking,       setGeoChecking]       = useState(false);
+  const [userLocation,      setUserLocation]      = useState(null);
+  const [isWithinGeofence,  setIsWithinGeofence]  = useState(null);
+
+  // GEO-FENCE CONFIG — Office: 21.18796, 72.81375 (Surat)
+  const OFFICE_LAT        = 21.18796;
+  const OFFICE_LNG        = 72.81375;
+  const GEOFENCE_RADIUS_M = 200;
   const [showLeaveForm,     setShowLeaveForm]     = useState(false);
   const [showHolidayModal,  setShowHolidayModal]  = useState(false);
   const [calendarOpenIdx,   setCalendarOpenIdx]   = useState(null);
@@ -1081,11 +1089,35 @@ export default function Attendance() {
     if (!isViewingOther && todayAttendance) {
       const shouldClose = todayAttendance.punch_in || todayAttendance.status === 'leave'
         || todayAttendance.status === 'absent' || todayIsHoliday || modalActionDone;
-      if (shouldClose) { setShowPunchInModal(false); return; }
-      const timer = setTimeout(() => setShowPunchInModal(true), 800);
+      if (shouldClose) {
+        setShowPunchInModal(false);
+        setGeoError(null); setUserLocation(null); setIsWithinGeofence(null);
+        return;
+      }
+      const timer = setTimeout(() => {
+        setShowPunchInModal(true);
+        // Auto-check location when modal opens
+        setGeoError(null); setUserLocation(null); setIsWithinGeofence(null);
+      }, 800);
       return () => clearTimeout(timer);
     }
   }, [todayAttendance, isViewingOther, todayIsHoliday, modalActionDone]);
+
+  // Block app body scroll when punch-in modal is open
+  useEffect(() => {
+    if (showPunchInModal) {
+      document.body.style.overflow = 'hidden';
+      document.body.style.pointerEvents = 'none';
+      // The modal itself re-enables pointer events via inline style
+    } else {
+      document.body.style.overflow = '';
+      document.body.style.pointerEvents = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+      document.body.style.pointerEvents = '';
+    };
+  }, [showPunchInModal]);
 
   useEffect(() => {
     setLiveDuration(calculateTodayLiveDuration(todayAttendance));
@@ -1265,21 +1297,66 @@ export default function Attendance() {
   }, [isViewingOther, selectedUserId]);
 
   // ── Punch Action ───────────────────────────────────────────────────────────
-  const handlePunchAction = useCallback(async (action) => {
-    setLoading(true);
-    try {
-      let locationData = null;
-      if (navigator?.geolocation) {
-        try {
-          const position = await new Promise((resolve, reject) =>
-            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000 })
-          );
-          locationData = { latitude: position.coords.latitude, longitude: position.coords.longitude };
-        } catch {}
+  // ── HAVERSINE DISTANCE (metres) ──────────────────────────────────────────
+  const haversineMetres = useCallback((lat1, lng1, lat2, lng2) => {
+    const R = 6371000;
+    const toRad = d => (d * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }, []);
+
+  // ── CHECK GEO-FENCE ───────────────────────────────────────────────────────
+  const checkGeofence = useCallback(async () => {
+    setGeoChecking(true); setGeoError(null);
+    return new Promise((resolve) => {
+      if (!navigator?.geolocation) {
+        setGeoError('GPS not available on this device.');
+        setIsWithinGeofence(false); setGeoChecking(false);
+        resolve({ ok: false, location: null });
+        return;
       }
-      const response = await api.post('/attendance', { action, location: locationData });
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const { latitude, longitude, accuracy } = pos.coords;
+          const dist = haversineMetres(latitude, longitude, OFFICE_LAT, OFFICE_LNG);
+          const within = dist <= GEOFENCE_RADIUS_M;
+          setUserLocation({ latitude, longitude, accuracy, distance: Math.round(dist) });
+          setIsWithinGeofence(within);
+          setGeoChecking(false);
+          if (!within) {
+            setGeoError(`You are ${Math.round(dist)}m from the office. Geo-fence radius is ${GEOFENCE_RADIUS_M}m.`);
+          }
+          resolve({ ok: within, location: { latitude, longitude, accuracy } });
+        },
+        (err) => {
+          const msg = err.code === 1 ? 'Location permission denied. Please allow GPS access.'
+            : err.code === 2 ? 'GPS unavailable. Check your device settings.'
+            : 'Location request timed out. Try again.';
+          setGeoError(msg); setIsWithinGeofence(false); setGeoChecking(false);
+          resolve({ ok: false, location: null });
+        },
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+      );
+    });
+  }, [haversineMetres]);
+
+  const handlePunchAction = useCallback(async (action) => {
+    setLoading(true); setGeoError(null);
+    try {
+      // Always get GPS location for both punch-in and punch-out
+      const { ok, location } = await checkGeofence();
+
+      // For punch-in: enforce geo-fence
+      if (action === 'punch_in' && !ok) {
+        setLoading(false);
+        return; // geoError is already set — modal will show it
+      }
+
+      const response = await api.post('/attendance', { action, location });
       if (action === 'punch_in') {
-        toast.success('Punched in successfully');
+        toast.success('Punched in successfully ✓');
         setModalActionDone(true); setShowPunchInModal(false);
       } else {
         const duration = response.data?.duration || 0;
@@ -1289,7 +1366,7 @@ export default function Attendance() {
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to record attendance');
     } finally { setLoading(false); }
-  }, [fetchData]);
+  }, [fetchData, checkGeofence]);
 
   // ── Leave ──────────────────────────────────────────────────────────────────
   const handleApplyLeave = useCallback(async () => {
@@ -2687,7 +2764,8 @@ export default function Attendance() {
               <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5" style={{ ...slimScroll, minHeight: 0 }}>
                 {loading && attendanceHistory.length === 0 ? (
                   <div className="flex items-center justify-center h-full">
-                    <GifLoader />
+                    <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                    <span className="ml-2 text-xs text-slate-400">Loading…</span>
                   </div>
                 ) : recentAttendance.length === 0 ? (
                   <div className="flex items-center justify-center h-full">
@@ -3049,34 +3127,134 @@ export default function Attendance() {
         {/* Punch-In Modal */}
         <AnimatePresence>
           {showPunchInModal && !isViewingOther && !isEveryoneView && (
-            <motion.div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+            <motion.div
+              className="fixed inset-0 z-[99999] flex items-center justify-center p-4"
+              style={{ background: isDark ? 'rgba(0,0,0,0.92)' : 'rgba(15,23,42,0.88)', backdropFilter: 'blur(12px)' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowPunchInModal(false)}>
+            >
+              {/* NO onClick dismiss — user MUST punch in to use the app */}
               <motion.div
-                className="rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl"
+                className="w-full max-w-sm overflow-hidden rounded-3xl shadow-2xl"
                 style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
+                initial={{ scale: 0.88, y: 32 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.88, y: 32 }}
+                transition={{ type: 'spring', stiffness: 240, damping: 22 }}
                 onClick={e => e.stopPropagation()}
-                initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
-                transition={{ type: 'spring', stiffness: 220, damping: 20 }}
               >
-                <div className="mb-6">
+                {/* Gradient header */}
+                <div className="relative overflow-hidden px-8 pt-8 pb-6 text-center"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}>
+                  <div className="absolute inset-0 opacity-10"
+                    style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 0%, transparent 60%)' }} />
+                  {/* Pulsing icon */}
                   <motion.div
-                    className="mx-auto w-20 h-20 rounded-3xl flex items-center justify-center punch-in-pulse"
-                    style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.15)' : '#dcfce7' }}>
-                    <LogIn className="w-10 h-10 text-emerald-500" />
+                    className="relative mx-auto w-20 h-20 rounded-2xl flex items-center justify-center mb-4"
+                    style={{ background: 'rgba(255,255,255,0.2)', boxShadow: '0 0 0 0 rgba(255,255,255,0.4)' }}
+                    animate={{ boxShadow: ['0 0 0 0 rgba(255,255,255,0.4)', '0 0 0 16px rgba(255,255,255,0)', '0 0 0 0 rgba(255,255,255,0)'] }}
+                    transition={{ duration: 2, repeat: Infinity, ease: 'easeOut' }}>
+                    <LogIn className="w-10 h-10 text-white" />
                   </motion.div>
+                  <p className="text-white/70 text-xs font-semibold uppercase tracking-widest mb-1">
+                    {new Date().toLocaleString('en-IN', { weekday: 'long', timeZone: 'Asia/Kolkata' })}
+                  </p>
+                  <h2 className="text-2xl font-black text-white">Good Morning!</h2>
+                  <p className="text-white/70 text-sm mt-1">Please punch in to start your workday</p>
                 </div>
-                <h2 className="text-2xl font-black mb-2" style={{ color: isDark ? D.text : COLORS.deepBlue }}>Good Morning</h2>
-                <p className="text-base mb-2" style={{ color: isDark ? D.muted : '#64748b' }}>Start your day by punching in</p>
-                <p className="text-xs text-red-500 font-semibold mb-7">Auto-absent marks at 7:00 PM if not punched in</p>
-                <Button onClick={() => handlePunchAction('punch_in')} disabled={loading}
-                  className="w-full mb-4 py-3 text-base font-bold rounded-2xl text-white"
-                  style={{ backgroundColor: COLORS.emeraldGreen }}>
-                  {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Punching In…</> : 'Punch In Now'}
-                </Button>
-                <button onClick={() => setShowPunchInModal(false)} className="text-sm underline text-slate-400 dark:text-slate-500">
-                  Remind me later
-                </button>
+
+                <div className="px-7 py-6 space-y-4">
+                  {/* Time display */}
+                  <div className="flex items-center justify-center gap-3 py-3 rounded-2xl border"
+                    style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}>
+                    <Clock className="w-5 h-5" style={{ color: COLORS.deepBlue }} />
+                    <span className="text-xl font-black font-mono tracking-wider" style={{ color: isDark ? D.text : COLORS.deepBlue }}>
+                      {new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' })}
+                    </span>
+                    <span className="text-xs font-bold text-slate-400">IST</span>
+                  </div>
+
+                  {/* Geo-fence status */}
+                  {geoChecking && (
+                    <div className="flex items-center gap-3 px-4 py-3 rounded-xl border"
+                      style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff', borderColor: isDark ? '#1d4ed8' : '#bfdbfe' }}>
+                      <Loader2 className="w-4 h-4 text-blue-500 animate-spin flex-shrink-0" />
+                      <p className="text-xs font-semibold text-blue-500">Verifying your location…</p>
+                    </div>
+                  )}
+                  {geoError && !geoChecking && (
+                    <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                      className="px-4 py-3 rounded-xl border"
+                      style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2', borderColor: isDark ? '#7f1d1d' : '#fecaca' }}>
+                      <div className="flex items-start gap-2.5">
+                        <MapPin className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-bold text-red-500 mb-0.5">Location check failed</p>
+                          <p className="text-[11px] leading-relaxed" style={{ color: isDark ? '#fca5a5' : '#dc2626' }}>{geoError}</p>
+                          {userLocation && (
+                            <p className="text-[10px] mt-1 font-mono" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                              Your position: {userLocation.latitude.toFixed(5)}, {userLocation.longitude.toFixed(5)}
+                              {userLocation.distance !== undefined && <> · {userLocation.distance}m from office</>}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                  {isWithinGeofence === true && userLocation && !geoChecking && (
+                    <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                      className="flex items-center gap-2.5 px-4 py-3 rounded-xl border"
+                      style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0' }}>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                      <div>
+                        <p className="text-xs font-bold text-emerald-500">Location verified ✓</p>
+                        <p className="text-[10px] font-mono" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                          {userLocation.latitude.toFixed(5)}, {userLocation.longitude.toFixed(5)}
+                          {userLocation.distance !== undefined && <> · {userLocation.distance}m from office</>}
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* Punch In button */}
+                  <motion.button
+                    whileHover={!loading && !geoChecking ? { scale: 1.02 } : {}}
+                    whileTap={!loading && !geoChecking ? { scale: 0.97 } : {}}
+                    onClick={() => handlePunchAction('punch_in')}
+                    disabled={loading || geoChecking}
+                    className="w-full py-3.5 rounded-2xl text-sm font-black text-white transition-all disabled:opacity-60"
+                    style={{
+                      background: (loading || geoChecking) ? '#9CA3AF' : `linear-gradient(135deg, ${COLORS.emeraldGreen}, #16a34a)`,
+                      boxShadow: (loading || geoChecking) ? 'none' : '0 4px 16px rgba(31,175,90,0.35)',
+                    }}>
+                    {loading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />Punching In…</span>
+                      : geoChecking ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />Checking Location…</span>
+                      : <span className="flex items-center justify-center gap-2"><LogIn className="w-4 h-4" />Punch In Now</span>}
+                  </motion.button>
+
+                  {/* Retry location + warning */}
+                  {geoError && !geoChecking && (
+                    <button onClick={checkGeofence}
+                      className="w-full py-2.5 rounded-2xl text-xs font-bold border-2 transition-all active:scale-95"
+                      style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.muted : '#64748b', backgroundColor: 'transparent' }}>
+                      <span className="flex items-center justify-center gap-2"><MapPin className="w-3.5 h-3.5" />Retry Location Check</span>
+                    </button>
+                  )}
+
+                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
+                    style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb' }}>
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: COLORS.amber }} />
+                    <p className="text-[11px] font-medium" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
+                      Access restricted — punch in required · Auto-absent at 7:00 PM IST
+                    </p>
+                  </div>
+
+                  {/* Apply leave link */}
+                  <div className="text-center">
+                    <button onClick={() => { setShowPunchInModal(false); setTimeout(() => setShowLeaveForm(true), 200); }}
+                      className="text-xs font-semibold underline decoration-dotted transition-all"
+                      style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                      On leave today? Apply here
+                    </button>
+                  </div>
+                </div>
               </motion.div>
             </motion.div>
           )}
