@@ -25,7 +25,7 @@ const COLORS = {
 
 const SIDEBAR_EXPANDED  = 280;
 const SIDEBAR_COLLAPSED = 80;
-const HEADER_H          = 56; // px — must match paddingTop below
+const HEADER_H          = 56;
 
 const NAV_GROUPS = [
   {
@@ -77,8 +77,8 @@ const NAV_GROUPS = [
     id: 'settings',
     dividerLabel: 'Settings',
     items: [
-      { path: '/settings/email', icon: Mail,     label: 'Email Accounts',  permission: 'can_connect_email'   },
-      { path: '/settings',       icon: Settings, label: 'General Settings',permission: 'can_manage_settings' },
+      { path: '/settings/email', icon: Mail,     label: 'Email Accounts',   permission: 'can_connect_email'   },
+      { path: '/settings',       icon: Settings, label: 'General Settings', permission: 'can_manage_settings' },
     ],
   },
 ];
@@ -123,12 +123,10 @@ const DashboardLayout = ({ children }) => {
   const mainRef       = useRef(null);
   const activeItemRef = useRef(null);
 
-  /* Scroll main content to top on route change */
   useEffect(() => {
     if (mainRef.current) mainRef.current.scrollTo({ top: 0, behavior: 'auto' });
   }, [location.pathname]);
 
-  /* Scroll active nav item into view (minimal scroll only) */
   useEffect(() => {
     if (activeItemRef.current) {
       activeItemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -158,17 +156,14 @@ const DashboardLayout = ({ children }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, [handleResize]);
 
-  /* Keep sidebar open on desktop — never re-mounts */
   useEffect(() => {
     if (window.innerWidth >= 1024) setSidebarOpen(true);
   }, []);
 
-  /* Close sidebar on mobile route change */
   useEffect(() => {
     if (!isDesktop) setSidebarOpen(false);
   }, [location.pathname, isDesktop]);
 
-  /* Close user menu on outside click */
   useEffect(() => {
     if (!userMenuOpen) return;
     const handle = (e) => {
@@ -178,7 +173,6 @@ const DashboardLayout = ({ children }) => {
     return () => document.removeEventListener('mousedown', handle);
   }, [userMenuOpen]);
 
-  /* Poll unread notification count */
   useEffect(() => {
     const fetchUnread = async () => {
       try {
@@ -251,12 +245,13 @@ const DashboardLayout = ({ children }) => {
               style={{ background: 'rgba(255,255,255,0.6)' }}
             />
           )}
-          <Icon className={`flex-shrink-0 transition-colors
-            ${collapsed ? 'h-5 w-5' : 'h-4 w-4'}
-            ${isActive
-              ? 'text-white'
-              : 'text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300'
-            }`}
+          <Icon
+            className={`flex-shrink-0 transition-colors
+              ${collapsed ? 'h-5 w-5' : 'h-4 w-4'}
+              ${isActive
+                ? 'text-white'
+                : 'text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300'
+              }`}
           />
           {!collapsed && (
             <span className="font-medium text-sm whitespace-nowrap tracking-tight truncate">
@@ -266,7 +261,6 @@ const DashboardLayout = ({ children }) => {
           {isActive && collapsed && (
             <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-white/70" />
           )}
-          {/* Collapsed tooltip */}
           {collapsed && (
             <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-800 dark:bg-slate-700 text-white text-xs font-medium rounded-lg whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 translate-x-1 group-hover:translate-x-0 transition-all duration-200 z-[100] shadow-lg">
               {item.label}
@@ -293,7 +287,6 @@ const DashboardLayout = ({ children }) => {
   return (
     <div
       className={`min-h-screen relative ${isDark ? 'bg-[#0f172a]' : 'bg-[#F4F6FA]'}`}
-      /* FIX: prevent horizontal scroll at root level */
       style={{ overflowX: 'hidden' }}
     >
 
@@ -321,13 +314,13 @@ const DashboardLayout = ({ children }) => {
           }
         `}
         style={{
-          width: sidebarPx,
+          width:       sidebarPx,
           background:  isDark ? '#1e293b' : '#ffffff',
           borderRight: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
           boxShadow:   isDark ? '10px 0 30px rgba(0,0,0,0.2)' : '10px 0 30px rgba(0,0,0,0.03)',
         }}
       >
-        {/* Logo — static, centered, +15% size */}
+        {/* Logo */}
         <div
           className={`h-20 flex items-center justify-center flex-shrink-0 border-b ${
             isDark ? 'border-slate-700/60' : 'border-slate-100'
@@ -377,6 +370,8 @@ const DashboardLayout = ({ children }) => {
                 </div>
               </div>
             );
+          })}
+        </div>
 
         {/* Collapse button — desktop only */}
         <div className={`p-4 ${isDark ? 'border-t border-slate-700/60' : 'border-t border-slate-100'} hidden lg:block`}>
@@ -393,7 +388,7 @@ const DashboardLayout = ({ children }) => {
                 <span className="text-sm font-medium">Collapse Sidebar</span>
               </React.Fragment>
             )}
-          </Button>>
+          </Button>
         </div>
       </aside>
 
@@ -405,7 +400,6 @@ const DashboardLayout = ({ children }) => {
           height:       HEADER_H,
           background:   isDark ? 'rgba(15,23,42,0.85)' : 'rgba(255,255,255,0.85)',
           borderBottom: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
-          /* Prevent header from creating horizontal scroll */
           maxWidth:     `calc(100vw - ${offsetPx}px)`,
           overflow:     'hidden',
         }}
@@ -523,7 +517,7 @@ const DashboardLayout = ({ children }) => {
                     className="absolute right-0 mt-2 z-50 overflow-hidden"
                     style={{
                       width: 'min(240px, calc(100vw - 2rem))',
-                      background:  isDark ? '#1e293b' : '#ffffff',
+                      background:   isDark ? '#1e293b' : '#ffffff',
                       borderRadius: '16px',
                       boxShadow: isDark
                         ? '0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(51,65,85,0.8)'
@@ -597,7 +591,6 @@ const DashboardLayout = ({ children }) => {
         style={{
           marginLeft: offsetPx,
           paddingTop:  HEADER_H,
-          /* Prevent any child from causing horizontal overflow */
           minWidth:    0,
           maxWidth:    '100%',
           overflowX:   'hidden',
@@ -606,7 +599,6 @@ const DashboardLayout = ({ children }) => {
         <main
           ref={mainRef}
           className="flex-1 overflow-y-auto overflow-x-hidden"
-          /* Responsive padding: tighter on mobile, spacious on desktop */
           style={{ padding: 'clamp(0.875rem, 2vw, 1.75rem)' }}
         >
           <div
