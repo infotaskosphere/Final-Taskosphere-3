@@ -1146,7 +1146,7 @@ export default function Tasks() {
     inProgress: scopedTasks.filter(t => t.status === 'in_progress').length,
     completed:  scopedTasks.filter(t => t.status === 'completed').length,
     overdue:    scopedTasks.filter(t => isOverdue(t)).length,
-    teamTask:   hasCrossVisibility ? tasks.filter(t => crossVisibilityUserIds.includes(t.assigned_to) && t.status !== 'completed').length : 0,
+    teamTask:   hasCrossVisibility ? tasks.filter(t => { const isIncomplete = t.status !== 'completed'; const isMyTask = t.assigned_to === user?.id || (t.sub_assignees || []).includes(user?.id); const isCrossTask = crossVisibilityUserIds.includes(t.assigned_to) || (t.sub_assignees || []).some(id => crossVisibilityUserIds.includes(id)); return isIncomplete && (isMyTask || isCrossTask); }).length : 0,
   };
 
   const completionRate = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
@@ -1154,14 +1154,16 @@ export default function Tasks() {
   const hasActiveFilters = activeFilters.length > 0;
 
   const teamTaskBreakdown = React.useMemo(() => {
-    if (!hasCrossVisibility || crossVisibilityUserIds.length === 0) return [];
-    return crossVisibilityUserIds.map(uid => {
+    if (!hasCrossVisibility) return [];
+    const allUids = [...new Set([user?.id, ...crossVisibilityUserIds].filter(Boolean))];
+    return allUids.map(uid => {
       const member = users.find(u => u.id === uid);
       const nameFromTask = tasks.find(t => t.assigned_to === uid)?.assigned_to_name;
-      const pendingCount = tasks.filter(t => (t.assigned_to === uid || t.sub_assignees?.includes(uid)) && t.status !== 'completed').length;
-      return { id: uid, name: member?.full_name || nameFromTask || 'Unknown', pendingCount };
+      const pendingCount = tasks.filter(t => (t.assigned_to === uid || (t.sub_assignees || []).includes(uid)) && t.status !== 'completed').length;
+      const label = uid === user?.id ? (member?.full_name || 'Me') : (member?.full_name || nameFromTask || 'Unknown');
+      return { id: uid, name: label, pendingCount };
     }).filter(m => m.pendingCount > 0);
-  }, [hasCrossVisibility, crossVisibilityUserIds, tasks, users]);
+  }, [hasCrossVisibility, crossVisibilityUserIds, tasks, users, user?.id]);
 
   // ── Filtering ─────────────────────────────────────────────────────────────
   const filteredTasks = scopedTasks.filter(task => {
@@ -1169,7 +1171,7 @@ export default function Tasks() {
     const matchesPriority = filterPriority === 'all' || task.priority   === filterPriority;
     const matchesCategory = filterCategory === 'all' || task.category   === filterCategory;
     const matchesAssignee = filterAssignee === 'all' || task.assigned_to === filterAssignee;
-    const matchesTeam     = !filterTeamOnly || crossVisibilityUserIds.includes(task.assigned_to);
+    const matchesTeam     = !filterTeamOnly || task.assigned_to === user?.id || (task.sub_assignees || []).includes(user?.id) || crossVisibilityUserIds.includes(task.assigned_to) || (task.sub_assignees || []).some(id => crossVisibilityUserIds.includes(id));
     let matchesStatus = true;
     if (filterStatus !== 'all') matchesStatus = filterStatus === 'overdue' ? isOverdue(task) : task.status === filterStatus;
     return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee && matchesTeam;
@@ -1201,7 +1203,12 @@ export default function Tasks() {
     const doneFiltered  = list.filter(t => t.status === 'completed');
     const overdueList   = list.filter(t => isOverdue(t));
     const teamFiltered  = hasCrossVisibility
-      ? list.filter(t => crossVisibilityUserIds.includes(t.assigned_to) && t.status !== 'completed')
+      ? list.filter(t => {
+          const isIncomplete = t.status !== 'completed';
+          const isMyTask = t.assigned_to === user?.id || (t.sub_assignees || []).includes(user?.id);
+          const isCrossTask = crossVisibilityUserIds.includes(t.assigned_to) || (t.sub_assignees || []).some(id => crossVisibilityUserIds.includes(id));
+          return isIncomplete && (isMyTask || isCrossTask);
+        })
       : [];
     const filteredCompletionRate = list.length > 0 ? Math.round((doneFiltered.length / list.length) * 100) : 0;
 
