@@ -996,6 +996,13 @@ export default function Attendance() {
   const isAdmin         = user?.role === 'admin';
   const canViewRankings = hasPermission('can_view_staff_rankings');
 
+  // ── Cross-visibility ───────────────────────────────────────────────────────
+  // view_other_attendance is an array of user IDs that this user can view
+  const crossVisAttendance  = user?.permissions?.view_other_attendance || [];
+  const hasCrossVisAttendance = crossVisAttendance.length > 0;
+  // canSwitchUser: admin can switch to any user; others only if they have cross-vis
+  const canSwitchUser = isAdmin || hasCrossVisAttendance;
+
   // ── Layout customizer ─────────────────────────────────────────────────────
   const ATT_SECTIONS = ['today_status', 'stat_cards', 'holidays_reminders', 'calendar_area'];
   const ATT_LABELS = {
@@ -1073,7 +1080,8 @@ export default function Attendance() {
 
   // ── Derived flags ──────────────────────────────────────────────────────────
   const isEveryoneView = isAdmin && selectedUserId === 'everyone';
-  const isViewingOther = isAdmin && !!selectedUserId && selectedUserId !== 'everyone';
+  // isViewingOther: admin viewing specific user OR non-admin with cross-vis permission
+  const isViewingOther = canSwitchUser && !!selectedUserId && selectedUserId !== 'everyone';
   const todayDateStr   = format(new Date(), 'yyyy-MM-dd');
 
   const todayIsHoliday = useMemo(() =>
@@ -1201,10 +1209,11 @@ export default function Attendance() {
   // ── Data Fetch ─────────────────────────────────────────────────────────────
   const fetchData = useCallback(async (overrideUserId = undefined) => {
     setLoading(true); setDataError(null);
-    const rawTargetId    = isAdmin ? (overrideUserId !== undefined ? overrideUserId : selectedUserId) : null;
+    // For admin: can target anyone or 'everyone'. For cross-vis users: target specific permitted user.
+    const rawTargetId    = canSwitchUser ? (overrideUserId !== undefined ? overrideUserId : selectedUserId) : null;
     const isEveryoneReq  = isAdmin && rawTargetId === 'everyone';
-    const isOtherReq     = isAdmin && !!rawTargetId && rawTargetId !== 'everyone';
-    const resolvedUserId = isEveryoneReq ? null : isOtherReq ? rawTargetId : (isAdmin ? user?.id : null);
+    const isOtherReq     = !!rawTargetId && rawTargetId !== 'everyone'; // works for both admin and cross-vis
+    const resolvedUserId = isEveryoneReq ? null : isOtherReq ? rawTargetId : null;
 
     try {
       let historyUrl;
@@ -1241,6 +1250,15 @@ export default function Attendance() {
 
       if (isAdmin && allUsers.length === 0) {
         try { const usersRes = await api.get('/users'); setAllUsers(usersRes.data || []); } catch {}
+      } else if (!isAdmin && hasCrossVisAttendance && allUsers.length === 0) {
+        // Non-admin with cross-visibility: fetch only the users they're permitted to see
+        try {
+          const usersRes = await api.get('/users');
+          const permitted = (usersRes.data || []).filter(u =>
+            crossVisAttendance.includes(u.id || u._id)
+          );
+          setAllUsers(permitted);
+        } catch {}
       }
 
       const history = historyRes.data || [];
@@ -1591,7 +1609,7 @@ export default function Attendance() {
     try {
       let employeeName;
       if (isAdmin && selectedUserId === 'everyone') employeeName = 'All Employees';
-      else if (isAdmin && selectedUserId) employeeName = (Array.isArray(allUsers) ? allUsers : []).find(u => u.id === selectedUserId)?.full_name || 'Employee';
+      else if (canSwitchUser && selectedUserId) employeeName = (Array.isArray(allUsers) ? allUsers : []).find(u => u.id === selectedUserId)?.full_name || 'Employee';
       else employeeName = user?.full_name || 'Staff Member';
 
       const doc = new jsPDF();
@@ -1938,16 +1956,18 @@ export default function Attendance() {
                   {format(new Date(), 'EEEE, MMMM d, yyyy')}
                 </p>
                 <h1 className="text-2xl font-bold text-white tracking-tight">
-                  {isAdmin ? 'Attendance Management' : 'My Attendance'}
+                  {isAdmin ? 'Attendance Management' : isViewingOther ? 'Team Attendance View' : 'My Attendance'}
                 </h1>
                 <p className="text-white/60 text-sm mt-1">
                   {isAdmin
                     ? 'Manage team attendance — auto-absent marks at 7:00 PM IST daily'
-                    : 'Track your daily hours — auto-absent at 7:00 PM if not punched in'}
+                    : isViewingOther
+                      ? `Viewing attendance for ${allUsers.find(u=>u.id===selectedUserId)?.full_name || 'team member'}`
+                      : 'Track your daily hours — auto-absent at 7:00 PM if not punched in'}
                 </p>
               </div>
               <div className="flex gap-2 flex-wrap items-center">
-                {isAdmin && (
+                {canSwitchUser && (
                   <select
                     className="rounded-xl px-3.5 py-2 text-sm font-medium cursor-pointer border focus:outline-none focus:ring-2 focus:ring-white/40 transition-all"
                     style={{
@@ -1965,12 +1985,15 @@ export default function Attendance() {
                     }}
                   >
                     <option value="" style={{ color: '#1e293b', background: '#ffffff' }}>
-                      {allUsers.length === 0 ? 'Loading users…' : user?.full_name ? `${user.full_name} (Admin)` : 'My Attendance'}
+                      {user?.full_name ? `${user.full_name} (Me)` : 'My Attendance'}
                     </option>
-                    <option value="everyone" style={{ color: '#1e293b', background: '#ffffff' }}>Everyone (All Users)</option>
+                    {/* Admin can see Everyone aggregate view */}
+                    {isAdmin && (
+                      <option value="everyone" style={{ color: '#1e293b', background: '#ffffff' }}>Everyone (All Users)</option>
+                    )}
                     {(Array.isArray(allUsers) ? allUsers : []).filter(u => u.id !== user?.id).map(u => (
                       <option key={u.id} value={u.id} style={{ color: '#1e293b', background: '#ffffff' }}>
-                        {u.full_name} ({u.role === 'admin' ? 'Admin' : u.role})
+                        {u.full_name}
                       </option>
                     ))}
                   </select>
