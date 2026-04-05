@@ -1,4 +1,6 @@
 import { useDark } from '@/hooks/useDark';
+import LayoutCustomizer from '@/components/layout/LayoutCustomizer';
+import { usePageLayout } from '@/hooks/usePageLayout';
 import GifLoader from '@/components/ui/GifLoader.jsx';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -19,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import {
   Plus, Zap, Trash2, CheckCircle2, Sparkles, ShieldCheck,
+  GripVertical, Settings2,
   RefreshCw, Target, TrendingUp, AlertCircle,
   Calendar as CalendarIcon, History, Users, Search, X,
   User as UserIcon, Activity, Layers, CheckSquare, Circle,
@@ -896,6 +899,13 @@ export default function TodoDashboard() {
   const isAdmin     = user?.role === 'admin';
   const isManager   = user?.role === 'manager';
   const isDark      = useDark();
+  const [showCustomize, setShowCustomize] = useState(false);
+  const TD_SECTIONS = ['stats_row', 'content_area'];
+  const TD_LABELS = {
+    stats_row:    { name:'Stats Row',      icon:'📊', desc:'Total, overdue, completion rate and health score' },
+    content_area: { name:'Todo Content',   icon:'✅', desc:'Create new todos, list, tasks and completed items' },
+  };
+  const { order: tdOrder, moveSection: tdMove, resetOrder: tdReset } = usePageLayout('tododashboard', TD_SECTIONS);
 
   // ── Form state ─────────────────────────────────────────────────────────────
   const [title,       setTitle]       = useState('');
@@ -1321,6 +1331,16 @@ export default function TodoDashboard() {
         )}
       </AnimatePresence>
 
+      <LayoutCustomizer
+        isOpen={showCustomize}
+        onClose={() => setShowCustomize(false)}
+        order={tdOrder}
+        sectionLabels={TD_LABELS}
+        onDragEnd={tdMove}
+        onReset={tdReset}
+        isDark={isDark}
+      />
+
       {/* ── Page Header ─────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
         <div
@@ -1367,6 +1387,24 @@ export default function TodoDashboard() {
         </div>
       </motion.div>
 
+      {/* CUSTOMIZE BUTTON */}
+      <motion.div variants={itemVariants} className="flex justify-end">
+        <button
+          onClick={() => setShowCustomize(true)}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition-all hover:shadow-md ${
+            isDark
+              ? 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'
+              : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+          }`}
+        >
+          <Settings2 size={13} /> Customize Layout
+        </button>
+      </motion.div>
+
+      {/* ORDERED SECTIONS */}
+      {tdOrder.map((sectionId) => {
+        if (sectionId === 'stats_row') return (
+      <React.Fragment key="stats_row">
       {/* ── Key Metrics ─────────────────────────────────────────────────────── */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-3" variants={itemVariants}>
         <MetricCard icon={Layers}      label="Total"        value={stats.total}                sub="todos tracked"                              accent={COLORS.deepBlue} />
@@ -1374,7 +1412,10 @@ export default function TodoDashboard() {
         <MetricCard icon={TrendingUp}  label="Completion"   value={`${stats.completionRate}%`} sub={`${stats.completed} of ${stats.total}`}     accent={COLORS.emeraldGreen} progress={stats.completionRate} />
         <MetricCard icon={Sparkles}    label="Health Score" value={`${stats.healthScore}%`}    sub={stats.healthScore >= 80 ? 'On track' : 'Needs focus'} accent={stats.healthScore >= 80 ? '#1F6FB2' : COLORS.amber} progress={stats.healthScore} />
       </motion.div>
-
+      </React.Fragment>
+        );
+        if (sectionId === 'content_area') return (
+      <React.Fragment key="content_area">
       <AnimatePresence mode="wait">
 
         {/* ─────────────── TODOS TAB ───────────────────────────────────────── */}
@@ -1881,6 +1922,10 @@ export default function TodoDashboard() {
         )}
 
       </AnimatePresence>
+      </React.Fragment>
+        );
+        return null;
+      })}
     </motion.div>
   );
 }
