@@ -27,22 +27,28 @@ const SIDEBAR_EXPANDED  = 280;
 const SIDEBAR_COLLAPSED = 80;
 const HEADER_H          = 56;
 
+// NAV_GROUPS: items with no `permission` key are visible to ALL authenticated users
+// (matching <Protected> routes). Items with a `permission` key are only shown
+// when the user has that permission flag (matching <Permission> routes).
+// Admins always see everything.
 const NAV_GROUPS = [
   {
     id: 'core',
     items: [
+      // Default modules — <Protected> routes, visible to all roles
       { path: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard' },
       { path: '/tasks',      icon: CheckSquare,     label: 'Tasks' },
-      { path: '/todos',      icon: CheckSquare,     label: 'To Do',              permission: 'can_view_todo_dashboard' },
-      { path: '/attendance', icon: Clock,           label: 'Attendance',          permission: 'can_view_attendance'    },
-      { path: '/duedates',   icon: Calendar,        label: 'Compliance Calendar', permission: 'can_view_all_duedates'  },
-      { path: '/visits',     icon: MapPin,          label: 'Client Visits',       permission: 'can_view_own_data'      },
+      { path: '/todos',      icon: CheckSquare,     label: 'To Do' },
+      { path: '/attendance', icon: Clock,           label: 'Attendance' },
+      { path: '/duedates',   icon: Calendar,        label: 'Compliance Calendar' },
+      { path: '/visits',     icon: MapPin,          label: 'Client Visits' },
     ],
   },
   {
     id: 'records',
     dividerLabel: 'Records',
     items: [
+      // Permission-based modules — only visible when user has the flag
       { path: '/dsc',       icon: FileText,  label: 'DSC Register',      permission: 'can_view_all_dsc'     },
       { path: '/documents', icon: FileText,  label: 'Document Register', permission: 'can_view_documents'   },
       { path: '/clients',   icon: Users,     label: 'Clients',           permission: 'can_view_all_clients' },
@@ -68,7 +74,8 @@ const NAV_GROUPS = [
     dividerLabel: 'Admin',
     items: [
       { path: '/staff-activity', icon: Activity,  label: 'Staff Activity',  permission: 'can_view_staff_activity' },
-      { path: '/reports',        icon: BarChart3,  label: 'Reports',         permission: 'can_view_reports'        },
+      // Reports — <Protected> route, visible to all roles (data scoped server-side)
+      { path: '/reports',        icon: BarChart3,  label: 'Reports' },
       { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log',  permission: 'can_view_audit_logs'     },
       { path: '/users',          icon: Users,      label: 'Users',           permission: 'can_view_user_page'      },
     ],
@@ -77,8 +84,9 @@ const NAV_GROUPS = [
     id: 'settings',
     dividerLabel: 'Settings',
     items: [
-      { path: '/settings/email', icon: Mail,     label: 'Email Accounts',   permission: 'can_connect_email'   },
-      { path: '/settings',       icon: Settings, label: 'General Settings', permission: 'can_manage_settings' },
+      // Settings — <Protected> routes, visible to all roles
+      { path: '/settings/email', icon: Mail,     label: 'Email Accounts'   },
+      { path: '/settings',       icon: Settings, label: 'General Settings' },
     ],
   },
 ];
