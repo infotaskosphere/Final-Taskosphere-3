@@ -117,7 +117,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_connect_email: true, can_view_own_data: true, can_create_quotations: true,
       can_manage_invoices: true, can_view_passwords: true, can_edit_passwords: true,
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
-      view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
+      view_other_attendance: [], view_other_reports: [], view_other_todos: [],
+      view_other_activity: [], view_other_visits: [],
     },
     // SCOPE: OWN + SAME_DEPARTMENT (Own + Team) | ALL MODULES enabled (permission-based, admin can revoke)
     manager: {
@@ -161,7 +162,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_delete_visits: false,       // admin-granted only
       can_delete_own_visits: true,    // always allowed for own records
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
-      view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
+      view_other_attendance: [], view_other_reports: [], view_other_todos: [],
+      view_other_activity: [], view_other_visits: [],
     },
     // SCOPE: OWN only | ALL MODULES enabled (permission-based, admin can revoke)
     staff: {
@@ -205,7 +207,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_delete_visits: false,       // admin-granted only
       can_delete_own_visits: true,    // always allowed for own records
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
-      view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
+      view_other_attendance: [], view_other_reports: [], view_other_todos: [],
+      view_other_activity: [], view_other_visits: [],
     },
   }
 
@@ -225,7 +228,8 @@ const EMPTY_PERMISSIONS = {
   can_view_all_visits: false, can_edit_visits: false,
   can_delete_visits: false, can_delete_own_visits: true,
   view_password_departments: [], assigned_clients: [], view_other_tasks: [],
-  view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
+  view_other_attendance: [], view_other_reports: [], view_other_todos: [],
+  view_other_activity: [], view_other_visits: [],
 };
 
 const GLOBAL_PERMS = [
@@ -1484,6 +1488,7 @@ export default function Users() {
         view_other_reports: ensureArray(permissions.view_other_reports),
         view_other_todos: ensureArray(permissions.view_other_todos),
         view_other_activity: ensureArray(permissions.view_other_activity),
+        view_other_visits: ensureArray(permissions.view_other_visits),
       };
       await api.put(`/users/${selectedUserForPerms?.id}/permissions`, payload);
       if (selectedUserForPerms?.id === user?.id) await refreshUser();
@@ -2018,6 +2023,7 @@ export default function Users() {
                   { key: 'view_other_reports',    label: 'Reports',    icon: BarChart2,   color: '#F59E0B' },
                   { key: 'view_other_todos',      label: 'Todos',      icon: CheckCircle, color: '#10B981' },
                   { key: 'view_other_activity',   label: 'Activity',   icon: Activity,    color: '#EF4444' },
+                  { key: 'view_other_visits',     label: 'Visits',     icon: MapPin,      color: '#0F766E' },
                 ].map(section => {
                   const SIcon = section.icon;
                   const selectedCount = (permissions[section.key] || []).length;
