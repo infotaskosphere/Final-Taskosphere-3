@@ -1106,41 +1106,44 @@ export default function Attendance() {
   }, [isViewingOther, displayTodayAttendance, liveDuration]);
 
   // ── Effects ────────────────────────────────────────────────────────────────
-  useEffect(() => { fetchData(); fetchReminders(); }, []); // eslint-disable-line
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchData();
+    fetchReminders(undefined, controller.signal);
+    return () => controller.abort();
+  }, []); // eslint-disable-line
 
   useEffect(() => {
-    // Always close modal when switching to view another user — prevents ghost modal
-    if (isViewingOther || isEveryoneView) {
-      setShowPunchInModal(false);
-      setGeoError(null); setUserLocation(null); setIsWithinGeofence(null);
-      return;
+    if (!isViewingOther && todayAttendance) {
+      const shouldClose = todayAttendance.punch_in || todayAttendance.status === 'leave'
+        || todayAttendance.status === 'absent' || todayIsHoliday || modalActionDone;
+      if (shouldClose) {
+        setShowPunchInModal(false);
+        setGeoError(null); setUserLocation(null); setIsWithinGeofence(null);
+        return;
+      }
+      const timer = setTimeout(() => {
+        setShowPunchInModal(true);
+        // Auto-check location when modal opens
+        setGeoError(null); setUserLocation(null); setIsWithinGeofence(null);
+      }, 800);
+      return () => clearTimeout(timer);
     }
-    if (!todayAttendance) return;
-    const shouldClose = todayAttendance.punch_in || todayAttendance.status === 'leave'
-      || todayAttendance.status === 'absent' || todayIsHoliday || modalActionDone;
-    if (shouldClose) {
-      setShowPunchInModal(false);
-      setGeoError(null); setUserLocation(null); setIsWithinGeofence(null);
-      return;
-    }
-    const timer = setTimeout(() => {
-      setShowPunchInModal(true);
-      setGeoError(null); setUserLocation(null); setIsWithinGeofence(null);
-    }, 800);
-    return () => clearTimeout(timer);
-  }, [todayAttendance, isViewingOther, isEveryoneView, todayIsHoliday, modalActionDone]);
+  }, [todayAttendance, isViewingOther, todayIsHoliday, modalActionDone]);
 
   // Block app body scroll when punch-in modal is open
   useEffect(() => {
-    // Only block scroll — do NOT set pointerEvents on body as it blocks
-    // all interaction (dropdowns, sidebar, navigation) app-wide
     if (showPunchInModal) {
       document.body.style.overflow = 'hidden';
+      document.body.style.pointerEvents = 'none';
+      // The modal itself re-enables pointer events via inline style
     } else {
       document.body.style.overflow = '';
+      document.body.style.pointerEvents = '';
     }
     return () => {
       document.body.style.overflow = '';
+      document.body.style.pointerEvents = '';
     };
   }, [showPunchInModal]);
 
@@ -1250,15 +1253,14 @@ export default function Attendance() {
       }
       if (isAdmin) setPendingHolidays((Array.isArray(allHolidays) ? allHolidays : []).filter(h => h.status === 'pending'));
 
-      if (isAdmin && allUsers.length === 0) {
+      if (isAdmin) {
         try { const usersRes = await api.get('/users'); setAllUsers(usersRes.data || []); } catch {}
-      } else if (!isAdmin && hasCrossVisAttendance && allUsers.length === 0) {
-        // Non-admin with cross-visibility: fetch only the users they're permitted to see
+      } else if (hasCrossVisAttendance) {
+        // Non-admin with cross-visibility: always keep permitted user list fresh
         try {
           const usersRes = await api.get('/users');
-          const crossVisStr = crossVisAttendance.map(String);
           const permitted = (usersRes.data || []).filter(u =>
-            crossVisStr.includes(String(u.id || u._id))
+            crossVisAttendance.includes(u.id || u._id)
           );
           setAllUsers(permitted);
         } catch {}
@@ -1319,18 +1321,16 @@ export default function Attendance() {
     } finally { setLoading(false); }
   }, [selectedUserId, isAdmin, canViewRankings, user?.id, allUsers.length]); // eslint-disable-line
 
-  const fetchReminders = useCallback(async (overrideUserId = undefined) => {
+  const fetchReminders = useCallback(async (overrideUserId = undefined, signal = undefined) => {
     try {
       const uid = overrideUserId !== undefined ? overrideUserId : (isViewingOther ? selectedUserId : null);
       if (uid === 'everyone') return;
-      // Non-admins must NOT fetch another user's reminders — the resulting 403
-      // from the backend triggers a global Axios interceptor that redirects to dashboard.
-      if (uid && String(uid) !== String(user?.id) && !isAdmin) return;
-      const url = uid ? `/email/reminders?user_id=${uid}` : '/email/reminders';;
-      const res = await api.get(url);
+      const url = uid ? `/email/reminders?user_id=${uid}` : '/email/reminders';
+      const res = await api.get(url, signal ? { signal } : {});
       const raw = Array.isArray(res.data) ? res.data : [];
       setReminders(raw.map(normalizeReminder));
     } catch (err) {
+      if (err?.code === 'ERR_CANCELED' || err?.name === 'AbortError' || err?.name === 'CanceledError') return;
       console.error('fetchReminders error:', err);
     }
   }, [isViewingOther, selectedUserId]);
@@ -3220,7 +3220,7 @@ export default function Attendance() {
           {showPunchInModal && !isViewingOther && !isEveryoneView && (
             <motion.div
               className="fixed inset-0 z-[99999] flex items-center justify-center p-4"
-              style={{ background: isDark ? 'rgba(0,0,0,0.92)' : 'rgba(15,23,42,0.88)', backdropFilter: 'blur(12px)', pointerEvents: 'all' }}
+              style={{ background: isDark ? 'rgba(0,0,0,0.92)' : 'rgba(15,23,42,0.88)', backdropFilter: 'blur(12px)' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             >
               {/* NO onClick dismiss — user MUST punch in to use the app */}
