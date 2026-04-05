@@ -14,11 +14,11 @@ import { toast } from 'sonner';
 import {
   Plus, Edit, Trash2, AlertCircle, ArrowDownCircle, ArrowUpCircle,
   History, Search, ArrowUpDown, Printer, CheckSquare, Square,
-  MinusSquare, ArrowDownUp, TrendingDown, Clock, XCircle,
+  MinusSquare, XCircle, Key, Shield, Clock, TrendingDown,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
-// ─── Print styles injected once ──────────────────────────────────────────────
+// ─── Print styles ─────────────────────────────────────────────────────────────
 const PRINT_STYLE = `
 @media print {
   body * { visibility: hidden !important; }
@@ -27,19 +27,16 @@ const PRINT_STYLE = `
   @page { margin: 16mm; }
 }`;
 
-// ─── Row highlight colours based on expiry ───────────────────────────────────
-// Brown  = expiring ≤ 7 days
-// Yellow = expiring ≤ 30 days
-// Normal = fine
+// ─── Row highlight colours based on expiry ────────────────────────────────────
 function getRowHighlight(expiryDate, isDark) {
   const daysLeft = Math.ceil((new Date(expiryDate) - new Date()) / (1000 * 60 * 60 * 24));
   if (daysLeft < 0)   return isDark ? 'bg-red-950/40'    : 'bg-red-50';
-  if (daysLeft <= 7)  return isDark ? 'bg-orange-950/40' : 'bg-orange-100';   // brown-ish
+  if (daysLeft <= 7)  return isDark ? 'bg-orange-950/40' : 'bg-orange-100';
   if (daysLeft <= 30) return isDark ? 'bg-yellow-950/30' : 'bg-yellow-50';
   return '';
 }
 
-// ─── Client-page style Pagination ────────────────────────────────────────────
+// ─── Pagination ───────────────────────────────────────────────────────────────
 function PaginationBar({ currentPage, totalPages, totalItems, pageSize, onPageChange, isDark }) {
   if (totalPages <= 1) return null;
   const pageStart = (currentPage - 1) * pageSize;
@@ -80,80 +77,67 @@ function PaginationBar({ currentPage, totalPages, totalItems, pageSize, onPageCh
   );
 }
 
-// ─── DSC Table with checkboxes + row highlight + last movement ───────────────
+// ─── DSC Table ────────────────────────────────────────────────────────────────
 function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, type, globalIndexStart, isDark, selectedIds, onToggleSelect, onToggleAll }) {
   const allSelected  = dscList.length > 0 && dscList.every(d => selectedIds.has(d.id));
   const someSelected = dscList.some(d => selectedIds.has(d.id)) && !allSelected;
 
   return (
-    <div className="w-full overflow-hidden">
-      <table className="w-full table-auto border-collapse">
-        <thead className={`border-b ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+    <div className="w-full overflow-x-auto">
+      <table className="w-full table-auto border-collapse min-w-[800px]">
+        <thead className={`border-b ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
           <tr>
-            {/* Checkbox all */}
             <th className="px-3 py-3 w-10">
               <button onClick={() => onToggleAll(dscList)} className="flex items-center justify-center">
                 {allSelected
-                  ? <CheckSquare className="h-4 w-4 text-indigo-600" />
+                  ? <CheckSquare className="h-4 w-4 text-indigo-500" />
                   : someSelected
                     ? <MinusSquare className="h-4 w-4 text-indigo-400" />
                     : <Square className="h-4 w-4 text-slate-400" />}
               </button>
             </th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-10">S.No</th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[140px]">Holder Name</th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-24">Type</th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[130px]">Associated With</th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-28">Expiry Date</th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-28">Status</th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[130px]">Last Movement</th>
-            <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-36">Actions</th>
+            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>S.No</th>
+            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[140px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Holder Name</th>
+            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider w-24 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Type</th>
+            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[130px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Associated With</th>
+            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider w-28 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Expiry Date</th>
+            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider w-32 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Status</th>
+            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[130px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Last Movement</th>
+            <th className={`px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider w-36 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Actions</th>
           </tr>
         </thead>
-        <tbody className={`divide-y ${isDark ? 'divide-slate-700' : 'divide-slate-100'}`}>
+        <tbody className={`divide-y ${isDark ? 'divide-slate-700/60' : 'divide-slate-100'}`}>
           {dscList.map((dsc, index) => {
-            const status      = getDSCStatus(dsc.expiry_date);
-            const highlight   = getRowHighlight(dsc.expiry_date, isDark);
-            const isSelected  = selectedIds.has(dsc.id);
-            const lastMove    = dsc.movement_log?.length > 0 ? dsc.movement_log[dsc.movement_log.length - 1] : null;
+            const status     = getDSCStatus(dsc.expiry_date);
+            const highlight  = getRowHighlight(dsc.expiry_date, isDark);
+            const isSelected = selectedIds.has(dsc.id);
+            const lastMove   = dsc.movement_log?.length > 0 ? dsc.movement_log[dsc.movement_log.length - 1] : null;
 
             return (
               <tr key={dsc.id}
                 className={`transition-colors ${highlight} ${isSelected ? (isDark ? 'ring-1 ring-inset ring-indigo-500' : 'ring-1 ring-inset ring-indigo-300') : ''} ${isDark ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50/80'}`}
                 data-testid={`dsc-row-${dsc.id}`}>
-
-                {/* Checkbox */}
                 <td className="px-3 py-3">
                   <button onClick={() => onToggleSelect(dsc.id)} className="flex items-center justify-center">
-                    {isSelected ? <CheckSquare className="h-4 w-4 text-indigo-600" /> : <Square className="h-4 w-4 text-slate-400" />}
+                    {isSelected ? <CheckSquare className="h-4 w-4 text-indigo-500" /> : <Square className="h-4 w-4 text-slate-400" />}
                   </button>
                 </td>
-
-                <td className="px-4 py-3 text-sm text-slate-500">{globalIndexStart + index + 1}</td>
-
-                <td className={`px-4 py-3 text-sm font-medium break-words leading-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                  {dsc.holder_name}
-                </td>
-
-                <td className="px-4 py-3 text-sm text-slate-600 truncate">{dsc.dsc_type || '-'}</td>
-
-                <td className="px-4 py-3 text-sm text-slate-600 break-words leading-tight">{dsc.associated_with || '-'}</td>
-
-                <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{format(new Date(dsc.expiry_date), 'MMM dd, yyyy')}</td>
-
+                <td className={`px-4 py-3 text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{globalIndexStart + index + 1}</td>
+                <td className={`px-4 py-3 text-sm font-semibold break-words leading-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{dsc.holder_name}</td>
+                <td className={`px-4 py-3 text-sm truncate ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{dsc.dsc_type || '—'}</td>
+                <td className={`px-4 py-3 text-sm break-words leading-tight ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{dsc.associated_with || '—'}</td>
+                <td className={`px-4 py-3 text-sm whitespace-nowrap font-medium ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{format(new Date(dsc.expiry_date), 'MMM dd, yyyy')}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1.5">
-                    <div className={`w-1.5 h-1.5 rounded-full ${status.color}`} />
-                    <span className={`text-[12px] font-medium leading-none ${status.textColor}`}>{status.text}</span>
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${status.color}`} />
+                    <span className={`text-[12px] font-semibold leading-none ${status.textColor}`}>{status.text}</span>
                   </div>
                 </td>
-
-                {/* Last movement inline */}
                 <td className="px-4 py-3">
                   {lastMove ? (
                     <div className="flex flex-col gap-0.5">
                       <div className="flex items-center gap-1">
-                        <Badge className={`text-[10px] px-1.5 py-0 ${lastMove.movement_type === 'IN' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                        <Badge className={`text-[10px] px-1.5 py-0 font-semibold ${lastMove.movement_type === 'IN' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
                           {lastMove.movement_type}
                         </Badge>
                         <span className={`text-xs font-medium truncate max-w-[90px] ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{lastMove.person_name}</span>
@@ -166,10 +150,9 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                     <span className="text-xs text-slate-400 italic">No movement</span>
                   )}
                 </td>
-
                 <td className="px-4 py-3 text-right">
                   <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => onViewLog(dsc)} className="h-8 w-8 p-0 hover:bg-slate-100" title="View Log">
+                    <Button variant="ghost" size="sm" onClick={() => onViewLog(dsc)} className={`h-8 w-8 p-0 ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`} title="View Log">
                       <History className="h-4 w-4 text-slate-500" />
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => onMovement(dsc, type === 'IN' ? 'OUT' : 'IN')}
@@ -177,10 +160,10 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                       title={type === 'IN' ? 'Mark as OUT' : 'Mark as IN'}>
                       {type === 'IN' ? <ArrowUpCircle className="h-4 w-4" /> : <ArrowDownCircle className="h-4 w-4" />}
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => onEdit(dsc)} className="h-8 w-8 p-0 hover:bg-indigo-50 text-indigo-600">
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(dsc)} className={`h-8 w-8 p-0 ${isDark ? 'hover:bg-indigo-900/30' : 'hover:bg-indigo-50'} text-indigo-500`}>
                       <Edit className="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => onDelete(dsc.id)} className="h-8 w-8 p-0 hover:bg-red-50 text-red-600">
+                    <Button variant="ghost" size="sm" onClick={() => onDelete(dsc.id)} className={`h-8 w-8 p-0 ${isDark ? 'hover:bg-red-900/30' : 'hover:bg-red-50'} text-red-500`}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
@@ -196,7 +179,7 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function DSCRegister() {
-  const isDark = useDark();
+  const isDark    = useDark();
   const searchRef = useRef(null);
 
   const [dscList, setDscList]                       = useState([]);
@@ -213,14 +196,14 @@ export default function DSCRegister() {
   const [currentPageOut, setCurrentPageOut]         = useState(1);
   const [currentPageExpired, setCurrentPageExpired] = useState(1);
   const [sortOrder, setSortOrder]                   = useState('az');
+  const [activeTab, setActiveTab]                   = useState('in');
 
-  // ── NEW: bulk selection ──────────────────────────────────────────────────
-  const [selectedIds, setSelectedIds]               = useState(new Set());
-  const [bulkDialogOpen, setBulkDialogOpen]         = useState(false);
-  const [bulkMovementType, setBulkMovementType]     = useState('IN');
-  const [bulkPersonName, setBulkPersonName]         = useState('');
-  const [bulkNotes, setBulkNotes]                   = useState('');
-  const [bulkLoading, setBulkLoading]               = useState(false);
+  const [selectedIds, setSelectedIds]       = useState(new Set());
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [bulkMovementType, setBulkMovementType] = useState('IN');
+  const [bulkPersonName, setBulkPersonName] = useState('');
+  const [bulkNotes, setBulkNotes]           = useState('');
+  const [bulkLoading, setBulkLoading]       = useState(false);
 
   const [formData, setFormData] = useState({
     holder_name: '', dsc_type: '', dsc_password: '',
@@ -233,7 +216,6 @@ export default function DSCRegister() {
   useEffect(() => { fetchDSC(); }, []);
   useEffect(() => { setCurrentPageIn(1); setCurrentPageOut(1); setCurrentPageExpired(1); }, [sortOrder, searchQuery]);
 
-  // ── Keyboard shortcut: press "/" to focus search ─────────────────────────
   useEffect(() => {
     const handler = (e) => {
       if (e.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
@@ -245,7 +227,6 @@ export default function DSCRegister() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // ── Print ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     const styleEl = document.createElement('style');
     styleEl.innerHTML = PRINT_STYLE;
@@ -257,9 +238,9 @@ export default function DSCRegister() {
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
   const extractItems = (data) => {
-    if (Array.isArray(data))                    return data;
-    if (data && Array.isArray(data.data))       return data.data;
-    if (data && Array.isArray(data.dscs))       return data.dscs;
+    if (Array.isArray(data))              return data;
+    if (data && Array.isArray(data.data)) return data.data;
+    if (data && Array.isArray(data.dscs)) return data.dscs;
     return [];
   };
 
@@ -318,7 +299,7 @@ export default function DSCRegister() {
     }
   };
 
-  // ── Single movement (dedicated dialog) ───────────────────────────────────
+  // ── Single movement ───────────────────────────────────────────────────────
   const handleMovement = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -349,7 +330,6 @@ export default function DSCRegister() {
     return dsc.current_location === 'with_company' ? 'IN' : 'OUT';
   };
 
-  // ── Movement from inside Edit modal ──────────────────────────────────────
   const handleMovementInModal = async () => {
     if (!editingDSC || !movementData.person_name) return;
     setLoading(true);
@@ -425,13 +405,13 @@ export default function DSCRegister() {
     setEditingDSC(null);
   };
 
-  // ── Status badge ──────────────────────────────────────────────────────────
+  // ── Status ────────────────────────────────────────────────────────────────
   const getDSCStatus = (expiryDate) => {
     const daysLeft = Math.ceil((new Date(expiryDate) - new Date()) / (1000 * 60 * 60 * 24));
-    if (daysLeft < 0)   return { color: 'bg-red-500',    text: 'Expired',               textColor: 'text-red-700' };
-    if (daysLeft <= 7)  return { color: 'bg-red-500',    text: `${daysLeft} Days left`,  textColor: 'text-red-700' };
-    if (daysLeft <= 30) return { color: 'bg-yellow-500', text: `${daysLeft} Days left`,  textColor: 'text-yellow-700' };
-    return               { color: 'bg-emerald-500',      text: `${daysLeft} Days left`,  textColor: 'text-emerald-700' };
+    if (daysLeft < 0)   return { color: 'bg-red-500',    text: 'Expired',              textColor: 'text-red-600' };
+    if (daysLeft <= 7)  return { color: 'bg-orange-500', text: `${daysLeft}d left`,    textColor: 'text-orange-600' };
+    if (daysLeft <= 30) return { color: 'bg-yellow-500', text: `${daysLeft}d left`,    textColor: 'text-yellow-700' };
+    return               { color: 'bg-emerald-500',      text: `${daysLeft}d left`,    textColor: 'text-emerald-700' };
   };
 
   const filterBySearch = (dsc) => {
@@ -453,12 +433,12 @@ export default function DSCRegister() {
     }
   };
 
-  const nowDate = new Date();
+  const nowDate    = new Date();
   const inDSC      = applySortOrder(dscList.filter(d => new Date(d.expiry_date) >= nowDate && getDSCInOutStatus(d) === 'IN'  && filterBySearch(d)));
   const outDSC     = applySortOrder(dscList.filter(d => new Date(d.expiry_date) >= nowDate && getDSCInOutStatus(d) === 'OUT' && filterBySearch(d)));
   const expiredDSC = applySortOrder(dscList.filter(d => new Date(d.expiry_date) < nowDate  && filterBySearch(d)));
 
-  // ── Stats for cards ───────────────────────────────────────────────────────
+  // ── Stats ─────────────────────────────────────────────────────────────────
   const statsExpiring7  = dscList.filter(d => { const dl = Math.ceil((new Date(d.expiry_date) - nowDate) / 86400000); return dl >= 0 && dl <= 7; }).length;
   const statsExpiring30 = dscList.filter(d => { const dl = Math.ceil((new Date(d.expiry_date) - nowDate) / 86400000); return dl > 7 && dl <= 30; }).length;
   const statsExpired    = dscList.filter(d => new Date(d.expiry_date) < nowDate).length;
@@ -467,35 +447,29 @@ export default function DSCRegister() {
 
   // ── Pagination ────────────────────────────────────────────────────────────
   const safePage = (cur, total) => Math.min(cur, Math.max(1, total));
-  const tpIn  = Math.ceil(inDSC.length      / rowsPerPage);
-  const tpOut = Math.ceil(outDSC.length     / rowsPerPage);
-  const tpExp = Math.ceil(expiredDSC.length / rowsPerPage);
-  const spIn  = safePage(currentPageIn,      tpIn);
-  const spOut = safePage(currentPageOut,     tpOut);
-  const spExp = safePage(currentPageExpired, tpExp);
+  const tpIn     = Math.ceil(inDSC.length      / rowsPerPage);
+  const tpOut    = Math.ceil(outDSC.length     / rowsPerPage);
+  const tpExp    = Math.ceil(expiredDSC.length / rowsPerPage);
+  const spIn     = safePage(currentPageIn,      tpIn);
+  const spOut    = safePage(currentPageOut,     tpOut);
+  const spExp    = safePage(currentPageExpired, tpExp);
   const pagedIn  = inDSC.slice((spIn  - 1) * rowsPerPage, spIn  * rowsPerPage);
   const pagedOut = outDSC.slice((spOut - 1) * rowsPerPage, spOut * rowsPerPage);
   const pagedExp = expiredDSC.slice((spExp - 1) * rowsPerPage, spExp * rowsPerPage);
 
-  // ── Bulk selection helpers ────────────────────────────────────────────────
-  const toggleSelect = (id) => setSelectedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
-  const toggleAll    = (list) => {
+  // ── Bulk selection ────────────────────────────────────────────────────────
+  const toggleSelect   = (id)  => setSelectedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+  const toggleAll      = (list) => {
     const allSel = list.every(d => selectedIds.has(d.id));
-    setSelectedIds(prev => {
-      const s = new Set(prev);
-      list.forEach(d => allSel ? s.delete(d.id) : s.add(d.id));
-      return s;
-    });
+    setSelectedIds(prev => { const s = new Set(prev); list.forEach(d => allSel ? s.delete(d.id) : s.add(d.id)); return s; });
   };
   const clearSelection = () => setSelectedIds(new Set());
 
-  // ── Bulk movement submit ──────────────────────────────────────────────────
   const handleBulkMovement = async () => {
     if (!bulkPersonName.trim()) { toast.error('Person name is required'); return; }
     setBulkLoading(true);
     let success = 0; let failed = 0;
-    const ids = Array.from(selectedIds);
-    for (const id of ids) {
+    for (const id of Array.from(selectedIds)) {
       try {
         await api.post(`/dsc/${id}/movement`, { movement_type: bulkMovementType, person_name: bulkPersonName.trim(), notes: bulkNotes.trim() });
         success++;
@@ -516,7 +490,6 @@ export default function DSCRegister() {
     { value: 'lifo', label: 'LIFO (Expiry ↓)' },
   ];
 
-  // ── Form body (shared between Add and Edit > Details tab) ─────────────────
   const renderFormBody = (isEdit) => (
     <>
       <div className="grid grid-cols-2 gap-4">
@@ -582,11 +555,20 @@ export default function DSCRegister() {
     </>
   );
 
+  // ─── Shared tab container style ───────────────────────────────────────────
+  const tabCard = (borderColor, bg) => ({
+    background: isDark ? '#1e293b' : '#fff',
+    borderColor: isDark ? 'rgba(255,255,255,0.07)' : borderColor,
+  });
+
+  const tabHeaderClass = (bg, border, text) =>
+    `${bg} border-b ${border} px-5 py-3 flex items-center gap-2`;
+
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className={`space-y-6 min-h-screen p-1 rounded-2xl ${isDark ? 'bg-[#0f172a]' : ''}`} data-testid="dsc-page">
+    <div className={`min-h-screen ${isDark ? 'bg-[#0f172a]' : 'bg-slate-50'}`} data-testid="dsc-page">
 
-      {/* ── Print area (hidden on screen, visible on print) ── */}
+      {/* ── Print area ── */}
       <div id="dsc-print-area" className="hidden print:block">
         <h2 className="text-xl font-bold mb-2">DSC Register — {format(new Date(), 'dd MMM yyyy')}</h2>
         <p className="text-sm text-slate-500 mb-4">Total: {dscList.length} | IN: {statsIn} | OUT: {statsOut} | Expired: {statsExpired}</p>
@@ -618,322 +600,374 @@ export default function DSCRegister() {
         </table>
       </div>
 
-      {/* ── Header ── */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className={`text-3xl font-bold font-outfit ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>DSC Register</h1>
-          <p className={`mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Manage digital signature certificates with IN/OUT tracking</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="outline" onClick={handlePrint} className={`h-9 px-4 gap-2 rounded-xl text-sm ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : ''}`}>
-            <Printer className="h-4 w-4" />Print
-          </Button>
+      {/* ── Dashboard-style Banner Header ── */}
+      <div className="relative overflow-hidden rounded-none"
+        style={{ background: 'linear-gradient(135deg, #0D3B66 0%, #1F6FB2 55%, #4f46e5 100%)' }}>
+        <div className="absolute inset-0 opacity-10"
+          style={{ backgroundImage: 'radial-gradient(circle at 20% 50%, white 1px, transparent 1px), radial-gradient(circle at 80% 20%, white 1px, transparent 1px)', backgroundSize: '60px 60px' }} />
+        <div className="absolute right-0 top-0 w-96 h-96 rounded-full -mr-32 -mt-32 opacity-10"
+          style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+        <div className="relative px-6 py-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div className="flex items-start gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-white/15 backdrop-blur-sm flex items-center justify-center flex-shrink-0 shadow-lg">
+              <Key className="h-7 w-7 text-white" />
+            </div>
+            <div>
+              <p className="text-blue-200/70 text-xs font-semibold uppercase tracking-widest mb-1">Registers</p>
+              <h1 className="text-3xl font-bold text-white leading-tight">DSC Register</h1>
+              <p className="text-blue-200/80 text-sm mt-1">Manage digital signature certificates with IN/OUT tracking</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button variant="outline" onClick={handlePrint}
+              className="h-9 px-4 gap-2 rounded-xl text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 backdrop-blur-sm">
+              <Printer className="h-4 w-4" />Print
+            </Button>
+            <Dialog open={dialogOpen} onOpenChange={open => { setDialogOpen(open); if (!open) resetForm(); }}>
+              <DialogTrigger asChild>
+                <Button className="bg-white text-indigo-700 hover:bg-blue-50 font-semibold rounded-xl px-5 shadow-lg transition-all hover:scale-105 active:scale-95" data-testid="add-dsc-btn">
+                  <Plus className="mr-2 h-4 w-4" />Add DSC
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle className="font-outfit text-2xl">{editingDSC ? 'Edit DSC' : 'Add New DSC'}</DialogTitle>
+                  <DialogDescription>{editingDSC ? 'Update DSC details and track IN/OUT status.' : 'Fill in the details to add a new DSC certificate.'}</DialogDescription>
+                </DialogHeader>
 
-          <Dialog open={dialogOpen} onOpenChange={open => { setDialogOpen(open); if (!open) resetForm(); }}>
-            <DialogTrigger asChild>
-              <Button className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-full px-6 shadow-lg shadow-indigo-500/20 transition-all hover:scale-105 active:scale-95" data-testid="add-dsc-btn">
-                <Plus className="mr-2 h-5 w-5" />Add DSC
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle className="font-outfit text-2xl">{editingDSC ? 'Edit DSC' : 'Add New DSC'}</DialogTitle>
-                <DialogDescription>{editingDSC ? 'Update DSC details and track IN/OUT status.' : 'Fill in the details to add a new DSC certificate.'}</DialogDescription>
-              </DialogHeader>
+                {editingDSC ? (
+                  <Tabs defaultValue="details" className="w-full">
+                    <TabsList className="grid w-full grid-cols-3">
+                      <TabsTrigger value="details">Details</TabsTrigger>
+                      <TabsTrigger value="status">IN/OUT Status</TabsTrigger>
+                      <TabsTrigger value="history">History</TabsTrigger>
+                    </TabsList>
 
-              {editingDSC ? (
-                <Tabs defaultValue="details" className="w-full">
-                  <TabsList className="grid w-full grid-cols-3">
-                    <TabsTrigger value="details">Details</TabsTrigger>
-                    <TabsTrigger value="status">IN/OUT Status</TabsTrigger>
-                    <TabsTrigger value="history">History</TabsTrigger>
-                  </TabsList>
+                    <TabsContent value="details" className="mt-4">
+                      <form onSubmit={handleSubmit} className="space-y-4">{renderFormBody(true)}</form>
+                    </TabsContent>
 
-                  <TabsContent value="details" className="mt-4">
-                    <form onSubmit={handleSubmit} className="space-y-4">{renderFormBody(true)}</form>
-                  </TabsContent>
-
-                  <TabsContent value="status" className="mt-4 space-y-4">
-                    <Card className={`p-4 ${getDSCInOutStatus(editingDSC) === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
-                      <p className="text-sm text-slate-600 mb-1">Current Status</p>
-                      <div className="flex items-center gap-2">
-                        {getDSCInOutStatus(editingDSC) === 'IN'
-                          ? <><ArrowDownCircle className="h-5 w-5 text-emerald-600" /><Badge className="bg-emerald-600 text-white">IN - Available</Badge></>
-                          : <><ArrowUpCircle className="h-5 w-5 text-red-600" /><Badge className="bg-red-600 text-white">OUT - Taken</Badge></>}
-                      </div>
-                    </Card>
-                    <Card className="p-4">
-                      <h4 className={`font-medium mb-3 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                        {getDSCInOutStatus(editingDSC) === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
-                      </h4>
-                      <form onSubmit={e => { e.preventDefault(); handleMovementInModal(); }} className="space-y-3">
-                        <div className="space-y-2">
-                          <Label htmlFor="inline_person">{getDSCInOutStatus(editingDSC) === 'IN' ? 'Taken By *' : 'Delivered By *'}</Label>
-                          <Input id="inline_person" placeholder="Enter person name" value={movementData.person_name}
-                            onChange={e => setMovementData({ ...movementData, person_name: e.target.value })} required />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="inline_notes">Notes</Label>
-                          <Input id="inline_notes" placeholder="Optional notes" value={movementData.notes}
-                            onChange={e => setMovementData({ ...movementData, notes: e.target.value })} />
-                        </div>
-                        <Button type="submit" disabled={loading}
-                          className={getDSCInOutStatus(editingDSC) === 'IN' ? 'bg-red-600 hover:bg-red-700 w-full' : 'bg-emerald-600 hover:bg-emerald-700 w-full'}>
+                    <TabsContent value="status" className="mt-4 space-y-4">
+                      <Card className={`p-4 ${getDSCInOutStatus(editingDSC) === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+                        <p className="text-sm text-slate-600 mb-1">Current Status</p>
+                        <div className="flex items-center gap-2">
                           {getDSCInOutStatus(editingDSC) === 'IN'
-                            ? <><ArrowUpCircle className="h-4 w-4 mr-2" />Mark as OUT</>
-                            : <><ArrowDownCircle className="h-4 w-4 mr-2" />Mark as IN</>}
-                        </Button>
-                      </form>
-                    </Card>
-                  </TabsContent>
+                            ? <><ArrowDownCircle className="h-5 w-5 text-emerald-600" /><Badge className="bg-emerald-600 text-white">IN — Available</Badge></>
+                            : <><ArrowUpCircle className="h-5 w-5 text-red-600" /><Badge className="bg-red-600 text-white">OUT — Taken</Badge></>}
+                        </div>
+                      </Card>
+                      <Card className="p-4">
+                        <h4 className={`font-medium mb-3 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                          {getDSCInOutStatus(editingDSC) === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
+                        </h4>
+                        <form onSubmit={e => { e.preventDefault(); handleMovementInModal(); }} className="space-y-3">
+                          <div className="space-y-2">
+                            <Label htmlFor="inline_person">{getDSCInOutStatus(editingDSC) === 'IN' ? 'Taken By *' : 'Delivered By *'}</Label>
+                            <Input id="inline_person" placeholder="Enter person name" value={movementData.person_name}
+                              onChange={e => setMovementData({ ...movementData, person_name: e.target.value })} required />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="inline_notes">Notes</Label>
+                            <Input id="inline_notes" placeholder="Optional notes" value={movementData.notes}
+                              onChange={e => setMovementData({ ...movementData, notes: e.target.value })} />
+                          </div>
+                          <Button type="submit" disabled={loading}
+                            className={getDSCInOutStatus(editingDSC) === 'IN' ? 'bg-red-600 hover:bg-red-700 w-full' : 'bg-emerald-600 hover:bg-emerald-700 w-full'}>
+                            {getDSCInOutStatus(editingDSC) === 'IN'
+                              ? <><ArrowUpCircle className="h-4 w-4 mr-2" />Mark as OUT</>
+                              : <><ArrowDownCircle className="h-4 w-4 mr-2" />Mark as IN</>}
+                          </Button>
+                        </form>
+                      </Card>
+                    </TabsContent>
 
-                  <TabsContent value="history" className="mt-4">
-                    <div className="space-y-3 max-h-80 overflow-y-auto">
-                      {editingDSC?.movement_log?.length > 0
-                        ? editingDSC.movement_log.slice().reverse().map((movement, index) => {
-                            const mKey     = movement.id || movement.timestamp;
-                            const isEdit   = editingMovement === mKey;
-                            return (
-                              <Card key={index} className={`p-3 ${movement.movement_type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
-                                {isEdit ? (
-                                  <div className="space-y-3">
-                                    <div className="flex items-center gap-3">
-                                      <Label className="text-sm font-medium">Status:</Label>
-                                      <div className="flex gap-2">
-                                        <Button type="button" size="sm"
-                                          variant={editMovementData.movement_type === 'IN' ? 'default' : 'outline'}
-                                          className={editMovementData.movement_type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
-                                          onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'IN' })}>
-                                          <ArrowDownCircle className="h-4 w-4 mr-1" />IN
-                                        </Button>
-                                        <Button type="button" size="sm"
-                                          variant={editMovementData.movement_type === 'OUT' ? 'default' : 'outline'}
-                                          className={editMovementData.movement_type === 'OUT' ? 'bg-red-600 hover:bg-red-700' : ''}
-                                          onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'OUT' })}>
-                                          <ArrowUpCircle className="h-4 w-4 mr-1" />OUT
+                    <TabsContent value="history" className="mt-4">
+                      <div className="space-y-3 max-h-80 overflow-y-auto">
+                        {editingDSC?.movement_log?.length > 0
+                          ? editingDSC.movement_log.slice().reverse().map((movement, index) => {
+                              const mKey   = movement.id || movement.timestamp;
+                              const isEdit = editingMovement === mKey;
+                              return (
+                                <Card key={index} className={`p-3 ${movement.movement_type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+                                  {isEdit ? (
+                                    <div className="space-y-3">
+                                      <div className="flex items-center gap-3">
+                                        <Label className="text-sm font-medium">Status:</Label>
+                                        <div className="flex gap-2">
+                                          <Button type="button" size="sm"
+                                            variant={editMovementData.movement_type === 'IN' ? 'default' : 'outline'}
+                                            className={editMovementData.movement_type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
+                                            onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'IN' })}>
+                                            <ArrowDownCircle className="h-4 w-4 mr-1" />IN
+                                          </Button>
+                                          <Button type="button" size="sm"
+                                            variant={editMovementData.movement_type === 'OUT' ? 'default' : 'outline'}
+                                            className={editMovementData.movement_type === 'OUT' ? 'bg-red-600 hover:bg-red-700' : ''}
+                                            onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'OUT' })}>
+                                            <ArrowUpCircle className="h-4 w-4 mr-1" />OUT
+                                          </Button>
+                                        </div>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-xs">Person Name</Label>
+                                        <Input size="sm" value={editMovementData.person_name}
+                                          onChange={e => setEditMovementData({ ...editMovementData, person_name: e.target.value })} placeholder="Person name" />
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-xs">Notes</Label>
+                                        <Input size="sm" value={editMovementData.notes}
+                                          onChange={e => setEditMovementData({ ...editMovementData, notes: e.target.value })} placeholder="Notes (optional)" />
+                                      </div>
+                                      <div className="flex gap-2 justify-end">
+                                        <Button type="button" size="sm" variant="outline" onClick={() => setEditingMovement(null)}>Cancel</Button>
+                                        <Button type="button" size="sm" className="bg-indigo-600 hover:bg-indigo-700"
+                                          onClick={() => handleUpdateMovement(movement.id)} disabled={loading || !editMovementData.person_name}>
+                                          {loading ? 'Saving...' : 'Save'}
                                         </Button>
                                       </div>
                                     </div>
-                                    <div className="space-y-2">
-                                      <Label className="text-xs">Person Name</Label>
-                                      <Input size="sm" value={editMovementData.person_name}
-                                        onChange={e => setEditMovementData({ ...editMovementData, person_name: e.target.value })} placeholder="Person name" />
-                                    </div>
-                                    <div className="space-y-2">
-                                      <Label className="text-xs">Notes</Label>
-                                      <Input size="sm" value={editMovementData.notes}
-                                        onChange={e => setEditMovementData({ ...editMovementData, notes: e.target.value })} placeholder="Notes (optional)" />
-                                    </div>
-                                    <div className="flex gap-2 justify-end">
-                                      <Button type="button" size="sm" variant="outline" onClick={() => setEditingMovement(null)}>Cancel</Button>
-                                      <Button type="button" size="sm" className="bg-indigo-600 hover:bg-indigo-700"
-                                        onClick={() => handleUpdateMovement(movement.id)} disabled={loading || !editMovementData.person_name}>
-                                        {loading ? 'Saving...' : 'Save'}
-                                      </Button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-start justify-between">
-                                    <div className="flex-1">
-                                      <div className="flex items-center gap-2 mb-1">
-                                        <Badge className={movement.movement_type === 'IN' ? 'bg-emerald-600 text-xs' : 'bg-red-600 text-xs'}>{movement.movement_type}</Badge>
-                                        <span className="text-sm font-medium">{movement.person_name}</span>
+                                  ) : (
+                                    <div className="flex items-start justify-between">
+                                      <div className="flex-1">
+                                        <div className="flex items-center gap-2 mb-1">
+                                          <Badge className={movement.movement_type === 'IN' ? 'bg-emerald-600 text-xs' : 'bg-red-600 text-xs'}>{movement.movement_type}</Badge>
+                                          <span className="text-sm font-medium">{movement.person_name}</span>
+                                        </div>
+                                        {movement.notes && <p className="text-xs text-slate-600">{movement.notes}</p>}
+                                        {movement.edited_at && (
+                                          <p className="text-xs text-slate-400 mt-1">Edited by {movement.edited_by} on {format(new Date(movement.edited_at), 'MMM dd, yyyy')}</p>
+                                        )}
                                       </div>
-                                      {movement.notes && <p className="text-xs text-slate-600">{movement.notes}</p>}
-                                      {movement.edited_at && (
-                                        <p className="text-xs text-slate-400 mt-1">Edited by {movement.edited_by} on {format(new Date(movement.edited_at), 'MMM dd, yyyy')}</p>
-                                      )}
-                                    </div>
-                                    <div className="flex flex-col items-end gap-2">
-                                      <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                                        {format(new Date(movement.timestamp), 'MMM dd, yyyy hh:mm a')}
+                                      <div className="flex flex-col items-end gap-2">
+                                        <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                          {format(new Date(movement.timestamp), 'MMM dd, yyyy hh:mm a')}
+                                        </span>
+                                        {movement.id && (
+                                          <Button type="button" size="sm" variant="ghost"
+                                            className="h-7 px-2 text-xs text-slate-500 hover:text-indigo-600"
+                                            onClick={() => startEditingMovement(movement)}>
+                                            <Edit className="h-3 w-3 mr-1" />Edit
+                                          </Button>
+                                        )}
                                       </div>
-                                      {movement.id && (
-                                        <Button type="button" size="sm" variant="ghost"
-                                          className="h-7 px-2 text-xs text-slate-500 hover:text-indigo-600"
-                                          onClick={() => startEditingMovement(movement)}>
-                                          <Edit className="h-3 w-3 mr-1" />Edit
-                                        </Button>
-                                      )}
                                     </div>
-                                  </div>
-                                )}
-                              </Card>
-                            );
-                          })
-                        : <div className="text-center py-8 text-slate-500"><History className="h-12 w-12 mx-auto mb-3 text-slate-300" /><p>No movement history yet</p></div>
-                      }
-                    </div>
-                  </TabsContent>
-                </Tabs>
-              ) : (
-                <form onSubmit={handleSubmit} className="space-y-4">{renderFormBody(false)}</form>
-              )}
-            </DialogContent>
-          </Dialog>
+                                  )}
+                                </Card>
+                              );
+                            })
+                          : <div className="text-center py-8 text-slate-500"><History className="h-12 w-12 mx-auto mb-3 text-slate-300" /><p>No movement history yet</p></div>
+                        }
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+                ) : (
+                  <form onSubmit={handleSubmit} className="space-y-4">{renderFormBody(false)}</form>
+                )}
+              </DialogContent>
+            </Dialog>
+          </div>
+        </div>
+
+        {/* ── Stats strip inside banner ── */}
+        <div className="relative px-6 pb-6 grid grid-cols-2 sm:grid-cols-5 gap-3">
+          {[
+            { label: 'Total IN',     value: statsIn,         icon: ArrowDownCircle, color: '#10b981' },
+            { label: 'Total OUT',    value: statsOut,        icon: ArrowUpCircle,   color: '#ef4444' },
+            { label: 'Expiring 7d',  value: statsExpiring7,  icon: AlertCircle,     color: '#f97316' },
+            { label: 'Expiring 30d', value: statsExpiring30, icon: Clock,           color: '#f59e0b' },
+            { label: 'Expired',      value: statsExpired,    icon: TrendingDown,    color: '#94a3b8' },
+          ].map(stat => {
+            const Icon = stat.icon;
+            return (
+              <div key={stat.label} className="rounded-xl bg-white/10 backdrop-blur-sm border border-white/15 px-4 py-3 flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${stat.color}30` }}>
+                  <Icon className="h-4 w-4" style={{ color: stat.color }} />
+                </div>
+                <div>
+                  <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest leading-none">{stat.label}</p>
+                  <p className="text-white text-2xl font-bold tabular-nums leading-tight mt-0.5">{stat.value}</p>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      {/* ── Stats Cards — compliance-calendar style ── */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        {[
-          { label: 'Total IN',     value: statsIn,         color: 'text-emerald-500' },
-          { label: 'Total OUT',    value: statsOut,        color: 'text-red-500'     },
-          { label: 'Expiring 7d',  value: statsExpiring7,  color: 'text-orange-500'  },
-          { label: 'Expiring 30d', value: statsExpiring30, color: 'text-amber-500'   },
-          { label: 'Expired',      value: statsExpired,    color: 'text-slate-500'   },
-        ].map(stat => (
-          <Card
-            key={stat.label}
-            className={`border transition-all hover:shadow-lg hover:-translate-y-0.5 ${isDark ? 'bg-slate-800 border-slate-700' : 'border-slate-200'}`}
-            style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}
-          >
-            <CardContent className="p-5">
-              <p className={`text-[11px] font-semibold uppercase tracking-widest mb-2 ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{stat.label}</p>
-              <p className={`text-4xl font-bold tabular-nums ${stat.color}`}>{stat.value}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {/* ── Page body ── */}
+      <div className="px-6 py-6 space-y-5">
 
-      {/* ── Controls bar ── */}
-      <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-center">
-        <Select value={rowsPerPage.toString()} onValueChange={v => { setRowsPerPage(Number(v)); setCurrentPageIn(1); setCurrentPageOut(1); setCurrentPageExpired(1); }}>
-          <SelectTrigger className={`w-[140px] focus:border-indigo-500 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}>
-            <SelectValue placeholder="Rows per page" />
-          </SelectTrigger>
-          <SelectContent>
-            {[15,30,50,100].map(n => <SelectItem key={n} value={String(n)}>{n} / page</SelectItem>)}
-          </SelectContent>
-        </Select>
+        {/* ── Alert banner ── */}
+        {dscList.filter(d => getDSCStatus(d.expiry_date).color !== 'bg-emerald-500').length > 0 && (
+          <div className={`flex items-start gap-3 px-4 py-3 rounded-xl border ${isDark ? 'bg-orange-900/20 border-orange-700/40' : 'bg-orange-50 border-orange-200'}`}>
+            <AlertCircle className="h-5 w-5 text-orange-500 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className={`text-sm font-semibold ${isDark ? 'text-orange-300' : 'text-orange-900'}`}>Attention Required</p>
+              <p className={`text-sm mt-0.5 ${isDark ? 'text-orange-400' : 'text-orange-700'}`}>
+                {dscList.filter(d => getDSCStatus(d.expiry_date).color === 'bg-red-500' || getDSCStatus(d.expiry_date).color === 'bg-orange-500').length} certificate(s) expired or expiring within 7 days.{' '}
+                {dscList.filter(d => getDSCStatus(d.expiry_date).color === 'bg-yellow-500').length} expiring within 30 days.
+              </p>
+            </div>
+          </div>
+        )}
 
-        {/* Sort pills */}
-        <div className={`flex items-center gap-2 border rounded-xl px-3 h-10 ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-200'}`}>
-          <ArrowUpDown className="h-4 w-4 text-slate-400 flex-shrink-0" />
-          <div className="flex items-center gap-1">
-            {SORT_OPTIONS.map(opt => (
-              <button key={opt.value} onClick={() => setSortOrder(opt.value)}
-                className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
-                style={{ background: sortOrder === opt.value ? 'linear-gradient(135deg,#4f46e5,#6366f1)' : 'transparent', color: sortOrder === opt.value ? '#fff' : (isDark ? '#94a3b8' : '#64748b') }}>
-                {opt.label}
+        {/* ── Controls bar ── */}
+        <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-center">
+          <Select value={rowsPerPage.toString()} onValueChange={v => { setRowsPerPage(Number(v)); setCurrentPageIn(1); setCurrentPageOut(1); setCurrentPageExpired(1); }}>
+            <SelectTrigger className={`w-[140px] focus:border-indigo-500 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}>
+              <SelectValue placeholder="Rows per page" />
+            </SelectTrigger>
+            <SelectContent>
+              {[15,30,50,100].map(n => <SelectItem key={n} value={String(n)}>{n} / page</SelectItem>)}
+            </SelectContent>
+          </Select>
+
+          <div className={`flex items-center gap-2 border rounded-xl px-3 h-10 ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-200'}`}>
+            <ArrowUpDown className="h-4 w-4 text-slate-400 flex-shrink-0" />
+            <div className="flex items-center gap-1">
+              {SORT_OPTIONS.map(opt => (
+                <button key={opt.value} onClick={() => setSortOrder(opt.value)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
+                  style={{ background: sortOrder === opt.value ? 'linear-gradient(135deg,#4f46e5,#6366f1)' : 'transparent', color: sortOrder === opt.value ? '#fff' : (isDark ? '#94a3b8' : '#64748b') }}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="relative flex-1 min-w-[220px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Input ref={searchRef} type="text" placeholder='Search… (press "/" to focus)' value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className={`pl-10 pr-16 focus:border-indigo-500 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white border-slate-200'}`}
+              data-testid="dsc-search-input" />
+            {!searchQuery && (
+              <kbd className={`absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono px-1.5 py-0.5 rounded border ${isDark ? 'bg-slate-700 border-slate-500 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-400'}`}>/</kbd>
+            )}
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                <XCircle className="h-4 w-4" />
               </button>
-            ))}
+            )}
           </div>
         </div>
 
-        {/* Search with "/" shortcut hint */}
-        <div className="relative flex-1 min-w-[220px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input ref={searchRef} type="text" placeholder='Search… (press "/" to focus)' value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className={`pl-10 pr-16 focus:border-indigo-500 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}
-            data-testid="dsc-search-input" />
-          {!searchQuery && (
-            <kbd className={`absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono px-1.5 py-0.5 rounded border ${isDark ? 'bg-slate-700 border-slate-500 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-400'}`}>/</kbd>
-          )}
-          {searchQuery && (
-            <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-              <XCircle className="h-4 w-4" />
-            </button>
-          )}
+        {/* ── Bulk action bar ── */}
+        {selectedIds.size > 0 && (
+          <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${isDark ? 'bg-indigo-900/30 border-indigo-700' : 'bg-indigo-50 border-indigo-200'}`}>
+            <CheckSquare className="h-4 w-4 text-indigo-500 flex-shrink-0" />
+            <span className={`text-sm font-semibold ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>{selectedIds.size} DSC selected</span>
+            <div className="flex gap-2 ml-auto">
+              <Button size="sm" onClick={() => { setBulkMovementType('IN'); setBulkDialogOpen(true); }}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 px-3 text-xs rounded-lg gap-1">
+                <ArrowDownCircle className="h-3.5 w-3.5" />Mark all IN
+              </Button>
+              <Button size="sm" onClick={() => { setBulkMovementType('OUT'); setBulkDialogOpen(true); }}
+                className="bg-red-600 hover:bg-red-700 text-white h-8 px-3 text-xs rounded-lg gap-1">
+                <ArrowUpCircle className="h-3.5 w-3.5" />Mark all OUT
+              </Button>
+              <Button size="sm" variant="ghost" onClick={clearSelection}
+                className={`h-8 px-3 text-xs rounded-lg ${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'}`}>
+                Clear
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Row colour legend ── */}
+        <div className="flex items-center gap-4 text-xs flex-wrap">
+          <span className={`font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Row colours:</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-orange-200 inline-block border border-orange-300" />Expiring ≤ 7 days</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-yellow-100 inline-block border border-yellow-300" />Expiring ≤ 30 days</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-100 inline-block border border-red-300" />Expired</span>
         </div>
+
+        {/* ── Tabs ── */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className={`inline-flex h-11 items-center rounded-xl p-1 gap-1 ${isDark ? 'bg-slate-800 border border-slate-700' : 'bg-slate-100 border border-slate-200'}`}>
+            <TabsTrigger value="in"
+              className="rounded-lg px-5 py-2 text-sm font-semibold transition-all data-[state=active]:bg-emerald-500 data-[state=active]:text-white data-[state=active]:shadow-md">
+              <ArrowDownCircle className="h-4 w-4 mr-1.5 inline" />IN ({inDSC.length})
+            </TabsTrigger>
+            <TabsTrigger value="out"
+              className="rounded-lg px-5 py-2 text-sm font-semibold transition-all data-[state=active]:bg-red-500 data-[state=active]:text-white data-[state=active]:shadow-md">
+              <ArrowUpCircle className="h-4 w-4 mr-1.5 inline" />OUT ({outDSC.length})
+            </TabsTrigger>
+            <TabsTrigger value="expired"
+              className="rounded-lg px-5 py-2 text-sm font-semibold transition-all data-[state=active]:bg-amber-600 data-[state=active]:text-white data-[state=active]:shadow-md">
+              <AlertCircle className="h-4 w-4 mr-1.5 inline" />EXPIRED ({expiredDSC.length})
+            </TabsTrigger>
+          </TabsList>
+
+          {/* IN */}
+          <TabsContent value="in" className="mt-4">
+            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={tabCard('#d1fae5', '')}>
+              <div className="bg-emerald-50 border-b border-emerald-200 px-5 py-3 flex items-center gap-2">
+                <ArrowDownCircle className="h-4 w-4 text-emerald-700 flex-shrink-0" />
+                <p className="text-sm font-semibold text-emerald-700 uppercase tracking-wider">DSC IN — Available ({inDSC.length})</p>
+              </div>
+              {loading && inDSC.length === 0
+                ? <div className="text-center py-12 text-slate-400">Loading…</div>
+                : inDSC.length === 0
+                  ? <div className={`text-center py-16 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                      <ArrowDownCircle className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                      <p className="font-medium">No DSC certificates currently IN</p>
+                    </div>
+                  : <DSCTable dscList={pagedIn} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog}
+                      onViewLog={openLogDialog} getDSCStatus={getDSCStatus} type="IN"
+                      globalIndexStart={(spIn-1)*rowsPerPage} isDark={isDark}
+                      selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
+              }
+              <PaginationBar currentPage={spIn} totalPages={tpIn} totalItems={inDSC.length} pageSize={rowsPerPage} onPageChange={setCurrentPageIn} isDark={isDark} />
+            </div>
+          </TabsContent>
+
+          {/* OUT */}
+          <TabsContent value="out" className="mt-4">
+            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={tabCard('#fecaca', '')}>
+              <div className="bg-red-50 border-b border-red-200 px-5 py-3 flex items-center gap-2">
+                <ArrowUpCircle className="h-4 w-4 text-red-700 flex-shrink-0" />
+                <p className="text-sm font-semibold text-red-700 uppercase tracking-wider">DSC OUT — Taken ({outDSC.length})</p>
+              </div>
+              {loading && outDSC.length === 0
+                ? <div className="text-center py-12 text-slate-400">Loading…</div>
+                : outDSC.length === 0
+                  ? <div className={`text-center py-16 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                      <ArrowUpCircle className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                      <p className="font-medium">No DSC certificates currently OUT</p>
+                    </div>
+                  : <DSCTable dscList={pagedOut} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog}
+                      onViewLog={openLogDialog} getDSCStatus={getDSCStatus} type="OUT"
+                      globalIndexStart={(spOut-1)*rowsPerPage} isDark={isDark}
+                      selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
+              }
+              <PaginationBar currentPage={spOut} totalPages={tpOut} totalItems={outDSC.length} pageSize={rowsPerPage} onPageChange={setCurrentPageOut} isDark={isDark} />
+            </div>
+          </TabsContent>
+
+          {/* EXPIRED */}
+          <TabsContent value="expired" className="mt-4">
+            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={tabCard('#fde68a', '')}>
+              <div className="bg-amber-50 border-b border-amber-300 px-5 py-3 flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-amber-700 flex-shrink-0" />
+                <p className="text-sm font-semibold text-amber-700 uppercase tracking-wider">DSC EXPIRED ({expiredDSC.length})</p>
+              </div>
+              {loading && expiredDSC.length === 0
+                ? <div className="text-center py-12 text-slate-400">Loading…</div>
+                : expiredDSC.length === 0
+                  ? <div className={`text-center py-16 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                      <AlertCircle className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                      <p className="font-medium">No expired DSC certificates</p>
+                    </div>
+                  : <DSCTable dscList={pagedExp} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog}
+                      onViewLog={openLogDialog} getDSCStatus={getDSCStatus} type="EXPIRED"
+                      globalIndexStart={(spExp-1)*rowsPerPage} isDark={isDark}
+                      selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
+              }
+              <PaginationBar currentPage={spExp} totalPages={tpExp} totalItems={expiredDSC.length} pageSize={rowsPerPage} onPageChange={setCurrentPageExpired} isDark={isDark} />
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
-
-      {/* ── Bulk action bar (shows when items selected) ── */}
-      {selectedIds.size > 0 && (
-        <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${isDark ? 'bg-indigo-900/30 border-indigo-700' : 'bg-indigo-50 border-indigo-200'}`}>
-          <CheckSquare className="h-4 w-4 text-indigo-600 flex-shrink-0" />
-          <span className={`text-sm font-semibold ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>{selectedIds.size} DSC selected</span>
-          <div className="flex gap-2 ml-auto">
-            <Button size="sm" onClick={() => { setBulkMovementType('IN'); setBulkDialogOpen(true); }}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 px-3 text-xs rounded-lg gap-1">
-              <ArrowDownCircle className="h-3.5 w-3.5" />Mark all IN
-            </Button>
-            <Button size="sm" onClick={() => { setBulkMovementType('OUT'); setBulkDialogOpen(true); }}
-              className="bg-red-600 hover:bg-red-700 text-white h-8 px-3 text-xs rounded-lg gap-1">
-              <ArrowUpCircle className="h-3.5 w-3.5" />Mark all OUT
-            </Button>
-            <Button size="sm" variant="ghost" onClick={clearSelection}
-              className={`h-8 px-3 text-xs rounded-lg ${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'}`}>
-              Clear
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Row colour legend ── */}
-      <div className="flex items-center gap-4 text-xs flex-wrap">
-        <span className={`font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Row colours:</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-orange-200 inline-block border border-orange-300" />Expiring ≤ 7 days</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-yellow-100 inline-block border border-yellow-300" />Expiring ≤ 30 days</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-100 inline-block border border-red-300" />Expired</span>
-      </div>
-
-      {/* ── Tabs ── */}
-      <Tabs defaultValue="in" className="w-full">
-        <TabsList className="grid w-full max-w-xl grid-cols-3">
-          <TabsTrigger value="in"      className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white"><ArrowDownCircle className="h-4 w-4 mr-2" />IN ({inDSC.length})</TabsTrigger>
-          <TabsTrigger value="out"     className="data-[state=active]:bg-red-500 data-[state=active]:text-white"><ArrowUpCircle className="h-4 w-4 mr-2" />OUT ({outDSC.length})</TabsTrigger>
-          <TabsTrigger value="expired" className="data-[state=active]:bg-amber-700 data-[state=active]:text-white"><AlertCircle className="h-4 w-4 mr-2" />EXPIRED ({expiredDSC.length})</TabsTrigger>
-        </TabsList>
-
-        {/* IN */}
-        <TabsContent value="in" className="mt-6">
-          <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col"
-            style={{ background: isDark ? '#1e293b' : '#fff', borderColor: isDark ? 'rgba(255,255,255,0.06)' : '#d1fae5' }}>
-            <div className="bg-emerald-50 border-b border-emerald-200 px-4 py-3 flex items-center gap-2">
-              <ArrowDownCircle className="h-4 w-4 text-emerald-700" />
-              <p className="text-sm font-medium text-emerald-700 uppercase tracking-wider">DSC IN - Available ({inDSC.length})</p>
-            </div>
-            {inDSC.length === 0
-              ? <div className="text-center py-12 text-slate-500">No DSC certificates currently IN</div>
-              : <DSCTable dscList={pagedIn} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog}
-                  onViewLog={openLogDialog} getDSCStatus={getDSCStatus} type="IN"
-                  globalIndexStart={(spIn-1)*rowsPerPage} isDark={isDark}
-                  selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
-            }
-            <PaginationBar currentPage={spIn} totalPages={tpIn} totalItems={inDSC.length} pageSize={rowsPerPage} onPageChange={setCurrentPageIn} isDark={isDark} />
-          </div>
-        </TabsContent>
-
-        {/* OUT */}
-        <TabsContent value="out" className="mt-6">
-          <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col"
-            style={{ background: isDark ? '#1e293b' : '#fff', borderColor: isDark ? 'rgba(255,255,255,0.06)' : '#fecaca' }}>
-            <div className="bg-red-50 border-b border-red-200 px-4 py-3 flex items-center gap-2">
-              <ArrowUpCircle className="h-4 w-4 text-red-700" />
-              <p className="text-sm font-medium text-red-700 uppercase tracking-wider">DSC OUT - Taken ({outDSC.length})</p>
-            </div>
-            {outDSC.length === 0
-              ? <div className="text-center py-12 text-slate-500">No DSC certificates currently OUT</div>
-              : <DSCTable dscList={pagedOut} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog}
-                  onViewLog={openLogDialog} getDSCStatus={getDSCStatus} type="OUT"
-                  globalIndexStart={(spOut-1)*rowsPerPage} isDark={isDark}
-                  selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
-            }
-            <PaginationBar currentPage={spOut} totalPages={tpOut} totalItems={outDSC.length} pageSize={rowsPerPage} onPageChange={setCurrentPageOut} isDark={isDark} />
-          </div>
-        </TabsContent>
-
-        {/* EXPIRED */}
-        <TabsContent value="expired" className="mt-6">
-          <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col"
-            style={{ background: isDark ? '#1e293b' : '#fff', borderColor: isDark ? 'rgba(255,255,255,0.06)' : '#fde68a' }}>
-            <div className="bg-amber-100 border-b border-amber-300 px-4 py-3 flex items-center gap-2">
-              <AlertCircle className="h-4 w-4 text-amber-800" />
-              <p className="text-sm font-medium text-amber-800 uppercase tracking-wider">DSC EXPIRED ({expiredDSC.length})</p>
-            </div>
-            {expiredDSC.length === 0
-              ? <div className="text-center py-12 text-slate-500">No expired DSC certificates</div>
-              : <DSCTable dscList={pagedExp} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog}
-                  onViewLog={openLogDialog} getDSCStatus={getDSCStatus} type="EXPIRED"
-                  globalIndexStart={(spExp-1)*rowsPerPage} isDark={isDark}
-                  selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
-            }
-            <PaginationBar currentPage={spExp} totalPages={tpExp} totalItems={expiredDSC.length} pageSize={rowsPerPage} onPageChange={setCurrentPageExpired} isDark={isDark} />
-          </div>
-        </TabsContent>
-      </Tabs>
 
       {/* ── Bulk Movement Dialog ── */}
       <Dialog open={bulkDialogOpen} onOpenChange={open => { setBulkDialogOpen(open); if (!open) { setBulkPersonName(''); setBulkNotes(''); } }}>
@@ -972,7 +1006,7 @@ export default function DSCRegister() {
           <form onSubmit={handleMovement} className="space-y-4">
             <div className="space-y-2">
               <Label>DSC Certificate</Label>
-              <p className="text-sm font-medium">{selectedDSC?.certificate_number} - {selectedDSC?.holder_name}</p>
+              <p className="text-sm font-semibold">{selectedDSC?.holder_name}</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="person_name">{movementData.movement_type === 'IN' ? 'Delivered By *' : 'Taken By *'}</Label>
@@ -999,8 +1033,10 @@ export default function DSCRegister() {
       <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-outfit text-2xl flex items-center gap-2"><History className="h-6 w-6" />Movement Log</DialogTitle>
-            <DialogDescription>{selectedDSC?.certificate_number} - {selectedDSC?.holder_name}</DialogDescription>
+            <DialogTitle className="font-outfit text-2xl flex items-center gap-2">
+              <History className="h-6 w-6 text-indigo-500" />Movement Log
+            </DialogTitle>
+            <DialogDescription className="font-medium">{selectedDSC?.holder_name}</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             {selectedDSC?.movement_log?.length > 0
@@ -1010,7 +1046,7 @@ export default function DSCRegister() {
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-2">
                           <Badge className={movement.movement_type === 'IN' ? 'bg-emerald-600' : 'bg-red-600'}>{movement.movement_type}</Badge>
-                          <span className="text-sm font-medium">{movement.person_name}</span>
+                          <span className="text-sm font-semibold">{movement.person_name}</span>
                         </div>
                         <p className="text-sm text-slate-600">{movement.movement_type === 'IN' ? 'Delivered by' : 'Taken by'}: {movement.person_name}</p>
                         <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Recorded by: {movement.recorded_by}</p>
@@ -1028,24 +1064,6 @@ export default function DSCRegister() {
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* ── Alert banner ── */}
-      {dscList.filter(d => getDSCStatus(d.expiry_date).color !== 'bg-emerald-500').length > 0 && (
-        <Card className="border-2 border-orange-200 bg-orange-50">
-          <CardContent className="p-4">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-orange-600 mt-0.5" />
-              <div>
-                <h3 className="font-semibold text-orange-900">Attention Required</h3>
-                <p className="text-sm text-orange-700 mt-1">
-                  {dscList.filter(d => getDSCStatus(d.expiry_date).color === 'bg-red-500').length} certificate(s) expired or expiring within 7 days.{' '}
-                  {dscList.filter(d => getDSCStatus(d.expiry_date).color === 'bg-yellow-500').length} certificate(s) expiring within 30 days.
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }
