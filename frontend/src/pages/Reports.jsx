@@ -461,6 +461,7 @@ export default function Reports() {
 
   // ── JSX ───────────────────────────────────────────────────────────────────
   return (
+   <>
     <LayoutCustomizer
       isOpen={showCustomize}
       onClose={() => setShowCustomize(false)}
@@ -1051,5 +1052,6 @@ export default function Reports() {
         return null;
       })}
     </motion.div>
+    </>
   );
 }
