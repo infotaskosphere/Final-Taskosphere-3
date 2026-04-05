@@ -732,8 +732,7 @@ async def detect_duplicate_tasks(
     # ── 4. Call Gemini ─────────────────────────────────────────────────────
     try:
         resp   = await _model.generate_content_async(prompt)
-        raw    = _re.sub(r"```[a-z]*
-?|```", "", resp.text.strip()).strip()
+        raw    = _re.sub(r"```[a-zA-Z]*", "", resp.text.strip()).replace("```", "").strip()
         groups = _json.loads(raw)
         if not isinstance(groups, list):
             groups = []
