@@ -70,15 +70,24 @@ export const AuthProvider = ({ children }) => {
         const parsedUser = JSON.parse(storedUser);
         parsedUser.permissions = normalizePermissions(parsedUser.permissions);
 
-        // ✅ attach token before API call
+        // ✅ Attach token before API call
         api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
 
-        await api.get("/auth/me");
+        // ✅ FIXED: Use the fresh response from /auth/me so that admin-revoked
+        //    permissions are reflected immediately — no stale cache issue.
+        const meRes = await api.get("/auth/me");
+        const freshUser = meRes.data;
+        freshUser.permissions = normalizePermissions(freshUser.permissions);
 
-        setUser(parsedUser);
+        // Persist the fresh user so next reload also starts clean
+        const storage = localStorage.getItem("token") ? localStorage : sessionStorage;
+        storage.setItem("user", JSON.stringify(freshUser));
+
+        setUser(freshUser);
 
       } catch (error) {
         if (error.message === "Network Error") {
+          // Backend unreachable (offline) — fall back to cached session
           console.warn("Backend unreachable, keeping stored session.");
 
           const parsedUser = JSON.parse(storedUser);
