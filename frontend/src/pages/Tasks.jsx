@@ -1246,7 +1246,7 @@ export default function Tasks() {
     if (filterPriority !== 'all') pills.push({ key: 'priority', label: filterPriority.toUpperCase() });
     if (filterCategory !== 'all') pills.push({ key: 'category', label: getCategoryLabel(filterCategory) });
     if (filterAssignee !== 'all') pills.push({ key: 'assignee', label: users.find(u => u.id === filterAssignee)?.full_name || filterAssignee });
-    if (showMyTasksOnly)          pills.push({ key: 'mytasks',     label: 'Assigned By' });
+    if (showMyTasksOnly)          pills.push({ key: 'mytasks',     label: 'Assigned To Me' });
     if (filterTeamOnly)           pills.push({ key: 'teamonly',    label: 'Team Tasks' });
     if (filterAssignedByMe)       pills.push({ key: 'assignedby',  label: 'Assigned by Me' });
     if (filterCreatedBy !== 'all') pills.push({ key: 'createdby', label: `By: ${users.find(u => u.id === filterCreatedBy)?.full_name || filterCreatedBy}` });
@@ -1608,7 +1608,7 @@ export default function Tasks() {
       >
         {/* 1. My Task */}
         <MetricCard
-          label="Assigned to Me" value={stats.myTask} icon={SlidersHorizontal}
+          label="ASSIGNED BY" value={stats.myTask} icon={SlidersHorizontal}
           accent={isDark ? '#60a5fa' : COLORS.deepBlue}
           active={showMyTasksOnly} isDark={isDark}
           onClick={() => setShowMyTasksOnly(p => !p)}
