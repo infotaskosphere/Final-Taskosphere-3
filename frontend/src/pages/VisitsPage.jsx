@@ -19,10 +19,13 @@ import {
   Send, ChevronDown, ClipboardList, Loader2, Check,
   Mail, Info, CalendarDays, CalendarRange, Filter,
   CheckSquare, Minus, TrendingUp, Target, ArrowUpRight,
+  GripVertical, Settings2,
 } from "lucide-react";
 
 // ADD THIS IMPORT AT TOP
 import { FixedSizeList as List } from "react-window";
+import LayoutCustomizer from "../components/layout/LayoutCustomizer";
+import { usePageLayout } from "../hooks/usePageLayout";
 
 // ── Brand Colors (matching Dashboard) ────────────────────────────────────────
 const COLORS = {
@@ -1268,6 +1271,14 @@ export default function VisitsPage() {
   const qc = useQueryClient();
 
   const [viewMode, setViewMode] = useState("list");
+  const [showCustomize, setShowCustomize] = useState(false);
+  const VP_SECTIONS = ['key_metrics','controls','main_content'];
+  const VP_LABELS = {
+    key_metrics:  { name:'Key Metrics',       icon:'📊', desc:'Total, scheduled, completed and missed visits' },
+    controls:     { name:'Controls & Filters',icon:'🔧', desc:'Month navigation, status filters and search' },
+    main_content: { name:'Visit List / Calendar', icon:'🗓️', desc:'All visit cards in list or calendar view' },
+  };
+  const { order: vpOrder, moveSection: vpMove, resetOrder: vpReset } = usePageLayout('visitspage', VP_SECTIONS);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterUser, setFilterUser] = useState("all");
@@ -1390,9 +1401,18 @@ export default function VisitsPage() {
   }, [user]);
 
   return (
+    <LayoutCustomizer
+      isOpen={showCustomize}
+      onClose={() => setShowCustomize(false)}
+      order={vpOrder}
+      sectionLabels={VP_LABELS}
+      onDragEnd={vpMove}
+      onReset={vpReset}
+      isDark={false}
+    />
     <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
 
-      {/* ── Welcome Banner (matching Dashboard) ──────────────────────────── */}
+      {/* ── Welcome Banner (matching Dashboard) ──────────────────────────── */>
       <motion.div variants={itemVariants}>
         <div className="relative overflow-hidden rounded-2xl px-6 py-5"
           style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: `0 8px 32px rgba(13,59,102,0.28)` }}>
@@ -1436,6 +1456,20 @@ export default function VisitsPage() {
         </div>
       </motion.div>
 
+      {/* CUSTOMIZE BUTTON */}
+      <motion.div variants={itemVariants} className="flex justify-end">
+        <button
+          onClick={() => setShowCustomize(true)}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition-all hover:shadow-md bg-white border-slate-200 text-slate-500 hover:border-slate-300"
+        >
+          <Settings2 size={13} /> Customize Layout
+        </button>
+      </motion.div>
+
+      {/* ORDERED SECTIONS */}
+      {vpOrder.map((sectionId) => {
+        if (sectionId === 'key_metrics') return (
+      <React.Fragment key="key_metrics">
       {/* ── Key Metrics (matching Dashboard metric cards) ─────────────────── */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-3" variants={itemVariants}>
         {statCards.map(({ label, value, color, iconBg, icon: Icon, rate }) => (
@@ -1470,6 +1504,10 @@ export default function VisitsPage() {
         ))}
       </motion.div>
 
+      </React.Fragment>
+        );
+        if (sectionId === 'controls') return (
+      <React.Fragment key="controls">
       {/* ── Controls ── */}
       <motion.div variants={itemVariants} className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 shadow-sm">
@@ -1565,6 +1603,10 @@ export default function VisitsPage() {
         )}
       </AnimatePresence>
 
+      </React.Fragment>
+        );
+        if (sectionId === 'main_content') return (
+      <React.Fragment key="main_content">
       {/* ── Main content ── */}
       <motion.div variants={itemVariants}>
         {isLoading ? (
@@ -1743,6 +1785,11 @@ export default function VisitsPage() {
             onConfirm={(deleteRecurrences) => { bulkDeleteMut.mutate({ ids: selectedIds, deleteRecurrences }); }} />
         )}
       </AnimatePresence>
+
+      </React.Fragment>
+        );
+        return null;
+      })}
 
       {/* ── Email importer ── */}
       <AnimatePresence>
