@@ -38,14 +38,21 @@ const INTERACTION_STYLES = `
   .won-glow{animation:wonGlow 1s ease-out 1}
   .lost-shake{animation:lostShake .4s ease-out 1}
 `;
-useEffect(() => {
-  if (!document.getElementById('leads-styles')) {
-    const s = document.createElement('style');
-    s.id = 'leads-styles';
-    s.textContent = INTERACTION_STYLES;
-    document.head.appendChild(s);
-  }
-}, []);
+
+export default function LeadsPage() {
+
+  const isDark = useDark();
+
+  // ✅ FIXED: Hook inside component
+  useEffect(() => {
+    if (!document.getElementById('leads-styles')) {
+      const s = document.createElement('style');
+      s.id = 'leads-styles';
+      s.textContent = INTERACTION_STYLES;
+      document.head.appendChild(s);
+    }
+  }, []);
+
 
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A', lightGreen: '#5CCB5F' };
 const containerVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: .05 } } };
