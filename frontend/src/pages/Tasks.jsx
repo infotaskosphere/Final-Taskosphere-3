@@ -1520,6 +1520,100 @@ export default function Tasks() {
       </motion.div>
 
       {/* ── METRIC CARDS — 6 equal, all same height/layout ──────────────── */}
+      {/* ── FILTERED STATS MINI-CARDS ─────────────────────────────────────── */}
+<AnimatePresence>
+  {(activeFilters.length > 0 || true) && (
+    <motion.div
+      key="filtered-stats"
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      transition={{ duration: 0.25 }}
+      className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2"
+    >
+      {[
+        {
+          label: activeFilters.length > 0
+            ? (activeFilters.find(f => f.key === 'mytasks') ? 'My Filtered' : 'Filtered: Assigned')
+            : 'Showing: All Mine',
+          value: displayTasks.filter(t => t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id)).length,
+          icon: SlidersHorizontal,
+          accent: isDark ? '#60a5fa' : COLORS.deepBlue,
+        },
+        {
+          label: activeFilters.length > 0 ? 'Filtered: To Do' : 'Showing: To Do',
+          value: displayTasks.filter(t => t.status === 'pending').length,
+          icon: Circle,
+          accent: '#EF4444',
+        },
+        {
+          label: activeFilters.length > 0 ? 'Filtered: In Progress' : 'Showing: In Progress',
+          value: displayTasks.filter(t => t.status === 'in_progress').length,
+          icon: TrendingUp,
+          accent: COLORS.amber,
+        },
+        {
+          label: activeFilters.length > 0 ? 'Filtered: Completed' : 'Showing: Completed',
+          value: displayTasks.filter(t => t.status === 'completed').length,
+          icon: CheckCircle2,
+          accent: COLORS.mediumBlue,
+          progress: displayTasks.length > 0
+            ? Math.round((displayTasks.filter(t => t.status === 'completed').length / displayTasks.length) * 100)
+            : 0,
+        },
+        {
+          label: activeFilters.length > 0 ? 'Filtered: Overdue' : 'Showing: Overdue',
+          value: displayTasks.filter(t => isOverdue(t)).length,
+          icon: AlertCircle,
+          accent: COLORS.coral,
+        },
+        {
+          label: activeFilters.length > 0 ? 'Filtered: Total' : 'Showing: Total',
+          value: displayTasks.length,
+          icon: Target,
+          accent: isDark ? '#a78bfa' : '#7c3aed',
+        },
+      ].map((card, i) => (
+        <motion.div
+          key={i}
+          whileHover={{ y: -2, transition: springPhysics.card }}
+          className={`rounded-xl border px-3 py-2.5 flex items-center gap-3 shadow-sm
+            ${isDark
+              ? 'bg-slate-800/70 border-slate-700/80'
+              : 'bg-slate-50/80 border-slate-200/80'
+            }`}
+        >
+          <div
+            className="p-1.5 rounded-lg flex-shrink-0"
+            style={{ backgroundColor: `${card.accent}18` }}
+          >
+            <card.icon className="h-3.5 w-3.5" style={{ color: card.accent }} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 truncate">
+              {card.label}
+            </p>
+            <p className="text-lg font-bold leading-tight" style={{ color: card.accent }}>
+              {card.value}
+            </p>
+            {card.progress !== undefined && (
+              <div className={`mt-1 h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
+                <motion.div
+                  className="h-full rounded-full"
+                  style={{ background: card.accent }}
+                  initial={{ width: 0 }}
+                  animate={{ width: `${Math.min(card.progress, 100)}%` }}
+                  transition={{ duration: 0.6, ease: 'easeOut' }}
+                />
+              </div>
+            )}
+          </div>
+        </motion.div>
+      ))}
+    </motion.div>
+  )}
+</AnimatePresence>
+
       {/* ── Reminder Result Banner ── */}
       {reminderResult && (
         <motion.div
