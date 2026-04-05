@@ -563,11 +563,15 @@ export default function DocumentRegister() {
 
       {/* ── Dashboard-style Banner Header ── */}
       <div className="relative overflow-hidden"
-        style={{ background: 'linear-gradient(135deg, #0D3B66 0%, #1FAF5A 55%, #10b981 100%)' }}>
+        style={{ background: 'linear-gradient(135deg, #0D3B66 0%, #1F6FB2 60%, #1a8fcc 100%)', boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
         <div className="absolute inset-0 opacity-10"
           style={{ backgroundImage: 'radial-gradient(circle at 20% 50%, white 1px, transparent 1px), radial-gradient(circle at 80% 20%, white 1px, transparent 1px)', backgroundSize: '60px 60px' }} />
         <div className="absolute right-0 top-0 w-96 h-96 rounded-full -mr-32 -mt-32 opacity-10"
           style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+        <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5"
+          style={{ background: 'white' }} />
+        <div className="absolute right-28 bottom-0 w-40 h-40 rounded-full mb-[-40px] opacity-5"
+          style={{ background: 'white' }} />
 
         <div className="relative px-6 py-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div className="flex items-start gap-4">
@@ -575,9 +579,9 @@ export default function DocumentRegister() {
               <FileText className="h-7 w-7 text-white" />
             </div>
             <div>
-              <p className="text-green-200/70 text-xs font-semibold uppercase tracking-widest mb-1">Registers</p>
+              <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1">Registers</p>
               <h1 className="text-3xl font-bold text-white leading-tight">Document Register</h1>
-              <p className="text-green-200/80 text-sm mt-1">Manage documents with IN/OUT tracking</p>
+              <p className="text-white/60 text-sm mt-1">Manage documents with IN/OUT tracking</p>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -851,19 +855,20 @@ export default function DocumentRegister() {
           ].map(stat => {
             const Icon = stat.icon;
             return (
-              <div key={stat.label} className="rounded-xl bg-white/10 backdrop-blur-sm border border-white/15 px-4 py-3 flex items-center gap-3">
+              <div key={stat.label}
+                className="rounded-xl backdrop-blur-sm px-4 py-3 flex items-center gap-3 cursor-default transition-all hover:scale-[1.03]"
+                style={{ background: 'rgba(255,255,255,0.10)', border: '1px solid rgba(255,255,255,0.18)', backdropFilter: 'blur(8px)' }}>
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${stat.color}30` }}>
                   <Icon className="h-4 w-4" style={{ color: stat.color }} />
                 </div>
                 <div>
-                  <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest leading-none">{stat.label}</p>
-                  <p className="text-white text-2xl font-bold tabular-nums leading-tight mt-0.5">{stat.value}</p>
+                  <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest leading-none">{stat.label}</p>
+                  <p className="text-white text-2xl font-black tabular-nums leading-tight mt-0.5" style={{ fontFamily: "'Roboto Mono', monospace" }}>{stat.value}</p>
                 </div>
               </div>
             );
           })}
         </div>
-      </div>
 
       {/* ── Page body ── */}
       <div className="px-6 py-6 space-y-5">
