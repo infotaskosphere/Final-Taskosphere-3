@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+// useNavigate removed — not used in this component
 import { motion, AnimatePresence } from "framer-motion";
 import {
   format, startOfMonth, endOfMonth, eachDayOfInterval,
@@ -1281,7 +1281,15 @@ export default function VisitsPage() {
   const { order: vpOrder, moveSection: vpMove, resetOrder: vpReset } = usePageLayout('visitspage', VP_SECTIONS);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [filterStatus, setFilterStatus] = useState("all");
-  const [filterUser, setFilterUser] = useState("all");
+  const [filterUser, setFilterUser] = useState(() => {
+    // Non-admin/non-mgr with cross-visibility: default to own visits
+    const storedUser = (() => { try { return JSON.parse(localStorage.getItem('user') || sessionStorage.getItem('user') || 'null'); } catch { return null; } })();
+    const role = storedUser?.role;
+    if (role === 'admin' || role === 'manager') return 'all';
+    const perms = storedUser?.permissions || {};
+    if (perms.view_other_visits?.length || perms.can_view_all_visits) return storedUser?.id || 'all';
+    return 'all';
+  });
   const [showForm, setShowForm] = useState(false);
   const [editingVisit, setEditingVisit] = useState(null);
   const [selectedVisit, setSelectedVisit] = useState(null);
@@ -1297,7 +1305,15 @@ export default function VisitsPage() {
 
   const { data: visits = [], isLoading } = useQuery({
     queryKey: ["visits", monthStr, filterStatus, filterUser],
-    queryFn: () => fetchVisits({ month: monthStr, status: filterStatus !== "all" ? filterStatus : undefined, user_id: filterUser !== "all" ? filterUser : undefined }),
+    queryFn: () => {
+      // For non-admin/non-mgr cross-vis users: "all" means their own visits
+      const effectiveUserId = filterUser !== "all"
+        ? filterUser
+        : (!isAdmin && !isMgr && hasCrossVisibility)
+          ? user?.id
+          : undefined;
+      return fetchVisits({ month: monthStr, status: filterStatus !== "all" ? filterStatus : undefined, user_id: effectiveUserId });
+    },
     staleTime: 0,
   });
 
@@ -1537,19 +1553,18 @@ export default function VisitsPage() {
         )}
         {!isAdmin && !isMgr && (() => {
           const perms = user?.permissions || {};
-          // Normalize to strings to avoid ObjectId vs string type mismatch
-          const allowed = (perms.view_other_visits || []).map(String);
+          const allowed = perms.view_other_visits || [];
           const canViewAll = !!perms.can_view_all_visits;
           if (!canViewAll && allowed.length === 0) return null;
           // When can_view_all_visits=true, show all active users; else show only permitted IDs
           const permittedUsers = canViewAll
-            ? users.filter(u => u.is_active && String(u.id) !== String(user?.id))
-            : users.filter(u => u.is_active && allowed.includes(String(u.id)));
+            ? users.filter(u => u.is_active && u.id !== user?.id)
+            : users.filter(u => u.is_active && allowed.includes(u.id));
           if (permittedUsers.length === 0) return null;
           return (
             <select value={filterUser} onChange={e => setFilterUser(e.target.value)}
               className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-400 shadow-sm">
-              <option value="all">My Visits</option>
+              <option value={user?.id || "all"}>My Visits</option>
               {permittedUsers.map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
             </select>
           );
@@ -1568,7 +1583,7 @@ export default function VisitsPage() {
           </button>
         )}
         {(filterStatus !== "all" || filterUser !== "all") && (
-          <button onClick={() => { setFilterStatus("all"); setFilterUser("all"); }}
+          <button onClick={() => { setFilterStatus("all"); setFilterUser((!isAdmin && !isMgr && hasCrossVisibility) ? (user?.id || "all") : "all"); }}
             className="flex items-center gap-1 px-3 py-2 rounded-xl text-sm font-semibold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 border border-red-100 dark:border-red-900 transition-colors">
             <X className="h-3.5 w-3.5" />Clear
           </button>
