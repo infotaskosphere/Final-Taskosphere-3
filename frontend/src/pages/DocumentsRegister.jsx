@@ -90,10 +90,20 @@ function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, 
 
   return (
     <div className="w-full overflow-x-auto">
-      <table className="w-full table-auto border-collapse min-w-[780px]">
+      <table className="w-full table-fixed border-collapse">
+        <colgroup>
+          <col style={{ width: 36 }} />
+          <col style={{ width: 36 }} />
+          <col style={{ width: '20%' }} />
+          <col style={{ width: '13%' }} />
+          <col style={{ width: '18%' }} />
+          <col style={{ width: '16%' }} />
+          <col style={{ width: '17%' }} />
+          <col style={{ width: 128 }} />
+        </colgroup>
         <thead className={`border-b ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
           <tr>
-            <th className="px-3 py-3 w-10">
+            <th className="px-2 py-2.5">
               <button onClick={() => onToggleAll(documentList)} className="flex items-center justify-center">
                 {allSelected
                   ? <CheckSquare className="h-4 w-4 text-indigo-500" />
@@ -102,13 +112,13 @@ function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, 
                     : <Square className="h-4 w-4 text-slate-400" />}
               </button>
             </th>
-            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>S.No</th>
-            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[140px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Holder Name</th>
-            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider w-36 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Type</th>
-            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[130px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Associated With</th>
-            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[130px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Last Movement</th>
-            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[180px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Notes</th>
-            <th className={`px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider w-40 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Actions</th>
+            <th className={`px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>#</th>
+            <th className={`px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Holder Name</th>
+            <th className={`px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Type</th>
+            <th className={`px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Associated With</th>
+            <th className={`px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Last Movement</th>
+            <th className={`px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Notes</th>
+            <th className={`px-2 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Actions</th>
           </tr>
         </thead>
         <tbody className={`divide-y ${isDark ? 'divide-slate-700/60' : 'divide-slate-100'}`}>
@@ -122,62 +132,61 @@ function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, 
                 className={`transition-colors ${highlight} ${isSelected ? (isDark ? 'ring-1 ring-inset ring-indigo-500' : 'ring-1 ring-inset ring-indigo-300') : ''} ${isDark ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50/80'}`}
                 data-testid={`document-row-${doc.id}`}>
 
-                <td className="px-3 py-3">
+                <td className="px-2 py-2.5">
                   <button onClick={() => onToggleSelect(doc.id)} className="flex items-center justify-center">
                     {isSelected ? <CheckSquare className="h-4 w-4 text-indigo-500" /> : <Square className="h-4 w-4 text-slate-400" />}
                   </button>
                 </td>
 
-                <td className={`px-4 py-3 text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{index + 1}</td>
+                <td className={`px-2 py-2.5 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{index + 1}</td>
 
-                <td className={`px-4 py-3 text-sm font-semibold break-words leading-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{doc.holder_name}</td>
+                <td className={`px-3 py-2.5 text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`} title={doc.holder_name}>{doc.holder_name}</td>
 
-                <td className={`px-4 py-3 text-sm truncate ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{doc.document_type || '—'}</td>
+                <td className={`px-2 py-2.5 text-xs truncate ${isDark ? 'text-slate-300' : 'text-slate-600'}`} title={doc.document_type || ''}>{doc.document_type || '—'}</td>
 
-                <td className={`px-4 py-3 text-sm break-words leading-tight ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{doc.associated_with || '—'}</td>
+                <td className={`px-2 py-2.5 text-xs truncate ${isDark ? 'text-slate-300' : 'text-slate-600'}`} title={doc.associated_with || ''}>{doc.associated_with || '—'}</td>
 
-                <td className="px-4 py-3">
+                <td className="px-2 py-2.5">
                   {lastMove ? (
                     <div className="flex flex-col gap-0.5">
                       <div className="flex items-center gap-1">
-                        <Badge className={`text-[10px] px-1.5 py-0 font-semibold ${lastMove.movement_type === 'IN' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                        <Badge className={`text-[9px] px-1 py-0 font-semibold leading-tight ${lastMove.movement_type === 'IN' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
                           {lastMove.movement_type}
                         </Badge>
-                        <span className={`text-xs font-medium truncate max-w-[90px] ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{lastMove.person_name}</span>
+                        <span className={`text-[11px] font-medium truncate ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{lastMove.person_name}</span>
                       </div>
                       <span className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                         {format(new Date(lastMove.timestamp), 'dd MMM yy')}
                       </span>
                     </div>
                   ) : (
-                    <span className="text-xs text-slate-400 italic">No movement</span>
+                    <span className="text-[11px] text-slate-400 italic">No movement</span>
                   )}
                 </td>
 
-                <td className={`px-4 py-3 text-sm break-words leading-tight transition-colors group relative ${isDark ? 'text-slate-300' : 'text-slate-600'} ${doc.notes ? 'cursor-pointer' : 'cursor-default'}`}
+                <td className={`px-2 py-2.5 transition-colors group relative ${isDark ? 'text-slate-300' : 'text-slate-600'} ${doc.notes ? 'cursor-pointer' : 'cursor-default'}`}
                   onClick={() => doc.notes && onShowFullNotes(doc)}>
                   {doc.notes
-                    ? <><div className="line-clamp-2 pr-6">{doc.notes}</div>
-                        <div className="absolute right-3 top-3 opacity-50 group-hover:opacity-80 text-xs text-slate-400 pointer-events-none">…</div></>
-                    : <span className="text-slate-400 italic">—</span>
+                    ? <div className="text-xs truncate pr-4" title={doc.notes}>{doc.notes}</div>
+                    : <span className="text-xs text-slate-400 italic">—</span>
                   }
                 </td>
 
-                <td className="px-4 py-3 text-right">
-                  <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => onViewLog(doc)} className={`h-8 w-8 p-0 ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`} title="View Log">
-                      <History className="h-4 w-4 text-slate-500" />
+                <td className="px-1 py-2.5 text-right">
+                  <div className="flex justify-end gap-0">
+                    <Button variant="ghost" size="sm" onClick={() => onViewLog(doc)} className={`h-7 w-7 p-0 ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`} title="View Log">
+                      <History className="h-3.5 w-3.5 text-slate-500" />
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => onMovement(doc, type === 'IN' ? 'OUT' : 'IN')}
-                      className={`h-8 w-8 p-0 ${type === 'IN' ? 'hover:bg-red-50 text-red-500' : 'hover:bg-emerald-50 text-emerald-600'}`}
+                      className={`h-7 w-7 p-0 ${type === 'IN' ? 'hover:bg-red-50 text-red-500' : 'hover:bg-emerald-50 text-emerald-600'}`}
                       title={type === 'IN' ? 'Mark as OUT' : 'Mark as IN'}>
-                      {type === 'IN' ? <ArrowUpCircle className="h-4 w-4" /> : <ArrowDownCircle className="h-4 w-4" />}
+                      {type === 'IN' ? <ArrowUpCircle className="h-3.5 w-3.5" /> : <ArrowDownCircle className="h-3.5 w-3.5" />}
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => onEdit(doc)} className={`h-8 w-8 p-0 ${isDark ? 'hover:bg-indigo-900/30' : 'hover:bg-indigo-50'} text-indigo-500`}>
-                      <Edit className="h-4 w-4" />
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(doc)} className={`h-7 w-7 p-0 ${isDark ? 'hover:bg-indigo-900/30' : 'hover:bg-indigo-50'} text-indigo-500`}>
+                      <Edit className="h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => onDelete(doc.id)} className={`h-8 w-8 p-0 ${isDark ? 'hover:bg-red-900/30' : 'hover:bg-red-50'} text-red-500`}>
-                      <Trash2 className="h-4 w-4" />
+                    <Button variant="ghost" size="sm" onClick={() => onDelete(doc.id)} className={`h-7 w-7 p-0 ${isDark ? 'hover:bg-red-900/30' : 'hover:bg-red-50'} text-red-500`}>
+                      <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 </td>
