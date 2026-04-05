@@ -647,8 +647,6 @@ export default function DueDates() {
           </div>
         </div>
       </motion.div>
-
-            </motion.div>
           );
 
           /* ── METRICS ──────────────────────────────────────────────── */
