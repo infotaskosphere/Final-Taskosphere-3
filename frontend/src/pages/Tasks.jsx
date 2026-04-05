@@ -1292,7 +1292,7 @@ export default function Tasks() {
   // ══════════════════════════════════════════════════════════════════════════
   return (
     <motion.div
-      className="space-y-4 w-full min-w-0 overflow-x-hidden"
+      className="space-y-4 w-full min-w-0"
       variants={containerVariants} initial="hidden" animate="visible"
     >
       {/* Non-blocking loader */}
@@ -1326,7 +1326,7 @@ export default function Tasks() {
             </div>
 
             {/* Right — action buttons */}
-            <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
             {/* Total Tasks — admin only */}
             {isAdmin && (
               <>
