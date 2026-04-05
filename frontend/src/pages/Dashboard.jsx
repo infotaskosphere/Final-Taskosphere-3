@@ -912,7 +912,7 @@ export default function Dashboard() {
 
     // ── Wave 1: critical path ──
     try {
-      const [tasksData, statsData, dueDatesData, attendanceData, todosData, visitsData] =
+      const [tasksData, statsData, dueDatesData, attendanceData, todosData, visitsData, holidaysRes] =
         await Promise.all([
           apiFetch('/tasks'),
           apiFetch('/dashboard/stats'),
@@ -920,9 +920,11 @@ export default function Dashboard() {
           apiFetch('/attendance/today'),
           apiFetch('/todos'),   // ← FIX: backend scopes by JWT; no user_id param needed
           apiFetch('/visits'),
+          apiFetch('/holidays'),
         ]);
         
       if (Array.isArray(tasksData)) setTasks(tasksData);
+      if (Array.isArray(holidaysRes)) setHolidaysData(holidaysRes);
       if (Array.isArray(visitsData)) setVisits(visitsData);
       
       if (statsData && typeof statsData === 'object' && !Array.isArray(statsData)) {
@@ -940,9 +942,8 @@ export default function Dashboard() {
 
     // ── Wave 2: secondary ──
     try {
-      const [usersData, holidaysRes, leadsRes, rankingsData] = await Promise.all([
+      const [usersData, leadsRes, rankingsData] = await Promise.all([
         apiFetch('/users'),
-        apiFetch('/holidays'),
         apiFetch('/leads'),
         apiFetch(`/reports/performance-rankings?period=${rankingPeriod}`),
       ]);
@@ -952,7 +953,6 @@ export default function Dashboard() {
         setUsersLoading(false); 
       }
       // CHECK HERE: Ensure the line below isn't "trapped" outside a block
-      if (Array.isArray(holidaysRes)) setHolidaysData(holidaysRes);
       if (Array.isArray(leadsRes)) setLeadsData(leadsRes);
       if (Array.isArray(rankingsData)) setRankings(rankingsData);
       
