@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
+import GifLoader from '@/components/ui/GifLoader.jsx';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -24,23 +25,8 @@ const COLORS = {
 
 const SIDEBAR_EXPANDED  = 280;
 const SIDEBAR_COLLAPSED = 80;
+const HEADER_H          = 56; // px — must match paddingTop below
 
-/*
- * NAV_GROUPS — defines every sidebar link.
- *
- * Permission matrix (updated):
- *   Admin   → all modules, all data (no permission flag needed)
- *   Manager → all modules, Own + Team scope (permission-based, all True by default)
- *   Staff   → all modules, Own scope only (permission-based, all True by default)
- *
- * `permission` can be:
- *   • a string  → user must have that single permission flag = true
- *   • an array  → user must have ANY of those permissions (OR logic)
- *   • undefined → visible to all authenticated users
- *
- * Since Manager and Staff now have all permission flags set to True by default,
- * all permission-gated items will be visible unless admin explicitly revokes.
- */
 const NAV_GROUPS = [
   {
     id: 'core',
@@ -81,10 +67,10 @@ const NAV_GROUPS = [
     id: 'admin',
     dividerLabel: 'Admin',
     items: [
-      { path: '/staff-activity', icon: Activity, label: 'Staff Activity',  permission: 'can_view_staff_activity' },
-      { path: '/reports',        icon: BarChart3, label: 'Reports' },
-      { path: '/task-audit',     icon: Activity,  label: 'Task Audit Log',  permission: 'can_view_audit_logs'     },
-      { path: '/users',          icon: Users,     label: 'Users',           permission: 'can_view_user_page'      },
+      { path: '/staff-activity', icon: Activity,  label: 'Staff Activity',  permission: 'can_view_staff_activity' },
+      { path: '/reports',        icon: BarChart3,  label: 'Reports' },
+      { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log',  permission: 'can_view_audit_logs'     },
+      { path: '/users',          icon: Users,      label: 'Users',           permission: 'can_view_user_page'      },
     ],
   },
   {
@@ -133,31 +119,19 @@ const DashboardLayout = ({ children }) => {
   );
   const [hasUnread, setHasUnread] = useState(false);
 
-  /* ── FIX 1 & 2: Refs for scroll control ─────────────────────────────
-     sidebarNavRef  → the scrollable nav div inside the sidebar
-     mainRef        → the main content area
-     activeItemRef  → set on whichever NavItem is currently active      */
-  const sidebarNavRef  = useRef(null);
-  const mainRef        = useRef(null);
-  const activeItemRef  = useRef(null);
+  const sidebarNavRef = useRef(null);
+  const mainRef       = useRef(null);
+  const activeItemRef = useRef(null);
 
-  /* ── FIX 1: Scroll main content to top on every route change ──────── */
+  /* Scroll main content to top on route change */
   useEffect(() => {
-    if (mainRef.current) {
-      mainRef.current.scrollTo({ top: 0, behavior: 'auto' });
-    }
+    if (mainRef.current) mainRef.current.scrollTo({ top: 0, behavior: 'auto' });
   }, [location.pathname]);
 
-  /* ── FIX 2: Scroll active nav item into view without moving sidebar
-     scrollbar to top. Uses scrollIntoView with block:"nearest" so it
-     only scrolls the minimum needed — if item is already visible,
-     nothing moves at all.                                               */
+  /* Scroll active nav item into view (minimal scroll only) */
   useEffect(() => {
     if (activeItemRef.current) {
-      activeItemRef.current.scrollIntoView({
-        block: 'nearest',
-        behavior: 'smooth',
-      });
+      activeItemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
   }, [location.pathname]);
 
@@ -184,17 +158,17 @@ const DashboardLayout = ({ children }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, [handleResize]);
 
-  /* ── FIX 3: Open sidebar on desktop mount — use visibility trick
-     so sidebar is always "present" on desktop and never re-mounts,
-     preventing the scroll-to-top flash on nav click.                   */
+  /* Keep sidebar open on desktop — never re-mounts */
   useEffect(() => {
     if (window.innerWidth >= 1024) setSidebarOpen(true);
   }, []);
 
+  /* Close sidebar on mobile route change */
   useEffect(() => {
     if (!isDesktop) setSidebarOpen(false);
   }, [location.pathname, isDesktop]);
 
+  /* Close user menu on outside click */
   useEffect(() => {
     if (!userMenuOpen) return;
     const handle = (e) => {
@@ -204,6 +178,7 @@ const DashboardLayout = ({ children }) => {
     return () => document.removeEventListener('mousedown', handle);
   }, [userMenuOpen]);
 
+  /* Poll unread notification count */
   useEffect(() => {
     const fetchUnread = async () => {
       try {
@@ -211,7 +186,7 @@ const DashboardLayout = ({ children }) => {
         if (!res.ok) return;
         const data = await res.json();
         setHasUnread(data.count > 0);
-      } catch {}
+      } catch { /* ignore */ }
     };
     fetchUnread();
     const interval = setInterval(fetchUnread, 30000);
@@ -222,29 +197,16 @@ const DashboardLayout = ({ children }) => {
   if (!user) { navigate('/login', { replace: true }); return null; }
 
   const handleLogout = () => {
-    // 🔴 stop activity tracking instantly
     window.__STOP_ACTIVITY__ = true;
-
     logout();
     toast.success('Logged out successfully');
     navigate('/login', { replace: true });
   };
 
-  /*
-   * ── Permission helper for nav items ─────────────────────────────────
-   * NEW: supports both string and array permission values.
-   *   string → single permission check (original behaviour, unchanged)
-   *   array  → OR check: visible if user holds ANY listed permission
-   *
-   * Admin role always returns true regardless of permission value,
-   * matching the same logic in AppRoutes.jsx and the backend.
-   */
   const checkNavPermission = (permission) => {
     if (!permission) return true;
     if (user?.role === 'admin') return true;
-    if (Array.isArray(permission)) {
-      return permission.some(p => hasPermission(p));
-    }
+    if (Array.isArray(permission)) return permission.some(p => hasPermission(p));
     return hasPermission(permission);
   };
 
@@ -257,14 +219,11 @@ const DashboardLayout = ({ children }) => {
 
   /* ── Nav Item ─────────────────────────────────────────────────────── */
   const NavItem = ({ item }) => {
-    // ── UPDATED: delegates to checkNavPermission (string OR array) ────
     if (!checkNavPermission(item.permission)) return null;
-
     const isActive = location.pathname === item.path;
     const Icon = item.icon;
 
     return (
-      /* ── FIX 2: attach ref to active item's wrapper div ── */
       <motion.div
         ref={isActive ? activeItemRef : null}
         whileHover={{ x: collapsed ? 0 : 3 }}
@@ -274,7 +233,7 @@ const DashboardLayout = ({ children }) => {
         <Link
           to={item.path}
           title={collapsed ? item.label : undefined}
-          className={`relative flex items-center gap-3
+          className={`relative flex items-center gap-3 min-w-0
             ${collapsed ? 'justify-center px-0 py-3' : 'px-3 py-2.5'}
             rounded-xl transition-all duration-200 group
             ${isActive
@@ -300,13 +259,14 @@ const DashboardLayout = ({ children }) => {
             }`}
           />
           {!collapsed && (
-            <span className="font-medium text-sm whitespace-nowrap tracking-tight">
+            <span className="font-medium text-sm whitespace-nowrap tracking-tight truncate">
               {item.label}
             </span>
           )}
           {isActive && collapsed && (
             <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-white/70" />
           )}
+          {/* Collapsed tooltip */}
           {collapsed && (
             <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-800 dark:bg-slate-700 text-white text-xs font-medium rounded-lg whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 translate-x-1 group-hover:translate-x-0 transition-all duration-200 z-[100] shadow-lg">
               {item.label}
@@ -331,7 +291,11 @@ const DashboardLayout = ({ children }) => {
   );
 
   return (
-    <div className={`min-h-screen relative ${isDark ? 'bg-[#0f172a]' : 'bg-[#F4F6FA]'}`}>
+    <div
+      className={`min-h-screen relative ${isDark ? 'bg-[#0f172a]' : 'bg-[#F4F6FA]'}`}
+      /* FIX: prevent horizontal scroll at root level */
+      style={{ overflowX: 'hidden' }}
+    >
 
       {/* ── Mobile overlay ── */}
       <AnimatePresence>
@@ -346,33 +310,33 @@ const DashboardLayout = ({ children }) => {
         )}
       </AnimatePresence>
 
-      {/* ── Sidebar ──────────────────────────────────────────────────────
-           FIX 3: On desktop, sidebar is ALWAYS visible (no transform).
-           We use a CSS class toggle instead of inline transform so the
-           sidebar never re-mounts or resets its scroll position.
-           On mobile, transform slides it in/out as before.             ── */}
+      {/* ── Sidebar ── */}
       <aside
         className={`
           fixed top-0 left-0 h-full z-50 flex flex-col
           transition-all duration-300 ease-in-out
           ${isDesktop
-            ? 'translate-x-0'                                      /* always visible on desktop */
-            : sidebarOpen ? 'translate-x-0' : '-translate-x-full' /* slide on mobile */
+            ? 'translate-x-0'
+            : sidebarOpen ? 'translate-x-0' : '-translate-x-full'
           }
         `}
         style={{
           width: sidebarPx,
-          background: isDark ? '#1e293b' : '#ffffff',
+          background:  isDark ? '#1e293b' : '#ffffff',
           borderRight: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
-          boxShadow: isDark
-            ? '10px 0 30px rgba(0,0,0,0.2)'
-            : '10px 0 30px rgba(0,0,0,0.03)',
+          boxShadow:   isDark ? '10px 0 30px rgba(0,0,0,0.2)' : '10px 0 30px rgba(0,0,0,0.03)',
         }}
       >
         {/* Logo */}
-        <div className={`h-20 flex items-center justify-center flex-shrink-0 transition-all duration-300 border-b ${isDark ? 'border-slate-700/60' : 'border-slate-100'}`}>
+        <div
+          className={`h-20 flex items-center justify-center flex-shrink-0 transition-all duration-300 border-b ${
+            isDark ? 'border-slate-700/60' : 'border-slate-100'
+          }`}
+        >
           <motion.div
-            className={`relative flex items-center justify-center transition-all duration-300 ${collapsed ? 'w-12 px-2' : 'w-full px-6'}`}
+            className={`relative flex items-center justify-center transition-all duration-300 ${
+              collapsed ? 'w-12 px-2' : 'w-full px-6'
+            }`}
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             whileHover={{ scale: 1.03 }}
@@ -390,9 +354,7 @@ const DashboardLayout = ({ children }) => {
                   : ['drop-shadow(0px 0px 0px rgba(31,175,90,0))', 'drop-shadow(0px 0px 6px rgba(31,175,90,0.3))', 'drop-shadow(0px 0px 0px rgba(31,175,90,0))'],
               } : {
                 scale: 1,
-                filter: isDark
-                  ? 'brightness(1.1) drop-shadow(0px 0px 2px rgba(255,255,255,0.1))'
-                  : 'none',
+                filter: isDark ? 'brightness(1.1) drop-shadow(0px 0px 2px rgba(255,255,255,0.1))' : 'none',
               }}
               transition={hasUnread
                 ? { duration: 2.5, repeat: Infinity, ease: 'easeInOut' }
@@ -410,21 +372,16 @@ const DashboardLayout = ({ children }) => {
           </motion.div>
         </div>
 
-        {/* ── FIX 1 & 2: Nav scroll container with ref ─────────────────
-             overflow-y: auto is correct — we just prevent it from
-             resetting via the scrollIntoView + no-remount approach.   */}
+        {/* Nav scroll container */}
         <div
           ref={sidebarNavRef}
-          className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar py-4"
+          className="flex-1 overflow-y-auto overflow-x-hidden slim-scroll py-4"
         >
           {NAV_GROUPS.map((group) => {
-            /* Hide the entire group (including its heading) if the user
-               has no permission to see any item within it.             */
             const visibleGroupItems = group.items.filter(
               (item) => checkNavPermission(item.permission)
             );
             if (visibleGroupItems.length === 0) return null;
-
             return (
               <div key={group.id} className="mb-2">
                 {group.dividerLabel && <NavDivider label={group.dividerLabel} />}
@@ -438,7 +395,7 @@ const DashboardLayout = ({ children }) => {
           })}
         </div>
 
-        {/* Collapse button */}
+        {/* Collapse button — desktop only */}
         <div className={`p-4 ${isDark ? 'border-t border-slate-700/60' : 'border-t border-slate-100'} hidden lg:block`}>
           <Button
             variant="ghost"
@@ -455,43 +412,54 @@ const DashboardLayout = ({ children }) => {
 
       {/* ── Header ── */}
       <header
-        className="fixed top-0 right-0 z-30 flex items-center h-14 transition-all duration-300 ease-in-out backdrop-blur-md"
+        className="fixed top-0 right-0 z-30 flex items-center transition-all duration-300 ease-in-out backdrop-blur-md"
         style={{
-          left: offsetPx,
-          background: isDark ? 'rgba(15,23,42,0.8)' : 'rgba(255,255,255,0.8)',
+          left:         offsetPx,
+          height:       HEADER_H,
+          background:   isDark ? 'rgba(15,23,42,0.85)' : 'rgba(255,255,255,0.85)',
           borderBottom: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
+          /* Prevent header from creating horizontal scroll */
+          maxWidth:     `calc(100vw - ${offsetPx}px)`,
+          overflow:     'hidden',
         }}
       >
-        <div className="flex-1 flex items-center justify-between px-4 sm:px-6">
-          <div className="flex items-center gap-4">
+        <div className="flex-1 flex items-center justify-between px-3 sm:px-5 min-w-0 gap-2">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            {/* Hamburger — mobile only */}
             <button
               onClick={() => setSidebarOpen(prev => !prev)}
-              className="lg:hidden p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500"
+              className="lg:hidden flex-shrink-0 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 active:scale-95 transition-all"
+              aria-label="Toggle sidebar"
             >
               <Menu className="h-5 w-5" />
             </button>
+
             <AnimatePresence mode="wait">
               <motion.h1
                 key={location.pathname}
-                className={`text-sm sm:text-lg font-bold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}
+                className={`text-sm sm:text-base font-bold truncate min-w-0 ${
+                  isDark ? 'text-slate-100' : 'text-slate-800'
+                }`}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
                 transition={{ type: 'spring', stiffness: 400, damping: 26 }}
+                style={{ maxWidth: 'clamp(80px, 30vw, 260px)' }}
               >
                 {activeLabel}
               </motion.h1>
             </AnimatePresence>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-4">
+          <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
             <NotificationBell />
 
             {/* Theme toggle */}
             <motion.button
               onClick={() => setIsDark(!isDark)}
-              className={`relative w-14 h-8 rounded-full p-1 flex items-center border transition-colors
-                ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-slate-100 border-slate-200'}`}
+              className={`relative flex-shrink-0 w-14 h-8 rounded-full p-1 flex items-center border transition-colors ${
+                isDark ? 'bg-slate-800 border-slate-600' : 'bg-slate-100 border-slate-200'
+              }`}
               whileTap={{ scale: 0.93 }}
               transition={springMed}
               aria-label="Toggle theme"
@@ -499,7 +467,9 @@ const DashboardLayout = ({ children }) => {
               <Sun  className="absolute left-1.5 h-3 w-3 text-amber-400 opacity-70" />
               <Moon className="absolute right-1.5 h-3 w-3 text-slate-400 opacity-70" />
               <motion.div
-                className={`absolute w-6 h-6 rounded-full shadow-sm flex items-center justify-center ${isDark ? 'bg-slate-200' : 'bg-white'}`}
+                className={`absolute w-6 h-6 rounded-full shadow-sm flex items-center justify-center ${
+                  isDark ? 'bg-slate-200' : 'bg-white'
+                }`}
                 animate={{ x: isDark ? 32 : 4 }}
                 transition={springSnap}
                 style={{ top: '50%', marginTop: -12 }}
@@ -522,16 +492,17 @@ const DashboardLayout = ({ children }) => {
             </motion.button>
 
             {/* User menu */}
-            <div className="relative" data-user-menu>
+            <div className="relative flex-shrink-0" data-user-menu>
               <motion.button
                 onClick={() => setUserMenuOpen(prev => !prev)}
-                className={`flex items-center gap-1.5 sm:gap-2.5 pl-1.5 sm:pl-2 pr-2 sm:pr-3 py-1 sm:py-1.5 rounded-xl border transition-all
-                  ${isDark
+                className={`flex items-center gap-1.5 sm:gap-2 pl-1.5 pr-2 sm:pr-3 py-1 sm:py-1.5 rounded-xl border transition-all ${
+                  isDark
                     ? 'border-slate-600 hover:border-slate-500 hover:bg-slate-700/60 bg-slate-800/60'
                     : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                  }`}
+                }`}
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.98 }}
+                aria-label="Open user menu"
               >
                 <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg overflow-hidden flex-shrink-0 ring-1 ring-slate-200 dark:ring-slate-600">
                   {user?.profile_picture ? (
@@ -545,7 +516,9 @@ const DashboardLayout = ({ children }) => {
                     </div>
                   )}
                 </div>
-                <span className={`hidden md:block text-xs sm:text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                <span className={`hidden md:block text-xs sm:text-sm font-semibold max-w-[100px] truncate ${
+                  isDark ? 'text-slate-200' : 'text-slate-700'
+                }`}>
                   {user?.full_name?.split(' ')[0]}
                 </span>
                 <motion.div animate={{ rotate: userMenuOpen ? 180 : 0 }} transition={springSoft}>
@@ -560,9 +533,10 @@ const DashboardLayout = ({ children }) => {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -8, scale: 0.96 }}
                     transition={springSoft}
-                    className="absolute right-0 mt-2 w-60 z-50 overflow-hidden"
+                    className="absolute right-0 mt-2 z-50 overflow-hidden"
                     style={{
-                      background: isDark ? '#1e293b' : '#ffffff',
+                      width: 'min(240px, calc(100vw - 2rem))',
+                      background:  isDark ? '#1e293b' : '#ffffff',
                       borderRadius: '16px',
                       boxShadow: isDark
                         ? '0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(51,65,85,0.8)'
@@ -573,7 +547,7 @@ const DashboardLayout = ({ children }) => {
                       className="px-4 py-3.5"
                       style={{ borderBottom: isDark ? '1px solid #334155' : '1px solid #f1f5f9' }}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
                         <div className="w-11 h-11 rounded-xl overflow-hidden flex-shrink-0 ring-2 ring-slate-100 dark:ring-slate-700">
                           {user?.profile_picture ? (
                             <img src={user.profile_picture} alt={user.full_name} className="w-full h-full object-cover" />
@@ -586,7 +560,7 @@ const DashboardLayout = ({ children }) => {
                             </div>
                           )}
                         </div>
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <p className={`font-semibold text-sm truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                             {user?.full_name}
                           </p>
@@ -605,19 +579,21 @@ const DashboardLayout = ({ children }) => {
                         onClick={() => { setUserMenuOpen(false); navigate('/settings'); }}
                         whileHover={{ x: 2 }}
                         transition={springSnap}
-                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors mb-0.5
-                          ${isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-50'}`}
+                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors mb-0.5 ${
+                          isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-50'
+                        }`}
                       >
-                        <Settings className="h-4 w-4" /> Settings
+                        <Settings className="h-4 w-4 flex-shrink-0" /> Settings
                       </motion.button>
                       <motion.button
                         onClick={handleLogout}
                         whileHover={{ x: 2 }}
                         transition={springSnap}
-                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors
-                          ${isDark ? 'text-red-400 hover:bg-red-900/30' : 'text-red-600 hover:bg-red-50'}`}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+                          isDark ? 'text-red-400 hover:bg-red-900/30' : 'text-red-600 hover:bg-red-50'
+                        }`}
                       >
-                        <LogOut className="h-4 w-4" /> Sign out
+                        <LogOut className="h-4 w-4 flex-shrink-0" /> Sign out
                       </motion.button>
                     </div>
                   </motion.div>
@@ -628,15 +604,28 @@ const DashboardLayout = ({ children }) => {
         </div>
       </header>
 
-      {/* ── Main content ──────────────────────────────────────────────────
-           FIX 1: ref={mainRef} + scrollTo(0,0) on route change keeps
-           new pages starting at the top, independent of old page pos.  */}
+      {/* ── Main content wrapper ── */}
       <div
         className="transition-all duration-300 ease-in-out min-h-screen flex flex-col"
-        style={{ marginLeft: offsetPx, paddingTop: 56 }}
+        style={{
+          marginLeft: offsetPx,
+          paddingTop:  HEADER_H,
+          /* Prevent any child from causing horizontal overflow */
+          minWidth:    0,
+          maxWidth:    '100%',
+          overflowX:   'hidden',
+        }}
       >
-        <main ref={mainRef} className="flex-1 p-5 md:p-7 overflow-y-auto">
-          <div className="max-w-[1400px] mx-auto">
+        <main
+          ref={mainRef}
+          className="flex-1 overflow-y-auto overflow-x-hidden"
+          /* Responsive padding: tighter on mobile, spacious on desktop */
+          style={{ padding: 'clamp(0.875rem, 2vw, 1.75rem)' }}
+        >
+          <div
+            className="mx-auto w-full min-w-0"
+            style={{ maxWidth: 'var(--content-max, 1400px)' }}
+          >
             <AnimatePresence mode="wait" initial={false}>
               <motion.div
                 key={location.pathname}
@@ -644,6 +633,7 @@ const DashboardLayout = ({ children }) => {
                 initial="initial"
                 animate="animate"
                 exit="exit"
+                className="w-full min-w-0"
               >
                 {children}
               </motion.div>
