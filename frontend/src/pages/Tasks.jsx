@@ -16,6 +16,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popove
 
 // ✅ OTHER LIBS
 import { toast } from 'sonner';
+import api from '../lib/api';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -27,6 +28,7 @@ import {
   X, ChevronDown, Filter, Clock, AlertCircle, CheckCircle2,
   TrendingUp, MoreHorizontal, Copy, SlidersHorizontal,
   Briefcase, Target, Activity, ChevronRight, Sun,
+  Loader2, Mail, Send,
 } from 'lucide-react';
 
 // ─── Brand Colors ────────────────────────────────────────────────────────────
@@ -749,6 +751,8 @@ export default function Tasks() {
   const [users,          setUsers]          = useState([]);
   const [clients,        setClients]        = useState([]);
   const [loading,        setLoading]        = useState(false);
+  const [sendingReminders, setSendingReminders] = useState(false);
+  const [reminderResult,   setReminderResult]   = useState(null); // { emails_sent, emails_failed, total_users }
   const [dataLoading,    setDataLoading]    = useState(true);
   const [usersLoading,   setUsersLoading]   = useState(true);
   const [filterTeamOnly, setFilterTeamOnly] = useState(false);
@@ -929,6 +933,28 @@ export default function Tasks() {
   const handleExportCsv = () => { toast.success('Exporting CSV (stub)'); };
   const handleExportPdf = () => { toast.success('Exporting PDF (stub)'); };
 
+  const handleSendReminders = async () => {
+    if (!window.confirm('Send pending task reminder emails to all assigned staff now?')) return;
+    setSendingReminders(true);
+    setReminderResult(null);
+    try {
+      const res = await api.post('/send-pending-task-reminders');
+      const { emails_sent = 0, emails_failed = [], total_users = 0 } = res.data || {};
+      setReminderResult({ emails_sent, emails_failed, total_users });
+      if (emails_sent > 0) {
+        toast.success(`✓ Reminder emails sent to ${emails_sent} of ${total_users} staff member${total_users !== 1 ? 's' : ''}`);
+      } else if (total_users === 0) {
+        toast.info('No pending tasks found — nothing to remind.');
+      } else {
+        toast.error(`All ${emails_failed.length} reminder email(s) failed. Check SENDGRID_API_KEY.`);
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to send reminders');
+    } finally {
+      setSendingReminders(false);
+    }
+  };
+
   // ── Scoping & stats ───────────────────────────────────────────────────────
   const scopedTasks = React.useMemo(() => {
     if (isAdmin) return tasks;
@@ -1096,6 +1122,23 @@ export default function Tasks() {
                 className="h-8 text-xs rounded-xl text-white/80 hover:text-white hover:bg-white/15 border border-white/20">
                 Upload CSV
               </Button>
+              {/* Send Reminders — admin or can_send_reminders permission */}
+              {(isAdmin || hasPermission('can_send_reminders')) && (
+                <Button
+                  variant="ghost" size="sm"
+                  onClick={handleSendReminders}
+                  disabled={sendingReminders}
+                  className="h-8 text-xs rounded-xl gap-1.5 border border-white/20 font-semibold"
+                  style={{
+                    backgroundColor: sendingReminders ? 'rgba(255,255,255,0.08)' : 'rgba(251,191,36,0.22)',
+                    borderColor: 'rgba(251,191,36,0.5)',
+                    color: sendingReminders ? 'rgba(255,255,255,0.5)' : '#fef3c7',
+                  }}>
+                  {sendingReminders
+                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Sending…</>
+                    : <><Mail className="h-3.5 w-3.5" />Send Reminders</>}
+                </Button>
+              )}
               <Button variant="ghost" size="sm" onClick={handleExportCsv}
                 className="h-8 text-xs rounded-xl text-white/80 hover:text-white hover:bg-white/15 border border-white/20">
                 Export CSV
@@ -1297,6 +1340,40 @@ export default function Tasks() {
       </motion.div>
 
       {/* ── METRIC CARDS — 6 equal, all same height/layout ──────────────── */}
+      {/* ── Reminder Result Banner ── */}
+      {reminderResult && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+          className="flex items-center gap-3 px-4 py-3 rounded-xl border text-sm"
+          style={{
+            borderColor: reminderResult.emails_sent > 0 ? '#bbf7d0' : '#fecaca',
+            backgroundColor: reminderResult.emails_sent > 0
+              ? (isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4')
+              : (isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2'),
+          }}>
+          <Mail className="w-4 h-4 flex-shrink-0"
+            style={{ color: reminderResult.emails_sent > 0 ? '#16a34a' : '#dc2626' }} />
+          <span className="flex-1 font-medium"
+            style={{ color: reminderResult.emails_sent > 0
+              ? (isDark ? '#86efac' : '#15803d')
+              : (isDark ? '#fca5a5' : '#dc2626') }}>
+            {reminderResult.emails_sent > 0
+              ? `✓ Reminder emails sent to ${reminderResult.emails_sent} / ${reminderResult.total_users} staff`
+              : `Reminder emails failed — check SENDGRID_API_KEY on the server`}
+            {reminderResult.emails_failed?.length > 0 && (
+              <span className="ml-2 text-xs opacity-70">
+                (Failed: {reminderResult.emails_failed.join(', ')})
+              </span>
+            )}
+          </span>
+          <button onClick={() => setReminderResult(null)}
+            className="w-6 h-6 flex items-center justify-center rounded-lg opacity-60 hover:opacity-100 transition-opacity"
+            style={{ color: reminderResult.emails_sent > 0 ? '#16a34a' : '#dc2626' }}>
+            ✕
+          </button>
+        </motion.div>
+      )}
+
       <motion.div
         variants={itemVariants}
         className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 [&>*]:min-w-0"
