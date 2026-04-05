@@ -663,7 +663,7 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate, onSel
 
 function SectionCard({ children, className = '' }) {
   return (
-    <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm ${className}`}>
+    <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm min-w-0 w-full ${className}`}>
       {children}
     </div>
   );
@@ -671,7 +671,7 @@ function SectionCard({ children, className = '' }) {
 
 function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
+    <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700 min-w-0 gap-2">
       <div className="flex items-center gap-2.5">
         <div className={`p-1.5 rounded-lg ${iconBg}`}>{icon}</div>
         <div>
@@ -1472,12 +1472,12 @@ export default function Dashboard() {
         isDark={isDark}
       />
 
-      <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
+      <motion.div className="space-y-4 sm:space-y-5 w-full min-w-0 overflow-x-hidden" variants={containerVariants} initial="hidden" animate="visible">
 
         {/* WELCOME BANNER */}
         <motion.div variants={itemVariants}>
           <div
-            className="relative overflow-hidden rounded-2xl px-6 pt-5 pb-4"
+            className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
             style={{
               background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`,
               boxShadow: `0 8px 32px rgba(13,59,102,0.28)`,
@@ -1872,7 +1872,7 @@ export default function Dashboard() {
           if (sectionId === 'tasks_row') return (
         <React.Fragment key="tasks_row">
         {/* RECENT TASKS + DEADLINES + ATTENDANCE */}
-        <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-3" variants={itemVariants}>
+        <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-3 min-w-0" variants={itemVariants}>
 
           {/* Recent Tasks */}
           <SectionCard>
