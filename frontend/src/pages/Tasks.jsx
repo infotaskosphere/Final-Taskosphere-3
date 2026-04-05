@@ -1010,6 +1010,7 @@ export default function Tasks() {
       else if (sortBy === 'priority') { const prioOrder = { critical: 4, high: 3, medium: 2, low: 1 }; cmp = (prioOrder[b.priority] || 0) - (prioOrder[a.priority] || 0); }
       else if (sortBy === 'title')  cmp = a.title.localeCompare(b.title);
       else if (sortBy === 'status') cmp = (a.status || '').localeCompare(b.status || '');
+      else if (sortBy === 'created_date') { const dA = a.created_at ? new Date(a.created_at).getTime() : 0; const dB = b.created_at ? new Date(b.created_at).getTime() : 0; cmp = dA - dB; }
       return sortDirection === 'asc' ? cmp : -cmp;
     });
     return result;
@@ -1065,7 +1066,7 @@ export default function Tasks() {
   // ══════════════════════════════════════════════════════════════════════════
   return (
     <motion.div
-      className={`space-y-4 min-h-screen p-5 rounded-2xl ${isDark ? 'bg-[#0f172a]' : 'bg-slate-50'}`}
+      className="space-y-4 w-full min-w-0 overflow-x-hidden"
       variants={containerVariants} initial="hidden" animate="visible"
     >
       {/* Non-blocking loader */}
@@ -1079,7 +1080,7 @@ export default function Tasks() {
       {/* ── WELCOME BANNER (matches Dashboard exactly) ───────────────────── */}
       <motion.div variants={itemVariants}>
         <div
-          className="relative overflow-hidden rounded-2xl px-6 pt-5 pb-4"
+          className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
           style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`, boxShadow: `0 8px 32px rgba(13,59,102,0.28)` }}
         >
           {/* Decorative blobs */}
@@ -1087,19 +1088,19 @@ export default function Tasks() {
           <div className="absolute right-28 bottom-0 w-40 h-40 rounded-full mb-[-40px] opacity-5" style={{ background: 'white' }} />
           <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5" style={{ background: 'white' }} />
 
-          <div className="relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+          <div className="relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 min-w-0">
             {/* Left — title */}
             <div className="flex-1 min-w-0">
-              <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1 flex items-center gap-1.5">
+              <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1 flex items-center gap-1.5 min-w-0 truncate">
                 <Briefcase className="h-3 w-3" />
                 {format(new Date(), 'EEEE, MMMM d, yyyy')}
               </p>
-              <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">Task Management</h1>
+              <h1 className="text-lg sm:text-2xl font-bold text-white tracking-tight leading-tight truncate">Task Management</h1>
               <p className="text-white/60 text-sm mt-1">Task Updates</p>
             </div>
 
             {/* Right — action buttons */}
-            <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+            <div className="flex flex-wrap items-center gap-2 flex-shrink-0 min-w-0">
             {/* Total Tasks — admin only */}
             {isAdmin && (
               <>
@@ -1480,10 +1481,12 @@ export default function Tasks() {
           </Select>
 
           <Select value={`${sortBy}-${sortDirection}`} onValueChange={(v) => { const [sb, sd] = v.split('-'); setSortBy(sb); setSortDirection(sd); }}>
-            <SelectTrigger className={`h-8 w-32 text-xs rounded-xl ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Sort" /></SelectTrigger>
+            <SelectTrigger className={`h-8 w-40 text-xs rounded-xl ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Sort" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="due_date-asc">Due Date ↑</SelectItem>
               <SelectItem value="due_date-desc">Due Date ↓</SelectItem>
+              <SelectItem value="created_date-asc">Created ↑ (FIFO)</SelectItem>
+              <SelectItem value="created_date-desc">Created ↓ (LIFO)</SelectItem>
               <SelectItem value="priority-desc">Priority ↓</SelectItem>
               <SelectItem value="title-asc">Title A-Z</SelectItem>
             </SelectContent>
