@@ -808,6 +808,7 @@ export default function DSCRegister() {
             );
           })}
         </div>
+      </div>
 
       {/* ── Page body ── */}
       <div className="px-6 py-6 space-y-5">
