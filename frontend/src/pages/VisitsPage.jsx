@@ -1413,7 +1413,7 @@ export default function VisitsPage() {
     />
     <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
 
-      {/* ── Welcome Banner (matching Dashboard) ──────────────────────────── */>
+    {/* ── Welcome Banner (matching Dashboard) ──────────────────────────── */}
       <motion.div variants={itemVariants}>
         <div className="relative overflow-hidden rounded-2xl px-6 py-5"
           style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: `0 8px 32px rgba(13,59,102,0.28)` }}>
