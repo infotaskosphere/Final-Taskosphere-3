@@ -3,35 +3,54 @@
 /* ── Base App Layout ─────────────────────────────────────────────── */
 .App {
   min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
 }
 
 /* ── Global Reset ───────────────────────────────────────────────── */
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
+  overflow-x: hidden;
+}
+
+/* ── Prevent flex overflow globally ─────────────────────────────── */
+.flex > *,
+.inline-flex > * {
+  min-width: 0;
 }
 
 /* ── Spinner Animation ──────────────────────────────────────────── */
 @keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
 }
+.animate-spin { animation: spin 1s linear infinite; }
 
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-
-/* ── Bottom Loading Bar Animation (IMPORTANT) ───────────────────── */
+/* ── Bottom Loading Bar Animation ───────────────────────────────── */
 @keyframes loadingBar {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(300%);
-  }
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+/* ── Scrollbar: slim global style ───────────────────────────────── */
+::-webkit-scrollbar        { width: 5px; height: 5px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: #cbd5e1; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+.dark ::-webkit-scrollbar-thumb       { background: #475569; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+/* ── Focus ring reset ───────────────────────────────────────────── */
+*:focus { outline: none; }
+*:focus-visible {
+  outline: 2px solid rgba(31, 111, 178, 0.55);
+  outline-offset: 2px;
 }
