@@ -959,7 +959,14 @@ export default function Tasks() {
         toast.info(`Found ${groups.length} potential duplicate group${groups.length !== 1 ? 's' : ''}`);
       }
     } catch (err) {
-      toast.error(err.message || 'AI duplicate detection failed. Check GEMINI_API_KEY on the server.');
+      const msg = err.message || '';
+      if (msg.includes('quota') || msg.includes('429') || msg.includes('rate')) {
+        toast.error('Gemini API quota exceeded. Upgrade your Google AI plan or wait and try again.', { duration: 6000 });
+      } else if (msg.includes('GEMINI_API_KEY') || msg.includes('not set')) {
+        toast.error('GEMINI_API_KEY not configured on the server.', { duration: 6000 });
+      } else {
+        toast.error(msg || 'AI duplicate detection failed.', { duration: 5000 });
+      }
       console.error('Duplicate detection error:', err);
     } finally {
       setDetectingDuplicates(false);
@@ -1190,22 +1197,6 @@ export default function Tasks() {
                   <FileText className="h-3.5 w-3.5" /> CA/CS Templates
                 </Button>
               )}
-              {/* AI Duplicate Detector */}
-              <Button
-                variant="ghost" size="sm"
-                onClick={handleDetectDuplicates}
-                disabled={detectingDuplicates}
-                className="h-8 text-xs rounded-xl gap-1.5 border font-semibold"
-                style={{
-                  backgroundColor: detectingDuplicates ? 'rgba(255,255,255,0.08)' : 'rgba(139,92,246,0.22)',
-                  borderColor: 'rgba(139,92,246,0.55)',
-                  color: detectingDuplicates ? 'rgba(255,255,255,0.4)' : '#ede9fe',
-                }}>
-                {detectingDuplicates
-                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Scanning…</>
-                  : <><Sparkles className="h-3.5 w-3.5" />AI Duplicates</>}
-              </Button>
-
               {/* Notifications */}
               <Popover open={showNotifications} onOpenChange={setShowNotifications}>
                 <PopoverTrigger asChild>
@@ -1432,7 +1423,7 @@ export default function Tasks() {
       >
         {/* 1. My Task */}
         <MetricCard
-          label="My Task" value={stats.myTask} icon={SlidersHorizontal}
+          label="Assigned to Me" value={stats.myTask} icon={SlidersHorizontal}
           accent={isDark ? '#60a5fa' : COLORS.deepBlue}
           active={showMyTasksOnly} isDark={isDark}
           onClick={() => setShowMyTasksOnly(p => !p)}
@@ -1557,6 +1548,21 @@ export default function Tasks() {
           >
             <User className="h-3 w-3" />
             {filterAssignedByMe ? '✓ Assigned by Me' : 'Assigned by Me'}
+          </button>
+
+          {/* AI Duplicate Detector */}
+          <button
+            onClick={handleDetectDuplicates}
+            disabled={detectingDuplicates}
+            className={`h-8 px-3 text-xs font-semibold rounded-xl border transition-all flex items-center gap-1.5 whitespace-nowrap
+              ${isDark
+                ? 'bg-violet-900/30 border-violet-700 text-violet-300 hover:bg-violet-900/50 disabled:opacity-40'
+                : 'bg-violet-50 border-violet-300 text-violet-700 hover:bg-violet-100 disabled:opacity-40'
+              }`}
+          >
+            {detectingDuplicates
+              ? <><Loader2 className="h-3 w-3 animate-spin" />Scanning…</>
+              : <><Sparkles className="h-3 w-3" />AI Duplicates</>}
           </button>
 
           {/* View toggle */}
