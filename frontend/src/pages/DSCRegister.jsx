@@ -84,10 +84,21 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
 
   return (
     <div className="w-full overflow-x-auto">
-      <table className="w-full table-auto border-collapse min-w-[800px]">
+      <table className="w-full table-fixed border-collapse">
+        <colgroup>
+          <col style={{ width: 36 }} />
+          <col style={{ width: 40 }} />
+          <col style={{ width: '18%' }} />
+          <col style={{ width: '10%' }} />
+          <col style={{ width: '18%' }} />
+          <col style={{ width: 100 }} />
+          <col style={{ width: 80 }} />
+          <col style={{ width: '16%' }} />
+          <col style={{ width: 128 }} />
+        </colgroup>
         <thead className={`border-b ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
           <tr>
-            <th className="px-3 py-3 w-10">
+            <th className="px-2 py-2.5">
               <button onClick={() => onToggleAll(dscList)} className="flex items-center justify-center">
                 {allSelected
                   ? <CheckSquare className="h-4 w-4 text-indigo-500" />
@@ -96,14 +107,14 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                     : <Square className="h-4 w-4 text-slate-400" />}
               </button>
             </th>
-            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>S.No</th>
-            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[140px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Holder Name</th>
-            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider w-24 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Type</th>
-            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[130px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Associated With</th>
-            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider w-28 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Expiry Date</th>
-            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider w-32 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Status</th>
-            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[130px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Last Movement</th>
-            <th className={`px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider w-36 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Actions</th>
+            <th className={`px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>#</th>
+            <th className={`px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Holder Name</th>
+            <th className={`px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Type</th>
+            <th className={`px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Associated With</th>
+            <th className={`px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Expiry</th>
+            <th className={`px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Status</th>
+            <th className={`px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Last Movement</th>
+            <th className={`px-2 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Actions</th>
           </tr>
         </thead>
         <tbody className={`divide-y ${isDark ? 'divide-slate-700/60' : 'divide-slate-100'}`}>
@@ -117,54 +128,54 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
               <tr key={dsc.id}
                 className={`transition-colors ${highlight} ${isSelected ? (isDark ? 'ring-1 ring-inset ring-indigo-500' : 'ring-1 ring-inset ring-indigo-300') : ''} ${isDark ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50/80'}`}
                 data-testid={`dsc-row-${dsc.id}`}>
-                <td className="px-3 py-3">
+                <td className="px-2 py-2.5">
                   <button onClick={() => onToggleSelect(dsc.id)} className="flex items-center justify-center">
                     {isSelected ? <CheckSquare className="h-4 w-4 text-indigo-500" /> : <Square className="h-4 w-4 text-slate-400" />}
                   </button>
                 </td>
-                <td className={`px-4 py-3 text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{globalIndexStart + index + 1}</td>
-                <td className={`px-4 py-3 text-sm font-semibold break-words leading-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{dsc.holder_name}</td>
-                <td className={`px-4 py-3 text-sm truncate ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{dsc.dsc_type || '—'}</td>
-                <td className={`px-4 py-3 text-sm break-words leading-tight ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{dsc.associated_with || '—'}</td>
-                <td className={`px-4 py-3 text-sm whitespace-nowrap font-medium ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{format(new Date(dsc.expiry_date), 'MMM dd, yyyy')}</td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-1.5">
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${status.color}`} />
-                    <span className={`text-[12px] font-semibold leading-none ${status.textColor}`}>{status.text}</span>
+                <td className={`px-2 py-2.5 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{globalIndexStart + index + 1}</td>
+                <td className={`px-3 py-2.5 text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`} title={dsc.holder_name}>{dsc.holder_name}</td>
+                <td className={`px-2 py-2.5 text-xs truncate ${isDark ? 'text-slate-300' : 'text-slate-600'}`} title={dsc.dsc_type || ''}>{dsc.dsc_type || '—'}</td>
+                <td className={`px-2 py-2.5 text-xs truncate ${isDark ? 'text-slate-300' : 'text-slate-600'}`} title={dsc.associated_with || ''}>{dsc.associated_with || '—'}</td>
+                <td className={`px-2 py-2.5 text-xs whitespace-nowrap font-medium ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{format(new Date(dsc.expiry_date), 'MMM dd, yy')}</td>
+                <td className="px-2 py-2.5">
+                  <div className="flex items-center gap-1">
+                    <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${status.color}`} />
+                    <span className={`text-[11px] font-semibold leading-none ${status.textColor}`}>{status.text}</span>
                   </div>
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-2 py-2.5">
                   {lastMove ? (
                     <div className="flex flex-col gap-0.5">
                       <div className="flex items-center gap-1">
-                        <Badge className={`text-[10px] px-1.5 py-0 font-semibold ${lastMove.movement_type === 'IN' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                        <Badge className={`text-[9px] px-1 py-0 font-semibold leading-tight ${lastMove.movement_type === 'IN' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
                           {lastMove.movement_type}
                         </Badge>
-                        <span className={`text-xs font-medium truncate max-w-[90px] ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{lastMove.person_name}</span>
+                        <span className={`text-[11px] font-medium truncate ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{lastMove.person_name}</span>
                       </div>
                       <span className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                         {format(new Date(lastMove.timestamp), 'dd MMM yy')}
                       </span>
                     </div>
                   ) : (
-                    <span className="text-xs text-slate-400 italic">No movement</span>
+                    <span className="text-[11px] text-slate-400 italic">No movement</span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-right">
-                  <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => onViewLog(dsc)} className={`h-8 w-8 p-0 ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`} title="View Log">
-                      <History className="h-4 w-4 text-slate-500" />
+                <td className="px-1 py-2.5 text-right">
+                  <div className="flex justify-end gap-0">
+                    <Button variant="ghost" size="sm" onClick={() => onViewLog(dsc)} className={`h-7 w-7 p-0 ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`} title="View Log">
+                      <History className="h-3.5 w-3.5 text-slate-500" />
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => onMovement(dsc, type === 'IN' ? 'OUT' : 'IN')}
-                      className={`h-8 w-8 p-0 ${type === 'IN' ? 'hover:bg-red-50 text-red-600' : 'hover:bg-emerald-50 text-emerald-600'}`}
+                      className={`h-7 w-7 p-0 ${type === 'IN' ? 'hover:bg-red-50 text-red-600' : 'hover:bg-emerald-50 text-emerald-600'}`}
                       title={type === 'IN' ? 'Mark as OUT' : 'Mark as IN'}>
-                      {type === 'IN' ? <ArrowUpCircle className="h-4 w-4" /> : <ArrowDownCircle className="h-4 w-4" />}
+                      {type === 'IN' ? <ArrowUpCircle className="h-3.5 w-3.5" /> : <ArrowDownCircle className="h-3.5 w-3.5" />}
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => onEdit(dsc)} className={`h-8 w-8 p-0 ${isDark ? 'hover:bg-indigo-900/30' : 'hover:bg-indigo-50'} text-indigo-500`}>
-                      <Edit className="h-4 w-4" />
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(dsc)} className={`h-7 w-7 p-0 ${isDark ? 'hover:bg-indigo-900/30' : 'hover:bg-indigo-50'} text-indigo-500`}>
+                      <Edit className="h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => onDelete(dsc.id)} className={`h-8 w-8 p-0 ${isDark ? 'hover:bg-red-900/30' : 'hover:bg-red-50'} text-red-500`}>
-                      <Trash2 className="h-4 w-4" />
+                    <Button variant="ghost" size="sm" onClick={() => onDelete(dsc.id)} className={`h-7 w-7 p-0 ${isDark ? 'hover:bg-red-900/30' : 'hover:bg-red-50'} text-red-500`}>
+                      <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 </td>
