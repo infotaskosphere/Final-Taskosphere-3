@@ -371,14 +371,12 @@ const DashboardLayout = ({ children }) => {
               <div key={group.id} className="mb-2">
                 {group.dividerLabel && <NavDivider label={group.dividerLabel} />}
                 <div className={`space-y-1 ${collapsed ? 'px-2' : 'px-3'}`}>
-                  {group.items.map((item) => (
+                  {visibleGroupItems.map((item) => (
                     <NavItem key={item.path} item={item} />
                   ))}
                 </div>
               </div>
             );
-          })}
-        </div>
 
         {/* Collapse button — desktop only */}
         <div className={`p-4 ${isDark ? 'border-t border-slate-700/60' : 'border-t border-slate-100'} hidden lg:block`}>
