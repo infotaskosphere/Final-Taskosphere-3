@@ -1080,6 +1080,7 @@ export default function DSCRegister() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </div>{/* closes page body (px-6 py-6) */}
+    </div>{/* closes min-h-screen wrapper */}
   );
 }
