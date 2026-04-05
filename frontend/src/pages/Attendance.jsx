@@ -1109,36 +1109,38 @@ export default function Attendance() {
   useEffect(() => { fetchData(); fetchReminders(); }, []); // eslint-disable-line
 
   useEffect(() => {
-    if (!isViewingOther && todayAttendance) {
-      const shouldClose = todayAttendance.punch_in || todayAttendance.status === 'leave'
-        || todayAttendance.status === 'absent' || todayIsHoliday || modalActionDone;
-      if (shouldClose) {
-        setShowPunchInModal(false);
-        setGeoError(null); setUserLocation(null); setIsWithinGeofence(null);
-        return;
-      }
-      const timer = setTimeout(() => {
-        setShowPunchInModal(true);
-        // Auto-check location when modal opens
-        setGeoError(null); setUserLocation(null); setIsWithinGeofence(null);
-      }, 800);
-      return () => clearTimeout(timer);
+    // Always close modal when switching to view another user — prevents ghost modal
+    if (isViewingOther || isEveryoneView) {
+      setShowPunchInModal(false);
+      setGeoError(null); setUserLocation(null); setIsWithinGeofence(null);
+      return;
     }
-  }, [todayAttendance, isViewingOther, todayIsHoliday, modalActionDone]);
+    if (!todayAttendance) return;
+    const shouldClose = todayAttendance.punch_in || todayAttendance.status === 'leave'
+      || todayAttendance.status === 'absent' || todayIsHoliday || modalActionDone;
+    if (shouldClose) {
+      setShowPunchInModal(false);
+      setGeoError(null); setUserLocation(null); setIsWithinGeofence(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setShowPunchInModal(true);
+      setGeoError(null); setUserLocation(null); setIsWithinGeofence(null);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [todayAttendance, isViewingOther, isEveryoneView, todayIsHoliday, modalActionDone]);
 
   // Block app body scroll when punch-in modal is open
   useEffect(() => {
+    // Only block scroll — do NOT set pointerEvents on body as it blocks
+    // all interaction (dropdowns, sidebar, navigation) app-wide
     if (showPunchInModal) {
       document.body.style.overflow = 'hidden';
-      document.body.style.pointerEvents = 'none';
-      // The modal itself re-enables pointer events via inline style
     } else {
       document.body.style.overflow = '';
-      document.body.style.pointerEvents = '';
     }
     return () => {
       document.body.style.overflow = '';
-      document.body.style.pointerEvents = '';
     };
   }, [showPunchInModal]);
 
@@ -1254,8 +1256,9 @@ export default function Attendance() {
         // Non-admin with cross-visibility: fetch only the users they're permitted to see
         try {
           const usersRes = await api.get('/users');
+          const crossVisStr = crossVisAttendance.map(String);
           const permitted = (usersRes.data || []).filter(u =>
-            crossVisAttendance.includes(u.id || u._id)
+            crossVisStr.includes(String(u.id || u._id))
           );
           setAllUsers(permitted);
         } catch {}
@@ -1320,7 +1323,10 @@ export default function Attendance() {
     try {
       const uid = overrideUserId !== undefined ? overrideUserId : (isViewingOther ? selectedUserId : null);
       if (uid === 'everyone') return;
-      const url = uid ? `/email/reminders?user_id=${uid}` : '/email/reminders';
+      // Non-admins must NOT fetch another user's reminders — the resulting 403
+      // from the backend triggers a global Axios interceptor that redirects to dashboard.
+      if (uid && String(uid) !== String(user?.id) && !isAdmin) return;
+      const url = uid ? `/email/reminders?user_id=${uid}` : '/email/reminders';;
       const res = await api.get(url);
       const raw = Array.isArray(res.data) ? res.data : [];
       setReminders(raw.map(normalizeReminder));
@@ -3214,7 +3220,7 @@ export default function Attendance() {
           {showPunchInModal && !isViewingOther && !isEveryoneView && (
             <motion.div
               className="fixed inset-0 z-[99999] flex items-center justify-center p-4"
-              style={{ background: isDark ? 'rgba(0,0,0,0.92)' : 'rgba(15,23,42,0.88)', backdropFilter: 'blur(12px)' }}
+              style={{ background: isDark ? 'rgba(0,0,0,0.92)' : 'rgba(15,23,42,0.88)', backdropFilter: 'blur(12px)', pointerEvents: 'all' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             >
               {/* NO onClick dismiss — user MUST punch in to use the app */}
