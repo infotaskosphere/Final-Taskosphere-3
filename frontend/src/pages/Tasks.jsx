@@ -23,7 +23,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 // ✅ ICONS
 import {
   Plus, Edit, Trash2, Search, Calendar, Building2, User, Users,
-  LayoutGrid, List, Circle, ArrowRight, Check, Repeat,
+  LayoutGrid, List, Circle, ArrowRight, Check, Repeat, Sparkles,
   MessageSquare, Bell, FileText, Calendar as CalendarIcon,
   X, ChevronDown, Filter, Clock, AlertCircle, CheckCircle2,
   TrendingUp, MoreHorizontal, Copy, SlidersHorizontal,
@@ -755,7 +755,11 @@ export default function Tasks() {
   const [reminderResult,   setReminderResult]   = useState(null); // { emails_sent, emails_failed, total_users }
   const [dataLoading,    setDataLoading]    = useState(true);
   const [usersLoading,   setUsersLoading]   = useState(true);
-  const [filterTeamOnly, setFilterTeamOnly] = useState(false);
+  const [filterTeamOnly,      setFilterTeamOnly]      = useState(false);
+  const [filterAssignedByMe,  setFilterAssignedByMe]  = useState(false);
+  const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
+  const [duplicateGroups,     setDuplicateGroups]     = useState([]);
+  const [detectingDuplicates, setDetectingDuplicates] = useState(false);
 
   const [dialogOpen,         setDialogOpen]         = useState(false);
   const [editingTask,        setEditingTask]         = useState(null);
@@ -929,6 +933,39 @@ export default function Tasks() {
     } catch { toast.error('Network error'); }
   };
 
+  const handleDetectDuplicates = async () => {
+    if (detectingDuplicates) return;
+    setDetectingDuplicates(true);
+    setDuplicateGroups([]);
+    try {
+      // ── Calls backend /api/tasks/detect-duplicates which uses the
+      //    existing Gemini AI (GEMINI_API_KEY) already configured on the server.
+      //    No frontend API key needed.
+      const res = await fetch(`${API_BASE}/tasks/detect-duplicates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Server error ${res.status}`);
+      }
+      const data = await res.json();
+      const groups = Array.isArray(data.groups) ? data.groups : [];
+      setDuplicateGroups(groups);
+      setShowDuplicateDialog(true);
+      if (!groups.length) {
+        toast.success(`Scanned ${data.total_tasks_scanned} tasks — no duplicates found ✓`);
+      } else {
+        toast.info(`Found ${groups.length} potential duplicate group${groups.length !== 1 ? 's' : ''}`);
+      }
+    } catch (err) {
+      toast.error(err.message || 'AI duplicate detection failed. Check GEMINI_API_KEY on the server.');
+      console.error('Duplicate detection error:', err);
+    } finally {
+      setDetectingDuplicates(false);
+    }
+  };
+
   const handleCsvUpload = () => { toast.success('CSV upload (stub)'); };
   const handleExportCsv = () => { toast.success('Exporting CSV (stub)'); };
   const handleExportPdf = () => { toast.success('Exporting PDF (stub)'); };
@@ -1003,7 +1040,8 @@ export default function Tasks() {
 
   const displayTasks = React.useMemo(() => {
     let result = [...filteredTasks];
-    if (showMyTasksOnly && user?.id) result = result.filter(t => t.assigned_to === user.id || t.sub_assignees?.includes(user.id) || t.created_by === user.id);
+    if (showMyTasksOnly && user?.id) result = result.filter(t => t.assigned_to === user.id || t.sub_assignees?.includes(user.id));
+    if (filterAssignedByMe && user?.id) result = result.filter(t => t.created_by === user.id);
     result.sort((a, b) => {
       let cmp = 0;
       if (sortBy === 'due_date') { const dA = a.due_date ? new Date(a.due_date).getTime() : Infinity; const dB = b.due_date ? new Date(b.due_date).getTime() : Infinity; cmp = dA - dB; }
@@ -1023,10 +1061,11 @@ export default function Tasks() {
     if (filterPriority !== 'all') pills.push({ key: 'priority', label: filterPriority.toUpperCase() });
     if (filterCategory !== 'all') pills.push({ key: 'category', label: getCategoryLabel(filterCategory) });
     if (filterAssignee !== 'all') pills.push({ key: 'assignee', label: users.find(u => u.id === filterAssignee)?.full_name || filterAssignee });
-    if (showMyTasksOnly)          pills.push({ key: 'mytasks',  label: 'My Tasks' });
-    if (filterTeamOnly)           pills.push({ key: 'teamonly', label: 'Team Tasks' });
+    if (showMyTasksOnly)          pills.push({ key: 'mytasks',     label: 'Assigned to Me' });
+    if (filterTeamOnly)           pills.push({ key: 'teamonly',    label: 'Team Tasks' });
+    if (filterAssignedByMe)       pills.push({ key: 'assignedby',  label: 'Assigned by Me' });
     setActiveFilters(pills);
-  }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, users]);
+  }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, filterAssignedByMe, users]);
 
   const removeFilter = (key) => {
     if (key === 'search')   setSearchQuery('');
@@ -1034,13 +1073,14 @@ export default function Tasks() {
     if (key === 'priority') setFilterPriority('all');
     if (key === 'category') setFilterCategory('all');
     if (key === 'assignee') setFilterAssignee('all');
-    if (key === 'mytasks')  setShowMyTasksOnly(false);
-    if (key === 'teamonly') setFilterTeamOnly(false);
+    if (key === 'mytasks')     setShowMyTasksOnly(false);
+    if (key === 'teamonly')    setFilterTeamOnly(false);
+    if (key === 'assignedby') setFilterAssignedByMe(false);
   };
 
   const clearAllFilters = () => {
     setSearchQuery(''); setFilterStatus('all'); setFilterPriority('all'); setFilterCategory('all'); setFilterAssignee('all');
-    setShowMyTasksOnly(false); setFilterTeamOnly(false); setSortBy('due_date'); setSortDirection('asc');
+    setShowMyTasksOnly(false); setFilterTeamOnly(false); setFilterAssignedByMe(false); setSortBy('due_date'); setSortDirection('asc');
     toast.success('Filters cleared');
   };
 
@@ -1100,20 +1140,19 @@ export default function Tasks() {
             </div>
 
             {/* Right — action buttons */}
-            <div className="flex flex-wrap items-center gap-2 flex-shrink-0 min-w-0">
+            <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
             {/* Total Tasks — admin only */}
             {isAdmin && (
               <>
                 <Button variant="ghost" size="sm"
                   onClick={() => { setFilterStatus('all'); setFilterAssignee('all'); setShowMyTasksOnly(false); setFilterTeamOnly(false); }}
-                  className="h-8 text-xs rounded-xl gap-1.5 text-white/80 hover:text-white hover:bg-white/15 border border-white/20">
+                  className="h-8 text-xs rounded-xl gap-1.5 border font-semibold"
+                  style={{ backgroundColor: 'rgba(31,175,90,0.22)', borderColor: 'rgba(31,175,90,0.55)', color: '#d1fae5' }}>
                   <Target className="h-3.5 w-3.5" /> Total: {stats.total}
                 </Button>
                 <div className="h-8 w-px bg-white/20 hidden md:block" />
               </>
             )}
-              {/* Separator */}
-              <div className="h-8 w-px bg-white/20 hidden md:block" />
 
               {/* Action buttons */}
               <Button variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()}
@@ -1151,6 +1190,21 @@ export default function Tasks() {
                   <FileText className="h-3.5 w-3.5" /> CA/CS Templates
                 </Button>
               )}
+              {/* AI Duplicate Detector */}
+              <Button
+                variant="ghost" size="sm"
+                onClick={handleDetectDuplicates}
+                disabled={detectingDuplicates}
+                className="h-8 text-xs rounded-xl gap-1.5 border font-semibold"
+                style={{
+                  backgroundColor: detectingDuplicates ? 'rgba(255,255,255,0.08)' : 'rgba(139,92,246,0.22)',
+                  borderColor: 'rgba(139,92,246,0.55)',
+                  color: detectingDuplicates ? 'rgba(255,255,255,0.4)' : '#ede9fe',
+                }}>
+                {detectingDuplicates
+                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Scanning…</>
+                  : <><Sparkles className="h-3.5 w-3.5" />AI Duplicates</>}
+              </Button>
 
               {/* Notifications */}
               <Popover open={showNotifications} onOpenChange={setShowNotifications}>
@@ -1492,6 +1546,19 @@ export default function Tasks() {
             </SelectContent>
           </Select>
 
+          {/* Assigned By Me toggle */}
+          <button
+            onClick={() => { setFilterAssignedByMe(p => !p); setShowMyTasksOnly(false); setFilterTeamOnly(false); setFilterAssignee('all'); }}
+            className={`h-8 px-3 text-xs font-semibold rounded-xl border transition-all flex items-center gap-1.5 whitespace-nowrap
+              ${filterAssignedByMe
+                ? (isDark ? 'bg-purple-900/40 border-purple-500 text-purple-300' : 'bg-purple-50 border-purple-400 text-purple-700')
+                : (isDark ? 'bg-slate-700 border-slate-600 text-slate-400 hover:border-purple-500 hover:text-purple-300' : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-purple-300 hover:text-purple-600')
+              }`}
+          >
+            <User className="h-3 w-3" />
+            {filterAssignedByMe ? '✓ Assigned by Me' : 'Assigned by Me'}
+          </button>
+
           {/* View toggle */}
           <div className={`flex p-0.5 rounded-xl ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
             <button onClick={() => setViewMode('list')}
@@ -1767,6 +1834,91 @@ export default function Tasks() {
               );
             })}
             {filteredWorkflows.length === 0 && <div className="col-span-2 text-center py-16 text-slate-400">No templates match your filters</div>}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── AI Duplicate Detection Dialog ──────────────────────────────── */}
+      <Dialog open={showDuplicateDialog} onOpenChange={setShowDuplicateDialog}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+              <Sparkles className="h-5 w-5 text-purple-500" />
+              AI Duplicate Task Detection
+            </DialogTitle>
+            <DialogDescription className="text-sm text-slate-500">
+              {duplicateGroups.length
+                ? `Found ${duplicateGroups.length} group${duplicateGroups.length !== 1 ? 's' : ''} of potential duplicate tasks.`
+                : 'No duplicate tasks detected.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4 space-y-4">
+            {duplicateGroups.length === 0 ? (
+              <div className="text-center py-12">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-50 flex items-center justify-center mx-auto mb-3">
+                  <CheckCircle2 className="h-6 w-6 text-emerald-500" />
+                </div>
+                <p className="font-semibold text-slate-700">All Clear!</p>
+                <p className="text-sm text-slate-400 mt-1">No duplicate tasks found in your current view.</p>
+              </div>
+            ) : duplicateGroups.map((group, gi) => {
+              const groupTasks = (group.task_ids || []).map(id => tasks.find(t => String(t.id) === String(id))).filter(Boolean);
+              const confColor = group.confidence === 'high' ? 'text-red-600 bg-red-50 border-red-200' : 'text-amber-600 bg-amber-50 border-amber-200';
+              return (
+                <div key={gi} className={`border rounded-xl overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                  <div className={`px-4 py-3 flex items-center justify-between gap-2 ${isDark ? 'bg-slate-800' : 'bg-slate-50'}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-xs font-bold text-slate-400">GROUP {gi + 1}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${confColor}`}>
+                        {(group.confidence || 'medium').toUpperCase()} MATCH
+                      </span>
+                    </div>
+                    <p className={`text-xs text-right truncate flex-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{group.reason}</p>
+                  </div>
+                  <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                    {groupTasks.map((task, ti) => {
+                      const ps = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
+                      const ss = STATUS_STYLES[task.status] || STATUS_STYLES.pending;
+                      return (
+                        <div key={ti} className={`px-4 py-3 flex items-center justify-between gap-3 ${isDark ? 'bg-slate-800/60' : 'bg-white'}`}>
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${getStripeColor(task, isOverdue(task)).replace('bg-', 'bg-')}`} />
+                            <span className={`text-sm font-medium truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{task.title}</span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${ss.bg} ${ss.text}`}>{ss.label}</span>
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${ps.bg} ${ps.text}`}>{ps.label}</span>
+                            <span className="text-[10px] text-slate-400">{getUserName(task.assigned_to)}</span>
+                            {canModifyTask(task) && (
+                              <button
+                                onClick={() => { handleEdit(task); setShowDuplicateDialog(false); }}
+                                className="h-6 px-2 text-[10px] font-semibold rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors border border-blue-200 flex-shrink-0"
+                              >
+                                Edit
+                              </button>
+                            )}
+                            {canDeleteTasks && (
+                              <button
+                                onClick={() => { handleDelete(task.id); setDuplicateGroups(prev => prev.map(g => ({ ...g, task_ids: g.task_ids.filter(id => String(id) !== String(task.id)) })).filter(g => g.task_ids.length > 1)); }}
+                                className="h-6 px-2 text-[10px] font-semibold rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors border border-red-200 flex-shrink-0"
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {groupTasks.length === 0 && (
+                      <p className="px-4 py-3 text-xs text-slate-400">Task IDs not found in current view — may be filtered out.</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className={`flex justify-end pt-4 border-t mt-2 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+            <Button variant="outline" onClick={() => setShowDuplicateDialog(false)} className="h-9 text-sm rounded-xl">Close</Button>
           </div>
         </DialogContent>
       </Dialog>
