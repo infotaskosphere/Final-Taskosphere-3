@@ -933,41 +933,111 @@ export default function Tasks() {
     } catch { toast.error('Network error'); }
   };
 
+  // ── Local duplicate detection (runs entirely in browser, no API needed) ──
+  const detectDuplicatesLocally = (taskList) => {
+    // Normalise a string: lowercase, remove punctuation, collapse spaces
+    const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+    // Token-overlap score between two strings (Jaccard similarity on words)
+    const similarity = (a, b) => {
+      const wa = new Set(norm(a).split(' ').filter(w => w.length > 2));
+      const wb = new Set(norm(b).split(' ').filter(w => w.length > 2));
+      if (!wa.size || !wb.size) return 0;
+      let inter = 0;
+      wa.forEach(w => { if (wb.has(w)) inter++; });
+      return inter / (wa.size + wb.size - inter); // Jaccard index 0–1
+    };
+
+    const groups = [];
+    const used   = new Set();
+
+    taskList.forEach((t1, i) => {
+      if (used.has(t1.id)) return;
+      const group = [t1.id];
+      const reasons = [];
+
+      taskList.forEach((t2, j) => {
+        if (i === j || used.has(t2.id)) return;
+
+        const titleSim = similarity(t1.title, t2.title);
+        const descSim  = similarity(t1.description, t2.description);
+
+        // Hard match: exact normalised title
+        const exactTitle = norm(t1.title) === norm(t2.title);
+        // Soft match: title similarity > 70% OR (title > 50% AND same category/client)
+        const softMatch  = titleSim > 0.70 ||
+          (titleSim > 0.50 && (t1.category === t2.category || t1.client_id === t2.client_id)) ||
+          (titleSim > 0.40 && descSim > 0.60);
+
+        if (exactTitle || softMatch) {
+          group.push(t2.id);
+          const conf = exactTitle || titleSim > 0.80 ? 'high' : 'medium';
+          reasons.push({ id: t2.id, conf, titleSim: Math.round(titleSim * 100) });
+        }
+      });
+
+      if (group.length > 1) {
+        const maxConf = reasons.some(r => r.conf === 'high') ? 'high' : 'medium';
+        const topSim  = Math.max(...reasons.map(r => r.titleSim));
+        groups.push({
+          reason: `Title similarity ${topSim}%${t1.category ? ` · same department (${t1.category.toUpperCase()})` : ''}`,
+          confidence: maxConf,
+          task_ids: group.map(String),
+          source: 'local',
+        });
+        group.forEach(id => used.add(id));
+      }
+    });
+
+    return groups;
+  };
+
   const handleDetectDuplicates = async () => {
     if (detectingDuplicates) return;
     setDetectingDuplicates(true);
     setDuplicateGroups([]);
+
+    // ── 1. Try AI (Gemini via backend) first ──────────────────────────────
     try {
-      // ── Calls backend /api/tasks/detect-duplicates which uses the
-      //    existing Gemini AI (GEMINI_API_KEY) already configured on the server.
-      //    No frontend API key needed.
       const res = await fetch(`${API_BASE}/tasks/detect-duplicates`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `Server error ${res.status}`);
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server error ${res.status}`);
       }
-      const data = await res.json();
+      const data   = await res.json();
       const groups = Array.isArray(data.groups) ? data.groups : [];
-      setDuplicateGroups(groups);
+      setDuplicateGroups(groups.map(g => ({ ...g, source: 'ai' })));
       setShowDuplicateDialog(true);
       if (!groups.length) {
-        toast.success(`Scanned ${data.total_tasks_scanned} tasks — no duplicates found ✓`);
+        toast.success(`AI scanned ${data.total_tasks_scanned} tasks — no duplicates found ✓`);
       } else {
-        toast.info(`Found ${groups.length} potential duplicate group${groups.length !== 1 ? 's' : ''}`);
+        toast.info(`AI found ${groups.length} duplicate group${groups.length !== 1 ? 's' : ''}`);
       }
-    } catch (err) {
-      const msg = err.message || '';
-      if (msg.includes('quota') || msg.includes('429') || msg.includes('rate')) {
-        toast.error('Gemini API quota exceeded. Upgrade your Google AI plan or wait and try again.', { duration: 6000 });
-      } else if (msg.includes('GEMINI_API_KEY') || msg.includes('not set')) {
-        toast.error('GEMINI_API_KEY not configured on the server.', { duration: 6000 });
+      setDetectingDuplicates(false);
+      return; // AI succeeded — done
+    } catch (aiErr) {
+      console.warn('AI duplicate detection unavailable, using local algorithm:', aiErr.message);
+    }
+
+    // ── 2. Local fallback — runs in browser, works offline ────────────────
+    try {
+      const localGroups = detectDuplicatesLocally(scopedTasks);
+      setDuplicateGroups(localGroups);
+      setShowDuplicateDialog(true);
+      if (!localGroups.length) {
+        toast.success(`Local scan of ${scopedTasks.length} tasks — no duplicates found ✓`);
       } else {
-        toast.error(msg || 'AI duplicate detection failed.', { duration: 5000 });
+        toast.info(
+          `Found ${localGroups.length} duplicate group${localGroups.length !== 1 ? 's' : ''} (local scan — AI unavailable)`,
+          { duration: 5000 }
+        );
       }
-      console.error('Duplicate detection error:', err);
+    } catch (localErr) {
+      toast.error('Duplicate detection failed. Please try again.', { duration: 5000 });
+      console.error('Local duplicate detection error:', localErr);
     } finally {
       setDetectingDuplicates(false);
     }
@@ -1852,10 +1922,21 @@ export default function Tasks() {
               <Sparkles className="h-5 w-5 text-purple-500" />
               AI Duplicate Task Detection
             </DialogTitle>
-            <DialogDescription className="text-sm text-slate-500">
-              {duplicateGroups.length
-                ? `Found ${duplicateGroups.length} group${duplicateGroups.length !== 1 ? 's' : ''} of potential duplicate tasks.`
-                : 'No duplicate tasks detected.'}
+            <DialogDescription className="text-sm text-slate-500 flex items-center gap-2">
+              <span>
+                {duplicateGroups.length
+                  ? `Found ${duplicateGroups.length} group${duplicateGroups.length !== 1 ? 's' : ''} of potential duplicate tasks.`
+                  : 'No duplicate tasks detected.'}
+              </span>
+              {duplicateGroups.length > 0 && (
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                  duplicateGroups[0]?.source === 'ai'
+                    ? 'bg-violet-50 text-violet-700 border-violet-200'
+                    : 'bg-blue-50 text-blue-700 border-blue-200'
+                }`}>
+                  {duplicateGroups[0]?.source === 'ai' ? '✦ Gemini AI' : '⚡ Local Scan'}
+                </span>
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="mt-4 space-y-4">
