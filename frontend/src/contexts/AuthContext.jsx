@@ -47,11 +47,60 @@ export const AuthProvider = ({ children }) => {
   const clearStorage = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
+    localStorage.removeItem("taskosphere_last_active");
+    localStorage.removeItem("taskosphere_tab_closed");
     sessionStorage.removeItem("token");
     sessionStorage.removeItem("user");
 
     delete api.defaults.headers.common["Authorization"];
   };
+
+  /* ============================================================
+  Auto-logout: 10-hour inactivity + logout on tab/browser close
+  ============================================================ */
+
+  const INACTIVITY_LIMIT_MS = 20 * 60 * 1000; // 20 minutes
+  const LAST_ACTIVE_KEY = 'taskosphere_last_active';
+
+  useEffect(() => {
+    // On tab/browser close — clear auth so user must re-login
+    const handleBeforeUnload = () => {
+      // If using sessionStorage (no rememberMe), it clears automatically.
+      // For localStorage users, we mark a "closed" flag so next open forces login.
+      if (localStorage.getItem('token')) {
+        localStorage.setItem('taskosphere_tab_closed', Date.now().toString());
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    // Record last active time on any user interaction
+    const updateActivity = () => {
+      localStorage.setItem(LAST_ACTIVE_KEY, Date.now().toString());
+    };
+
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach(e => window.addEventListener(e, updateActivity, { passive: true }));
+    updateActivity(); // record now
+
+    // Check inactivity every minute
+    const interval = setInterval(() => {
+      const lastActive = parseInt(localStorage.getItem(LAST_ACTIVE_KEY) || '0', 10);
+      if (Date.now() - lastActive > INACTIVITY_LIMIT_MS) {
+        logout();
+      }
+    }, 60 * 1000);
+
+    return () => {
+      events.forEach(e => window.removeEventListener(e, updateActivity));
+      clearInterval(interval);
+    };
+  }, [user]);
 
   /* ============================================================
   Restore Session
@@ -62,6 +111,15 @@ export const AuthProvider = ({ children }) => {
       const { token, storedUser } = getStoredAuth();
 
       if (!token || !storedUser) {
+        setLoading(false);
+        return;
+      }
+
+      // If user closed the browser/tab while using localStorage session → force re-login
+      const tabClosedAt = localStorage.getItem('taskosphere_tab_closed');
+      if (tabClosedAt && localStorage.getItem('token')) {
+        localStorage.removeItem('taskosphere_tab_closed');
+        clearStorage();
         setLoading(false);
         return;
       }
