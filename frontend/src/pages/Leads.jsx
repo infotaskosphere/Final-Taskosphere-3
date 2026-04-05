@@ -18,10 +18,11 @@ import {
   CheckCircle2, Loader2, Circle, X, ArrowRight, IndianRupee, FileText,
   UserCheck, Tag, MessageSquare, Target, ChevronRight, ShieldCheck,
   Timer, Layers, RefreshCw, Receipt, ClipboardCheck, FolderCheck,
-  Users, CalendarDays, Flag, ClipboardList, MapPin, Briefcase, ListTodo,
+  Users, CalendarDays, Flag, ClipboardList, MapPin, Briefcase, ListTodo, GripVertical,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
@@ -1186,6 +1187,72 @@ export default function LeadsPage() {
   const activeLeads = filteredLeads.filter(l => !['won', 'lost'].includes(l.status));
   const closedLeads = filteredLeads.filter(l => ['won', 'lost'].includes(l.status));
 
+  // ── Drag-and-drop state ─────────────────────────────────────────────────
+  const [leadListIds, setLeadListIds] = React.useState([]);
+  const [kanbanLeadIds, setKanbanLeadIds] = React.useState({});
+
+  React.useEffect(() => {
+    setLeadListIds(activeLeads.map(l => l.id));
+  }, [activeLeads.map(l => l.id).join(',')]);
+
+  React.useEffect(() => {
+    const grouped = {};
+    KANBAN_COLS.forEach(sid => {
+      grouped[sid] = filteredLeads.filter(l => l.status === sid).map(l => l.id);
+    });
+    setKanbanLeadIds(grouped);
+  }, [filteredLeads.map(l => l.id + l.status).join(',')]);
+
+  const orderedActiveLeads = React.useMemo(() => {
+    const leadMap = Object.fromEntries(activeLeads.map(l => [l.id, l]));
+    const result = leadListIds.map(id => leadMap[id]).filter(Boolean);
+    const extra = activeLeads.filter(l => !leadListIds.includes(l.id));
+    return [...result, ...extra];
+  }, [leadListIds, activeLeads]);
+
+  const onLeadListDragEnd = (result) => {
+    if (!result.destination) return;
+    const { source, destination } = result;
+    if (source.index === destination.index) return;
+    const newIds = [...leadListIds];
+    const [moved] = newIds.splice(source.index, 1);
+    newIds.splice(destination.index, 0, moved);
+    setLeadListIds(newIds);
+  };
+
+  const onKanbanDragEnd = (result) => {
+    if (!result.destination) return;
+    const { source, destination, draggableId } = result;
+    const srcStatus = source.droppableId;
+    const dstStatus = destination.droppableId;
+    if (srcStatus === dstStatus && source.index === destination.index) return;
+
+    const newBoard = { ...kanbanLeadIds };
+    const srcIds = [...(newBoard[srcStatus] || [])];
+    const [movedId] = srcIds.splice(source.index, 1);
+
+    if (srcStatus === dstStatus) {
+      srcIds.splice(destination.index, 0, movedId);
+      newBoard[srcStatus] = srcIds;
+    } else {
+      const dstIds = [...(newBoard[dstStatus] || [])];
+      dstIds.splice(destination.index, 0, movedId);
+      newBoard[srcStatus] = srcIds;
+      newBoard[dstStatus] = dstIds;
+      const lead = filteredLeads.find(l => String(l.id) === String(movedId));
+      if (lead) handleQuickStage(lead, dstStatus);
+    }
+    setKanbanLeadIds(newBoard);
+  };
+
+  const getKanbanColOrderedLeads = (sid) => {
+    const leadMap = Object.fromEntries(filteredLeads.map(l => [l.id, l]));
+    const ids = kanbanLeadIds[sid] || [];
+    const result = ids.map(id => leadMap[id]).filter(l => l && l.status === sid);
+    const extra = filteredLeads.filter(l => l.status === sid && !ids.includes(l.id));
+    return [...result, ...extra];
+  };
+
   /* ── Shared action button row for any lead ── */
   const renderLeadActionButtons = (lead, isClosedSection = false) => {
     const editable = canEditLead(lead);
@@ -1353,6 +1420,7 @@ export default function LeadsPage() {
 
       {/* ══════════ LIST VIEW ══════════ */}
       {viewMode === 'list' && (
+        <DragDropContext onDragEnd={onLeadListDragEnd}>
         <motion.div className="space-y-3" variants={containerVariants}>
           {filteredLeads.length === 0 && (
             <div className="text-center py-20 text-slate-400">
@@ -1363,17 +1431,26 @@ export default function LeadsPage() {
           )}
 
           {/* Active leads */}
-          {activeLeads.map(lead => {
+          <Droppable droppableId="leads-list">
+            {(listProvided) => (
+              <div ref={listProvided.innerRef} {...listProvided.droppableProps} className="space-y-3">
+          {orderedActiveLeads.map((lead, leadIndex) => {
             const stage = stageOf(lead.status);
             const overdue = isOverdue(lead);
             const qtnOpen = !!expandedQtn[lead.id];
             return (
-              <motion.div key={lead.id} variants={itemVariants}>
-                <DashboardStripCard stripeColor={stage.stripe}>
+              <Draggable key={String(lead.id)} draggableId={String(lead.id)} index={leadIndex}>
+                {(leadDragProvided, leadDragSnapshot) => (
+                <div ref={leadDragProvided.innerRef} {...leadDragProvided.draggableProps}>
+              <motion.div variants={itemVariants}>
+                <DashboardStripCard stripeColor={stage.stripe} className={leadDragSnapshot.isDragging ? 'shadow-2xl ring-2 ring-blue-400/30' : ''}>
                   <div className="flex flex-col gap-3">
                     {/* Row 1 — title + badges + quick actions */}
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div className="flex items-center gap-2.5 flex-wrap min-w-0">
+                        <span {...leadDragProvided.dragHandleProps} className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-400 transition-colors flex-shrink-0" title="Drag to reorder">
+                          <GripVertical className="h-4 w-4" />
+                        </span>
                         <span className="text-base font-semibold text-slate-900 dark:text-slate-100">{lead.company_name}</span>
                         <motion.span key={lead.status} initial={{ scale: .8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
                           className={cn('inline-flex items-center gap-1 px-2.5 py-0.5 rounded-xl text-[11px] font-semibold border', stage.badge)}>
@@ -1485,8 +1562,15 @@ export default function LeadsPage() {
                   </div>
                 </DashboardStripCard>
               </motion.div>
+              </div>
+              )}
+              </Draggable>
             );
           })}
+              {listProvided.placeholder}
+            </div>
+          )}
+          </Droppable>
 
           {/* Closed leads */}
           {closedLeads.length > 0 && (
@@ -1535,72 +1619,86 @@ export default function LeadsPage() {
             </div>
           )}
         </motion.div>
+        </DragDropContext>
       )}
 
       {/* ══════════ KANBAN VIEW ══════════ */}
       {viewMode === 'kanban' && (
+        <DragDropContext onDragEnd={onKanbanDragEnd}>
         <motion.div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3" variants={containerVariants}>
           {KANBAN_COLS.map(sid => {
             const stage = stageOf(sid);
-            const colLeads = filteredLeads.filter(l => l.status === sid);
+            const colLeads = getKanbanColOrderedLeads(sid);
             return (
               <motion.div key={sid} variants={itemVariants} className="flex flex-col gap-2">
                 <div className={cn('rounded-2xl border px-3 py-2 flex items-center justify-between', stage.badge)}>
                   <span className="text-xs font-bold">{stage.label}</span>
                   <span className="text-xs font-bold bg-white/80 px-1.5 py-0.5 rounded-full">{colLeads.length}</span>
                 </div>
-                <div className="space-y-2 min-h-[80px]">
-                  <AnimatePresence>
-                    {colLeads.map(lead => (
-                      <motion.div key={lead.id} layout initial={{ opacity: 0, scale: .95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: .95 }}
-                        className="relative bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-md transition-all">
-                        <div className={cn('absolute left-0 top-0 h-full w-[5px]', stage.stripe)} />
-                        <div className="pl-4 pr-3 py-3 space-y-2">
-                          <p className="text-xs font-semibold text-slate-900 dark:text-slate-100 line-clamp-2">{lead.company_name}</p>
-                          {lead.contact_name && <p className="text-[11px] text-slate-500 flex items-center gap-1"><User className="h-3 w-3" />{lead.contact_name}</p>}
-                          {lead.assigned_to  && <p className="text-[11px] text-blue-600 font-medium flex items-center gap-1"><UserCheck className="h-3 w-3" />{userNameById(lead.assigned_to)}</p>}
-                          {(lead.services || []).length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {lead.services.slice(0, 2).map(s => <ServiceBadge key={s} value={s} size="xs" />)}
-                              {lead.services.length > 2 && <span className="text-[10px] text-slate-400">+{lead.services.length - 2}</span>}
+                <Droppable droppableId={sid}>
+                  {(colProvided, colSnapshot) => (
+                    <div ref={colProvided.innerRef} {...colProvided.droppableProps}
+                      className={`space-y-2 min-h-[80px] rounded-2xl p-1 transition-colors ${colSnapshot.isDraggingOver ? 'bg-blue-50/60 ring-2 ring-blue-200' : ''}`}>
+                      {colLeads.map((lead, kIdx) => (
+                        <Draggable key={String(lead.id)} draggableId={String(lead.id)} index={kIdx}>
+                          {(kDragProvided, kDragSnapshot) => (
+                            <div ref={kDragProvided.innerRef} {...kDragProvided.draggableProps}
+                              className={`relative bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-md transition-all ${kDragSnapshot.isDragging ? 'shadow-2xl ring-2 ring-blue-400/30 rotate-1' : ''}`}>
+                              <div className={cn('absolute left-0 top-0 h-full w-[5px]', stage.stripe)} />
+                              <div className="pl-4 pr-3 py-3 space-y-2">
+                                <div className="flex items-center gap-1 -mt-1 mb-0.5">
+                                  <span {...kDragProvided.dragHandleProps} className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-400 transition-colors" title="Drag to move stage">
+                                    <GripVertical className="h-3.5 w-3.5" />
+                                  </span>
+                                </div>
+                                <p className="text-xs font-semibold text-slate-900 dark:text-slate-100 line-clamp-2">{lead.company_name}</p>
+                                {lead.contact_name && <p className="text-[11px] text-slate-500 flex items-center gap-1"><User className="h-3 w-3" />{lead.contact_name}</p>}
+                                {lead.assigned_to  && <p className="text-[11px] text-blue-600 font-medium flex items-center gap-1"><UserCheck className="h-3 w-3" />{userNameById(lead.assigned_to)}</p>}
+                                {(lead.services || []).length > 0 && (
+                                  <div className="flex flex-wrap gap-1">
+                                    {lead.services.slice(0, 2).map(s => <ServiceBadge key={s} value={s} size="xs" />)}
+                                    {lead.services.length > 2 && <span className="text-[10px] text-slate-400">+{lead.services.length - 2}</span>}
+                                  </div>
+                                )}
+                                {lead.quotation_amount && <p className="text-xs font-bold text-slate-700">₹{Number(lead.quotation_amount).toLocaleString()}</p>}
+                                {canEditLead(lead) && (
+                                  <div className="flex gap-1 pt-1 border-t border-slate-100 flex-wrap">
+                                    <button onClick={() => openEdit(lead)}
+                                      className="flex-1 h-6 text-[11px] font-medium rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all active:scale-95">
+                                      Edit
+                                    </button>
+                                    <button onClick={() => setTaskLead(lead)}
+                                      className="flex-1 h-6 text-[11px] font-semibold rounded-xl border border-blue-200 text-blue-700 hover:bg-blue-100 hover:shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1">
+                                      <ListTodo className="h-3 w-3" />Task
+                                    </button>
+                                    {!lead.converted_client_id && (
+                                      <button onClick={() => setClientConvLead(lead)}
+                                        className="flex-1 h-6 text-[11px] font-semibold rounded-xl border border-emerald-300 text-emerald-700 hover:bg-emerald-600 hover:text-white hover:shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1">
+                                        <Zap className="h-3 w-3" />Client
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           )}
-                          {lead.quotation_amount && <p className="text-xs font-bold text-slate-700">₹{Number(lead.quotation_amount).toLocaleString()}</p>}
-                          {canEditLead(lead) && (
-                            <div className="flex gap-1 pt-1 border-t border-slate-100 flex-wrap">
-                              <button onClick={() => openEdit(lead)}
-                                className="flex-1 h-6 text-[11px] font-medium rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all active:scale-95">
-                                Edit
-                              </button>
-                              {/* Create Task in kanban */}
-                              <button onClick={() => setTaskLead(lead)}
-                                className="flex-1 h-6 text-[11px] font-semibold rounded-xl border border-blue-200 text-blue-700 hover:bg-blue-100 hover:shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1">
-                                <ListTodo className="h-3 w-3" />Task
-                              </button>
-                              {/* Convert to Client in kanban */}
-                              {!lead.converted_client_id && (
-                                <button onClick={() => setClientConvLead(lead)}
-                                  className="flex-1 h-6 text-[11px] font-semibold rounded-xl border border-emerald-300 text-emerald-700 hover:bg-emerald-600 hover:text-white hover:shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1">
-                                  <Zap className="h-3 w-3" />Client
-                                </button>
-                              )}
-                            </div>
-                          )}
+                        </Draggable>
+                      ))}
+                      {colProvided.placeholder}
+                      {colLeads.length === 0 && !colSnapshot.isDraggingOver && (
+                        <div className="text-center py-8 text-slate-200">
+                          <Circle className="h-7 w-7 mx-auto mb-1 opacity-50" />
+                          <p className="text-[11px]">Empty</p>
                         </div>
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
-                  {colLeads.length === 0 && (
-                    <div className="text-center py-8 text-slate-200">
-                      <Circle className="h-7 w-7 mx-auto mb-1 opacity-50" />
-                      <p className="text-[11px]">Empty</p>
+                      )}
                     </div>
                   )}
-                </div>
+                </Droppable>
               </motion.div>
             );
           })}
         </motion.div>
+        </DragDropContext>
       )}
 
       {/* ── Lead Form Dialog ── */}
