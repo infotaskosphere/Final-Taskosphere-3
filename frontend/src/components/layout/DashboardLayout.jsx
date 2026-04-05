@@ -385,11 +385,15 @@ const DashboardLayout = ({ children }) => {
             onClick={() => setCollapsed(!collapsed)}
             className={`w-full flex items-center ${collapsed ? 'justify-center' : 'justify-start gap-3'} h-11 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700/60 transition-all`}
           >
-            {collapsed
-              ? <PanelLeftOpen className="h-5 w-5" />
-              : <><PanelLeftClose className="h-4 w-4" /><span className="text-sm font-medium">Collapse Sidebar</span></>
-            }
-          </Button>
+            {collapsed ? (
+              <PanelLeftOpen className="h-5 w-5" />
+            ) : (
+              <React.Fragment>
+                <PanelLeftClose className="h-4 w-4" />
+                <span className="text-sm font-medium">Collapse Sidebar</span>
+              </React.Fragment>
+            )}
+          </Button>>
         </div>
       </aside>
 
