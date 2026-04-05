@@ -1280,7 +1280,7 @@ export default function TodoDashboard() {
           )}
           {permittedUsers.map(u => (
             <SelectItem key={u.id || u._id} value={u.id || u._id}>
-              {u.full_name || u.user_name} ({u.role})
+              {u.full_name || u.user_name}
             </SelectItem>
           ))}
         </SelectContent>
