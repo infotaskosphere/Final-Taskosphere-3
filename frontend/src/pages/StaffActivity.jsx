@@ -508,7 +508,8 @@ export default function StaffActivity() {
   }
   // ════════════════════════════════════════════════════════════════════════════
   return (
-    <LayoutCustomizer
+    <>
+      <LayoutCustomizer
       isOpen={showCustomize}
       onClose={() => setShowCustomize(false)}
       order={saOrder}
@@ -1941,5 +1942,6 @@ export default function StaffActivity() {
         return null;
       })}
     </motion.div>
+    </>
   );
 }
