@@ -16,8 +16,10 @@ import {
   CheckCircle, Filter, Upload, Sparkles, FileText,
   X, CheckSquare, Loader2, SkipForward, ChevronRight,
   Target, AlertCircle, TrendingUp, Clock, CalendarIcon,
-  ArrowUpRight, Tag, Layers,
+  ArrowUpRight, Tag, Layers, Settings2,
 } from 'lucide-react';
+import LayoutCustomizer from '../components/layout/LayoutCustomizer';
+import { usePageLayout } from '../hooks/usePageLayout';
 import { format, differenceInDays } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -354,6 +356,16 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
 // MAIN PAGE
 // ─────────────────────────────────────────────
 export default function DueDates() {
+  // ── Layout customizer ───────────────────────────────────────────────────
+  const DD_SECTIONS = ['banner', 'metrics', 'filters', 'table'];
+  const DD_LABELS = {
+    banner:  { name: 'Page Header',   icon: '🏷️', desc: 'Welcome banner and quick actions' },
+    metrics: { name: 'Key Metrics',   icon: '📊', desc: 'Summary counts by status' },
+    filters: { name: 'Filters',       icon: '🔍', desc: 'Search and filter controls' },
+    table:   { name: 'Due Dates List',icon: '📋', desc: 'All compliance deadlines' },
+  };
+  const { order: ddOrder, moveSection: ddMove, resetOrder: ddReset } = usePageLayout('duedates', DD_SECTIONS);
+  const [showLayoutCustomizer, setShowLayoutCustomizer] = React.useState(false);
   const { user } = useAuth();
   const isDark = useDark();
   const [dueDates, setDueDates]         = useState([]);
@@ -479,10 +491,41 @@ export default function DueDates() {
   );
 
   return (
-    <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
+    <>
+      {/* ── Layout Customizer Panel ─────────────────────────────────────── */}
+      <LayoutCustomizer
+        isOpen={showLayoutCustomizer}
+        onClose={() => setShowLayoutCustomizer(false)}
+        order={ddOrder}
+        sectionLabels={DD_LABELS}
+        onDragEnd={ddMove}
+        onReset={ddReset}
+        isDark={isDark}
+      />
 
-      {/* ── Welcome Banner (matching Dashboard banner) ───────────────────── */}
-      <motion.div variants={itemVariants}>
+      <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
+
+        {/* ── Customize Layout Button ───────────────────────────────────── */}
+        <div className="flex justify-end">
+          <button
+            onClick={() => setShowLayoutCustomizer(true)}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all active:scale-95"
+            style={{
+              background:  isDark ? 'rgba(31,111,178,0.15)' : 'rgba(31,111,178,0.07)',
+              borderColor: isDark ? 'rgba(31,111,178,0.4)'  : 'rgba(31,111,178,0.22)',
+              color:       isDark ? '#60a5fa'                : '#1F6FB2',
+            }}
+          >
+            <Settings2 size={13} />
+            Customize Layout
+          </button>
+        </div>
+
+        {/* ── Ordered Sections ─────────────────────────────────────────── */}
+        {ddOrder.map((sectionId) => {
+          /* ── BANNER ───────────────────────────────────────────────── */
+          if (sectionId === 'banner') return (
+            <motion.div key="banner" variants={itemVariants}>
         <div className="relative overflow-hidden rounded-2xl px-6 py-5"
           style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: `0 8px 32px rgba(13,59,102,0.28)` }}>
           <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
@@ -605,8 +648,12 @@ export default function DueDates() {
         </div>
       </motion.div>
 
-      {/* ── Key Metrics (matching Dashboard metric cards) ─────────────────── */}
-      <motion.div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3" variants={itemVariants}>
+            </motion.div>
+          );
+
+          /* ── METRICS ──────────────────────────────────────────────── */
+          if (sectionId === 'metrics') return (
+            <motion.div key="metrics" className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3" variants={itemVariants}>
         <StatCard label="Total" value={stats.total} color={COLORS.deepBlue} iconColor={COLORS.deepBlue}
           iconBg={{ light: `${COLORS.deepBlue}12`, dark: 'rgba(96,165,250,0.12)' }}
           icon={Target} status="all" ring="ring-slate-400"
@@ -629,7 +676,11 @@ export default function DueDates() {
           isActive={filterStatus==='completed'} onClick={()=>setFilterStatus(filterStatus==='completed'?'all':'completed')} />
       </motion.div>
 
-      {/* ── Filters (matching Dashboard filter style) ─────────────────────── */}
+          );
+
+          /* ── FILTERS ──────────────────────────────────────────────── */
+          if (sectionId === 'filters') return (
+            <React.Fragment key="filters">
       <motion.div variants={itemVariants} className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
@@ -671,7 +722,12 @@ export default function DueDates() {
         </div>
       </motion.div>
 
-      {/* ── Due Dates Table Card (matching Dashboard SectionCard) ──────────── */}
+            </React.Fragment>
+          );
+
+          /* ── TABLE ────────────────────────────────────────────────── */
+          if (sectionId === 'table') return (
+            <React.Fragment key="table">
       <motion.div variants={itemVariants}>
         <SectionCard>
           <CardHeaderRow
@@ -837,6 +893,14 @@ export default function DueDates() {
         </SectionCard>
       </motion.div>
 
+            </React.Fragment>
+          );
+
+          return null;
+        })}
+
+      </motion.div>
+
       <SmartImportModal
         open={importOpen}
         onClose={()=>setImportOpen(false)}
@@ -845,6 +909,6 @@ export default function DueDates() {
         user={user}
         onImportDone={fetchDueDates}
       />
-    </motion.div>
+    </>
   );
 }
