@@ -38,15 +38,16 @@ const INTERACTION_STYLES = `
   .won-glow{animation:wonGlow 1s ease-out 1}
   .lost-shake{animation:lostShake .4s ease-out 1}
 `;
-if (typeof document !== 'undefined' && !document.getElementById('leads-styles')) {
-  const s = document.createElement('style');
-  s.id = 'leads-styles';
-  s.textContent = INTERACTION_STYLES;
-  document.head.appendChild(s);
-}
+useEffect(() => {
+  if (!document.getElementById('leads-styles')) {
+    const s = document.createElement('style');
+    s.id = 'leads-styles';
+    s.textContent = INTERACTION_STYLES;
+    document.head.appendChild(s);
+  }
+}, []);
 
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A', lightGreen: '#5CCB5F' };
-
 const containerVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: .05 } } };
 const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: .3 } } };
 
