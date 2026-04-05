@@ -1151,6 +1151,47 @@ export default function Tasks() {
 
   const completionRate = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
 
+  // ── Live filtered stats — recomputed from displayTasks whenever filters change ──
+  const filteredStats = React.useMemo(() => {
+    const list = displayTasks; // already fully filtered + sorted
+    const myFiltered    = list.filter(t => t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id));
+    const todoFiltered  = list.filter(t => t.status === 'pending');
+    const wipFiltered   = list.filter(t => t.status === 'in_progress');
+    const doneFiltered  = list.filter(t => t.status === 'completed');
+    const overdueList   = list.filter(t => isOverdue(t));
+    const teamFiltered  = hasCrossVisibility
+      ? list.filter(t => crossVisibilityUserIds.includes(t.assigned_to) && t.status !== 'completed')
+      : [];
+    const filteredCompletionRate = list.length > 0 ? Math.round((doneFiltered.length / list.length) * 100) : 0;
+    return {
+      total:        list.length,
+      myTask:       myFiltered.length,
+      todo:         todoFiltered.length,
+      inProgress:   wipFiltered.length,
+      completed:    doneFiltered.length,
+      overdue:      overdueList.length,
+      teamTask:     teamFiltered.length,
+      completionRate: filteredCompletionRate,
+    };
+  }, [displayTasks, user, isOverdue, hasCrossVisibility, crossVisibilityUserIds]);
+
+  // Human-readable filter context for the live card subheadings
+  const filterContextLabel = React.useMemo(() => {
+    const parts = [];
+    if (searchQuery)              parts.push(`"${searchQuery}"`);
+    if (filterStatus !== 'all')   parts.push(STATUS_STYLES[filterStatus]?.label || filterStatus);
+    if (filterPriority !== 'all') parts.push(filterPriority.toUpperCase());
+    if (filterCategory !== 'all') parts.push(getCategoryLabel(filterCategory));
+    if (filterAssignee !== 'all') parts.push(users.find(u => u.id === filterAssignee)?.full_name || '');
+    if (showMyTasksOnly)          parts.push('Mine');
+    if (filterTeamOnly)           parts.push('Team');
+    if (filterAssignedByMe)       parts.push('By Me');
+    if (filterCreatedBy !== 'all') parts.push(`By ${users.find(u => u.id === filterCreatedBy)?.full_name || ''}`);
+    return parts.filter(Boolean).join(' · ');
+  }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, filterAssignedByMe, filterCreatedBy, users]);
+
+  const hasActiveFilters = activeFilters.length > 0;
+
   const teamTaskBreakdown = React.useMemo(() => {
     if (!hasCrossVisibility || crossVisibilityUserIds.length === 0) return [];
     return crossVisibilityUserIds.map(uid => {
@@ -1520,100 +1561,6 @@ export default function Tasks() {
       </motion.div>
 
       {/* ── METRIC CARDS — 6 equal, all same height/layout ──────────────── */}
-      {/* ── FILTERED STATS MINI-CARDS ─────────────────────────────────────── */}
-<AnimatePresence>
-  {(activeFilters.length > 0 || true) && (
-    <motion.div
-      key="filtered-stats"
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.25 }}
-      className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2"
-    >
-      {[
-        {
-          label: activeFilters.length > 0
-            ? (activeFilters.find(f => f.key === 'mytasks') ? 'My Filtered' : 'Filtered: Assigned')
-            : 'Showing: All Mine',
-          value: displayTasks.filter(t => t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id)).length,
-          icon: SlidersHorizontal,
-          accent: isDark ? '#60a5fa' : COLORS.deepBlue,
-        },
-        {
-          label: activeFilters.length > 0 ? 'Filtered: To Do' : 'Showing: To Do',
-          value: displayTasks.filter(t => t.status === 'pending').length,
-          icon: Circle,
-          accent: '#EF4444',
-        },
-        {
-          label: activeFilters.length > 0 ? 'Filtered: In Progress' : 'Showing: In Progress',
-          value: displayTasks.filter(t => t.status === 'in_progress').length,
-          icon: TrendingUp,
-          accent: COLORS.amber,
-        },
-        {
-          label: activeFilters.length > 0 ? 'Filtered: Completed' : 'Showing: Completed',
-          value: displayTasks.filter(t => t.status === 'completed').length,
-          icon: CheckCircle2,
-          accent: COLORS.mediumBlue,
-          progress: displayTasks.length > 0
-            ? Math.round((displayTasks.filter(t => t.status === 'completed').length / displayTasks.length) * 100)
-            : 0,
-        },
-        {
-          label: activeFilters.length > 0 ? 'Filtered: Overdue' : 'Showing: Overdue',
-          value: displayTasks.filter(t => isOverdue(t)).length,
-          icon: AlertCircle,
-          accent: COLORS.coral,
-        },
-        {
-          label: activeFilters.length > 0 ? 'Filtered: Total' : 'Showing: Total',
-          value: displayTasks.length,
-          icon: Target,
-          accent: isDark ? '#a78bfa' : '#7c3aed',
-        },
-      ].map((card, i) => (
-        <motion.div
-          key={i}
-          whileHover={{ y: -2, transition: springPhysics.card }}
-          className={`rounded-xl border px-3 py-2.5 flex items-center gap-3 shadow-sm
-            ${isDark
-              ? 'bg-slate-800/70 border-slate-700/80'
-              : 'bg-slate-50/80 border-slate-200/80'
-            }`}
-        >
-          <div
-            className="p-1.5 rounded-lg flex-shrink-0"
-            style={{ backgroundColor: `${card.accent}18` }}
-          >
-            <card.icon className="h-3.5 w-3.5" style={{ color: card.accent }} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 truncate">
-              {card.label}
-            </p>
-            <p className="text-lg font-bold leading-tight" style={{ color: card.accent }}>
-              {card.value}
-            </p>
-            {card.progress !== undefined && (
-              <div className={`mt-1 h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
-                <motion.div
-                  className="h-full rounded-full"
-                  style={{ background: card.accent }}
-                  initial={{ width: 0 }}
-                  animate={{ width: `${Math.min(card.progress, 100)}%` }}
-                  transition={{ duration: 0.6, ease: 'easeOut' }}
-                />
-              </div>
-            )}
-          </div>
-        </motion.div>
-      ))}
-    </motion.div>
-  )}
-</AnimatePresence>
-
       {/* ── Reminder Result Banner ── */}
       {reminderResult && (
         <motion.div
@@ -1706,6 +1653,211 @@ export default function Tasks() {
           isDark={isDark}
         />
       </motion.div>
+
+      {/* ── LIVE FILTER SUMMARY CARDS — always visible, updates in real time ── */}
+      {(() => {
+        // Build a human-friendly label for each active filter dimension
+        const filterParts = [];
+        if (searchQuery)               filterParts.push({ key: 'search',    icon: '🔍', text: `"${searchQuery}"` });
+        if (filterStatus !== 'all')    filterParts.push({ key: 'status',    icon: '📌', text: STATUS_STYLES[filterStatus]?.label || filterStatus });
+        if (filterPriority !== 'all')  filterParts.push({ key: 'priority',  icon: '⚡', text: filterPriority.toUpperCase() + ' Priority' });
+        if (filterCategory !== 'all')  filterParts.push({ key: 'dept',      icon: '🏢', text: getCategoryLabel(filterCategory) });
+        if (filterAssignee !== 'all')  filterParts.push({ key: 'assignee',  icon: '👤', text: users.find(u => u.id === filterAssignee)?.full_name || 'Assignee' });
+        if (showMyTasksOnly)           filterParts.push({ key: 'mine',      icon: '🎯', text: 'Assigned to Me' });
+        if (filterTeamOnly)            filterParts.push({ key: 'team',      icon: '👥', text: 'Team Tasks' });
+        if (filterAssignedByMe)        filterParts.push({ key: 'byme',      icon: '✍️', text: 'Assigned by Me' });
+        if (filterCreatedBy !== 'all') filterParts.push({ key: 'creator',   icon: '✍️', text: `By ${users.find(u => u.id === filterCreatedBy)?.full_name || 'Creator'}` });
+
+        const isFiltered = filterParts.length > 0;
+
+        // Dynamic label builder for each mini-card heading
+        const buildLabel = (base, filterKey, activeIcon = '✓') => {
+          const match = filterParts.find(f => f.key === filterKey);
+          if (match) return `${activeIcon} ${base}`;
+          // Contextualise with the primary active filter if no direct match
+          if (isFiltered) {
+            const ctx = filterParts[0];
+            if (ctx.key === 'assignee') return `${base} · ${users.find(u => u.id === filterAssignee)?.full_name?.split(' ')[0] || ''}`;
+            if (ctx.key === 'mine')     return `${base} · Me`;
+            if (ctx.key === 'team')     return `${base} · Team`;
+            if (ctx.key === 'creator')  return `${base} · ${users.find(u => u.id === filterCreatedBy)?.full_name?.split(' ')[0] || 'Creator'}`;
+            if (ctx.key === 'dept')     return `${base} · ${getCategoryLabel(filterCategory)}`;
+          }
+          return base;
+        };
+
+        const miniCards = [
+          {
+            id: 'mine',
+            label: buildLabel('Assigned to Me', 'mine'),
+            value: filteredStats.myTask,
+            total: stats.myTask,
+            accent: isDark ? '#60a5fa' : COLORS.deepBlue,
+            icon: SlidersHorizontal,
+            active: showMyTasksOnly,
+          },
+          {
+            id: 'todo',
+            label: buildLabel('To Do', 'status', filterStatus === 'pending' ? '✓' : undefined),
+            value: filteredStats.todo,
+            total: stats.todo,
+            accent: '#EF4444',
+            icon: Circle,
+            active: filterStatus === 'pending',
+          },
+          {
+            id: 'wip',
+            label: buildLabel('In Progress', 'status', filterStatus === 'in_progress' ? '✓' : undefined),
+            value: filteredStats.inProgress,
+            total: stats.inProgress,
+            accent: COLORS.amber,
+            icon: TrendingUp,
+            active: filterStatus === 'in_progress',
+          },
+          {
+            id: 'done',
+            label: buildLabel('Completed', 'status', filterStatus === 'completed' ? '✓' : undefined),
+            value: filteredStats.completed,
+            total: stats.completed,
+            accent: COLORS.mediumBlue,
+            icon: CheckCircle2,
+            active: filterStatus === 'completed',
+            showRate: true,
+            rate: filteredStats.completionRate,
+          },
+          {
+            id: 'overdue',
+            label: buildLabel('Overdue', 'status', filterStatus === 'overdue' ? '✓' : undefined),
+            value: filteredStats.overdue,
+            total: stats.overdue,
+            accent: COLORS.coral,
+            icon: AlertCircle,
+            active: filterStatus === 'overdue',
+          },
+          {
+            id: 'team',
+            label: buildLabel('Team Tasks', 'team'),
+            value: filteredStats.teamTask,
+            total: stats.teamTask,
+            accent: isDark ? '#a78bfa' : '#7c3aed',
+            icon: Users,
+            active: filterTeamOnly,
+            hidden: !hasCrossVisibility,
+          },
+        ];
+
+        return (
+          <motion.div variants={itemVariants} className="space-y-1.5">
+            {/* Filter context strip — shown only when filtering */}
+            <AnimatePresence>
+              {isFiltered && (
+                <motion.div
+                  key="filter-strip"
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.18 }}
+                  className={`flex items-center gap-2 flex-wrap px-3 py-1.5 rounded-xl border text-[10px] font-semibold ${isDark ? 'bg-blue-950/40 border-blue-900 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-700'}`}
+                >
+                  <Activity className="h-3 w-3 flex-shrink-0" />
+                  <span className="font-bold uppercase tracking-wide">Live View</span>
+                  <span className={`${isDark ? 'text-blue-500' : 'text-blue-400'}`}>·</span>
+                  {filterParts.map((f, i) => (
+                    <span key={f.key} className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md ${isDark ? 'bg-blue-900/50 text-blue-200' : 'bg-blue-100 text-blue-800'}`}>
+                      {f.icon} {f.text}
+                    </span>
+                  ))}
+                  <span className={`ml-auto font-bold ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
+                    {filteredStats.total} / {stats.total} tasks
+                  </span>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Mini stat cards — always visible */}
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+              {miniCards.map(({ id, label, value, total, accent, icon: Icon, active, showRate, rate, hidden }) => {
+                if (hidden) return null;
+                const pct     = total > 0 ? Math.round((value / total) * 100) : 0;
+                const delta   = value - total; // negative = fewer in filter than global
+                const changed = isFiltered && value !== total;
+                return (
+                  <motion.div
+                    key={id}
+                    layout
+                    animate={{ scale: active ? 1.02 : 1 }}
+                    transition={{ duration: 0.18 }}
+                    className={`rounded-xl px-2.5 py-2 border flex flex-col gap-1 transition-all ${
+                      active
+                        ? (isDark ? 'border-slate-500 bg-slate-700' : 'border-slate-300 bg-white shadow-sm')
+                        : (isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-white/80 border-slate-200/80')
+                    }`}
+                    style={active ? { borderColor: accent, boxShadow: `0 0 0 1.5px ${accent}40` } : {}}
+                  >
+                    {/* Label row */}
+                    <div className="flex items-start justify-between gap-1">
+                      <p className={`text-[8.5px] font-bold uppercase tracking-wide leading-tight truncate ${active ? '' : 'text-slate-400'}`}
+                        style={active ? { color: accent } : {}}>
+                        {label}
+                      </p>
+                      <div className="p-0.5 rounded-md flex-shrink-0" style={{ backgroundColor: `${accent}18` }}>
+                        <Icon className="h-2.5 w-2.5" style={{ color: accent }} />
+                      </div>
+                    </div>
+
+                    {/* Value row */}
+                    <div className="flex items-end gap-1">
+                      <motion.span
+                        key={value}
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="text-lg font-bold leading-none tracking-tight"
+                        style={{ color: accent }}
+                      >
+                        {value}
+                      </motion.span>
+                      <span className={`text-[9px] font-medium pb-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                        / {total}
+                      </span>
+                      {/* Delta badge — shows change when filter is active */}
+                      {changed && (
+                        <span className={`text-[8px] font-bold ml-auto px-1 py-0.5 rounded-md leading-none ${
+                          delta < 0
+                            ? (isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500')
+                            : (isDark ? 'bg-emerald-900/40 text-emerald-400' : 'bg-emerald-50 text-emerald-600')
+                        }`}>
+                          {delta < 0 ? delta : `+${delta}`}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Progress bar */}
+                    <div className={`h-0.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                      <motion.div
+                        className="h-full rounded-full"
+                        style={{ background: active ? accent : `${accent}88` }}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${pct}%` }}
+                        transition={{ duration: 0.45, ease: 'easeOut' }}
+                      />
+                    </div>
+
+                    {/* Completion rate or pct label */}
+                    {showRate ? (
+                      <p className="text-[8px] font-semibold" style={{ color: accent }}>{rate}% done</p>
+                    ) : (
+                      <p className={`text-[8px] font-medium ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>
+                        {pct}% of total
+                      </p>
+                    )}
+                  </motion.div>
+                );
+              })}
+            </div>
+          </motion.div>
+        );
+      })()}
 
       {/* ── TOOLBAR — removed My Tasks toggle, kept all filters ─────────── */}
       <motion.div variants={itemVariants}
