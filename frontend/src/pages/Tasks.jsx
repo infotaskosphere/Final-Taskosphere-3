@@ -1608,7 +1608,7 @@ export default function Tasks() {
       >
         {/* 1. My Task */}
         <MetricCard
-          label="ASSIGNED BY" value={stats.myTask} icon={SlidersHorizontal}
+          label="ASSIGNED TO ME" value={stats.myTask} icon={SlidersHorizontal}
           accent={isDark ? '#60a5fa' : COLORS.deepBlue}
           active={showMyTasksOnly} isDark={isDark}
           onClick={() => setShowMyTasksOnly(p => !p)}
@@ -1670,7 +1670,7 @@ export default function Tasks() {
         if (filterPriority !== 'all')  filterParts.push({ key: 'priority',  icon: '⚡', text: filterPriority.toUpperCase() + ' Priority' });
         if (filterCategory !== 'all')  filterParts.push({ key: 'dept',      icon: '🏢', text: getCategoryLabel(filterCategory) });
         if (filterAssignee !== 'all')  filterParts.push({ key: 'assignee',  icon: '👤', text: users.find(u => u.id === filterAssignee)?.full_name || 'Assignee' });
-        if (showMyTasksOnly)           filterParts.push({ key: 'mine',      icon: '🎯', text: 'Assigned to Me' });
+        if (showMyTasksOnly)           filterParts.push({ key: 'mine',      icon: '🎯', text: 'Assigned To Me' });
         if (filterTeamOnly)            filterParts.push({ key: 'team',      icon: '👥', text: 'Team Tasks' });
         if (filterAssignedByMe)        filterParts.push({ key: 'byme',      icon: '✍️', text: 'Assigned by Me' });
         if (filterCreatedBy !== 'all') filterParts.push({ key: 'creator',   icon: '✍️', text: `By ${users.find(u => u.id === filterCreatedBy)?.full_name || 'Creator'}` });
@@ -1696,7 +1696,7 @@ export default function Tasks() {
         const miniCards = [
           {
             id: 'mine',
-            label: buildLabel('Assigned to Me', 'mine'),
+            label: buildLabel('Assigned By', 'mine'),
             value: filteredStats.myTask,
             total: stats.myTask,
             accent: isDark ? '#60a5fa' : COLORS.deepBlue,
