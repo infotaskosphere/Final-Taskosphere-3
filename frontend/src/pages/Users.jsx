@@ -156,6 +156,10 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_manage_invoices: true,      // default module (permission-based)
       can_view_passwords: true,       // default module (permission-based)
       can_edit_passwords: true,       // default module (permission-based)
+      can_view_all_visits: true,      // own + team visits (server-side scoped)
+      can_edit_visits: true,          // edit own + team visits
+      can_delete_visits: false,       // admin-granted only
+      can_delete_own_visits: true,    // always allowed for own records
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
     },
@@ -196,6 +200,10 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_manage_invoices: true,      // default module (permission-based)
       can_view_passwords: true,       // default module (permission-based)
       can_edit_passwords: true,       // default module (permission-based)
+      can_view_all_visits: false,     // own visits only (server-side scoped)
+      can_edit_visits: true,          // edit own visits
+      can_delete_visits: false,       // admin-granted only
+      can_delete_own_visits: true,    // always allowed for own records
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
     },
@@ -405,9 +413,12 @@ const ModuleAccessBadges = ({ userData }) => {
 };
 
 const PermissionMatrixSummary = ({ permissions }) => {
+  // Include module-level perms (managed from the Modules tab) so coverage % is accurate
+  const MODULE_PERM_KEYS = ['can_manage_invoices', 'can_view_passwords', 'can_edit_passwords'];
   const allPerms = [...GLOBAL_PERMS, ...OPS_PERMS, ...EDIT_PERMS];
-  const granted  = allPerms.filter(p => permissions[p.key]).length;
-  const total    = allPerms.length;
+  const granted  = allPerms.filter(p => permissions[p.key]).length
+                 + MODULE_PERM_KEYS.filter(k => permissions[k]).length;
+  const total    = allPerms.length + MODULE_PERM_KEYS.length;
   const pct      = Math.round((granted / total) * 100);
   return (
     <div className="flex gap-5 p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700">
@@ -1477,6 +1488,9 @@ export default function Users() {
       await api.put(`/users/${selectedUserForPerms?.id}/permissions`, payload);
       if (selectedUserForPerms?.id === user?.id) await refreshUser();
       toast.success('✓ Permissions saved');
+      if (selectedUserForPerms?.id !== user?.id) {
+        toast.info(`${selectedUserForPerms?.full_name || 'The user'} will see updated permissions on their next page load.`, { duration: 5000 });
+      }
       setPermDialogOpen(false); fetchUsers();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to update permissions');
@@ -1563,9 +1577,11 @@ export default function Users() {
       {/* ── Page Header ── */}
       <motion.div variants={slideIn}>
         <div className="relative overflow-hidden rounded-2xl px-6 py-5"
-          style={{ background: GRADIENT, boxShadow: '0 8px 32px rgba(13,59,102,0.22)' }}>
-          <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
+          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`, boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
+          <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10"
             style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+          <div className="absolute right-28 bottom-0 w-40 h-40 rounded-full mb-[-40px] opacity-5"
+            style={{ background: 'white' }} />
           <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5" style={{ background: 'white' }} />
           <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-4">
