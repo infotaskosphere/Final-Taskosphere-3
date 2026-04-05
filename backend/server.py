@@ -666,10 +666,30 @@ async def detect_duplicate_tasks(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Use Gemini AI to find duplicate or very similar tasks visible to the current user.
-    Returns: [{reason, confidence, task_ids}]
+    Use Gemini AI (gemini-1.5-flash) to find duplicate tasks.
+    Better free-tier quota than gemini-2.0-flash-lite.
     """
-    # ── 1. Build query (same scope as GET /tasks) ──────────────────────────
+    import json as _json, re as _re
+
+    # ── 1. Verify Gemini is configured ────────────────────────────────────
+    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    if not gemini_key:
+        raise HTTPException(
+            status_code=503,
+            detail="GEMINI_API_KEY is not set on the server."
+        )
+
+    try:
+        import google.generativeai as _genai
+        _genai.configure(api_key=gemini_key)
+        _model = _genai.GenerativeModel("gemini-1.5-flash")
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="google-generativeai package not installed."
+        )
+
+    # ── 2. Scope query same as GET /tasks ──────────────────────────────────
     query: dict = {"type": {"$ne": "todo"}}
     if current_user.role != "admin":
         permissions = get_user_permissions(current_user)
@@ -683,68 +703,54 @@ async def detect_duplicate_tasks(
             or_clauses.append({"assigned_to": {"$in": allowed_users}})
         query["$or"] = or_clauses
 
-    tasks = await db.tasks.find(query, {"_id": 0}).to_list(200)
+    # Cap at 50 tasks to stay within free-tier token limits
+    tasks = await db.tasks.find(query, {"_id": 0}).to_list(50)
 
     if not tasks:
         return {"groups": [], "total_tasks_scanned": 0}
 
-    if not _gemini_ai:
-        raise HTTPException(
-            status_code=503,
-            detail="Gemini AI is not configured. Please set GEMINI_API_KEY in environment variables."
-        )
-
-    # ── 2. Build slim task payload for Gemini ─────────────────────────────
+    # ── 3. Build minimal payload ───────────────────────────────────────────
     task_summaries = [
         {
-            "id":          str(t.get("id", "")),
-            "title":       (t.get("title") or "")[:120],
-            "description": (t.get("description") or "")[:150],
-            "category":    t.get("category") or "",
-            "status":      t.get("status") or "",
-            "priority":    t.get("priority") or "",
-            "assigned_to": t.get("assigned_to") or "",
-            "client_id":   t.get("client_id") or "",
-            "due_date":    str(t.get("due_date") or ""),
+            "id":    str(t.get("id", "")),
+            "title": (t.get("title") or "")[:100],
+            "desc":  (t.get("description") or "")[:80],
+            "cat":   t.get("category") or "",
+            "cid":   t.get("client_id") or "",
         }
         for t in tasks
     ]
 
     prompt = (
-        "You are a task deduplication assistant for a CA/CS compliance firm.\n"
-        "Analyze the following tasks and identify potential duplicates or very similar tasks.\n"
-        "Group tasks that appear to describe the same work or overlap significantly.\n\n"
-        "RULES:\n"
-        "1. Compare task titles, descriptions, category, client, and assigned user.\n"
-        "2. Only group tasks that are genuinely likely to be duplicates.\n"
-        "3. Return ONLY a valid JSON array — no markdown, no explanation, no backticks.\n"
-        "4. Format: [{\"reason\": \"why similar\", \"confidence\": \"high|medium\", \"task_ids\": [\"id1\", \"id2\"]}]\n"
-        "5. Only include groups with 2 or more tasks.\n"
-        "6. If no duplicates found, return exactly: []\n\n"
-        f"Tasks (JSON):\n{import_json_dumps(task_summaries)}"
+        "Find duplicate or very similar tasks. "
+        "Return ONLY a JSON array, no markdown, no explanation. "
+        'Format: [{"reason":"brief reason","confidence":"high|medium","task_ids":["id1","id2"]}] '
+        "Only groups with 2+ tasks. If none found return []. "
+        f"Tasks: {_json.dumps(task_summaries, ensure_ascii=False)}"
     )
 
+    # ── 4. Call Gemini ─────────────────────────────────────────────────────
     try:
-        import json as _json
-        resp = await _gemini_ai.generate_content_async(prompt)
-        raw  = resp.text.strip()
-        # Strip any accidental markdown fences
-        import re as _re
-        raw = _re.sub(r"```[a-z]*\n?|```", "", raw).strip()
+        resp   = await _model.generate_content_async(prompt)
+        raw    = _re.sub(r"```[a-z]*
+?|```", "", resp.text.strip()).strip()
         groups = _json.loads(raw)
         if not isinstance(groups, list):
             groups = []
     except Exception as e:
+        err_str = str(e)
+        if "429" in err_str or "quota" in err_str.lower() or "rate" in err_str.lower():
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    "Gemini API quota exceeded. "
+                    "Upgrade at https://ai.google.dev/pricing or wait and retry."
+                )
+            )
         logger.warning(f"Gemini duplicate detection failed: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"AI detection failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"AI error: {err_str[:200]}")
 
-    return {
-        "groups": groups,
-        "total_tasks_scanned": len(tasks)
-    }
+    return {"groups": groups, "total_tasks_scanned": len(tasks)}
 
 
 def import_json_dumps(obj):
