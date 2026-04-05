@@ -8,6 +8,7 @@ import {
   BarChart3, TrendingUp, Clock, Award, Users, CheckCircle2,
   AlertTriangle, Target, Download, RefreshCw, Activity,
   Calendar, Star, Zap, Shield,
+  GripVertical, Settings2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -17,6 +18,8 @@ import {
 } from 'recharts';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
+import LayoutCustomizer from '@/components/layout/LayoutCustomizer';
+import { usePageLayout } from '@/hooks/usePageLayout';
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 const C = {
@@ -225,6 +228,13 @@ export default function Reports() {
   const [refreshing, setRefreshing] = useState(false);
   const [selUser,    setSelUser]    = useState('all');
   const [tab,        setTab]        = useState('overview');
+  const [showCustomize, setShowCustomize] = useState(false);
+  const RPT_SECTIONS = ['kpi_row','tab_panels'];
+  const RPT_LABELS = {
+    kpi_row:    { name:'KPI Stats Row',  icon:'📊', desc:'6 summary cards — tasks, completion, attendance, DSC…' },
+    tab_panels: { name:'Tab Panels',     icon:'📑', desc:'Overview, tasks, attendance, efficiency, performers, team' },
+  };
+  const { order: rptOrder, moveSection: rptMove, resetOrder: rptReset } = usePageLayout('reports', RPT_SECTIONS);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   const fetchAll = async (ref=false) => {
@@ -451,6 +461,15 @@ export default function Reports() {
 
   // ── JSX ───────────────────────────────────────────────────────────────────
   return (
+    <LayoutCustomizer
+      isOpen={showCustomize}
+      onClose={() => setShowCustomize(false)}
+      order={rptOrder}
+      sectionLabels={RPT_LABELS}
+      onDragEnd={rptMove}
+      onReset={rptReset}
+      isDark={dark}
+    />
     <motion.div variants={cV} initial="hidden" animate="visible"
       className="space-y-4 p-4 md:p-6 min-h-screen"
       style={{background:t.pageBg}}>
@@ -521,6 +540,24 @@ export default function Reports() {
         </div>
       </motion.div>
 
+      {/* CUSTOMIZE BUTTON */}
+      <motion.div variants={iV} className="flex justify-end">
+        <button
+          onClick={() => setShowCustomize(true)}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition-all hover:shadow-md ${
+            dark
+              ? 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'
+              : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+          }`}
+        >
+          <Settings2 size={13} /> Customize Layout
+        </button>
+      </motion.div>
+
+      {/* ORDERED SECTIONS */}
+      {rptOrder.map((sectionId) => {
+        if (sectionId === 'kpi_row') return (
+      <React.Fragment key="kpi_row">
       {/* ══ KPI ROW — 6 cards, uniform height via grid ══ */}
       {/* grid-rows-1 + items-stretch ensures every card in the row is the same height */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-stretch">
@@ -533,7 +570,10 @@ export default function Reports() {
           {label:'Screen Time',   value:fmtC(totMins),         sub:`${presDays} days logged`,   color:C.amber,        icon:Clock        },
         ].map((k,i)=><KpiCard key={i} {...k} dark={dark}/>)}
       </div>
-
+      </React.Fragment>
+        );
+        if (sectionId === 'tab_panels') return (
+      <React.Fragment key="tab_panels">
       {/* ══ TAB PANELS ══ */}
       <AnimatePresence mode="wait">
 
@@ -1006,6 +1046,10 @@ export default function Reports() {
         )}
 
       </AnimatePresence>
+      </React.Fragment>
+        );
+        return null;
+      })}
     </motion.div>
   );
 }
