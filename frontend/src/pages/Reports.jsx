@@ -217,6 +217,11 @@ export default function Reports() {
   const isAdmin  = user?.role === 'admin';
   const canDL    = isAdmin || hasPermission('can_download_reports');
 
+  // Cross-visibility: view_other_reports is array of user IDs this user can view
+  const crossVisReports  = user?.permissions?.view_other_reports || [];
+  const hasCrossVisReports = crossVisReports.length > 0;
+  const canSwitchUser = isAdmin || hasCrossVisReports;
+
   // ── State ──────────────────────────────────────────────────────────────────
   const [tasks,      setTasks]      = useState([]);
   const [dashStats,  setDashStats]  = useState(null);
@@ -243,12 +248,16 @@ export default function Reports() {
       api.get('/tasks'),
       api.get('/dashboard/stats'),
       api.get('/attendance/history'),
-      isAdmin ? api.get('/users') : Promise.resolve({data:[]}),
+      (isAdmin || hasCrossVisReports) ? api.get('/users') : Promise.resolve({data:[]}),
     ]);
     if (r1.status==='fulfilled') setTasks(r1.value?.data||[]);
     if (r2.status==='fulfilled') setDashStats(r2.value?.data||null);
     if (r3.status==='fulfilled') setAttendance(r3.value?.data||[]);
-    if (r4.status==='fulfilled') setAllUsers(r4.value?.data||[]);
+    if (r4.status==='fulfilled') {
+      const rawUsers = r4.value?.data || [];
+      // Non-admin: only keep the users they're permitted to view via cross-visibility
+      setAllUsers(isAdmin ? rawUsers : rawUsers.filter(u => crossVisReports.includes(u.id || u._id)));
+    }
     setLoading(false); setRefreshing(false);
   };
 
@@ -286,7 +295,7 @@ export default function Reports() {
 
   // ── Unique users (dropdown) ───────────────────────────────────────────────
   const uUsers = useMemo(()=>{
-    if (!isAdmin) return [];
+    if (!isAdmin && !hasCrossVisReports) return [];
     const m=new Map();
     allUsers.forEach(u=>{if(u.id&&u.full_name)m.set(u.id,u);});
     return Array.from(m.values());
@@ -357,7 +366,8 @@ export default function Reports() {
 
   // ── Efficiency cards — real tasks + real attendance ───────────────────────
   const effCards = useMemo(()=>{
-    if (!isAdmin) {
+    if (!isAdmin && !hasCrossVisReports) {
+      // Regular staff: own data only
       const myT=tasks.filter(t=>t.assigned_to===user?.id);
       const myA=attendance.filter(a=>a.user_id===user?.id);
       const myM=myA.reduce((s,a)=>s+(a.duration_minutes||0),0);
@@ -369,6 +379,21 @@ export default function Reports() {
         mins:myM,days:myD,
         pct:myT.length>0?Math.round((myT.filter(t=>t.status==='completed').length/myT.length)*100):0,
       }];
+    }
+    // Non-admin with cross-visibility: show own data + cross-vis users' data
+    if (!isAdmin && hasCrossVisReports) {
+      const allowedIds = new Set([user?.id, ...crossVisReports]);
+      const uMap={};
+      // Seed with own entry + cross-vis users
+      if (user?.id) uMap[user.id]={user_id:user.id,user_name:user.full_name||'You',total:0,done:0,pend:0,mins:0,days:0,pct:0};
+      allUsers.forEach(u=>{if(crossVisReports.includes(u.id))uMap[u.id]={user_id:u.id,user_name:u.full_name,total:0,done:0,pend:0,mins:0,days:0,pct:0};});
+      tasks.forEach(t=>{const u=t.assigned_to;if(u&&uMap[u]){uMap[u].total++;t.status==='completed'?uMap[u].done++:uMap[u].pend++;}});
+      attendance.forEach(a=>{const u=a.user_id;if(u&&uMap[u]){uMap[u].mins+=(a.duration_minutes||0);if(a.status==='present')uMap[u].days++;}});
+      Object.values(uMap).forEach(u=>{u.pct=u.total>0?Math.round((u.done/u.total)*100):0;});
+      let cards=Object.values(uMap);
+      if(selUser!=='all'&&selUser!==user?.id) cards=cards.filter(c=>c.user_id===selUser);
+      else if(selUser===user?.id) cards=cards.filter(c=>c.user_id===user?.id);
+      return cards.sort((a,b)=>b.done-a.done);
     }
     const uMap={};
     allUsers.forEach(u=>{uMap[u.id]={user_id:u.id,user_name:u.full_name,total:0,done:0,pend:0,mins:0,days:0,pct:0};});
@@ -500,11 +525,13 @@ export default function Reports() {
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {isAdmin&&uUsers.length>0&&(
+                {canSwitchUser && uUsers.length>0 && (
                   <select value={selUser} onChange={e=>setSelUser(e.target.value)}
                     className="h-8 px-3 text-xs rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
                     style={{background:t.inputBg,border:`1px solid ${t.inputBdr}`,color:t.text}}>
-                    <option value="all">All Users</option>
+                    {/* Admin can see aggregate; non-admin with cross-vis only see specific users */}
+                    {isAdmin && <option value="all">All Users</option>}
+                    {!isAdmin && <option value={user?.id || 'all'}>My Reports</option>}
                     {uUsers.map(u=><option key={u.id} value={u.id}>{u.full_name}</option>)}
                   </select>
                 )}
