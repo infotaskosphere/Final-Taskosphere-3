@@ -3,14 +3,11 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname  = path.dirname(__filename);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-
-  // ✅ CRITICAL FIX — keep as-is
-  base: '/',
 
   resolve: {
     alias: {
@@ -19,28 +16,32 @@ export default defineConfig({
   },
 
   server: {
-    port:       3000,
-    strictPort: true,
-    host:       true,
+    port: 3000,
     proxy: {
-      '/notifications': { target: 'http://localhost:8000', changeOrigin: true },
-      '/api':           { target: 'http://localhost:8000', changeOrigin: true },
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/notifications': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
 
   build: {
-    outDir:                  'dist',
-    sourcemap:               false,
-    assetsDir:               'assets',
-    chunkSizeWarningLimit:   2000,
+    outDir:          'dist',
+    sourcemap:       false,
+    chunkSizeWarningLimit: 2000,
     rollupOptions: {
       output: {
+        // Split large vendor bundles for faster loads
         manualChunks: {
-          'react-core': ['react', 'react-dom', 'react-router-dom'],
-          'framer':     ['framer-motion'],
-          'charts':     ['recharts', 'chart.js'],
-          'dnd':        ['@hello-pangea/dnd'],
-          'radix': [
+          'react-core':   ['react', 'react-dom', 'react-router-dom'],
+          'framer':       ['framer-motion'],
+          'charts':       ['recharts', 'chart.js'],
+          'dnd':          ['@hello-pangea/dnd'],
+          'radix':        [
             '@radix-ui/react-dialog',
             '@radix-ui/react-dropdown-menu',
             '@radix-ui/react-select',
@@ -53,6 +54,7 @@ export default defineConfig({
     },
   },
 
+  // Suppress known dev-mode warnings
   optimizeDeps: {
     include: ['@hello-pangea/dnd'],
   },
