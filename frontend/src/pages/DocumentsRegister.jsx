@@ -562,15 +562,13 @@ export default function DocumentRegister() {
       </div>
 
       {/* ── Dashboard-style Banner Header ── */}
-      <div className="relative overflow-hidden"
+      <div className="relative overflow-hidden rounded-2xl"
         style={{ background: 'linear-gradient(135deg, #0D3B66 0%, #1F6FB2 60%, #1a8fcc 100%)', boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
-        <div className="absolute inset-0 opacity-10"
-          style={{ backgroundImage: 'radial-gradient(circle at 20% 50%, white 1px, transparent 1px), radial-gradient(circle at 80% 20%, white 1px, transparent 1px)', backgroundSize: '60px 60px' }} />
-        <div className="absolute right-0 top-0 w-96 h-96 rounded-full -mr-32 -mt-32 opacity-10"
+        <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10"
           style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
-        <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5"
-          style={{ background: 'white' }} />
         <div className="absolute right-28 bottom-0 w-40 h-40 rounded-full mb-[-40px] opacity-5"
+          style={{ background: 'white' }} />
+        <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5"
           style={{ background: 'white' }} />
 
         <div className="relative px-6 py-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
