@@ -1196,7 +1196,6 @@ export default function Tasks() {
   // ── Live filtered stats — recomputed from displayTasks whenever filters change ──
   const filteredStats = React.useMemo(() => {
     const list = displayTasks; // already fully filtered + sorted
-    const myFiltered    = list.filter(t => t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id));
     const todoFiltered  = list.filter(t => t.status === 'pending');
     const wipFiltered   = list.filter(t => t.status === 'in_progress');
     const doneFiltered  = list.filter(t => t.status === 'completed');
@@ -1205,17 +1204,25 @@ export default function Tasks() {
       ? list.filter(t => crossVisibilityUserIds.includes(t.assigned_to) && t.status !== 'completed')
       : [];
     const filteredCompletionRate = list.length > 0 ? Math.round((doneFiltered.length / list.length) * 100) : 0;
+
+    // When a creator filter is active (filterCreatedBy or filterAssignedByMe),
+    // "assigned" card shows tasks assigned BY that creator TO others (not self)
+    const creatorId = filterAssignedByMe ? user?.id : (filterCreatedBy !== 'all' ? filterCreatedBy : null);
+    const assignedByCreator = creatorId
+      ? list.filter(t => t.created_by === creatorId && t.assigned_to !== creatorId)
+      : list.filter(t => t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id));
+
     return {
-      total:        list.length,
-      myTask:       myFiltered.length,
-      todo:         todoFiltered.length,
-      inProgress:   wipFiltered.length,
-      completed:    doneFiltered.length,
-      overdue:      overdueList.length,
-      teamTask:     teamFiltered.length,
+      total:          list.length,
+      myTask:         assignedByCreator.length,
+      todo:           todoFiltered.length,
+      inProgress:     wipFiltered.length,
+      completed:      doneFiltered.length,
+      overdue:        overdueList.length,
+      teamTask:       teamFiltered.length,
       completionRate: filteredCompletionRate,
     };
-  }, [displayTasks, user, isOverdue, hasCrossVisibility, crossVisibilityUserIds]);
+  }, [displayTasks, user, isOverdue, hasCrossVisibility, crossVisibilityUserIds, filterAssignedByMe, filterCreatedBy]);
 
   // Human-readable filter context for the live card subheadings
   const filterContextLabel = React.useMemo(() => {
