@@ -1110,7 +1110,6 @@ export default function DocumentRegister() {
           <DialogFooter><Button variant="outline" onClick={() => setFullNotesOpen(false)}>Close</Button></DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>{/* closes page body */}
-    </div>{/* closes min-h-screen */}
+    </div>
   );
 }
