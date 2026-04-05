@@ -409,7 +409,7 @@ const DashboardLayout = ({ children }) => {
           background:   isDark ? 'rgba(15,23,42,0.85)' : 'rgba(255,255,255,0.85)',
           borderBottom: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
           maxWidth:     `calc(100vw - ${offsetPx}px)`,
-          overflow:     'hidden',
+          overflow:     'visible',
         }}
       >
         <div className="flex-1 flex items-center justify-between px-3 sm:px-5 min-w-0 gap-2">
@@ -522,7 +522,7 @@ const DashboardLayout = ({ children }) => {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -8, scale: 0.96 }}
                     transition={springSoft}
-                    className="absolute right-0 mt-2 z-50 overflow-hidden"
+                    className="absolute right-0 mt-2 z-[200] overflow-hidden"
                     style={{
                       width: 'min(240px, calc(100vw - 2rem))',
                       background:   isDark ? '#1e293b' : '#ffffff',
