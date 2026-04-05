@@ -327,49 +327,34 @@ const DashboardLayout = ({ children }) => {
           boxShadow:   isDark ? '10px 0 30px rgba(0,0,0,0.2)' : '10px 0 30px rgba(0,0,0,0.03)',
         }}
       >
-        {/* Logo */}
+        {/* Logo — static, centered, +15% size */}
         <div
-          className={`h-20 flex items-center justify-center flex-shrink-0 transition-all duration-300 border-b ${
+          className={`h-20 flex items-center justify-center flex-shrink-0 border-b ${
             isDark ? 'border-slate-700/60' : 'border-slate-100'
           }`}
         >
-          <motion.div
-            className={`relative flex items-center justify-center transition-all duration-300 ${
-              collapsed ? 'w-12 px-2' : 'w-full px-6'
+          <div
+            className={`relative flex items-center justify-center ${
+              collapsed ? 'w-12' : 'w-full px-5'
             }`}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            whileHover={{ scale: 1.03 }}
-            transition={springSnap}
           >
-            <motion.img
+            <img
               src="/logo.png"
               alt="TaskOsphere"
-              className="max-w-full h-auto object-contain cursor-pointer z-10"
+              className="object-contain cursor-pointer mx-auto block"
               onClick={() => navigate('/dashboard')}
-              animate={hasUnread ? {
-                scale: [1, 1.05, 1],
-                filter: isDark
-                  ? ['brightness(1.1) drop-shadow(0px 0px 2px rgba(31,175,90,0.2))', 'brightness(1.2) drop-shadow(0px 0px 8px rgba(31,175,90,0.5))', 'brightness(1.1) drop-shadow(0px 0px 2px rgba(31,175,90,0.2))']
-                  : ['drop-shadow(0px 0px 0px rgba(31,175,90,0))', 'drop-shadow(0px 0px 6px rgba(31,175,90,0.3))', 'drop-shadow(0px 0px 0px rgba(31,175,90,0))'],
-              } : {
-                scale: 1,
-                filter: isDark ? 'brightness(1.1) drop-shadow(0px 0px 2px rgba(255,255,255,0.1))' : 'none',
+              style={{
+                maxHeight: collapsed ? '46px' : '60px',
+                width: 'auto',
+                filter: isDark ? 'brightness(1.08)' : 'none',
               }}
-              transition={hasUnread
-                ? { duration: 2.5, repeat: Infinity, ease: 'easeInOut' }
-                : { duration: 0.3 }
-              }
-              style={{ maxHeight: collapsed ? '40px' : '52px' }}
             />
             {hasUnread && (
-              <motion.span
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
+              <span
                 className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#1FAF5A] rounded-full border-2 border-white dark:border-slate-800 shadow-sm z-20"
               />
             )}
-          </motion.div>
+          </div>
         </div>
 
         {/* Nav scroll container */}
