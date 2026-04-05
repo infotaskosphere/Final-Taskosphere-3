@@ -869,6 +869,7 @@ export default function DocumentRegister() {
             );
           })}
         </div>
+      </div>
 
       {/* ── Page body ── */}
       <div className="px-6 py-6 space-y-5">
@@ -1109,6 +1110,7 @@ export default function DocumentRegister() {
           <DialogFooter><Button variant="outline" onClick={() => setFullNotesOpen(false)}>Close</Button></DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </div>{/* closes page body */}
+    </div>{/* closes min-h-screen */}
   );
 }
