@@ -89,11 +89,25 @@ api.interceptors.response.use(
   (error) => {
     if (!error.config?._silent) _setLoading(-1);
 
-    // 🔐 401 → logout
+    // 🔐 401 → session expired, redirect to login
     if (error.response?.status === 401) {
       clearToken();
+      localStorage.removeItem("user");
+      sessionStorage.removeItem("user");
+      sessionStorage.removeItem("token");
       if (!window.location.pathname.startsWith("/login")) {
         window.location.href = "/login";
+      }
+    }
+
+    // 🚫 403 → permission denied — refresh user then go to dashboard
+    //    The next AuthContext session-restore will fetch fresh permissions.
+    if (error.response?.status === 403) {
+      if (!window.location.pathname.startsWith("/login") &&
+          !window.location.pathname.startsWith("/dashboard")) {
+        // Fire a custom event so AuthContext (if listening) can refresh
+        window.dispatchEvent(new CustomEvent("permission-denied"));
+        window.location.href = "/dashboard";
       }
     }
 
