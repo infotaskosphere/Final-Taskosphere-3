@@ -33,10 +33,10 @@ const NAV_GROUPS = [
     items: [
       { path: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard' },
       { path: '/tasks',      icon: CheckSquare,     label: 'Tasks' },
-      { path: '/todos',      icon: CheckSquare,     label: 'To Do' },
-      { path: '/attendance', icon: Clock,           label: 'Attendance' },
-      { path: '/duedates',   icon: Calendar,        label: 'Compliance Calendar' },
-      { path: '/visits',     icon: MapPin,          label: 'Client Visits' },
+      { path: '/todos',      icon: CheckSquare,     label: 'To Do',              permission: 'can_view_todo_dashboard' },
+      { path: '/attendance', icon: Clock,           label: 'Attendance',          permission: 'can_view_attendance'    },
+      { path: '/duedates',   icon: Calendar,        label: 'Compliance Calendar', permission: 'can_view_all_duedates'  },
+      { path: '/visits',     icon: MapPin,          label: 'Client Visits',       permission: 'can_view_own_data'      },
     ],
   },
   {
@@ -68,7 +68,7 @@ const NAV_GROUPS = [
     dividerLabel: 'Admin',
     items: [
       { path: '/staff-activity', icon: Activity,  label: 'Staff Activity',  permission: 'can_view_staff_activity' },
-      { path: '/reports',        icon: BarChart3,  label: 'Reports' },
+      { path: '/reports',        icon: BarChart3,  label: 'Reports',         permission: 'can_view_reports'        },
       { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log',  permission: 'can_view_audit_logs'     },
       { path: '/users',          icon: Users,      label: 'Users',           permission: 'can_view_user_page'      },
     ],
@@ -77,8 +77,8 @@ const NAV_GROUPS = [
     id: 'settings',
     dividerLabel: 'Settings',
     items: [
-      { path: '/settings/email', icon: Mail,     label: 'Email Accounts'   },
-      { path: '/settings',       icon: Settings, label: 'General Settings' },
+      { path: '/settings/email', icon: Mail,     label: 'Email Accounts',  permission: 'can_connect_email'   },
+      { path: '/settings',       icon: Settings, label: 'General Settings',permission: 'can_manage_settings' },
     ],
   },
 ];
