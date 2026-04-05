@@ -13,6 +13,8 @@ import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
 import { Calendar as CalendarComponent } from '../components/ui/calendar';
+import LayoutCustomizer from '../components/layout/LayoutCustomizer';
+import { usePageLayout } from '../hooks/usePageLayout';
 
 
 import {
@@ -47,6 +49,8 @@ import {
   Sun,
   Moon,
   Sunset,
+  GripVertical,
+  Settings2,
 } from 'lucide-react';
 
 const IST_TIMEZONE = 'Asia/Kolkata';
@@ -889,6 +893,16 @@ export default function Dashboard() {
   const [selectedVisit,     setSelectedVisit]     = useState(null);
   const [selectedTodo,      setSelectedTodo]      = useState(null);
   const [selectedPerformer, setSelectedPerformer] = useState(null);
+  const [showCustomize,     setShowCustomize]     = useState(false);
+  const DASHBOARD_SECTIONS = ['metrics','tasks_row','assigned_tasks','performers','quick_access'];
+  const DASHBOARD_LABELS = {
+    metrics:         { name:'Key Metrics',          icon:'📊', desc:'6 stat cards — tasks, todos, overdue, DSC…' },
+    tasks_row:       { name:'Tasks & Deadlines',    icon:'📋', desc:'Recent tasks, compliance deadlines, attendance' },
+    assigned_tasks:  { name:'Assigned Tasks',       icon:'✅', desc:'Tasks assigned to you and by you' },
+    performers:      { name:'Performers & Todos',   icon:'🌟', desc:'Star performers, to-do list and client visits' },
+    quick_access:    { name:'Quick Access',         icon:'⚡', desc:'Leads, clients, DSC, compliance tiles' },
+  };
+  const { order: dashOrder, moveSection: dashMove, resetOrder: dashReset } = usePageLayout('dashboard', DASHBOARD_SECTIONS);
 
   // ── Real Data State (replaces all stubs) ──────────────────────────────────
   const [allUsers,         setAllUsers]         = useState([]);
@@ -1448,6 +1462,16 @@ export default function Dashboard() {
         )}
       </AnimatePresence>
 
+      <LayoutCustomizer
+        isOpen={showCustomize}
+        onClose={() => setShowCustomize(false)}
+        order={dashOrder}
+        sectionLabels={DASHBOARD_LABELS}
+        onDragEnd={dashMove}
+        onReset={dashReset}
+        isDark={isDark}
+      />
+
       <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
 
         {/* WELCOME BANNER */}
@@ -1589,6 +1613,24 @@ export default function Dashboard() {
           </div>
         </motion.div>
 
+        {/* CUSTOMIZE BUTTON */}
+        <motion.div variants={itemVariants} className="flex justify-end">
+          <button
+            onClick={() => setShowCustomize(true)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition-all hover:shadow-md ${
+              isDark
+                ? 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'
+                : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+            }`}
+          >
+            <Settings2 size={13} /> Customize Layout
+          </button>
+        </motion.div>
+
+        {/* ORDERED SECTIONS */}
+        {dashOrder.map((sectionId) => {
+          if (sectionId === 'metrics') return (
+        <React.Fragment key="metrics">
         {/* KEY METRICS — 6 EQUAL CARDS
             Cards: My Task | Todo | Overdue | DSC | Completion | Team Task
             All cards use identical padding, flex layout, and min-h to stay same size. */}
@@ -1825,7 +1867,10 @@ export default function Dashboard() {
             </CardContent>
           </motion.div>
         </motion.div>
-
+        </React.Fragment>
+          );
+          if (sectionId === 'tasks_row') return (
+        <React.Fragment key="tasks_row">
         {/* RECENT TASKS + DEADLINES + ATTENDANCE */}
         <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-3" variants={itemVariants}>
 
@@ -1996,7 +2041,10 @@ export default function Dashboard() {
             </div>
           </SectionCard>
         </motion.div>
-
+        </React.Fragment>
+          );
+          if (sectionId === 'assigned_tasks') return (
+        <React.Fragment key="assigned_tasks">
         {/* ASSIGNED TASKS */}
         {showTaskSection && (
           <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-3">
@@ -2055,7 +2103,10 @@ export default function Dashboard() {
             </SectionCard>
           </motion.div>
         )}
-
+        </React.Fragment>
+          );
+          if (sectionId === 'performers') return (
+        <React.Fragment key="performers">
         {/* STAR PERFORMERS + TO-DO + VISITS */}
         <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
 
@@ -2201,7 +2252,10 @@ export default function Dashboard() {
             isLoading={dataLoading} 
           />
           </motion.div>
-
+        </React.Fragment>
+          );
+          if (sectionId === 'quick_access') return (
+        <React.Fragment key="quick_access">
         {/* QUICK ACCESS TILES */}
         <motion.div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 [&>*]:min-w-0" variants={itemVariants}>
           {[
@@ -2264,6 +2318,10 @@ export default function Dashboard() {
             </motion.div>
           )}
         </motion.div>
+        </React.Fragment>
+          );
+          return null;
+        })}
 
         {/* PUNCH-IN GATE OVERLAY */}
         <AnimatePresence>
