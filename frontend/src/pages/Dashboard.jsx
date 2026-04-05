@@ -1074,29 +1074,36 @@ export default function Dashboard() {
   }, [tasks]);
 
   const teamTaskBreakdown = useMemo(() => {
-    if (!hasCrossVisibility || crossVisibilityUserIds.length === 0) return [];
-    return crossVisibilityUserIds
+    if (!hasCrossVisibility) return [];
+    // Build list: current user + all cross visibility users
+    const allUids = [...new Set([user?.id, ...crossVisibilityUserIds].filter(Boolean))];
+    return allUids
       .map(uid => {
         const memberUser = allUsers.find(u => u.id === uid);
-        const nameFromTask = tasks.find(t => t.assigned_to === uid)?.assigned_to_name;
         const pendingCount = tasks.filter(
           t =>
-            (t.assigned_to === uid || t.sub_assignees?.includes(uid)) &&
+            (t.assigned_to === uid || (t.sub_assignees || []).includes(uid)) &&
             t.status !== 'completed'
         ).length;
-        return { id: uid, name: memberUser?.full_name || 'Unknown', pendingCount };
+        const label = uid === user?.id ? (memberUser?.full_name || 'Me') : (memberUser?.full_name || 'Unknown');
+        return { id: uid, name: label, pendingCount };
       })
       .filter(m => m.pendingCount > 0);
-  }, [hasCrossVisibility, crossVisibilityUserIds, tasks, allUsers]);
+  }, [hasCrossVisibility, crossVisibilityUserIds, tasks, allUsers, user?.id]);
 
   const teamTaskTotal = useMemo(() => {
     if (!hasCrossVisibility) return 0;
-    return tasks.filter(
-      t =>
-        crossVisibilityUserIds.includes(t.assigned_to) &&
-        t.status !== 'completed'
-    ).length;
-  }, [hasCrossVisibility, crossVisibilityUserIds, tasks]);
+    return tasks.filter(t => {
+      const isIncomplete = t.status !== 'completed';
+      // Include current user own tasks
+      const isMyTask = t.assigned_to === user?.id || (t.sub_assignees || []).includes(user?.id);
+      // Include cross visibility users tasks
+      const isCrossTask =
+        crossVisibilityUserIds.includes(t.assigned_to) ||
+        (t.sub_assignees || []).some(id => crossVisibilityUserIds.includes(id));
+      return isIncomplete && (isMyTask || isCrossTask);
+    }).length;
+  }, [hasCrossVisibility, crossVisibilityUserIds, tasks, user?.id]);
 
   const sortedDueDates = useMemo(() => {
     return [...upcomingDueDates].sort((a, b) => {
