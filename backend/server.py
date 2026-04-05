@@ -4078,6 +4078,48 @@ async def delete_client(
 #============================================
 # DASHBOARD ROUTES
 #============================================
+
+@api_router.get("/dashboard/dept-members")
+async def get_dept_member_count(current_user: User = Depends(get_current_user)):
+    """
+    Returns count + basic info of users in the same department(s) as the current user.
+    Accessible by all roles (admin, manager, staff).
+    - Admin: returns count of ALL active users.
+    - Manager: returns count of same-department users (staff + other managers).
+    - Staff: returns count of same-department users (staff + managers).
+    """
+    if current_user.role == "admin":
+        all_users = await db.users.find(
+            {"is_active": True, "status": "approved"},
+            {"_id": 0, "id": 1, "full_name": 1, "departments": 1, "role": 1}
+        ).to_list(1000)
+        return {
+            "count": len(all_users),
+            "departments": [],
+            "members": [{"id": u["id"], "full_name": u.get("full_name", ""), "role": u.get("role", "")} for u in all_users]
+        }
+
+    user_depts = current_user.departments or []
+    if not user_depts:
+        return {"count": 0, "departments": [], "members": []}
+
+    dept_users = await db.users.find(
+        {
+            "departments": {"$in": user_depts},
+            "id": {"$ne": current_user.id},
+            "is_active": True,
+            "status": "approved",
+        },
+        {"_id": 0, "id": 1, "full_name": 1, "departments": 1, "role": 1}
+    ).to_list(500)
+
+    return {
+        "count": len(dept_users),
+        "departments": user_depts,
+        "members": [{"id": u["id"], "full_name": u.get("full_name", ""), "role": u.get("role", "")} for u in dept_users]
+    }
+
+
 @api_router.get("/dashboard/stats", response_model=DashboardStats)
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     now = datetime.now(IST)
@@ -4140,14 +4182,18 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     if current_user.role == "admin":
         client_query = {}
     else:
-        # SCOPE: OWN + CROSS-VISIBILITY (same for Manager and Staff)
-        # Managers with can_view_all_clients=True already get all via /clients; dashboard shows own only
+        # SCOPE: OWN (assigned_to) + created_by + per-service assignments[] + explicit assigned_clients permission
+        # This ensures non-admin users see all clients they are actually working on
         permissions = get_user_permissions(current_user)
         extra_clients = permissions.get("assigned_clients", []) or []
-        or_clauses = [{"assigned_to": current_user.id}]
+        or_clauses = [
+            {"assigned_to": current_user.id},
+            {"created_by": current_user.id},
+            {"assignments": {"$elemMatch": {"user_id": current_user.id}}},
+        ]
         if extra_clients:
             or_clauses.append({"id": {"$in": extra_clients}})
-        client_query = {"$or": or_clauses} if len(or_clauses) > 1 else {"assigned_to": current_user.id}
+        client_query = {"$or": or_clauses}
 
     clients = await db.clients.find(client_query, {"_id": 0}).to_list(1000)
     total_clients = len(clients)
