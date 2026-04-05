@@ -1537,13 +1537,14 @@ export default function VisitsPage() {
         )}
         {!isAdmin && !isMgr && (() => {
           const perms = user?.permissions || {};
-          const allowed = perms.view_other_visits || [];
+          // Normalize to strings to avoid ObjectId vs string type mismatch
+          const allowed = (perms.view_other_visits || []).map(String);
           const canViewAll = !!perms.can_view_all_visits;
           if (!canViewAll && allowed.length === 0) return null;
           // When can_view_all_visits=true, show all active users; else show only permitted IDs
           const permittedUsers = canViewAll
-            ? users.filter(u => u.is_active && u.id !== user?.id)
-            : users.filter(u => u.is_active && allowed.includes(u.id));
+            ? users.filter(u => u.is_active && String(u.id) !== String(user?.id))
+            : users.filter(u => u.is_active && allowed.includes(String(u.id)));
           if (permittedUsers.length === 0) return null;
           return (
             <select value={filterUser} onChange={e => setFilterUser(e.target.value)}
