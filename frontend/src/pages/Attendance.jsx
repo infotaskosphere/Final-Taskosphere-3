@@ -70,7 +70,11 @@ import {
   Zap,
   Send,
   ExternalLink,
+  Settings2,
+  GripVertical,
 } from 'lucide-react';
+import LayoutCustomizer from '../components/layout/LayoutCustomizer';
+import { usePageLayout } from '../hooks/usePageLayout';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS & TOKENS
@@ -992,6 +996,17 @@ export default function Attendance() {
   const isAdmin         = user?.role === 'admin';
   const canViewRankings = hasPermission('can_view_staff_rankings');
 
+  // ── Layout customizer ─────────────────────────────────────────────────────
+  const ATT_SECTIONS = ['today_status', 'stat_cards', 'holidays_reminders', 'calendar_area'];
+  const ATT_LABELS = {
+    today_status:       { name: "Today's Status",      icon: '🕐', desc: 'Punch-in / punch-out card' },
+    stat_cards:         { name: 'Statistics',           icon: '📊', desc: 'Monthly hours, streak, rank' },
+    holidays_reminders: { name: 'Holidays & Reminders', icon: '🗓️', desc: 'Upcoming holidays and reminders' },
+    calendar_area:      { name: 'Calendar & History',   icon: '📅', desc: 'Attendance calendar and recent records' },
+  };
+  const { order: attOrder, moveSection: attMove, resetOrder: attReset } = usePageLayout('attendance', ATT_SECTIONS);
+  const [showLayoutCustomizer, setShowLayoutCustomizer] = React.useState(false);
+
   // ── State ─────────────────────────────────────────────────────────────────
   const [loading,            setLoading]            = useState(false);
   const [selectedDate,       setSelectedDate]       = useState(new Date());
@@ -1890,8 +1905,19 @@ export default function Attendance() {
         )}
       </AnimatePresence>
 
+      {/* ── Layout Customizer Panel ─────────────────────────────────────────── */}
+      <LayoutCustomizer
+        isOpen={showLayoutCustomizer}
+        onClose={() => setShowLayoutCustomizer(false)}
+        order={attOrder}
+        sectionLabels={ATT_LABELS}
+        onDragEnd={attMove}
+        onReset={attReset}
+        isDark={isDark}
+      />
+
       <motion.div
-        className="min-h-screen p-5 md:p-6 lg:p-8 space-y-5"
+        className="min-h-screen p-4 sm:p-5 md:p-6 lg:p-7 space-y-4 sm:space-y-5 overflow-x-hidden"
         style={{ background: isDark ? D.bg : '#f8fafc' }}
         variants={containerVariants} initial="hidden" animate="visible"
       >
@@ -2043,8 +2069,29 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ══ TODAY STATUS ═════════════════════════════════════════════════════ */}
-        {!isEveryoneView && (
+        {/* ── Customize Layout button ─────────────────────────────────── */}
+        <div className="flex justify-end -mt-1">
+          <button
+            onClick={() => setShowLayoutCustomizer(true)}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all active:scale-95"
+            style={{
+              background:  isDark ? 'rgba(31,111,178,0.15)' : 'rgba(31,111,178,0.07)',
+              borderColor: isDark ? 'rgba(31,111,178,0.4)'  : 'rgba(31,111,178,0.22)',
+              color:       isDark ? '#60a5fa'                : '#1F6FB2',
+            }}
+          >
+            <Settings2 size={13} />
+            Customize Layout
+          </button>
+        </div>
+
+        {/* ── Ordered sections ─────────────────────────────────────────────── */}
+        {attOrder.map((sectionId) => {
+
+          /* ══ TODAY STATUS ═════════════════════════════════════════════════ */
+          if (sectionId === 'today_status') return (
+            <React.Fragment key="today_status">
+              {!isEveryoneView && (
           <motion.div variants={itemVariants}>
             <SectionCard>
               <CardHeaderRow
@@ -2337,8 +2384,13 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ══ STAT CARDS (Enhanced with Streak + Avg Hours) ═════════════════════ */}
-        <motion.div
+            </React.Fragment>
+          );
+
+          /* ══ STAT CARDS ══════════════════════════════════════════════════ */
+          if (sectionId === 'stat_cards') return (
+            <React.Fragment key="stat_cards">
+              <motion.div
           className={`grid gap-3 ${canViewRankings ? 'grid-cols-2 md:grid-cols-3 lg:grid-cols-6' : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-5'}`}
           variants={itemVariants}
         >
@@ -2367,8 +2419,13 @@ export default function Attendance() {
           )}
         </motion.div>
 
-        {/* ══ HOLIDAYS + REMINDERS ═════════════════════════════════════════════ */}
-        {!isEveryoneView && (
+            </React.Fragment>
+          );
+
+          /* ══ HOLIDAYS + REMINDERS ════════════════════════════════════════ */
+          if (sectionId === 'holidays_reminders') return (
+            <React.Fragment key="holidays_reminders">
+              {!isEveryoneView && (
           <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-5">
 
             {/* HOLIDAYS CARD */}
@@ -2549,8 +2606,13 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ══ CALENDAR + APPLY LEAVE + RECENT ATTENDANCE ═══════════════════════ */}
-        <motion.div
+            </React.Fragment>
+          );
+
+          /* ══ CALENDAR + APPLY LEAVE + RECENT ATTENDANCE ══════════════════ */
+          if (sectionId === 'calendar_area') return (
+            <React.Fragment key="calendar_area">
+              <motion.div
           className={`grid gap-5 items-stretch ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-3'}`}
           variants={itemVariants}
         >
@@ -3718,6 +3780,12 @@ export default function Attendance() {
             />
           )}
         </AnimatePresence>
+
+            </React.Fragment>
+          );
+
+          return null;
+        })}
 
       </motion.div>
     </TooltipProvider>
