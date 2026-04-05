@@ -1246,7 +1246,7 @@ export default function Tasks() {
     if (filterPriority !== 'all') pills.push({ key: 'priority', label: filterPriority.toUpperCase() });
     if (filterCategory !== 'all') pills.push({ key: 'category', label: getCategoryLabel(filterCategory) });
     if (filterAssignee !== 'all') pills.push({ key: 'assignee', label: users.find(u => u.id === filterAssignee)?.full_name || filterAssignee });
-    if (showMyTasksOnly)          pills.push({ key: 'mytasks',     label: 'Assigned to Me' });
+    if (showMyTasksOnly)          pills.push({ key: 'mytasks',     label: 'Assigned By' });
     if (filterTeamOnly)           pills.push({ key: 'teamonly',    label: 'Team Tasks' });
     if (filterAssignedByMe)       pills.push({ key: 'assignedby',  label: 'Assigned by Me' });
     if (filterCreatedBy !== 'all') pills.push({ key: 'createdby', label: `By: ${users.find(u => u.id === filterCreatedBy)?.full_name || filterCreatedBy}` });
