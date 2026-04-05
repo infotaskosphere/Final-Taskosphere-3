@@ -1401,7 +1401,8 @@ export default function VisitsPage() {
   }, [user]);
 
   return (
-    <LayoutCustomizer
+    <>
+      <LayoutCustomizer
       isOpen={showCustomize}
       onClose={() => setShowCustomize(false)}
       order={vpOrder}
@@ -1798,5 +1799,6 @@ export default function VisitsPage() {
         )}
       </AnimatePresence>
     </motion.div>
+    </>
   );
 }
