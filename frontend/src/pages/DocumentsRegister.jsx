@@ -15,7 +15,7 @@ import {
   Plus, Edit, Trash2, ArrowDownCircle, ArrowUpCircle,
   History, Search, ArrowUpDown, Printer,
   CheckSquare, Square, MinusSquare, XCircle,
-  FileText, ArrowDownUp, LayoutList,
+  FileText, Clock,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -28,24 +28,21 @@ const PRINT_STYLE = `
   @page { margin: 16mm; }
 }`;
 
-// ─── Row highlight: brown for out > 30 days, yellow for recent out ────────────
-// For documents: highlight based on how long they've been OUT
-// No expiry on documents — we highlight based on current_status and issue_date
+// ─── Row highlight: based on how long OUT ────────────────────────────────────
 function getDocRowHighlight(doc, isDark) {
   if (doc.current_status === 'OUT' || doc.current_location === 'taken_by_client') {
-    // Check how long it's been out using last movement timestamp
-    const log = doc.movement_log || [];
+    const log    = doc.movement_log || [];
     const lastOut = [...log].reverse().find(m => m.movement_type === 'OUT');
     if (lastOut) {
       const daysOut = Math.ceil((new Date() - new Date(lastOut.timestamp)) / (1000 * 60 * 60 * 24));
-      if (daysOut > 30) return isDark ? 'bg-orange-950/40' : 'bg-orange-100';  // brown-ish, out long time
-      if (daysOut > 7)  return isDark ? 'bg-yellow-950/30' : 'bg-yellow-50';   // yellow, out a week+
+      if (daysOut > 30) return isDark ? 'bg-orange-950/40' : 'bg-orange-100';
+      if (daysOut > 7)  return isDark ? 'bg-yellow-950/30' : 'bg-yellow-50';
     }
   }
   return '';
 }
 
-// ─── Client-page style Pagination ────────────────────────────────────────────
+// ─── Pagination ───────────────────────────────────────────────────────────────
 function PaginationBar({ currentPage, totalPages, totalItems, pageSize, onPageChange, isDark }) {
   if (totalPages <= 1) return null;
   const pageStart = (currentPage - 1) * pageSize;
@@ -86,20 +83,20 @@ function PaginationBar({ currentPage, totalPages, totalItems, pageSize, onPageCh
   );
 }
 
-// ─── Document Table with checkboxes + row highlight + last movement ───────────
+// ─── Document Table ───────────────────────────────────────────────────────────
 function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, onShowFullNotes, type, isDark, selectedIds, onToggleSelect, onToggleAll }) {
   const allSelected  = documentList.length > 0 && documentList.every(d => selectedIds.has(d.id));
   const someSelected = documentList.some(d => selectedIds.has(d.id)) && !allSelected;
 
   return (
-    <div className="w-full overflow-hidden">
-      <table className="w-full table-auto border-collapse">
-        <thead className={`border-b ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+    <div className="w-full overflow-x-auto">
+      <table className="w-full table-auto border-collapse min-w-[780px]">
+        <thead className={`border-b ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
           <tr>
             <th className="px-3 py-3 w-10">
               <button onClick={() => onToggleAll(documentList)} className="flex items-center justify-center">
                 {allSelected
-                  ? <CheckSquare className="h-4 w-4 text-indigo-600" />
+                  ? <CheckSquare className="h-4 w-4 text-indigo-500" />
                   : someSelected
                     ? <MinusSquare className="h-4 w-4 text-indigo-400" />
                     : <Square className="h-4 w-4 text-slate-400" />}
@@ -107,14 +104,14 @@ function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, 
             </th>
             <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>S.No</th>
             <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[140px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Holder Name</th>
-            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider w-28 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Type</th>
+            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider w-36 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Type</th>
             <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[130px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Associated With</th>
             <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[130px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Last Movement</th>
-            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[200px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Notes</th>
-            <th className={`px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider w-44 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Actions</th>
+            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[180px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Notes</th>
+            <th className={`px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider w-40 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Actions</th>
           </tr>
         </thead>
-        <tbody className={`divide-y ${isDark ? 'divide-slate-700' : 'divide-slate-100'}`}>
+        <tbody className={`divide-y ${isDark ? 'divide-slate-700/60' : 'divide-slate-100'}`}>
           {documentList.map((doc, index) => {
             const highlight  = getDocRowHighlight(doc, isDark);
             const isSelected = selectedIds.has(doc.id);
@@ -125,27 +122,25 @@ function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, 
                 className={`transition-colors ${highlight} ${isSelected ? (isDark ? 'ring-1 ring-inset ring-indigo-500' : 'ring-1 ring-inset ring-indigo-300') : ''} ${isDark ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50/80'}`}
                 data-testid={`document-row-${doc.id}`}>
 
-                {/* Checkbox */}
                 <td className="px-3 py-3">
                   <button onClick={() => onToggleSelect(doc.id)} className="flex items-center justify-center">
-                    {isSelected ? <CheckSquare className="h-4 w-4 text-indigo-600" /> : <Square className="h-4 w-4 text-slate-400" />}
+                    {isSelected ? <CheckSquare className="h-4 w-4 text-indigo-500" /> : <Square className="h-4 w-4 text-slate-400" />}
                   </button>
                 </td>
 
                 <td className={`px-4 py-3 text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{index + 1}</td>
 
-                <td className={`px-4 py-3 text-sm font-medium break-words leading-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{doc.holder_name}</td>
+                <td className={`px-4 py-3 text-sm font-semibold break-words leading-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{doc.holder_name}</td>
 
                 <td className={`px-4 py-3 text-sm truncate ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{doc.document_type || '—'}</td>
 
                 <td className={`px-4 py-3 text-sm break-words leading-tight ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{doc.associated_with || '—'}</td>
 
-                {/* Last movement inline */}
                 <td className="px-4 py-3">
                   {lastMove ? (
                     <div className="flex flex-col gap-0.5">
                       <div className="flex items-center gap-1">
-                        <Badge className={`text-[10px] px-1.5 py-0 ${lastMove.movement_type === 'IN' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                        <Badge className={`text-[10px] px-1.5 py-0 font-semibold ${lastMove.movement_type === 'IN' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
                           {lastMove.movement_type}
                         </Badge>
                         <span className={`text-xs font-medium truncate max-w-[90px] ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{lastMove.person_name}</span>
@@ -159,10 +154,10 @@ function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, 
                   )}
                 </td>
 
-                <td className={`px-4 py-3 text-sm break-words leading-tight transition-colors group relative ${isDark ? 'text-slate-300' : 'text-slate-600'} ${doc.notes ? 'cursor-pointer hover:bg-slate-50/80' : 'cursor-default'}`}
+                <td className={`px-4 py-3 text-sm break-words leading-tight transition-colors group relative ${isDark ? 'text-slate-300' : 'text-slate-600'} ${doc.notes ? 'cursor-pointer' : 'cursor-default'}`}
                   onClick={() => doc.notes && onShowFullNotes(doc)}>
                   {doc.notes
-                    ? <><div className="line-clamp-2 pr-6" title="Click to view full notes">{doc.notes}</div>
+                    ? <><div className="line-clamp-2 pr-6">{doc.notes}</div>
                         <div className="absolute right-3 top-3 opacity-50 group-hover:opacity-80 text-xs text-slate-400 pointer-events-none">…</div></>
                     : <span className="text-slate-400 italic">—</span>
                   }
@@ -170,16 +165,20 @@ function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, 
 
                 <td className="px-4 py-3 text-right">
                   <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => onViewLog(doc)} className="h-8 w-8 p-0 hover:bg-slate-100" title="View Log">
+                    <Button variant="ghost" size="sm" onClick={() => onViewLog(doc)} className={`h-8 w-8 p-0 ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`} title="View Log">
                       <History className="h-4 w-4 text-slate-500" />
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => onMovement(doc, type === 'IN' ? 'OUT' : 'IN')}
-                      className={`h-8 w-8 p-0 ${type === 'IN' ? 'hover:bg-red-50 text-red-600' : 'hover:bg-emerald-50 text-emerald-600'}`}
+                      className={`h-8 w-8 p-0 ${type === 'IN' ? 'hover:bg-red-50 text-red-500' : 'hover:bg-emerald-50 text-emerald-600'}`}
                       title={type === 'IN' ? 'Mark as OUT' : 'Mark as IN'}>
                       {type === 'IN' ? <ArrowUpCircle className="h-4 w-4" /> : <ArrowDownCircle className="h-4 w-4" />}
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => onEdit(doc)} className="h-8 w-8 p-0 hover:bg-indigo-50 text-indigo-600"><Edit className="h-4 w-4" /></Button>
-                    <Button variant="ghost" size="sm" onClick={() => onDelete(doc.id)} className="h-8 w-8 p-0 hover:bg-red-50 text-red-600"><Trash2 className="h-4 w-4" /></Button>
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(doc)} className={`h-8 w-8 p-0 ${isDark ? 'hover:bg-indigo-900/30' : 'hover:bg-indigo-50'} text-indigo-500`}>
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => onDelete(doc.id)} className={`h-8 w-8 p-0 ${isDark ? 'hover:bg-red-900/30' : 'hover:bg-red-50'} text-red-500`}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                 </td>
               </tr>
@@ -191,7 +190,7 @@ function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, 
   );
 }
 
-// ─── Document type options ─────────────────────────────────────────────────────
+// ─── Document type options ────────────────────────────────────────────────────
 const DOC_TYPE_OPTIONS = [
   { value: 'Agreement',       label: 'Agreement / Contract' },
   { value: 'NDA',             label: 'NDA' },
@@ -217,7 +216,7 @@ const DOC_TYPE_OPTIONS = [
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function DocumentRegister() {
-  const isDark = useDark();
+  const isDark    = useDark();
   const searchRef = useRef(null);
 
   const [documentList, setDocumentList]             = useState([]);
@@ -234,16 +233,15 @@ export default function DocumentRegister() {
   const [rowsPerPage, setRowsPerPage]               = useState(15);
   const [currentPageIn, setCurrentPageIn]           = useState(1);
   const [currentPageOut, setCurrentPageOut]         = useState(1);
-  // 'az'|'za'|'fifo'|'lifo'
   const [sortOrder, setSortOrder]                   = useState('az');
+  const [activeTab, setActiveTab]                   = useState('in');
 
-  // ── NEW: bulk ──────────────────────────────────────────────────────────────
-  const [selectedIds, setSelectedIds]               = useState(new Set());
-  const [bulkDialogOpen, setBulkDialogOpen]         = useState(false);
-  const [bulkMovementType, setBulkMovementType]     = useState('IN');
-  const [bulkPersonName, setBulkPersonName]         = useState('');
-  const [bulkNotes, setBulkNotes]                   = useState('');
-  const [bulkLoading, setBulkLoading]               = useState(false);
+  const [selectedIds, setSelectedIds]           = useState(new Set());
+  const [bulkDialogOpen, setBulkDialogOpen]     = useState(false);
+  const [bulkMovementType, setBulkMovementType] = useState('IN');
+  const [bulkPersonName, setBulkPersonName]     = useState('');
+  const [bulkNotes, setBulkNotes]               = useState('');
+  const [bulkLoading, setBulkLoading]           = useState(false);
 
   const [formData, setFormData] = useState({
     holder_name: '', document_type: 'Agreement', document_password: '',
@@ -255,7 +253,6 @@ export default function DocumentRegister() {
   useEffect(() => { fetchDocuments(); }, []);
   useEffect(() => { setCurrentPageIn(1); setCurrentPageOut(1); }, [sortOrder, searchQuery]);
 
-  // ── Keyboard shortcut "/" to focus search ─────────────────────────────────
   useEffect(() => {
     const handler = (e) => {
       if (e.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
@@ -267,7 +264,6 @@ export default function DocumentRegister() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // ── Print styles ──────────────────────────────────────────────────────────
   useEffect(() => {
     const styleEl = document.createElement('style');
     styleEl.innerHTML = PRINT_STYLE;
@@ -279,11 +275,14 @@ export default function DocumentRegister() {
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
   const fetchDocuments = async () => {
+    setLoading(true);
     try {
       const response = await api.get('/documents');
       setDocumentList(response.data);
     } catch (error) {
       toast.error(getErrorMessage(error) || 'Failed to fetch documents');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -333,8 +332,8 @@ export default function DocumentRegister() {
     setMovementDialogOpen(true);
   };
 
-  const openLogDialog    = (document) => { setSelectedDocument(document); setLogDialogOpen(true); };
-  const openFullNotes    = (doc) => {
+  const openLogDialog = (document) => { setSelectedDocument(document); setLogDialogOpen(true); };
+  const openFullNotes = (doc) => {
     if (!doc.notes) return;
     setSelectedFullNotes({ holder_name: doc.holder_name || '—', notes: doc.notes });
     setFullNotesOpen(true);
@@ -445,7 +444,7 @@ export default function DocumentRegister() {
     );
   };
 
-  // ── Sort — FIFO/LIFO by issue_date ────────────────────────────────────────
+  // ── Sort ──────────────────────────────────────────────────────────────────
   const applySortOrder = (list) => {
     const arr = [...list];
     switch (sortOrder) {
@@ -464,7 +463,6 @@ export default function DocumentRegister() {
   const statsIn      = inDocuments.length;
   const statsOut     = outDocuments.length;
   const statsTotal   = documentList.length;
-  // Out > 30 days
   const statsLongOut = documentList.filter(doc => {
     if (getDocumentInOutStatus(doc) !== 'OUT') return false;
     const log  = doc.movement_log || [];
@@ -483,14 +481,10 @@ export default function DocumentRegister() {
   const pagedOut = outDocuments.slice((spOut - 1) * rowsPerPage, spOut * rowsPerPage);
 
   // ── Bulk helpers ──────────────────────────────────────────────────────────
-  const toggleSelect = (id) => setSelectedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
-  const toggleAll    = (list) => {
+  const toggleSelect   = (id)  => setSelectedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+  const toggleAll      = (list) => {
     const allSel = list.every(d => selectedIds.has(d.id));
-    setSelectedIds(prev => {
-      const s = new Set(prev);
-      list.forEach(d => allSel ? s.delete(d.id) : s.add(d.id));
-      return s;
-    });
+    setSelectedIds(prev => { const s = new Set(prev); list.forEach(d => allSel ? s.delete(d.id) : s.add(d.id)); return s; });
   };
   const clearSelection = () => setSelectedIds(new Set());
 
@@ -519,9 +513,13 @@ export default function DocumentRegister() {
     { value: 'lifo', label: 'LIFO (Newest ↓)' },
   ];
 
+  const tabCard = () => ({
+    background: isDark ? '#1e293b' : '#fff',
+  });
+
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className={`space-y-6 min-h-screen p-1 rounded-2xl ${isDark ? 'bg-[#0f172a]' : ''}`} data-testid="document-page">
+    <div className={`min-h-screen ${isDark ? 'bg-[#0f172a]' : 'bg-slate-50'}`} data-testid="document-page">
 
       {/* ── Print area ── */}
       <div id="doc-print-area" className="hidden print:block">
@@ -554,224 +552,443 @@ export default function DocumentRegister() {
         </table>
       </div>
 
-      {/* ── Header ── */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className={`text-3xl font-bold font-outfit ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Document Register</h1>
-          <p className={`mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Manage documents with IN/OUT tracking</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="outline" onClick={handlePrint} className={`h-9 px-4 gap-2 rounded-xl text-sm ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : ''}`}>
-            <Printer className="h-4 w-4" />Print
-          </Button>
+      {/* ── Dashboard-style Banner Header ── */}
+      <div className="relative overflow-hidden"
+        style={{ background: 'linear-gradient(135deg, #0D3B66 0%, #1FAF5A 55%, #10b981 100%)' }}>
+        <div className="absolute inset-0 opacity-10"
+          style={{ backgroundImage: 'radial-gradient(circle at 20% 50%, white 1px, transparent 1px), radial-gradient(circle at 80% 20%, white 1px, transparent 1px)', backgroundSize: '60px 60px' }} />
+        <div className="absolute right-0 top-0 w-96 h-96 rounded-full -mr-32 -mt-32 opacity-10"
+          style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
 
-          <Dialog open={dialogOpen} onOpenChange={open => { setDialogOpen(open); if (!open) resetForm(); }}>
-            <DialogTrigger asChild>
-              <Button className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-full px-6 shadow-lg shadow-indigo-500/20 transition-all hover:scale-105 active:scale-95" data-testid="add-document-btn">
-                <Plus className="mr-2 h-5 w-5" />Add Document
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle className="font-outfit text-2xl">{editingDocument ? 'Edit Document' : 'Add New Document'}</DialogTitle>
-              </DialogHeader>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="holder_name">Holder Name <span className="text-red-500">*</span></Label>
-                    <Input id="holder_name" placeholder="Name of document holder" value={formData.holder_name}
-                      onChange={e => setFormData({ ...formData, holder_name: e.target.value })} required data-testid="document-holder-name-input" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Document Type</Label>
-                    <Select value={formData.document_type} onValueChange={v => setFormData({ ...formData, document_type: v })}>
-                      <SelectTrigger id="document_type" data-testid="document-type-select"><SelectValue placeholder="Select document type" /></SelectTrigger>
-                      <SelectContent className="max-h-64">
-                        {DOC_TYPE_OPTIONS.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
+        <div className="relative px-6 py-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div className="flex items-start gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-white/15 backdrop-blur-sm flex items-center justify-center flex-shrink-0 shadow-lg">
+              <FileText className="h-7 w-7 text-white" />
+            </div>
+            <div>
+              <p className="text-green-200/70 text-xs font-semibold uppercase tracking-widest mb-1">Registers</p>
+              <h1 className="text-3xl font-bold text-white leading-tight">Document Register</h1>
+              <p className="text-green-200/80 text-sm mt-1">Manage documents with IN/OUT tracking</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button variant="outline" onClick={handlePrint}
+              className="h-9 px-4 gap-2 rounded-xl text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 backdrop-blur-sm">
+              <Printer className="h-4 w-4" />Print
+            </Button>
+            <Dialog open={dialogOpen} onOpenChange={open => { setDialogOpen(open); if (!open) resetForm(); }}>
+              <DialogTrigger asChild>
+                <Button className="bg-white text-emerald-700 hover:bg-green-50 font-semibold rounded-xl px-5 shadow-lg transition-all hover:scale-105 active:scale-95" data-testid="add-document-btn">
+                  <Plus className="mr-2 h-4 w-4" />Add Document
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle className="font-outfit text-2xl">{editingDocument ? 'Edit Document' : 'Add New Document'}</DialogTitle>
+                  <DialogDescription>{editingDocument ? 'Update document details and track IN/OUT status.' : 'Fill in the details to add a new document.'}</DialogDescription>
+                </DialogHeader>
+
+                {editingDocument ? (
+                  <Tabs defaultValue="details" className="w-full">
+                    <TabsList className="grid w-full grid-cols-3">
+                      <TabsTrigger value="details">Details</TabsTrigger>
+                      <TabsTrigger value="status">IN/OUT Status</TabsTrigger>
+                      <TabsTrigger value="history">History</TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="details" className="mt-4">
+                      <form onSubmit={handleSubmit} className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="holder_name">Holder Name <span className="text-red-500">*</span></Label>
+                            <Input id="holder_name" placeholder="Name of document holder" value={formData.holder_name}
+                              onChange={e => setFormData({ ...formData, holder_name: e.target.value })} required data-testid="document-holder-name-input" />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Document Type</Label>
+                            <Select value={formData.document_type} onValueChange={v => setFormData({ ...formData, document_type: v })}>
+                              <SelectTrigger id="document_type" data-testid="document-type-select"><SelectValue placeholder="Select document type" /></SelectTrigger>
+                              <SelectContent className="max-h-64">
+                                {DOC_TYPE_OPTIONS.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="document_password">Password</Label>
+                            <Input id="document_password" type="text" placeholder="Document Password (if any)" value={formData.document_password}
+                              onChange={e => setFormData({ ...formData, document_password: e.target.value })} data-testid="document-password-input" />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="associated_with">Associated With (Firm/Client)</Label>
+                            <Input id="associated_with" placeholder="Firm or client name" value={formData.associated_with}
+                              onChange={e => setFormData({ ...formData, associated_with: e.target.value })} data-testid="document-associated-input" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="entity_type">Entity Type</Label>
+                            <Select value={formData.entity_type} onValueChange={v => setFormData({ ...formData, entity_type: v })}>
+                              <SelectTrigger id="entity_type" data-testid="document-entity-type-select"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="firm">Firm</SelectItem>
+                                <SelectItem value="client">Client</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="issue_date">Issue Date <span className="text-red-500">*</span></Label>
+                            <Input id="issue_date" type="date" value={formData.issue_date}
+                              onChange={e => setFormData({ ...formData, issue_date: e.target.value })} required data-testid="document-issue-date-input" />
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="notes">Notes</Label>
+                          <Textarea id="notes" placeholder="Additional notes" value={formData.notes}
+                            onChange={e => setFormData({ ...formData, notes: e.target.value })} rows={2} data-testid="document-notes-input" />
+                        </div>
+                        <DialogFooter>
+                          <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }} data-testid="document-cancel-btn">Cancel</Button>
+                          <Button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700" data-testid="document-submit-btn">
+                            {loading ? 'Saving...' : 'Update Document'}
+                          </Button>
+                        </DialogFooter>
+                      </form>
+                    </TabsContent>
+
+                    <TabsContent value="status" className="mt-4 space-y-4">
+                      <Card className={`p-4 ${getDocumentInOutStatus(editingDocument) === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+                        <p className="text-sm text-slate-600 mb-1">Current Status</p>
+                        <div className="flex items-center gap-2">
+                          {getDocumentInOutStatus(editingDocument) === 'IN'
+                            ? <><ArrowDownCircle className="h-5 w-5 text-emerald-600" /><Badge className="bg-emerald-600 text-white">IN — Available</Badge></>
+                            : <><ArrowUpCircle className="h-5 w-5 text-red-600" /><Badge className="bg-red-600 text-white">OUT — Taken</Badge></>}
+                        </div>
+                      </Card>
+                      <Card className="p-4">
+                        <h4 className={`font-medium mb-3 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                          {getDocumentInOutStatus(editingDocument) === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
+                        </h4>
+                        <form onSubmit={e => { e.preventDefault(); handleMovementInModal(); }} className="space-y-3">
+                          <div className="space-y-2">
+                            <Label htmlFor="inline_person">{getDocumentInOutStatus(editingDocument) === 'IN' ? 'Taken By *' : 'Delivered By *'}</Label>
+                            <Input id="inline_person" placeholder="Enter person name" value={movementData.person_name}
+                              onChange={e => setMovementData({ ...movementData, person_name: e.target.value })} required />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="inline_notes">Notes</Label>
+                            <Input id="inline_notes" placeholder="Optional notes" value={movementData.notes}
+                              onChange={e => setMovementData({ ...movementData, notes: e.target.value })} />
+                          </div>
+                          <Button type="submit" disabled={loading}
+                            className={getDocumentInOutStatus(editingDocument) === 'IN' ? 'bg-red-600 hover:bg-red-700 w-full' : 'bg-emerald-600 hover:bg-emerald-700 w-full'}>
+                            {getDocumentInOutStatus(editingDocument) === 'IN'
+                              ? <><ArrowUpCircle className="h-4 w-4 mr-2" />Mark as OUT</>
+                              : <><ArrowDownCircle className="h-4 w-4 mr-2" />Mark as IN</>}
+                          </Button>
+                        </form>
+                      </Card>
+                    </TabsContent>
+
+                    <TabsContent value="history" className="mt-4">
+                      <div className="space-y-3 max-h-80 overflow-y-auto">
+                        {editingDocument?.movement_log?.length > 0
+                          ? editingDocument.movement_log.slice().reverse().map((movement, index) => {
+                              const mKey   = movement.id || movement.timestamp;
+                              const isEdit = editingMovement === mKey;
+                              return (
+                                <Card key={index} className={`p-3 ${movement.movement_type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+                                  {isEdit ? (
+                                    <div className="space-y-3">
+                                      <div className="flex items-center gap-3">
+                                        <Label className="text-sm font-medium">Status:</Label>
+                                        <div className="flex gap-2">
+                                          <Button type="button" size="sm"
+                                            variant={editMovementData.movement_type === 'IN' ? 'default' : 'outline'}
+                                            className={editMovementData.movement_type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
+                                            onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'IN' })}>
+                                            <ArrowDownCircle className="h-4 w-4 mr-1" />IN
+                                          </Button>
+                                          <Button type="button" size="sm"
+                                            variant={editMovementData.movement_type === 'OUT' ? 'default' : 'outline'}
+                                            className={editMovementData.movement_type === 'OUT' ? 'bg-red-600 hover:bg-red-700' : ''}
+                                            onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'OUT' })}>
+                                            <ArrowUpCircle className="h-4 w-4 mr-1" />OUT
+                                          </Button>
+                                        </div>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-xs">Person Name</Label>
+                                        <Input size="sm" value={editMovementData.person_name}
+                                          onChange={e => setEditMovementData({ ...editMovementData, person_name: e.target.value })} placeholder="Person name" />
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-xs">Notes</Label>
+                                        <Input size="sm" value={editMovementData.notes}
+                                          onChange={e => setEditMovementData({ ...editMovementData, notes: e.target.value })} placeholder="Notes (optional)" />
+                                      </div>
+                                      <div className="flex gap-2 justify-end">
+                                        <Button type="button" size="sm" variant="outline" onClick={() => setEditingMovement(null)}>Cancel</Button>
+                                        <Button type="button" size="sm" className="bg-indigo-600 hover:bg-indigo-700"
+                                          onClick={() => handleUpdateMovement(movement.id)} disabled={loading || !editMovementData.person_name}>
+                                          {loading ? 'Saving...' : 'Save'}
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-start justify-between">
+                                      <div className="flex-1">
+                                        <div className="flex items-center gap-2 mb-1">
+                                          <Badge className={movement.movement_type === 'IN' ? 'bg-emerald-600 text-xs' : 'bg-red-600 text-xs'}>{movement.movement_type}</Badge>
+                                          <span className="text-sm font-medium">{movement.person_name}</span>
+                                        </div>
+                                        {movement.notes && <p className="text-xs text-slate-600">{movement.notes}</p>}
+                                      </div>
+                                      <div className="flex flex-col items-end gap-2">
+                                        <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                          {format(new Date(movement.timestamp), 'MMM dd, yyyy hh:mm a')}
+                                        </span>
+                                        {movement.id && (
+                                          <Button type="button" size="sm" variant="ghost"
+                                            className="h-7 px-2 text-xs text-slate-500 hover:text-indigo-600"
+                                            onClick={() => startEditingMovement(movement)}>
+                                            <Edit className="h-3 w-3 mr-1" />Edit
+                                          </Button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </Card>
+                              );
+                            })
+                          : <div className="text-center py-8 text-slate-500"><History className="h-12 w-12 mx-auto mb-3 text-slate-300" /><p>No movement history yet</p></div>
+                        }
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+                ) : (
+                  <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="holder_name">Holder Name <span className="text-red-500">*</span></Label>
+                        <Input id="holder_name" placeholder="Name of document holder" value={formData.holder_name}
+                          onChange={e => setFormData({ ...formData, holder_name: e.target.value })} required data-testid="document-holder-name-input" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Document Type</Label>
+                        <Select value={formData.document_type} onValueChange={v => setFormData({ ...formData, document_type: v })}>
+                          <SelectTrigger id="document_type" data-testid="document-type-select"><SelectValue placeholder="Select document type" /></SelectTrigger>
+                          <SelectContent className="max-h-64">
+                            {DOC_TYPE_OPTIONS.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="document_password">Password</Label>
+                        <Input id="document_password" type="text" placeholder="Document Password (if any)" value={formData.document_password}
+                          onChange={e => setFormData({ ...formData, document_password: e.target.value })} data-testid="document-password-input" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="associated_with">Associated With (Firm/Client)</Label>
+                        <Input id="associated_with" placeholder="Firm or client name" value={formData.associated_with}
+                          onChange={e => setFormData({ ...formData, associated_with: e.target.value })} data-testid="document-associated-input" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="entity_type">Entity Type</Label>
+                        <Select value={formData.entity_type} onValueChange={v => setFormData({ ...formData, entity_type: v })}>
+                          <SelectTrigger id="entity_type" data-testid="document-entity-type-select"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="firm">Firm</SelectItem>
+                            <SelectItem value="client">Client</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="issue_date">Issue Date <span className="text-red-500">*</span></Label>
+                        <Input id="issue_date" type="date" value={formData.issue_date}
+                          onChange={e => setFormData({ ...formData, issue_date: e.target.value })} required data-testid="document-issue-date-input" />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="notes">Notes</Label>
+                      <Textarea id="notes" placeholder="Additional notes" value={formData.notes}
+                        onChange={e => setFormData({ ...formData, notes: e.target.value })} rows={2} data-testid="document-notes-input" />
+                    </div>
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }} data-testid="document-cancel-btn">Cancel</Button>
+                      <Button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700" data-testid="document-submit-btn">
+                        {loading ? 'Saving...' : 'Add Document'}
+                      </Button>
+                    </DialogFooter>
+                  </form>
+                )}
+              </DialogContent>
+            </Dialog>
+          </div>
+        </div>
+
+        {/* ── Stats strip inside banner ── */}
+        <div className="relative px-6 pb-6 grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { label: 'Total IN',      value: statsIn,      icon: ArrowDownCircle, color: '#10b981' },
+            { label: 'Total OUT',     value: statsOut,     icon: ArrowUpCircle,   color: '#ef4444' },
+            { label: 'Total Records', value: statsTotal,   icon: FileText,        color: '#6366f1' },
+            { label: 'Out > 30 days', value: statsLongOut, icon: Clock,           color: '#f97316' },
+          ].map(stat => {
+            const Icon = stat.icon;
+            return (
+              <div key={stat.label} className="rounded-xl bg-white/10 backdrop-blur-sm border border-white/15 px-4 py-3 flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${stat.color}30` }}>
+                  <Icon className="h-4 w-4" style={{ color: stat.color }} />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="document_password">Password</Label>
-                    <Input id="document_password" type="text" placeholder="Document Password (if any)" value={formData.document_password}
-                      onChange={e => setFormData({ ...formData, document_password: e.target.value })} data-testid="document-password-input" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="associated_with">Associated With (Firm/Client)</Label>
-                    <Input id="associated_with" placeholder="Firm or client name" value={formData.associated_with}
-                      onChange={e => setFormData({ ...formData, associated_with: e.target.value })} data-testid="document-associated-input" />
-                  </div>
+                <div>
+                  <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest leading-none">{stat.label}</p>
+                  <p className="text-white text-2xl font-bold tabular-nums leading-tight mt-0.5">{stat.value}</p>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="entity_type">Entity Type</Label>
-                    <Select value={formData.entity_type} onValueChange={v => setFormData({ ...formData, entity_type: v })}>
-                      <SelectTrigger id="entity_type" data-testid="document-entity-type-select"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="firm">Firm</SelectItem>
-                        <SelectItem value="client">Client</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="issue_date">Issue Date <span className="text-red-500">*</span></Label>
-                    <Input id="issue_date" type="date" value={formData.issue_date}
-                      onChange={e => setFormData({ ...formData, issue_date: e.target.value })} required data-testid="document-issue-date-input" />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="notes">Notes</Label>
-                  <Textarea id="notes" placeholder="Additional notes" value={formData.notes}
-                    onChange={e => setFormData({ ...formData, notes: e.target.value })} rows={2} data-testid="document-notes-input" />
-                </div>
-                <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }} data-testid="document-cancel-btn">Cancel</Button>
-                  <Button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700" data-testid="document-submit-btn">
-                    {loading ? 'Saving...' : editingDocument ? 'Update Document' : 'Add Document'}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      {/* ── Stats Cards — compliance-calendar style ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: 'Total IN',      value: statsIn,      color: 'text-emerald-500' },
-          { label: 'Total OUT',     value: statsOut,     color: 'text-red-500'     },
-          { label: 'Total Records', value: statsTotal,   color: 'text-slate-700'   },
-          { label: 'Out > 30 days', value: statsLongOut, color: 'text-orange-500'  },
-        ].map(stat => (
-          <Card
-            key={stat.label}
-            className={`border transition-all hover:shadow-lg hover:-translate-y-0.5 ${isDark ? 'bg-slate-800 border-slate-700' : 'border-slate-200'}`}
-            style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}
-          >
-            <CardContent className="p-5">
-              <p className={`text-[11px] font-semibold uppercase tracking-widest mb-2 ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{stat.label}</p>
-              <p className={`text-4xl font-bold tabular-nums ${isDark && stat.color === 'text-slate-700' ? 'text-slate-200' : stat.color}`}>{stat.value}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {/* ── Page body ── */}
+      <div className="px-6 py-6 space-y-5">
 
-      {/* ── Controls bar ── */}
-      <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-center">
-        <Select value={rowsPerPage.toString()} onValueChange={v => { setRowsPerPage(Number(v)); setCurrentPageIn(1); setCurrentPageOut(1); }}>
-          <SelectTrigger className={`w-[140px] focus:border-indigo-500 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}>
-            <SelectValue placeholder="Rows per page" />
-          </SelectTrigger>
-          <SelectContent>
-            {[15,30,50,100].map(n => <SelectItem key={n} value={String(n)}>{n} / page</SelectItem>)}
-          </SelectContent>
-        </Select>
+        {/* ── Controls bar ── */}
+        <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-center">
+          <Select value={rowsPerPage.toString()} onValueChange={v => { setRowsPerPage(Number(v)); setCurrentPageIn(1); setCurrentPageOut(1); }}>
+            <SelectTrigger className={`w-[140px] focus:border-indigo-500 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}>
+              <SelectValue placeholder="Rows per page" />
+            </SelectTrigger>
+            <SelectContent>
+              {[15,30,50,100].map(n => <SelectItem key={n} value={String(n)}>{n} / page</SelectItem>)}
+            </SelectContent>
+          </Select>
 
-        {/* Sort pills */}
-        <div className={`flex items-center gap-2 border rounded-xl px-3 h-10 ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-200'}`}>
-          <ArrowUpDown className="h-4 w-4 text-slate-400 flex-shrink-0" />
-          <div className="flex items-center gap-1">
-            {SORT_OPTIONS.map(opt => (
-              <button key={opt.value} onClick={() => setSortOrder(opt.value)}
-                className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
-                style={{ background: sortOrder === opt.value ? 'linear-gradient(135deg,#4f46e5,#6366f1)' : 'transparent', color: sortOrder === opt.value ? '#fff' : (isDark ? '#94a3b8' : '#64748b') }}>
-                {opt.label}
+          <div className={`flex items-center gap-2 border rounded-xl px-3 h-10 ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-200'}`}>
+            <ArrowUpDown className="h-4 w-4 text-slate-400 flex-shrink-0" />
+            <div className="flex items-center gap-1">
+              {SORT_OPTIONS.map(opt => (
+                <button key={opt.value} onClick={() => setSortOrder(opt.value)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
+                  style={{ background: sortOrder === opt.value ? 'linear-gradient(135deg,#4f46e5,#6366f1)' : 'transparent', color: sortOrder === opt.value ? '#fff' : (isDark ? '#94a3b8' : '#64748b') }}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="relative flex-1 min-w-[220px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Input ref={searchRef} type="text" placeholder='Search… (press "/" to focus)' value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className={`pl-10 pr-16 focus:border-indigo-500 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white border-slate-200'}`}
+              data-testid="document-search-input" />
+            {!searchQuery && (
+              <kbd className={`absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono px-1.5 py-0.5 rounded border ${isDark ? 'bg-slate-700 border-slate-500 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-400'}`}>/</kbd>
+            )}
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                <XCircle className="h-4 w-4" />
               </button>
-            ))}
+            )}
           </div>
         </div>
 
-        {/* Search with "/" hint */}
-        <div className="relative flex-1 min-w-[220px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input ref={searchRef} type="text" placeholder='Search… (press "/" to focus)' value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className={`pl-10 pr-16 focus:border-indigo-500 ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 placeholder:text-slate-500' : 'bg-white border-slate-200'}`}
-            data-testid="document-search-input" />
-          {!searchQuery && (
-            <kbd className={`absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono px-1.5 py-0.5 rounded border ${isDark ? 'bg-slate-700 border-slate-500 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-400'}`}>/</kbd>
-          )}
-          {searchQuery && (
-            <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-              <XCircle className="h-4 w-4" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* ── Bulk action bar ── */}
-      {selectedIds.size > 0 && (
-        <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${isDark ? 'bg-indigo-900/30 border-indigo-700' : 'bg-indigo-50 border-indigo-200'}`}>
-          <CheckSquare className="h-4 w-4 text-indigo-600 flex-shrink-0" />
-          <span className={`text-sm font-semibold ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>{selectedIds.size} document(s) selected</span>
-          <div className="flex gap-2 ml-auto">
-            <Button size="sm" onClick={() => { setBulkMovementType('IN'); setBulkDialogOpen(true); }}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 px-3 text-xs rounded-lg gap-1">
-              <ArrowDownCircle className="h-3.5 w-3.5" />Mark all IN
-            </Button>
-            <Button size="sm" onClick={() => { setBulkMovementType('OUT'); setBulkDialogOpen(true); }}
-              className="bg-red-600 hover:bg-red-700 text-white h-8 px-3 text-xs rounded-lg gap-1">
-              <ArrowUpCircle className="h-3.5 w-3.5" />Mark all OUT
-            </Button>
-            <Button size="sm" variant="ghost" onClick={clearSelection}
-              className={`h-8 px-3 text-xs rounded-lg ${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'}`}>
-              Clear
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Row colour legend ── */}
-      <div className="flex items-center gap-4 text-xs flex-wrap">
-        <span className={`font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Row colours:</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-orange-200 inline-block border border-orange-300" />OUT &gt; 30 days</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-yellow-100 inline-block border border-yellow-300" />OUT &gt; 7 days</span>
-      </div>
-
-      {/* ── Tabs ── */}
-      <Tabs defaultValue="in" className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
-          <TabsTrigger value="in"  className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white"><ArrowDownCircle className="h-4 w-4 mr-2" />IN ({inDocuments.length})</TabsTrigger>
-          <TabsTrigger value="out" className="data-[state=active]:bg-red-500 data-[state=active]:text-white"><ArrowUpCircle className="h-4 w-4 mr-2" />OUT ({outDocuments.length})</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="in" className="mt-6">
-          <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col"
-            style={{ background: isDark ? '#1e293b' : '#fff', borderColor: isDark ? 'rgba(255,255,255,0.06)' : '#d1fae5' }}>
-            <div className="bg-emerald-50 border-b border-emerald-200 px-4 py-3 flex items-center gap-2">
-              <ArrowDownCircle className="h-4 w-4 text-emerald-700" />
-              <p className="text-sm font-medium text-emerald-700 uppercase tracking-wider">Documents IN - Available ({inDocuments.length})</p>
+        {/* ── Bulk action bar ── */}
+        {selectedIds.size > 0 && (
+          <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${isDark ? 'bg-indigo-900/30 border-indigo-700' : 'bg-indigo-50 border-indigo-200'}`}>
+            <CheckSquare className="h-4 w-4 text-indigo-500 flex-shrink-0" />
+            <span className={`text-sm font-semibold ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>{selectedIds.size} document(s) selected</span>
+            <div className="flex gap-2 ml-auto">
+              <Button size="sm" onClick={() => { setBulkMovementType('IN'); setBulkDialogOpen(true); }}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 px-3 text-xs rounded-lg gap-1">
+                <ArrowDownCircle className="h-3.5 w-3.5" />Mark all IN
+              </Button>
+              <Button size="sm" onClick={() => { setBulkMovementType('OUT'); setBulkDialogOpen(true); }}
+                className="bg-red-600 hover:bg-red-700 text-white h-8 px-3 text-xs rounded-lg gap-1">
+                <ArrowUpCircle className="h-3.5 w-3.5" />Mark all OUT
+              </Button>
+              <Button size="sm" variant="ghost" onClick={clearSelection}
+                className={`h-8 px-3 text-xs rounded-lg ${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'}`}>
+                Clear
+              </Button>
             </div>
-            {inDocuments.length === 0
-              ? <div className={`text-center py-12 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>No documents currently IN</div>
-              : <DocumentTable documentList={pagedIn} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog}
-                  onViewLog={openLogDialog} onShowFullNotes={openFullNotes} type="IN" isDark={isDark}
-                  selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
-            }
-            <PaginationBar currentPage={spIn} totalPages={tpIn} totalItems={inDocuments.length} pageSize={rowsPerPage} onPageChange={setCurrentPageIn} isDark={isDark} />
           </div>
-        </TabsContent>
+        )}
 
-        <TabsContent value="out" className="mt-6">
-          <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col"
-            style={{ background: isDark ? '#1e293b' : '#fff', borderColor: isDark ? 'rgba(255,255,255,0.06)' : '#fecaca' }}>
-            <div className="bg-red-50 border-b border-red-200 px-4 py-3 flex items-center gap-2">
-              <ArrowUpCircle className="h-4 w-4 text-red-700" />
-              <p className="text-sm font-medium text-red-700 uppercase tracking-wider">Documents OUT - Taken ({outDocuments.length})</p>
+        {/* ── Row colour legend ── */}
+        <div className="flex items-center gap-4 text-xs flex-wrap">
+          <span className={`font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Row colours:</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-orange-200 inline-block border border-orange-300" />OUT &gt; 30 days</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-yellow-100 inline-block border border-yellow-300" />OUT &gt; 7 days</span>
+        </div>
+
+        {/* ── Tabs ── */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className={`inline-flex h-11 items-center rounded-xl p-1 gap-1 ${isDark ? 'bg-slate-800 border border-slate-700' : 'bg-slate-100 border border-slate-200'}`}>
+            <TabsTrigger value="in"
+              className="rounded-lg px-6 py-2 text-sm font-semibold transition-all data-[state=active]:bg-emerald-500 data-[state=active]:text-white data-[state=active]:shadow-md">
+              <ArrowDownCircle className="h-4 w-4 mr-1.5 inline" />IN ({inDocuments.length})
+            </TabsTrigger>
+            <TabsTrigger value="out"
+              className="rounded-lg px-6 py-2 text-sm font-semibold transition-all data-[state=active]:bg-red-500 data-[state=active]:text-white data-[state=active]:shadow-md">
+              <ArrowUpCircle className="h-4 w-4 mr-1.5 inline" />OUT ({outDocuments.length})
+            </TabsTrigger>
+          </TabsList>
+
+          {/* IN */}
+          <TabsContent value="in" className="mt-4">
+            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col"
+              style={{ background: isDark ? '#1e293b' : '#fff', borderColor: isDark ? 'rgba(255,255,255,0.07)' : '#d1fae5' }}>
+              <div className="bg-emerald-50 border-b border-emerald-200 px-5 py-3 flex items-center gap-2">
+                <ArrowDownCircle className="h-4 w-4 text-emerald-700 flex-shrink-0" />
+                <p className="text-sm font-semibold text-emerald-700 uppercase tracking-wider">Documents IN — Available ({inDocuments.length})</p>
+              </div>
+              {loading && inDocuments.length === 0
+                ? <div className="text-center py-12 text-slate-400">Loading…</div>
+                : inDocuments.length === 0
+                  ? <div className={`text-center py-16 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                      <ArrowDownCircle className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                      <p className="font-medium">No documents currently IN</p>
+                    </div>
+                  : <DocumentTable documentList={pagedIn} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog}
+                      onViewLog={openLogDialog} onShowFullNotes={openFullNotes} type="IN" isDark={isDark}
+                      selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
+              }
+              <PaginationBar currentPage={spIn} totalPages={tpIn} totalItems={inDocuments.length} pageSize={rowsPerPage} onPageChange={setCurrentPageIn} isDark={isDark} />
             </div>
-            {outDocuments.length === 0
-              ? <div className={`text-center py-12 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>No documents currently OUT</div>
-              : <DocumentTable documentList={pagedOut} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog}
-                  onViewLog={openLogDialog} onShowFullNotes={openFullNotes} type="OUT" isDark={isDark}
-                  selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
-            }
-            <PaginationBar currentPage={spOut} totalPages={tpOut} totalItems={outDocuments.length} pageSize={rowsPerPage} onPageChange={setCurrentPageOut} isDark={isDark} />
-          </div>
-        </TabsContent>
-      </Tabs>
+          </TabsContent>
+
+          {/* OUT */}
+          <TabsContent value="out" className="mt-4">
+            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col"
+              style={{ background: isDark ? '#1e293b' : '#fff', borderColor: isDark ? 'rgba(255,255,255,0.07)' : '#fecaca' }}>
+              <div className="bg-red-50 border-b border-red-200 px-5 py-3 flex items-center gap-2">
+                <ArrowUpCircle className="h-4 w-4 text-red-700 flex-shrink-0" />
+                <p className="text-sm font-semibold text-red-700 uppercase tracking-wider">Documents OUT — Taken ({outDocuments.length})</p>
+              </div>
+              {loading && outDocuments.length === 0
+                ? <div className="text-center py-12 text-slate-400">Loading…</div>
+                : outDocuments.length === 0
+                  ? <div className={`text-center py-16 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                      <ArrowUpCircle className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                      <p className="font-medium">No documents currently OUT</p>
+                    </div>
+                  : <DocumentTable documentList={pagedOut} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog}
+                      onViewLog={openLogDialog} onShowFullNotes={openFullNotes} type="OUT" isDark={isDark}
+                      selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
+              }
+              <PaginationBar currentPage={spOut} totalPages={tpOut} totalItems={outDocuments.length} pageSize={rowsPerPage} onPageChange={setCurrentPageOut} isDark={isDark} />
+            </div>
+          </TabsContent>
+        </Tabs>
+      </div>
 
       {/* ── Bulk Movement Dialog ── */}
       <Dialog open={bulkDialogOpen} onOpenChange={open => { setBulkDialogOpen(open); if (!open) { setBulkPersonName(''); setBulkNotes(''); } }}>
@@ -809,7 +1026,7 @@ export default function DocumentRegister() {
           <form onSubmit={handleMovement} className="space-y-4">
             <div className="space-y-2">
               <Label>Document</Label>
-              <p className="text-sm font-medium">{selectedDocument?.holder_name || '—'}</p>
+              <p className="text-sm font-semibold">{selectedDocument?.holder_name || '—'}</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="person_name">{movementData.movement_type === 'IN' ? 'Delivered By *' : 'Taken By *'}</Label>
@@ -836,8 +1053,10 @@ export default function DocumentRegister() {
       <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-outfit text-2xl flex items-center gap-2"><History className="h-6 w-6" />Movement Log</DialogTitle>
-            <DialogDescription>{selectedDocument?.holder_name || '—'}</DialogDescription>
+            <DialogTitle className="font-outfit text-2xl flex items-center gap-2">
+              <History className="h-6 w-6 text-indigo-500" />Movement Log
+            </DialogTitle>
+            <DialogDescription className="font-medium">{selectedDocument?.holder_name || '—'}</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             {selectedDocument?.movement_log?.length > 0
@@ -847,7 +1066,7 @@ export default function DocumentRegister() {
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-2">
                           <Badge className={movement.movement_type === 'IN' ? 'bg-emerald-600' : 'bg-red-600'}>{movement.movement_type}</Badge>
-                          <span className="text-sm font-medium">{movement.person_name}</span>
+                          <span className="text-sm font-semibold">{movement.person_name}</span>
                         </div>
                         <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{movement.movement_type === 'IN' ? 'Delivered by' : 'Taken by'}: {movement.person_name}</p>
                         <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Recorded by: {movement.recorded_by || '—'}</p>
@@ -869,8 +1088,8 @@ export default function DocumentRegister() {
       {/* ── Full Notes Modal ── */}
       <Dialog open={fullNotesOpen} onOpenChange={setFullNotesOpen}>
         <DialogContent className="sm:max-w-lg max-h-[85vh]">
-          <DialogHeader><DialogTitle>Notes — {selectedFullNotes.holder_name}</DialogTitle></DialogHeader>
-          <div className={`mt-4 p-5 rounded-lg border max-h-[65vh] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed ${isDark ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-slate-50'}`}>
+          <DialogHeader><DialogTitle className="font-outfit">Notes — {selectedFullNotes.holder_name}</DialogTitle></DialogHeader>
+          <div className={`mt-4 p-5 rounded-xl border max-h-[65vh] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed ${isDark ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-slate-50 border-slate-200'}`}>
             {selectedFullNotes.notes || <p className={`italic text-center py-10 ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>No notes available</p>}
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setFullNotesOpen(false)}>Close</Button></DialogFooter>
