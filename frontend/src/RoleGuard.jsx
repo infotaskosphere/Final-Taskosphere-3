@@ -3,23 +3,35 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Navigate } from "react-router-dom";
 import GifLoader from "@/components/ui/GifLoader.jsx";
 
+/**
+ * RoleGuard — wrap any page that requires a specific permission.
+ *
+ * Usage:
+ *   <RoleGuard permission="can_view_all_dsc">
+ *     <DSCRegister />
+ *   </RoleGuard>
+ *
+ * • Admin always passes.
+ * • Non-admin without the flag → redirected to /dashboard.
+ * • No permission prop → behaves like <Protected> (login required only).
+ */
 const RoleGuard = ({ children, permission }) => {
   const { user, loading, hasPermission } = useAuth();
 
-  // While auth state is loading
   if (loading) return <GifLoader />;
+  if (!user) return <Navigate to="/login" replace />;
 
-  // If not logged in → redirect to login
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
+  // Admin bypasses all permission checks
+  if (user.role === "admin") return <>{children}</>;
 
-  // If permission is provided and user does not have it → block access
-  if (permission && !hasPermission(permission)) {
-    return <Navigate to="/unauthorized" replace />;
-  }
+  // No specific permission required — any authenticated user can access
+  if (!permission) return <>{children}</>;
 
-  // If everything is fine → render page
+  const perms = Array.isArray(permission) ? permission : [permission];
+  const hasAccess = perms.some((p) => hasPermission(p));
+
+  if (!hasAccess) return <Navigate to="/dashboard" replace />;
+
   return <>{children}</>;
 };
 
