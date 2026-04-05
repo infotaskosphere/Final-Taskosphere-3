@@ -757,9 +757,12 @@ export default function Tasks() {
   const [usersLoading,   setUsersLoading]   = useState(true);
   const [filterTeamOnly,      setFilterTeamOnly]      = useState(false);
   const [filterAssignedByMe,  setFilterAssignedByMe]  = useState(false);
+  const [filterCreatedBy,     setFilterCreatedBy]     = useState('all');
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
   const [duplicateGroups,     setDuplicateGroups]     = useState([]);
   const [detectingDuplicates, setDetectingDuplicates] = useState(false);
+  const [compareTaskIds,      setCompareTaskIds]       = useState([]);
+  const [compareMode,         setCompareMode]          = useState(false);
 
   const [dialogOpen,         setDialogOpen]         = useState(false);
   const [editingTask,        setEditingTask]         = useState(null);
@@ -814,6 +817,23 @@ export default function Tasks() {
     }
     return users.filter(u => u.id === user?.id);
   }, [isAdmin, hasCrossVisibility, crossVisibilityUserIds, users, user]);
+
+  // Users who have created tasks that the current user can see — respects permission scope
+  const visibleCreators = React.useMemo(() => {
+    if (isAdmin) return users; // admin sees everyone
+    // For non-admin: only show creators whose tasks are in scopedTasks
+    const creatorIds = new Set(
+      tasks
+        .filter(t => {
+          // same scope check as scopedTasks
+          const visibleIds = new Set([user?.id, ...crossVisibilityUserIds]);
+          return visibleIds.has(t.assigned_to) || t.sub_assignees?.some(id => visibleIds.has(id)) || t.created_by === user?.id;
+        })
+        .map(t => t.created_by)
+        .filter(Boolean)
+    );
+    return users.filter(u => creatorIds.has(u.id));
+  }, [isAdmin, users, tasks, user, crossVisibilityUserIds]);
 
   useEffect(() => {
     const loadAll = async () => {
@@ -933,54 +953,92 @@ export default function Tasks() {
     } catch { toast.error('Network error'); }
   };
 
-  // ── Local duplicate detection (runs entirely in browser, no API needed) ──
+  // ── Enhanced local duplicate detection — deep field-level comparison ──
   const detectDuplicatesLocally = (taskList) => {
-    // Normalise a string: lowercase, remove punctuation, collapse spaces
     const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 
-    // Token-overlap score between two strings (Jaccard similarity on words)
+    // Jaccard similarity on word tokens (length > 2)
     const similarity = (a, b) => {
       const wa = new Set(norm(a).split(' ').filter(w => w.length > 2));
       const wb = new Set(norm(b).split(' ').filter(w => w.length > 2));
       if (!wa.size || !wb.size) return 0;
       let inter = 0;
       wa.forEach(w => { if (wb.has(w)) inter++; });
-      return inter / (wa.size + wb.size - inter); // Jaccard index 0–1
+      return inter / (wa.size + wb.size - inter);
     };
+
+    // Trigram similarity for short strings like client names
+    const trigramSim = (a, b) => {
+      const trig = (s) => { const r = new Set(); for (let i = 0; i < s.length - 2; i++) r.add(s.slice(i, i + 3)); return r; };
+      const sa = trig(norm(a)), sb = trig(norm(b));
+      if (!sa.size || !sb.size) return 0;
+      let inter = 0;
+      sa.forEach(t => { if (sb.has(t)) inter++; });
+      return inter / (sa.size + sb.size - inter);
+    };
+
+    // Strip common CA/legal suffixes for smarter title matching
+    const normTitle = (s) => norm(s)
+      .replace(/\b(pvt|ltd|llp|private|limited|inc|corp|gst|registration|filing|return|application|document|compliance|annual)\b/g, '')
+      .replace(/\s+/g, ' ').trim();
 
     const groups = [];
     const used   = new Set();
 
     taskList.forEach((t1, i) => {
       if (used.has(t1.id)) return;
-      const group = [t1.id];
+      const group   = [t1.id];
       const reasons = [];
 
       taskList.forEach((t2, j) => {
         if (i === j || used.has(t2.id)) return;
 
-        const titleSim = similarity(t1.title, t2.title);
-        const descSim  = similarity(t1.description, t2.description);
+        const titleSim     = similarity(t1.title, t2.title);
+        const titleNormSim = similarity(normTitle(t1.title), normTitle(t2.title));
+        const descSim      = similarity(t1.description, t2.description);
+        const exactTitle   = norm(t1.title) === norm(t2.title);
+        const sameCategory = t1.category && t2.category && t1.category === t2.category;
+        const sameClient   = t1.client_id && t2.client_id && t1.client_id === t2.client_id;
+        const sameAssignee = t1.assigned_to && t2.assigned_to && t1.assigned_to === t2.assigned_to;
+        const samePriority = t1.priority === t2.priority;
+        const sameDueDate  = t1.due_date && t2.due_date &&
+          new Date(t1.due_date).toDateString() === new Date(t2.due_date).toDateString();
 
-        // Hard match: exact normalised title
-        const exactTitle = norm(t1.title) === norm(t2.title);
-        // Soft match: title similarity > 70% OR (title > 50% AND same category/client)
-        const softMatch  = titleSim > 0.70 ||
-          (titleSim > 0.50 && (t1.category === t2.category || t1.client_id === t2.client_id)) ||
-          (titleSim > 0.40 && descSim > 0.60);
+        // Score composite: weighted combination of signals
+        let score = 0;
+        score += titleSim * 50;           // raw title similarity 0-50
+        score += titleNormSim * 20;       // normalised title (strips legal words) 0-20
+        score += descSim * 15;            // description similarity 0-15
+        if (sameCategory) score += 8;
+        if (sameClient)   score += 10;
+        if (sameAssignee) score += 4;
+        if (samePriority) score += 3;
+        if (sameDueDate)  score += 5;
 
-        if (exactTitle || softMatch) {
-          group.push(t2.id);
-          const conf = exactTitle || titleSim > 0.80 ? 'high' : 'medium';
-          reasons.push({ id: t2.id, conf, titleSim: Math.round(titleSim * 100) });
-        }
+        // Build human-readable reason
+        const reasonParts = [];
+        if (exactTitle) reasonParts.push('Exact title match');
+        else if (titleSim > 0.7) reasonParts.push(`Title ${Math.round(titleSim * 100)}% similar`);
+        else if (titleNormSim > 0.7) reasonParts.push(`Core title ${Math.round(titleNormSim * 100)}% similar`);
+        if (sameClient)   reasonParts.push(`same client`);
+        if (sameCategory) reasonParts.push(`same dept (${(t1.category || '').toUpperCase()})`);
+        if (sameDueDate)  reasonParts.push(`same due date`);
+        if (descSim > 0.5) reasonParts.push(`description ${Math.round(descSim * 100)}% similar`);
+
+        // Thresholds — exact title = always flag; score >= 55 = high; >= 40 = medium
+        const isDuplicate = exactTitle || score >= 40;
+        if (!isDuplicate) return;
+
+        group.push(t2.id);
+        const conf = exactTitle || score >= 65 ? 'high' : 'medium';
+        reasons.push({ id: t2.id, conf, score: Math.round(score), reasonParts });
       });
 
       if (group.length > 1) {
-        const maxConf = reasons.some(r => r.conf === 'high') ? 'high' : 'medium';
-        const topSim  = Math.max(...reasons.map(r => r.titleSim));
+        const maxConf    = reasons.some(r => r.conf === 'high') ? 'high' : 'medium';
+        const topReason  = reasons[0]?.reasonParts?.join(' · ') || 'Similar tasks detected';
         groups.push({
-          reason: `Title similarity ${topSim}%${t1.category ? ` · same department (${t1.category.toUpperCase()})` : ''}`,
+          reason: topReason,
           confidence: maxConf,
           task_ids: group.map(String),
           source: 'local',
@@ -1119,6 +1177,7 @@ export default function Tasks() {
     let result = [...filteredTasks];
     if (showMyTasksOnly && user?.id) result = result.filter(t => t.assigned_to === user.id || t.sub_assignees?.includes(user.id));
     if (filterAssignedByMe && user?.id) result = result.filter(t => t.created_by === user.id);
+    if (filterCreatedBy !== 'all') result = result.filter(t => t.created_by === filterCreatedBy);
     result.sort((a, b) => {
       let cmp = 0;
       if (sortBy === 'due_date') { const dA = a.due_date ? new Date(a.due_date).getTime() : Infinity; const dB = b.due_date ? new Date(b.due_date).getTime() : Infinity; cmp = dA - dB; }
@@ -1129,7 +1188,7 @@ export default function Tasks() {
       return sortDirection === 'asc' ? cmp : -cmp;
     });
     return result;
-  }, [filteredTasks, showMyTasksOnly, sortBy, sortDirection, user]);
+  }, [filteredTasks, showMyTasksOnly, sortBy, sortDirection, user, filterAssignedByMe, filterCreatedBy]);
 
   useEffect(() => {
     const pills = [];
@@ -1141,8 +1200,9 @@ export default function Tasks() {
     if (showMyTasksOnly)          pills.push({ key: 'mytasks',     label: 'Assigned to Me' });
     if (filterTeamOnly)           pills.push({ key: 'teamonly',    label: 'Team Tasks' });
     if (filterAssignedByMe)       pills.push({ key: 'assignedby',  label: 'Assigned by Me' });
+    if (filterCreatedBy !== 'all') pills.push({ key: 'createdby', label: `By: ${users.find(u => u.id === filterCreatedBy)?.full_name || filterCreatedBy}` });
     setActiveFilters(pills);
-  }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, filterAssignedByMe, users]);
+  }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, filterAssignedByMe, filterCreatedBy, users]);
 
   const removeFilter = (key) => {
     if (key === 'search')   setSearchQuery('');
@@ -1153,11 +1213,12 @@ export default function Tasks() {
     if (key === 'mytasks')     setShowMyTasksOnly(false);
     if (key === 'teamonly')    setFilterTeamOnly(false);
     if (key === 'assignedby') setFilterAssignedByMe(false);
+    if (key === 'createdby')  setFilterCreatedBy('all');
   };
 
   const clearAllFilters = () => {
     setSearchQuery(''); setFilterStatus('all'); setFilterPriority('all'); setFilterCategory('all'); setFilterAssignee('all');
-    setShowMyTasksOnly(false); setFilterTeamOnly(false); setFilterAssignedByMe(false); setSortBy('due_date'); setSortDirection('asc');
+    setShowMyTasksOnly(false); setFilterTeamOnly(false); setFilterAssignedByMe(false); setFilterCreatedBy('all'); setSortBy('due_date'); setSortDirection('asc');
     toast.success('Filters cleared');
   };
 
@@ -1318,8 +1379,14 @@ export default function Tasks() {
                       <DialogTitle className="text-xl font-bold" style={{ color: COLORS.deepBlue }}>
                         {editingTask ? 'Edit Task' : 'Create New Task'}
                       </DialogTitle>
-                      <DialogDescription className="text-sm text-slate-500">
-                        {editingTask ? 'Update task details below.' : 'Fill in the details to create a new task.'}
+                      <DialogDescription className="text-sm text-slate-500 flex items-center gap-3 flex-wrap">
+                        <span>{editingTask ? 'Update task details below.' : 'Fill in the details to create a new task.'}</span>
+                        {editingTask?.created_at && (
+                          <span className="flex items-center gap-1 text-[11px] font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full border border-slate-200">
+                            <Clock className="h-3 w-3" />
+                            Created: {format(new Date(editingTask.created_at), 'MMM dd, yyyy · hh:mm a')}
+                          </span>
+                        )}
                       </DialogDescription>
                     </DialogHeader>
                     <form onSubmit={handleSubmit} className="space-y-4 mt-2">
@@ -1607,18 +1674,46 @@ export default function Tasks() {
             </SelectContent>
           </Select>
 
-          {/* Assigned By Me toggle */}
-          <button
-            onClick={() => { setFilterAssignedByMe(p => !p); setShowMyTasksOnly(false); setFilterTeamOnly(false); setFilterAssignee('all'); }}
-            className={`h-8 px-3 text-xs font-semibold rounded-xl border transition-all flex items-center gap-1.5 whitespace-nowrap
-              ${filterAssignedByMe
-                ? (isDark ? 'bg-purple-900/40 border-purple-500 text-purple-300' : 'bg-purple-50 border-purple-400 text-purple-700')
-                : (isDark ? 'bg-slate-700 border-slate-600 text-slate-400 hover:border-purple-500 hover:text-purple-300' : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-purple-300 hover:text-purple-600')
-              }`}
+          {/* Assigned By dropdown — permission-aware creator filter */}
+          <Select
+            value={filterCreatedBy !== 'all' ? filterCreatedBy : (filterAssignedByMe ? '__me__' : 'all')}
+            onValueChange={(v) => {
+              if (v === '__me__') {
+                setFilterAssignedByMe(true);
+                setFilterCreatedBy('all');
+                setShowMyTasksOnly(false);
+                setFilterTeamOnly(false);
+                setFilterAssignee('all');
+              } else {
+                setFilterAssignedByMe(false);
+                setFilterCreatedBy(v);
+                if (v !== 'all') { setShowMyTasksOnly(false); setFilterTeamOnly(false); }
+              }
+            }}
           >
-            <User className="h-3 w-3" />
-            {filterAssignedByMe ? '✓ Assigned by Me' : 'Assigned by Me'}
-          </button>
+            <SelectTrigger
+              className={`h-8 text-xs rounded-xl flex-1 min-w-[130px] max-w-[200px] transition-all ${
+                (filterCreatedBy !== 'all' || filterAssignedByMe)
+                  ? (isDark ? 'bg-purple-900/40 border-purple-500 text-purple-300' : 'bg-purple-50 border-purple-400 text-purple-700')
+                  : (isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200')
+              }`}
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <User className="h-3 w-3 flex-shrink-0" />
+                <SelectValue placeholder="Assigned by" />
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Creators</SelectItem>
+              <SelectItem value="__me__">Assigned by Me</SelectItem>
+              {visibleCreators
+                .filter(u => u.id !== user?.id) // "me" already covered above
+                .map(u => (
+                  <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
+                ))
+              }
+            </SelectContent>
+          </Select>
 
           {/* AI Duplicate Detector */}
           <button
@@ -1808,6 +1903,7 @@ export default function Tasks() {
                     { label: 'Created By',  value: selectedDetailTask.created_by ? getUserName(selectedDetailTask.created_by) : '—' },
                     { label: 'Department',  value: getCategoryLabel(selectedDetailTask.category) },
                     { label: 'Client',      value: selectedDetailTask.client_id ? getClientName(selectedDetailTask.client_id) : '—' },
+                    { label: 'Created On',  value: selectedDetailTask.created_at ? format(new Date(selectedDetailTask.created_at), 'MMM dd, yyyy · hh:mm a') : '—' },
                     { label: 'Due Date',    value: selectedDetailTask.due_date ? `${format(new Date(selectedDetailTask.due_date), 'MMM dd, yyyy')} · ${getRelativeDueDate(selectedDetailTask.due_date)}` : 'No due date' },
                     { label: 'Recurrence', value: selectedDetailTask.is_recurring ? `Every ${selectedDetailTask.recurrence_interval} ${selectedDetailTask.recurrence_pattern}(s)` : 'One-time' },
                   ].map(({ label, value }) => (
@@ -1915,14 +2011,14 @@ export default function Tasks() {
       </Dialog>
 
       {/* ── AI Duplicate Detection Dialog ──────────────────────────────── */}
-      <Dialog open={showDuplicateDialog} onOpenChange={setShowDuplicateDialog}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+      <Dialog open={showDuplicateDialog} onOpenChange={(o) => { setShowDuplicateDialog(o); if (!o) { setCompareMode(false); setCompareTaskIds([]); } }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl font-bold flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
               <Sparkles className="h-5 w-5 text-purple-500" />
               AI Duplicate Task Detection
             </DialogTitle>
-            <DialogDescription className="text-sm text-slate-500 flex items-center gap-2">
+            <DialogDescription className="text-sm text-slate-500 flex items-center gap-2 flex-wrap">
               <span>
                 {duplicateGroups.length
                   ? `Found ${duplicateGroups.length} group${duplicateGroups.length !== 1 ? 's' : ''} of potential duplicate tasks.`
@@ -1937,9 +2033,86 @@ export default function Tasks() {
                   {duplicateGroups[0]?.source === 'ai' ? '✦ Gemini AI' : '⚡ Local Scan'}
                 </span>
               )}
+              {duplicateGroups.length > 0 && (
+                <button
+                  onClick={() => { setCompareMode(p => !p); setCompareTaskIds([]); }}
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all ${
+                    compareMode
+                      ? 'bg-emerald-500 text-white border-emerald-500'
+                      : 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+                  }`}
+                >
+                  {compareMode ? '✓ Compare Mode ON — select 2 tasks' : '⇄ Compare Mode'}
+                </button>
+              )}
             </DialogDescription>
           </DialogHeader>
-          <div className="mt-4 space-y-4">
+
+          {/* ── Compare Panel ── */}
+          {compareMode && compareTaskIds.length === 2 && (() => {
+            const tA = tasks.find(t => String(t.id) === String(compareTaskIds[0]));
+            const tB = tasks.find(t => String(t.id) === String(compareTaskIds[1]));
+            if (!tA || !tB) return null;
+            const fields = [
+              { label: 'Title',      a: tA.title,                                                      b: tB.title },
+              { label: 'Status',     a: STATUS_STYLES[tA.status]?.label || tA.status,                  b: STATUS_STYLES[tB.status]?.label || tB.status },
+              { label: 'Priority',   a: (tA.priority || '').toUpperCase(),                             b: (tB.priority || '').toUpperCase() },
+              { label: 'Department', a: getCategoryLabel(tA.category),                                 b: getCategoryLabel(tB.category) },
+              { label: 'Client',     a: tA.client_id ? getClientName(tA.client_id) : '—',             b: tB.client_id ? getClientName(tB.client_id) : '—' },
+              { label: 'Assignee',   a: getUserName(tA.assigned_to),                                   b: getUserName(tB.assigned_to) },
+              { label: 'Due Date',   a: tA.due_date ? format(new Date(tA.due_date), 'MMM dd, yyyy') : '—', b: tB.due_date ? format(new Date(tB.due_date), 'MMM dd, yyyy') : '—' },
+              { label: 'Created',    a: tA.created_at ? format(new Date(tA.created_at), 'MMM dd, yyyy') : '—', b: tB.created_at ? format(new Date(tB.created_at), 'MMM dd, yyyy') : '—' },
+              { label: 'Recurring',  a: tA.is_recurring ? 'Yes' : 'No',                               b: tB.is_recurring ? 'Yes' : 'No' },
+              { label: 'Description',a: (tA.description || '—').slice(0, 80),                         b: (tB.description || '—').slice(0, 80) },
+            ];
+            return (
+              <div className={`my-3 border rounded-xl overflow-hidden ${isDark ? 'border-emerald-800 bg-slate-800' : 'border-emerald-200 bg-emerald-50/30'}`}>
+                <div className="flex items-center justify-between px-4 py-2 bg-emerald-500 text-white">
+                  <span className="text-xs font-bold uppercase tracking-wide">Side-by-Side Comparison</span>
+                  <button onClick={() => { setCompareTaskIds([]); setCompareMode(false); }} className="text-white/80 hover:text-white text-xs">✕ Close</button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700' : 'border-emerald-200 bg-emerald-100/60'}`}>
+                        <th className="px-3 py-2 text-left font-bold text-slate-500 w-24">Field</th>
+                        <th className="px-3 py-2 text-left font-semibold text-blue-700 max-w-[220px]">
+                          <button onClick={() => openTaskDetail(tA)} className="hover:underline truncate block">{tA.title.slice(0, 30)}{tA.title.length > 30 ? '…' : ''}</button>
+                        </th>
+                        <th className="px-3 py-2 text-left font-semibold text-purple-700 max-w-[220px]">
+                          <button onClick={() => openTaskDetail(tB)} className="hover:underline truncate block">{tB.title.slice(0, 30)}{tB.title.length > 30 ? '…' : ''}</button>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fields.map(({ label, a, b }) => {
+                        const diff = String(a).toLowerCase() !== String(b).toLowerCase();
+                        return (
+                          <tr key={label} className={`border-b ${isDark ? 'border-slate-700' : 'border-emerald-100'} ${diff ? (isDark ? 'bg-amber-900/20' : 'bg-amber-50/60') : ''}`}>
+                            <td className="px-3 py-1.5 font-bold text-slate-400 whitespace-nowrap">{label}</td>
+                            <td className={`px-3 py-1.5 ${diff ? 'text-blue-700 font-semibold' : (isDark ? 'text-slate-300' : 'text-slate-700')}`}>{a}</td>
+                            <td className={`px-3 py-1.5 ${diff ? 'text-purple-700 font-semibold' : (isDark ? 'text-slate-300' : 'text-slate-700')}`}>{b}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex gap-2 px-4 py-2 border-t border-emerald-200">
+                  {canDeleteTasks && <button onClick={() => { handleDelete(tA.id); setCompareTaskIds([]); setCompareMode(false); }} className="h-6 px-3 text-[10px] font-semibold rounded-lg bg-red-50 text-red-600 border border-red-200 hover:bg-red-100">Delete Task A</button>}
+                  {canDeleteTasks && <button onClick={() => { handleDelete(tB.id); setCompareTaskIds([]); setCompareMode(false); }} className="h-6 px-3 text-[10px] font-semibold rounded-lg bg-red-50 text-red-600 border border-red-200 hover:bg-red-100">Delete Task B</button>}
+                  <button onClick={() => { setCompareTaskIds([]); }} className="h-6 px-3 text-[10px] font-semibold rounded-lg bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 ml-auto">Clear Selection</button>
+                </div>
+              </div>
+            );
+          })()}
+          {compareMode && compareTaskIds.length < 2 && (
+            <div className={`my-2 px-4 py-2 rounded-lg text-xs font-medium text-center ${isDark ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-800' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+              {compareTaskIds.length === 0 ? 'Click any task title below to select it for comparison (select 2)' : `1 task selected — click one more task to compare`}
+            </div>
+          )}
+
+          <div className="mt-2 space-y-4">
             {duplicateGroups.length === 0 ? (
               <div className="text-center py-12">
                 <div className="w-14 h-14 rounded-2xl bg-emerald-50 flex items-center justify-center mx-auto mb-3">
@@ -1954,28 +2127,81 @@ export default function Tasks() {
               return (
                 <div key={gi} className={`border rounded-xl overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
                   <div className={`px-4 py-3 flex items-center justify-between gap-2 ${isDark ? 'bg-slate-800' : 'bg-slate-50'}`}>
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0 flex-wrap">
                       <span className="text-xs font-bold text-slate-400">GROUP {gi + 1}</span>
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${confColor}`}>
                         {(group.confidence || 'medium').toUpperCase()} MATCH
                       </span>
+                      <span className={`text-[10px] text-right truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{group.reason}</span>
                     </div>
-                    <p className={`text-xs text-right truncate flex-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{group.reason}</p>
+                    <button
+                      onClick={() => {
+                        // Select all tasks in group for quick compare of first 2
+                        const ids = groupTasks.slice(0, 2).map(t => String(t.id));
+                        setCompareTaskIds(ids);
+                        setCompareMode(true);
+                      }}
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex-shrink-0 transition-all ${isDark ? 'bg-slate-700 border-slate-600 text-slate-300 hover:border-emerald-500 hover:text-emerald-400' : 'bg-white border-slate-300 text-slate-600 hover:border-emerald-400 hover:text-emerald-600'}`}
+                    >
+                      ⇄ Compare
+                    </button>
                   </div>
                   <div className="divide-y divide-slate-100 dark:divide-slate-700">
                     {groupTasks.map((task, ti) => {
                       const ps = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
                       const ss = STATUS_STYLES[task.status] || STATUS_STYLES.pending;
+                      const isSelectedForCompare = compareTaskIds.includes(String(task.id));
                       return (
-                        <div key={ti} className={`px-4 py-3 flex items-center justify-between gap-3 ${isDark ? 'bg-slate-800/60' : 'bg-white'}`}>
+                        <div key={ti} className={`px-4 py-3 flex items-center justify-between gap-3 transition-all ${
+                          isSelectedForCompare
+                            ? (isDark ? 'bg-emerald-900/30 border-l-2 border-emerald-500' : 'bg-emerald-50 border-l-2 border-emerald-500')
+                            : (isDark ? 'bg-slate-800/60' : 'bg-white')
+                        }`}>
                           <div className="flex items-center gap-2 min-w-0 flex-1">
-                            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${getStripeColor(task, isOverdue(task)).replace('bg-', 'bg-')}`} />
-                            <span className={`text-sm font-medium truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{task.title}</span>
+                            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${getStripeColor(task, isOverdue(task))}`} />
+                            {/* Clickable title — opens Task Detail OR selects for compare */}
+                            <button
+                              onClick={() => {
+                                if (compareMode) {
+                                  const sid = String(task.id);
+                                  setCompareTaskIds(prev => {
+                                    if (prev.includes(sid)) return prev.filter(i => i !== sid);
+                                    if (prev.length >= 2) return [prev[1], sid];
+                                    return [...prev, sid];
+                                  });
+                                } else {
+                                  openTaskDetail(task);
+                                  setShowDuplicateDialog(false);
+                                }
+                              }}
+                              className={`text-sm font-medium truncate text-left transition-colors ${
+                                compareMode
+                                  ? (isSelectedForCompare
+                                    ? 'text-emerald-600 font-bold'
+                                    : (isDark ? 'text-slate-300 hover:text-emerald-400' : 'text-slate-700 hover:text-emerald-600'))
+                                  : (isDark ? 'text-slate-100 hover:text-blue-400 underline-offset-2 hover:underline' : 'text-slate-800 hover:text-blue-700 underline-offset-2 hover:underline')
+                              }`}
+                              title={compareMode ? 'Click to select for comparison' : 'Click to view task details'}
+                            >
+                              {isSelectedForCompare && '✓ '}{task.title}
+                            </button>
                           </div>
-                          <div className="flex items-center gap-2 flex-shrink-0">
+                          <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
                             <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${ss.bg} ${ss.text}`}>{ss.label}</span>
                             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${ps.bg} ${ps.text}`}>{ps.label}</span>
+                            {task.category && <span className="text-[10px] text-slate-400 uppercase">{task.category}</span>}
                             <span className="text-[10px] text-slate-400">{getUserName(task.assigned_to)}</span>
+                            {task.created_at && (
+                              <span className="text-[10px] text-slate-400 hidden sm:inline">{format(new Date(task.created_at), 'MMM dd, yy')}</span>
+                            )}
+                            {/* View button */}
+                            <button
+                              onClick={() => { openTaskDetail(task); setShowDuplicateDialog(false); }}
+                              className="h-6 px-2 text-[10px] font-semibold rounded-lg bg-slate-50 text-slate-600 hover:bg-slate-100 transition-colors border border-slate-200 flex-shrink-0"
+                              title="View task details"
+                            >
+                              View
+                            </button>
                             {canModifyTask(task) && (
                               <button
                                 onClick={() => { handleEdit(task); setShowDuplicateDialog(false); }}
@@ -1986,7 +2212,14 @@ export default function Tasks() {
                             )}
                             {canDeleteTasks && (
                               <button
-                                onClick={() => { handleDelete(task.id); setDuplicateGroups(prev => prev.map(g => ({ ...g, task_ids: g.task_ids.filter(id => String(id) !== String(task.id)) })).filter(g => g.task_ids.length > 1)); }}
+                                onClick={() => {
+                                  handleDelete(task.id);
+                                  setDuplicateGroups(prev =>
+                                    prev.map(g => ({ ...g, task_ids: g.task_ids.filter(id => String(id) !== String(task.id)) }))
+                                      .filter(g => g.task_ids.length > 1)
+                                  );
+                                  setCompareTaskIds(prev => prev.filter(id => id !== String(task.id)));
+                                }}
                                 className="h-6 px-2 text-[10px] font-semibold rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors border border-red-200 flex-shrink-0"
                               >
                                 Delete
@@ -2004,8 +2237,11 @@ export default function Tasks() {
               );
             })}
           </div>
-          <div className={`flex justify-end pt-4 border-t mt-2 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-            <Button variant="outline" onClick={() => setShowDuplicateDialog(false)} className="h-9 text-sm rounded-xl">Close</Button>
+          <div className={`flex items-center justify-between pt-4 border-t mt-2 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+            <p className="text-[10px] text-slate-400">
+              {compareMode ? 'Click task titles to select for comparison · Click "View" to open details' : 'Click task titles to open details · Enable Compare Mode to compare side-by-side'}
+            </p>
+            <Button variant="outline" onClick={() => { setShowDuplicateDialog(false); setCompareMode(false); setCompareTaskIds([]); }} className="h-9 text-sm rounded-xl">Close</Button>
           </div>
         </DialogContent>
       </Dialog>
