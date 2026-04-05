@@ -158,7 +158,7 @@ function RevealPw({ entryId, isDark }) {
     if (shown) { setShown(false); setPw(''); return; }
     setLoading(true);
     try {
-      const r = await api.get(`/${entryId}/reveal`);
+      const r = await api.get(`/passwords/${entryId}/reveal`);
       if (!mounted.current) return;
       setPw(r.data.password || '');
       setShown(true);
