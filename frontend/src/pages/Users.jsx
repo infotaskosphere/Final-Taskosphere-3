@@ -22,7 +22,7 @@ import {
   Hash, ArrowUpRight, SlidersHorizontal, ShieldCheck,
   ShieldOff, Fingerprint, Download, Pencil, Inbox, X,
   Monitor, Wifi, WifiOff, RefreshCw, Radar, Loader2,
-  Network, Save, ClipboardList, LayoutDashboard, AlertTriangle,
+  Network, Save, ClipboardList, LayoutDashboard, AlertTriangle, MapPin,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -214,6 +214,8 @@ const EMPTY_PERMISSIONS = {
   can_view_staff_rankings: false, can_delete_data: false, can_delete_tasks: false,
   can_connect_email: false, can_view_own_data: false, can_create_quotations: false,
   can_manage_invoices: false, can_view_passwords: false, can_edit_passwords: false,
+  can_view_all_visits: false, can_edit_visits: false,
+  can_delete_visits: false, can_delete_own_visits: true,
   view_password_departments: [], assigned_clients: [], view_other_tasks: [],
   view_other_attendance: [], view_other_reports: [], view_other_todos: [], view_other_activity: [],
 };
@@ -236,17 +238,21 @@ const GLOBAL_PERMS = [
 ];
 
 const OPS_PERMS = [
-  { key: 'can_assign_tasks',        label: 'Task Delegation',       desc: 'Assign tasks to other staff members',       icon: ArrowUpRight },
-  { key: 'can_assign_clients',      label: 'Client Assignment',     desc: 'Assign and reassign staff to clients',      icon: Briefcase    },
-  { key: 'can_manage_users',        label: 'User Governance',       desc: 'Manage team members and roles',             icon: UsersIcon    },
-  { key: 'can_view_attendance',     label: 'Attendance Management', desc: 'Review punch timings and late reports',     icon: Clock        },
-  { key: 'can_view_staff_activity', label: 'Staff Monitoring',      desc: 'View app usage and screen activity',        icon: Activity     },
-  { key: 'can_send_reminders',      label: 'Automated Reminders',   desc: 'Trigger email/notification reminders',      icon: Bell         },
-  { key: 'can_download_reports',    label: 'Export Data',           desc: 'Download CSV/PDF versions of reports',      icon: Download     },
-  { key: 'can_manage_settings',     label: 'System Settings',       desc: 'Modify global system configuration',        icon: Settings     },
-  { key: 'can_delete_data',         label: 'Delete Records',        desc: 'Permanently delete data entries',           icon: Trash2       },
-  { key: 'can_delete_tasks',        label: 'Delete Tasks',          desc: 'Delete any task regardless of ownership',   icon: XCircle      },
-  { key: 'can_connect_email',       label: 'Connect Email Accounts',desc: 'Link personal email via IMAP integration',  icon: Inbox        },
+  { key: 'can_assign_tasks',        label: 'Task Delegation',        desc: 'Assign tasks to other staff members',              icon: ArrowUpRight },
+  { key: 'can_assign_clients',      label: 'Client Assignment',      desc: 'Assign and reassign staff to clients',             icon: Briefcase    },
+  { key: 'can_manage_users',        label: 'User Governance',        desc: 'Manage team members and roles',                    icon: UsersIcon    },
+  { key: 'can_view_attendance',     label: 'Attendance Management',  desc: 'Review punch timings and late reports',            icon: Clock        },
+  { key: 'can_view_staff_activity', label: 'Staff Monitoring',       desc: 'View app usage and screen activity',               icon: Activity     },
+  { key: 'can_send_reminders',      label: 'Automated Reminders',    desc: 'Trigger email/notification reminders',             icon: Bell         },
+  { key: 'can_download_reports',    label: 'Export Data',            desc: 'Download CSV/PDF versions of reports',             icon: Download     },
+  { key: 'can_manage_settings',     label: 'System Settings',        desc: 'Modify global system configuration',               icon: Settings     },
+  { key: 'can_delete_data',         label: 'Delete Records',         desc: 'Permanently delete data entries',                  icon: Trash2       },
+  { key: 'can_delete_tasks',        label: 'Delete Tasks',           desc: 'Delete any task regardless of ownership',          icon: XCircle      },
+  { key: 'can_connect_email',       label: 'Connect Email Accounts', desc: 'Link personal email via IMAP integration',         icon: Inbox        },
+  { key: 'can_view_all_visits',     label: 'View All Visits',        desc: 'See client visits logged by any staff member',     icon: MapPin       },
+  { key: 'can_edit_visits',         label: 'Edit Visits',            desc: 'Edit and update client visit records',             icon: Edit         },
+  { key: 'can_delete_visits',       label: 'Delete Any Visit',       desc: 'Delete visit records belonging to any staff',      icon: Trash2       },
+  { key: 'can_delete_own_visits',   label: 'Delete Own Visits',      desc: 'Delete only their own logged visit records',       icon: XCircle      },
 ];
 
 const EDIT_PERMS = [
@@ -1920,8 +1926,49 @@ export default function Users() {
                   <ModuleAccessCard icon={FileText} title="Invoicing & Billing" desc="Create GST invoices, record payments, manage product catalog" permKey="can_manage_invoices" permissions={permissions} setPermissions={setPermissions} accentColor={COLORS.emeraldGreen} badge={permissions.can_manage_invoices ? 'Full Access' : undefined} />
                   <ModuleAccessCard icon={KeyRound} title="Password Vault" desc="Access the secure portal credentials repository" permKey="can_view_passwords" permissions={permissions} setPermissions={setPermissions} accentColor="#F59E0B" badge={permissions.can_edit_passwords ? 'Read / Write' : permissions.can_view_passwords ? 'Read Only' : undefined} />
                   {permissions.can_view_passwords && (
-                    <div className="ml-5">
+                    <div className="ml-5 space-y-3">
                       <PermToggleRow permKey="can_edit_passwords" label="Vault Write Access" desc="Allow adding, editing and deleting portal credentials" icon={Pencil} permissions={permissions} setPermissions={setPermissions} />
+                      <div className={`p-4 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                        <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                          Vault Department Scope
+                        </p>
+                        <p className="text-xs text-slate-400 dark:text-slate-500 mb-3">
+                          Leave empty to allow access to all departments. Select specific departments to restrict.
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {DEPARTMENTS.map(dept => {
+                            const isSelected = (permissions.view_password_departments || []).includes(dept.value);
+                            return (
+                              <button
+                                key={dept.value}
+                                onClick={() => setPermissions(prev => ({
+                                  ...prev,
+                                  view_password_departments: isSelected
+                                    ? prev.view_password_departments.filter(d => d !== dept.value)
+                                    : [...(prev.view_password_departments || []), dept.value],
+                                }))}
+                                className="px-3 py-1.5 rounded-xl text-xs font-bold border-2 transition-all hover:shadow-sm"
+                                style={isSelected
+                                  ? { background: dept.color, color: 'white', borderColor: dept.color }
+                                  : { background: dept.bg, color: dept.color, borderColor: `${dept.color}30` }
+                                }
+                              >
+                                {isSelected ? '✓ ' : ''}{dept.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {(permissions.view_password_departments || []).length === 0 && (
+                          <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-2 font-medium">
+                            ✓ Access to all departments (no restriction)
+                          </p>
+                        )}
+                        {(permissions.view_password_departments || []).length > 0 && (
+                          <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 font-medium">
+                            ⚠ Restricted to {(permissions.view_password_departments || []).join(', ')} only
+                          </p>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
