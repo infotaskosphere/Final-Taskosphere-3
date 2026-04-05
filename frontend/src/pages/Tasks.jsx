@@ -1151,6 +1151,48 @@ export default function Tasks() {
 
   const completionRate = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
 
+  const hasActiveFilters = activeFilters.length > 0;
+
+  const teamTaskBreakdown = React.useMemo(() => {
+    if (!hasCrossVisibility || crossVisibilityUserIds.length === 0) return [];
+    return crossVisibilityUserIds.map(uid => {
+      const member = users.find(u => u.id === uid);
+      const nameFromTask = tasks.find(t => t.assigned_to === uid)?.assigned_to_name;
+      const pendingCount = tasks.filter(t => (t.assigned_to === uid || t.sub_assignees?.includes(uid)) && t.status !== 'completed').length;
+      return { id: uid, name: member?.full_name || nameFromTask || 'Unknown', pendingCount };
+    }).filter(m => m.pendingCount > 0);
+  }, [hasCrossVisibility, crossVisibilityUserIds, tasks, users]);
+
+  // ── Filtering ─────────────────────────────────────────────────────────────
+  const filteredTasks = scopedTasks.filter(task => {
+    const matchesSearch   = task.title.toLowerCase().includes(searchQuery.toLowerCase()) || task.description?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesPriority = filterPriority === 'all' || task.priority   === filterPriority;
+    const matchesCategory = filterCategory === 'all' || task.category   === filterCategory;
+    const matchesAssignee = filterAssignee === 'all' || task.assigned_to === filterAssignee;
+    const matchesTeam     = !filterTeamOnly || crossVisibilityUserIds.includes(task.assigned_to);
+    let matchesStatus = true;
+    if (filterStatus !== 'all') matchesStatus = filterStatus === 'overdue' ? isOverdue(task) : task.status === filterStatus;
+    return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee && matchesTeam;
+  });
+
+  // ── displayTasks must be defined BEFORE filteredStats ────────────────────
+  const displayTasks = React.useMemo(() => {
+    let result = [...filteredTasks];
+    if (showMyTasksOnly && user?.id) result = result.filter(t => t.assigned_to === user.id || t.sub_assignees?.includes(user.id));
+    if (filterAssignedByMe && user?.id) result = result.filter(t => t.created_by === user.id);
+    if (filterCreatedBy !== 'all') result = result.filter(t => t.created_by === filterCreatedBy);
+    result.sort((a, b) => {
+      let cmp = 0;
+      if (sortBy === 'due_date') { const dA = a.due_date ? new Date(a.due_date).getTime() : Infinity; const dB = b.due_date ? new Date(b.due_date).getTime() : Infinity; cmp = dA - dB; }
+      else if (sortBy === 'priority') { const prioOrder = { critical: 4, high: 3, medium: 2, low: 1 }; cmp = (prioOrder[b.priority] || 0) - (prioOrder[a.priority] || 0); }
+      else if (sortBy === 'title')  cmp = a.title.localeCompare(b.title);
+      else if (sortBy === 'status') cmp = (a.status || '').localeCompare(b.status || '');
+      else if (sortBy === 'created_date') { const dA = a.created_at ? new Date(a.created_at).getTime() : 0; const dB = b.created_at ? new Date(b.created_at).getTime() : 0; cmp = dA - dB; }
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+    return result;
+  }, [filteredTasks, showMyTasksOnly, sortBy, sortDirection, user, filterAssignedByMe, filterCreatedBy]);
+
   // ── Live filtered stats — recomputed from displayTasks whenever filters change ──
   const filteredStats = React.useMemo(() => {
     const list = displayTasks; // already fully filtered + sorted
@@ -1189,47 +1231,6 @@ export default function Tasks() {
     if (filterCreatedBy !== 'all') parts.push(`By ${users.find(u => u.id === filterCreatedBy)?.full_name || ''}`);
     return parts.filter(Boolean).join(' · ');
   }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, filterAssignedByMe, filterCreatedBy, users]);
-
-  const hasActiveFilters = activeFilters.length > 0;
-
-  const teamTaskBreakdown = React.useMemo(() => {
-    if (!hasCrossVisibility || crossVisibilityUserIds.length === 0) return [];
-    return crossVisibilityUserIds.map(uid => {
-      const member = users.find(u => u.id === uid);
-      const nameFromTask = tasks.find(t => t.assigned_to === uid)?.assigned_to_name;
-      const pendingCount = tasks.filter(t => (t.assigned_to === uid || t.sub_assignees?.includes(uid)) && t.status !== 'completed').length;
-      return { id: uid, name: member?.full_name || nameFromTask || 'Unknown', pendingCount };
-    }).filter(m => m.pendingCount > 0);
-  }, [hasCrossVisibility, crossVisibilityUserIds, tasks, users]);
-
-  // ── Filtering ─────────────────────────────────────────────────────────────
-  const filteredTasks = scopedTasks.filter(task => {
-    const matchesSearch   = task.title.toLowerCase().includes(searchQuery.toLowerCase()) || task.description?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesPriority = filterPriority === 'all' || task.priority   === filterPriority;
-    const matchesCategory = filterCategory === 'all' || task.category   === filterCategory;
-    const matchesAssignee = filterAssignee === 'all' || task.assigned_to === filterAssignee;
-    const matchesTeam     = !filterTeamOnly || crossVisibilityUserIds.includes(task.assigned_to);
-    let matchesStatus = true;
-    if (filterStatus !== 'all') matchesStatus = filterStatus === 'overdue' ? isOverdue(task) : task.status === filterStatus;
-    return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee && matchesTeam;
-  });
-
-  const displayTasks = React.useMemo(() => {
-    let result = [...filteredTasks];
-    if (showMyTasksOnly && user?.id) result = result.filter(t => t.assigned_to === user.id || t.sub_assignees?.includes(user.id));
-    if (filterAssignedByMe && user?.id) result = result.filter(t => t.created_by === user.id);
-    if (filterCreatedBy !== 'all') result = result.filter(t => t.created_by === filterCreatedBy);
-    result.sort((a, b) => {
-      let cmp = 0;
-      if (sortBy === 'due_date') { const dA = a.due_date ? new Date(a.due_date).getTime() : Infinity; const dB = b.due_date ? new Date(b.due_date).getTime() : Infinity; cmp = dA - dB; }
-      else if (sortBy === 'priority') { const prioOrder = { critical: 4, high: 3, medium: 2, low: 1 }; cmp = (prioOrder[b.priority] || 0) - (prioOrder[a.priority] || 0); }
-      else if (sortBy === 'title')  cmp = a.title.localeCompare(b.title);
-      else if (sortBy === 'status') cmp = (a.status || '').localeCompare(b.status || '');
-      else if (sortBy === 'created_date') { const dA = a.created_at ? new Date(a.created_at).getTime() : 0; const dB = b.created_at ? new Date(b.created_at).getTime() : 0; cmp = dA - dB; }
-      return sortDirection === 'asc' ? cmp : -cmp;
-    });
-    return result;
-  }, [filteredTasks, showMyTasksOnly, sortBy, sortDirection, user, filterAssignedByMe, filterCreatedBy]);
 
   useEffect(() => {
     const pills = [];
@@ -1279,7 +1280,6 @@ export default function Tasks() {
 
   const unreadCount         = notifications.filter(n => !n.is_read).length;
   const getBoardColumnTasks = (colStatus) => displayTasks.filter(t => t.status === colStatus);
-
   // ══════════════════════════════════════════════════════════════════════════
   // RENDER
   // ══════════════════════════════════════════════════════════════════════════
