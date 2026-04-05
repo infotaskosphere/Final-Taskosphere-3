@@ -919,6 +919,7 @@ export default function Dashboard() {
   const [todosRaw,         setTodosRaw]         = useState([]);
   const [leadsData,        setLeadsData]        = useState([]);
   const [dataLoading,      setDataLoading]      = useState(true);
+  const [deptMembers,      setDeptMembers]      = useState({ count: 0, departments: [], members: [] });
 
   // ── Fetch All Dashboard Data ───────────────────────────────────────────────
   const fetchDashboardData = React.useCallback(async () => {
@@ -926,7 +927,7 @@ export default function Dashboard() {
 
     // ── Wave 1: critical path ──
     try {
-      const [tasksData, statsData, dueDatesData, attendanceData, todosData, visitsData, holidaysRes] =
+      const [tasksData, statsData, dueDatesData, attendanceData, todosData, visitsData, holidaysRes, deptMembersRes] =
         await Promise.all([
           apiFetch('/tasks'),
           apiFetch('/dashboard/stats'),
@@ -935,6 +936,7 @@ export default function Dashboard() {
           apiFetch('/todos'),   // ← FIX: backend scopes by JWT; no user_id param needed
           apiFetch('/visits'),
           apiFetch('/holidays'),
+          apiFetch('/dashboard/dept-members'),  // dept-scoped team count for all roles
         ]);
         
       if (Array.isArray(tasksData)) setTasks(tasksData);
@@ -947,6 +949,9 @@ export default function Dashboard() {
       if (Array.isArray(dueDatesData)) setUpcomingDueDates(dueDatesData);
       if (attendanceData) setTodayAttendance(attendanceData);
       if (Array.isArray(todosData)) setTodosRaw(todosData);
+      if (deptMembersRes && typeof deptMembersRes.count === 'number') {
+        setDeptMembers(deptMembersRes);
+      }
       
     } catch (e) {
       console.error('Dashboard wave-1 fetch error:', e);
@@ -2271,7 +2276,7 @@ export default function Dashboard() {
               icon:<Building2 className="h-4 w-4" style={{ color:COLORS.emeraldGreen }} />,
               iconBg: isDark ? 'rgba(31,175,90,0.2)' : `${COLORS.emeraldGreen}12`,
               label:String(stats?.total_clients || 0),
-              sub:'Clients',
+              sub: isAdmin ? 'Total Clients' : 'My Clients',
             },
             {
               path:'/dsc',
@@ -2302,21 +2307,30 @@ export default function Dashboard() {
             </motion.div>
           ))}
 
-          {isAdmin && (
-            <motion.div whileHover={{ y:-3, transition:springPhysics.card }} whileTap={{ scale:0.97 }}
-              onClick={() => navigate('/users')} className={`${metricCardCls} ${metricCardDefault}`}>
-              <CardContent className="p-3.5 flex items-center gap-3">
-                <div className="p-2.5 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
-                  style={{ backgroundColor: isDark ? 'rgba(31,111,178,0.2)' : `${COLORS.mediumBlue}12` }}>
-                  <Users className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xl font-bold tracking-tight" style={{ color: isDark ? '#e2e8f0' : COLORS.deepBlue }}>{stats?.team_workload?.length || 0}</p>
-                  <p className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>Team Members</p>
-                </div>
-              </CardContent>
-            </motion.div>
-          )}
+          {/* Team Members tile — visible to ALL roles; admins see total, others see dept-scoped count */}
+          <motion.div whileHover={{ y:-3, transition:springPhysics.card }} whileTap={{ scale:0.97 }}
+            onClick={() => isAdmin ? navigate('/users') : undefined}
+            className={`${metricCardCls} ${metricCardDefault} ${isAdmin ? 'cursor-pointer' : 'cursor-default'}`}>
+            <CardContent className="p-3.5 flex items-center gap-3">
+              <div className="p-2.5 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
+                style={{ backgroundColor: isDark ? 'rgba(31,111,178,0.2)' : `${COLORS.mediumBlue}12` }}>
+                <Users className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xl font-bold tracking-tight" style={{ color: isDark ? '#e2e8f0' : COLORS.deepBlue }}>
+                  {isAdmin ? (stats?.team_workload?.length || deptMembers.count || 0) : deptMembers.count}
+                </p>
+                <p className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
+                  {isAdmin ? 'Team Members' : 'Dept Members'}
+                </p>
+                {!isAdmin && deptMembers.departments?.length > 0 && (
+                  <p className="text-[9px] text-slate-400 truncate mt-0.5">
+                    {deptMembers.departments.join(', ')}
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </motion.div>
         </motion.div>
         </React.Fragment>
           );
