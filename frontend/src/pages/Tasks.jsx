@@ -1095,10 +1095,7 @@ export default function Tasks() {
                 {format(new Date(), 'EEEE, MMMM d, yyyy')}
               </p>
               <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">Task Management</h1>
-              <p className="text-white/60 text-sm mt-1">
-                {stats.myTask} my tasks · {stats.overdue} overdue · {stats.inProgress} in progress
-                {hasCrossVisibility && ` · ${stats.teamTask} team pending`}
-              </p>
+              <p className="text-white/60 text-sm mt-1">Task Updates</p>
             </div>
 
             {/* Right — action buttons */}
