@@ -1004,8 +1004,8 @@ export default function Quotations() {
     setLoading(true);
     try {
       const params = {};
-      if (filterStatus !== 'all') params.status = filterStatus;
-      if (filterService !== 'all') params.service = filterService;
+      if (filterStatus !== 'all_statuses') params.status = filterStatus;
+      if (filterService !== 'all_services') params.service = filterService;
       const res = await api.get('/quotations', { params });
       setQuotations(res.data);
     } catch (err) {
