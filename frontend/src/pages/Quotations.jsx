@@ -13,7 +13,7 @@ import {
   Phone, Mail, Globe, CreditCard, User, Tag, Info,
   IndianRupee, Percent, Hash, Calendar, Link, ExternalLink,
   Send, MessageCircle, Settings, Eye, ArrowRight, Users,
-  Printer
+  Printer, LayoutGrid, List, TrendingUp
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -999,6 +999,7 @@ export default function Quotations() {
 
   const [downloading, setDownloading] = useState(null);
   const [convertingId, setConvertingId] = useState(null);
+  const [viewMode, setViewMode] = useState('board'); // 'board' | 'list'
 
   const fetchQuotations = async () => {
     setLoading(true);
@@ -1143,229 +1144,434 @@ const handlePrintQuotation = (quotation, company = {}) => {
 
   const getCompanyById = id => companies.find(c => c.id === id);
 
+  const isDark = useDark();
+
+  const pageBg   = isDark ? '#0f172a' : '#F4F6FA';
+  const cardBg   = isDark ? '#1e293b' : '#ffffff';
+  const cardBdr  = isDark ? '#334155' : '#e2e8f0';
+  const textMain = isDark ? '#f1f5f9' : '#0f172a';
+  const textSub  = isDark ? '#94a3b8' : '#64748b';
+  const inputBg  = isDark ? '#1e293b' : '#ffffff';
+  const inputBdr = isDark ? '#334155' : '#e2e8f0';
+
+  const STATUS_CONFIG = {
+    draft:    { label: 'Draft',    bg: isDark ? 'rgba(100,116,139,0.15)' : '#f1f5f9', color: isDark ? '#94a3b8' : '#475569', dot: '#94a3b8' },
+    sent:     { label: 'Sent',     bg: isDark ? 'rgba(59,130,246,0.15)'  : '#eff6ff', color: isDark ? '#60a5fa' : '#2563eb', dot: '#3b82f6' },
+    accepted: { label: 'Accepted', bg: isDark ? 'rgba(16,185,129,0.15)'  : '#ecfdf5', color: isDark ? '#34d399' : '#059669', dot: '#10b981' },
+    rejected: { label: 'Rejected', bg: isDark ? 'rgba(239,68,68,0.15)'   : '#fef2f2', color: isDark ? '#f87171' : '#dc2626', dot: '#ef4444' },
+  };
+
+  const stats = {
+    total:    quotations.length,
+    draft:    quotations.filter(q => q.status === 'draft').length,
+    sent:     quotations.filter(q => q.status === 'sent').length,
+    accepted: quotations.filter(q => q.status === 'accepted').length,
+    rejected: quotations.filter(q => q.status === 'rejected').length,
+    value:    quotations.reduce((s, q) => s + (q.total || 0), 0),
+  };
+
+  const STAT_CARDS = [
+    { label: 'Total',    value: stats.total,                                          icon: Receipt,      color: COLORS.mediumBlue  },
+    { label: 'Draft',    value: stats.draft,                                          icon: FileText,     color: '#64748b'           },
+    { label: 'Sent',     value: stats.sent,                                           icon: Send,         color: '#3b82f6'           },
+    { label: 'Accepted', value: stats.accepted,                                       icon: Check,        color: COLORS.emeraldGreen },
+    { label: 'Value',    value: `₹${(stats.value/1000).toFixed(0)}k`,               icon: TrendingUp,   color: '#a855f7'           },
+  ];
+
   return (
-    <div className="container mx-auto p-4 max-w-7xl">
-      {/* Header */}
-      <div className="flex flex-wrap justify-between items-center gap-3 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: COLORS.deepBlue }}>Quotations</h1>
-          <p className="text-sm text-slate-500 mt-0.5">{quotations.length} quotation{quotations.length !== 1 ? 's' : ''} total</p>
+    <div style={{ background: pageBg, minHeight: '100vh' }} className="transition-colors duration-200">
+      <div className="p-4 md:p-6 space-y-5 max-w-7xl mx-auto">
+
+        {/* ── Header ── */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-bold" style={{ color: textMain }}>Quotations</h1>
+            <p className="text-sm mt-0.5" style={{ color: textSub }}>{stats.total} quotation{stats.total !== 1 ? 's' : ''} total</p>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => setIsCompanyListOpen(true)}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium border transition-all"
+              style={{ background: cardBg, border: `1px solid ${cardBdr}`, color: textSub }}
+            >
+              <Building2 className="h-4 w-4" />
+              Manage Companies
+              {companies.length > 0 && (
+                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold" style={{ background: `${COLORS.mediumBlue}18`, color: COLORS.mediumBlue }}>
+                  {companies.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => { setEditingQuotation(null); setIsManagerOpen(true); }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
+              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+            >
+              <Plus className="h-4 w-4" />New Quotation
+            </button>
+          </div>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          <Button onClick={() => setIsCompanyListOpen(true)} variant="outline" className="rounded-xl gap-2">
-            <Building2 className="h-4 w-4" />
-            Manage Companies
-            {companies.length > 0 && <Badge className="ml-1 bg-blue-100 text-blue-700 text-[10px]">{companies.length}</Badge>}
-          </Button>
-          <Button onClick={() => { setEditingQuotation(null); setIsManagerOpen(true); }} className="rounded-xl gap-2" style={{ background: COLORS.emeraldGreen }}>
-            <Plus className="h-4 w-4" />New Quotation
-          </Button>
+
+        {/* ── No company warning ── */}
+        {companies.length === 0 && (
+          <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl text-sm border"
+            style={{ background: isDark ? 'rgba(245,158,11,0.1)' : '#fffbeb', borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#fde68a', color: isDark ? '#fbbf24' : '#92400e' }}>
+            <Info className="h-4 w-4 flex-shrink-0" />
+            No company profiles yet.{' '}
+            <button onClick={() => setIsCompanyListOpen(true)} className="underline font-semibold">Add a company</button> before creating quotations.
+          </div>
+        )}
+
+        {/* ── Stat Cards ── */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          {STAT_CARDS.map(s => (
+            <div key={s.label} className="rounded-2xl p-4 border" style={{ background: cardBg, borderColor: cardBdr }}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: textSub }}>{s.label}</span>
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: `${s.color}18` }}>
+                  <s.icon className="h-3.5 w-3.5" style={{ color: s.color }} />
+                </div>
+              </div>
+              <p className="text-2xl font-bold" style={{ color: textMain }}>{s.value}</p>
+            </div>
+          ))}
         </div>
+
+        {/* ── Filters + View Toggle ── */}
+        <div className="flex flex-wrap gap-3 items-center">
+          {/* Search */}
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: textSub }} />
+            <input
+              placeholder="Search quotation no., client, service…"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-4 h-10 rounded-xl text-sm border outline-none transition-all"
+              style={{ background: inputBg, borderColor: inputBdr, color: textMain }}
+            />
+          </div>
+          {/* Status filter */}
+          <select
+            value={filterStatus}
+            onChange={e => setFilterStatus(e.target.value)}
+            className="h-10 px-3 rounded-xl text-sm border outline-none"
+            style={{ background: inputBg, borderColor: inputBdr, color: textMain }}
+          >
+            <option value="all_statuses">All Statuses</option>
+            <option value="draft">Draft</option>
+            <option value="sent">Sent</option>
+            <option value="accepted">Accepted</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          {/* View toggle */}
+          <div className="flex rounded-xl overflow-hidden border" style={{ borderColor: cardBdr }}>
+            <button
+              onClick={() => setViewMode('board')}
+              className="px-3 py-2 flex items-center gap-1.5 text-xs font-medium transition-all"
+              style={{
+                background: viewMode === 'board' ? `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` : cardBg,
+                color: viewMode === 'board' ? '#fff' : textSub,
+              }}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" /> Board
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className="px-3 py-2 flex items-center gap-1.5 text-xs font-medium transition-all"
+              style={{
+                background: viewMode === 'list' ? `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` : cardBg,
+                color: viewMode === 'list' ? '#fff' : textSub,
+              }}
+            >
+              <List className="h-3.5 w-3.5" /> List
+            </button>
+          </div>
+        </div>
+
+        {/* ── Content ── */}
+        {loading ? (
+          <GifLoader />
+        ) : filteredQuotations.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-4">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: `${COLORS.deepBlue}12` }}>
+              <Receipt className="h-8 w-8" style={{ color: COLORS.mediumBlue }} />
+            </div>
+            <div className="text-center">
+              <p className="font-bold text-base" style={{ color: textMain }}>No quotations found</p>
+              <p className="text-sm mt-1" style={{ color: textSub }}>Create your first quotation to get started.</p>
+            </div>
+            <button
+              onClick={() => { setEditingQuotation(null); setIsManagerOpen(true); }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white"
+              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+            >
+              <Plus className="h-4 w-4" />Create Quotation
+            </button>
+          </div>
+
+        ) : viewMode === 'board' ? (
+          /* ── BOARD VIEW ── */
+          <motion.div
+            className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4"
+            variants={containerVariants} initial="hidden" animate="visible"
+          >
+            <AnimatePresence>
+              {filteredQuotations.map(q => {
+                const sc = STATUS_CONFIG[q.status] || STATUS_CONFIG.draft;
+                const company = getCompanyById(q.company_id);
+                return (
+                  <motion.div key={q.id} variants={itemVariants} layout exit={{ opacity: 0, scale: 0.95 }}>
+                    <div className="rounded-2xl border overflow-hidden transition-all hover:shadow-lg"
+                      style={{ background: cardBg, borderColor: cardBdr, borderTop: `3px solid ${sc.dot}` }}>
+                      <div className="p-4">
+                        {/* Card header */}
+                        <div className="flex items-start justify-between mb-3">
+                          <div>
+                            <p className="font-bold text-base" style={{ color: COLORS.deepBlue }}>{q.quotation_no}</p>
+                            <p className="text-xs mt-0.5" style={{ color: textSub }}>{q.date} · Valid {q.validity_days}d</p>
+                          </div>
+                          <span className="px-2.5 py-1 rounded-full text-xs font-semibold capitalize"
+                            style={{ background: sc.bg, color: sc.color }}>
+                            {sc.label}
+                          </span>
+                        </div>
+
+                        {/* Client */}
+                        <div className="mb-3">
+                          <p className="font-semibold text-sm" style={{ color: textMain }}>{q.client_name}</p>
+                          <p className="text-xs mt-0.5" style={{ color: textSub }}>{q.service}</p>
+                          {q.client_phone && (
+                            <p className="text-xs mt-1 flex items-center gap-1" style={{ color: textSub }}>
+                              <Phone className="h-3 w-3" />{q.client_phone}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Company */}
+                        {company && (
+                          <div className="flex items-center gap-1.5 mb-3 text-xs" style={{ color: textSub }}>
+                            <Building2 className="h-3 w-3" />{company.name}
+                          </div>
+                        )}
+
+                        {/* Amount */}
+                        <div className="flex items-center justify-between rounded-xl px-3 py-2.5 mb-3"
+                          style={{ background: isDark ? 'rgba(255,255,255,0.04)' : '#f8fafc', border: `1px solid ${cardBdr}` }}>
+                          <span className="text-xs font-medium" style={{ color: textSub }}>Total Amount</span>
+                          <span className="font-bold text-base" style={{ color: COLORS.emeraldGreen }}>₹{(q.total || 0).toLocaleString()}</span>
+                        </div>
+
+                        {/* Status changer */}
+                        <select
+                          value={q.status || 'draft'}
+                          onChange={async e => {
+                            try {
+                              await api.put(`/quotations/${q.id}`, { status: e.target.value });
+                              toast.success('Status updated');
+                              fetchQuotations();
+                            } catch { toast.error('Failed to update status'); }
+                          }}
+                          className="w-full h-8 px-2 rounded-lg text-xs border mb-3 outline-none"
+                          style={{ background: inputBg, borderColor: inputBdr, color: textMain }}
+                        >
+                          <option value="draft">Draft</option>
+                          <option value="sent">Sent</option>
+                          <option value="accepted">Accepted</option>
+                          <option value="rejected">Rejected</option>
+                        </select>
+
+                        {/* Quotation PDF actions */}
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                          <button onClick={() => handleDownloadPdf(q.id, q.quotation_no)} disabled={downloading === q.id + '-pdf'}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
+                            style={{ background: isDark ? 'rgba(59,130,246,0.1)' : '#eff6ff', borderColor: isDark ? 'rgba(59,130,246,0.3)' : '#bfdbfe', color: '#3b82f6' }}>
+                            {downloading === q.id + '-pdf' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}PDF
+                          </button>
+                          <button onClick={() => handlePreviewQuotation(q, company || {})}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
+                            style={{ background: isDark ? 'rgba(168,85,247,0.1)' : '#faf5ff', borderColor: isDark ? 'rgba(168,85,247,0.3)' : '#e9d5ff', color: '#a855f7' }}>
+                            <Eye className="h-3 w-3" />Preview
+                          </button>
+                          <button onClick={() => handlePrintQuotation(q, company || {})}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
+                            style={{ background: isDark ? 'rgba(16,185,129,0.1)' : '#ecfdf5', borderColor: isDark ? 'rgba(16,185,129,0.3)' : '#a7f3d0', color: '#10b981' }}>
+                            <Printer className="h-3 w-3" />Print
+                          </button>
+                          <button onClick={() => { setEmailModalQuotation(q); setEmailModalPdfType('quotation'); setIsEmailModalOpen(true); }}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
+                            style={{ background: isDark ? 'rgba(59,130,246,0.1)' : '#eff6ff', borderColor: isDark ? 'rgba(59,130,246,0.3)' : '#bfdbfe', color: '#3b82f6' }}>
+                            <Mail className="h-3 w-3" />Email
+                          </button>
+                          <button onClick={() => { setWhatsAppModalQuotation(q); setWhatsAppModalPdfType('quotation'); setIsWhatsAppModalOpen(true); }}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
+                            style={{ background: isDark ? 'rgba(34,197,94,0.1)' : '#f0fdf4', borderColor: isDark ? 'rgba(34,197,94,0.3)' : '#bbf7d0', color: '#22c55e' }}>
+                            <MessageCircle className="h-3 w-3" />WA
+                          </button>
+                        </div>
+
+                        {/* Checklist section */}
+                        <div className="pt-2 mb-2 border-t" style={{ borderColor: cardBdr }}>
+                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: textSub }}>Document Checklist</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            <button onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no)} disabled={downloading === q.id + '-checklist-pdf'}
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
+                              style={{ background: isDark ? 'rgba(59,130,246,0.1)' : '#eff6ff', borderColor: isDark ? 'rgba(59,130,246,0.3)' : '#bfdbfe', color: '#3b82f6' }}>
+                              {downloading === q.id + '-checklist-pdf' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}Checklist PDF
+                            </button>
+                            <button onClick={() => { setEmailModalQuotation(q); setEmailModalPdfType('checklist'); setIsEmailModalOpen(true); }}
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
+                              style={{ background: isDark ? 'rgba(59,130,246,0.1)' : '#eff6ff', borderColor: isDark ? 'rgba(59,130,246,0.3)' : '#bfdbfe', color: '#3b82f6' }}>
+                              <Mail className="h-3 w-3" />Email
+                            </button>
+                            <button onClick={() => { setWhatsAppModalQuotation(q); setWhatsAppModalPdfType('checklist'); setIsWhatsAppModalOpen(true); }}
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
+                              style={{ background: isDark ? 'rgba(34,197,94,0.1)' : '#f0fdf4', borderColor: isDark ? 'rgba(34,197,94,0.3)' : '#bbf7d0', color: '#22c55e' }}>
+                              <MessageCircle className="h-3 w-3" />WA
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Bottom actions */}
+                        <div className="flex items-center justify-between pt-2 border-t flex-wrap gap-1" style={{ borderColor: cardBdr }}>
+                          <button onClick={() => handleConvertToInvoice(q.id)} disabled={convertingId === q.id}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
+                            style={{ background: isDark ? 'rgba(168,85,247,0.1)' : '#faf5ff', borderColor: isDark ? 'rgba(168,85,247,0.3)' : '#e9d5ff', color: '#a855f7' }}>
+                            {convertingId === q.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowRight className="h-3 w-3" />}To Invoice
+                          </button>
+                          <div className="flex gap-1">
+                            <button onClick={() => { setEditingQuotation(q); setIsManagerOpen(true); }}
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
+                              style={{ background: isDark ? 'rgba(255,255,255,0.06)' : '#f8fafc', borderColor: cardBdr, color: textSub }}>
+                              <Edit className="h-3 w-3" />Edit
+                            </button>
+                            <button onClick={() => handleDeleteQuotation(q.id)}
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
+                              style={{ background: isDark ? 'rgba(239,68,68,0.1)' : '#fef2f2', borderColor: isDark ? 'rgba(239,68,68,0.3)' : '#fecaca', color: '#ef4444' }}>
+                              <Trash2 className="h-3 w-3" />Delete
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+          </motion.div>
+
+        ) : (
+          /* ── LIST VIEW ── */
+          <div className="rounded-2xl border overflow-hidden" style={{ background: cardBg, borderColor: cardBdr }}>
+            {/* Table header */}
+            <div className="grid grid-cols-12 px-4 py-2.5 text-xs font-bold uppercase tracking-widest border-b"
+              style={{ background: isDark ? 'rgba(255,255,255,0.03)' : '#f8fafc', borderColor: cardBdr, color: textSub }}>
+              <div className="col-span-2">Quot. No.</div>
+              <div className="col-span-3">Client</div>
+              <div className="col-span-2">Service</div>
+              <div className="col-span-1">Date</div>
+              <div className="col-span-1 text-right">Amount</div>
+              <div className="col-span-1 text-center">Status</div>
+              <div className="col-span-2 text-right">Actions</div>
+            </div>
+            {/* Rows */}
+            <AnimatePresence>
+              {filteredQuotations.map((q, idx) => {
+                const sc = STATUS_CONFIG[q.status] || STATUS_CONFIG.draft;
+                const company = getCompanyById(q.company_id);
+                return (
+                  <motion.div key={q.id}
+                    initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                    transition={{ delay: idx * 0.02 }}
+                    className="grid grid-cols-12 px-4 py-3 border-b items-center gap-1 hover:bg-opacity-50 transition-all"
+                    style={{ borderColor: cardBdr, background: idx % 2 === 0 ? 'transparent' : (isDark ? 'rgba(255,255,255,0.01)' : 'rgba(0,0,0,0.01)') }}
+                  >
+                    {/* Quot no */}
+                    <div className="col-span-2">
+                      <p className="text-xs font-bold" style={{ color: COLORS.deepBlue }}>{q.quotation_no}</p>
+                      <p className="text-[10px]" style={{ color: textSub }}>Valid {q.validity_days}d</p>
+                    </div>
+                    {/* Client */}
+                    <div className="col-span-3">
+                      <p className="text-xs font-semibold truncate" style={{ color: textMain }}>{q.client_name}</p>
+                      {company && <p className="text-[10px] truncate" style={{ color: textSub }}>{company.name}</p>}
+                    </div>
+                    {/* Service */}
+                    <div className="col-span-2">
+                      <p className="text-xs truncate" style={{ color: textSub }}>{q.service}</p>
+                    </div>
+                    {/* Date */}
+                    <div className="col-span-1">
+                      <p className="text-xs" style={{ color: textSub }}>{q.date}</p>
+                    </div>
+                    {/* Amount */}
+                    <div className="col-span-1 text-right">
+                      <p className="text-xs font-bold" style={{ color: COLORS.emeraldGreen }}>₹{(q.total || 0).toLocaleString()}</p>
+                    </div>
+                    {/* Status */}
+                    <div className="col-span-1 flex justify-center">
+                      <select
+                        value={q.status || 'draft'}
+                        onChange={async e => {
+                          try {
+                            await api.put(`/quotations/${q.id}`, { status: e.target.value });
+                            toast.success('Status updated');
+                            fetchQuotations();
+                          } catch { toast.error('Failed to update status'); }
+                        }}
+                        className="h-6 px-1.5 rounded-lg text-[10px] border outline-none font-semibold"
+                        style={{ background: sc.bg, borderColor: 'transparent', color: sc.color }}
+                      >
+                        <option value="draft">Draft</option>
+                        <option value="sent">Sent</option>
+                        <option value="accepted">Accepted</option>
+                        <option value="rejected">Rejected</option>
+                      </select>
+                    </div>
+                    {/* Actions */}
+                    <div className="col-span-2 flex items-center justify-end gap-1 flex-wrap">
+                      <button onClick={() => handleDownloadPdf(q.id, q.quotation_no)} disabled={downloading === q.id + '-pdf'}
+                        title="Download PDF" className="p-1.5 rounded-lg border transition-all hover:opacity-80"
+                        style={{ background: isDark ? 'rgba(59,130,246,0.1)' : '#eff6ff', borderColor: 'transparent', color: '#3b82f6' }}>
+                        {downloading === q.id + '-pdf' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                      </button>
+                      <button onClick={() => handlePreviewQuotation(q, company || {})} title="Preview"
+                        className="p-1.5 rounded-lg border transition-all hover:opacity-80"
+                        style={{ background: isDark ? 'rgba(168,85,247,0.1)' : '#faf5ff', borderColor: 'transparent', color: '#a855f7' }}>
+                        <Eye className="h-3 w-3" />
+                      </button>
+                      <button onClick={() => { setEmailModalQuotation(q); setEmailModalPdfType('quotation'); setIsEmailModalOpen(true); }} title="Email"
+                        className="p-1.5 rounded-lg border transition-all hover:opacity-80"
+                        style={{ background: isDark ? 'rgba(59,130,246,0.1)' : '#eff6ff', borderColor: 'transparent', color: '#3b82f6' }}>
+                        <Mail className="h-3 w-3" />
+                      </button>
+                      <button onClick={() => handleConvertToInvoice(q.id)} disabled={convertingId === q.id} title="Convert to Invoice"
+                        className="p-1.5 rounded-lg border transition-all hover:opacity-80"
+                        style={{ background: isDark ? 'rgba(168,85,247,0.1)' : '#faf5ff', borderColor: 'transparent', color: '#a855f7' }}>
+                        {convertingId === q.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowRight className="h-3 w-3" />}
+                      </button>
+                      <button onClick={() => { setEditingQuotation(q); setIsManagerOpen(true); }} title="Edit"
+                        className="p-1.5 rounded-lg border transition-all hover:opacity-80"
+                        style={{ background: isDark ? 'rgba(255,255,255,0.06)' : '#f8fafc', borderColor: cardBdr, color: textSub }}>
+                        <Edit className="h-3 w-3" />
+                      </button>
+                      <button onClick={() => handleDeleteQuotation(q.id)} title="Delete"
+                        className="p-1.5 rounded-lg border transition-all hover:opacity-80"
+                        style={{ background: isDark ? 'rgba(239,68,68,0.1)' : '#fef2f2', borderColor: 'transparent', color: '#ef4444' }}>
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+            {/* Footer count */}
+            <div className="px-4 py-2.5 text-xs" style={{ color: textSub }}>
+              {filteredQuotations.length} quotation{filteredQuotations.length !== 1 ? 's' : ''}
+            </div>
+          </div>
+        )}
+
       </div>
-
-      {/* Company quick summary */}
-      {companies.length === 0 && (
-        <div className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-center gap-2">
-          <Info className="h-4 w-4 flex-shrink-0" />
-          <span>No company profiles yet. <button onClick={() => setIsCompanyListOpen(true)} className="underline font-semibold">Add a company</button> before creating quotations.</span>
-        </div>
-      )}
-
-      {/* Filters */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
-        <div className="relative md:col-span-2">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input placeholder="Search by quotation no., client, service…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="pl-9 h-10 rounded-xl" />
-        </div>
-        <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Filter by Status" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all_statuses">All Statuses</SelectItem>
-            <SelectItem value="draft">Draft</SelectItem>
-            <SelectItem value="sent">Sent</SelectItem>
-            <SelectItem value="accepted">Accepted</SelectItem>
-            <SelectItem value="rejected">Rejected</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Quotation Cards */}
-      {loading ? (
-        <GifLoader />
-      ) : filteredQuotations.length === 0 ? (
-        <div className="text-center py-16 text-slate-400">
-          <Receipt className="h-14 w-14 mx-auto mb-4 opacity-20" />
-          <p className="text-lg font-medium">No quotations found</p>
-          <p className="text-sm mt-1">Create your first quotation to get started.</p>
-          <Button onClick={() => { setEditingQuotation(null); setIsManagerOpen(true); }} className="mt-4 rounded-xl gap-2" style={{ background: COLORS.deepBlue }}>
-            <Plus className="h-4 w-4" />Create Quotation
-          </Button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
-          <AnimatePresence>
-            {filteredQuotations.map(q => (
-              <motion.div key={q.id} layout initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.2 }}>
-                <Card className="rounded-2xl shadow-md hover:shadow-lg transition-shadow border-t-4" style={{ borderTopColor: COLORS.deepBlue }}>
-                  <CardContent className="p-5">
-                    {/* Card Header */}
-                    <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <p className="font-bold text-lg" style={{ color: COLORS.deepBlue }}>{q.quotation_no}</p>
-                        <p className="text-xs text-slate-400">{q.date} · Valid {q.validity_days}d</p>
-                      </div>
-                      <Badge className={cn("text-xs font-medium px-3 py-1 rounded-full border", STATUS_STYLES[q.status] || STATUS_STYLES.draft)}>
-                        {q.status}
-                      </Badge>
-                    </div>
-
-                    {/* Client info */}
-                    <div className="mb-3">
-                      <p className="font-semibold text-slate-800">{q.client_name}</p>
-                      <p className="text-xs text-slate-500">{q.service}</p>
-                      {q.client_phone && <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5"><Phone className="h-3 w-3" />{q.client_phone}</p>}
-                    </div>
-
-                    {/* Company badge */}
-                    {getCompanyById(q.company_id) && (
-                      <div className="flex items-center gap-1.5 mb-3 text-xs text-slate-500">
-                        <Building2 className="h-3 w-3" />
-                        <span>{getCompanyById(q.company_id)?.name}</span>
-                      </div>
-                    )}
-
-                    {/* Total */}
-                    <div className="flex items-center justify-between bg-slate-50 rounded-xl p-3 mb-3">
-                      <span className="text-sm text-slate-600 font-medium">Total Amount</span>
-                      <span className="font-bold text-lg" style={{ color: COLORS.emeraldGreen }}>₹ {(q.total || 0).toLocaleString()}</span>
-                    </div>
-
-                    {/* Status changer */}
-                    <div className="mb-3">
-                      <Select value={q.status || 'draft'} onValueChange={async (newStatus) => {
-                        try {
-                          await api.put(`/quotations/${q.id}`, { status: newStatus });
-                          toast.success('Status updated');
-                          fetchQuotations();
-                        } catch { toast.error('Failed to update status'); }
-                      }}>
-                        <SelectTrigger className="h-8 rounded-lg text-xs"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="draft">Draft</SelectItem>
-                          <SelectItem value="sent">Sent</SelectItem>
-                          <SelectItem value="accepted">Accepted</SelectItem>
-                          <SelectItem value="rejected">Rejected</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {/* Quotation PDF actions */}
-<div className="flex flex-wrap gap-1.5 mb-2">
-  
-  {/* PDF (optional backend) */}
-  <Button
-    variant="outline"
-    size="sm"
-    onClick={() => handleDownloadPdf(q.id, q.quotation_no)}
-    disabled={downloading === q.id + '-pdf'}
-    className="rounded-lg gap-1 text-xs text-blue-600 border-blue-200 hover:bg-blue-50"
-  >
-    {downloading === q.id + '-pdf'
-      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      : <Download className="h-3.5 w-3.5" />}
-    PDF
-  </Button>
-
-  {/* Preview */}
-  <Button
-    variant="outline"
-    size="sm"
-    onClick={() => handlePreviewQuotation(q, getCompanyById(q.company_id) || {})}
-    className="rounded-lg gap-1 text-xs text-purple-600 border-purple-200 hover:bg-purple-50"
-  >
-    <Eye className="h-3.5 w-3.5" />
-    Preview
-  </Button>
-
-  {/* Print */}
-  <Button
-    variant="outline"
-    size="sm"
-    onClick={() => handlePrintQuotation(q, getCompanyById(q.company_id) || {})}
-    className="rounded-lg gap-1 text-xs text-emerald-600 border-emerald-200 hover:bg-emerald-50"
-  >
-    <Printer className="h-3.5 w-3.5" />
-    Print
-  </Button>
-
-  {/* Email */}
-  <Button
-    variant="outline"
-    size="sm"
-    onClick={() => {
-      setEmailModalQuotation(q);
-      setEmailModalPdfType('quotation');
-      setIsEmailModalOpen(true);
-    }}
-    className="rounded-lg gap-1 text-xs text-blue-600 border-blue-200 hover:bg-blue-50"
-  >
-    <Mail className="h-3.5 w-3.5" />
-    Email
-  </Button>
-
-  {/* WhatsApp */}
-  <Button
-    variant="outline"
-    size="sm"
-    onClick={() => {
-      setWhatsAppModalQuotation(q);
-      setWhatsAppModalPdfType('quotation');
-      setIsWhatsAppModalOpen(true);
-    }}
-    className="rounded-lg gap-1 text-xs text-green-600 border-green-200 hover:bg-green-50"
-  >
-    <MessageCircle className="h-3.5 w-3.5" />
-    WA
-  </Button>
-
-</div>
-                    {/* Checklist PDF actions */}
-                    <div className="border-t pt-2 mb-2">
-                      <p className="text-[10px] text-slate-400 mb-1.5 font-semibold uppercase tracking-wide">Document Checklist</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        <Button variant="outline" size="sm" onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no)} disabled={downloading === q.id + '-checklist-pdf'} className="rounded-lg gap-1 text-xs text-blue-600 border-blue-200 hover:bg-blue-50">
-                          {downloading === q.id + '-checklist-pdf' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}Checklist PDF
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => { setEmailModalQuotation(q); setEmailModalPdfType('checklist'); setIsEmailModalOpen(true); }} className="rounded-lg gap-1 text-xs text-blue-600 border-blue-200 hover:bg-blue-50">
-                          <Mail className="h-3.5 w-3.5" />Email
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => { setWhatsAppModalQuotation(q); setWhatsAppModalPdfType('checklist'); setIsWhatsAppModalOpen(true); }} className="rounded-lg gap-1 text-xs text-green-600 border-green-200 hover:bg-green-50">
-                          <MessageCircle className="h-3.5 w-3.5" />WA
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* Bottom actions */}
-                    <div className="flex justify-between items-center pt-2 border-t gap-1 flex-wrap">
-                      <Button variant="outline" size="sm" onClick={() => handleConvertToInvoice(q.id)} disabled={convertingId === q.id} className="rounded-lg gap-1 text-xs text-purple-600 border-purple-200 hover:bg-purple-50">
-                        {convertingId === q.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />}To Invoice
-                      </Button>
-                      <div className="flex gap-1">
-                        <Button variant="outline" size="sm" onClick={() => { setEditingQuotation(q); setIsManagerOpen(true); }} className="rounded-lg gap-1 text-xs text-slate-600 border-slate-200 hover:bg-slate-50">
-                          <Edit className="h-3.5 w-3.5" />Edit
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => handleDeleteQuotation(q.id)} className="rounded-lg gap-1 text-xs text-red-600 border-red-200 hover:bg-red-50">
-                          <Trash2 className="h-3.5 w-3.5" />Delete
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
-      )}
 
       {/* ── Modals ── */}
       {isManagerOpen && (
