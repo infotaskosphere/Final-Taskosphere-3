@@ -1590,8 +1590,8 @@ export default function Users() {
 
       {/* ── Page Header ── */}
       <motion.div variants={slideIn}>
-        <div className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
-          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`, boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
+        <div className="banner-animated relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
+          style={{ boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
           <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10"
             style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
           <div className="absolute right-28 bottom-0 w-40 h-40 rounded-full mb-[-40px] opacity-5"
