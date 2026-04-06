@@ -92,30 +92,38 @@ export default function TaskAudit() {
   return (
     <div style={{ background: pageBg, minHeight: "100vh" }} className="transition-colors duration-200">
       <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto">
+
+        {/* ── Banner — matches Dashboard style ── */}
         <div
-          style={{ background: cardBg, border: `1px solid ${cardBdr}` }}
-          className="rounded-3xl overflow-hidden shadow-xl"
+          className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
+          style={{
+            background: `linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 60%, #1a8fcc 100%)`,
+            boxShadow: "0 8px 32px rgba(13,59,102,0.28)",
+          }}
         >
-          {/* Header */}
-          <div
-            style={{ background: hdrBg, borderBottom: `1px solid ${cardBdr}` }}
-            className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 p-6 md:p-8"
-          >
-            <div className="flex items-center gap-4">
-              <div className="p-3 rounded-2xl text-white shadow-lg" style={{ background: C.deepBlue }}>
-                <History className="h-7 w-7" />
+          <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10"
+            style={{ background: "radial-gradient(circle, white 0%, transparent 70%)" }} />
+          <div className="absolute right-28 bottom-0 w-40 h-40 rounded-full mb-[-40px] opacity-5"
+            style={{ background: "white" }} />
+          <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5"
+            style={{ background: "white" }} />
+
+          <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0 mt-0.5">
+                <History className="h-5 w-5 text-white" />
               </div>
               <div>
-                <h1 style={{ color: headTxt }} className="text-2xl md:text-3xl font-bold">Task Audit Trail</h1>
-                <p style={{ color: subTxt }} className="font-medium text-sm mt-0.5">Compliance-ready record of modifications</p>
+                <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1">Admin</p>
+                <h1 className="text-2xl font-bold text-white leading-tight">Task Audit Trail</h1>
+                <p className="text-white/60 text-sm mt-0.5">Compliance-ready record of modifications</p>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+            <div className="flex flex-wrap items-center gap-2 sm:flex-shrink-0">
               <Select value={filter} onValueChange={setFilter}>
                 <SelectTrigger
-                  style={{ background: selectBg, border: `1px solid ${selectBdr}`, color: isDark ? "#e2e8f0" : "#374151" }}
-                  className="w-full md:w-[220px] rounded-xl shadow-sm h-12 font-bold"
+                  className="w-[190px] rounded-xl h-9 text-xs font-semibold bg-white/15 border-white/25 text-white focus:ring-0"
                 >
                   <SelectValue placeholder="Action Type" />
                 </SelectTrigger>
@@ -128,19 +136,23 @@ export default function TaskAudit() {
                   <SelectItem value="DELETE_TASK">Deletions</SelectItem>
                 </SelectContent>
               </Select>
-              <Button
-                variant="outline"
+              <button
                 onClick={() => refetch()}
-                style={{ border: `1px solid ${selectBdr}`, color: isDark ? "#94a3b8" : "#475569", background: selectBg }}
-                className="rounded-xl h-12 w-12 p-0 hover:opacity-80"
+                className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 border border-white/25 flex items-center justify-center transition-all active:scale-95"
               >
-                <RefreshCcw className="h-5 w-5" />
-              </Button>
+                <RefreshCcw className="h-4 w-4 text-white" />
+              </button>
             </div>
           </div>
+        </div>
+
+        <div
+          style={{ background: cardBg, border: `1px solid ${cardBdr}` }}
+          className="rounded-2xl overflow-hidden shadow-sm"
+        >
 
           {/* Timeline */}
-          <div className="p-6 md:p-8">
+          <div className="p-4 md:p-6">
             <div className="relative space-y-8">
               <div
                 className="absolute inset-0 ml-6 -translate-x-px h-full w-0.5"
