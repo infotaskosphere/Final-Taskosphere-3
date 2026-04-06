@@ -2861,7 +2861,7 @@ export default function Attendance() {
                 {loading && attendanceHistory.length === 0 ? (
                   <div className="flex items-center justify-center h-full">
                     <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                    <span className="ml-2 text-xs text-slate-400">Loading…</span>
+                    
                   </div>
                 ) : recentAttendance.length === 0 ? (
                   <div className="flex items-center justify-center h-full">
