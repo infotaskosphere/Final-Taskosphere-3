@@ -3454,7 +3454,7 @@ const fetchAll = useCallback(async () => {
       ) : (
         <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full" style={{minWidth:700}}>
               <thead>
                 <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
                   <th className="px-4 py-3 w-10">
