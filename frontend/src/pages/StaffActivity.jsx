@@ -968,9 +968,7 @@ export default function StaffActivity() {
                   />
                   <div className="p-4">
                     {loading ? (
-                      <div className="flex justify-center py-10">
-                        <Loader2 className="h-6 w-6 animate-spin text-slate-300" />
-                      </div>
+                      <MiniLoader height={80} />
                     ) : aggregatedApps.length > 0 ? (
                       <motion.div variants={staggerChildren} initial="hidden" animate="visible" className="space-y-4">
                         {aggregatedApps.map((app, idx) => {
@@ -1077,9 +1075,7 @@ export default function StaffActivity() {
                   />
                   <div className="p-4 flex-1">
                     {loading ? (
-                      <div className="flex justify-center py-8">
-                        <Loader2 className="h-5 w-5 animate-spin text-slate-300" />
-                      </div>
+                      <MiniLoader height={72} />
                     ) : aggregatedWebsites.length > 0 ? (
                       <motion.div variants={staggerChildren} initial="hidden" animate="visible" className="space-y-2">
                         {aggregatedWebsites.map((site, idx) => {
@@ -1166,8 +1162,7 @@ export default function StaffActivity() {
                           exit={{ opacity: 0 }}
                           className="flex flex-col items-center gap-2 py-8"
                         >
-                          <Loader2 className="h-6 w-6 animate-spin" style={{ color: COLORS.mediumBlue }} />
-                          <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>Running analysis…</p>
+                          <MiniLoader height={40} />
                         </motion.div>
                       ) : auditInsights.length > 0 ? (
                         <motion.div key="insights" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-2">
@@ -1334,9 +1329,7 @@ export default function StaffActivity() {
                   />
                   <div className="p-4">
                     {loading ? (
-                      <div className="flex justify-center py-8">
-                        <Loader2 className="h-6 w-6 animate-spin text-slate-300" />
-                      </div>
+                      <MiniLoader height={80} />
                     ) : idleStats.perUser.length > 0 ? (
                       <div className="space-y-3 max-h-[260px] overflow-y-auto pr-1">
                         {idleStats.perUser.map((u, idx) => {
@@ -1415,9 +1408,7 @@ export default function StaffActivity() {
                   />
                   <div className="overflow-x-auto">
                     {loading ? (
-                      <div className="flex justify-center py-16">
-                        <Loader2 className="h-6 w-6 animate-spin text-slate-300" />
-                      </div>
+                      <MiniLoader height={80} />
                     ) : (
                       <table className="w-full text-sm">
                         <thead>
@@ -1568,9 +1559,7 @@ export default function StaffActivity() {
                         <p className={`text-xs mt-1 ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>Use the Personnel filter in the header</p>
                       </div>
                     ) : taskVectorsLoading ? (
-                      <div className="flex justify-center py-14">
-                        <Loader2 className="h-6 w-6 animate-spin text-slate-300" />
-                      </div>
+                      <MiniLoader height={80} />
                     ) : (
                       <motion.div variants={staggerChildren} initial="hidden" animate="visible" className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                         {taskVectors.map((task, i) => (
