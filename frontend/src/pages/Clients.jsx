@@ -2108,7 +2108,6 @@ export default function Clients() {
                   index={index}
                   isDark={isDark}
                   onSendBirthdayWish={handleSendBirthdayWish}
-                  />
                   key={client.id} client={client} index={boardPageStart + localIndex}
                   isDark={isDark} users={users} getClientAssignments={getClientAssignments}
                   openWhatsApp={openWhatsApp} handleEdit={handleEdit}
