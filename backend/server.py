@@ -636,6 +636,39 @@ def send_birthday_email(recipient_email: str, client_name: str):
         logger.error(f"Failed to send birthday email: {str(e)}")
         return False
 
+# ─── TEST EMAIL ENDPOINT ──────────────────────────────────────────────────────
+@api_router.post("/email/test")
+async def test_email_service(current_user: User = Depends(get_current_user)):
+    """Send a test email to the logged-in admin to verify Brevo SMTP is working."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    missing = [k for k, v in {
+        "BREVO_SMTP_USER": os.getenv("BREVO_SMTP_USER"),
+        "BREVO_SMTP_PASS": os.getenv("BREVO_SMTP_PASS"),
+        "SENDER_EMAIL":    os.getenv("SENDER_EMAIL"),
+    }.items() if not v]
+
+    if missing:
+        raise HTTPException(status_code=500, detail=f"Missing env vars: {', '.join(missing)}")
+
+    try:
+        _brevo_send(
+            to_email   = current_user.email,
+            subject    = "✅ TaskoSphere — Mail Service Test",
+            body_plain = (
+                f"Hello {current_user.full_name},\n\n"
+                f"This is a test email from TaskoSphere.\n"
+                f"If you received this, your mail service is working correctly.\n\n"
+                f"SMTP Host : {os.getenv('BREVO_SMTP_HOST', 'smtp-relay.brevo.com')}\n"
+                f"Sender    : {os.getenv('SENDER_EMAIL')}\n\n"
+                f"Regards,\nTaskoSphere"
+            ),
+        )
+        return {"status": "success", "message": f"Test email sent to {current_user.email}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Mail error: {str(e)}")
+
 # Task Analytics
 @api_router.get("/tasks/analytics")
 async def get_task_analytics(
@@ -3363,6 +3396,42 @@ async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get
                 continue
     return sorted(upcoming, key=lambda x: x["days_until_birthday"])
 
+# ─── MANUAL BIRTHDAY WISH ────────────────────────────────────────────────────
+@api_router.post("/clients/{client_id}/send-birthday-wish")
+async def send_birthday_wish_manual(
+    client_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Manually send a birthday wish to a client. Admin/manager only."""
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(status_code=403, detail="Admin or Manager only")
+
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    sent_to, failed, no_email = [], [], []
+
+    # Main client email
+    client_name  = client.get("company_name") or "Valued Client"
+    client_email = client.get("email")
+    if client_email:
+        ok = send_birthday_email(client_email, client_name)
+        (sent_to if ok else failed).append(client_email)
+    else:
+        no_email.append(client_name)
+
+    # Contact persons
+    for cp in client.get("contact_persons") or []:
+        cp_email = cp.get("email")
+        cp_name  = cp.get("name") or client_name
+        if cp_email:
+            ok = send_birthday_email(cp_email, cp_name)
+            (sent_to if ok else failed).append(cp_email)
+        else:
+            no_email.append(cp_name)
+
+    return {"status": "completed", "sent_to": sent_to, "failed": failed, "no_email": no_email}
 
 @api_router.get("/leads/meta/services")
 async def get_leads_services_meta(current_user: User = Depends(get_current_user)):
