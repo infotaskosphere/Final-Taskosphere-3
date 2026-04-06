@@ -1189,6 +1189,7 @@ export default function PartyLedger({
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent
+        hideClose
         className={`max-w-[96vw] w-[1280px] p-0 rounded-3xl border-0 shadow-2xl flex flex-col overflow-hidden ${surface}`}
         style={{ maxHeight: '94vh', height: '94vh' }}
       >
