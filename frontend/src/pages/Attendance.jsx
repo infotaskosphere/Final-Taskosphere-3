@@ -1384,14 +1384,18 @@ export default function Attendance() {
   const handlePunchAction = useCallback(async (action) => {
     setLoading(true); setGeoError(null);
     try {
-      // Always get GPS location for both punch-in and punch-out
+      // Always attempt GPS location for both punch-in and punch-out
       const { ok, location } = await checkGeofence();
 
-      // For punch-in: enforce geo-fence
-      if (action === 'punch_in' && !ok && userLocation !== null) {
-        // Only block if we DID get a location but it's outside fence
+      // For punch-in: enforce geo-fence ONLY when we successfully obtained
+      // the user's location AND it is outside the allowed radius.
+      // If geolocation is unavailable (permission denied, HTTP context, GPS
+      // hardware missing), we still allow the punch so the web app is not
+      // completely blocked — the server records the attempt without coordinates.
+      if (action === 'punch_in' && !ok && location !== null) {
+        // We have a valid location reading but it's outside the fence
         setLoading(false);
-        return;
+        return; // geoError is already set — modal will show it
       }
 
       const response = await api.post('/attendance', { action, location });
