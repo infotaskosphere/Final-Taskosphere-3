@@ -1,8 +1,7 @@
 import Papa from 'papaparse/papaparse.js';
 import { useDark } from '@/hooks/useDark';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -1164,7 +1163,7 @@ export default function Clients() {
       }
       // N → open new client (only when no dialog/input is focused)
       if (e.key === 'n' && !dialogOpen && !detailDialogOpen && !bulkMsgOpen && document.activeElement.tagName === 'BODY') {
-        setDialogOpen(true);
+        openAddDialog();
       }
       // Escape → clear search if focused
       if (e.key === 'Escape' && document.activeElement === searchRef.current) {
@@ -1427,6 +1426,7 @@ export default function Clients() {
       }
       if (editingClient) await api.put(`/clients/${editingClient.id}`, payload);
       else await api.post('/clients', payload);
+      if (!editingClient) { try { localStorage.removeItem(DRAFT_KEY); } catch {} }
       setDialogOpen(false); resetForm(); fetchClients();
       toast.success(editingClient ? 'Client updated!' : 'Client created!');
     } catch (error) {
@@ -1464,6 +1464,32 @@ export default function Clients() {
   }, []);
 
   useEffect(() => { if (!dialogOpen) { setFormErrors({}); setContactErrors([]); } }, [dialogOpen]);
+
+  // ── Draft persistence: save add-form to localStorage whenever it changes ──
+  const DRAFT_KEY = 'taskosphere_clients_add_draft';
+  useEffect(() => {
+    if (dialogOpen && !editingClient) {
+      try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ formData, otherService })); } catch {}
+    }
+  }, [formData, otherService, dialogOpen, editingClient]);
+
+  // Restore draft when opening add dialog
+  const openAddDialog = useCallback(() => {
+    try {
+      const saved = localStorage.getItem(DRAFT_KEY);
+      if (saved) {
+        const { formData: savedForm, otherService: savedOther } = JSON.parse(saved);
+        if (savedForm?.company_name?.trim()) {
+          setFormData(prev => ({ ...prev, ...savedForm }));
+          setOtherService(savedOther || '');
+        }
+      }
+    } catch {}
+    setEditingClient(null);
+    setDialogOpen(true);
+    setFormErrors({});
+    setContactErrors([]);
+  }, []);
 
   // ── Contact/DSC/Assignment helpers ────────────────────────────────────────
   const updateContact = useCallback((idx, field, val) => {
@@ -1675,7 +1701,7 @@ export default function Clients() {
             <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importLoading} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl backdrop-blur-sm">{importLoading ? 'Importing…' : 'Import CSV'}</Button>
             <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
               <DialogTrigger asChild>
-                <Button className="h-9 px-5 text-sm rounded-xl bg-white text-slate-800 hover:bg-blue-50 shadow-sm gap-2 font-semibold border-0"><Plus className="h-4 w-4" /> New Client</Button>
+                <Button onClick={openAddDialog} className="h-9 px-5 text-sm rounded-xl bg-white text-slate-800 hover:bg-blue-50 shadow-sm gap-2 font-semibold border-0"><Plus className="h-4 w-4" /> New Client</Button>
               </DialogTrigger>
               <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto bg-white rounded-2xl border border-slate-200 shadow-2xl p-0">
                 <div className={`sticky top-0 z-10 border-b px-8 py-5 flex items-center justify-between ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
