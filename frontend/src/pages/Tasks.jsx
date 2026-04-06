@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+
+import React, { useState, useEffect, useRef } from 'react';
 import useDark from '../hooks/useDark';
 
 // ✅ UI COMPONENTS (fixed)
@@ -19,14 +20,12 @@ import { toast } from 'sonner';
 import api from '../lib/api';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
-import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { GripVertical } from 'lucide-react';
 
 // ✅ ICONS
 import {
   Plus, Edit, Trash2, Search, Calendar, Building2, User, Users,
   LayoutGrid, List, Circle, ArrowRight, Check, Repeat, Sparkles,
-  MessageSquare, Bell, FileText,
+  MessageSquare, Bell, FileText, Calendar as CalendarIcon,
   X, ChevronDown, Filter, Clock, AlertCircle, CheckCircle2,
   TrendingUp, MoreHorizontal, Copy, SlidersHorizontal,
   Briefcase, Target, Activity, ChevronRight, Sun,
@@ -582,7 +581,6 @@ const BoardCard = ({
   openTaskDetail, openCommentTaskId, setOpenCommentTaskId,
   fetchComments, comments, newComment, setNewComment,
   selectedTask, setSelectedTask, handleAddComment,
-  dragHandleProps, isDragging,
 }) => {
   const isDark = useDark();
   const checklistItems = parseChecklist(task.description);
@@ -601,12 +599,6 @@ const BoardCard = ({
 
         <div className="p-4 space-y-3">
           <div className="flex items-start justify-between gap-2">
-            {/* Drag handle */}
-            {dragHandleProps && (
-              <span {...dragHandleProps} className="mt-0.5 flex-shrink-0 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity" style={{ touchAction: 'none' }}>
-                <GripVertical className="h-4 w-4 text-slate-300" />
-              </span>
-            )}
             <button
               onClick={() => openTaskDetail(task)}
               className={`font-semibold text-sm leading-snug text-left flex-1 transition-colors
@@ -894,27 +886,6 @@ export default function Tasks() {
   };
   const openTaskDetail = (task) => { setSelectedDetailTask(task); setTaskDetailOpen(true); };
   const resetForm = () => { setFormData({ ...EMPTY_FORM }); setEditingTask(null); };
-
-  // ── Draft persistence for add-task form ──────────────────────────────────
-  const TASKS_DRAFT_KEY = 'taskosphere_tasks_add_draft';
-  useEffect(() => {
-    if (dialogOpen && !editingTask) {
-      try { localStorage.setItem(TASKS_DRAFT_KEY, JSON.stringify(formData)); } catch {}
-    }
-  }, [formData, dialogOpen, editingTask]);
-
-  const openAddTaskDialog = useCallback(() => {
-    setEditingTask(null);
-    try {
-      const saved = localStorage.getItem(TASKS_DRAFT_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed?.title?.trim()) { setFormData({ ...EMPTY_FORM, ...parsed }); }
-        else setFormData({ ...EMPTY_FORM });
-      } else setFormData({ ...EMPTY_FORM });
-    } catch { setFormData({ ...EMPTY_FORM }); }
-    setDialogOpen(true);
-  }, []);
   const toggleSubAssignee = (userId) => {
     setFormData(prev => ({ ...prev, sub_assignees: prev.sub_assignees.includes(userId) ? prev.sub_assignees.filter(id => id !== userId) : [...prev.sub_assignees, userId] }));
   };
@@ -931,12 +902,8 @@ export default function Tasks() {
         else toast.error('Failed to update task');
       } else {
         const res = await fetch(`${API_BASE}/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeader() }, body: JSON.stringify(taskData) });
-        if (res.ok) {
-          const created = await res.json();
-          setTasks(prev => [created, ...prev]);
-          try { localStorage.removeItem(TASKS_DRAFT_KEY); } catch {}
-          toast.success('Task created!');
-        } else toast.error('Failed to create task');
+        if (res.ok) { const created = await res.json(); setTasks(prev => [created, ...prev]); toast.success('Task created!'); }
+        else toast.error('Failed to create task');
       }
     } catch { toast.error('Network error'); }
     setDialogOpen(false); resetForm(); setLoading(false);
@@ -1212,7 +1179,7 @@ export default function Tasks() {
   });
 
   // ── displayTasks must be defined BEFORE filteredStats ────────────────────
-  const displayTasksBase = React.useMemo(() => {
+  const displayTasks = React.useMemo(() => {
     let result = [...filteredTasks];
     if (showMyTasksOnly && user?.id) result = result.filter(t => t.assigned_to === user.id || t.sub_assignees?.includes(user.id));
     if (filterAssignedByMe && user?.id) result = result.filter(t => t.created_by === user.id);
@@ -1228,82 +1195,6 @@ export default function Tasks() {
     });
     return result;
   }, [filteredTasks, showMyTasksOnly, sortBy, sortDirection, user, filterAssignedByMe, filterCreatedBy]);
-
-  // ── DnD local order (list view) ────────────────────────────────────────
-  const [listOrder, setListOrder] = useState(null); // null = use base order
-  const displayTasks = useMemo(() => {
-    if (!listOrder) return displayTasksBase;
-    // Re-apply listOrder mapping by task id
-    const byId = Object.fromEntries(displayTasksBase.map(t => [String(t.id), t]));
-    const ordered = listOrder.map(id => byId[id]).filter(Boolean);
-    // Append any new tasks not yet in listOrder
-    const orderSet = new Set(listOrder);
-    const extras = displayTasksBase.filter(t => !orderSet.has(String(t.id)));
-    return [...ordered, ...extras];
-  }, [displayTasksBase, listOrder]);
-
-  // Reset listOrder when base list changes structurally (new filters, etc.)
-  useEffect(() => { setListOrder(null); }, [displayTasksBase.length]);
-
-  // ── DnD board order (per column) ─────────────────────────────────────
-  const [boardOrder, setBoardOrder] = useState({}); // { status: [id,...] }
-
-  // ── Handle DnD end (list view) ────────────────────────────────────────
-  const handleListDragEnd = useCallback((result) => {
-    if (!result.destination) return;
-    const from = result.source.index;
-    const to = result.destination.index;
-    if (from === to) return;
-    setListOrder(prev => {
-      const ids = (prev || displayTasksBase.map(t => String(t.id)));
-      const next = [...ids];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
-  }, [displayTasksBase]);
-
-  // ── Handle DnD end (board view) ───────────────────────────────────────
-  const handleBoardDragEnd = useCallback((result) => {
-    if (!result.destination) return;
-    const { source, destination, draggableId } = result;
-    const srcCol = source.droppableId;
-    const dstCol = destination.droppableId;
-
-    if (srcCol === dstCol && source.index === destination.index) return;
-
-    if (srcCol === dstCol) {
-      // Reorder within same column
-      setBoardOrder(prev => {
-        const colTasks = getBoardColumnTasksOrdered(srcCol, prev);
-        const ids = colTasks.map(t => String(t.id));
-        const [moved] = ids.splice(source.index, 1);
-        ids.splice(destination.index, 0, moved);
-        return { ...prev, [srcCol]: ids };
-      });
-    } else {
-      // Move to different column — update status via API
-      const taskId = parseInt(draggableId, 10);
-      handleQuickStatusChange(taskId, dstCol);
-      // Optimistically update board order
-      setBoardOrder(prev => {
-        const srcIds = getBoardColumnTasksOrdered(srcCol, prev).map(t => String(t.id)).filter(id => id !== draggableId);
-        const dstIds = getBoardColumnTasksOrdered(dstCol, prev).map(t => String(t.id));
-        dstIds.splice(destination.index, 0, draggableId);
-        return { ...prev, [srcCol]: srcIds, [dstCol]: dstIds };
-      });
-    }
-  }, [displayTasksBase, boardOrder]);
-
-  const getBoardColumnTasksOrdered = useCallback((colStatus, orderMap) => {
-    const baseTasks = displayTasksBase.filter(t => t.status === colStatus);
-    const ids = orderMap?.[colStatus];
-    if (!ids) return baseTasks;
-    const byId = Object.fromEntries(baseTasks.map(t => [String(t.id), t]));
-    const ordered = ids.map(id => byId[id]).filter(Boolean);
-    const extras = baseTasks.filter(t => !ids.includes(String(t.id)));
-    return [...ordered, ...extras];
-  }, [displayTasksBase]);
 
   // ── Live filtered stats — recomputed from displayTasks whenever filters change ──
   const filteredStats = React.useMemo(() => {
@@ -1403,7 +1294,7 @@ export default function Tasks() {
   };
 
   const unreadCount         = notifications.filter(n => !n.is_read).length;
-  // getBoardColumnTasks replaced by getBoardColumnTasksOrdered (DnD-aware)
+  const getBoardColumnTasks = (colStatus) => displayTasks.filter(t => t.status === colStatus);
   // ══════════════════════════════════════════════════════════════════════════
   // RENDER
   // ══════════════════════════════════════════════════════════════════════════
@@ -1423,37 +1314,40 @@ export default function Tasks() {
       {/* ── WELCOME BANNER (matches Dashboard exactly) ───────────────────── */}
       <motion.div variants={itemVariants}>
         <div
-          className="banner-animated relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-3"
-          style={{ boxShadow: `0 8px 32px rgba(13,59,102,0.28)` }}
+          className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
+          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`, boxShadow: `0 8px 32px rgba(13,59,102,0.28)` }}
         >
           {/* Decorative blobs */}
           <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10" style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
           <div className="absolute right-28 bottom-0 w-40 h-40 rounded-full mb-[-40px] opacity-5" style={{ background: 'white' }} />
           <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5" style={{ background: 'white' }} />
 
-          <div className="relative min-w-0">
-            {/* Row 1 — title + stats */}
-            <div className="flex items-center justify-between gap-4 min-w-0">
-              <div className="flex-1 min-w-0">
-                <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-0.5 flex items-center gap-1.5 min-w-0 truncate">
-                  <Briefcase className="h-3 w-3" />
-                  {format(new Date(), 'EEEE, MMMM d, yyyy')}
-                </p>
-                <h1 className="text-lg sm:text-2xl font-bold text-white tracking-tight leading-tight truncate">Task Management</h1>
-              </div>
-              {/* Stats pill — admin only */}
-              {isAdmin && (
+          <div className="relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 min-w-0">
+            {/* Left — title */}
+            <div className="flex-1 min-w-0">
+              <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1 flex items-center gap-1.5 min-w-0 truncate">
+                <Briefcase className="h-3 w-3" />
+                {format(new Date(), 'EEEE, MMMM d, yyyy')}
+              </p>
+              <h1 className="text-lg sm:text-2xl font-bold text-white tracking-tight leading-tight truncate">Task Management</h1>
+              <p className="text-white/60 text-sm mt-1">Task Updates</p>
+            </div>
+
+            {/* Right — action buttons */}
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
+            {/* Total Tasks — admin only */}
+            {isAdmin && (
+              <>
                 <Button variant="ghost" size="sm"
                   onClick={() => { setFilterStatus('all'); setFilterAssignee('all'); setShowMyTasksOnly(false); setFilterTeamOnly(false); }}
-                  className="h-8 text-xs rounded-xl gap-1.5 border font-semibold flex-shrink-0"
+                  className="h-8 text-xs rounded-xl gap-1.5 border font-semibold"
                   style={{ backgroundColor: 'rgba(31,175,90,0.22)', borderColor: 'rgba(31,175,90,0.55)', color: '#d1fae5' }}>
                   <Target className="h-3.5 w-3.5" /> Total: {stats.total}
                 </Button>
-              )}
-            </div>
+                <div className="h-8 w-px bg-white/20 hidden md:block" />
+              </>
+            )}
 
-            {/* Row 2 — compact action toolbar */}
-            <div className="flex flex-wrap items-center gap-1.5 mt-2.5 min-w-0">
               {/* Action buttons */}
               <Button variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()}
                 className="h-8 text-xs rounded-xl text-white/80 hover:text-white hover:bg-white/15 border border-white/20">
@@ -1528,7 +1422,7 @@ export default function Tasks() {
               {canEditTasks && (
                 <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
                   <DialogTrigger asChild>
-                    <Button size="sm" onClick={() => openAddTaskDialog()}
+                    <Button size="sm" onClick={() => { setEditingTask(null); setFormData({ ...EMPTY_FORM }); }}
                       className="h-8 px-4 text-xs rounded-xl font-semibold gap-1.5"
                       style={{ background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.35)', color: 'white' }}>
                       <Plus className="h-3.5 w-3.5" /> New Task
@@ -1676,9 +1570,9 @@ export default function Tasks() {
                   </DialogContent>
                 </Dialog>
               )}
-            </div>{/* end Row 2 */}
-          </div>{/* end relative */}
-        </div>{/* end banner-animated */}
+            </div>
+          </div>
+        </div>
       </motion.div>
 
       {/* ── METRIC CARDS — 6 equal, all same height/layout ──────────────── */}
@@ -2130,175 +2024,105 @@ export default function Tasks() {
       {/* ── List / Board ─────────────────────────────────────────────────── */}
       <div className="overflow-y-auto max-h-[calc(100vh-360px)]">
         {viewMode === 'list' ? (
-          /* ── LIST VIEW with drag-and-drop rows ── */
-          <DragDropContext onDragEnd={handleListDragEnd}>
-            <motion.div className="space-y-1.5" variants={containerVariants}>
-              {/* Column headers */}
-              <div
-                className={`hidden sm:grid items-center pl-5 pr-3 py-2 text-[10px] font-bold uppercase tracking-widest select-none border-b mb-1.5
-                  ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-100'}`}
-                style={{ gridTemplateColumns: '20px 24px 24px minmax(0,1fr) 160px 88px 64px 72px 110px 110px 88px 100px' }}
-              >
-                <span title="Drag to reorder"><GripVertical className="h-3 w-3 text-slate-300" /></span>
-                <span /><span />
-                <span className="pl-1">Task</span>
-                <span className="text-center">Status</span>
-                <span className="text-center">Dept</span>
-                <span className="text-center">Priority</span>
-                <span className="text-center">Overdue</span>
-                <span className="text-center">Assignee</span>
-                <span className="text-center">Assignor</span>
-                <span className="text-center">Due</span>
-                <span className="text-center">Actions</span>
-              </div>
+          <motion.div className="space-y-1.5" variants={containerVariants}>
+            <div
+              className={`hidden sm:grid items-center pl-5 pr-3 py-2 text-[10px] font-bold uppercase tracking-widest select-none border-b mb-1.5
+                ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-100'}`}
+              style={{ gridTemplateColumns: '24px 24px minmax(0,1fr) 160px 88px 64px 72px 110px 110px 88px 100px' }}
+            >
+              <span /><span />
+              <span className="pl-1">Task</span>
+              <span className="text-center">Status</span>
+              <span className="text-center">Dept</span>
+              <span className="text-center">Priority</span>
+              <span className="text-center">Overdue</span>
+              <span className="text-center">Assignee</span>
+              <span className="text-center">Assignor</span>
+              <span className="text-center">Due</span>
+              <span className="text-center">Actions</span>
+            </div>
 
-              <Droppable droppableId="task-list">
-                {(provided, snapshot) => (
-                  <div
-                    ref={provided.innerRef}
-                    {...provided.droppableProps}
-                    className={`space-y-1.5 rounded-xl transition-all duration-200 ${snapshot.isDraggingOver ? (isDark ? 'bg-blue-900/10' : 'bg-blue-50/50') : ''}`}
-                  >
-                    {displayTasks.map((task, index) => {
+            {displayTasks.map((task, index) => {
+              const taskIsOverdue = isOverdue(task);
+              const displayStatus = getDisplayStatus(task);
+              const statusStyle   = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
+              const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
+              const stripeColor   = getStripeColor(task, taskIsOverdue);
+              return (
+                <TaskRow key={task.id} task={task} index={index}
+                  isOverdue={taskIsOverdue} statusStyle={statusStyle} priorityStyle={priorityStyle} stripeColor={stripeColor}
+                  getUserName={getUserName} getClientName={getClientName} getRelativeDueDate={getRelativeDueDate}
+                  getChecklistProgress={getChecklistProgress} parseChecklist={parseChecklist}
+                  taskChecklists={taskChecklists} toggleChecklistItem={toggleChecklistItem}
+                  canModifyTask={canModifyTask} canDeleteTasks={canDeleteTasks}
+                  handleEdit={handleEdit} handleDelete={handleDelete} handleDuplicateTask={handleDuplicateTask}
+                  handleQuickStatusChange={handleQuickStatusChange} openTaskDetail={openTaskDetail}
+                  openCommentTaskId={openCommentTaskId} setOpenCommentTaskId={setOpenCommentTaskId}
+                  fetchComments={fetchComments} comments={comments} newComment={newComment}
+                  setNewComment={setNewComment} selectedTask={selectedTask} setSelectedTask={setSelectedTask}
+                  handleAddComment={handleAddComment} user={user}
+                />
+              );
+            })}
+
+            {displayTasks.length === 0 && (
+              <div className="text-center py-16">
+                <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
+                  <Search className="h-5 w-5 text-slate-300" />
+                </div>
+                <p className="text-sm font-medium text-slate-500">No tasks found</p>
+                <p className="text-xs text-slate-400 mt-1">Try adjusting your filters</p>
+              </div>
+            )}
+          </motion.div>
+        ) : (
+          <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-5" variants={containerVariants}>
+            {[
+              { status: 'pending',     title: 'To Do',       color: 'text-red-600',   bg: 'bg-red-500',   count: stats.todo },
+              { status: 'in_progress', title: 'In Progress', color: 'text-amber-600', bg: 'bg-amber-500', count: stats.inProgress },
+              { status: 'completed',   title: 'Completed',   color: 'text-blue-600',  bg: 'bg-blue-600',  count: stats.completed },
+            ].map((col) => {
+              const colTasks = getBoardColumnTasks(col.status);
+              return (
+                <motion.div key={col.status} variants={itemVariants} className="space-y-3">
+                  <div className="flex items-center gap-2 px-1">
+                    <div className={`w-2.5 h-2.5 rounded-full ${col.bg}`} />
+                    <h2 className={`text-sm font-bold ${col.color}`}>{col.title}</h2>
+                    <span className="text-xs font-semibold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full ml-auto">{colTasks.length}</span>
+                  </div>
+                  <div className="space-y-3 min-h-[200px]">
+                    {colTasks.map((task, index) => {
                       const taskIsOverdue = isOverdue(task);
                       const displayStatus = getDisplayStatus(task);
                       const statusStyle   = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
                       const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
                       const stripeColor   = getStripeColor(task, taskIsOverdue);
                       return (
-                        <Draggable key={String(task.id)} draggableId={String(task.id)} index={index}>
-                          {(dragProvided, dragSnapshot) => (
-                            <div
-                              ref={dragProvided.innerRef}
-                              {...dragProvided.draggableProps}
-                              className={`rounded-xl transition-shadow ${dragSnapshot.isDragging ? 'shadow-2xl ring-2 ring-blue-400/40 z-50' : ''}`}
-                              style={dragProvided.draggableProps.style}
-                            >
-                              {/* Drag handle injected as first child via wrapper */}
-                              <div className="relative">
-                                <span
-                                  {...dragProvided.dragHandleProps}
-                                  className="absolute left-0 top-0 bottom-0 w-5 flex items-center justify-center cursor-grab active:cursor-grabbing z-10 opacity-0 hover:opacity-100 group-hover:opacity-100"
-                                  style={{ touchAction: 'none' }}
-                                >
-                                  <GripVertical className="h-3.5 w-3.5 text-slate-400" />
-                                </span>
-                                <TaskRow task={task} index={index}
-                                  isOverdue={taskIsOverdue} statusStyle={statusStyle} priorityStyle={priorityStyle} stripeColor={stripeColor}
-                                  getUserName={getUserName} getClientName={getClientName} getRelativeDueDate={getRelativeDueDate}
-                                  getChecklistProgress={getChecklistProgress} parseChecklist={parseChecklist}
-                                  taskChecklists={taskChecklists} toggleChecklistItem={toggleChecklistItem}
-                                  canModifyTask={canModifyTask} canDeleteTasks={canDeleteTasks}
-                                  handleEdit={handleEdit} handleDelete={handleDelete} handleDuplicateTask={handleDuplicateTask}
-                                  handleQuickStatusChange={handleQuickStatusChange} openTaskDetail={openTaskDetail}
-                                  openCommentTaskId={openCommentTaskId} setOpenCommentTaskId={setOpenCommentTaskId}
-                                  fetchComments={fetchComments} comments={comments} newComment={newComment}
-                                  setNewComment={setNewComment} selectedTask={selectedTask} setSelectedTask={setSelectedTask}
-                                  handleAddComment={handleAddComment} user={user}
-                                  dragHandleProps={dragProvided.dragHandleProps}
-                                  isDragging={dragSnapshot.isDragging}
-                                />
-                              </div>
-                            </div>
-                          )}
-                        </Draggable>
+                        <BoardCard key={task.id} task={task} index={index}
+                          isOverdue={taskIsOverdue} statusStyle={statusStyle} priorityStyle={priorityStyle} stripeColor={stripeColor}
+                          getUserName={getUserName} getClientName={getClientName} getRelativeDueDate={getRelativeDueDate}
+                          getChecklistProgress={getChecklistProgress} parseChecklist={parseChecklist}
+                          taskChecklists={taskChecklists} toggleChecklistItem={toggleChecklistItem}
+                          canModifyTask={canModifyTask} canDeleteTasks={canDeleteTasks}
+                          handleEdit={handleEdit} handleDelete={handleDelete} handleDuplicateTask={handleDuplicateTask}
+                          handleQuickStatusChange={handleQuickStatusChange} openTaskDetail={openTaskDetail}
+                          openCommentTaskId={openCommentTaskId} setOpenCommentTaskId={setOpenCommentTaskId}
+                          fetchComments={fetchComments} comments={comments} newComment={newComment}
+                          setNewComment={setNewComment} selectedTask={selectedTask} setSelectedTask={setSelectedTask}
+                          handleAddComment={handleAddComment}
+                        />
                       );
                     })}
-                    {provided.placeholder}
+                    {colTasks.length === 0 && (
+                      <div className={`flex items-center justify-center h-24 rounded-xl border-2 border-dashed ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                        <p className="text-xs text-slate-400">No tasks</p>
+                      </div>
+                    )}
                   </div>
-                )}
-              </Droppable>
-
-              {displayTasks.length === 0 && (
-                <div className="text-center py-16">
-                  <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
-                    <Search className="h-5 w-5 text-slate-300" />
-                  </div>
-                  <p className="text-sm font-medium text-slate-500">No tasks found</p>
-                  <p className="text-xs text-slate-400 mt-1">Try adjusting your filters</p>
-                </div>
-              )}
-            </motion.div>
-          </DragDropContext>
-        ) : (
-          /* ── BOARD VIEW with cross-column drag-and-drop ── */
-          <DragDropContext onDragEnd={handleBoardDragEnd}>
-            <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-5" variants={containerVariants}>
-              {[
-                { status: 'pending',     title: 'To Do',       color: 'text-red-600',   bg: 'bg-red-500',   borderColor: 'border-red-200',   headerBg: isDark ? 'bg-red-900/20' : 'bg-red-50' },
-                { status: 'in_progress', title: 'In Progress', color: 'text-amber-600', bg: 'bg-amber-500', borderColor: 'border-amber-200', headerBg: isDark ? 'bg-amber-900/20' : 'bg-amber-50' },
-                { status: 'completed',   title: 'Completed',   color: 'text-blue-600',  bg: 'bg-blue-600',  borderColor: 'border-blue-200',  headerBg: isDark ? 'bg-blue-900/20' : 'bg-blue-50' },
-              ].map((col) => {
-                const colTasks = getBoardColumnTasksOrdered(col.status, boardOrder);
-                return (
-                  <motion.div key={col.status} variants={itemVariants} className="space-y-3">
-                    <div className={`flex items-center gap-2 px-3 py-2 rounded-xl ${col.headerBg}`}>
-                      <div className={`w-2.5 h-2.5 rounded-full ${col.bg}`} />
-                      <h2 className={`text-sm font-bold ${col.color}`}>{col.title}</h2>
-                      <span className="text-xs font-semibold bg-white/70 dark:bg-slate-700/70 text-slate-500 px-2 py-0.5 rounded-full ml-auto">{colTasks.length}</span>
-                      <GripVertical className="h-3.5 w-3.5 text-slate-400 opacity-50" />
-                    </div>
-
-                    <Droppable droppableId={col.status}>
-                      {(provided, snapshot) => (
-                        <div
-                          ref={provided.innerRef}
-                          {...provided.droppableProps}
-                          className={`space-y-3 min-h-[200px] rounded-xl p-1.5 transition-all duration-200 border-2 border-dashed ${
-                            snapshot.isDraggingOver
-                              ? (isDark ? `border-blue-500/50 bg-blue-900/10` : `${col.borderColor} bg-blue-50/60`)
-                              : 'border-transparent'
-                          }`}
-                        >
-                          {colTasks.map((task, index) => {
-                            const taskIsOverdue = isOverdue(task);
-                            const displayStatus = getDisplayStatus(task);
-                            const statusStyle   = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
-                            const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
-                            const stripeColor   = getStripeColor(task, taskIsOverdue);
-                            return (
-                              <Draggable key={String(task.id)} draggableId={String(task.id)} index={index}>
-                                {(dragProvided, dragSnapshot) => (
-                                  <div
-                                    ref={dragProvided.innerRef}
-                                    {...dragProvided.draggableProps}
-                                    className={`rounded-xl transition-all ${dragSnapshot.isDragging ? 'shadow-2xl ring-2 ring-blue-400/40 rotate-1 opacity-95' : ''}`}
-                                    style={dragProvided.draggableProps.style}
-                                  >
-                                    <BoardCard task={task} index={index}
-                                      isOverdue={taskIsOverdue} statusStyle={statusStyle} priorityStyle={priorityStyle} stripeColor={stripeColor}
-                                      getUserName={getUserName} getClientName={getClientName} getRelativeDueDate={getRelativeDueDate}
-                                      getChecklistProgress={getChecklistProgress} parseChecklist={parseChecklist}
-                                      taskChecklists={taskChecklists} toggleChecklistItem={toggleChecklistItem}
-                                      canModifyTask={canModifyTask} canDeleteTasks={canDeleteTasks}
-                                      handleEdit={handleEdit} handleDelete={handleDelete} handleDuplicateTask={handleDuplicateTask}
-                                      handleQuickStatusChange={handleQuickStatusChange} openTaskDetail={openTaskDetail}
-                                      openCommentTaskId={openCommentTaskId} setOpenCommentTaskId={setOpenCommentTaskId}
-                                      fetchComments={fetchComments} comments={comments} newComment={newComment}
-                                      setNewComment={setNewComment} selectedTask={selectedTask} setSelectedTask={setSelectedTask}
-                                      handleAddComment={handleAddComment}
-                                      dragHandleProps={dragProvided.dragHandleProps}
-                                      isDragging={dragSnapshot.isDragging}
-                                    />
-                                  </div>
-                                )}
-                              </Draggable>
-                            );
-                          })}
-                          {provided.placeholder}
-                          {colTasks.length === 0 && !snapshot.isDraggingOver && (
-                            <div className={`flex flex-col items-center justify-center h-24 rounded-xl border-2 border-dashed ${isDark ? 'border-slate-700 text-slate-600' : 'border-slate-200 text-slate-400'}`}>
-                              <p className="text-xs">Drop tasks here</p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </Droppable>
-                  </motion.div>
-                );
-              })}
-            </motion.div>
-          </DragDropContext>
+                </motion.div>
+              );
+            })}
+          </motion.div>
         )}
       </div>
 
