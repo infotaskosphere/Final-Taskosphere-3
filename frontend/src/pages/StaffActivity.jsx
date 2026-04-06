@@ -1,600 +1,579 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
+import React, { useState, useEffect, useMemo } from 'react';
+import GifLoader from '@/components/ui/GifLoader.jsx';
 import { useDark } from '@/hooks/useDark';
-import { CardContent } from '@/components/ui/card';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
-import { MiniLoader } from '@/components/ui/GifLoader';
-const getToken = () =>
-  localStorage.getItem("token") || sessionStorage.getItem("token");
 import { toast } from 'sonner';
-import { motion, AnimatePresence } from 'framer-motion';
-import { format, subMonths } from 'date-fns';
 import {
-  ResponsiveContainer,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-  Radar,
-  Tooltip,
-  Legend,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-} from 'recharts';
-import {
-  Users,
-  Clock,
-  Activity,
-  TrendingUp,
-  Target,
-  RefreshCw,
-  BrainCircuit,
-  FileDown,
-  Calendar as CalendarIcon,
-  ShieldCheck,
-  GitCompare,
-  Flame,
-  Binary,
-  Timer,
-  LayoutDashboard,
-  Database,
-  UserCheck,
-  Filter,
-  ChevronRight,
-  AlertCircle,
-  CheckCircle2,
-  XCircle,
-  Loader2,
-  Globe,
-  Mouse,
-  Keyboard,
-  Monitor,
-  Zap,
-  BarChart2,
-  Eye,
-  GripVertical,
-  Settings2,
+  BarChart3, TrendingUp, Clock, Award, Users, CheckCircle2,
+  AlertTriangle, Target, Download, RefreshCw, Activity,
+  Calendar, Star, Zap, Shield,
+  GripVertical, Settings2,
 } from 'lucide-react';
-import LayoutCustomizer from '../components/layout/LayoutCustomizer';
-import { usePageLayout } from '../hooks/usePageLayout';
-// ─── Brand Colors ─────────────────────────────────────────────────────────────
-const COLORS = {
-  deepBlue: '#0D3B66',
-  mediumBlue: '#1F6FB2',
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, AreaChart, Area, Legend,
+  RadarChart, Radar, PolarGrid, PolarAngleAxis,
+} from 'recharts';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
+import LayoutCustomizer from '@/components/layout/LayoutCustomizer';
+import { usePageLayout } from '@/hooks/usePageLayout';
+
+// ─── Colors ──────────────────────────────────────────────────────────────────
+const C = {
+  deepBlue:     '#0D3B66',
+  mediumBlue:   '#1F6FB2',
   emeraldGreen: '#1FAF5A',
-  lightGreen: '#5CCB5F',
-  coral: '#FF6B6B',
-  amber: '#F59E0B',
+  amber:        '#F59E0B',
+  coral:        '#EF4444',
 };
-// ─── Spring Physics ───────────────────────────────────────────────────────────
-const springPhysics = {
-  card: { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
+const PALETTE = ['#0D3B66','#1F6FB2','#1FAF5A','#5CCB5F','#F59E0B','#EF4444'];
+
+// ─── Animations ───────────────────────────────────────────────────────────────
+const cV = { hidden:{opacity:0}, visible:{opacity:1,transition:{staggerChildren:0.06}} };
+const iV = { hidden:{opacity:0,y:16}, visible:{opacity:1,y:0,transition:{duration:0.35,ease:[0.23,1,0.32,1]}} };
+
+// Dark mode via shared hook (imported above)
+
+// ─── Theme tokens (light / dark) ─────────────────────────────────────────────
+const tok = (dark) => ({
+  pageBg:   dark ? '#0f172a' : '#f8fafc',
+  card:     dark ? '#1e293b' : '#ffffff',
+  card2:    dark ? '#263348' : '#f8fafc',
+  border:   dark ? '#334155' : '#e2e8f0',
+  border2:  dark ? '#1e293b' : '#f1f5f9',
+  text:     dark ? '#e2e8f0' : '#1e293b',
+  textSub:  dark ? '#94a3b8' : '#64748b',
+  textMute: dark ? '#475569' : '#94a3b8',
+  hover:    dark ? '#1a2942' : '#f8fafc',
+  inputBg:  dark ? '#263348' : '#ffffff',
+  inputBdr: dark ? '#334155' : '#e2e8f0',
+  shadow:   dark ? '0 1px 4px rgba(0,0,0,0.45)' : '0 1px 4px rgba(0,0,0,0.06)',
+});
+
+// ─── Format helpers ───────────────────────────────────────────────────────────
+const fmt     = m  => !m||m===0 ? '0h 0m' : `${Math.floor(m/60)}h ${m%60}m`;
+const fmtH    = h  => !h||h===0 ? '0h 0m' : `${Math.floor(h)}h ${Math.round((h%1)*60)}m`;
+// Compact: never wraps — no minutes when ≥100h
+const fmtC    = m  => {
+  if (!m||m===0) return '0h';
+  const h=Math.floor(m/60), mn=m%60;
+  return h>=100 ? `${h}h` : mn>0 ? `${h}h ${mn}m` : `${h}h`;
 };
-// ─── Animation Variants ───────────────────────────────────────────────────────
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
-};
-const itemVariants = {
-  hidden: { opacity: 0, y: 24 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] } },
-  exit: { opacity: 0, y: 12, transition: { duration: 0.3 } },
-};
-const staggerChildren = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.04, delayChildren: 0.05 } },
-};
-const listItem = {
-  hidden: { opacity: 0, y: 16, scale: 0.98 },
-  visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.38, ease: [0.23, 1, 0.32, 1] } },
-};
-// ─── Shared Card Shell ────────────────────────────────────────────────────────
-function SectionCard({ children, className, onClick, isDark }) {
-  const base = `border rounded-2xl overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`;
-  const interactive = onClick ? 'cursor-pointer hover:shadow-md transition-all' : '';
+
+// ─── Custom chart tooltip ─────────────────────────────────────────────────────
+const ChartTip = ({ active, payload, label, dark }) => {
+  const t = tok(dark);
+  if (!active||!payload?.length) return null;
   return (
-    <div onClick={onClick} className={[base, interactive, className].filter(Boolean).join(' ')}>
-      {children}
+    <div className="rounded-xl px-3 py-2 shadow-xl text-xs"
+      style={{background:t.card, border:`1px solid ${t.border}`, color:t.text}}>
+      {label&&<p className="font-semibold mb-1">{label}</p>}
+      {payload.map((e,i)=>(
+        <p key={i} className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{background:e.color}}/>
+          {e.name}: <strong>{e.value}</strong>
+        </p>
+      ))}
     </div>
   );
-}
-// ─── Card Header Row ──────────────────────────────────────────────────────────
-function CardHeaderRow({ iconBg, icon, title, subtitle, action, isDark }) {
+};
+
+// ─── KPI Card — strict equal-height layout ────────────────────────────────────
+const KpiCard = ({ label, value, sub, color, icon:Icon, dark }) => {
+  const t = tok(dark);
   return (
-    <div className={`flex items-center justify-between px-4 py-3 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-      <div className="flex items-center gap-2.5">
-        <div className={['p-1.5 rounded-lg', iconBg].join(' ')}>{icon}</div>
-        <div>
-          <h3 className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{title}</h3>
-          <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{subtitle}</p>
+    <motion.div variants={iV} className="h-full">
+      {/* outer wrapper fills the grid cell height */}
+      <div className="rounded-xl overflow-hidden flex flex-col h-full"
+        style={{background:t.card, border:`1px solid ${t.border}`, boxShadow:t.shadow}}>
+        {/* accent stripe */}
+        <div className="h-[3px] w-full flex-shrink-0" style={{background:color}} />
+        {/* content — flex-1 so all cards stretch equally */}
+        <div className="p-3 sm:p-4 flex flex-col flex-1">
+          {/* label + icon row */}
+          <div className="flex items-start justify-between gap-1">
+            <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider leading-tight"
+              style={{color:t.textMute}}>{label}</p>
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+              style={{background:`${color}1a`}}>
+              <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" style={{color}} />
+            </div>
+          </div>
+          {/* value */}
+          <p className="mt-1.5 text-xl sm:text-2xl font-black leading-none tracking-tight" style={{color}}>
+            {value}
+          </p>
+          {/* sub — always renders (even empty) to keep spacing identical */}
+          <p className="mt-1 text-[10px] sm:text-xs font-medium leading-snug flex-1 break-words"
+            style={{color:t.textSub, minHeight:'1rem'}}>
+            {sub || '\u00A0'}
+          </p>
         </div>
       </div>
-      {action}
+    </motion.div>
+  );
+};
+
+// ─── Section wrapper ─────────────────────────────────────────────────────────
+const Sec = ({ title, desc, children, action, dark }) => {
+  const t = tok(dark);
+  return (
+    <motion.div variants={iV}>
+      <div className="rounded-xl overflow-hidden"
+        style={{background:t.card, border:`1px solid ${t.border}`, boxShadow:t.shadow}}>
+        <div className="h-[2px] w-full"
+          style={{background:`linear-gradient(90deg,${C.deepBlue},${C.emeraldGreen})`}} />
+        <div className="px-5 pt-4 pb-3 flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-bold" style={{color:t.text}}>{title}</p>
+            {desc&&<p className="text-xs mt-0.5" style={{color:t.textSub}}>{desc}</p>}
+          </div>
+          {action}
+        </div>
+        <div className="px-5 pb-5">{children}</div>
+      </div>
+    </motion.div>
+  );
+};
+
+// ─── Empty state ─────────────────────────────────────────────────────────────
+const Empty = ({ icon:Icon, text, dark }) => {
+  const t = tok(dark);
+  return (
+    <div className="h-44 flex flex-col items-center justify-center gap-3">
+      <div className="w-11 h-11 rounded-xl flex items-center justify-center"
+        style={{background:t.card2}}>
+        <Icon className="w-5 h-5" style={{color:t.textMute}} />
+      </div>
+      <p className="text-xs font-medium" style={{color:t.textMute}}>{text}</p>
     </div>
   );
-}
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function secondsToHM(s) {
-  const t = Math.floor(Number(s) || 0);
-  return `${Math.floor(t / 3600)}h ${Math.floor((t % 3600) / 60)}m`;
-}
-function minutesToHM(m) {
-  const t = Math.floor(Number(m) || 0);
-  return `${Math.floor(t / 60)}h ${t % 60}m`;
-}
-function secToMin(s) { return Math.floor((Number(s) || 0) / 60); }
-function pct(part, total) { return total > 0 ? Math.round((part / total) * 100) : 0; }
-function getDomain(url) {
-  if (!url) return 'Unknown';
-  try {
-    const u = url.startsWith('http') ? url : `https://${url}`;
-    return new URL(u).hostname.replace(/^www\./, '');
-  } catch {
-    return url.length > 30 ? url.slice(0, 30) + '…' : url;
-  }
-}
-const CAT_COLORS = {
-  productivity: COLORS.emeraldGreen,
-  communication: COLORS.mediumBlue,
-  entertainment: COLORS.coral,
-  social: COLORS.amber,
-  development: COLORS.deepBlue,
-  other: '#94a3b8',
 };
-// ─────────────────────────────────────────────────────────────────────────────
-// MAIN COMPONENT
-// ─────────────────────────────────────────────────────────────────────────────
-export default function StaffActivity() {
+
+// ─── Performer row ────────────────────────────────────────────────────────────
+const PerfRow = ({ m, rank, dark }) => {
+  const t = tok(dark);
+  const G=rank===1, S=rank===2, B=rank===3, P=G||S||B;
+  const medal = G?'🥇':S?'🥈':B?'🥉':`#${rank}`;
+  const grad  = G?'linear-gradient(135deg,#7B5A0A,#C9920A,#FFD700)'
+              : S?'linear-gradient(135deg,#3A3A3A,#707070,#C0C0C0)'
+              : B?'linear-gradient(135deg,#5C2E00,#A0521A,#CD7F32)':undefined;
+  return (
+    <div className="flex items-center justify-between p-2.5 rounded-xl"
+      style={P?{background:grad}:{background:t.card2,border:`1px solid ${t.border}`}}>
+      <div className="flex items-center gap-2.5">
+        <span className="w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold flex-shrink-0"
+          style={P?{background:'rgba(0,0,0,0.2)',color:'#fff'}:{background:t.border,color:t.textSub}}>
+          {medal}
+        </span>
+        <div className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0">
+          {m.profile_picture
+            ? <img src={m.profile_picture} alt={m.user_name} className="w-full h-full object-cover"/>
+            : <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold"
+                style={{background:`linear-gradient(135deg,${C.deepBlue},${C.mediumBlue})`}}>
+                {m.user_name?.charAt(0)?.toUpperCase()||'?'}
+              </div>}
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold leading-tight truncate max-w-[110px]"
+            style={P?{color:'#fff'}:{color:t.text}}>{m.user_name||'Unknown'}</p>
+          <p className="text-[10px]"
+            style={P?{color:'rgba(255,255,255,0.6)'}:{color:t.textMute}}>{m.badge||'Good Performer'}</p>
+        </div>
+      </div>
+      <div className="text-right flex-shrink-0">
+        <p className="text-sm font-black" style={P?{color:'#fff'}:{color:C.deepBlue}}>{m.overall_score}%</p>
+        <p className="text-[10px]" style={P?{color:'rgba(255,255,255,0.5)'}:{color:t.textMute}}>{fmtH(m.total_hours)}</p>
+      </div>
+    </div>
+  );
+};
+
+// ─── Tab button ───────────────────────────────────────────────────────────────
+const TabBtn = ({ id, label, icon:Icon, active, onClick, dark }) => {
+  const t = tok(dark);
+  return (
+    <button onClick={()=>onClick(id)}
+      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap flex-shrink-0"
+      style={active
+        ?{background:C.deepBlue,color:'#fff',boxShadow:'0 2px 6px rgba(13,59,102,0.35)'}
+        :{background:t.card2,color:t.textSub,border:`1px solid ${t.border}`}}>
+      <Icon className="w-3.5 h-3.5"/>{label}
+    </button>
+  );
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// MAIN
+// ════════════════════════════════════════════════════════════════════════════
+export default function Reports() {
   const { user, hasPermission } = useAuth();
-  const isDark = useDark();
+  const dark = useDark();
+  const t    = tok(dark);
+
+  const isAdmin  = user?.role === 'admin';
+  const canDL    = isAdmin || hasPermission('can_download_reports');
+
+  // Cross-visibility: view_other_reports is array of user IDs this user can view
+  const crossVisReports  = user?.permissions?.view_other_reports || [];
+  const hasCrossVisReports = crossVisReports.length > 0;
+  const canSwitchUser = isAdmin || hasCrossVisReports;
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [tasks,      setTasks]      = useState([]);
+  const [dashStats,  setDashStats]  = useState(null);
+  const [attendance, setAttendance] = useState([]);
+  const [allUsers,   setAllUsers]   = useState([]);
+  const [performers, setPerformers] = useState([]);
+  const [rankPeriod, setRankPeriod] = useState('monthly');
+  const [loading,    setLoading]    = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [selUser,    setSelUser]    = useState('all');
+  const [tab,        setTab]        = useState('overview');
   const [showCustomize, setShowCustomize] = useState(false);
-  const SA_SECTIONS = ['key_metrics','intensity_radar','activity_tabs'];
-  const SA_LABELS = {
-    key_metrics:     { name:'Key Metrics',           icon:'📊', desc:'Active personnel, hours, productivity, intensity, idle time' },
-    intensity_radar: { name:'Intensity Map & Radar', icon:'🔥', desc:'24-hour heatmap and comparison radar chart' },
-    activity_tabs:   { name:'Activity Tabs',         icon:'📑', desc:'Activity log, task telemetry, app usage, executive intelligence' },
+  const RPT_SECTIONS = ['kpi_row','tab_panels'];
+  const RPT_LABELS = {
+    kpi_row:    { name:'KPI Stats Row',  icon:'📊', desc:'6 summary cards — tasks, completion, attendance, DSC…' },
+    tab_panels: { name:'Tab Panels',     icon:'📑', desc:'Overview, tasks, attendance, efficiency, performers, team' },
   };
-  const { order: saOrder, moveSection: saMove, resetOrder: saReset } = usePageLayout('staffactivity', SA_SECTIONS);
-  // ── Permissions ───────────────────────────────────────────────────────────
-  const isAdmin = user?.role === 'admin';
-  const canViewActivity = hasPermission('can_view_staff_activity') || isAdmin;
-  const canDownloadReports = hasPermission('can_download_reports') || isAdmin;
-  // ── UI state ──────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState('activity_log');
-  const [loading, setLoading] = useState(true);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [isAuditing, setIsAuditing] = useState(false);
-  const [auditInsights, setAuditInsights] = useState([]);
-  // ── Data state ────────────────────────────────────────────────────────────
-  const [attendanceRegister, setAttendanceRegister] = useState([]);
-  const [activitySummary, setActivitySummary] = useState([]);
-  const [activePersonnel, setActivePersonnel] = useState([]);
-  const [taskVectors, setTaskVectors] = useState([]);
-  const [taskVectorsLoading, setTaskVectorsLoading] = useState(false);
-  // ── Filter state ──────────────────────────────────────────────────────────
-  const [selectedUnit, setSelectedUnit] = useState('all');
-  const [selectedMonth, setSelectedMonth] = useState(format(new Date(), 'yyyy-MM'));
-  const [unitAlpha, setUnitAlpha] = useState('');
-  const [unitBeta, setUnitBeta] = useState('');
-  // ── Month options ─────────────────────────────────────────────────────────
-  const monthOptions = useMemo(() =>
-    Array.from({ length: 12 }, (_, i) => {
-      const d = subMonths(new Date(), i);
-      return { value: format(d, 'yyyy-MM'), label: format(d, 'MMMM yyyy') };
-    }), []);
-  // ── 24-hr intensity map ───────────────────────────────────────────────────
-  const intensityMap = useMemo(() =>
-    Array.from({ length: 24 }, (_, i) => ({
-      hour: `${String(i).padStart(2, '0')}:00`,
-      density: (i >= 9 && i <= 18)
-        ? 35 + (i === 10 || i === 11 || i === 14 || i === 15 ? 30 : 10) + (i * 2 % 15)
-        : 2 + (i * 3 % 8),
-    })), []);
-  // ── Filtered arrays ───────────────────────────────────────────────────────
-  const filteredActivity = useMemo(() =>
-    selectedUnit === 'all'
-      ? activitySummary
-      : activitySummary.filter((s) => s.user_id === selectedUnit),
-  [activitySummary, selectedUnit]);
-  const filteredAttendance = useMemo(() =>
-    selectedUnit === 'all'
-      ? attendanceRegister
-      : attendanceRegister.filter((s) => s.user_id === selectedUnit),
-  [attendanceRegister, selectedUnit]);
-  // ── Aggregated apps ───────────────────────────────────────────────────────
-  const aggregatedApps = useMemo(() => {
-    const map = {};
-    filteredActivity.forEach((u) => {
-      (u.apps_list || []).forEach((app) => {
-        if (!map[app.name]) map[app.name] = { name: app.name, duration: 0, count: 0 };
-        map[app.name].duration += Number(app.duration) || 0;
-        map[app.name].count += Number(app.count) || 0;
-      });
+  const { order: rptOrder, moveSection: rptMove, resetOrder: rptReset } = usePageLayout('reports', RPT_SECTIONS);
+
+  // ── Fetch ──────────────────────────────────────────────────────────────────
+  const fetchAll = async (ref=false) => {
+    ref ? setRefreshing(true) : setLoading(true);
+    const [r1,r2,r3,r4] = await Promise.allSettled([
+      api.get('/tasks'),
+      api.get('/dashboard/stats'),
+      api.get('/attendance/history'),
+      (isAdmin || hasCrossVisReports) ? api.get('/users') : Promise.resolve({data:[]}),
+    ]);
+    if (r1.status==='fulfilled') setTasks(r1.value?.data||[]);
+    if (r2.status==='fulfilled') setDashStats(r2.value?.data||null);
+    if (r3.status==='fulfilled') setAttendance(r3.value?.data||[]);
+    if (r4.status==='fulfilled') {
+      const rawUsers = r4.value?.data || [];
+      // Non-admin: only keep the users they're permitted to view via cross-visibility
+      setAllUsers(isAdmin ? rawUsers : rawUsers.filter(u => crossVisReports.includes(u.id || u._id)));
+    }
+    setLoading(false); setRefreshing(false);
+  };
+
+  const fetchPerf = async () => {
+    try {
+      const p = rankPeriod==='all'?'all_time':rankPeriod;
+      const r = await api.get('/reports/performance-rankings',{params:{period:p}});
+      setPerformers(r.data||[]);
+    } catch { setPerformers([]); }
+  };
+
+  useEffect(()=>{ if(user) fetchAll(); },[user]);
+  useEffect(()=>{ fetchPerf(); },[rankPeriod]);
+
+  // ── Derived: tasks ────────────────────────────────────────────────────────
+  const fTasks = useMemo(()=>
+    selUser==='all'?tasks:tasks.filter(t=>t.assigned_to===selUser||t.created_by===selUser),
+    [tasks,selUser]);
+
+  const done   = useMemo(()=>fTasks.filter(t=>t.status==='completed'),[fTasks]);
+  const wip    = useMemo(()=>fTasks.filter(t=>t.status==='in_progress'),[fTasks]);
+  const pend   = useMemo(()=>fTasks.filter(t=>t.status==='pending'),[fTasks]);
+  const overdue= useMemo(()=>{
+    const now=new Date();
+    return fTasks.filter(t=>t.due_date&&new Date(t.due_date)<now&&t.status!=='completed');
+  },[fTasks]);
+  const compRate= fTasks.length>0?Math.round((done.length/fTasks.length)*100):0;
+
+  // ── Derived: attendance ───────────────────────────────────────────────────
+  const fAtt    = useMemo(()=>selUser==='all'?attendance:attendance.filter(a=>a.user_id===selUser),[attendance,selUser]);
+  const totMins = useMemo(()=>fAtt.reduce((s,a)=>s+(a.duration_minutes||0),0),[fAtt]);
+  const presDays= useMemo(()=>fAtt.filter(a=>a.status==='present'&&a.punch_in).length,[fAtt]);
+  const avgMins = presDays>0?Math.round(totMins/presDays):0;
+  const lateDays= useMemo(()=>fAtt.filter(a=>a.is_late).length,[fAtt]);
+
+  // ── Unique users (dropdown) ───────────────────────────────────────────────
+  const uUsers = useMemo(()=>{
+    if (!isAdmin && !hasCrossVisReports) return [];
+    const m=new Map();
+    allUsers.forEach(u=>{if(u.id&&u.full_name)m.set(u.id,u);});
+    return Array.from(m.values());
+  },[allUsers,isAdmin]);
+
+  // ── Chart data ─────────────────────────────────────────────────────────────
+  const statusData = useMemo(()=>[
+    {name:'Completed',  value:done.length, color:C.emeraldGreen},
+    {name:'In Progress',value:wip.length,  color:C.mediumBlue  },
+    {name:'Pending',    value:pend.length, color:C.amber       },
+  ].filter(d=>d.value>0),[done,wip,pend]);
+
+  const catData = useMemo(()=>{
+    const cc={};
+    fTasks.forEach(t=>{const c=t.category||'Other';cc[c]=(cc[c]||0)+1;});
+    return Object.entries(cc)
+      .map(([name,count],i)=>({name:name.replace(/_/g,' ').replace(/\b\w/g,l=>l.toUpperCase()),tasks:count,fill:PALETTE[i%PALETTE.length]}))
+      .sort((a,b)=>b.tasks-a.tasks).slice(0,7);
+  },[fTasks]);
+
+  const weeklyData = useMemo(()=>{
+    const today=new Date(), diff=today.getDay()-1;
+    const mon=new Date(today); mon.setDate(today.getDate()-(diff>=0?diff:diff+7)); mon.setHours(0,0,0,0);
+    const days=Array.from({length:7},(_,i)=>{
+      const d=new Date(mon); d.setDate(mon.getDate()+i);
+      return {name:d.toLocaleDateString('en-US',{weekday:'short'}),completed:0,pending:0};
     });
-    return Object.values(map).sort((a, b) => b.duration - a.duration).slice(0, 8);
-  }, [filteredActivity]);
-  // ── Aggregated websites ───────────────────────────────────────────────────
-  const aggregatedWebsites = useMemo(() => {
-    const map = {};
-    filteredActivity.forEach((u) => {
-      const websites = u.websites;
-      if (!websites) return;
-      if (Array.isArray(websites)) {
-        websites.forEach((entry) => {
-          const url = entry?.url || entry?.domain || '';
-          const duration = Number(entry?.duration ?? entry?.time ?? 0);
-          if (!url) return;
-          const domain = getDomain(url);
-          if (!map[domain]) map[domain] = { domain, duration: 0 };
-          map[domain].duration += duration;
+    fTasks.forEach(t=>{
+      const gs=ds=>{const d=new Date(ds);d.setHours(0,0,0,0);return d;};
+      if (t.status==='completed'&&t.completed_at){const i=Math.floor((gs(t.completed_at)-mon)/86400000);if(i>=0&&i<7)days[i].completed++;}
+      if (t.status!=='completed'&&t.created_at){const i=Math.floor((gs(t.created_at)-mon)/86400000);if(i>=0&&i<7)days[i].pending++;}
+    });
+    return days;
+  },[fTasks]);
+
+  const attTrend = useMemo(()=>{
+    const today=new Date();
+    const days=Array.from({length:7},(_,i)=>{
+      const d=new Date(today); d.setDate(today.getDate()-(6-i));
+      return {name:d.toLocaleDateString('en-US',{weekday:'short'}),date:d.toISOString().slice(0,10),hours:0};
+    });
+    fAtt.forEach(a=>{const day=days.find(d=>d.date===a.date);if(day)day.hours=Math.round((a.duration_minutes||0)/60*10)/10;});
+    return days;
+  },[fAtt]);
+
+  const prioData = useMemo(()=>{
+    const cc={critical:0,urgent:0,high:0,medium:0,low:0};
+    fTasks.forEach(t=>{const p=(t.priority||'medium').toLowerCase();if(cc[p]!==undefined)cc[p]++;});
+    return [
+      {name:'Critical',value:cc.critical,color:'#dc2626'},
+      {name:'Urgent',  value:cc.urgent,  color:'#ea580c'},
+      {name:'High',    value:cc.high,    color:C.amber  },
+      {name:'Medium',  value:cc.medium,  color:C.mediumBlue},
+      {name:'Low',     value:cc.low,     color:C.emeraldGreen},
+    ].filter(d=>d.value>0);
+  },[fTasks]);
+
+  const radarData = useMemo(()=>{
+    const p=performers[0]; if(!p) return [];
+    return [
+      {metric:'Attendance',score:p.attendance_percent||0},
+      {metric:'Task Done', score:p.task_completion_percent||0},
+      {metric:'On Time',   score:p.timely_punchin_percent||0},
+      {metric:'Todo Rate', score:p.todo_ontime_percent||0},
+      {metric:'Overall',   score:p.overall_score||0},
+    ];
+  },[performers]);
+
+  // ── Efficiency cards — real tasks + real attendance ───────────────────────
+  const effCards = useMemo(()=>{
+    if (!isAdmin && !hasCrossVisReports) {
+      // Regular staff: own data only
+      const myT=tasks.filter(t=>t.assigned_to===user?.id);
+      const myA=attendance.filter(a=>a.user_id===user?.id);
+      const myM=myA.reduce((s,a)=>s+(a.duration_minutes||0),0);
+      const myD=myA.filter(a=>a.status==='present').length;
+      return [{
+        user_id:user?.id,user_name:user?.full_name||'You',
+        total:myT.length,done:myT.filter(t=>t.status==='completed').length,
+        pend:myT.filter(t=>t.status!=='completed').length,
+        mins:myM,days:myD,
+        pct:myT.length>0?Math.round((myT.filter(t=>t.status==='completed').length/myT.length)*100):0,
+      }];
+    }
+    // Non-admin with cross-visibility: show own data + cross-vis users' data
+    if (!isAdmin && hasCrossVisReports) {
+      const allowedIds = new Set([user?.id, ...crossVisReports]);
+      const uMap={};
+      // Seed with own entry + cross-vis users
+      if (user?.id) uMap[user.id]={user_id:user.id,user_name:user.full_name||'You',total:0,done:0,pend:0,mins:0,days:0,pct:0};
+      allUsers.forEach(u=>{if(crossVisReports.includes(u.id))uMap[u.id]={user_id:u.id,user_name:u.full_name,total:0,done:0,pend:0,mins:0,days:0,pct:0};});
+      tasks.forEach(t=>{const u=t.assigned_to;if(u&&uMap[u]){uMap[u].total++;t.status==='completed'?uMap[u].done++:uMap[u].pend++;}});
+      attendance.forEach(a=>{const u=a.user_id;if(u&&uMap[u]){uMap[u].mins+=(a.duration_minutes||0);if(a.status==='present')uMap[u].days++;}});
+      Object.values(uMap).forEach(u=>{u.pct=u.total>0?Math.round((u.done/u.total)*100):0;});
+      let cards=Object.values(uMap);
+      if(selUser!=='all'&&selUser!==user?.id) cards=cards.filter(c=>c.user_id===selUser);
+      else if(selUser===user?.id) cards=cards.filter(c=>c.user_id===user?.id);
+      return cards.sort((a,b)=>b.done-a.done);
+    }
+    const uMap={};
+    allUsers.forEach(u=>{uMap[u.id]={user_id:u.id,user_name:u.full_name,total:0,done:0,pend:0,mins:0,days:0,pct:0};});
+    tasks.forEach(t=>{const u=t.assigned_to;if(u&&uMap[u]){uMap[u].total++;t.status==='completed'?uMap[u].done++:uMap[u].pend++;}});
+    attendance.forEach(a=>{const u=a.user_id;if(u&&uMap[u]){uMap[u].mins+=(a.duration_minutes||0);if(a.status==='present')uMap[u].days++;}});
+    Object.values(uMap).forEach(u=>{u.pct=u.total>0?Math.round((u.done/u.total)*100):0;});
+    let cards=Object.values(uMap);
+    if(selUser!=='all') cards=cards.filter(c=>c.user_id===selUser);
+    return cards.sort((a,b)=>b.done-a.done);
+  },[tasks,attendance,allUsers,isAdmin,user,selUser]);
+
+  const teamWL = useMemo(()=>(dashStats?.team_workload||[]).slice(0,12),[dashStats]);
+
+  // ── CSV export ────────────────────────────────────────────────────────────
+  const handleCsv = () => {
+    const h=['User','Total Tasks','Completed','Pending','Completion%','Screen Time(min)','Days Present'];
+    const rows=effCards.map(d=>[d.user_name,d.total,d.done,d.pend,`${d.pct}%`,d.mins,d.days]);
+    const csv=[h,...rows].map(r=>r.join(',')).join('\n');
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+    a.download='efficiency_reports.csv';a.click();
+    toast.success('CSV downloaded!');
+  };
+
+  // ── PDF export ────────────────────────────────────────────────────────────
+  const handlePdf = async () => {
+    try {
+      const doc=new jsPDF('p','mm','a4'); let y=15;
+      doc.setFontSize(20);doc.setTextColor(13,59,102);
+      doc.text('Efficiency Reports & Analytics',15,y);y+=9;
+      doc.setFontSize(10);doc.setTextColor(100,100,100);
+      doc.text(`Generated: ${new Date().toLocaleDateString()} | Period: ${rankPeriod}`,15,y);y+=10;
+
+      doc.setFontSize(12);doc.setTextColor(13,59,102);doc.text('Key Performance Indicators',15,y);y+=8;
+      doc.autoTable({
+        head:[['Metric','Value']],
+        body:[
+          ['Total Tasks',fTasks.length.toString()],['Completed',done.length.toString()],
+          ['In Progress',wip.length.toString()],['Overdue',overdue.length.toString()],
+          ['Completion Rate',`${compRate}%`],['Days Present',presDays.toString()],
+          ['Total Screen Time',fmt(totMins)],['Avg Daily Hours',fmt(avgMins)],
+          ['Late Punch-ins',lateDays.toString()],
+        ],
+        startY:y,margin:15,theme:'grid',
+        headStyles:{fillColor:[13,59,102],textColor:[255,255,255],fontStyle:'bold'},
+        alternateRowStyles:{fillColor:[240,240,240]},
+      });
+      y=doc.lastAutoTable.finalY+12;
+
+      if(effCards.length>0){
+        if(y>180){doc.addPage();y=15;}
+        doc.setFontSize(12);doc.setTextColor(13,59,102);doc.text('Efficiency Breakdown',15,y);y+=8;
+        doc.autoTable({
+          head:[['User','Tasks','Completed','Pending','Completion%','Screen Time','Days']],
+          body:effCards.map(d=>[d.user_name,d.total,d.done,d.pend,`${d.pct}%`,fmt(d.mins),d.days]),
+          startY:y,margin:15,theme:'grid',
+          headStyles:{fillColor:[31,111,178],textColor:[255,255,255],fontStyle:'bold'},
         });
-      } else if (typeof websites === 'object') {
-        Object.entries(websites).forEach(([url, dur]) => {
-          if (!url) return;
-          const domain = getDomain(url);
-          if (!map[domain]) map[domain] = { domain, duration: 0 };
-          map[domain].duration += Number(dur) || 0;
+        y=doc.lastAutoTable.finalY+12;
+      }
+
+      if(performers.length>0){
+        doc.addPage();y=15;
+        doc.setFontSize(12);doc.setTextColor(13,59,102);doc.text('Star Performers',15,y);y+=8;
+        doc.autoTable({
+          head:[['Rank','Name','Score','Attendance%','Task Done%','Punch-In%','Hours','Badge']],
+          body:performers.map((m,i)=>[`#${i+1}`,m.user_name,`${m.overall_score}%`,`${m.attendance_percent}%`,`${m.task_completion_percent}%`,`${m.timely_punchin_percent}%`,fmtH(m.total_hours),m.badge||'Good']),
+          startY:y,margin:15,theme:'grid',
+          headStyles:{fillColor:[31,111,178],textColor:[255,255,255],fontStyle:'bold'},
         });
       }
-    });
-    return Object.values(map).sort((a, b) => b.duration - a.duration).slice(0, 10);
-  }, [filteredActivity]);
-  // ── Idle stats ────────────────────────────────────────────────────────────
-  const idleStats = useMemo(() => {
-    const totalDur = filteredActivity.reduce((a, u) => a + (Number(u.total_duration) || 0), 0);
-    const idleDur = filteredActivity.reduce((a, u) => a + (Number(u.idle_duration) || 0), 0);
-    const activeDur = filteredActivity.reduce((a, u) => a + (Number(u.active_duration) || 0), 0);
-    const idlePct = pct(idleDur, totalDur);
-    const activePct = pct(activeDur, totalDur);
-    const perUser = filteredActivity.map((u) => {
-      const total = Number(u.total_duration) || 0;
-      const idle = Number(u.idle_duration) || 0;
-      const active = Number(u.active_duration) || 0;
-      return {
-        user_name: u.user_name || 'Unknown',
-        user_id: u.user_id,
-        total,
-        idle,
-        active,
-        idlePct: pct(idle, total || 1),
-      };
-    }).sort((a, b) => b.idlePct - a.idlePct);
-    return { totalDur, idleDur, activeDur, idlePct, activePct, perUser };
-  }, [filteredActivity]);
-  // ── Category breakdown ────────────────────────────────────────────────────
-  const categoryBreakdown = useMemo(() => {
-    const map = {};
-    filteredActivity.forEach((u) => {
-      Object.entries(u.categories || {}).forEach(([cat, dur]) => {
-        map[cat] = (map[cat] || 0) + (Number(dur) || 0);
-      });
-    });
-    const total = Object.values(map).reduce((a, b) => a + b, 0);
-    return Object.entries(map)
-      .map(([category, duration]) => ({ category, duration, pct: pct(duration, total) }))
-      .sort((a, b) => b.duration - a.duration);
-  }, [filteredActivity]);
-  // ── Header metrics ────────────────────────────────────────────────────────
-  const totalLoggedTime = useMemo(() => {
-    const mins = filteredAttendance.reduce((acc, s) => acc + (Number(s.total_minutes) || 0), 0);
-    return minutesToHM(mins);
-  }, [filteredAttendance]);
-  const avgProductivity = useMemo(() => {
-    if (!filteredActivity.length) return null;
-    const sum = filteredActivity.reduce((a, s) => a + (Number(s.productivity_percent) || 0), 0);
-    return Math.round(sum / filteredActivity.length);
-  }, [filteredActivity]);
-  const peakHour = useMemo(
-    () => intensityMap.reduce((mx, h) => (h.density > mx.density ? h : mx), intensityMap[0]),
-    [intensityMap],
-  );
-  const displayPersonnelCount = useMemo(() => {
-    if (selectedUnit === 'all') return activePersonnel.length;
-    return activePersonnel.some((u) => u.id === selectedUnit) ? 1 : 0;
-  }, [activePersonnel, selectedUnit]);
-  // ── Radar metrics ─────────────────────────────────────────────────────────
-  const radarMetrics = useMemo(() => {
-    if (!unitAlpha || !unitBeta) return [];
-    const labels = ['Efficiency', 'Precision', 'Consistency', 'Communication', 'Volume', 'Initiative'];
-    const a = activitySummary.find((s) => s.user_id === unitAlpha);
-    const b = activitySummary.find((s) => s.user_id === unitBeta);
-    const aAtt = attendanceRegister.find((s) => s.user_id === unitAlpha);
-    const bAtt = attendanceRegister.find((s) => s.user_id === unitBeta);
-    const aBase = a ? Math.min(100, Number(a.productivity_percent) || 60) : 60;
-    const bBase = b ? Math.min(100, Number(b.productivity_percent) || 55) : 55;
-    const aAttPct = aAtt ? Math.min(100, Math.round(((aAtt.days_present || 0) / 22) * 100)) : 70;
-    const bAttPct = bAtt ? Math.min(100, Math.round(((bAtt.days_present || 0) / 22) * 100)) : 65;
-    const variation = [0, 8, -5, 12, -3, 7];
-    return labels.map((metric, i) => ({
-      metric,
-      A: Math.max(10, Math.min(100, i === 1 ? aAttPct : aBase + variation[i])),
-      B: Math.max(10, Math.min(100, i === 1 ? bAttPct : bBase + variation[i] - 5)),
-    }));
-  }, [unitAlpha, unitBeta, activitySummary, attendanceRegister]);
-  // ── Task stats ────────────────────────────────────────────────────────────
-  const taskStats = useMemo(() => {
-    const completed = taskVectors.filter((t) => t.is_completed).length;
-    const total = taskVectors.length;
-    return { completed, active: total - completed, total, rate: pct(completed, total) };
-  }, [taskVectors]);
-  // ── TOKEN GUARD (after all hooks) ────────────────────────────────────────
-  const token = getToken();
-  if (!token) {
-    return null;
-  }
-  // ─────────────────────────────────────────────────────────────────────────
-  // DATA FETCHING
-  // ─────────────────────────────────────────────────────────────────────────
-  const synchronize = useCallback(async () => {
-    const token = getToken();
-
-    if (!token) {
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      const [year, month] = selectedMonth.split('-').map(Number);
-      const lastDay = new Date(year, month, 0).getDate();
-
-      const dateFrom = `${selectedMonth}-01T00:00:00`;
-      const dateTo = `${selectedMonth}-${String(lastDay).padStart(2, '0')}T23:59:59`;
-
-      const [uRes, aRes, attRes] = await Promise.all([
-        api.get('/users'),
-        api.get(`/activity/summary?date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}`),
-        api.get(`/attendance/staff-report?month=${selectedMonth}`),
-      ]);
-
-      setActivePersonnel(Array.isArray(uRes.data) ? uRes.data : []);
-      setActivitySummary(Array.isArray(aRes.data) ? aRes.data : []);
-      setAttendanceRegister(Array.isArray(attRes.data) ? attRes.data : []);
-
-    } catch (err) {
-      if (err?.message === "No auth token — request blocked") return;
-
-      console.error('Sync error:', err);
-      toast.error('Telemetry sync failed. Check network.');
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedMonth]);
-  const fetchTaskVectors = useCallback(async () => {
-    const token = getToken();
-
-    if (!token || !selectedUnit || selectedUnit === 'all') {
-      setTaskVectors([]);
-      return;
-    }
-
-    setTaskVectorsLoading(true);
-
-    try {
-      const res = await api.get(`/todos?user_id=${selectedUnit}`);
-      setTaskVectors(Array.isArray(res.data) ? res.data : []);
-
-    } catch (err) {
-      if (err?.message === "No auth token — request blocked") return;
-
-      toast.error('Failed to load task data.');
-      setTaskVectors([]);
-
-    } finally {
-      setTaskVectorsLoading(false);
-    }
-  }, [selectedUnit]);
-  // ── SAFE DATA FETCH TRIGGER ───────────────────────────────────────────────
-  useEffect(() => {
-    const token = getToken();
-    if (!token || !canViewActivity) return;
-
-    synchronize();
-  }, [selectedMonth, refreshTrigger, canViewActivity]);
-  // ── SAFE TASK FETCH TRIGGER ───────────────────────────────────────────────
-  useEffect(() => {
-    const token = getToken();
-    if (!token) return;
-
-    fetchTaskVectors();
-  }, [selectedUnit]);
-  // ── AI audit ──────────────────────────────────────────────────────────────
-  const runAudit = () => {
-    setIsAuditing(true);
-    setTimeout(() => {
-      const topIdler = idleStats.perUser[0];
-      const topApp = aggregatedApps[0];
-      setAuditInsights([
-        {
-          title: 'Peak Efficiency Window',
-          desc: `Output density peaks at ${peakHour.hour} — ${peakHour.density} ops/hr. Schedule deep-work blocks here.`,
-          Icon: Flame,
-          color: COLORS.emeraldGreen,
-          bg: isDark ? 'bg-emerald-900/20 border-emerald-800' : 'bg-emerald-50 border-emerald-100',
-        },
-        {
-          title: 'Idle Ratio Alert',
-          desc: topIdler
-            ? `${idleStats.idlePct}% of tracked time shows no input. Highest: ${topIdler.user_name} at ${topIdler.idlePct}%.`
-            : `Overall idle ratio is ${idleStats.idlePct}%. No activity data yet.`,
-          Icon: Mouse,
-          color: COLORS.coral,
-          bg: isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-100',
-        },
-        {
-          title: 'Velocity Projection',
-          desc: `Task-completion vectors project +8.4% next week. Top driver: ${topApp?.name || 'No app data yet'}.`,
-          Icon: TrendingUp,
-          color: COLORS.mediumBlue,
-          bg: isDark ? 'bg-blue-900/20 border-blue-800' : 'bg-blue-50 border-blue-100',
-        },
-      ]);
-      setIsAuditing(false);
-      toast.success('Executive Intelligence Audit complete.');
-    }, 2000);
+      doc.save('efficiency_reports.pdf');
+      toast.success('PDF exported!');
+    } catch(e){console.error(e);toast.error('PDF failed');}
   };
-  // ── Status badge ──────────────────────────────────────────────────────────
-  function statusBadge(avgHoursPerDay) {
-    const n = Number(avgHoursPerDay) || 0;
-    if (n >= 7.5)
-      return (
-        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold ${isDark ? 'bg-emerald-900/40 text-emerald-400' : 'bg-emerald-100 text-emerald-700'}`}>
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />OPTIMAL
-        </span>
-      );
-    if (n >= 6)
-      return (
-        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold ${isDark ? 'bg-blue-900/40 text-blue-400' : 'bg-blue-100 text-blue-700'}`}>
-          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />STANDARD
-        </span>
-      );
-    return (
-      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold ${isDark ? 'bg-amber-900/40 text-amber-400' : 'bg-amber-100 text-amber-700'}`}>
-        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />RECOVERY
-      </span>
-    );
-  }
-  const metricCardCls = 'rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border';
-  const metricCardDefault = isDark
-    ? 'bg-slate-800 border-slate-700 hover:border-slate-600'
-    : 'bg-white border-slate-200/80 hover:border-slate-300';
-  const TABS = [
-    { value: 'activity_log', label: 'Activity Log', Icon: Activity },
-    { value: 'idle_tracker', label: 'Idle Tracker', Icon: Mouse },
-    { value: 'attendance', label: 'Attendance', Icon: Users },
-    { value: 'task_list', label: 'Task Audit', Icon: LayoutDashboard },
-    { value: 'comparison', label: 'Comparison', Icon: GitCompare },
+
+  // ── Loading ───────────────────────────────────────────────────────────────
+  if (loading) return <GifLoader />;
+
+  const tabs=[
+    {id:'overview',   label:'Overview',    icon:BarChart3 },
+    {id:'tasks',      label:'Tasks',       icon:Target    },
+    {id:'attend',     label:'Attendance',  icon:Clock     },
+    {id:'efficiency', label:'Efficiency',  icon:Zap       },
+    {id:'performers', label:'Performers',  icon:Award     },
+    ...(isAdmin?[{id:'team',label:'Team',icon:Users}]:[]),
   ];
-  // ── Guard ─────────────────────────────────────────────────────────────────
-  if (!canViewActivity) {
-    return (
-      <motion.div
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-        className="min-h-[80vh] flex items-center justify-center p-8"
-      >
-        <SectionCard isDark={isDark} className="max-w-sm p-10 text-center">
-          <ShieldCheck className="mx-auto mb-4 h-14 w-14 text-slate-300" />
-          <h2 className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Access Restricted</h2>
-          <p className={`mt-2 text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            Clearance{' '}
-            <code className={`px-1.5 py-0.5 rounded text-xs ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-              can_view_staff_activity
-            </code>{' '}
-            required.
-          </p>
-          <Button
-            className="mt-6 w-full rounded-xl h-10"
-            style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
-          >
-            Request Access
-          </Button>
-        </SectionCard>
-      </motion.div>
-    );
-  }
-  // ════════════════════════════════════════════════════════════════════════════
+
+  const cursorStyle={fill:dark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.03)'};
+
+  // ── JSX ───────────────────────────────────────────────────────────────────
   return (
-    <>
-      <LayoutCustomizer
+   <>
+    <LayoutCustomizer
       isOpen={showCustomize}
       onClose={() => setShowCustomize(false)}
-      order={saOrder}
-      sectionLabels={SA_LABELS}
-      onDragEnd={saMove}
-      onReset={saReset}
-      isDark={isDark}
+      order={rptOrder}
+      sectionLabels={RPT_LABELS}
+      onDragEnd={rptMove}
+      onReset={rptReset}
+      isDark={dark}
     />
-    <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
-      {/* ── BANNER ─────────────────────────────────────────────────────────── */}
-      <motion.div variants={itemVariants}>
-        <div
-          className="banner-animated relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
-          style={{
-            boxShadow: '0 8px 32px rgba(13,59,102,0.28)',
-          }}
-        >
-          <div
-            className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
-            style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }}
-          />
-          <div className="relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-            <div>
-              <p className="text-white/60 text-xs font-medium uppercase tracking-widest mb-1">
-                {format(new Date(), 'EEEE, MMMM d, yyyy')}
-              </p>
-              <h1 className="text-2xl font-bold text-white tracking-tight">Staff Activity</h1>
-              <p className="text-white/60 text-sm mt-1">Real-time organisational telemetry</p>
+    <motion.div variants={cV} initial="hidden" animate="visible"
+      className="space-y-4 p-4 md:p-6 min-h-screen"
+      style={{background:t.pageBg}}>
+
+      {/* ══ HEADER ══ */}
+      <motion.div variants={iV}>
+        <div className="rounded-2xl overflow-hidden"
+          style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:t.shadow}}>
+          <div className="h-1 w-full"
+            style={{background:`linear-gradient(90deg,${C.deepBlue},${C.mediumBlue},${C.emeraldGreen})`}}/>
+          <div className="p-4 md:p-5">
+            {/* title row */}
+            <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+              <div>
+                <h1 className="text-xl font-black tracking-tight" style={{color:C.deepBlue}}>
+                  Reports &amp; Analytics
+                </h1>
+                <p className="text-sm mt-0.5 flex flex-wrap items-center gap-2" style={{color:t.textSub}}>
+                  Live metrics from tasks, attendance &amp; performance
+                  {fTasks.length>0&&(
+                    <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full"
+                      style={{background:`${C.emeraldGreen}18`,color:C.emeraldGreen}}>
+                      <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse"/>
+                      {fTasks.length} tasks
+                    </span>
+                  )}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {canSwitchUser && uUsers.length>0 && (
+                  <select value={selUser} onChange={e=>setSelUser(e.target.value)}
+                    className="h-8 px-3 text-xs rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    style={{background:t.inputBg,border:`1px solid ${t.inputBdr}`,color:t.text}}>
+                    {/* Admin can see aggregate; non-admin with cross-vis only see specific users */}
+                    {isAdmin && <option value="all">All Users</option>}
+                    {!isAdmin && <option value={user?.id || 'all'}>My Reports</option>}
+                    {uUsers.map(u=><option key={u.id} value={u.id}>{u.full_name}</option>)}
+                  </select>
+                )}
+                <button onClick={()=>fetchAll(true)} disabled={refreshing}
+                  className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
+                  style={{background:t.card2,border:`1px solid ${t.border}`,color:t.text}}>
+                  <RefreshCw className={`w-3.5 h-3.5 ${refreshing?'animate-spin':''}`}/>
+                  {refreshing?'Refreshing…':'Refresh'}
+                </button>
+                {canDL&&(
+                  <>
+                    <button onClick={handleCsv}
+                      className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 text-white transition-all"
+                      style={{background:'#1e293b'}}>
+                      <Download className="w-3.5 h-3.5"/> CSV
+                    </button>
+                    <button onClick={handlePdf}
+                      className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 text-white transition-all"
+                      style={{background:C.deepBlue}}>
+                      <Download className="w-3.5 h-3.5"/> PDF
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2.5">
-              <div
-                className="flex items-center gap-2 px-3 py-2 rounded-xl"
-                style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.18)' }}
-              >
-                <UserCheck className="h-3.5 w-3.5 text-white/60 flex-shrink-0" />
-                <Select value={selectedUnit} onValueChange={setSelectedUnit}>
-                  <SelectTrigger className="w-40 border-0 bg-transparent text-white text-xs h-6 focus:ring-0 p-0">
-                    <SelectValue placeholder="All Personnel" />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl">
-                    <SelectItem value="all">All Personnel</SelectItem>
-                    {activePersonnel.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div
-                className="flex items-center gap-2 px-3 py-2 rounded-xl"
-                style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.18)' }}
-              >
-                <CalendarIcon className="h-3.5 w-3.5 text-white/60 flex-shrink-0" />
-                <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-                  <SelectTrigger className="w-36 border-0 bg-transparent text-white text-xs h-6 focus:ring-0 p-0">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl">
-                    {monthOptions.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button
-                onClick={() => setRefreshTrigger((t) => t + 1)}
-                disabled={loading}
-                className="rounded-xl h-9 text-sm font-medium"
-                style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.2)' }}
-              >
-                {loading
-                  ? <Loader2 className="h-4 w-4 animate-spin text-white" />
-                  : <RefreshCw className="h-4 w-4 text-white" />}
-                <span className="text-white ml-1.5">{loading ? 'Syncing…' : 'Refresh'}</span>
-              </Button>
+            {/* tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1" style={{scrollbarWidth:'none',WebkitOverflowScrolling:'touch'}}>
+              {tabs.map(tb=>(
+                <TabBtn key={tb.id} id={tb.id} label={tb.label} icon={tb.icon}
+                  active={tab===tb.id} onClick={setTab} dark={dark}/>
+              ))}
             </div>
           </div>
         </div>
       </motion.div>
+
       {/* CUSTOMIZE BUTTON */}
-      <motion.div variants={itemVariants} className="flex justify-end">
+      <motion.div variants={iV} className="flex justify-end">
         <button
           onClick={() => setShowCustomize(true)}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition-all hover:shadow-md ${
-            isDark
+            dark
               ? 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'
               : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
           }`}
@@ -604,1328 +583,499 @@ export default function StaffActivity() {
       </motion.div>
 
       {/* ORDERED SECTIONS */}
-      {saOrder.map((sectionId) => {
-        if (sectionId === 'key_metrics') return (
-      <React.Fragment key="key_metrics">
-      {/* ── KEY METRICS ────────────────────────────────────────────────────── */}
-      <motion.div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3" variants={itemVariants}>
-        {/* 1. Active Personnel */}
-        <motion.div
-          whileHover={{ y: -3, transition: springPhysics.card }}
-          whileTap={{ scale: 0.985 }}
-          className={`${metricCardCls} ${metricCardDefault}`}
-        >
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                  Active Personnel
-                </p>
-                <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
-                  {loading ? '—' : displayPersonnelCount}
-                </p>
-              </div>
-              <div className="p-2 rounded-xl" style={{ backgroundColor: isDark ? 'rgba(96,165,250,0.12)' : `${COLORS.deepBlue}12` }}>
-                <Users className="h-4 w-4" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }} />
-              </div>
-            </div>
-            <div className={`flex items-center gap-1 mt-3 text-xs font-medium ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-              <span>View registry</span><ChevronRight className="h-3 w-3" />
-            </div>
-          </CardContent>
-        </motion.div>
-        {/* 2. Total Hours Logged */}
-        <motion.div
-          whileHover={{ y: -3, transition: springPhysics.card }}
-          whileTap={{ scale: 0.985 }}
-          className={`${metricCardCls} ${metricCardDefault}`}
-        >
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                  Hours Logged
-                </p>
-                <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.emeraldGreen }}>
-                  {loading ? '—' : totalLoggedTime}
-                </p>
-              </div>
-              <div className="p-2 rounded-xl" style={{ backgroundColor: `${COLORS.emeraldGreen}12` }}>
-                <Clock className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />
-              </div>
-            </div>
-            <div className={`flex items-center gap-1 mt-3 text-xs font-medium ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-              <span>{selectedMonth}</span><ChevronRight className="h-3 w-3" />
-            </div>
-          </CardContent>
-        </motion.div>
-        {/* 3. Avg Productivity */}
-        <motion.div
-          whileHover={{ y: -3, transition: springPhysics.card }}
-          whileTap={{ scale: 0.985 }}
-          className={`${metricCardCls} ${metricCardDefault}`}
-        >
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                  Avg Productivity
-                </p>
-                <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.mediumBlue }}>
-                  {loading ? '—' : avgProductivity !== null ? `${avgProductivity}%` : '—'}
-                </p>
-              </div>
-              <div className="p-2 rounded-xl" style={{ backgroundColor: `${COLORS.mediumBlue}12` }}>
-                <Target className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
-              </div>
-            </div>
-            {avgProductivity !== null && (
-              <div className={`mt-2.5 h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                <div
-                  className="h-full rounded-full transition-all duration-700"
-                  style={{
-                    width: `${avgProductivity}%`,
-                    background: `linear-gradient(90deg, ${COLORS.mediumBlue}, ${COLORS.emeraldGreen})`,
-                  }}
-                />
-              </div>
-            )}
-            <div className={`flex items-center gap-1 mt-2 text-xs font-medium ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-              <span>Across team</span><ChevronRight className="h-3 w-3" />
-            </div>
-          </CardContent>
-        </motion.div>
-        {/* 4. Peak Intensity */}
-        <motion.div
-          whileHover={{ y: -3, transition: springPhysics.card }}
-          whileTap={{ scale: 0.985 }}
-          className={`${metricCardCls} ${metricCardDefault}`}
-        >
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                  Peak Intensity
-                </p>
-                <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.amber }}>
-                  {loading ? '—' : peakHour.hour}
-                </p>
-              </div>
-              <div className="p-2 rounded-xl" style={{ backgroundColor: `${COLORS.amber}18` }}>
-                <Flame className="h-4 w-4" style={{ color: COLORS.amber }} />
-              </div>
-            </div>
-            <div className={`flex items-center gap-1 mt-3 text-xs font-medium ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-              <span>Today</span><ChevronRight className="h-3 w-3" />
-            </div>
-          </CardContent>
-        </motion.div>
-        {/* 5. Idle Time */}
-        <motion.div
-          whileHover={{ y: -3, transition: springPhysics.card }}
-          whileTap={{ scale: 0.985 }}
-          className={`${metricCardCls} ${
-            idleStats.idlePct > 30
-              ? isDark
-                ? 'bg-red-900/20 border-red-800 hover:border-red-700'
-                : 'bg-red-50/60 border-red-200 hover:border-red-300'
-              : metricCardDefault
-          }`}
-        >
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                  Idle Time
-                </p>
-                <p
-                  className="text-2xl font-bold mt-1 tracking-tight"
-                  style={{ color: idleStats.idlePct > 30 ? COLORS.coral : COLORS.amber }}
-                >
-                  {loading ? '—' : `${idleStats.idlePct}%`}
-                </p>
-                <p className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                  {secondsToHM(idleStats.idleDur)} idle
-                </p>
-              </div>
-              <div
-                className="p-2 rounded-xl"
-                style={{ backgroundColor: idleStats.idlePct > 30 ? `${COLORS.coral}18` : `${COLORS.amber}18` }}
-              >
-                <Mouse className="h-4 w-4" style={{ color: idleStats.idlePct > 30 ? COLORS.coral : COLORS.amber }} />
-              </div>
-            </div>
-          </CardContent>
-        </motion.div>
-      </motion.div>
+      {rptOrder.map((sectionId) => {
+        if (sectionId === 'kpi_row') return (
+      <React.Fragment key="kpi_row">
+      {/* ══ KPI ROW — 6 cards, uniform height via grid ══ */}
+      {/* grid-rows-1 + items-stretch ensures every card in the row is the same height */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-stretch">
+        {[
+          {label:'Total Tasks',   value:fTasks.length,        sub:`${compRate}% completion`,    color:C.deepBlue,     icon:Target       },
+          {label:'Completed',     value:done.length,           sub:`${done.length} of ${fTasks.length}`,color:C.emeraldGreen,icon:CheckCircle2},
+          {label:'In Progress',   value:wip.length,            sub:'Currently active',           color:C.mediumBlue,   icon:Activity     },
+          {label:'Overdue',       value:overdue.length,        sub:'Past due date',              color:C.coral,        icon:AlertTriangle},
+          {label:'Days Present',  value:presDays,              sub:`${fmt(avgMins)} avg/day`,    color:C.mediumBlue,   icon:Calendar     },
+          {label:'Screen Time',   value:fmtC(totMins),         sub:`${presDays} days logged`,   color:C.amber,        icon:Clock        },
+        ].map((k,i)=><KpiCard key={i} {...k} dark={dark}/>)}
+      </div>
       </React.Fragment>
         );
-        if (sectionId === 'intensity_radar') return (
-      <React.Fragment key="intensity_radar">
-      {/* ── INTENSITY MAP + COMPARISON RADAR ───────────────────────────────── */}
-      <motion.div className="grid grid-cols-1 lg:grid-cols-5 gap-3" variants={itemVariants}>
-        <SectionCard isDark={isDark} className="lg:col-span-3 flex flex-col">
-          <CardHeaderRow
-            isDark={isDark}
-            iconBg={isDark ? 'bg-amber-900/40' : 'bg-amber-50'}
-            icon={<Flame className="h-4 w-4 text-amber-500" />}
-            title="24-Hour Intensity Map"
-            subtitle="Organisational output density across working hours"
-            action={
-              <Badge
-                variant="outline"
-                className={`text-[10px] rounded-full px-2.5 border-amber-200 ${isDark ? 'text-amber-400 bg-amber-900/20' : 'text-amber-600 bg-amber-50'}`}
-              >
-                Live
-              </Badge>
-            }
-          />
-          {/* FIX: explicit height on the wrapper div, not relying on auto-sizing */}
-          <div className="p-4 flex-1 min-h-[220px]">
-            <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={intensityMap} margin={{ top: 5, right: 8, left: -24, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="intensityGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={COLORS.amber} stopOpacity={0.6} />
-                    <stop offset="95%" stopColor={COLORS.amber} stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#1e293b' : '#f1f5f9'} vertical={false} />
-                <XAxis dataKey="hour" tick={{ fontSize: 9, fill: '#94a3b8' }} interval={3} />
-                <YAxis hide />
-                <Tooltip
-                  contentStyle={{
-                    borderRadius: '10px',
-                    border: 'none',
-                    fontSize: '11px',
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.1)',
-                    backgroundColor: isDark ? '#1e293b' : '#fff',
-                  }}
-                  formatter={(v) => [`${v} ops`, 'Density']}
-                />
-                <Area
-                  type="natural"
-                  dataKey="density"
-                  stroke={COLORS.amber}
-                  strokeWidth={2.5}
-                  fill="url(#intensityGradient)"
-                  dot={false}
-                  activeDot={{ r: 4, fill: COLORS.amber, strokeWidth: 0 }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </SectionCard>
-        <SectionCard isDark={isDark} className="lg:col-span-2">
-          <CardHeaderRow
-            isDark={isDark}
-            iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
-            icon={<GitCompare className="h-4 w-4 text-blue-500" />}
-            title="Unit Comparison"
-            subtitle="Performance radar"
-            action={
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={runAudit}
-                disabled={isAuditing || !unitAlpha || !unitBeta}
-                className={`text-xs h-7 px-2.5 ${isDark ? 'text-blue-400' : 'text-blue-600'}`}
-              >
-                {isAuditing ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Run Audit'}
-              </Button>
-            }
-          />
-          <div className="p-4 space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { label: 'Alpha', val: unitAlpha, set: setUnitAlpha },
-                { label: 'Beta', val: unitBeta, set: setUnitBeta },
-              ].map(({ label, val, set }) => (
-                <div key={label}>
-                  <p className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                    {label}
-                  </p>
-                  <Select value={val} onValueChange={set}>
-                    <SelectTrigger className={`rounded-xl border h-8 text-xs ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200'}`}>
-                      <SelectValue placeholder="Select…" />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-xl">
-                      {activePersonnel.map((u) => (
-                        <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+        if (sectionId === 'tab_panels') return (
+      <React.Fragment key="tab_panels">
+      {/* ══ TAB PANELS ══ */}
+      <AnimatePresence mode="wait">
+
+        {/* ──────── OVERVIEW ──────── */}
+        {tab==='overview'&&(
+          <motion.div key="ov" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+              {/* Task status donut */}
+              <Sec title="Task Status" desc="Current distribution" dark={dark}>
+                {statusData.length>0?(
+                  <ResponsiveContainer width="100%" height={220}>
+                    <PieChart>
+                      <Pie data={statusData} cx="50%" cy="50%" innerRadius={52} outerRadius={80}
+                        paddingAngle={3} dataKey="value"
+                        label={({percent})=>`${(percent*100).toFixed(0)}%`} labelLine={false}
+                        isAnimationActive={true}>
+                        {statusData.map((d,i)=><Cell key={i} fill={d.color}/>)}
+                      </Pie>
+                      <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
+                      <Legend wrapperStyle={{fontSize:10,color:t.textSub}}/>
+                    </PieChart>
+                  </ResponsiveContainer>
+                ):<Empty icon={Target} text="No task data" dark={dark}/>}
+              </Sec>
+
+              {/* Priority mix */}
+              <Sec title="Priority Mix" desc="Task urgency levels" dark={dark}>
+                {prioData.length>0?(
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={prioData} layout="vertical" barSize={12}>
+                      <XAxis type="number" tick={{fontSize:10,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                      <YAxis dataKey="name" type="category" width={58} tick={{fontSize:10,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                      <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
+                      <Bar dataKey="value" name="Tasks" radius={[0,6,6,0]}>
+                        {prioData.map((d,i)=><Cell key={i} fill={d.color}/>)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ):<Empty icon={Shield} text="No priority data" dark={dark}/>}
+              </Sec>
+
+              {/* Compliance gauge */}
+              <Sec title="Compliance Score" desc="Overall health" dark={dark}>
+                <div className="flex flex-col items-center justify-center h-[220px] gap-3">
+                  {dashStats?.compliance_status?(
+                    <>
+                      <div className="relative w-32 h-32">
+                        <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+                          <circle cx="50" cy="50" r="42" fill="none" strokeWidth="10"
+                            style={{stroke:dark?'#1e293b':'#f1f5f9'}}/>
+                          <circle cx="50" cy="50" r="42" fill="none" strokeWidth="10" strokeLinecap="round"
+                            stroke={dashStats.compliance_status.score>=80?C.emeraldGreen:dashStats.compliance_status.score>=50?C.amber:'#dc2626'}
+                            strokeDasharray={`${2.64*dashStats.compliance_status.score} 264`}/>
+                        </svg>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center">
+                          <p className="text-2xl font-black" style={{color:C.deepBlue}}>{dashStats.compliance_status.score}%</p>
+                          <p className="text-[9px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>Score</p>
+                        </div>
+                      </div>
+                      <div className="w-full space-y-1.5">
+                        {[
+                          {label:'Overdue Tasks', val:dashStats.compliance_status.overdue_tasks,         col:'#dc2626'},
+                          {label:'Expiring DSC',  val:dashStats.compliance_status.expiring_certificates, col:C.amber  },
+                          {label:'Status',        val:(dashStats.compliance_status.status||'').toUpperCase(),
+                            col:dashStats.compliance_status.score>=80?C.emeraldGreen:C.amber},
+                        ].map((it,i)=>(
+                          <div key={i} className="flex items-center justify-between text-xs">
+                            <span style={{color:t.textSub}}>{it.label}</span>
+                            <span className="font-bold" style={{color:it.col}}>{it.val}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ):<Empty icon={Shield} text="No compliance data" dark={dark}/>}
                 </div>
-              ))}
+              </Sec>
             </div>
-            {/* FIX: explicit height to avoid ResponsiveContainer -1 error */}
-            <div className="min-h-[148px]">
-              <AnimatePresence mode="wait">
-                {unitAlpha && unitBeta && radarMetrics.length > 0 ? (
-                  <motion.div
-                    key="radar-mini"
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0 }}
-                    style={{ width: '100%', height: 148 }}
-                  >
-                    <ResponsiveContainer width="100%" height="100%">
-                      <RadarChart data={radarMetrics}>
-                        <PolarGrid stroke={isDark ? '#334155' : '#e2e8f0'} />
-                        <PolarAngleAxis dataKey="metric" tick={{ fontSize: 8, fill: isDark ? '#94a3b8' : '#64748b' }} />
-                        <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
-                        <Radar
-                          name={activePersonnel.find((u) => u.id === unitAlpha)?.full_name || 'Alpha'}
-                          dataKey="A"
-                          stroke={COLORS.mediumBlue}
-                          fill={COLORS.mediumBlue}
-                          fillOpacity={0.2}
-                          strokeWidth={2}
-                        />
-                        <Radar
-                          name={activePersonnel.find((u) => u.id === unitBeta)?.full_name || 'Beta'}
-                          dataKey="B"
-                          stroke={COLORS.amber}
-                          fill={COLORS.amber}
-                          fillOpacity={0.2}
-                          strokeWidth={2}
-                        />
-                        <Tooltip
-                          contentStyle={{
-                            borderRadius: '8px',
-                            border: 'none',
-                            fontSize: '10px',
-                            backgroundColor: isDark ? '#1e293b' : '#fff',
-                          }}
-                        />
-                        <Legend wrapperStyle={{ fontSize: '9px' }} />
-                      </RadarChart>
-                    </ResponsiveContainer>
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    key="radar-empty"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className={`h-full flex flex-col items-center justify-center text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}
-                  >
-                    <Binary className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                    <p className="text-xs">Select both units to compare</p>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+
+            {/* Weekly trend */}
+            <Sec title="Weekly Activity Trend" desc="Task completions vs new tasks this week" dark={dark}>
+              <ResponsiveContainer width="100%" height={220}>
+                <AreaChart data={weeklyData}>
+                  <defs>
+                    <linearGradient id="gc" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={C.emeraldGreen} stopOpacity={0.3}/>
+                      <stop offset="100%" stopColor={C.emeraldGreen} stopOpacity={0.02}/>
+                    </linearGradient>
+                    <linearGradient id="gp" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={C.mediumBlue} stopOpacity={0.25}/>
+                      <stop offset="100%" stopColor={C.mediumBlue} stopOpacity={0.02}/>
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="name" tick={{fontSize:11,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                  <YAxis tick={{fontSize:11,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                  <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
+                  <Legend wrapperStyle={{fontSize:11,color:t.textSub}}/>
+                  <Area type="monotone" dataKey="completed" stroke={C.emeraldGreen} strokeWidth={2} fill="url(#gc)" name="Completed"/>
+                  <Area type="monotone" dataKey="pending"   stroke={C.mediumBlue}   strokeWidth={2} fill="url(#gp)"  name="New/Pending"/>
+                </AreaChart>
+              </ResponsiveContainer>
+            </Sec>
+          </motion.div>
+        )}
+
+        {/* ──────── TASKS ──────── */}
+        {tab==='tasks'&&(
+          <motion.div key="tk" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <Sec title="Tasks by Category" desc="Volume per department" dark={dark}>
+                {catData.length>0?(
+                  <ResponsiveContainer width="100%" height={260}>
+                    <BarChart data={catData} layout="vertical">
+                      <XAxis type="number" tick={{fontSize:10,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                      <YAxis dataKey="name" type="category" width={100} tick={{fontSize:10,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                      <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
+                      <Bar dataKey="tasks" name="Tasks" radius={[0,6,6,0]}>
+                        {catData.map((d,i)=><Cell key={i} fill={d.fill}/>)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ):<Empty icon={BarChart3} text="No category data" dark={dark}/>}
+              </Sec>
+
+              <Sec title="Status Distribution" dark={dark}>
+                {statusData.length>0?(
+                  <ResponsiveContainer width="100%" height={260}>
+                    <PieChart>
+                      <Pie data={statusData} cx="50%" cy="50%" innerRadius={58} outerRadius={92}
+                        paddingAngle={4} dataKey="value"
+                        label={({percent})=>`${(percent*100).toFixed(0)}%`} labelLine={false}>
+                        {statusData.map((d,i)=><Cell key={i} fill={d.color}/>)}
+                      </Pie>
+                      <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
+                      <Legend wrapperStyle={{fontSize:10,color:t.textSub}}/>
+                    </PieChart>
+                  </ResponsiveContainer>
+                ):<Empty icon={Target} text="No task data" dark={dark}/>}
+              </Sec>
             </div>
-          </div>
-        </SectionCard>
-      </motion.div>
-      </React.Fragment>
-        );
-        if (sectionId === 'activity_tabs') return (
-      <React.Fragment key="activity_tabs">
-      {/* ── TABS ──────────────────────────────────────────────────────────── */}
-      <motion.div variants={itemVariants}>
-        <div className={`flex gap-0.5 rounded-xl p-1 mb-4 overflow-x-auto ${isDark ? 'bg-slate-800 border border-slate-700' : 'bg-white border border-slate-200/80 shadow-sm'}`} style={{scrollbarWidth:'none',WebkitOverflowScrolling:'touch'}}>
-          {TABS.map(({ value, label, Icon }) => (
-            <button
-              key={value}
-              onClick={() => setActiveTab(value)}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex-shrink-0 ${
-                activeTab === value
-                  ? isDark ? 'bg-slate-700 text-white shadow-sm' : 'bg-slate-900 text-white shadow-sm'
-                  : isDark ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/60' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <Icon className="h-3.5 w-3.5" />{label}
-            </button>
-          ))}
-        </div>
-        <AnimatePresence mode="wait">
-          {/* ─── TAB 1: ACTIVITY LOG ─────────────────────────────────────── */}
-          {activeTab === 'activity_log' && (
-            <motion.div
-              key="activity_log"
-              variants={staggerChildren}
-              initial="hidden"
-              animate="visible"
-              exit={{ opacity: 0 }}
-              className="space-y-3"
-            >
-              {/* Row 1: Application Usage + Category Breakdown (equal halves) */}
-              <motion.div variants={listItem} className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                {/* Application Usage */}
-                <SectionCard isDark={isDark}>
-                  <CardHeaderRow
-                    isDark={isDark}
-                    iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
-                    icon={<Monitor className="h-4 w-4 text-blue-500" />}
-                    title="Application Usage"
-                    subtitle="Time spent per application"
-                    action={
-                      <span className={`text-[10px] font-medium px-2 py-1 rounded-lg ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
-                        {aggregatedApps.length} apps
-                      </span>
-                    }
-                  />
-                  <div className="p-4">
-                    {loading ? (
-                      <MiniLoader height={80} />
-                    ) : aggregatedApps.length > 0 ? (
-                      <motion.div variants={staggerChildren} initial="hidden" animate="visible" className="space-y-4">
-                        {aggregatedApps.map((app, idx) => {
-                          const max = aggregatedApps[0]?.duration || 1;
-                          return (
-                            <motion.div key={idx} variants={listItem} className="space-y-1.5">
-                              <div className="flex justify-between items-center">
-                                <div className="flex items-center gap-2">
-                                  <div
-                                    className="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold text-white"
-                                    style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
-                                  >
-                                    {String(idx + 1).padStart(2, '0')}
-                                  </div>
-                                  <span className={`text-sm font-medium ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{app.name}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className={`text-[10px] font-mono ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{secToMin(app.duration)} min</span>
-                                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>{app.count}×</span>
-                                </div>
-                              </div>
-                              <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                                <motion.div
-                                  initial={{ width: 0 }}
-                                  animate={{ width: `${Math.round((app.duration / max) * 100)}%` }}
-                                  transition={{ duration: 0.7, delay: idx * 0.07, ease: 'easeOut' }}
-                                  className="h-full rounded-full"
-                                  style={{ background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
-                                />
-                              </div>
-                            </motion.div>
-                          );
-                        })}
-                      </motion.div>
-                    ) : (
-                      <div className={`text-center py-10 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        <Monitor className="h-10 w-10 mx-auto mb-3 opacity-25" />
-                        <p className="font-medium">No app data for {selectedMonth}</p>
-                        <p className={`text-xs mt-1 ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>
-                          Install the activity-tracker agent to capture app usage
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </SectionCard>
-                {/* Category Breakdown */}
-                <SectionCard isDark={isDark}>
-                  <CardHeaderRow
-                    isDark={isDark}
-                    iconBg={isDark ? 'bg-purple-900/40' : 'bg-purple-50'}
-                    icon={<BarChart2 className="h-4 w-4 text-purple-500" />}
-                    title="Category Breakdown"
-                    subtitle="Time by work category"
-                  />
-                  <div className="p-4">
-                    {categoryBreakdown.length > 0 ? (
-                      <div className="space-y-2.5">
-                        {categoryBreakdown.slice(0, 5).map((cat, idx) => (
-                          <div key={idx} className="flex items-center gap-3">
-                            <div
-                              className="w-20 text-[11px] font-medium capitalize truncate"
-                              style={{ color: CAT_COLORS[cat.category] || '#94a3b8' }}
-                            >
-                              {cat.category}
-                            </div>
-                            <div className={`flex-1 h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                              <motion.div
-                                initial={{ width: 0 }}
-                                animate={{ width: `${cat.pct}%` }}
-                                transition={{ duration: 0.6, delay: idx * 0.06 }}
-                                className="h-full rounded-full"
-                                style={{ backgroundColor: CAT_COLORS[cat.category] || '#94a3b8' }}
-                              />
-                            </div>
-                            <span className={`text-[10px] font-mono w-8 text-right ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                              {cat.pct}%
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className={`text-xs text-center py-6 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        No category data for {selectedMonth}
-                      </p>
-                    )}
-                  </div>
-                </SectionCard>
-              </motion.div>
-              {/* Row 2: Website Activity + Executive Intelligence (equal halves, same height) */}
-              <motion.div variants={listItem} className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                {/* Website Activity */}
-                <SectionCard isDark={isDark} className="flex flex-col">
-                  <CardHeaderRow
-                    isDark={isDark}
-                    iconBg={isDark ? 'bg-cyan-900/40' : 'bg-cyan-50'}
-                    icon={<Globe className="h-4 w-4 text-cyan-500" />}
-                    title="Website Activity"
-                    subtitle="Domains visited and time spent"
-                    action={
-                      <span className={`text-[10px] font-medium px-2 py-1 rounded-lg ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
-                        {aggregatedWebsites.length} domains
-                      </span>
-                    }
-                  />
-                  <div className="p-4 flex-1">
-                    {loading ? (
-                      <MiniLoader height={72} />
-                    ) : aggregatedWebsites.length > 0 ? (
-                      <motion.div variants={staggerChildren} initial="hidden" animate="visible" className="space-y-2">
-                        {aggregatedWebsites.map((site, idx) => {
-                          const maxDur = aggregatedWebsites[0]?.duration || 1;
-                          const bar = Math.round((site.duration / maxDur) * 100);
-                          const isWork = ['gmail', 'drive', 'docs', 'sheets', 'notion', 'slack', 'teams', 'zoom', 'meet', 'jira', 'github']
-                            .some((k) => site.domain.includes(k));
-                          return (
-                            <motion.div
-                              key={idx}
-                              variants={listItem}
-                              className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${isDark ? 'border-slate-700 bg-slate-800/60 hover:border-slate-600' : 'border-slate-100 bg-slate-50/60 hover:border-slate-200'}`}
-                            >
-                              <div
-                                className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-xs font-bold"
-                                style={{
-                                  background: isWork ? `${COLORS.emeraldGreen}20` : `${COLORS.coral}15`,
-                                  color: isWork ? COLORS.emeraldGreen : COLORS.coral,
-                                }}
-                              >
-                                {site.domain.charAt(0).toUpperCase()}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center justify-between">
-                                  <p className={`text-xs font-medium truncate ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{site.domain}</p>
-                                  <span className={`text-[10px] font-mono ml-2 flex-shrink-0 ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{secToMin(site.duration)}m</span>
-                                </div>
-                                <div className={`mt-1.5 h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
-                                  <motion.div
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${bar}%` }}
-                                    transition={{ duration: 0.6, delay: idx * 0.04 }}
-                                    className="h-full rounded-full"
-                                    style={{ backgroundColor: isWork ? COLORS.emeraldGreen : COLORS.coral }}
-                                  />
-                                </div>
-                              </div>
-                            </motion.div>
-                          );
-                        })}
-                      </motion.div>
-                    ) : (
-                      <div className={`text-center py-10 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        <Globe className="h-10 w-10 mx-auto mb-3 opacity-25" />
-                        <p className="font-medium">No website data for {selectedMonth}</p>
-                        <p className={`text-xs mt-1 ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>
-                          Install the activity-tracker agent
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </SectionCard>
-                {/* Executive Intelligence */}
-                <SectionCard isDark={isDark} className="flex flex-col">
-                  <CardHeaderRow
-                    isDark={isDark}
-                    iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
-                    icon={<BrainCircuit className="h-4 w-4 text-emerald-500" />}
-                    title="Executive Intelligence"
-                    subtitle="AI-powered workforce analysis"
-                    action={
-                      auditInsights.length > 0
-                        ? (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={runAudit}
-                            disabled={isAuditing}
-                            className={`text-[10px] h-6 px-2 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}
-                          >
-                            Re-run
-                          </Button>
-                        )
-                        : null
-                    }
-                  />
-                  <div className="p-4 flex-1">
-                    <AnimatePresence mode="wait">
-                      {isAuditing ? (
-                        <motion.div
-                          key="auditing"
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          exit={{ opacity: 0 }}
-                          className="flex flex-col items-center gap-2 py-8"
-                        >
-                          <MiniLoader height={40} />
-                        </motion.div>
-                      ) : auditInsights.length > 0 ? (
-                        <motion.div key="insights" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-2">
-                          {auditInsights.map((ins, i) => (
-                            <motion.div
-                              key={i}
-                              initial={{ opacity: 0, y: 8 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              transition={{ delay: i * 0.1 }}
-                              className={`p-3 rounded-xl border ${ins.bg}`}
-                            >
-                              <div className="flex gap-2.5">
-                                <ins.Icon className="h-4 w-4 mt-0.5 flex-shrink-0" style={{ color: ins.color }} />
-                                <div>
-                                  <p className="font-semibold text-xs" style={{ color: ins.color }}>{ins.title}</p>
-                                  <p className={`text-[11px] mt-0.5 leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{ins.desc}</p>
-                                </div>
-                              </div>
-                            </motion.div>
-                          ))}
-                        </motion.div>
-                      ) : (
-                        <motion.div key="cta" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center">
-                          <BrainCircuit className={`h-10 w-10 mx-auto mb-2 opacity-25 ${isDark ? 'text-slate-400' : 'text-slate-400'}`} />
-                          <p className={`text-xs mb-3 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                            Run AI workforce analysis
-                          </p>
-                          <Button
-                            onClick={runAudit}
-                            className="w-full rounded-xl h-9 text-sm font-semibold"
-                            style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
-                          >
-                            Run Executive Audit
-                          </Button>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                </SectionCard>
-              </motion.div>
-            </motion.div>
-          )}
-          {/* ─── TAB 2: IDLE TRACKER ─────────────────────────────────────── */}
-          {activeTab === 'idle_tracker' && (
-            <motion.div
-              key="idle_tracker"
-              variants={staggerChildren}
-              initial="hidden"
-              animate="visible"
-              exit={{ opacity: 0 }}
-              className="space-y-3"
-            >
-              <motion.div variants={listItem} className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {[
-                  { label: 'Total Tracked', value: secondsToHM(idleStats.totalDur), Icon: Clock, color: COLORS.deepBlue, sub: 'All sessions' },
-                  { label: 'Active Time', value: secondsToHM(idleStats.activeDur), Icon: Zap, color: COLORS.emeraldGreen, sub: `${idleStats.activePct}% of total` },
-                  { label: 'Idle (No Input)', value: secondsToHM(idleStats.idleDur), Icon: Mouse, color: idleStats.idlePct > 30 ? COLORS.coral : COLORS.amber, sub: `${idleStats.idlePct}% of total` },
-                  { label: 'Keyboard/Mouse Rate', value: `${100 - idleStats.idlePct}%`, Icon: Keyboard, color: COLORS.mediumBlue, sub: 'Input activity rate' },
-                ].map(({ label, value, Icon, color, sub }) => (
-                  <motion.div
-                    key={label}
-                    whileHover={{ y: -2, transition: springPhysics.card }}
-                    className={`${metricCardCls} ${metricCardDefault}`}
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{label}</p>
-                          <p className="text-xl font-bold mt-1 tracking-tight" style={{ color }}>{value}</p>
-                          <p className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{sub}</p>
-                        </div>
-                        <div className="p-2 rounded-xl" style={{ backgroundColor: `${color}15` }}>
-                          <Icon className="h-4 w-4" style={{ color }} />
-                        </div>
-                      </div>
-                    </CardContent>
-                  </motion.div>
-                ))}
-              </motion.div>
-              {!loading && idleStats.totalDur === 0 && (
-                <motion.div variants={listItem}>
-                  <div className={`flex items-start gap-3 p-4 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-amber-50 border-amber-100'}`}>
-                    <AlertCircle className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-                        No activity tracking data for {selectedMonth}
-                      </p>
-                      <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                        The activity-tracker agent must be installed and running on each workstation. Attendance data is available in the Attendance tab.
-                      </p>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-              <motion.div variants={listItem} className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                <SectionCard isDark={isDark}>
-                  <CardHeaderRow
-                    isDark={isDark}
-                    iconBg={isDark ? 'bg-slate-700' : 'bg-slate-50'}
-                    icon={<Activity className="h-4 w-4 text-slate-500" />}
-                    title="Active vs Idle Ratio"
-                    subtitle="Keyboard & mouse input vs idle periods"
-                  />
-                  <div className="p-4">
-                    <div className="mb-5">
-                      <div className={`h-7 rounded-xl overflow-hidden flex ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                        {idleStats.totalDur > 0 ? (
-                          <>
-                            <motion.div
-                              initial={{ width: 0 }}
-                              animate={{ width: `${idleStats.activePct}%` }}
-                              transition={{ duration: 1, ease: 'easeOut' }}
-                              className="h-full flex items-center justify-center text-[10px] font-bold text-white rounded-l-xl"
-                              style={{ background: `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})` }}
-                            >
-                              {idleStats.activePct > 12 ? `${idleStats.activePct}% Active` : ''}
-                            </motion.div>
-                            <motion.div
-                              initial={{ width: 0 }}
-                              animate={{ width: `${idleStats.idlePct}%` }}
-                              transition={{ duration: 1, ease: 'easeOut', delay: 0.15 }}
-                              className="h-full flex items-center justify-center text-[10px] font-bold text-white rounded-r-xl"
-                              style={{ background: `linear-gradient(90deg, ${COLORS.coral}, #ff8e8e)` }}
-                            >
-                              {idleStats.idlePct > 12 ? `${idleStats.idlePct}% Idle` : ''}
-                            </motion.div>
-                          </>
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-xs text-slate-400">No data</div>
-                        )}
-                      </div>
-                      <div className="flex justify-between mt-2">
-                        {[
-                          { col: COLORS.emeraldGreen, label: `Active · ${secondsToHM(idleStats.activeDur)}` },
-                          { col: COLORS.coral, label: `Idle · ${secondsToHM(idleStats.idleDur)}` },
-                        ].map(({ col, label }) => (
-                          <div key={label} className="flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: col }} />
-                            <span className={`text-[10px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{label}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    {idleStats.idlePct > 30 && (
-                      <div className={`flex items-start gap-2.5 p-3 rounded-xl border ${isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-100'}`}>
-                        <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" />
-                        <div>
-                          <p className="text-xs font-semibold text-red-600">High Idle Alert</p>
-                          <p className={`text-[11px] mt-0.5 ${isDark ? 'text-red-400' : 'text-red-500'}`}>
-                            {idleStats.idlePct}% idle ratio exceeds the 30% threshold.
+
+            {overdue.length>0&&(
+              <Sec title={`Overdue Tasks (${overdue.length})`} desc="Past due — immediate attention required" dark={dark}>
+                <div className="space-y-2 max-h-72 overflow-y-auto" style={{scrollbarWidth:'thin'}}>
+                  {overdue.slice(0,15).map((tk,i)=>{
+                    const days=Math.floor((new Date()-new Date(tk.due_date))/86400000);
+                    return (
+                      <div key={tk.id||i} className="flex items-center justify-between p-3 rounded-xl"
+                        style={{background:dark?'rgba(239,68,68,0.1)':'#fef2f2',border:'1px solid rgba(239,68,68,0.25)'}}>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold truncate" style={{color:t.text}}>{tk.title||'Untitled'}</p>
+                          <p className="text-xs mt-0.5" style={{color:t.textSub}}>
+                            {tk.assigned_to_name&&<><span className="font-medium">{tk.assigned_to_name}</span> · </>}
+                            Due: {tk.due_date?new Date(tk.due_date).toLocaleDateString():'—'}
                           </p>
                         </div>
+                        <span className="flex-shrink-0 text-xs font-bold px-2 py-0.5 rounded-lg ml-3"
+                          style={{background:'#fee2e2',color:'#dc2626'}}>{days}d overdue</span>
                       </div>
-                    )}
-                  </div>
-                </SectionCard>
-                <SectionCard isDark={isDark}>
-                  <CardHeaderRow
-                    isDark={isDark}
-                    iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
-                    icon={<Users className="h-4 w-4 text-orange-500" />}
-                    title="Per-User Idle Breakdown"
-                    subtitle="Keyboard & mouse inactivity by personnel"
-                  />
-                  <div className="p-4">
-                    {loading ? (
-                      <MiniLoader height={80} />
-                    ) : idleStats.perUser.length > 0 ? (
-                      <div className="space-y-3 max-h-[260px] overflow-y-auto pr-1">
-                        {idleStats.perUser.map((u, idx) => {
-                          const barCol = u.idlePct > 40 ? COLORS.coral : u.idlePct > 25 ? COLORS.amber : COLORS.emeraldGreen;
-                          const badgeCl = u.idlePct > 40
-                            ? isDark ? 'bg-red-900/40 text-red-400' : 'bg-red-100 text-red-600'
-                            : u.idlePct > 25
-                            ? isDark ? 'bg-amber-900/40 text-amber-400' : 'bg-amber-100 text-amber-600'
-                            : isDark ? 'bg-emerald-900/40 text-emerald-400' : 'bg-emerald-100 text-emerald-700';
-                          return (
-                            <div key={u.user_id || idx}>
-                              <div className="flex items-center justify-between mb-1">
-                                <div className="flex items-center gap-2">
-                                  <div
-                                    className="w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold text-white"
-                                    style={{ backgroundColor: barCol }}
-                                  >
-                                    {u.user_name?.charAt(0)?.toUpperCase() || '?'}
-                                  </div>
-                                  <span className={`text-xs font-medium ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{u.user_name}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className={`text-[10px] font-mono ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{secondsToHM(u.idle)} idle</span>
-                                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${badgeCl}`}>{u.idlePct}%</span>
-                                </div>
-                              </div>
-                              <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                                <motion.div
-                                  initial={{ width: 0 }}
-                                  animate={{ width: `${u.idlePct}%` }}
-                                  transition={{ duration: 0.6, delay: idx * 0.05 }}
-                                  className="h-full rounded-full"
-                                  style={{ backgroundColor: barCol }}
-                                />
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className={`text-center py-8 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        <Keyboard className="h-8 w-8 mx-auto mb-2 opacity-25" />
-                        No idle data for {selectedMonth}
-                      </div>
-                    )}
-                  </div>
-                </SectionCard>
-              </motion.div>
-            </motion.div>
-          )}
-          {/* ─── TAB 3: ATTENDANCE ───────────────────────────────────────── */}
-          {activeTab === 'attendance' && (
-            <motion.div
-              key="attendance"
-              variants={staggerChildren}
-              initial="hidden"
-              animate="visible"
-              exit={{ opacity: 0 }}
-            >
-              <motion.div variants={listItem}>
-                <SectionCard isDark={isDark}>
-                  <CardHeaderRow
-                    isDark={isDark}
-                    iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
-                    icon={<Users className="h-4 w-4 text-blue-500" />}
-                    title="Personnel Attendance Registry"
-                    subtitle={`${filteredAttendance.length} record${filteredAttendance.length !== 1 ? 's' : ''} · ${selectedMonth}`}
-                    action={
-                      <Badge
-                        variant="outline"
-                        className={`text-[10px] rounded-full px-2.5 ${isDark ? 'border-slate-600 text-slate-400' : 'border-slate-200 text-slate-500'}`}
-                      >
-                        {selectedMonth}
-                      </Badge>
-                    }
-                  />
-                  <div className="overflow-x-auto">
-                    {loading ? (
-                      <MiniLoader height={80} />
-                    ) : (
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-slate-50/60'}`}>
-                            {['Personnel', 'Attendance', 'Hours Logged', 'Late Days', 'Early Outs', 'Status'].map((h) => (
-                              <th
-                                key={h}
-                                className={`text-left py-3 px-4 text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}
-                              >
-                                {h}
-                              </th>
-                            ))}
+                    );
+                  })}
+                </div>
+              </Sec>
+            )}
+          </motion.div>
+        )}
+
+        {/* ──────── ATTENDANCE ──────── */}
+        {tab==='attend'&&(
+          <motion.div key="at" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-stretch">
+              {[
+                {label:'Days Present',  value:presDays,         sub:'This period',        color:C.emeraldGreen, icon:CheckCircle2},
+                {label:'Total Hours',   value:fmtC(totMins),    sub:'Logged time',         color:C.deepBlue,     icon:Clock       },
+                {label:'Avg / Day',     value:fmt(avgMins),     sub:'Per present day',     color:C.mediumBlue,   icon:Activity    },
+                {label:'Late Days',     value:lateDays,         sub:'Arrived after time',  color:C.amber,        icon:AlertTriangle},
+              ].map((k,i)=><KpiCard key={i} {...k} dark={dark}/>)}
+            </div>
+
+            <Sec title="Daily Hours — Last 7 Days" desc="From actual punch records" dark={dark}>
+              {attTrend.some(d=>d.hours>0)?(
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={attTrend} barSize={28}>
+                    <XAxis dataKey="name" tick={{fontSize:11,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                    <YAxis tick={{fontSize:11,fill:t.textSub}} unit="h" axisLine={false} tickLine={false}/>
+                    <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
+                    <Bar dataKey="hours" name="Hours" radius={[6,6,0,0]}>
+                      {attTrend.map((d,i)=>(
+                        <Cell key={i} fill={d.hours>=8?C.emeraldGreen:d.hours>=4?C.mediumBlue:dark?'#334155':'#e2e8f0'}/>
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ):<Empty icon={Clock} text="No attendance records for the last 7 days" dark={dark}/>}
+            </Sec>
+
+            {fAtt.length>0&&(
+              <Sec title="Attendance Log" desc="Recent punch records" dark={dark}>
+                <div className="overflow-x-auto rounded-xl" style={{border:`1px solid ${t.border}`}}>
+                  <table className="w-full text-sm min-w-[600px]">
+                    <thead>
+                      <tr style={{background:t.card2}}>
+                        {(isAdmin?['Employee','Date','In','Out','Duration','Status','Notes']:['Date','In','Out','Duration','Status','Notes']).map(h=>(
+                          <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider"
+                            style={{color:t.textMute}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fAtt.slice(0,20).map((a,i)=>{
+                        const pi=a.punch_in ?new Date(a.punch_in ).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}):'—';
+                        const po=a.punch_out?new Date(a.punch_out).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}):'—';
+                        const sc=a.status==='present'
+                          ?{bg:dark?'rgba(31,175,90,0.15)':'#f0fdf4',col:C.emeraldGreen}
+                          :a.status==='absent'
+                          ?{bg:dark?'rgba(239,68,68,0.12)':'#fef2f2',col:'#dc2626'}
+                          :{bg:dark?'rgba(245,158,11,0.12)':'#fffbeb',col:C.amber};
+                        const flags=[a.is_late&&'⏰ Late',a.punched_out_early&&'🚪 Early',a.auto_marked&&'🤖 Auto'].filter(Boolean);
+                        return (
+                          <tr key={i} style={{borderTop:`1px solid ${t.border2}`}}
+                            onMouseEnter={e=>e.currentTarget.style.background=t.hover}
+                            onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                            {isAdmin&&<td className="px-4 py-2.5 text-xs font-medium" style={{color:t.text}}>{a.user_name||'—'}</td>}
+                            <td className="px-4 py-2.5 font-medium text-xs" style={{color:t.text}}>{a.date}</td>
+                            <td className="px-4 py-2.5 text-xs" style={{color:t.textSub}}>{pi}</td>
+                            <td className="px-4 py-2.5 text-xs" style={{color:t.textSub}}>{po}</td>
+                            <td className="px-4 py-2.5 text-xs font-bold" style={{color:C.deepBlue}}>{fmt(a.duration_minutes||0)}</td>
+                            <td className="px-4 py-2.5">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md capitalize"
+                                style={{background:sc.bg,color:sc.col}}>{a.status}</span>
+                            </td>
+                            <td className="px-4 py-2.5 text-[10px]" style={{color:t.textMute}}>
+                              {flags.length?flags.join(' '):<span style={{color:C.emeraldGreen}}>✓ OK</span>}
+                            </td>
                           </tr>
-                        </thead>
-                        <tbody className={`divide-y ${isDark ? 'divide-slate-700/60' : 'divide-slate-50'}`}>
-                          {filteredAttendance.map((staff, idx) => (
-                            <tr
-                              key={staff.user_id || idx}
-                              className={`transition-colors ${isDark ? 'hover:bg-slate-700/40' : 'hover:bg-slate-50/80'}`}
-                            >
-                              <td className="py-3.5 px-4">
-                                <div className="flex items-center gap-2.5">
-                                  <div
-                                    className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold flex-shrink-0"
-                                    style={{
-                                      background: `linear-gradient(135deg, ${COLORS.deepBlue}20, ${COLORS.mediumBlue}30)`,
-                                      color: COLORS.deepBlue,
-                                    }}
-                                  >
-                                    {(staff.user_name || '?').charAt(0).toUpperCase()}
-                                  </div>
-                                  <div>
-                                    <p className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{staff.user_name || 'Unknown'}</p>
-                                    <p className={`text-[10px] capitalize ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{staff.role || 'staff'}</p>
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="py-3.5 px-4">
-                                <div className="w-40">
-                                  <div className={`flex justify-between text-[10px] mb-1 ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                                    <span>{staff.days_present || 0} days</span>
-                                    <span>/ {staff.expected_hours ? Math.round(staff.expected_hours / 8.5) : 22}</span>
-                                  </div>
-                                  <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                                    <div
-                                      className="h-full rounded-full transition-all"
-                                      style={{
-                                        width: `${Math.min(((staff.days_present || 0) / 22) * 100, 100)}%`,
-                                        backgroundColor:
-                                          (staff.days_present || 0) >= 18
-                                            ? COLORS.emeraldGreen
-                                            : (staff.days_present || 0) >= 12
-                                            ? COLORS.amber
-                                            : COLORS.coral,
-                                      }}
-                                    />
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="py-3.5 px-4">
-                                <span className="font-bold text-base tracking-tight" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
-                                  {staff.total_hours || minutesToHM(staff.total_minutes || 0)}
-                                </span>
-                              </td>
-                              <td className="py-3.5 px-4">
-                                {(staff.late_days || 0) > 0 ? (
-                                  <div className="flex items-center gap-1.5">
-                                    <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
-                                    <span className={`font-semibold ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>{staff.late_days}</span>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center gap-1.5">
-                                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                                    <span className={`font-medium ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>0</span>
-                                  </div>
-                                )}
-                              </td>
-                              <td className="py-3.5 px-4">
-                                {(staff.early_out_days || 0) > 0 ? (
-                                  <div className="flex items-center gap-1.5">
-                                    <XCircle className="h-3.5 w-3.5 text-red-400" />
-                                    <span className="text-red-500 font-semibold">{staff.early_out_days}</span>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center gap-1.5">
-                                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                                    <span className={`font-medium ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>0</span>
-                                  </div>
-                                )}
-                              </td>
-                              <td className="py-3.5 px-4">{statusBadge(staff.avg_hours_per_day)}</td>
-                            </tr>
-                          ))}
-                          {filteredAttendance.length === 0 && (
-                            <tr>
-                              <td colSpan={6} className={`py-16 text-center text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                                <Binary className="mx-auto h-8 w-8 mb-2 opacity-25" />
-                                No attendance data for {selectedMonth}
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
-                </SectionCard>
-              </motion.div>
-            </motion.div>
-          )}
-          {/* ─── TAB 4: TASK AUDIT ───────────────────────────────────────── */}
-          {activeTab === 'task_list' && (
-            <motion.div
-              key="task_list"
-              variants={staggerChildren}
-              initial="hidden"
-              animate="visible"
-              exit={{ opacity: 0 }}
-              className="grid grid-cols-1 lg:grid-cols-12 gap-3"
-            >
-              <motion.div variants={listItem} className="lg:col-span-8">
-                <SectionCard isDark={isDark}>
-                  <CardHeaderRow
-                    isDark={isDark}
-                    iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
-                    icon={<LayoutDashboard className="h-4 w-4 text-emerald-500" />}
-                    title="Task List Audit"
-                    subtitle={
-                      selectedUnit === 'all'
-                        ? 'Select a personnel to view their tasks'
-                        : `${taskVectors.length} todos · ${taskStats.rate}% completion`
-                    }
-                    action={
-                      selectedUnit !== 'all' ? (
-                        <Badge
-                          variant="outline"
-                          className={`text-[10px] rounded-full px-2.5 ${isDark ? 'border-emerald-700 text-emerald-400' : 'border-emerald-200 text-emerald-600 bg-emerald-50'}`}
-                        >
-                          {taskStats.rate}% done
-                        </Badge>
-                      ) : null
-                    }
-                  />
-                  <div className="p-4">
-                    {selectedUnit === 'all' ? (
-                      <div className={`py-14 text-center text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        <Filter className="h-10 w-10 mx-auto mb-3 opacity-25" />
-                        <p className="font-medium">No personnel selected</p>
-                        <p className={`text-xs mt-1 ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>Use the Personnel filter in the header</p>
-                      </div>
-                    ) : taskVectorsLoading ? (
-                      <MiniLoader height={80} />
-                    ) : (
-                      <motion.div variants={staggerChildren} initial="hidden" animate="visible" className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                        {taskVectors.map((task, i) => (
-                          <motion.div
-                            key={task.id || i}
-                            variants={listItem}
-                            layout
-                            className={`p-3.5 rounded-xl border transition-all ${
-                              task.is_completed
-                                ? isDark ? 'bg-slate-800/40 border-slate-700' : 'bg-slate-50/60 border-slate-100'
-                                : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-500' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'
-                            }`}
-                          >
-                            <div className="flex justify-between items-start mb-2.5">
-                              <div
-                                className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] flex-shrink-0 ${
-                                  task.is_completed
-                                    ? isDark ? 'bg-emerald-900/40 text-emerald-400' : 'bg-emerald-100 text-emerald-600'
-                                    : isDark ? 'bg-amber-900/40 text-amber-400' : 'bg-amber-100 text-amber-600'
-                                }`}
-                              >
-                                {task.is_completed ? '✓' : '·'}
-                              </div>
-                              <span
-                                className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                                  task.is_completed
-                                    ? isDark ? 'bg-emerald-900/30 text-emerald-400' : 'bg-emerald-100 text-emerald-600'
-                                    : isDark ? 'bg-amber-900/30 text-amber-400' : 'bg-amber-100 text-amber-600'
-                                }`}
-                              >
-                                {task.is_completed ? 'Done' : 'Active'}
-                              </span>
-                            </div>
-                            <p
-                              className={`text-sm font-medium leading-snug ${
-                                task.is_completed
-                                  ? isDark ? 'line-through text-slate-600' : 'line-through text-slate-400'
-                                  : isDark ? 'text-slate-100' : 'text-slate-800'
-                              }`}
-                            >
-                              {task.title || 'Untitled Task'}
-                            </p>
-                            {task.description && (
-                              <p className={`text-[11px] mt-1 line-clamp-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{task.description}</p>
-                            )}
-                            <div className={`mt-2.5 flex items-center gap-1.5 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                              <Timer className="h-3 w-3" />
-                              {task.due_date ? `Due ${format(new Date(task.due_date), 'MMM d')}` : 'No due date'}
-                            </div>
-                          </motion.div>
-                        ))}
-                        {taskVectors.length === 0 && (
-                          <div className={`col-span-2 py-14 text-center text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                            <Database className="h-8 w-8 mx-auto mb-2 opacity-25" />
-                            No todos found for this user
-                          </div>
-                        )}
-                      </motion.div>
-                    )}
-                  </div>
-                </SectionCard>
-              </motion.div>
-              <motion.div variants={listItem} className="lg:col-span-4 space-y-3">
-                <SectionCard isDark={isDark}>
-                  <CardHeaderRow
-                    isDark={isDark}
-                    iconBg={isDark ? 'bg-slate-700' : 'bg-slate-50'}
-                    icon={<Target className="h-4 w-4 text-slate-500" />}
-                    title="Audit Profile"
-                    subtitle="Task completion statistics"
-                  />
-                  <div className="p-4 space-y-4">
-                    <div>
-                      <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                        Completion Rate
-                      </p>
-                      <p className="text-4xl font-bold mt-1 tracking-tighter" style={{ color: COLORS.emeraldGreen }}>
-                        {selectedUnit === 'all' ? '—' : `${taskStats.rate}%`}
-                      </p>
-                    </div>
-                    <div>
-                      <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                        Total Todos
-                      </p>
-                      <p className="text-4xl font-bold mt-1 tracking-tighter" style={{ color: COLORS.deepBlue }}>
-                        {selectedUnit === 'all' ? '—' : taskStats.total}
-                      </p>
-                    </div>
-                    {selectedUnit !== 'all' && (
-                      <>
-                        <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                          <motion.div
-                            initial={{ width: 0 }}
-                            animate={{ width: `${taskStats.rate}%` }}
-                            transition={{ duration: 0.8 }}
-                            className="h-full rounded-full"
-                            style={{ background: `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})` }}
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className={`p-3 rounded-xl ${isDark ? 'bg-emerald-900/20' : 'bg-emerald-50'}`}>
-                            <p className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider">Completed</p>
-                            <p className={`text-2xl font-bold mt-0.5 ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>{taskStats.completed}</p>
-                          </div>
-                          <div className={`p-3 rounded-xl ${isDark ? 'bg-amber-900/20' : 'bg-amber-50'}`}>
-                            <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider">Active</p>
-                            <p className={`text-2xl font-bold mt-0.5 ${isDark ? 'text-amber-400' : 'text-amber-700'}`}>{taskStats.active}</p>
-                          </div>
-                        </div>
-                        <Button
-                          className="w-full rounded-xl h-9 text-sm font-semibold"
-                          onClick={fetchTaskVectors}
-                          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
-                        >
-                          Refresh Task Data
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </SectionCard>
-                {selectedUnit !== 'all' && (() => {
-                  const person = activePersonnel.find((u) => u.id === selectedUnit);
-                  const att = attendanceRegister.find((a) => a.user_id === selectedUnit);
-                  if (!person) return null;
-                  return (
-                    <SectionCard isDark={isDark}>
-                      <div className="p-4">
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {fAtt.length>20&&(
+                    <p className="text-xs text-center py-2" style={{color:t.textMute}}>
+                      Showing 20 of {fAtt.length} records
+                    </p>
+                  )}
+                </div>
+              </Sec>
+            )}
+          </motion.div>
+        )}
+
+        {/* ──────── EFFICIENCY ──────── */}
+        {tab==='efficiency'&&(
+          <motion.div key="ef" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
+            <Sec title="Efficiency Breakdown"
+              desc="Computed from real task assignments + attendance records"
+              dark={dark}>
+              {effCards.length>0?(
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {effCards.map((d,i)=>{
+                    const bc=d.pct>=70?C.emeraldGreen:d.pct>=40?C.amber:'#dc2626';
+                    return (
+                      <motion.div key={d.user_id||i} variants={iV}
+                        className="rounded-xl p-4"
+                        style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:t.shadow}}>
+                        {/* header */}
                         <div className="flex items-center gap-3 mb-3">
-                          <div
-                            className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm text-white"
-                            style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
-                          >
-                            {person.full_name?.charAt(0).toUpperCase()}
+                          <div className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-white text-sm flex-shrink-0"
+                            style={{background:PALETTE[i%PALETTE.length]}}>
+                            {(d.user_name||'U').charAt(0).toUpperCase()}
                           </div>
-                          <div>
-                            <p className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{person.full_name}</p>
-                            <p className={`text-[10px] capitalize ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{person.role}</p>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold text-sm truncate" style={{color:t.text}}>{d.user_name}</p>
+                            <p className="text-xs" style={{color:t.textMute}}>{d.days} days present</p>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className="text-xl font-black leading-none" style={{color:bc}}>{d.pct}%</p>
+                            <p className="text-[9px] font-bold uppercase tracking-wider mt-0.5" style={{color:t.textMute}}>Done</p>
                           </div>
                         </div>
-                        {att && (
-                          <div className="grid grid-cols-2 gap-2">
-                            {[
-                              { label: 'Days Present', value: att.days_present || 0 },
-                              { label: 'Hours', value: att.total_hours || minutesToHM(att.total_minutes || 0) },
-                            ].map(({ label, value }) => (
-                              <div key={label} className={`p-2.5 rounded-xl ${isDark ? 'bg-slate-700' : 'bg-slate-50'}`}>
-                                <p className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{label}</p>
-                                <p className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{value}</p>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </SectionCard>
-                  );
-                })()}
-              </motion.div>
-            </motion.div>
-          )}
-          {/* ─── TAB 5: COMPARISON ───────────────────────────────────────── */}
-          {activeTab === 'comparison' && (
-            <motion.div
-              key="comparison"
-              variants={staggerChildren}
-              initial="hidden"
-              animate="visible"
-              exit={{ opacity: 0 }}
-              className="grid grid-cols-1 lg:grid-cols-3 gap-3"
-            >
-              <motion.div variants={listItem}>
-                <SectionCard isDark={isDark}>
-                  <CardHeaderRow
-                    isDark={isDark}
-                    iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
-                    icon={<GitCompare className="h-4 w-4 text-blue-500" />}
-                    title="Cross-Unit Audit"
-                    subtitle="Compare two personnel performance vectors"
-                  />
-                  <div className="p-4 space-y-4">
-                    {[
-                      { label: 'Unit Alpha', val: unitAlpha, set: setUnitAlpha },
-                      { label: 'Unit Beta', val: unitBeta, set: setUnitBeta },
-                    ].map(({ label, val, set }, i) => (
-                      <div key={label}>
-                        <p className={`text-[10px] font-semibold uppercase tracking-wider mb-2 ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                          {label}
-                        </p>
-                        <Select value={val} onValueChange={set}>
-                          <SelectTrigger className={`rounded-xl border h-9 text-sm ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200'}`}>
-                            <SelectValue placeholder={`Select ${label}`} />
-                          </SelectTrigger>
-                          <SelectContent className="rounded-xl">
-                            {activePersonnel.map((u) => (
-                              <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {i === 0 && (
-                          <div className="flex items-center gap-3 mt-4">
-                            <div className={`flex-1 h-px ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`} />
-                            <div
-                              className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold text-white"
-                              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
-                            >
-                              VS
-                            </div>
-                            <div className={`flex-1 h-px ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`} />
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {unitAlpha && unitBeta && (
-                      <div className={`p-3 rounded-xl space-y-2 ${isDark ? 'bg-slate-700/60' : 'bg-slate-50'}`}>
-                        {[
-                          { col: COLORS.mediumBlue, name: activePersonnel.find((u) => u.id === unitAlpha)?.full_name || 'Alpha' },
-                          { col: COLORS.amber, name: activePersonnel.find((u) => u.id === unitBeta)?.full_name || 'Beta' },
-                        ].map(({ col, name }) => (
-                          <div key={name} className="flex items-center gap-2">
-                            <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: col }} />
-                            <span className={`text-xs font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{name}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <Button
-                      onClick={runAudit}
-                      disabled={isAuditing || !unitAlpha || !unitBeta}
-                      className="w-full rounded-xl h-9 text-sm font-semibold"
-                      style={(!unitAlpha || !unitBeta) ? undefined : { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
-                    >
-                      {isAuditing
-                        ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Auditing…</>
-                        : 'Run Comparative Audit'}
-                    </Button>
-                    <AnimatePresence>
-                      {auditInsights.length > 0 && (
-                        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-2">
-                          <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                            AI Insights
-                          </p>
-                          {auditInsights.map((ins, i) => (
-                            <div key={i} className={`p-2.5 rounded-xl border ${ins.bg}`}>
-                              <div className="flex gap-2">
-                                <ins.Icon className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" style={{ color: ins.color }} />
-                                <div>
-                                  <p className="text-[10px] font-bold" style={{ color: ins.color }}>{ins.title}</p>
-                                  <p className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{ins.desc}</p>
-                                </div>
-                              </div>
+                        {/* bar */}
+                        <div className="h-1.5 rounded-full overflow-hidden mb-3" style={{background:dark?'#334155':'#f1f5f9'}}>
+                          <div className="h-full rounded-full transition-all duration-700"
+                            style={{width:`${d.pct}%`,background:bc}}/>
+                        </div>
+                        {/* stats */}
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            {label:'Done',   val:d.done,          color:C.emeraldGreen},
+                            {label:'Pending',val:d.pend,          color:C.amber       },
+                            {label:'Hours',  val:fmtC(d.mins),    color:C.mediumBlue  },
+                          ].map((it,j)=>(
+                            <div key={j} className="rounded-lg p-2 text-center" style={{background:t.card2}}>
+                              <p className="text-[9px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>{it.label}</p>
+                              <p className="text-sm font-black mt-0.5 leading-none" style={{color:it.color}}>{it.val}</p>
                             </div>
                           ))}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between text-xs">
+                          <span style={{color:t.textMute}}>Total assigned</span>
+                          <span className="font-bold" style={{color:t.text}}>{d.total} tasks</span>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              ):<Empty icon={Zap} text="No efficiency data" dark={dark}/>}
+            </Sec>
+
+            {/* comparison bar */}
+            {effCards.length>1&&(
+              <Sec title="Completion Rate Comparison" desc="Side-by-side across team" dark={dark}>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={effCards.slice(0,10).map(d=>({name:d.user_name?.split(' ')[0]||'?',pct:d.pct,done:d.done}))} barSize={24}>
+                    <XAxis dataKey="name" tick={{fontSize:10,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                    <YAxis tick={{fontSize:10,fill:t.textSub}} unit="%" axisLine={false} tickLine={false} domain={[0,100]}/>
+                    <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
+                    <Bar dataKey="pct" name="Completion%" radius={[6,6,0,0]}>
+                      {effCards.slice(0,10).map((d,i)=>(
+                        <Cell key={i} fill={d.pct>=70?C.emeraldGreen:d.pct>=40?C.amber:'#dc2626'}/>
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </Sec>
+            )}
+          </motion.div>
+        )}
+
+        {/* ──────── PERFORMERS ──────── */}
+        {tab==='performers'&&(
+          <motion.div key="pf" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <Sec title={isAdmin?'Star Performers':'Your Rank'} desc="Ranked by overall score" dark={dark}
+                action={isAdmin&&(
+                  <div className="flex gap-1">
+                    {['all','monthly','weekly'].map(p=>(
+                      <button key={p} onClick={()=>setRankPeriod(p)}
+                        className="h-6 px-2.5 text-[10px] font-bold rounded-lg transition-all"
+                        style={rankPeriod===p
+                          ?{background:C.deepBlue,color:'#fff'}
+                          :{background:t.card2,color:t.textSub,border:`1px solid ${t.border}`}}>
+                        {p==='all'?'All Time':p.charAt(0).toUpperCase()+p.slice(1)}
+                      </button>
+                    ))}
                   </div>
-                </SectionCard>
-              </motion.div>
-              <motion.div variants={listItem} className="lg:col-span-2">
-                <SectionCard isDark={isDark}>
-                  <CardHeaderRow
-                    isDark={isDark}
-                    iconBg={isDark ? 'bg-purple-900/40' : 'bg-purple-50'}
-                    icon={<Eye className="h-4 w-4 text-purple-500" />}
-                    title="Performance Vectors"
-                    subtitle="Six-dimensional workforce comparison"
-                  />
-                  {/* FIX: explicit pixel height to prevent ResponsiveContainer measuring -1 */}
-                  <div className="p-4" style={{ height: 440 }}>
-                    <AnimatePresence mode="wait">
-                      {unitAlpha && unitBeta && radarMetrics.length > 0 ? (
-                        <motion.div
-                          key="radar-large"
-                          initial={{ opacity: 0, scale: 0.9 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0 }}
-                          style={{ width: '100%', height: '100%' }}
-                        >
-                          <ResponsiveContainer width="100%" height="100%">
-                            <RadarChart data={radarMetrics} margin={{ top: 20, right: 40, bottom: 20, left: 40 }}>
-                              <PolarGrid stroke={isDark ? '#1e293b' : '#e2e8f0'} strokeWidth={1} />
-                              <PolarAngleAxis
-                                dataKey="metric"
-                                tick={{ fontSize: 12, fill: isDark ? '#94a3b8' : '#475569', fontWeight: 600 }}
-                              />
-                              <PolarRadiusAxis
-                                domain={[0, 100]}
-                                tickCount={5}
-                                tick={{ fontSize: 9, fill: isDark ? '#475569' : '#cbd5e1' }}
-                              />
-                              <Radar
-                                name={activePersonnel.find((u) => u.id === unitAlpha)?.full_name || 'Alpha'}
-                                dataKey="A"
-                                stroke={COLORS.mediumBlue}
-                                fill={COLORS.mediumBlue}
-                                fillOpacity={0.22}
-                                strokeWidth={2.5}
-                              />
-                              <Radar
-                                name={activePersonnel.find((u) => u.id === unitBeta)?.full_name || 'Beta'}
-                                dataKey="B"
-                                stroke={COLORS.amber}
-                                fill={COLORS.amber}
-                                fillOpacity={0.22}
-                                strokeWidth={2.5}
-                              />
-                              <Tooltip
-                                contentStyle={{
-                                  borderRadius: '10px',
-                                  border: 'none',
-                                  fontSize: '11px',
-                                  boxShadow: '0 8px 24px rgba(0,0,0,0.1)',
-                                  backgroundColor: isDark ? '#1e293b' : '#fff',
-                                }}
-                              />
-                              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '12px' }} />
-                            </RadarChart>
-                          </ResponsiveContainer>
-                        </motion.div>
-                      ) : (
-                        <motion.div
-                          key="radar-large-empty"
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          className={`h-full flex flex-col items-center justify-center text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}
-                        >
-                          <Binary className="h-14 w-14 mx-auto mb-4 opacity-25" />
-                          <p className="text-sm font-medium">Select two units to compare performance</p>
-                          <p className={`text-xs mt-1 ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>
-                            Choose Alpha and Beta from the panel on the left
-                          </p>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                )}>
+                {performers.length>0?(
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto" style={{scrollbarWidth:'thin'}}>
+                    {performers.map((m,i)=><PerfRow key={m.user_id||i} m={m} rank={i+1} dark={dark}/>)}
                   </div>
-                </SectionCard>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.div>
-      {/* ── FOOTER HUD ──────────────────────────────────────────────────────── */}
-      <motion.div
-        variants={itemVariants}
-        className={`flex flex-col md:flex-row items-center justify-between gap-4 pt-4 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}
-      >
-        <div className={`flex items-center gap-3 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
-          <span>Telemetry synchronised · {selectedMonth}</span>
-          {attendanceRegister.length > 0 && (
-            <>
-              <span className={isDark ? 'text-slate-700' : 'text-slate-200'}>·</span>
-              <span>{attendanceRegister.length} personnel record{attendanceRegister.length !== 1 ? 's' : ''}</span>
-            </>
-          )}
-        </div>
-        <Button
-          onClick={() => {
-            if (!canDownloadReports) return toast.error('Export privileges restricted.');
-            toast.info('Compiling telemetry report…');
-          }}
-          variant="outline"
-          className={`rounded-xl h-8 text-xs flex items-center gap-2 ${isDark ? 'border-slate-700 text-slate-400 hover:text-slate-200' : 'border-slate-200 text-slate-500'}`}
-        >
-          <FileDown className="h-3.5 w-3.5" />Export Telemetry
-        </Button>
-      </motion.div>
+                ):<Empty icon={Award} text="No performance data" dark={dark}/>}
+              </Sec>
+
+              <Sec title="Top Performer Breakdown" desc={performers[0]?`${performers[0].user_name} — components`:'Score radar'} dark={dark}>
+                {radarData.length>0?(
+                  <ResponsiveContainer width="100%" height={260}>
+                    <RadarChart data={radarData}>
+                      <PolarGrid stroke={dark?'#334155':'#e2e8f0'}/>
+                      <PolarAngleAxis dataKey="metric" tick={{fontSize:10,fill:t.textSub}}/>
+                      <Radar name="Score" dataKey="score" stroke={C.deepBlue} fill={C.deepBlue} fillOpacity={0.18} strokeWidth={2}/>
+                      <Tooltip content={<ChartTip dark={dark}/>}/>
+                    </RadarChart>
+                  </ResponsiveContainer>
+                ):<Empty icon={Star} text="No data" dark={dark}/>}
+              </Sec>
+            </div>
+
+            {performers.length>0&&(
+              <Sec title="Full Score Breakdown" desc="All 5 performance dimensions" dark={dark}>
+                <div className="overflow-x-auto rounded-xl" style={{border:`1px solid ${t.border}`}}>
+                  <table className="w-full text-sm min-w-[700px]">
+                    <thead>
+                      <tr style={{background:t.card2}}>
+                        {['Rank','Employee','Overall','Attendance','Task Done','Punch-In','Todo','Hours','Badge'].map(h=>(
+                          <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider whitespace-nowrap"
+                            style={{color:t.textMute}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {performers.map((m,i)=>{
+                        const sc=m.overall_score>=85?C.emeraldGreen:m.overall_score>=60?C.amber:'#dc2626';
+                        return (
+                          <tr key={m.user_id||i} style={{borderTop:`1px solid ${t.border2}`}}
+                            onMouseEnter={e=>e.currentTarget.style.background=t.hover}
+                            onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                            <td className="px-3 py-2.5 text-sm">
+                              {i===0?'🥇':i===1?'🥈':i===2?'🥉':<span style={{color:t.textMute}}>#{i+1}</span>}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                                  style={{background:`linear-gradient(135deg,${C.deepBlue},${C.mediumBlue})`}}>
+                                  {m.user_name?.charAt(0)?.toUpperCase()||'?'}
+                                </div>
+                                <span className="font-semibold text-xs whitespace-nowrap" style={{color:t.text}}>{m.user_name}</span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <span className="text-base font-black" style={{color:sc}}>{m.overall_score}%</span>
+                            </td>
+                            {[m.attendance_percent,m.task_completion_percent,m.timely_punchin_percent,m.todo_ontime_percent].map((v,j)=>(
+                              <td key={j} className="px-3 py-2.5 text-xs font-semibold" style={{color:t.textSub}}>{v}%</td>
+                            ))}
+                            <td className="px-3 py-2.5 text-xs font-semibold" style={{color:t.textSub}}>{fmtH(m.total_hours)}</td>
+                            <td className="px-3 py-2.5">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
+                                style={m.badge==='Star Performer'?{background:'#fef9c3',color:'#854d0e'}
+                                     :m.badge==='Top Performer' ?{background:'#d1fae5',color:'#065f46'}
+                                     :{background:t.card2,color:t.textSub}}>
+                                {m.badge||'Good Performer'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Sec>
+            )}
+          </motion.div>
+        )}
+
+        {/* ──────── TEAM (admin) ──────── */}
+        {tab==='team'&&isAdmin&&(
+          <motion.div key="tm" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
+            {teamWL.length>0?(
+              <Sec title="Team Workload Distribution"
+                desc="Individual breakdown — live from task assignments" dark={dark}>
+                <div className="overflow-x-auto rounded-xl" style={{border:`1px solid ${t.border}`}}>
+                  <table className="w-full text-sm min-w-[520px]">
+                    <thead>
+                      <tr style={{background:t.card2}}>
+                        {['Employee','Total','Pending','Completed','Progress'].map(h=>(
+                          <th key={h} className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider"
+                            style={{color:t.textMute}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {teamWL.map((m,i)=>{
+                        const pct=m.total_tasks>0?Math.round((m.completed_tasks/m.total_tasks)*100):0;
+                        const bc=pct>=70?C.emeraldGreen:pct>=40?C.amber:'#dc2626';
+                        return (
+                          <tr key={m.user_id||i} style={{borderTop:`1px solid ${t.border2}`}}
+                            onMouseEnter={e=>e.currentTarget.style.background=t.hover}
+                            onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                            <td className="px-5 py-3 font-semibold text-sm" style={{color:t.text}}>{m.user_name}</td>
+                            <td className="px-5 py-3 font-bold" style={{color:C.deepBlue}}>{m.total_tasks}</td>
+                            <td className="px-5 py-3 font-semibold" style={{color:C.amber}}>{m.pending_tasks}</td>
+                            <td className="px-5 py-3 font-semibold" style={{color:C.emeraldGreen}}>{m.completed_tasks}</td>
+                            <td className="px-5 py-3">
+                              <div className="flex items-center gap-3">
+                                <div className="flex-1 h-2 rounded-full overflow-hidden"
+                                  style={{background:dark?'#334155':'#f1f5f9'}}>
+                                  <div className="h-full rounded-full transition-all duration-700"
+                                    style={{width:`${pct}%`,background:bc}}/>
+                                </div>
+                                <span className="text-xs font-bold w-9 text-right" style={{color:t.textSub}}>{pct}%</span>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Sec>
+            ):<Empty icon={Users} text="No team workload data" dark={dark}/>}
+          </motion.div>
+        )}
+
+      </AnimatePresence>
       </React.Fragment>
         );
         return null;
