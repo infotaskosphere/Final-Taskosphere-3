@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import GifLoader, { MiniLoader } from "@/components/ui/GifLoader.jsx";
 import { useDark } from '@/hooks/useDark';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -964,7 +965,7 @@ export default function DocumentRegister() {
                 <p className="text-sm font-semibold text-emerald-700 uppercase tracking-wider">Documents IN — Available ({inDocuments.length})</p>
               </div>
               {loading && inDocuments.length === 0
-                ? <div className="text-center py-12 text-slate-400">Loading…</div>
+                ? <MiniLoader />
                 : inDocuments.length === 0
                   ? <div className={`text-center py-16 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                       <ArrowDownCircle className="h-10 w-10 mx-auto mb-3 opacity-30" />
@@ -987,7 +988,7 @@ export default function DocumentRegister() {
                 <p className="text-sm font-semibold text-red-700 uppercase tracking-wider">Documents OUT — Taken ({outDocuments.length})</p>
               </div>
               {loading && outDocuments.length === 0
-                ? <div className="text-center py-12 text-slate-400">Loading…</div>
+                ? <MiniLoader />
                 : outDocuments.length === 0
                   ? <div className={`text-center py-16 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                       <ArrowUpCircle className="h-10 w-10 mx-auto mb-3 opacity-30" />
