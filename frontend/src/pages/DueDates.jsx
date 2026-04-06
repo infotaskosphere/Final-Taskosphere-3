@@ -526,7 +526,7 @@ export default function DueDates() {
           /* ── BANNER ───────────────────────────────────────────────── */
           if (sectionId === 'banner') return (
             <motion.div key="banner" variants={itemVariants}>
-        <div className="relative overflow-hidden rounded-2xl px-6 py-5"
+        <div className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
           style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: `0 8px 32px rgba(13,59,102,0.28)` }}>
           <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
             style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
