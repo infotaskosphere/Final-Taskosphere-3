@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDark } from '@/hooks/useDark';
+import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
 import axios from 'axios';
