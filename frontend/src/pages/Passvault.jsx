@@ -1,5 +1,6 @@
+
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
+import GifLoader from '@/components/ui/GifLoader.jsx';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -518,7 +519,7 @@ function WAModal({ open, onClose, entry, isDark }) {
               placeholder="+91 9876543210" value={phone} onChange={e => setPhone(e.target.value)} />
           </div>
           {loadPw
-            ? <MiniLoader height={40} />
+            ? <p className="text-xs text-slate-400 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Fetching credentials…</p>
             : pw
               ? <div className={`p-3 rounded-lg text-xs space-y-1 ${isDark ? 'bg-slate-700/50 border border-slate-600' : 'bg-slate-50 border border-slate-200'}`}>
                 <p className={`font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>✓ Credentials ready</p>
@@ -906,7 +907,7 @@ export default function PasswordRepository() {
     <motion.div className="space-y-4" variants={cv} initial="hidden" animate="visible">
       <motion.div variants={iv}>
         <div className="relative overflow-hidden rounded-xl px-4 py-3"
-          style={{ boxShadow: '0 4px 20px rgba(13,59,102,0.25)' }} className="banner-animated">
+          style={{ background: `linear-gradient(135deg,${C.deepBlue} 0%,${C.medBlue} 100%)`, boxShadow: '0 4px 20px rgba(13,59,102,0.25)' }}>
           <div className="absolute right-0 top-0 w-48 h-48 rounded-full -mr-16 -mt-16 opacity-10"
             style={{ background: 'radial-gradient(circle,white 0%,transparent 70%)' }} />
           <div className="relative flex items-center justify-between gap-3 flex-wrap">
