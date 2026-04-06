@@ -173,7 +173,7 @@ const PerfRow = ({ m, rank, dark }) => {
           {m.profile_picture
             ? <img src={m.profile_picture} alt={m.user_name} className="w-full h-full object-cover"/>
             : <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold"
-                style={{background:`linear-gradient(135deg,${C.deepBlue},${C.mediumBlue})`}}>
+                className="banner-animated">
                 {m.user_name?.charAt(0)?.toUpperCase()||'?'}
               </div>}
         </div>
