@@ -747,7 +747,7 @@ export default function DueDates() {
           />
 
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full" style={{minWidth:700}}>
               <thead>
                 <tr className={isDark ? 'bg-slate-800/80' : 'bg-slate-50/80'}>
                   {['Status','Title','Category / Dept','Client','Due Date','Assigned To','Days Left','Actions'].map(h=>(
