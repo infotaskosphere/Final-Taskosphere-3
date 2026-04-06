@@ -431,7 +431,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
 // ═══════════════════════════════════════════════════════════════════════════
 // CLIENT CARD — lifted outside Clients() so it never re-creates on render
 // ═══════════════════════════════════════════════════════════════════════════
-const ModernClientCard = React.memo(({ client, index, isDark, users, getClientAssignments, openWhatsApp, handleEdit, canDeleteData, onDelete, setSelectedClient, setDetailDialogOpen, getClientNumber }) => {
+const ModernClientCard = React.memo(({ onSendBirthdayWish, client, index, isDark, users, getClientAssignments, openWhatsApp, handleEdit, canDeleteData, onDelete, setSelectedClient, setDetailDialogOpen, getClientNumber }) => {
   const cfg = TYPE_CONFIG[client.client_type] || TYPE_CONFIG.proprietor;
   const avatarGrad = getAvatarGradient(client.company_name);
   const isArchived = client.status === 'inactive';
@@ -449,7 +449,7 @@ const ModernClientCard = React.memo(({ client, index, isDark, users, getClientAs
       return worst;
     }, null);
   }, [client.dsc_details]);
-
+  
   const hasBirthdayToday = useMemo(() =>
     client.contact_persons?.some(cp => {
       if (!cp?.birthday) return false;
@@ -573,6 +573,27 @@ const ModernClientCard = React.memo(({ client, index, isDark, users, getClientAs
           onMouseEnter={e => e.currentTarget.style.background = isDark ? 'rgba(59,130,246,0.1)' : '#eff6ff'}
           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
           <Edit style={{ width: 12, height: 12 }} />Edit
+        </button>
+        <button
+          onClick={e => {
+          e.stopPropagation();
+            onSendBirthdayWish(client.id, client.company_name);
+          }}
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 4,
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            color: '#d97706',
+            fontSize: 10,
+            fontWeight: 700,
+          }}
+        >
+          🎂 Wish
         </button>
         {canDeleteData && (
           <button onClick={e => { e.stopPropagation(); onDelete(client); }}
@@ -1063,6 +1084,24 @@ export default function Clients() {
   const canAssignClients  = hasPermission("can_assign_clients");
   const navigate = useNavigate();
   const location = useLocation();
+  const handleSendBirthdayWish = async (clientId, clientName) => {
+  try {
+    const res = await api.post(`/clients/${clientId}/send-birthday-wish`);
+    const { sent_to, failed, no_email } = res.data;
+
+    if (sent_to.length > 0) {
+      toast.success(`Birthday wish sent to ${sent_to.join(', ')}`);
+    }
+    if (failed.length > 0) {
+      toast.error(`Failed to send to: ${failed.join(', ')}`);
+    }
+    if (no_email.length > 0) {
+      toast.warning(`No email found for: ${no_email.join(', ')}`);
+    }
+  } catch (err) {
+    toast.error('Failed to send birthday wish');
+  }
+};
 
   // ── Data state ──────────────────────────────────────────────────────────
   const [clients, setClients] = useState([]);
@@ -2065,6 +2104,11 @@ export default function Clients() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(255px, 1fr))', gap: 10, padding: '10px 10px 4px 10px' }}>
               {boardPageClients.map((client, localIndex) => (
                 <ModernClientCard
+                  client={client}
+                  index={index}
+                  isDark={isDark}
+                  onSendBirthdayWish={handleSendBirthdayWish}
+                  />
                   key={client.id} client={client} index={boardPageStart + localIndex}
                   isDark={isDark} users={users} getClientAssignments={getClientAssignments}
                   openWhatsApp={openWhatsApp} handleEdit={handleEdit}
@@ -2310,6 +2354,17 @@ export default function Clients() {
                   <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-xs" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}><Users className="h-3.5 w-3.5" /></div><h4 className="text-sm font-semibold text-slate-800">Directors / Contact Persons <span className="text-[10px] font-normal text-slate-400">({mdsForm.contact_persons.filter(c => c.name?.trim()).length} parsed)</span></h4></div>
                   <button type="button" onClick={() => setMdsForm(f => ({ ...f, contact_persons: [...f.contact_persons, { name: '', designation: '', email: '', phone: '', birthday: '', din: '' }] }))} className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors"><Plus className="h-3 w-3" /> Add</button>
                 </div>
+                <button
+                  onClick={() => handleSendBirthdayWish(client.id, client.company_name)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all"
+                  style={{
+                    background: 'rgba(251,191,36,0.15)',
+                    borderColor: 'rgba(251,191,36,0.5)',
+                    color: '#92400e',
+                  }}
+                >
+                  🎂 Send Wish
+                </button>
                 <div className="space-y-3">{mdsForm.contact_persons.map((cp, idx) => (
                   <div key={idx} className={`border rounded-xl p-4 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
                     <div className="flex items-center justify-between mb-3">
