@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogFooter, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -130,6 +130,9 @@ function HolderBadge({ holderType }) {
 function ModalHead({ icon, title, sub, grad, onClose }) {
   return (
     <div className="px-5 py-4 flex-shrink-0" style={{ background: grad }}>
+      {/* Hidden but present for screen-reader accessibility — suppresses Radix warnings */}
+      <DialogTitle className="sr-only">{title}</DialogTitle>
+      <DialogDescription className="sr-only">{sub || title}</DialogDescription>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-8 h-8 bg-white/15 rounded-xl flex items-center justify-center flex-shrink-0">{icon}</div>
