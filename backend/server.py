@@ -25,6 +25,7 @@ from backend.leads import router as leads_router
 from backend.telegram import router as telegram_router
 from backend.notifications import router as notification_router, create_notification
 from backend.email_integration import router as email_router
+from backend.attendance_identix import identix_router
 # Gemini AI instance (already configured in email_integration module)
 try:
     from backend.email_integration import _gemini as _gemini_ai
@@ -120,14 +121,17 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://final-taskosphere-frontend.onrender.com",
+        "https://final-taskosphere-frontend-1.onrender.com",
+        "https://final-taskosphere-frontend-2.onrender.com",
         "http://localhost:3000",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
     ],
+    allow_origin_regex=r"https://.*\.onrender\.com",  # covers any onrender subdomain
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With", "*"],
     expose_headers=["*"],
     max_age=3600,
 )
@@ -1375,6 +1379,20 @@ async def update_user(
         await db.users.update_one({"id": user_id}, {"$set": update_payload})
     await create_audit_log(current_user, "UPDATE_USER", "user", user_id, existing, update_payload)
     updated_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+    if not updated_user:
+        raise HTTPException(status_code=404, detail="User not found after update.")
+
+    # Ensure permissions is always a valid dict — a None value causes Pydantic
+    # ResponseValidationError when serialising the User response model.
+    if not updated_user.get("permissions") or not isinstance(updated_user["permissions"], dict):
+        role_val = updated_user.get("role", "staff")
+        updated_user["permissions"] = DEFAULT_ROLE_PERMISSIONS.get(role_val, UserPermissions().model_dump())
+        # Persist the fix so future reads are also clean
+        await db.users.update_one(
+            {"id": user_id},
+            {"$set": {"permissions": updated_user["permissions"]}}
+        )
+
     return updated_user
 
 @api_router.delete("/users/{user_id}")
@@ -5211,20 +5229,54 @@ CORS_HEADERS = {
     "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, X-Requested-With",
 }
 
+ALLOWED_ORIGINS = [
+    "https://final-taskosphere-frontend.onrender.com",
+    "https://final-taskosphere-frontend-1.onrender.com",
+    "https://final-taskosphere-frontend-2.onrender.com",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
+
+def get_cors_origin(origin: str) -> str:
+    """Return the origin to echo back, supporting any onrender.com subdomain."""
+    import re
+    if origin in ALLOWED_ORIGINS:
+        return origin
+    if re.match(r"https://.*\.onrender\.com$", origin):
+        return origin
+    return "https://final-taskosphere-frontend.onrender.com"
+
+
+@app.options("/{rest_of_path:path}")
+async def preflight_handler(request: Request, rest_of_path: str):
+    """
+    Explicit OPTIONS handler — ensures CORS preflight responses are returned
+    immediately, even during Render cold-start before the server is fully awake.
+    Without this, the CORSMiddleware doesn't get a chance to add headers when
+    the server is waking up, causing browser CORS errors.
+    """
+    origin = request.headers.get("origin", "")
+    cors_origin = get_cors_origin(origin)
+    return JSONResponse(
+        content={},
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": cors_origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, X-Requested-With",
+            "Access-Control-Max-Age": "3600",
+        },
+    )
+
 @app.exception_handler(Exception)
 async def universal_exception_handler(request: Request, exc: Exception):
     logger.error(f"Critical Error on {request.url.path}: {str(exc)}")
     logger.error(traceback.format_exc())
-    # Determine the correct origin to echo back (support localhost dev too)
     origin = request.headers.get("origin", "")
-    allowed_origins = [
-        "https://final-taskosphere-frontend.onrender.com",
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-    ]
-    cors_origin = origin if origin in allowed_origins else "https://final-taskosphere-frontend.onrender.com"
+    cors_origin = get_cors_origin(origin)
     headers = {
         "Access-Control-Allow-Origin": cors_origin,
         "Access-Control-Allow-Credentials": "true",
@@ -5251,5 +5303,6 @@ api_router.include_router(telegram_router)
 api_router.include_router(leads_router)
 api_router.include_router(notification_router)
 api_router.include_router(email_router)
+api_router.include_router(identix_router, prefix="/identix")
 app.include_router(google_auth_router)
 app.include_router(api_router)
