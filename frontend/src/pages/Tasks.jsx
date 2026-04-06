@@ -26,7 +26,7 @@ import { GripVertical } from 'lucide-react';
 import {
   Plus, Edit, Trash2, Search, Calendar, Building2, User, Users,
   LayoutGrid, List, Circle, ArrowRight, Check, Repeat, Sparkles,
-  MessageSquare, Bell, FileText, Calendar as CalendarIcon,
+  MessageSquare, Bell, FileText,
   X, ChevronDown, Filter, Clock, AlertCircle, CheckCircle2,
   TrendingUp, MoreHorizontal, Copy, SlidersHorizontal,
   Briefcase, Target, Activity, ChevronRight, Sun,
