@@ -299,6 +299,7 @@ export default function DSCRegister() {
         toast.success('DSC updated successfully!');
       } else {
         await api.post('/dsc', dscData);
+        try { localStorage.removeItem(DSC_DRAFT_KEY); } catch {}
         toast.success('DSC added successfully!');
       }
       setDialogOpen(false);
@@ -416,6 +417,27 @@ export default function DSCRegister() {
     setFormData({ holder_name: '', dsc_type: '', dsc_password: '', associated_with: '', entity_type: 'firm', issue_date: '', expiry_date: '', notes: '' });
     setEditingDSC(null);
   };
+
+  // ── Draft persistence for add-DSC form ───────────────────────────────────
+  const DSC_DRAFT_KEY = 'taskosphere_dsc_add_draft';
+  useEffect(() => {
+    if (dialogOpen && !editingDSC) {
+      try { localStorage.setItem(DSC_DRAFT_KEY, JSON.stringify(formData)); } catch {}
+    }
+  }, [formData, dialogOpen, editingDSC]);
+
+  const openAddDSCDialog = useCallback(() => {
+    setEditingDSC(null);
+    try {
+      const saved = localStorage.getItem(DSC_DRAFT_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.holder_name?.trim()) setFormData(prev => ({ ...prev, ...parsed }));
+        else setFormData({ holder_name: '', dsc_type: '', dsc_password: '', associated_with: '', entity_type: 'firm', issue_date: '', expiry_date: '', notes: '' });
+      }
+    } catch {}
+    setDialogOpen(true);
+  }, []);
 
   // ── Status ────────────────────────────────────────────────────────────────
   const getDSCStatus = (expiryDate) => {
@@ -639,7 +661,7 @@ export default function DSCRegister() {
             </Button>
             <Dialog open={dialogOpen} onOpenChange={open => { setDialogOpen(open); if (!open) resetForm(); }}>
               <DialogTrigger asChild>
-                <Button className="bg-white text-indigo-700 hover:bg-blue-50 font-semibold rounded-xl px-5 shadow-lg transition-all hover:scale-105 active:scale-95" data-testid="add-dsc-btn">
+                <Button onClick={openAddDSCDialog} className="bg-white text-indigo-700 hover:bg-blue-50 font-semibold rounded-xl px-5 shadow-lg transition-all hover:scale-105 active:scale-95" data-testid="add-dsc-btn">
                   <Plus className="mr-2 h-4 w-4" />Add DSC
                 </Button>
               </DialogTrigger>
