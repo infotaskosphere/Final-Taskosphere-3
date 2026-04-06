@@ -1,7 +1,8 @@
+
 import { useDark } from '@/hooks/useDark';
 import LayoutCustomizer from '@/components/layout/LayoutCustomizer';
 import { usePageLayout } from '@/hooks/usePageLayout';
-import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
+import GifLoader from '@/components/ui/GifLoader.jsx';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from 'sonner';
@@ -9,8 +10,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format, isPast, parseISO, isToday, isTomorrow } from 'date-fns';
-import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-
 
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -221,7 +220,8 @@ function PromoteToTaskModal({ todo, isDark, onClose, onConfirm, isLoading, allUs
       >
         {/* Header */}
         <div
-          className="banner-animated relative px-6 py-5 overflow-hidden"
+          className="relative px-6 py-5 overflow-hidden"
+          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, #1a5fa8 100%)` }}
         >
           <div className="absolute right-0 top-0 w-48 h-48 rounded-full -mr-12 -mt-12 opacity-10"
             style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
@@ -540,13 +540,13 @@ function TodoDetailModal({ todo, isDark, onClose, onToggle, onPromote, onDelete,
       >
         {/* Header */}
         <div
-          className={`relative px-6 py-5 overflow-hidden ${!isOverdue && !isCompleted ? 'banner-animated' : ''}`}
+          className="relative px-6 py-5 overflow-hidden"
           style={{
             background: isOverdue && !isCompleted
               ? `linear-gradient(135deg, #B91C1C, #EF4444)`
               : isCompleted
               ? `linear-gradient(135deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`
-              : undefined,
+              : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`,
           }}
         >
           <div className="absolute right-0 top-0 w-40 h-40 rounded-full -mr-10 -mt-10 opacity-10"
@@ -1094,31 +1094,7 @@ export default function TodoDashboard() {
     return list;
   }, [todos, search, todoFilter]);
 
-  // ── DnD ordering for todo list ────────────────────────────────────────
-  const [todoOrder, setTodoOrder] = useState(null);
-  useEffect(() => { setTodoOrder(null); }, [filteredTodos.length, search, todoFilter]);
-
-  const orderedTodos = useMemo(() => {
-    if (!todoOrder) return filteredTodos;
-    const byId = Object.fromEntries(filteredTodos.map(t => [String(t.id || t._id), t]));
-    const ordered = todoOrder.map(id => byId[id]).filter(Boolean);
-    const extras  = filteredTodos.filter(t => !todoOrder.includes(String(t.id || t._id)));
-    return [...ordered, ...extras];
-  }, [filteredTodos, todoOrder]);
-
-  const handleTodoDragEnd = useCallback((result) => {
-    if (!result.destination) return;
-    const from = result.source.index;
-    const to   = result.destination.index;
-    if (from === to) return;
-    setTodoOrder(prev => {
-      const ids = (prev || filteredTodos.map(t => String(t.id || t._id)));
-      const next = [...ids];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
-  }, [filteredTodos]);
+  // ── Filtered log ───────────────────────────────────────────────────────────
   const filteredLog = useMemo(() => {
     let list = todoLog;
     if (logSearch) {
@@ -1669,7 +1645,7 @@ export default function TodoDashboard() {
 
                     <div style={{ maxHeight: 560, overflowY: 'auto' }} className="todo-slim">
                       {isLoading ? (
-                        <MiniLoader height={120} />
+                        <GifLoader />
                       ) : filteredTodos.length === 0 ? (
                         <div className="py-16 flex flex-col items-center gap-3">
                           <div className="w-14 h-14 rounded-2xl flex items-center justify-center bg-slate-100 dark:bg-slate-700">
@@ -1683,52 +1659,20 @@ export default function TodoDashboard() {
                           </p>
                         </div>
                       ) : (
-                        <DragDropContext onDragEnd={handleTodoDragEnd}>
-                          <Droppable droppableId="todo-list">
-                            {(provided, snapshot) => (
-                              <div
-                                ref={provided.innerRef}
-                                {...provided.droppableProps}
-                                className={`space-y-1.5 transition-all rounded-xl ${snapshot.isDraggingOver ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
-                              >
-                                {orderedTodos.map((todo, idx) => (
-                                  <Draggable key={String(todo.id || todo._id)} draggableId={String(todo.id || todo._id)} index={idx}>
-                                    {(dp, ds) => (
-                                      <div
-                                        ref={dp.innerRef}
-                                        {...dp.draggableProps}
-                                        className={`rounded-xl transition-shadow ${ds.isDragging ? 'shadow-xl ring-2 ring-blue-400/30' : ''}`}
-                                        style={dp.draggableProps.style}
-                                      >
-                                        <div className="flex items-stretch gap-1 group">
-                                          <span
-                                            {...dp.dragHandleProps}
-                                            className="flex items-center px-1 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-                                            style={{ touchAction: 'none' }}
-                                          >
-                                            <GripVertical className="h-3.5 w-3.5 text-slate-300" />
-                                          </span>
-                                          <div className="flex-1 min-w-0">
-                                            <TodoItem
-                                              todo={todo}
-                                              onToggle={handleToggle}
-                                              onPromote={handleOpenPromote}
-                                              onDelete={handleDelete}
-                                              showOwner={selectedUser === 'everyone'}
-                                              ownerName={resolveUserName(todo.user_id)}
-                                              onClickDetail={setSelectedTodo}
-                                            />
-                                          </div>
-                                        </div>
-                                      </div>
-                                    )}
-                                  </Draggable>
-                                ))}
-                                {provided.placeholder}
-                              </div>
-                            )}
-                          </Droppable>
-                        </DragDropContext>
+                        <AnimatePresence>
+                          {filteredTodos.map(todo => (
+                            <TodoItem
+                              key={todo.id || todo._id}
+                              todo={todo}
+                              onToggle={handleToggle}
+                              onPromote={handleOpenPromote}
+                              onDelete={handleDelete}
+                              showOwner={selectedUser === 'everyone'}
+                              ownerName={resolveUserName(todo.user_id)}
+                              onClickDetail={setSelectedTodo}
+                            />
+                          ))}
+                        </AnimatePresence>
                       )}
                     </div>
                   </SectionCard>
