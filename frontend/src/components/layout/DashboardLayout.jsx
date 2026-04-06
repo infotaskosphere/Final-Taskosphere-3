@@ -214,7 +214,10 @@ const DashboardLayout = ({ children }) => {
 
   const allNavItems     = NAV_GROUPS.flatMap(g => g.items);
   const visibleNavItems = allNavItems.filter(i => checkNavPermission(i.permission));
-  const activeLabel     = visibleNavItems.find(i => i.path === location.pathname)?.label || 'Dashboard';
+  const activeLabel     = visibleNavItems.find(i =>
+    i.path === location.pathname ||
+    (location.pathname.startsWith(i.path + '/') && i.path !== '/')
+  )?.label || 'Dashboard';
 
   const sidebarPx = collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED;
   const offsetPx  = isDesktop ? sidebarPx : 0;
@@ -222,7 +225,8 @@ const DashboardLayout = ({ children }) => {
   /* ── Nav Item ─────────────────────────────────────────────────────── */
   const NavItem = ({ item }) => {
     if (!checkNavPermission(item.permission)) return null;
-    const isActive = location.pathname === item.path;
+    const isActive = location.pathname === item.path ||
+      (location.pathname.startsWith(item.path + '/') && item.path !== '/');
     const Icon = item.icon;
 
     return (
