@@ -571,15 +571,15 @@ export default function DocumentRegister() {
         <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5"
           style={{ background: 'white' }} />
 
-        <div className="relative px-6 py-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-white/15 backdrop-blur-sm flex items-center justify-center flex-shrink-0 shadow-lg">
-              <FileText className="h-7 w-7 text-white" />
+        <div className="relative px-4 sm:px-6 pt-4 sm:pt-5 pb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/15 backdrop-blur-sm flex items-center justify-center flex-shrink-0 mt-0.5">
+              <FileText className="h-5 w-5 text-white" />
             </div>
             <div>
               <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1">Registers</p>
-              <h1 className="text-3xl font-bold text-white leading-tight">Document Register</h1>
-              <p className="text-white/60 text-sm mt-1">Manage documents with IN/OUT tracking</p>
+              <h1 className="text-2xl font-bold text-white leading-tight">Document Register</h1>
+              <p className="text-white/60 text-sm mt-0.5">Manage documents with IN/OUT tracking</p>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
