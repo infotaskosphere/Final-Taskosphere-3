@@ -1,6 +1,6 @@
 import Papa from 'papaparse/papaparse.js';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import GifLoader from '@/components/ui/GifLoader.jsx';
+import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -1834,8 +1834,7 @@ const handleImport = async () => {
           {/* STEP: IMPORTING */}
           {step === 'importing' && (
             <div className="flex flex-col items-center justify-center py-10 gap-6">
-              <GifLoader />
-              <div className="text-center"><p className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Importing…</p><p className="text-sm text-slate-400 mt-1">Please wait while your data is being imported</p></div>
+              <MiniLoader height={100} />
               <div className="w-full max-w-xs">
                 <div className={`h-3 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
                   <div className="h-full rounded-full transition-all duration-300" style={{ width: `${progress}%`, background: 'linear-gradient(90deg, #065f46, #059669)' }} /></div>
