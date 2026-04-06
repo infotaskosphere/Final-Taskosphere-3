@@ -1,7 +1,7 @@
 import { useDark } from '@/hooks/useDark';
 import LayoutCustomizer from '@/components/layout/LayoutCustomizer';
 import { usePageLayout } from '@/hooks/usePageLayout';
-import GifLoader from '@/components/ui/GifLoader.jsx';
+import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from 'sonner';
@@ -1644,7 +1644,7 @@ export default function TodoDashboard() {
 
                     <div style={{ maxHeight: 560, overflowY: 'auto' }} className="todo-slim">
                       {isLoading ? (
-                        <GifLoader />
+                        <MiniLoader height={120} />
                       ) : filteredTodos.length === 0 ? (
                         <div className="py-16 flex flex-col items-center gap-3">
                           <div className="w-14 h-14 rounded-2xl flex items-center justify-center bg-slate-100 dark:bg-slate-700">
