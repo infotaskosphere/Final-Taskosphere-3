@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import GifLoader, { MiniLoader } from "@/components/ui/GifLoader.jsx";
 import { useDark } from '@/hooks/useDark';
 import { Card, CardContent } from '@/components/ui/card';
@@ -307,6 +307,7 @@ export default function DocumentRegister() {
         toast.success('Document updated successfully!');
       } else {
         await api.post('/documents', documentData);
+        try { localStorage.removeItem(DOCS_DRAFT_KEY); } catch {}
         toast.success('Document added successfully!');
       }
       setDialogOpen(false);
@@ -434,6 +435,27 @@ export default function DocumentRegister() {
     setFormData({ holder_name: '', document_type: 'Agreement', document_password: '', associated_with: '', entity_type: 'firm', issue_date: '', notes: '' });
     setEditingDocument(null);
   };
+
+  // ── Draft persistence for add-document form ───────────────────────────────
+  const DOCS_DRAFT_KEY = 'taskosphere_docs_add_draft';
+  useEffect(() => {
+    if (dialogOpen && !editingDocument) {
+      try { localStorage.setItem(DOCS_DRAFT_KEY, JSON.stringify(formData)); } catch {}
+    }
+  }, [formData, dialogOpen, editingDocument]);
+
+  const openAddDocDialog = useCallback(() => {
+    setEditingDocument(null);
+    try {
+      const saved = localStorage.getItem(DOCS_DRAFT_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.holder_name?.trim()) setFormData(prev => ({ ...prev, ...parsed }));
+        else setFormData({ holder_name: '', document_type: 'Agreement', document_password: '', associated_with: '', entity_type: 'firm', issue_date: '', notes: '' });
+      }
+    } catch {}
+    setDialogOpen(true);
+  }, []);
 
   const getErrorMessage = (error) => {
     const detail = error.response?.data?.detail;
@@ -590,7 +612,7 @@ export default function DocumentRegister() {
             </Button>
             <Dialog open={dialogOpen} onOpenChange={open => { setDialogOpen(open); if (!open) resetForm(); }}>
               <DialogTrigger asChild>
-                <Button className="bg-white text-emerald-700 hover:bg-green-50 font-semibold rounded-xl px-5 shadow-lg transition-all hover:scale-105 active:scale-95" data-testid="add-document-btn">
+                <Button onClick={openAddDocDialog} className="bg-white text-emerald-700 hover:bg-green-50 font-semibold rounded-xl px-5 shadow-lg transition-all hover:scale-105 active:scale-95" data-testid="add-document-btn">
                   <Plus className="mr-2 h-4 w-4" />Add Document
                 </Button>
               </DialogTrigger>
