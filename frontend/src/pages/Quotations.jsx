@@ -561,6 +561,227 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
 // ════════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+// QUOTATION DETAIL PANEL
+// ════════════════════════════════════════════════════════════════════════════
+const QuotationDetailPanel = ({ quotation: q, open, onClose, onEdit, onDelete, isDark, companies, downloading, handleDownload, handleDownloadChecklistPdf, handleConvertToInvoice, convertingId, setEmailModalQuotation, setEmailModalPdfType, setIsEmailModalOpen, setWhatsAppModalQuotation, setWhatsAppModalPdfType, setIsWhatsAppModalOpen }) => {
+  const meta = STATUS_META[q?.status] || STATUS_META.draft;
+  const company = companies?.find(c => c.id === q?.company_id);
+
+  if (!q) return null;
+
+  const surface = isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200';
+  const textPrimary = isDark ? 'text-slate-100' : 'text-slate-900';
+  const textSub = isDark ? 'text-slate-400' : 'text-slate-500';
+  const divider = isDark ? 'border-slate-700' : 'border-slate-100';
+  const cardBg = isDark ? 'bg-slate-700/50' : 'bg-slate-50';
+
+  const items = q.items || [];
+  const scopeItems = Array.isArray(q.scope_of_work) ? q.scope_of_work : (q.scope_of_work ? [q.scope_of_work] : []);
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent
+        hideClose
+        className={`max-w-3xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${surface}`}
+      >
+        <DialogTitle className="sr-only">Quotation Detail</DialogTitle>
+        <DialogDescription className="sr-only">Full quotation details</DialogDescription>
+
+        {/* HEADER */}
+        <div className="px-7 py-5 relative overflow-hidden flex-shrink-0"
+          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+          <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
+            style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+          <div className="relative flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
+                <FileText className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                  <p className="text-white font-bold text-lg">{q.quotation_no}</p>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${meta.bg} ${meta.text}`}>{meta.label}</span>
+                </div>
+                <p className="text-white/70 text-sm">{q.client_name}</p>
+                <p className="text-white/50 text-xs mt-0.5">{q.date} · Valid {q.validity_days || 30} days · {q.service}</p>
+              </div>
+            </div>
+            <button onClick={onClose}
+              className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center flex-shrink-0 transition-colors">
+              <X className="w-4 h-4 text-white" />
+            </button>
+          </div>
+        </div>
+
+        {/* BODY */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="p-6 space-y-5">
+
+            {/* Summary cards */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className={`rounded-xl p-4 border ${cardBg} ${divider}`}>
+                <p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${textSub}`}>Total Amount</p>
+                <p className={`text-xl font-black text-emerald-600 dark:text-emerald-400`}>{fmtC(q.total || 0)}</p>
+              </div>
+              <div className={`rounded-xl p-4 border ${cardBg} ${divider}`}>
+                <p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${textSub}`}>GST Rate</p>
+                <p className={`text-xl font-black ${textPrimary}`}>{q.gst_rate ?? 18}%</p>
+              </div>
+              <div className={`rounded-xl p-4 border ${cardBg} ${divider}`}>
+                <p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${textSub}`}>Status</p>
+                <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full ${meta.bg} ${meta.text}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />{meta.label}
+                </span>
+              </div>
+            </div>
+
+            {/* Client info */}
+            <div className={`rounded-xl border p-4 ${cardBg} ${divider}`}>
+              <p className={`text-[10px] font-bold uppercase tracking-widest mb-3 ${textSub}`}>Client Information</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className={`text-xs ${textSub}`}>Name</p>
+                  <p className={`text-sm font-semibold ${textPrimary}`}>{q.client_name || '—'}</p>
+                </div>
+                {q.client_email && <div>
+                  <p className={`text-xs ${textSub}`}>Email</p>
+                  <p className={`text-sm font-semibold ${textPrimary}`}>{q.client_email}</p>
+                </div>}
+                {q.client_phone && <div>
+                  <p className={`text-xs ${textSub}`}>Phone</p>
+                  <p className={`text-sm font-semibold ${textPrimary}`}>{q.client_phone}</p>
+                </div>}
+                {q.client_address && <div className="col-span-2">
+                  <p className={`text-xs ${textSub}`}>Address</p>
+                  <p className={`text-sm font-semibold ${textPrimary}`}>{q.client_address}</p>
+                </div>}
+                {company && <div>
+                  <p className={`text-xs ${textSub}`}>Our Company</p>
+                  <p className={`text-sm font-semibold ${textPrimary}`}>{company.name}</p>
+                </div>}
+              </div>
+            </div>
+
+            {/* Line items */}
+            {items.length > 0 && (
+              <div className={`rounded-xl border overflow-hidden ${divider}`}>
+                <div className={`px-5 py-3 border-b ${cardBg} ${divider}`}>
+                  <p className={`text-xs font-bold uppercase tracking-widest ${textSub}`}>Line Items ({items.length})</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'bg-slate-50/60 border-slate-100'}`}>
+                        {['#', 'Description', 'Qty', 'Unit', 'Rate', 'Amount'].map(h => (
+                          <th key={h} className={`px-4 py-2 text-left text-[10px] font-bold uppercase tracking-wider ${textSub}`}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((item, i) => (
+                        <tr key={i} className={`border-b last:border-0 ${isDark ? 'border-slate-700' : 'border-slate-50'}`}>
+                          <td className={`px-4 py-3 text-xs font-bold ${textSub}`}>{i + 1}</td>
+                          <td className={`px-4 py-3 text-sm ${textPrimary}`}>{item.description || '—'}</td>
+                          <td className={`px-4 py-3 text-sm ${textPrimary}`}>{item.quantity}</td>
+                          <td className={`px-4 py-3 text-xs ${textSub}`}>{item.unit || 'service'}</td>
+                          <td className={`px-4 py-3 text-sm ${textPrimary}`}>{fmtC(item.unit_price || 0)}</td>
+                          <td className={`px-4 py-3 text-sm font-semibold text-emerald-600 dark:text-emerald-400`}>{fmtC(item.amount || (item.unit_price * item.quantity) || 0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className={`flex justify-end px-5 py-3 border-t ${divider} gap-6`}>
+                  <span className={`text-xs ${textSub}`}>Total</span>
+                  <span className={`text-sm font-black text-emerald-600 dark:text-emerald-400`}>{fmtC(q.total || 0)}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Scope of work */}
+            {scopeItems.filter(Boolean).length > 0 && (
+              <div className={`rounded-xl border p-4 ${cardBg} ${divider}`}>
+                <p className={`text-[10px] font-bold uppercase tracking-widest mb-3 ${textSub}`}>Scope of Work</p>
+                <ul className="space-y-1.5">
+                  {scopeItems.filter(Boolean).map((s, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <Check className="h-3.5 w-3.5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                      <span className={`text-sm ${textPrimary}`}>{s}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Terms grid */}
+            {(q.payment_terms || q.timeline || q.advance_terms || q.notes) && (
+              <div className="grid grid-cols-2 gap-3">
+                {q.payment_terms && (
+                  <div className={`rounded-xl border p-4 ${cardBg} ${divider}`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 ${textSub}`}>Payment Terms</p>
+                    <p className={`text-sm ${textPrimary}`}>{q.payment_terms}</p>
+                  </div>
+                )}
+                {q.timeline && (
+                  <div className={`rounded-xl border p-4 ${cardBg} ${divider}`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 ${textSub}`}>Timeline</p>
+                    <p className={`text-sm ${textPrimary}`}>{q.timeline}</p>
+                  </div>
+                )}
+                {q.advance_terms && (
+                  <div className={`rounded-xl border p-4 ${cardBg} ${divider}`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 ${textSub}`}>Advance Terms</p>
+                    <p className={`text-sm ${textPrimary}`}>{q.advance_terms}</p>
+                  </div>
+                )}
+                {q.notes && (
+                  <div className={`rounded-xl border p-4 ${cardBg} ${divider} col-span-2`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 ${textSub}`}>Notes</p>
+                    <p className={`text-sm ${textPrimary}`}>{q.notes}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* FOOTER ACTIONS */}
+        <div className={`flex-shrink-0 border-t ${divider} px-6 py-4 flex items-center gap-2 flex-wrap ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+          <Button size="sm" variant="outline" onClick={() => { onEdit(q); onClose(); }}
+            className="h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold">
+            <Edit className="h-3.5 w-3.5" /> Edit
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => handleDownload(q.id, q.quotation_no)} disabled={downloading === q.id}
+            className="h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold">
+            {downloading === q.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} PDF
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no)} disabled={downloading === q.id + '-checklist'}
+            className="h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold">
+            {downloading === q.id + '-checklist' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCheck className="h-3.5 w-3.5" />} Checklist
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => { setEmailModalQuotation(q); setEmailModalPdfType('quotation'); setIsEmailModalOpen(true); onClose(); }}
+            className="h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold">
+            <Mail className="h-3.5 w-3.5" /> Email
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => { setWhatsAppModalQuotation(q); setWhatsAppModalPdfType('quotation'); setIsWhatsAppModalOpen(true); onClose(); }}
+            className="h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold text-green-600 border-green-200 hover:bg-green-50">
+            <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
+          </Button>
+          <Button size="sm" onClick={() => { handleConvertToInvoice(q.id); onClose(); }} disabled={convertingId === q.id}
+            className="h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white ml-auto">
+            {convertingId === q.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />} Convert to Invoice
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => { if (window.confirm('Delete this quotation?')) { onDelete(q.id); onClose(); } }}
+            className="h-9 px-3 rounded-xl text-xs text-red-500 hover:bg-red-50">
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 export default function Quotations() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -589,6 +810,8 @@ export default function Quotations() {
   const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
   const [whatsAppModalQuotation, setWhatsAppModalQuotation] = useState(null);
   const [whatsAppModalPdfType, setWhatsAppModalPdfType] = useState('quotation');
+  const [detailQuotation, setDetailQuotation] = useState(null);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
 
   // ── Debounce search ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -868,7 +1091,8 @@ export default function Quotations() {
                 <AnimatePresence>
                   {filtered.map((q, idx) => (
                     <motion.tr key={q.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ delay: idx * 0.02 }}
-                      className={`border-b last:border-0 transition-colors ${isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50/80'}`}>
+                      className={`border-b last:border-0 transition-colors cursor-pointer ${isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50/80'}`}
+                      onClick={() => { setDetailQuotation(q); setIsDetailOpen(true); }}>
                       <td className="px-4 py-3.5">
                         <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{q.quotation_no}</p>
                         <p className="text-[10px] text-slate-400 mt-0.5">Valid {q.validity_days}d</p>
@@ -900,7 +1124,7 @@ export default function Quotations() {
                           <SelectContent>{Object.entries(STATUS_META).map(([k,v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
                         </Select>
                       </td>
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1 flex-wrap">
                           <QuotationActions q={q} compact />
                           <Button variant="outline" size="sm" onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no)} disabled={downloading === q.id + '-checklist'} className="h-7 px-2 rounded-lg gap-1 text-xs text-slate-600 border-slate-200 hover:bg-slate-50">
@@ -1042,6 +1266,28 @@ export default function Quotations() {
       <CompanyListModal open={isCompanyListOpen} onClose={() => setIsCompanyListOpen(false)} onRefresh={fetchMeta} />
       {isEmailModalOpen && <EmailModal open={isEmailModalOpen} onClose={() => setIsEmailModalOpen(false)} quotation={emailModalQuotation} company={getCompany(emailModalQuotation?.company_id)} pdfType={emailModalPdfType} />}
       {isWhatsAppModalOpen && <WhatsAppModal open={isWhatsAppModalOpen} onClose={() => setIsWhatsAppModalOpen(false)} quotation={whatsAppModalQuotation} company={getCompany(whatsAppModalQuotation?.company_id)} pdfType={whatsAppModalPdfType} />}
+      {detailQuotation && (
+        <QuotationDetailPanel
+          quotation={detailQuotation}
+          open={isDetailOpen}
+          onClose={() => setIsDetailOpen(false)}
+          onEdit={(q) => { setEditingQuotation(q); setIsManagerOpen(true); }}
+          onDelete={handleDelete}
+          isDark={isDark}
+          companies={companies}
+          downloading={downloading}
+          handleDownload={handleDownloadPdf}
+          handleDownloadChecklistPdf={handleDownloadChecklistPdf}
+          handleConvertToInvoice={handleConvertToInvoice}
+          convertingId={convertingId}
+          setEmailModalQuotation={setEmailModalQuotation}
+          setEmailModalPdfType={setEmailModalPdfType}
+          setIsEmailModalOpen={setIsEmailModalOpen}
+          setWhatsAppModalQuotation={setWhatsAppModalQuotation}
+          setWhatsAppModalPdfType={setWhatsAppModalPdfType}
+          setIsWhatsAppModalOpen={setIsWhatsAppModalOpen}
+        />
+      )}
     </div>
   );
 }
