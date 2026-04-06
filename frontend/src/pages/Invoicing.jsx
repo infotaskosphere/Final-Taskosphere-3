@@ -1,7 +1,6 @@
-
 import Papa from 'papaparse/papaparse.js';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import GifLoader from '@/components/ui/GifLoader.jsx';
+import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -151,6 +150,25 @@ const avatarGrad = (name = '') => {
   const i = (name.charCodeAt(0) || 0) % AVATAR_GRADS.length;
   return `linear-gradient(135deg, ${AVATAR_GRADS[i][0]}, ${AVATAR_GRADS[i][1]})`;
 };
+// ─── Invoice age-based colour strip ─────────────────────────────────────────
+// green = paid / fully-received
+// orange = outstanding 15-30 days since invoice date
+// red = outstanding > 30 days since invoice date OR past due date
+const getInvoiceStripe = (inv) => {
+  if (inv.status === 'paid' || inv.amount_due <= 0) return { color: '#1FAF5A', label: 'Paid' };
+  if (inv.status === 'cancelled') return { color: '#94A3B8', label: 'Cancelled' };
+  const today = new Date();
+  const invoiceDate = inv.invoice_date ? new Date(inv.invoice_date) : null;
+  const dueDate = inv.due_date ? new Date(inv.due_date) : null;
+  // If past due date → red
+  if (dueDate && differenceInDays(today, dueDate) > 0) return { color: '#FF6B6B', label: 'Overdue' };
+  // Days since invoice was created
+  const daysSince = invoiceDate ? differenceInDays(today, invoiceDate) : 0;
+  if (daysSince > 30) return { color: '#FF6B6B', label: '>30 days' };
+  if (daysSince > 15) return { color: '#F59E0B', label: '>15 days' };
+  return { color: '#1F6FB2', label: 'Recent' };
+};
+
 const Hl = ({ text = '', query = '' }) => {
   if (!query.trim()) return <>{text}</>;
   const idx = text.toLowerCase().indexOf(query.toLowerCase());
@@ -1835,8 +1853,7 @@ const handleImport = async () => {
           {/* STEP: IMPORTING */}
           {step === 'importing' && (
             <div className="flex flex-col items-center justify-center py-10 gap-6">
-              <GifLoader />
-              <div className="text-center"><p className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Importing…</p><p className="text-sm text-slate-400 mt-1">Please wait while your data is being imported</p></div>
+              <MiniLoader height={100} />
               <div className="w-full max-w-xs">
                 <div className={`h-3 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
                   <div className="h-full rounded-full transition-all duration-300" style={{ width: `${progress}%`, background: 'linear-gradient(90deg, #065f46, #059669)' }} /></div>
@@ -2353,6 +2370,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   const previewRef = useRef(null);
 
   // ── useEffect ──
+  const INV_DRAFT_KEY = 'taskosphere_invoice_add_draft';
   useEffect(() => {
     if (open) {
       if (editingInv) {
@@ -2363,11 +2381,27 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
           due_date: (editingInv.due_date || '').slice(0, 10) || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
         });
       } else {
-        setForm(defaultForm);
+        // Restore draft if available
+        try {
+          const saved = localStorage.getItem(INV_DRAFT_KEY);
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed?.client_name?.trim() || parsed?.items?.length > 1) {
+              setForm(prev => ({ ...defaultForm, ...parsed }));
+            } else { setForm(defaultForm); }
+          } else { setForm(defaultForm); }
+        } catch { setForm(defaultForm); }
       }
       setActiveTab('details');
     }
   }, [open, editingInv]);
+
+  // Save draft when form changes in add mode
+  useEffect(() => {
+    if (open && !editingInv) {
+      try { localStorage.setItem(INV_DRAFT_KEY, JSON.stringify(form)); } catch {}
+    }
+  }, [form, open, editingInv]);
 
   useEffect(() => { api.get('/products').then(r => setProducts(r.data || [])).catch(() => {}); }, []);
 
@@ -2429,7 +2463,10 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     try {
       const payload = { ...form, ...totals };
       if (editingInv) await api.put(`/invoices/${editingInv.id}`, payload);
-      else await api.post('/invoices', payload);
+      else {
+        await api.post('/invoices', payload);
+        try { localStorage.removeItem(INV_DRAFT_KEY); } catch {}
+      }
       toast.success(editingInv ? 'Invoice updated successfully' : 'Invoice created successfully');
       saveItemMemory(form.items);
       onSuccess?.();
@@ -2813,6 +2850,7 @@ const InvoiceDetailPanel = ({
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent
+        hideClose
         className={`max-w-2xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${
           isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
         }`}
@@ -3205,6 +3243,16 @@ function Invoicing() {
     [enrichedFiltered]
   );
 
+  // ── Split invoices into Received and Outstanding sections ─────────────────
+  const receivedInvoices = useMemo(() =>
+    enrichedFiltered.filter(inv => inv.status === 'paid' || (inv.amount_due <= 0 && inv.status !== 'draft' && inv.status !== 'cancelled')),
+    [enrichedFiltered]
+  );
+  const outstandingInvoices = useMemo(() =>
+    enrichedFiltered.filter(inv => inv.status !== 'paid' && (inv.amount_due > 0 || inv.status === 'draft' || inv.status === 'cancelled')),
+    [enrichedFiltered]
+  );
+
   // ── G. ALL useCallback (AFTER ALL MEMOS) ─────────────────────────────────
 
   const toggleSelect = useCallback((id) => {
@@ -3437,7 +3485,7 @@ const fetchAll = useCallback(async () => {
         )}
       </div>
 
-      {/* INVOICE LIST */}
+      {/* INVOICE LIST — split into Outstanding and Received */}
       {loading ? (
         <GifLoader />
       ) : enrichedFiltered.length === 0 ? (
@@ -3454,86 +3502,176 @@ const fetchAll = useCallback(async () => {
           </Button>
         </div>
       ) : (
-        <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <div className="overflow-x-auto">
-            <table className="w-full" style={{minWidth:700}}>
-              <thead>
-                <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
-                  <th className="px-4 py-3 w-10">
-                    <input type="checkbox" checked={selectedIds.size === enrichedFiltered.length && enrichedFiltered.length > 0} onChange={toggleSelectAll}
-                      className="rounded border-slate-300 text-blue-600" />
-                  </th>
-                  {['Invoice', 'Client', 'Date', 'Type', 'Amount', 'Status', 'Actions'].map(h => (
-                    <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedFiltered.map(inv => {
-                  const meta = getStatusMeta(inv);
-                  const isSelected = selectedIds.has(inv.id);
-                  return (
-                    <tr key={inv.id}
-                      className={`border-b last:border-0 transition-colors cursor-pointer ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
-                      onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
-                      <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
-                        <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.id)} className="rounded border-slate-300 text-blue-600" />
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                          <Hl text={inv.invoice_no || '—'} query={searchTerm} />
-                        </p>
-                        {inv.reference_no && <p className="text-[10px] text-slate-400 mt-0.5">Ref: {inv.reference_no}</p>}
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                            style={{ background: avatarGrad(inv.client_name) }}>
-                            {(inv.client_name || '?').charAt(0).toUpperCase()}
-                          </div>
-                          <div className="min-w-0">
-                            <p className={`text-sm font-medium truncate max-w-[180px] ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-                              <Hl text={inv.client_name || '—'} query={searchTerm} />
-                            </p>
-                            {inv.client_gstin && <p className="text-[10px] text-slate-400 font-mono truncate">{inv.client_gstin}</p>}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{inv.invoice_date}</p>
-                        {inv.due_date && <p className="text-[10px] text-slate-400">Due: {inv.due_date}</p>}
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
-                          {INV_TYPES.find(t => t.value === inv.invoice_type)?.label || inv.invoice_type}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(inv.grand_total)}</p>
-                        {inv.amount_due > 0 && <p className="text-[10px] text-amber-500">Due: {fmtC(inv.amount_due)}</p>}
-                      </td>
-                      <td className="px-4 py-3.5"><StatusPill inv={inv} /></td>
-                      <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => { setEditingInv(inv); setFormOpen(true); }} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}><Edit className="h-3.5 w-3.5" /></button>
-                          <button onClick={() => handleDownloadPdf(inv)} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}><Download className="h-3.5 w-3.5" /></button>
-                          <button onClick={() => handleDelete(inv)} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}><Trash2 className="h-3.5 w-3.5" /></button>
-                        </div>
-                      </td>
+        <div className="space-y-4">
+          {/* ── OUTSTANDING SECTION ───────────────────────────── */}
+          {outstandingInvoices.length > 0 && (
+            <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              {/* Section header */}
+              <div className={`flex items-center gap-3 px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-700/30' : 'border-slate-100 bg-amber-50/60'}`}>
+                <div className="w-2 h-6 rounded-full" style={{ background: 'linear-gradient(180deg, #FF6B6B, #F59E0B)' }} />
+                <AlertCircle className="h-4 w-4 text-amber-500" />
+                <span className={`text-sm font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Outstanding</span>
+                <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${isDark ? 'bg-amber-900/40 text-amber-300' : 'bg-amber-100 text-amber-700'}`}>{outstandingInvoices.length}</span>
+                <span className={`ml-auto text-xs font-bold ${isDark ? 'text-red-400' : 'text-red-600'}`}>
+                  {fmtC(outstandingInvoices.reduce((s, i) => s + (i.amount_due || 0), 0))} due
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full" style={{minWidth:700}}>
+                  <thead>
+                    <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
+                      <th className="w-[5px]" />
+                      <th className="px-4 py-3 w-10" />
+                      {['Invoice', 'Client', 'Date', 'Type', 'Amount', 'Status', 'Actions'].map(h => (
+                        <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
+                      ))}
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          {totalListPages > 1 && (
-            <div className={`flex items-center justify-between px-4 py-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-              <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                Page {listPage} of {totalListPages} · {enrichedFiltered.length} invoices
-              </span>
-              <div className="flex gap-1">
-                <Button variant="outline" size="sm" disabled={listPage === 1} onClick={() => setListPage(p => p - 1)} className="h-8 px-3 text-xs rounded-xl">Prev</Button>
-                <Button variant="outline" size="sm" disabled={listPage === totalListPages} onClick={() => setListPage(p => p + 1)} className="h-8 px-3 text-xs rounded-xl">Next</Button>
+                  </thead>
+                  <tbody>
+                    {outstandingInvoices.map(inv => {
+                      const stripe = getInvoiceStripe(inv);
+                      const isSelected = selectedIds.has(inv.id);
+                      return (
+                        <tr key={inv.id}
+                          className={`border-b last:border-0 transition-colors cursor-pointer relative ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
+                          onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
+                          {/* Colour strip — identical to Tasks page left stripe */}
+                          <td className="p-0 w-[5px]">
+                            <div className="w-[5px] h-full min-h-[54px] rounded-sm" style={{ backgroundColor: stripe.color }} />
+                          </td>
+                          <td className="px-4 py-3.5 w-10" />
+                          <td className="px-4 py-3.5">
+                            <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                              <Hl text={inv.invoice_no || '—'} query={searchTerm} />
+                            </p>
+                            {inv.reference_no && <p className="text-[10px] text-slate-400 mt-0.5">Ref: {inv.reference_no}</p>}
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                                style={{ background: avatarGrad(inv.client_name) }}>
+                                {(inv.client_name || '?').charAt(0).toUpperCase()}
+                              </div>
+                              <div className="min-w-0">
+                                <p className={`text-sm font-medium truncate max-w-[180px] ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                                  <Hl text={inv.client_name || '—'} query={searchTerm} />
+                                </p>
+                                {inv.client_gstin && <p className="text-[10px] text-slate-400 font-mono truncate">{inv.client_gstin}</p>}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{inv.invoice_date}</p>
+                            {inv.due_date && <p className="text-[10px] text-slate-400">Due: {inv.due_date}</p>}
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                              {INV_TYPES.find(t => t.value === inv.invoice_type)?.label || inv.invoice_type}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(inv.grand_total)}</p>
+                            {inv.amount_due > 0 && <p className="text-[10px] font-semibold mt-0.5" style={{ color: stripe.color }}>Due: {fmtC(inv.amount_due)}</p>}
+                          </td>
+                          <td className="px-4 py-3.5"><StatusPill inv={inv} /></td>
+                          <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => { setEditingInv(inv); setFormOpen(true); }} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}><Edit className="h-3.5 w-3.5" /></button>
+                              <button onClick={() => handleDownloadPdf(inv)} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}><Download className="h-3.5 w-3.5" /></button>
+                              <button onClick={() => handleDelete(inv)} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ── RECEIVED SECTION ──────────────────────────────── */}
+          {receivedInvoices.length > 0 && (
+            <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              {/* Section header */}
+              <div className={`flex items-center gap-3 px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-700/30' : 'border-slate-100 bg-emerald-50/60'}`}>
+                <div className="w-2 h-6 rounded-full bg-emerald-500" />
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                <span className={`text-sm font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Received</span>
+                <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${isDark ? 'bg-emerald-900/40 text-emerald-300' : 'bg-emerald-100 text-emerald-700'}`}>{receivedInvoices.length}</span>
+                <span className={`ml-auto text-xs font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                  {fmtC(receivedInvoices.reduce((s, i) => s + (i.grand_total || 0), 0))} collected
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full" style={{minWidth:700}}>
+                  <thead>
+                    <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
+                      <th className="w-[5px]" />
+                      <th className="px-4 py-3 w-10" />
+                      {['Invoice', 'Client', 'Date', 'Type', 'Amount', 'Status', 'Actions'].map(h => (
+                        <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {receivedInvoices.map(inv => {
+                      const isSelected = selectedIds.has(inv.id);
+                      return (
+                        <tr key={inv.id}
+                          className={`border-b last:border-0 transition-colors cursor-pointer ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
+                          onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
+                          {/* Green strip for paid invoices */}
+                          <td className="p-0 w-[5px]">
+                            <div className="w-[5px] h-full min-h-[54px] rounded-sm bg-emerald-500" />
+                          </td>
+                          <td className="px-4 py-3.5 w-10" />
+                          <td className="px-4 py-3.5">
+                            <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                              <Hl text={inv.invoice_no || '—'} query={searchTerm} />
+                            </p>
+                            {inv.reference_no && <p className="text-[10px] text-slate-400 mt-0.5">Ref: {inv.reference_no}</p>}
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                                style={{ background: avatarGrad(inv.client_name) }}>
+                                {(inv.client_name || '?').charAt(0).toUpperCase()}
+                              </div>
+                              <div className="min-w-0">
+                                <p className={`text-sm font-medium truncate max-w-[180px] ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                                  <Hl text={inv.client_name || '—'} query={searchTerm} />
+                                </p>
+                                {inv.client_gstin && <p className="text-[10px] text-slate-400 font-mono truncate">{inv.client_gstin}</p>}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{inv.invoice_date}</p>
+                            {inv.due_date && <p className="text-[10px] text-slate-400">Due: {inv.due_date}</p>}
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                              {INV_TYPES.find(t => t.value === inv.invoice_type)?.label || inv.invoice_type}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(inv.grand_total)}</p>
+                            <p className="text-[10px] text-emerald-500 font-semibold mt-0.5">Paid in full</p>
+                          </td>
+                          <td className="px-4 py-3.5"><StatusPill inv={inv} /></td>
+                          <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => { setEditingInv(inv); setFormOpen(true); }} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}><Edit className="h-3.5 w-3.5" /></button>
+                              <button onClick={() => handleDownloadPdf(inv)} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}><Download className="h-3.5 w-3.5" /></button>
+                              <button onClick={() => handleDelete(inv)} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
