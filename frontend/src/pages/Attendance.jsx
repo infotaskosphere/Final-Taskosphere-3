@@ -1388,9 +1388,10 @@ export default function Attendance() {
       const { ok, location } = await checkGeofence();
 
       // For punch-in: enforce geo-fence
-      if (action === 'punch_in' && !ok) {
+      if (action === 'punch_in' && !ok && userLocation !== null) {
+        // Only block if we DID get a location but it's outside fence
         setLoading(false);
-        return; // geoError is already set — modal will show it
+        return;
       }
 
       const response = await api.post('/attendance', { action, location });
