@@ -924,7 +924,7 @@ export default function StaffActivity() {
       <React.Fragment key="activity_tabs">
       {/* ── TABS ──────────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
-        <div className={`inline-flex gap-0.5 rounded-xl p-1 mb-4 ${isDark ? 'bg-slate-800 border border-slate-700' : 'bg-white border border-slate-200/80 shadow-sm'}`}>
+        <div className={`inline-flex gap-0.5 rounded-xl p-1 mb-4 overflow-x-auto ${isDark ? 'bg-slate-800 border border-slate-700' : 'bg-white border border-slate-200/80 shadow-sm'}`}>
           {TABS.map(({ value, label, Icon }) => (
             <button
               key={value}
