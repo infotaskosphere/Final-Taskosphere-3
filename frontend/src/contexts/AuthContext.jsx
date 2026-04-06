@@ -56,17 +56,20 @@ export const AuthProvider = ({ children }) => {
   };
 
   /* ============================================================
-  Auto-logout: 10-hour inactivity + logout on tab/browser close
+  Auto-logout: 20-minute inactivity + logout on tab/browser CLOSE
+  (NOT on hard refresh — hard refresh is a reload, not a close)
   ============================================================ */
 
   const INACTIVITY_LIMIT_MS = 20 * 60 * 1000; // 20 minutes
   const LAST_ACTIVE_KEY = 'taskosphere_last_active';
 
   useEffect(() => {
-    // On tab/browser close — clear auth so user must re-login
+    // On tab/browser close — mark a flag so next open forces re-login.
+    // NOTE: beforeunload fires for BOTH tab close AND hard refresh.
+    // We only want to honour the flag when the cause was an actual close,
+    // NOT a reload.  We record the navigation type at mount time (before any
+    // unload) so restoreSession can read it.
     const handleBeforeUnload = () => {
-      // If using sessionStorage (no rememberMe), it clears automatically.
-      // For localStorage users, we mark a "closed" flag so next open forces login.
       if (localStorage.getItem('token')) {
         localStorage.setItem('taskosphere_tab_closed', Date.now().toString());
       }
@@ -115,13 +118,30 @@ export const AuthProvider = ({ children }) => {
         return;
       }
 
-      // If user closed the browser/tab while using localStorage session → force re-login
+      // Detect whether this page load is a RELOAD (hard refresh / F5) or a
+      // genuine new navigation.  The Performance Navigation API is the most
+      // reliable cross-browser way to do this.
+      const navType =
+        window.performance?.getEntriesByType?.('navigation')?.[0]?.type  // modern
+        ?? (window.performance?.navigation?.type === 1 ? 'reload' : 'navigate'); // legacy
+
+      const isReload = navType === 'reload';
+
+      // Only honour the tab-closed flag when the page is NOT being reloaded.
+      // Hard refresh sets the flag via beforeunload but immediately reloads —
+      // without this guard it causes a spurious logout on every Ctrl+F5 / ⌘⇧R.
       const tabClosedAt = localStorage.getItem('taskosphere_tab_closed');
       if (tabClosedAt && localStorage.getItem('token')) {
+        // Always remove the stale flag first
         localStorage.removeItem('taskosphere_tab_closed');
-        clearStorage();
-        setLoading(false);
-        return;
+
+        if (!isReload) {
+          // Genuine close → force re-login
+          clearStorage();
+          setLoading(false);
+          return;
+        }
+        // It was a hard refresh → keep the session, just discard the flag
       }
 
       try {
