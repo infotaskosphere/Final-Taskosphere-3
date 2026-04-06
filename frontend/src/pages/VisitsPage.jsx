@@ -487,7 +487,7 @@ function VisitCard({ v, onClick, onEdit, currentUser, selected, onSelectToggle, 
 
           {/* Right action cluster */}
           {!selectionMode && (
-            <div className="flex items-center gap-1.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-1 flex-shrink-0 flex-wrap justify-end max-w-[40%]" onClick={e => e.stopPropagation()}>
               <PriorityDot priority={v.priority} />
               <Avatar src={v.assigned_to_picture} name={v.assigned_to_name} size={6} />
               <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
