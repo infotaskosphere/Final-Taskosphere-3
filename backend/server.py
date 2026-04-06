@@ -17,6 +17,7 @@ from datetime import datetime, date, timezone, timedelta
 # --- FIXED ROUTER IMPORTS ---
 # Added 'backend.' to invoicing to match the others
 from backend.quotations import router as quotation_router
+from backend.attendance_identix import identix_router
 from backend.google_auth import router as google_auth_router
 from backend.website_tracking import router as website_tracking_router
 from backend.invoicing import router as invoicing_router
@@ -5317,6 +5318,7 @@ async def universal_exception_handler(request: Request, exc: Exception):
 
 # Api Router
 api_router.include_router(invoicing_router)
+api_router.include_router(identix_router, prefix="/identix")
 api_router.include_router(passwords_router)
 api_router.include_router(visits_router)
 api_router.include_router(website_tracking_router)
