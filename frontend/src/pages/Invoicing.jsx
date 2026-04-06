@@ -2850,6 +2850,7 @@ const InvoiceDetailPanel = ({
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent
+        hideClose
         className={`max-w-2xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${
           isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
         }`}
@@ -3520,9 +3521,7 @@ const fetchAll = useCallback(async () => {
                   <thead>
                     <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
                       <th className="w-[5px]" />
-                      <th className="px-4 py-3 w-10">
-                        <input type="checkbox" checked={selectedIds.size === enrichedFiltered.length && enrichedFiltered.length > 0} onChange={toggleSelectAll} className="rounded border-slate-300 text-blue-600" />
-                      </th>
+                      <th className="px-4 py-3 w-10" />
                       {['Invoice', 'Client', 'Date', 'Type', 'Amount', 'Status', 'Actions'].map(h => (
                         <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
                       ))}
@@ -3540,9 +3539,7 @@ const fetchAll = useCallback(async () => {
                           <td className="p-0 w-[5px]">
                             <div className="w-[5px] h-full min-h-[54px] rounded-sm" style={{ backgroundColor: stripe.color }} />
                           </td>
-                          <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
-                            <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.id)} className="rounded border-slate-300 text-blue-600" />
-                          </td>
+                          <td className="px-4 py-3.5 w-10" />
                           <td className="px-4 py-3.5">
                             <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                               <Hl text={inv.invoice_no || '—'} query={searchTerm} />
@@ -3611,9 +3608,7 @@ const fetchAll = useCallback(async () => {
                   <thead>
                     <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
                       <th className="w-[5px]" />
-                      <th className="px-4 py-3 w-10">
-                        <input type="checkbox" className="rounded border-slate-300 text-blue-600" />
-                      </th>
+                      <th className="px-4 py-3 w-10" />
                       {['Invoice', 'Client', 'Date', 'Type', 'Amount', 'Status', 'Actions'].map(h => (
                         <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
                       ))}
@@ -3630,9 +3625,7 @@ const fetchAll = useCallback(async () => {
                           <td className="p-0 w-[5px]">
                             <div className="w-[5px] h-full min-h-[54px] rounded-sm bg-emerald-500" />
                           </td>
-                          <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
-                            <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.id)} className="rounded border-slate-300 text-blue-600" />
-                          </td>
+                          <td className="px-4 py-3.5 w-10" />
                           <td className="px-4 py-3.5">
                             <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                               <Hl text={inv.invoice_no || '—'} query={searchTerm} />
