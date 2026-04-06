@@ -3365,11 +3365,12 @@ const fetchAll = useCallback(async () => {
   return (
     <div className={`min-h-screen p-5 md:p-7 space-y-5 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
       {/* PAGE HEADER */}
-      <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 shadow-sm" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)` }}>
-        <div className="relative flex flex-col sm:flex-row justify-between items-start sm:items-center gap-5 px-7 py-6">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-white/15 backdrop-blur-sm border border-white/20 flex-shrink-0"><Receipt className="h-6 w-6 text-white" /></div>
-            <div><h1 className="text-2xl font-bold text-white tracking-tight">Invoicing & Billing</h1><p className="text-sm text-blue-200 mt-0.5">GST-compliant · Smart client search · GSTR reports · Email invoices · <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white/20 font-mono">Ctrl+K</kbd> · <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white/20 font-mono">N</kbd> new</p></div>
+      <div className="relative overflow-hidden rounded-2xl shadow-sm" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)` }}>
+        <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10" style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+        <div className="relative flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 px-4 sm:px-6 pt-4 sm:pt-5 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-white/15 backdrop-blur-sm border border-white/20 flex-shrink-0"><Receipt className="h-5 w-5 text-white" /></div>
+            <div><h1 className="text-2xl font-bold text-white tracking-tight leading-tight">Invoicing & Billing</h1><p className="text-sm text-blue-200 mt-0.5">GST-compliant · Smart client search · GSTR reports · Email invoices · <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white/20 font-mono">Ctrl+K</kbd> · <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white/20 font-mono">N</kbd> new</p></div>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => { setLedgerClient(null); setLedgerOpen(true); }} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold"><BookOpen className="h-4 w-4" /> Party Ledger</Button>
