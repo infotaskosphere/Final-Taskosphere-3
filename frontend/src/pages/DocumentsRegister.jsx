@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import GifLoader, { MiniLoader } from "@/components/ui/GifLoader.jsx";
 import { useDark } from '@/hooks/useDark';
 import { Card, CardContent } from '@/components/ui/card';
@@ -307,7 +307,6 @@ export default function DocumentRegister() {
         toast.success('Document updated successfully!');
       } else {
         await api.post('/documents', documentData);
-        try { localStorage.removeItem(DOCS_DRAFT_KEY); } catch {}
         toast.success('Document added successfully!');
       }
       setDialogOpen(false);
@@ -435,27 +434,6 @@ export default function DocumentRegister() {
     setFormData({ holder_name: '', document_type: 'Agreement', document_password: '', associated_with: '', entity_type: 'firm', issue_date: '', notes: '' });
     setEditingDocument(null);
   };
-
-  // ── Draft persistence for add-document form ───────────────────────────────
-  const DOCS_DRAFT_KEY = 'taskosphere_docs_add_draft';
-  useEffect(() => {
-    if (dialogOpen && !editingDocument) {
-      try { localStorage.setItem(DOCS_DRAFT_KEY, JSON.stringify(formData)); } catch {}
-    }
-  }, [formData, dialogOpen, editingDocument]);
-
-  const openAddDocDialog = useCallback(() => {
-    setEditingDocument(null);
-    try {
-      const saved = localStorage.getItem(DOCS_DRAFT_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed?.holder_name?.trim()) setFormData(prev => ({ ...prev, ...parsed }));
-        else setFormData({ holder_name: '', document_type: 'Agreement', document_password: '', associated_with: '', entity_type: 'firm', issue_date: '', notes: '' });
-      }
-    } catch {}
-    setDialogOpen(true);
-  }, []);
 
   const getErrorMessage = (error) => {
     const detail = error.response?.data?.detail;
@@ -586,7 +564,7 @@ export default function DocumentRegister() {
 
       {/* ── Dashboard-style Banner Header ── */}
       <div className="relative overflow-hidden rounded-2xl"
-        className="banner-animated" style={{ boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
+        style={{ background: 'linear-gradient(135deg, #0D3B66 0%, #1F6FB2 60%, #1a8fcc 100%)', boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
         <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10"
           style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
         <div className="absolute right-28 bottom-0 w-40 h-40 rounded-full mb-[-40px] opacity-5"
@@ -612,7 +590,7 @@ export default function DocumentRegister() {
             </Button>
             <Dialog open={dialogOpen} onOpenChange={open => { setDialogOpen(open); if (!open) resetForm(); }}>
               <DialogTrigger asChild>
-                <Button onClick={openAddDocDialog} className="bg-white text-emerald-700 hover:bg-green-50 font-semibold rounded-xl px-5 shadow-lg transition-all hover:scale-105 active:scale-95" data-testid="add-document-btn">
+                <Button className="bg-white text-emerald-700 hover:bg-green-50 font-semibold rounded-xl px-5 shadow-lg transition-all hover:scale-105 active:scale-95" data-testid="add-document-btn">
                   <Plus className="mr-2 h-4 w-4" />Add Document
                 </Button>
               </DialogTrigger>
