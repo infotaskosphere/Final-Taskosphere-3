@@ -86,8 +86,8 @@ export default function GeneralSettings() {
   const roleCfg = ROLE_COLORS[user?.role] || ROLE_COLORS.staff;
 
   return (
-    <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
-      {/* TOP BANNER — UNCHANGED */}
+    <div className="space-y-4 w-full min-w-0 overflow-x-hidden">
+      {/* TOP BANNER */}
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
         <div
           className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
@@ -102,7 +102,7 @@ export default function GeneralSettings() {
               <Settings className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">Account Settings</h1>
+              <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">General Settings</h1>
               <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest mt-0.5">
                 Manage identity &amp; preferences
               </p>
@@ -112,12 +112,12 @@ export default function GeneralSettings() {
       </motion.div>
 
       {/* Main grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-stretch">
 
         {/* Left: Profile identity card */}
         <motion.div
           initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.05 }}
-          className="lg:col-span-2 space-y-3"
+          className="lg:col-span-2 flex flex-col gap-3"
         >
           <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
             {/* Mini header strip */}
@@ -198,9 +198,9 @@ export default function GeneralSettings() {
         {/* Right: Edit form */}
         <motion.div
           initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.08 }}
-          className="lg:col-span-3"
+          className="lg:col-span-3 flex flex-col"
         >
-          <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <div className={`rounded-2xl border overflow-hidden shadow-sm flex flex-col flex-1 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
             {/* Card header */}
             <div className={`flex items-center gap-2.5 px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-800/70' : 'border-slate-100 bg-slate-50/60'}`}>
               <div className={`p-1.5 rounded-lg ${isDark ? 'bg-blue-900/40' : 'bg-blue-50'}`}>
@@ -212,7 +212,7 @@ export default function GeneralSettings() {
               </div>
             </div>
 
-            <form onSubmit={handleSave} className="p-5 space-y-4">
+            <form onSubmit={handleSave} className="p-5 space-y-4 flex flex-col flex-1">
               {/* Full Name */}
               <div className="space-y-1.5">
                 <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Full Name</Label>
@@ -290,7 +290,7 @@ export default function GeneralSettings() {
               )}
 
               {/* Save */}
-              <div className={`flex justify-end pt-2 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+              <div className={`flex justify-end pt-2 border-t mt-auto ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
                 <motion.button
                   type="submit"
                   disabled={loading}
