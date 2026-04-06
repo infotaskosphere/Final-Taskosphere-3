@@ -2,8 +2,10 @@ import React from "react";
 import { useDark } from "@/hooks/useDark";
 
 /**
- * GifLoader — full-page centered loader.gif overlay.
- * Used as the global page/suspense loading screen.
+ * GifLoader — FULL-SCREEN loader.
+ * Used ONLY for auth loading (before DashboardLayout mounts).
+ * Do NOT use this as a Suspense fallback inside DashboardLayout —
+ * use ContentLoader instead so the sidebar stays visible.
  */
 export default function GifLoader() {
   const isDark = useDark();
@@ -18,10 +20,10 @@ export default function GifLoader() {
         justifyContent: "center",
         zIndex: 9999,
         background: isDark
-          ? "rgba(15, 23, 42, 0.88)"
-          : "rgba(255, 255, 255, 0.88)",
-        backdropFilter: "blur(3px)",
-        WebkitBackdropFilter: "blur(3px)",
+          ? "rgba(15, 23, 42, 0.92)"
+          : "rgba(255, 255, 255, 0.92)",
+        backdropFilter: "blur(4px)",
+        WebkitBackdropFilter: "blur(4px)",
         pointerEvents: "none",
       }}
     >
@@ -29,8 +31,8 @@ export default function GifLoader() {
         src="/loader.gif"
         alt="Loading…"
         style={{
-          width: 120,
-          height: 120,
+          width: 150,
+          height: 150,
           objectFit: "contain",
           pointerEvents: "none",
         }}
@@ -40,8 +42,49 @@ export default function GifLoader() {
 }
 
 /**
- * MiniLoader — inline section loader using loader.gif.
- * Drop-in replacement for any "Loading…" text or skeleton inside page bodies.
+ * ContentLoader — in-layout page loader.
+ * Used as the <Suspense> fallback INSIDE DashboardLayout so the
+ * sidebar and header stay visible while a lazy page is loading.
+ * Logo stays centered within the main content area only.
+ */
+export function ContentLoader() {
+  const isDark = useDark();
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 100,
+        background: isDark
+          ? "rgba(15, 23, 42, 0.85)"
+          : "rgba(255, 255, 255, 0.85)",
+        backdropFilter: "blur(3px)",
+        WebkitBackdropFilter: "blur(3px)",
+        pointerEvents: "none",
+        borderRadius: "inherit",
+      }}
+    >
+      <img
+        src="/loader.gif"
+        alt="Loading…"
+        style={{
+          width: 150,
+          height: 150,
+          objectFit: "contain",
+          pointerEvents: "none",
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * MiniLoader — inline section loader.
+ * Drop-in for small loading states inside a page section.
  */
 export function MiniLoader({ height = 200 }) {
   return (
@@ -58,8 +101,8 @@ export function MiniLoader({ height = 200 }) {
         src="/loader.gif"
         alt=""
         style={{
-          width: 56,
-          height: 56,
+          width: 70,
+          height: 70,
           objectFit: "contain",
         }}
       />
