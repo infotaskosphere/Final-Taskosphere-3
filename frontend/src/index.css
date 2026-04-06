@@ -549,6 +549,33 @@ td, th {
 [data-radix-popper-content-wrapper] { z-index: 9999 !important; }
 
 /* ============================= */
+/* BANNER GRADIENT ANIMATION     */
+/* ============================= */
+
+/* Animated shifting gradient for all welcome banners */
+@keyframes bannerGradientShift {
+  0%   { background-position: 0%   50%; }
+  25%  { background-position: 50%  100%; }
+  50%  { background-position: 100% 50%; }
+  75%  { background-position: 50%  0%; }
+  100% { background-position: 0%   50%; }
+}
+
+.banner-animated {
+  background: linear-gradient(
+    135deg,
+    #0D3B66 0%,
+    #1F6FB2 20%,
+    #1a8fcc 40%,
+    #1FAF5A 60%,
+    #1F6FB2 80%,
+    #0D3B66 100%
+  ) !important;
+  background-size: 300% 300% !important;
+  animation: bannerGradientShift 8s ease infinite !important;
+}
+
+/* ============================= */
 /* LOADING ANIMATIONS            */
 /* ============================= */
 @keyframes loadingBar {
