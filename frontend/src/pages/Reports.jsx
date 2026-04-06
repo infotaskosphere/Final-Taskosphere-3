@@ -92,23 +92,23 @@ const KpiCard = ({ label, value, sub, color, icon:Icon, dark }) => {
         {/* accent stripe */}
         <div className="h-[3px] w-full flex-shrink-0" style={{background:color}} />
         {/* content — flex-1 so all cards stretch equally */}
-        <div className="p-4 flex flex-col flex-1">
-          {/* label + icon row — fixed height */}
-          <div className="flex items-start justify-between gap-2 h-8">
-            <p className="text-[10px] font-bold uppercase tracking-widest leading-tight"
+        <div className="p-3 sm:p-4 flex flex-col flex-1">
+          {/* label + icon row */}
+          <div className="flex items-start justify-between gap-1">
+            <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider leading-tight"
               style={{color:t.textMute}}>{label}</p>
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center flex-shrink-0"
               style={{background:`${color}1a`}}>
-              <Icon className="w-4 h-4" style={{color}} />
+              <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" style={{color}} />
             </div>
           </div>
-          {/* value — fixed line-height so numbers don't shift */}
-          <p className="mt-2 text-2xl font-black leading-none tracking-tight" style={{color}}>
+          {/* value */}
+          <p className="mt-1.5 text-xl sm:text-2xl font-black leading-none tracking-tight" style={{color}}>
             {value}
           </p>
           {/* sub — always renders (even empty) to keep spacing identical */}
-          <p className="mt-1.5 text-xs font-medium leading-snug flex-1"
-            style={{color:t.textSub, minHeight:'1.2rem'}}>
+          <p className="mt-1 text-[10px] sm:text-xs font-medium leading-snug flex-1 break-words"
+            style={{color:t.textSub, minHeight:'1rem'}}>
             {sub || '\u00A0'}
           </p>
         </div>
@@ -197,7 +197,7 @@ const TabBtn = ({ id, label, icon:Icon, active, onClick, dark }) => {
   const t = tok(dark);
   return (
     <button onClick={()=>onClick(id)}
-      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap"
+      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap flex-shrink-0"
       style={active
         ?{background:C.deepBlue,color:'#fff',boxShadow:'0 2px 6px rgba(13,59,102,0.35)'}
         :{background:t.card2,color:t.textSub,border:`1px solid ${t.border}`}}>
@@ -558,7 +558,7 @@ export default function Reports() {
               </div>
             </div>
             {/* tabs */}
-            <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1" style={{scrollbarWidth:'none',WebkitOverflowScrolling:'touch'}}>
               {tabs.map(tb=>(
                 <TabBtn key={tb.id} id={tb.id} label={tb.label} icon={tb.icon}
                   active={tab===tb.id} onClick={setTab} dark={dark}/>
@@ -615,13 +615,14 @@ export default function Reports() {
                 {statusData.length>0?(
                   <ResponsiveContainer width="100%" height={220}>
                     <PieChart>
-                      <Pie data={statusData} cx="50%" cy="50%" innerRadius={55} outerRadius={88}
+                      <Pie data={statusData} cx="50%" cy="50%" innerRadius={52} outerRadius={80}
                         paddingAngle={3} dataKey="value"
-                        label={({name,percent})=>`${(percent*100).toFixed(0)}%`} labelLine={false}>
+                        label={({percent})=>`${(percent*100).toFixed(0)}%`} labelLine={false}
+                        isAnimationActive={true}>
                         {statusData.map((d,i)=><Cell key={i} fill={d.color}/>)}
                       </Pie>
                       <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
-                      <Legend wrapperStyle={{fontSize:11,color:t.textSub}}/>
+                      <Legend wrapperStyle={{fontSize:10,color:t.textSub}}/>
                     </PieChart>
                   </ResponsiveContainer>
                 ):<Empty icon={Target} text="No task data" dark={dark}/>}
@@ -729,12 +730,13 @@ export default function Reports() {
                 {statusData.length>0?(
                   <ResponsiveContainer width="100%" height={260}>
                     <PieChart>
-                      <Pie data={statusData} cx="50%" cy="50%" innerRadius={65} outerRadius={105}
+                      <Pie data={statusData} cx="50%" cy="50%" innerRadius={58} outerRadius={92}
                         paddingAngle={4} dataKey="value"
-                        label={({name,value,percent})=>`${name}: ${value} (${(percent*100).toFixed(0)}%)`}>
+                        label={({percent})=>`${(percent*100).toFixed(0)}%`} labelLine={false}>
                         {statusData.map((d,i)=><Cell key={i} fill={d.color}/>)}
                       </Pie>
                       <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
+                      <Legend wrapperStyle={{fontSize:10,color:t.textSub}}/>
                     </PieChart>
                   </ResponsiveContainer>
                 ):<Empty icon={Target} text="No task data" dark={dark}/>}
