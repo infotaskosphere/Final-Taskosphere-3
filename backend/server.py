@@ -4531,7 +4531,71 @@ async def get_user_activity(
     return activities
 
 # TASK REMINDER ROUTES
+def build_reminder_email(user_name: str, task_list: list) -> tuple[str, str]:
+    """
+    Builds Option-1 style plain-text reminder email.
+    Returns (subject, body).
+    """
+    from datetime import datetime
+
+    def fmt_date(raw):
+        if not raw or raw == "N/A":
+            return "N/A"
+        try:
+            # Handle ISO string like 2026-04-23T00:00:00.000Z
+            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            return dt.strftime("%d %b %Y")
+        except Exception:
+            return str(raw)[:10]  # fallback: take first 10 chars
+
+    def priority_badge(p):
+        p = (p or "medium").lower()
+        if p in ("critical", "high"):   return "High  "
+        if p == "medium":               return "Medium"
+        return "Low   "
+
+    count = len(task_list)
+    first_name = user_name.split()[0] if user_name else "there"
+
+    # Column widths
+    W_TASK  = 50
+    W_DATE  = 13
+    W_PRIO  = 8
+
+    def row(task_col, date_col, prio_col, sep="│"):
+        return (
+            f"{sep} {task_col:<{W_TASK}} {sep} {date_col:<{W_DATE}} {sep} {prio_col:<{W_PRIO}} {sep}"
+        )
+
+    top    = f"┌{'─'*(W_TASK+2)}┬{'─'*(W_DATE+2)}┬{'─'*(W_PRIO+2)}┐"
+    header = row("Task", "Due Date", "Priority")
+    mid    = f"├{'─'*(W_TASK+2)}┼{'─'*(W_DATE+2)}┼{'─'*(W_PRIO+2)}┤"
+    bottom = f"└{'─'*(W_TASK+2)}┴{'─'*(W_DATE+2)}┴{'─'*(W_PRIO+2)}┘"
+
+    rows = []
+    for t in task_list:
+        title    = (t.get("title") or "Untitled")[:W_TASK]
+        due      = fmt_date(t.get("due_date", "N/A"))
+        priority = priority_badge(t.get("priority"))
+        rows.append(row(title, due, priority))
+
+    table = "\n".join([top, header, mid] + rows + [bottom])
+
+    subject = f"\u23f0 Task Reminder \u2014 {count} Pending Task{'s' if count != 1 else ''}"
+
+    body = (
+        f"Hello {first_name},\n\n"
+        f"You have {count} pending task{'s' if count != 1 else ''} requiring your attention:\n\n"
+        f"{table}\n\n"
+        f"Please complete them at your earliest convenience.\n\n"
+        f"Regards,\n"
+        f"TaskoSphere"
+    )
+
+    return subject, body
+
 @api_router.post("/send-pending-task-reminders")
+
 async def send_pending_task_reminders(current_user: User = Depends(get_current_user)):
     perms = get_user_permissions(current_user)
     if current_user.role != "admin" and not perms.get("can_send_reminders", False):
@@ -4552,11 +4616,10 @@ async def send_pending_task_reminders(current_user: User = Depends(get_current_u
     failed_emails = []
     for email, task_list in user_task_map.items():
         try:
-            body = "Hello,\n\nYou have the following pending tasks:\n\n"
-            for t in task_list:
-                body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
-            body += "\nPlease complete them at the earliest.\n\nRegards,\nTaskoSphere"
-            sent = send_email(email, "Pending Task Reminder - TaskoSphere", body)
+            user_doc = await db.users.find_one({"email": email}, {"_id": 0})
+            user_name = user_doc.get("full_name", "") if user_doc else ""
+            subject, body = build_reminder_email(user_name, task_list)
+            sent = send_email(email, subject, body)
             if sent:
                 success_count += 1
             else:
@@ -4612,11 +4675,10 @@ async def send_pending_task_reminders_internal():
         user_task_map.setdefault(user["email"], []).append(task)
     for email, task_list in user_task_map.items():
         try:
-            body = "Hello,\n\nYou have the following pending tasks:\n\n"
-            for t in task_list:
-                body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
-            body += "\nPlease complete them.\n\nRegards,\nTaskoSphere"
-            send_email(email, "Daily Pending Task Reminder - TaskoSphere", body)
+            user_doc = await db.users.find_one({"email": email}, {"_id": 0})
+            user_name = user_doc.get("full_name", "") if user_doc else ""
+            subject, body = build_reminder_email(user_name, task_list)
+            send_email(email, subject, body)
         except Exception as e:
             logger.error(f"Auto reminder failed for {email}: {str(e)}")
 
