@@ -523,9 +523,8 @@ export default function StaffActivity() {
       {/* ── BANNER ─────────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
         <div
-          className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
+          className="banner-animated relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
           style={{
-            background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
             boxShadow: '0 8px 32px rgba(13,59,102,0.28)',
           }}
         >
