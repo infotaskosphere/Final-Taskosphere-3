@@ -885,6 +885,27 @@ export default function Tasks() {
   };
   const openTaskDetail = (task) => { setSelectedDetailTask(task); setTaskDetailOpen(true); };
   const resetForm = () => { setFormData({ ...EMPTY_FORM }); setEditingTask(null); };
+
+  // ── Draft persistence for add-task form ──────────────────────────────────
+  const TASKS_DRAFT_KEY = 'taskosphere_tasks_add_draft';
+  useEffect(() => {
+    if (dialogOpen && !editingTask) {
+      try { localStorage.setItem(TASKS_DRAFT_KEY, JSON.stringify(formData)); } catch {}
+    }
+  }, [formData, dialogOpen, editingTask]);
+
+  const openAddTaskDialog = useCallback(() => {
+    setEditingTask(null);
+    try {
+      const saved = localStorage.getItem(TASKS_DRAFT_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.title?.trim()) { setFormData({ ...EMPTY_FORM, ...parsed }); }
+        else setFormData({ ...EMPTY_FORM });
+      } else setFormData({ ...EMPTY_FORM });
+    } catch { setFormData({ ...EMPTY_FORM }); }
+    setDialogOpen(true);
+  }, []);
   const toggleSubAssignee = (userId) => {
     setFormData(prev => ({ ...prev, sub_assignees: prev.sub_assignees.includes(userId) ? prev.sub_assignees.filter(id => id !== userId) : [...prev.sub_assignees, userId] }));
   };
@@ -901,8 +922,12 @@ export default function Tasks() {
         else toast.error('Failed to update task');
       } else {
         const res = await fetch(`${API_BASE}/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeader() }, body: JSON.stringify(taskData) });
-        if (res.ok) { const created = await res.json(); setTasks(prev => [created, ...prev]); toast.success('Task created!'); }
-        else toast.error('Failed to create task');
+        if (res.ok) {
+          const created = await res.json();
+          setTasks(prev => [created, ...prev]);
+          try { localStorage.removeItem(TASKS_DRAFT_KEY); } catch {}
+          toast.success('Task created!');
+        } else toast.error('Failed to create task');
       }
     } catch { toast.error('Network error'); }
     setDialogOpen(false); resetForm(); setLoading(false);
@@ -1421,7 +1446,7 @@ export default function Tasks() {
               {canEditTasks && (
                 <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
                   <DialogTrigger asChild>
-                    <Button size="sm" onClick={() => { setEditingTask(null); setFormData({ ...EMPTY_FORM }); }}
+                    <Button size="sm" onClick={() => openAddTaskDialog()}
                       className="h-8 px-4 text-xs rounded-xl font-semibold gap-1.5"
                       style={{ background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.35)', color: 'white' }}>
                       <Plus className="h-3.5 w-3.5" /> New Task
