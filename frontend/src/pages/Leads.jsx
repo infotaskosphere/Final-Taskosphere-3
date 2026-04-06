@@ -1282,94 +1282,160 @@ export default function LeadsPage() {
       className={`space-y-4 p-2 md:p-4 min-h-screen rounded-2xl ${isDark ? 'bg-[#0f172a]' : ''}`}
       variants={containerVariants} initial="hidden" animate="visible">
 
-      {/* ── Header ── */}
+      {/* ── Header Banner (Dashboard-style) ── */}
       <motion.div variants={itemVariants}>
-        <Card className="rounded-3xl overflow-hidden border border-slate-200 dark:border-slate-700 dark:bg-slate-800 shadow-sm">
-          <div className="h-1.5 w-full bg-gradient-to-r from-blue-700 via-indigo-600 to-emerald-600" />
-          <CardContent className="p-5 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h1 className="text-2xl font-semibold tracking-tight dark:text-blue-300" style={{ color: COLORS.deepBlue }}>
-                Lead Pipeline
-              </h1>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-                {stats.active} active ·&nbsp;<span className="text-emerald-600 font-medium">{stats.won} won</span>
-                {stats.overdue > 0 && <span className="text-red-500 font-medium"> · {stats.overdue} overdue</span>}
+        <div
+          className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
+          style={{
+            background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a5fa8 100%)`,
+            boxShadow: `0 8px 32px rgba(13,59,102,0.28)`,
+          }}
+        >
+          {/* decorative circles */}
+          <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10"
+            style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+          <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5"
+            style={{ background: 'white' }} />
+
+          <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                <TrendingUp className="h-3 w-3" /> CRM
+              </p>
+              <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">Lead Pipeline</h1>
+              <p className="text-white/60 text-sm mt-1">
+                <span className="text-white/80 font-medium">{stats.active}</span> active ·{' '}
+                <span className="text-emerald-300 font-medium">{stats.won} won</span>
+                {stats.overdue > 0 && <span className="text-red-300 font-medium"> · {stats.overdue} overdue</span>}
               </p>
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex bg-slate-100 dark:bg-slate-700 p-1 rounded-2xl shadow-sm">
+
+            <div className="flex items-center gap-2 flex-wrap flex-shrink-0">
+              {/* Revenue pills */}
+              <div className="hidden md:flex items-center gap-3">
+                <div className="flex flex-col items-center px-4 py-2 rounded-xl"
+                  style={{ background: 'rgba(31,175,90,0.18)', border: '1px solid rgba(31,175,90,0.3)' }}>
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-300">Won Revenue</span>
+                  <span className="text-base font-black text-white leading-tight mt-0.5">₹{stats.wonValue.toLocaleString()}</span>
+                </div>
+                <div className="flex flex-col items-center px-4 py-2 rounded-xl"
+                  style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.18)' }}>
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-blue-200">Pipeline</span>
+                  <span className="text-base font-black text-white leading-tight mt-0.5">₹{stats.pipeValue.toLocaleString()}</span>
+                </div>
+              </div>
+
+              {/* View toggle */}
+              <div className="flex p-1 rounded-xl gap-0.5" style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)' }}>
                 {[{ id: 'list', icon: List }, { id: 'kanban', icon: LayoutGrid }].map(v => (
-                  <Button key={v.id} variant="ghost" size="sm"
-                    className={cn('rounded-xl font-medium transition-all', viewMode === v.id ? 'bg-white dark:bg-slate-600 shadow text-slate-800 dark:text-slate-100' : 'text-slate-500 hover:text-slate-700')}
+                  <button key={v.id}
+                    className={cn('flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all', viewMode === v.id ? 'bg-white text-slate-800 shadow' : 'text-white/70 hover:text-white hover:bg-white/10')}
                     onClick={() => setViewMode(v.id)}>
-                    <v.icon className="h-4 w-4 mr-1" />{v.id.charAt(0).toUpperCase() + v.id.slice(1)}
-                  </Button>
+                    <v.icon className="h-3.5 w-3.5" />{v.id.charAt(0).toUpperCase() + v.id.slice(1)}
+                  </button>
                 ))}
               </div>
-              <Button size="sm"
-                className="h-9 px-4 text-sm font-medium rounded-2xl shadow-sm hover:shadow-md bg-blue-700 hover:bg-blue-800 text-white active:scale-95 transition-all"
-                onClick={() => openAddDialog()}>
-                <Plus className="mr-2 h-5 w-5" />New Lead
-              </Button>
+
+              <button
+                onClick={() => openAddDialog()}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 hover:shadow-lg"
+                style={{ background: `${COLORS.emeraldGreen}`, color: 'white', boxShadow: `0 4px 14px rgba(31,175,90,0.4)` }}>
+                <Plus className="h-4 w-4" /> New Lead
+              </button>
             </div>
-          </CardContent>
-        </Card>
-      </motion.div>
-
-      {/* ── Stats ── */}
-      <motion.div variants={itemVariants} className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <StatCard label="Total"       value={stats.total}       color="text-slate-800"   onClick={() => setStatusFilter('all')}         active={statusFilter === 'all'} />
-        <StatCard label="Active"      value={stats.active}      color="text-blue-600"    onClick={() => setStatusFilter('active')}      active={statusFilter === 'active'} />
-        <StatCard label="Won"         value={stats.won}         color="text-emerald-600" onClick={() => setStatusFilter('won')}         active={statusFilter === 'won'} />
-        <StatCard label="Lost"        value={stats.lost}        color="text-red-600"     onClick={() => setStatusFilter('lost')}        active={statusFilter === 'lost'} />
-        <StatCard label="Negotiation" value={stats.negotiation} color="text-orange-600"  onClick={() => setStatusFilter('negotiation')} active={statusFilter === 'negotiation'} />
-      </motion.div>
-
-      {/* ── Revenue ── */}
-      <motion.div variants={itemVariants} className="grid grid-cols-2 gap-3">
-        <Card className="rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Won Revenue</p>
-            <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400 mt-1">₹{stats.wonValue.toLocaleString()}</p>
-          </CardContent>
-        </Card>
-        <Card className="rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-medium text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Pipeline Value</p>
-            <p className="text-2xl font-bold text-indigo-700 dark:text-indigo-400 mt-1">₹{stats.pipeValue.toLocaleString()}</p>
-          </CardContent>
-        </Card>
-      </motion.div>
-
-      {/* ── Filters ── */}
-      <motion.div variants={itemVariants} className="flex flex-wrap items-center gap-3">
-        <div className="relative w-full sm:w-64">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input placeholder="Search leads…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-            className="pl-10 bg-white dark:bg-slate-800 dark:border-slate-600 dark:text-slate-100 rounded-2xl" />
+          </div>
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-40 bg-white dark:bg-slate-800 dark:border-slate-600 dark:text-slate-100 rounded-2xl text-sm">
-            <SelectValue placeholder="All Stages" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Stages</SelectItem>
-            <SelectItem value="active">Active Leads</SelectItem>
-            {PIPELINE_STAGES.map(s => <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={serviceFilter} onValueChange={setServiceFilter}>
-          <SelectTrigger className="w-40 bg-white dark:bg-slate-800 dark:border-slate-600 dark:text-slate-100 rounded-2xl text-sm">
-            <SelectValue placeholder="All Services" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Services</SelectItem>
-            {LEAD_SERVICES.map(s => <SelectItem key={s.value} value={s.value}>{s.value}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <p className="text-xs text-slate-400 dark:text-slate-500 ml-auto">
-          {filteredLeads.length} lead{filteredLeads.length !== 1 ? 's' : ''}
-        </p>
+      </motion.div>
+
+      {/* ── Stats — Dashboard metric card style ── */}
+      <motion.div variants={itemVariants} className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        {[
+          { label: 'Total', value: stats.total, color: isDark ? '#e2e8f0' : COLORS.deepBlue, iconBg: isDark ? 'rgba(96,165,250,0.12)' : `${COLORS.deepBlue}12`, filter: 'all' },
+          { label: 'Active', value: stats.active, color: isDark ? '#93c5fd' : COLORS.mediumBlue, iconBg: isDark ? 'rgba(31,111,178,0.2)' : `${COLORS.mediumBlue}12`, filter: 'active' },
+          { label: 'Won', value: stats.won, color: isDark ? '#6ee7b7' : COLORS.emeraldGreen, iconBg: isDark ? 'rgba(31,175,90,0.2)' : `${COLORS.emeraldGreen}12`, filter: 'won' },
+          { label: 'Lost', value: stats.lost, color: '#ef4444', iconBg: isDark ? 'rgba(239,68,68,0.15)' : '#fef2f2', filter: 'lost' },
+          { label: 'Negotiation', value: stats.negotiation, color: '#f97316', iconBg: isDark ? 'rgba(249,115,22,0.15)' : '#fff7ed', filter: 'negotiation' },
+        ].map(({ label, value, color, iconBg, filter }) => (
+          <motion.div key={filter}
+            whileHover={{ y: -3, transition: { type: 'spring', stiffness: 280, damping: 22 } }}
+            whileTap={{ scale: 0.985 }}
+            onClick={() => setStatusFilter(filter)}
+            className={cn(
+              'rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border select-none',
+              statusFilter === filter
+                ? 'ring-2 ring-blue-400 border-blue-300'
+                : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200/80 hover:border-slate-300'
+            )}
+          >
+            <div className="p-4 flex flex-col justify-between min-h-[90px]">
+              <div className="flex items-start justify-between">
+                <div className="min-w-0 flex-1 mr-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color }}>{value}</p>
+                </div>
+                <div className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0" style={{ backgroundColor: iconBg }}>
+                  <Target className="h-4 w-4" style={{ color }} />
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        ))}
+      </motion.div>
+
+      {/* ── Revenue (mobile only — hidden on md+) ── */}
+      <motion.div variants={itemVariants} className="grid grid-cols-2 gap-3 md:hidden">
+        <div className="rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4">
+          <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Won Revenue</p>
+          <p className="text-xl font-bold text-emerald-700 dark:text-emerald-400 mt-1">₹{stats.wonValue.toLocaleString()}</p>
+        </div>
+        <div className="rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 p-4">
+          <p className="text-xs font-medium text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Pipeline Value</p>
+          <p className="text-xl font-bold text-indigo-700 dark:text-indigo-400 mt-1">₹{stats.pipeValue.toLocaleString()}</p>
+        </div>
+      </motion.div>
+
+      {/* ── Filters — Dashboard SectionCard style ── */}
+      <motion.div variants={itemVariants}>
+        <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm`}>
+          <div className="h-[2px] w-full" style={{ background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue}, ${COLORS.emeraldGreen})` }} />
+          <div className="px-4 py-3 flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/30">
+                <Search className="h-4 w-4 text-blue-500" />
+              </div>
+              <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Filter Leads</h3>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 flex-1">
+              <div className="relative w-full sm:w-56">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <Input placeholder="Search leads…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                  className="pl-9 h-8 text-sm bg-slate-50 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100 rounded-xl border-slate-200" />
+              </div>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-36 h-8 text-xs bg-slate-50 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100 rounded-xl border-slate-200">
+                  <SelectValue placeholder="All Stages" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Stages</SelectItem>
+                  <SelectItem value="active">Active Leads</SelectItem>
+                  {PIPELINE_STAGES.map(s => <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={serviceFilter} onValueChange={setServiceFilter}>
+                <SelectTrigger className="w-36 h-8 text-xs bg-slate-50 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100 rounded-xl border-slate-200">
+                  <SelectValue placeholder="All Services" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Services</SelectItem>
+                  {LEAD_SERVICES.map(s => <SelectItem key={s.value} value={s.value}>{s.value}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <span className="ml-auto text-xs font-medium text-slate-400 dark:text-slate-500">
+                {filteredLeads.length} lead{filteredLeads.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+          </div>
+        </div>
       </motion.div>
 
       {/* ══════════ LIST VIEW ══════════ */}
