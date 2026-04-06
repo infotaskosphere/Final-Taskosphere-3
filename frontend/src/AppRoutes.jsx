@@ -7,6 +7,7 @@ import GifLoader from "@/components/ui/GifLoader.jsx";
   /* ── Lazy Loaded Pages ──────────────────────────────────────────────────── */
 
   const Login             = lazy(() => import("@/pages/Login.jsx"));
+  const ForgotPassword = lazy(() => import("@/pages/ForgotPassword.jsx"));
   const TaskAudit         = lazy(() => import("@/pages/TaskAudit.jsx"));
   const Register          = lazy(() => import("@/pages/Register.jsx"));
   const Dashboard         = lazy(() => import("@/pages/Dashboard.jsx"));
@@ -128,6 +129,8 @@ import GifLoader from "@/components/ui/GifLoader.jsx";
         <Route path="/" element={<Public><PageLoader><Login /></PageLoader></Public>} />
         <Route path="/login" element={<Public><PageLoader><Login /></PageLoader></Public>} />
         <Route path="/register" element={<Public><PageLoader><Register /></PageLoader></Public>} />
+        <Route path="/forgot-password" element={<Public><PageLoader><ForgotPassword /></PageLoader></Public>} />
+
 
         {/* Dashboard — all roles */}
         <Route path="/dashboard" element={<Protected><PageLoader><Dashboard /></PageLoader></Protected>} />
