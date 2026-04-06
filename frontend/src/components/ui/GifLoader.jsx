@@ -2,8 +2,8 @@ import React from "react";
 import { useDark } from "@/hooks/useDark";
 
 /**
- * GifLoader — full-page centered logo pulse.
- * No text. Logo at 200% (144 px). Dark-mode aware.
+ * GifLoader — full-page centered loader.gif overlay.
+ * Used as the global page/suspense loading screen.
  */
 export default function GifLoader() {
   const isDark = useDark();
@@ -18,37 +18,30 @@ export default function GifLoader() {
         justifyContent: "center",
         zIndex: 9999,
         background: isDark
-          ? "rgba(15, 23, 42, 0.80)"
-          : "rgba(255, 255, 255, 0.80)",
+          ? "rgba(15, 23, 42, 0.88)"
+          : "rgba(255, 255, 255, 0.88)",
         backdropFilter: "blur(3px)",
         WebkitBackdropFilter: "blur(3px)",
         pointerEvents: "none",
       }}
     >
       <img
-        src="/logo.png"
-        alt="Taskosphere"
+        src="/loader.gif"
+        alt="Loading…"
         style={{
-          width: 144,
-          height: 144,
+          width: 120,
+          height: 120,
           objectFit: "contain",
           pointerEvents: "none",
-          animation: "ts-pulse 1.4s ease-in-out infinite",
         }}
       />
-      <style>{`
-        @keyframes ts-pulse {
-          0%,100% { transform: scale(1);    opacity: 1;   }
-          50%      { transform: scale(0.82); opacity: 0.6; }
-        }
-      `}</style>
     </div>
   );
 }
 
 /**
- * MiniLoader — inline skeleton for page sections (no text, just logo pulse).
- * Use inside page bodies instead of "Loading…" text.
+ * MiniLoader — inline section loader using loader.gif.
+ * Drop-in replacement for any "Loading…" text or skeleton inside page bodies.
  */
 export function MiniLoader({ height = 200 }) {
   return (
@@ -62,13 +55,12 @@ export function MiniLoader({ height = 200 }) {
       }}
     >
       <img
-        src="/logo.png"
+        src="/loader.gif"
         alt=""
         style={{
-          width: 48,
-          height: 48,
+          width: 56,
+          height: 56,
           objectFit: "contain",
-          animation: "ts-pulse 1.4s ease-in-out infinite",
         }}
       />
     </div>
