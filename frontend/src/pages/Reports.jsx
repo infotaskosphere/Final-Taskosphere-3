@@ -81,32 +81,29 @@ const ChartTip = ({ active, payload, label, dark }) => {
   );
 };
 
-// ─── KPI Card — strict equal-height layout ────────────────────────────────────
+// ─── KPI Card — Dashboard metric card style ───────────────────────────────────
 const KpiCard = ({ label, value, sub, color, icon:Icon, dark }) => {
   const t = tok(dark);
   return (
-    <motion.div variants={iV} className="h-full">
-      {/* outer wrapper fills the grid cell height */}
-      <div className="rounded-xl overflow-hidden flex flex-col h-full"
+    <motion.div variants={iV} className="h-full"
+      whileHover={{ y: -3, transition: { type: 'spring', stiffness: 280, damping: 22 } }}
+      whileTap={{ scale: 0.985 }}>
+      <div className="rounded-2xl overflow-hidden flex flex-col h-full group cursor-default"
         style={{background:t.card, border:`1px solid ${t.border}`, boxShadow:t.shadow}}>
-        {/* accent stripe */}
+        {/* accent stripe — same as Dashboard metric cards */}
         <div className="h-[3px] w-full flex-shrink-0" style={{background:color}} />
-        {/* content — flex-1 so all cards stretch equally */}
         <div className="p-3 sm:p-4 flex flex-col flex-1">
-          {/* label + icon row */}
           <div className="flex items-start justify-between gap-1">
-            <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider leading-tight"
+            <p className="text-[9px] sm:text-[10px] font-semibold uppercase tracking-wider leading-tight"
               style={{color:t.textMute}}>{label}</p>
-            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+            <div className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
               style={{background:`${color}1a`}}>
               <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" style={{color}} />
             </div>
           </div>
-          {/* value */}
-          <p className="mt-1.5 text-xl sm:text-2xl font-black leading-none tracking-tight" style={{color}}>
+          <p className="mt-1.5 text-xl sm:text-2xl font-bold leading-none tracking-tight" style={{color}}>
             {value}
           </p>
-          {/* sub — always renders (even empty) to keep spacing identical */}
           <p className="mt-1 text-[10px] sm:text-xs font-medium leading-snug flex-1 break-words"
             style={{color:t.textSub, minHeight:'1rem'}}>
             {sub || '\u00A0'}
@@ -500,86 +497,95 @@ export default function Reports() {
       className="space-y-4 p-4 md:p-6 min-h-screen"
       style={{background:t.pageBg}}>
 
-      {/* ══ HEADER ══ */}
+      {/* ══ HEADER — Dashboard-style banner ══ */}
       <motion.div variants={iV}>
-        <div className="rounded-2xl overflow-hidden"
-          style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:t.shadow}}>
-          <div className="h-1 w-full"
-            style={{background:`linear-gradient(90deg,${C.deepBlue},${C.mediumBlue},${C.emeraldGreen})`}}/>
-          <div className="p-4 md:p-5">
-            {/* title row */}
-            <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div
+          className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
+          style={{
+            background: `linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 60%, #1a8fcc 100%)`,
+            boxShadow: `0 8px 32px rgba(13,59,102,0.28)`,
+          }}
+        >
+          {/* decorative circles */}
+          <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10"
+            style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+          <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5"
+            style={{ background: 'white' }} />
+
+          <div className="relative">
+            {/* Title + action row */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
               <div>
-                <h1 className="text-xl font-black tracking-tight" style={{color:C.deepBlue}}>
+                <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                  <Activity className="h-3 w-3" /> Analytics
+                </p>
+                <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">
                   Reports &amp; Analytics
                 </h1>
-                <p className="text-sm mt-0.5 flex flex-wrap items-center gap-2" style={{color:t.textSub}}>
+                <p className="text-white/60 text-sm mt-1 flex flex-wrap items-center gap-2">
                   Live metrics from tasks, attendance &amp; performance
                   {fTasks.length>0&&(
-                    <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full"
-                      style={{background:`${C.emeraldGreen}18`,color:C.emeraldGreen}}>
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full"
+                      style={{background:'rgba(31,175,90,0.25)',color:'#6ee7b7'}}>
                       <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse"/>
                       {fTasks.length} tasks
                     </span>
                   )}
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
                 {canSwitchUser && uUsers.length>0 && (
                   <select value={selUser} onChange={e=>setSelUser(e.target.value)}
-                    className="h-8 px-3 text-xs rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    style={{background:t.inputBg,border:`1px solid ${t.inputBdr}`,color:t.text}}>
-                    {/* Admin can see aggregate; non-admin with cross-vis only see specific users */}
-                    {isAdmin && <option value="all">All Users</option>}
-                    {!isAdmin && <option value={user?.id || 'all'}>My Reports</option>}
-                    {uUsers.map(u=><option key={u.id} value={u.id}>{u.full_name}</option>)}
+                    className="h-8 px-3 text-xs rounded-xl font-semibold focus:outline-none focus:ring-2 focus:ring-white/50"
+                    style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.25)',color:'white'}}>
+                    {isAdmin && <option value="all" style={{color:'#1e293b'}}>All Users</option>}
+                    {!isAdmin && <option value={user?.id || 'all'} style={{color:'#1e293b'}}>My Reports</option>}
+                    {uUsers.map(u=><option key={u.id} value={u.id} style={{color:'#1e293b'}}>{u.full_name}</option>)}
                   </select>
                 )}
                 <button onClick={()=>fetchAll(true)} disabled={refreshing}
-                  className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
-                  style={{background:t.card2,border:`1px solid ${t.border}`,color:t.text}}>
+                  className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all active:scale-95"
+                  style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.25)',color:'white'}}>
                   <RefreshCw className={`w-3.5 h-3.5 ${refreshing?'animate-spin':''}`}/>
                   {refreshing?'Refreshing…':'Refresh'}
                 </button>
                 {canDL&&(
                   <>
                     <button onClick={handleCsv}
-                      className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 text-white transition-all"
-                      style={{background:'#1e293b'}}>
+                      className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all active:scale-95"
+                      style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.25)',color:'white'}}>
                       <Download className="w-3.5 h-3.5"/> CSV
                     </button>
                     <button onClick={handlePdf}
-                      className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 text-white transition-all"
-                      style={{background:C.deepBlue}}>
+                      className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all active:scale-95"
+                      style={{background:C.emeraldGreen,color:'white',boxShadow:'0 4px 12px rgba(31,175,90,0.4)'}}>
                       <Download className="w-3.5 h-3.5"/> PDF
                     </button>
                   </>
                 )}
+                <button
+                  onClick={() => setShowCustomize(true)}
+                  className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all active:scale-95"
+                  style={{background:'rgba(255,255,255,0.12)',border:'1px solid rgba(255,255,255,0.2)',color:'white'}}>
+                  <Settings2 size={13}/> Customize
+                </button>
               </div>
             </div>
-            {/* tabs */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1" style={{scrollbarWidth:'none',WebkitOverflowScrolling:'touch'}}>
+
+            {/* Tabs — styled for banner background */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5" style={{scrollbarWidth:'none',WebkitOverflowScrolling:'touch'}}>
               {tabs.map(tb=>(
-                <TabBtn key={tb.id} id={tb.id} label={tb.label} icon={tb.icon}
-                  active={tab===tb.id} onClick={setTab} dark={dark}/>
+                <button key={tb.id} onClick={()=>setTab(tb.id)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl transition-all whitespace-nowrap flex-shrink-0 active:scale-95"
+                  style={tab===tb.id
+                    ?{background:'white',color:C.deepBlue,boxShadow:'0 2px 8px rgba(0,0,0,0.15)'}
+                    :{background:'rgba(255,255,255,0.12)',color:'rgba(255,255,255,0.75)',border:'1px solid rgba(255,255,255,0.18)'}}>
+                  <tb.icon className="w-3.5 h-3.5"/>{tb.label}
+                </button>
               ))}
             </div>
           </div>
         </div>
-      </motion.div>
-
-      {/* CUSTOMIZE BUTTON */}
-      <motion.div variants={iV} className="flex justify-end">
-        <button
-          onClick={() => setShowCustomize(true)}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition-all hover:shadow-md ${
-            dark
-              ? 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'
-              : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
-          }`}
-        >
-          <Settings2 size={13} /> Customize Layout
-        </button>
       </motion.div>
 
       {/* ORDERED SECTIONS */}
