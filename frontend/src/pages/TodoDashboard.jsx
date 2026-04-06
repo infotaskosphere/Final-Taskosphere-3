@@ -10,7 +10,7 @@ import api from '@/lib/api';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format, isPast, parseISO, isToday, isTomorrow } from 'date-fns';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { GripVertical } from 'lucide-react';
+
 
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
