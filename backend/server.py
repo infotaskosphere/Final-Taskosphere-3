@@ -86,8 +86,9 @@ from backend.dependencies import (
 
 # External Services
 from fpdf import FPDF
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # ====================== CONFIG ======================
@@ -568,22 +569,48 @@ def fetch_indian_holidays_task():
 api_router = APIRouter(prefix="/api")
 
 # HELPERS - Email Service Functions
+def _brevo_send(to_email: str, subject: str, body_plain: str, body_html: str = None):
+    """Core Brevo SMTP sender used by all email functions."""
+    smtp_host = os.getenv("BREVO_SMTP_HOST", "smtp-relay.brevo.com")
+    smtp_port = int(os.getenv("BREVO_SMTP_PORT", "587"))
+    smtp_user = os.getenv("BREVO_SMTP_USER")
+    smtp_pass = os.getenv("BREVO_SMTP_PASS")
+    sender    = os.getenv("SENDER_EMAIL")
+
+    if not smtp_user or not smtp_pass or not sender:
+        raise Exception("Brevo SMTP environment variables not configured (BREVO_SMTP_USER, BREVO_SMTP_PASS, SENDER_EMAIL)")
+
+    msg = MIMEMultipart("alternative")
+    msg["From"]    = sender
+    msg["To"]      = to_email
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body_plain, "plain"))
+    if body_html:
+        msg.attach(MIMEText(body_html, "html"))
+
+    with smtplib.SMTP(smtp_host, smtp_port) as server:
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.sendmail(sender, to_email, msg.as_string())
+    return True
+
+
 def send_birthday_email(recipient_email: str, client_name: str):
-    """Send birthday wish email to client"""
-    sendgrid_key = os.environ.get('SENDGRID_API_KEY')
-    sender_email = os.environ.get('SENDER_EMAIL', 'noreply@taskosphere.com')
-    if not sendgrid_key:
-        logger.warning("SENDGRID_API_KEY not configured, email not sent")
-        return False
+    """Send birthday wish email to client via Brevo SMTP."""
     subject = f"Happy Birthday, {client_name}!"
+    body_plain = (
+        f"Dear {client_name},\n\n"
+        f"On behalf of our entire team, we wish you a very Happy Birthday!\n\n"
+        f"We appreciate your continued trust and partnership. "
+        f"May this year bring you prosperity, success, and happiness.\n\n"
+        f"Best regards,\nTaskosphere Team"
+    )
     html_content = f"""
     <html>
     <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #f5f5f5;">
     <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
     <h1 style="color: #4F46E5; text-align: center;"> Happy Birthday! </h1>
-    <p style="font-size: 16px; line-height: 1.6; color: #333;">
-     Dear {client_name},
-    </p>
+    <p style="font-size: 16px; line-height: 1.6; color: #333;">Dear {client_name},</p>
     <p style="font-size: 16px; line-height: 1.6; color: #333;">
      On behalf of our entire team, we wish you a very Happy Birthday!
     </p>
@@ -591,29 +618,19 @@ def send_birthday_email(recipient_email: str, client_name: str):
      We appreciate your continued trust and partnership. May this year bring you prosperity, success, and happiness.
     </p>
     <div style="background-color: #4F46E5; color: white; padding: 15px; border-radius: 5px; margin: 20px 0; text-align: center;">
-    <p style="margin: 0; font-size: 18px; font-weight: bold;">
-     Wishing you all the best!
-    </p>
+    <p style="margin: 0; font-size: 18px; font-weight: bold;">Wishing you all the best!</p>
     </div>
     <p style="font-size: 14px; color: #666; text-align: center; margin-top: 30px;">
-     Best regards,<br>
-     <strong>Taskosphere Team</strong>
+     Best regards,<br><strong>Taskosphere Team</strong>
     </p>
     </div>
     </body>
     </html>
     """
-    message = Mail(
-        from_email=sender_email,
-        to_emails=recipient_email,
-        subject=subject,
-        html_content=html_content
-    )
     try:
-        sg = SendGridAPIClient(sendgrid_key)
-        response = sg.send(message)
-        logger.info(f"Birthday email sent to {recipient_email}, status: {response.status_code}")
-        return response.status_code == 202
+        _brevo_send(recipient_email, subject, body_plain, html_content)
+        logger.info(f"Birthday email sent to {recipient_email}")
+        return True
     except Exception as e:
         logger.error(f"Failed to send birthday email: {str(e)}")
         return False
@@ -768,22 +785,12 @@ def get_password_hash(password):
     return pwd_context.hash(password)
 
 def send_email(to_email: str, subject: str, body: str):
-    sendgrid_key = os.getenv("SENDGRID_API_KEY")
-    sender_email = os.getenv("SENDER_EMAIL")
-    if not sendgrid_key or not sender_email:
-        raise Exception("SendGrid environment variables not configured")
-    message = Mail(
-        from_email=sender_email,
-        to_emails=to_email,
-        subject=subject,
-        plain_text_content=body
-    )
+    """Send plain text email via Brevo SMTP."""
     try:
-        sg = SendGridAPIClient(sendgrid_key)
-        response = sg.send(message)
-        return response.status_code == 202
+        _brevo_send(to_email, subject, body)
+        return True
     except Exception as e:
-        raise Exception(f"SendGrid error: {str(e)}")
+        raise Exception(f"Brevo SMTP error: {str(e)}")
 
 
 #===========================================================
@@ -1237,7 +1244,7 @@ class ResetPasswordRequest(BaseModel):
 async def forgot_password(data: ForgotPasswordRequest):
     """
     Always returns 200 (to prevent email enumeration).
-    Generates a short-lived token, stores it in DB, and emails it via SendGrid.
+    Generates a short-lived token, stores it in DB, and emails it via Brevo SMTP.
     """
     user = await db.users.find_one({"email": data.email.strip().lower()}, {"_id": 0})
     if user:
