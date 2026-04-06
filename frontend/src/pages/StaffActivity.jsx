@@ -924,12 +924,12 @@ export default function StaffActivity() {
       <React.Fragment key="activity_tabs">
       {/* ── TABS ──────────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
-        <div className={`inline-flex gap-0.5 rounded-xl p-1 mb-4 overflow-x-auto ${isDark ? 'bg-slate-800 border border-slate-700' : 'bg-white border border-slate-200/80 shadow-sm'}`}>
+        <div className={`flex gap-0.5 rounded-xl p-1 mb-4 overflow-x-auto ${isDark ? 'bg-slate-800 border border-slate-700' : 'bg-white border border-slate-200/80 shadow-sm'}`} style={{scrollbarWidth:'none',WebkitOverflowScrolling:'touch'}}>
           {TABS.map(({ value, label, Icon }) => (
             <button
               key={value}
               onClick={() => setActiveTab(value)}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex-shrink-0 ${
                 activeTab === value
                   ? isDark ? 'bg-slate-700 text-white shadow-sm' : 'bg-slate-900 text-white shadow-sm'
                   : isDark ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/60' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
