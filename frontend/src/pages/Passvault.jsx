@@ -906,7 +906,7 @@ export default function PasswordRepository() {
     <motion.div className="space-y-4" variants={cv} initial="hidden" animate="visible">
       <motion.div variants={iv}>
         <div className="relative overflow-hidden rounded-xl px-4 py-3"
-          style={{ background: `linear-gradient(135deg,${C.deepBlue} 0%,${C.medBlue} 100%)`, boxShadow: '0 4px 20px rgba(13,59,102,0.25)' }}>
+          style={{ boxShadow: '0 4px 20px rgba(13,59,102,0.25)' }} className="banner-animated">
           <div className="absolute right-0 top-0 w-48 h-48 rounded-full -mr-16 -mt-16 opacity-10"
             style={{ background: 'radial-gradient(circle,white 0%,transparent 70%)' }} />
           <div className="relative flex items-center justify-between gap-3 flex-wrap">
