@@ -116,13 +116,7 @@ export default function Login() {
   };
 
   const handleForgotPassword = () => {
-    if (!forgotEmail) {
-      toast.error('Please enter your email address');
-      return;
-    }
-    toast.info('Password reset functionality will be available soon.');
-    setShowForgotPassword(false);
-    setForgotEmail('');
+    navigate('/forgot-password');
   };
 
   const pageBg = isDark
