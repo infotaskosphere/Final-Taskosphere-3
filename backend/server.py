@@ -12,9 +12,6 @@ import calendar
 import requests
 import httpx
 import pandas as pd
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import datetime, date, timezone, timedelta
 
 # --- FIXED ROUTER IMPORTS ---
@@ -771,26 +768,22 @@ def get_password_hash(password):
     return pwd_context.hash(password)
 
 def send_email(to_email: str, subject: str, body: str):
-    smtp_host = os.getenv("BREVO_SMTP_HOST", "smtp-relay.brevo.com")
-    smtp_port = int(os.getenv("BREVO_SMTP_PORT", "587"))
-    smtp_user = os.getenv("BREVO_SMTP_USER")
-    smtp_pass = os.getenv("BREVO_SMTP_PASS")
-    sender    = os.getenv("SENDER_EMAIL")
-
-    if not smtp_user or not smtp_pass or not sender:
-        raise Exception("Brevo SMTP environment variables not configured")
-
-    msg = MIMEMultipart()
-    msg["From"]    = sender
-    msg["To"]      = to_email
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body, "plain"))
-
-    with smtplib.SMTP(smtp_host, smtp_port) as server:
-        server.starttls()
-        server.login(smtp_user, smtp_pass)
-        server.sendmail(sender, to_email, msg.as_string())
-    return True
+    sendgrid_key = os.getenv("SENDGRID_API_KEY")
+    sender_email = os.getenv("SENDER_EMAIL")
+    if not sendgrid_key or not sender_email:
+        raise Exception("SendGrid environment variables not configured")
+    message = Mail(
+        from_email=sender_email,
+        to_emails=to_email,
+        subject=subject,
+        plain_text_content=body
+    )
+    try:
+        sg = SendGridAPIClient(sendgrid_key)
+        response = sg.send(message)
+        return response.status_code == 202
+    except Exception as e:
+        raise Exception(f"SendGrid error: {str(e)}")
 
 
 #===========================================================
