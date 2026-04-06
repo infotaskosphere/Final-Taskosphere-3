@@ -832,7 +832,7 @@ export default function Quotations() {
         /* ─── LIST VIEW (table style matching Invoicing) ─────────────────── */
         <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full" style={{minWidth:620}}>
               <thead>
                 <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
                   {['Quotation', 'Client', 'Service', 'Date', 'Amount', 'Status', 'Actions'].map(h => (
