@@ -1953,8 +1953,9 @@ export default function Attendance() {
         {/* ══ PAGE HEADER ══════════════════════════════════════════════════════ */}
         <motion.div variants={itemVariants}>
           <div
-            className="banner-animated relative overflow-hidden rounded-2xl px-6 py-5"
+            className="relative overflow-hidden rounded-2xl px-6 py-5"
             style={{
+              background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
               boxShadow: '0 8px 32px rgba(13,59,102,0.25)',
             }}
           >
@@ -3236,7 +3237,8 @@ export default function Attendance() {
                 onClick={e => e.stopPropagation()}
               >
                 {/* Gradient header */}
-                <div className="banner-animated relative overflow-hidden px-8 pt-8 pb-6 text-center">
+                <div className="relative overflow-hidden px-8 pt-8 pb-6 text-center"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}>
                   <div className="absolute inset-0 opacity-10"
                     style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 0%, transparent 60%)' }} />
                   {/* Pulsing icon */}
@@ -3438,7 +3440,8 @@ export default function Attendance() {
                 onClick={e => e.stopPropagation()}
               >
                 {/* Header */}
-                <div className="banner-animated px-7 py-5 text-white flex items-center justify-between flex-shrink-0">
+                <div className="px-7 py-5 text-white flex items-center justify-between flex-shrink-0"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
                   <div>
                     <h2 className="text-xl font-black">Add Holidays</h2>
                     <p className="text-blue-200 text-sm mt-0.5">Add one or multiple holidays — click the date to pick from calendar</p>
