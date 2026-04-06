@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import GifLoader, { MiniLoader } from "@/components/ui/GifLoader.jsx";
 import { useDark } from '@/hooks/useDark';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -921,7 +922,7 @@ export default function DSCRegister() {
                 <p className="text-sm font-semibold text-emerald-700 uppercase tracking-wider">DSC IN — Available ({inDSC.length})</p>
               </div>
               {loading && inDSC.length === 0
-                ? <div className="text-center py-12 text-slate-400">Loading…</div>
+                ? <MiniLoader />
                 : inDSC.length === 0
                   ? <div className={`text-center py-16 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                       <ArrowDownCircle className="h-10 w-10 mx-auto mb-3 opacity-30" />
@@ -944,7 +945,7 @@ export default function DSCRegister() {
                 <p className="text-sm font-semibold text-red-700 uppercase tracking-wider">DSC OUT — Taken ({outDSC.length})</p>
               </div>
               {loading && outDSC.length === 0
-                ? <div className="text-center py-12 text-slate-400">Loading…</div>
+                ? <MiniLoader />
                 : outDSC.length === 0
                   ? <div className={`text-center py-16 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                       <ArrowUpCircle className="h-10 w-10 mx-auto mb-3 opacity-30" />
@@ -967,7 +968,7 @@ export default function DSCRegister() {
                 <p className="text-sm font-semibold text-amber-700 uppercase tracking-wider">DSC EXPIRED ({expiredDSC.length})</p>
               </div>
               {loading && expiredDSC.length === 0
-                ? <div className="text-center py-12 text-slate-400">Loading…</div>
+                ? <MiniLoader />
                 : expiredDSC.length === 0
                   ? <div className={`text-center py-16 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                       <AlertCircle className="h-10 w-10 mx-auto mb-3 opacity-30" />
