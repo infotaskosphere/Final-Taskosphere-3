@@ -586,7 +586,7 @@ export default function DocumentRegister() {
 
       {/* ── Dashboard-style Banner Header ── */}
       <div className="relative overflow-hidden rounded-2xl"
-        style={{ background: 'linear-gradient(135deg, #0D3B66 0%, #1F6FB2 60%, #1a8fcc 100%)', boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
+        className="banner-animated" style={{ boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
         <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10"
           style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
         <div className="absolute right-28 bottom-0 w-40 h-40 rounded-full mb-[-40px] opacity-5"
