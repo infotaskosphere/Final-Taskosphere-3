@@ -1339,9 +1339,15 @@ export default function Users() {
   const canManagePermissions = isAdmin;
 
   // ── Main page tab (Users vs Identix) ─────────────────────────────────────
-  const [mainTab, setMainTab] = useState('users'); // 'users' | 'identix'
+  const [mainTab, setMainTab] = useState('users'); // 'users' | 'identix' | 'password_resets'
   // ── Identix sub-tab ───────────────────────────────────────────────────────
   const [identixTab, setIdentixTab] = useState('dashboard'); // 'dashboard' | 'devices' | 'enrollment' | 'logs'
+  // ── Password reset requests (admin only) ──────────────────────────────────
+  const [resetRequests, setResetRequests]   = useState([]);
+  const [resetLoading,  setResetLoading]    = useState(false);
+  const [forceResetUser, setForceResetUser] = useState(null); // { id, full_name, email }
+  const [forceNewPass,   setForceNewPass]   = useState('');
+  const [forceLoading,   setForceLoading]   = useState(false);
 
   const [users,                setUsers]                = useState([]);
   const [clients,              setClients]              = useState([]);
@@ -1382,6 +1388,41 @@ export default function Users() {
       setClients(Array.isArray(res.data) ? res.data : (res.data?.data || []));
     } catch {}
   }, []);
+
+  // ── Password Reset Requests ───────────────────────────────────────────────
+  const fetchResetRequests = useCallback(async () => {
+    setResetLoading(true);
+    try {
+      const res = await api.get('/auth/reset-requests');
+      setResetRequests(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      // Backend endpoint may not exist yet — silently show empty list
+      setResetRequests([]);
+    } finally { setResetLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (mainTab === 'password_resets' && isAdmin) fetchResetRequests();
+  }, [mainTab, isAdmin, fetchResetRequests]);
+
+  const handleForceReset = useCallback(async () => {
+    if (!forceResetUser || !forceNewPass.trim()) {
+      toast.error('Enter a new password'); return;
+    }
+    if (forceNewPass.trim().length < 6) {
+      toast.error('Password must be at least 6 characters'); return;
+    }
+    setForceLoading(true);
+    try {
+      await api.patch(`/users/${forceResetUser.id}`, { password: forceNewPass.trim() });
+      toast.success(`Password updated for ${forceResetUser.full_name}`);
+      setForceResetUser(null);
+      setForceNewPass('');
+      fetchResetRequests();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to update password');
+    } finally { setForceLoading(false); }
+  }, [forceResetUser, forceNewPass, fetchResetRequests]);
 
   const fetchPermissions = useCallback(async (userId) => {
     try {
@@ -1606,8 +1647,9 @@ export default function Users() {
               {/* Main tab switcher */}
               <div className="flex gap-1 p-1 rounded-xl bg-white/10 backdrop-blur-sm">
                 {[
-                  { id: 'users',   label: 'Users',   icon: UsersIcon   },
-                  { id: 'identix', label: 'Identix', icon: Fingerprint },
+                  { id: 'users',           label: 'Users',           icon: UsersIcon   },
+                  { id: 'identix',         label: 'Identix',         icon: Fingerprint },
+                  ...(isAdmin ? [{ id: 'password_resets', label: 'Password Resets', icon: KeyRound }] : []),
                 ].map(t => {
                   const Icon = t.icon;
                   return (
@@ -1731,6 +1773,149 @@ export default function Users() {
               )}
           </motion.div>
         </>
+      )}
+
+      {/* ════ PASSWORD RESETS TAB (Admin only) ════ */}
+      {mainTab === 'password_resets' && isAdmin && (
+        <motion.div variants={itemVariants} className="space-y-4">
+          {/* Header */}
+          <div className={`rounded-2xl p-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} shadow-sm`}>
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl" style={{ background: `${COLORS.mediumBlue}15` }}>
+                  <KeyRound className="h-5 w-5" style={{ color: COLORS.mediumBlue }} />
+                </div>
+                <div>
+                  <h2 className={`font-bold text-base ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Password Reset Requests</h2>
+                  <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    Users who requested a password reset · Admin can also force-set any user's password
+                  </p>
+                </div>
+              </div>
+              <Button onClick={fetchResetRequests} disabled={resetLoading} variant="outline"
+                className={`h-9 px-4 rounded-xl text-xs gap-2 ${isDark ? 'border-slate-600 text-slate-300' : 'border-slate-200 text-slate-600'}`}>
+                <RefreshCw className={`h-3.5 w-3.5 ${resetLoading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+            </div>
+          </div>
+
+          {/* Force-reset any user */}
+          <div className={`rounded-2xl p-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} shadow-sm`}>
+            <h3 className={`font-semibold text-sm mb-3 flex items-center gap-2 ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+              <ShieldCheck className="h-4 w-4 text-emerald-500" /> Force-Set Password for Any User
+            </h3>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex-1">
+                <select
+                  value={forceResetUser?.id || ''}
+                  onChange={e => {
+                    const u = users.find(u => u.id === e.target.value);
+                    setForceResetUser(u ? { id: u.id, full_name: u.full_name, email: u.email } : null);
+                    setForceNewPass('');
+                  }}
+                  className={`w-full h-10 px-3 rounded-xl border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200 text-slate-800'}`}
+                >
+                  <option value="">— Select user —</option>
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>{u.full_name} ({u.email})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex-1">
+                <input
+                  type="password"
+                  placeholder="New password (min 6 chars)"
+                  value={forceNewPass}
+                  onChange={e => setForceNewPass(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleForceReset()}
+                  className={`w-full h-10 px-3 rounded-xl border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
+                />
+              </div>
+              <Button
+                onClick={handleForceReset}
+                disabled={forceLoading || !forceResetUser || !forceNewPass.trim()}
+                className="h-10 px-5 rounded-xl text-sm font-semibold text-white"
+                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+              >
+                {forceLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4 mr-1.5" />}
+                {forceLoading ? 'Saving…' : 'Set Password'}
+              </Button>
+            </div>
+            {forceResetUser && (
+              <p className={`text-xs mt-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Setting password for: <span className="font-semibold">{forceResetUser.full_name}</span> · {forceResetUser.email}
+              </p>
+            )}
+          </div>
+
+          {/* Reset requests list */}
+          <div className={`rounded-2xl border overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} shadow-sm`}>
+            <div className={`px-5 py-3.5 border-b ${isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-slate-50/60'}`}>
+              <p className={`text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Reset Requests · {resetRequests.length} record{resetRequests.length !== 1 ? 's' : ''}
+              </p>
+            </div>
+            {resetLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="h-7 w-7 animate-spin text-slate-400" />
+              </div>
+            ) : resetRequests.length === 0 ? (
+              <div className={`py-16 text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                <KeyRound className="h-10 w-10 mx-auto mb-3 opacity-25" />
+                <p className="text-sm font-medium">No password reset requests</p>
+                <p className="text-xs mt-1 opacity-70">Requests will appear here when users click "Forgot Password"</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-slate-50'}`}>
+                      {['User', 'Email', 'Requested At', 'Status', 'Action'].map(h => (
+                        <th key={h} className={`text-left py-3 px-4 text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className={`divide-y ${isDark ? 'divide-slate-700/60' : 'divide-slate-50'}`}>
+                    {resetRequests.map((req, idx) => (
+                      <tr key={req.id || idx} className={`transition-colors ${isDark ? 'hover:bg-slate-700/40' : 'hover:bg-slate-50'}`}>
+                        <td className="py-3 px-4 font-semibold">{req.full_name || req.user_name || '—'}</td>
+                        <td className="py-3 px-4 text-xs text-slate-400">{req.email || '—'}</td>
+                        <td className="py-3 px-4 text-xs text-slate-400">
+                          {req.requested_at ? new Date(req.requested_at).toLocaleString() : '—'}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                            req.status === 'completed'
+                              ? isDark ? 'bg-emerald-900/40 text-emerald-400' : 'bg-emerald-100 text-emerald-700'
+                              : isDark ? 'bg-amber-900/40 text-amber-400' : 'bg-amber-100 text-amber-700'
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full inline-block ${req.status === 'completed' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                            {req.status === 'completed' ? 'Completed' : 'Pending'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setForceResetUser({ id: req.user_id, full_name: req.full_name || req.user_name, email: req.email });
+                              setForceNewPass('');
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }}
+                            className={`h-7 px-3 rounded-lg text-xs ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                          >
+                            <Lock className="h-3 w-3 mr-1" /> Reset Now
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </motion.div>
       )}
 
       {/* ════ IDENTIX TAB ════ */}
