@@ -611,7 +611,7 @@ const DashboardLayout = ({ children }) => {
         <main
           ref={mainRef}
           className="flex-1 overflow-y-auto overflow-x-hidden"
-          style={{ padding: 'clamp(0.875rem, 2vw, 1.75rem)' }}
+          style={{ padding: 'clamp(0.875rem, 2vw, 1.75rem)', position: 'relative' }}
         >
           <div
             className="mx-auto w-full min-w-0"
