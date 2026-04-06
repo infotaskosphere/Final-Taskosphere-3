@@ -282,21 +282,63 @@ function DetailModal({ open, onClose, entry, isDark }) {
   );
 }
 
+// ── Field wrapper defined OUTSIDE EditModal so it is never recreated on re-render.
+// When F was defined inside EditModal, React treated it as a new component type on
+// every render and unmounted/remounted every input, stealing focus after one keystroke.
+function EditField({ label, children }) {
+  return (
+    <div>
+      <Label className="text-xs font-bold uppercase text-slate-500">{label}</Label>
+      {children}
+    </div>
+  );
+}
+
+const DRAFT_KEY = (id) => `passvault_draft_${id ?? 'new'}`;
+
 function EditModal({ open, onClose, entry, isDark, onSuccess }) {
   const [form, setForm] = useState({});
   const [busy, setBusy] = useState(false);
+  const [hasDraft, setHasDraft] = useState(false);
   const qc = useQueryClient();
+  // Track whether user explicitly closed (Cancel / Save) so we don't close on tab-switch
+  const explicitClose = useRef(false);
 
   useEffect(() => {
-    if (open) {
-      setForm(entry
-        ? { ...entry, password_plain: '', department: entry.department || 'OTHER' }
-        : { portal_type: 'OTHER', holder_type: 'COMPANY', department: 'OTHER' }
-      );
+    if (!open) return;
+    const draftKey = DRAFT_KEY(entry?.id);
+    const saved = sessionStorage.getItem(draftKey);
+    if (saved) {
+      try {
+        setForm(JSON.parse(saved));
+        setHasDraft(true);
+        return;
+      } catch { /* fall through to default */ }
     }
+    setHasDraft(false);
+    setForm(entry
+      ? { ...entry, password_plain: '', department: entry.department || 'OTHER' }
+      : { portal_type: 'OTHER', holder_type: 'COMPANY', department: 'OTHER' }
+    );
   }, [entry, open]);
 
+  // Persist draft to sessionStorage on every form change
+  useEffect(() => {
+    if (!open) return;
+    const draftKey = DRAFT_KEY(entry?.id);
+    sessionStorage.setItem(draftKey, JSON.stringify(form));
+  }, [form, open, entry?.id]);
+
   const set = useCallback((k, v) => setForm(p => ({ ...p, [k]: v })), []);
+
+  const clearDraft = () => sessionStorage.removeItem(DRAFT_KEY(entry?.id));
+
+  const handleExplicitClose = () => {
+    explicitClose.current = true;
+    clearDraft();
+    setHasDraft(false);
+    onClose();
+  };
 
   const save = async () => {
     if (!form.portal_name?.trim()) return toast.error('Portal name is required');
@@ -311,107 +353,126 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
       }
       qc.invalidateQueries({ queryKey: ['passwords'] });
       onSuccess?.();
+      clearDraft();
+      setHasDraft(false);
+      explicitClose.current = true;
       onClose();
     } catch (e) {
       toast.error(errorMessage(e));
     } finally { setBusy(false); }
   };
 
+  // Prevent dialog from closing when user switches browser tabs or clicks outside.
+  // Only close when Cancel or Save button is pressed (explicitClose flag).
+  const handleOpenChange = (isOpen) => {
+    if (!isOpen) {
+      if (explicitClose.current) {
+        explicitClose.current = false;
+        return; // let onClose already called above handle it
+      }
+      // Tab-switch or outside-click — do NOT close, keep draft alive
+      return;
+    }
+  };
+
   const ic = `rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`;
   const sc = `rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`;
 
-  const F = ({ label, children }) => (
-    <div><Label className="text-xs font-bold uppercase text-slate-500">{label}</Label>{children}</div>
-  );
-
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className={`max-w-2xl rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
         <ModalHead
           icon={entry?.id ? <Edit2 className="h-4 w-4 text-white" /> : <Plus className="h-4 w-4 text-white" />}
           title={entry?.id ? 'Edit Entry' : 'Add New Entry'}
           sub="Manage credential details"
           grad={`linear-gradient(135deg,${C.deepBlue},${C.medBlue})`}
-          onClose={onClose}
+          onClose={handleExplicitClose}
         />
+        {hasDraft && (
+          <div className={`mx-6 mt-4 px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between gap-2 ${isDark ? 'bg-amber-900/30 border border-amber-700/50 text-amber-300' : 'bg-amber-50 border border-amber-200 text-amber-700'}`}>
+            <span>📋 Draft restored — continue where you left off.</span>
+            <button type="button" onClick={() => { clearDraft(); setHasDraft(false); setForm(entry ? { ...entry, password_plain: '', department: entry.department || 'OTHER' } : { portal_type: 'OTHER', holder_type: 'COMPANY', department: 'OTHER' }); }}
+              className="underline text-xs opacity-70 hover:opacity-100 flex-shrink-0">Discard</button>
+          </div>
+        )}
         <div className="p-6 space-y-4 max-h-[72vh] overflow-y-auto">
           <div className="grid grid-cols-2 gap-4">
-            <F label="Portal Name *">
+            <EditField label="Portal Name *">
               <Input className={ic} value={form.portal_name || ''} onChange={e => set('portal_name', e.target.value)} placeholder="e.g. GST Portal" />
-            </F>
-            <F label="Portal Type">
+            </EditField>
+            <EditField label="Portal Type">
               <Select value={form.portal_type || 'OTHER'} onValueChange={v => set('portal_type', v)}>
                 <SelectTrigger className={sc}><SelectValue /></SelectTrigger>
                 <SelectContent>{PORTAL_TYPES.map(t => <SelectItem key={t} value={t}>{PM[t].icon} {PM[t].label}</SelectItem>)}</SelectContent>
               </Select>
-            </F>
+            </EditField>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <F label="Department *">
+            <EditField label="Department *">
               <Select value={form.department || 'OTHER'} onValueChange={v => set('department', v)}>
                 <SelectTrigger className={sc}><SelectValue /></SelectTrigger>
                 <SelectContent>{DEPTS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
               </Select>
-            </F>
-            <F label="Portal URL">
+            </EditField>
+            <EditField label="Portal URL">
               <Input className={ic} value={form.url || ''} onChange={e => set('url', e.target.value)} placeholder="https://..." />
-            </F>
+            </EditField>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <F label="Username / Email">
+            <EditField label="Username / Email">
               <Input className={ic} value={form.username || ''} onChange={e => set('username', e.target.value)} placeholder="user@example.com" />
-            </F>
-            <F label="Password">
+            </EditField>
+            <EditField label="Password">
               <Input type="password" className={ic} value={form.password_plain || ''} onChange={e => set('password_plain', e.target.value)} placeholder="••••••••" />
-            </F>
+            </EditField>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <F label="Holder Type">
+            <EditField label="Holder Type">
               <Select value={form.holder_type || 'COMPANY'} onValueChange={v => set('holder_type', v)}>
                 <SelectTrigger className={sc}><SelectValue /></SelectTrigger>
                 <SelectContent>{HOLDER_TYPES.map(t => <SelectItem key={t} value={t}>{HM[t].icon} {HM[t].label}</SelectItem>)}</SelectContent>
               </Select>
-            </F>
-            <F label="Holder Name">
+            </EditField>
+            <EditField label="Holder Name">
               <Input className={ic} value={form.holder_name || ''} onChange={e => set('holder_name', e.target.value)} placeholder="Director / Company name" />
-            </F>
+            </EditField>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <F label="Holder PAN">
+            <EditField label="Holder PAN">
               <Input className={ic} value={form.holder_pan || ''} onChange={e => set('holder_pan', e.target.value.toUpperCase())} placeholder="ABCDE1234F" />
-            </F>
-            <F label="Holder DIN">
+            </EditField>
+            <EditField label="Holder DIN">
               <Input className={ic} value={form.holder_din || ''} onChange={e => set('holder_din', e.target.value)} placeholder="DIN number" />
-            </F>
+            </EditField>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <F label="Mobile Number">
+            <EditField label="Mobile Number">
               <Input className={ic} value={form.mobile || ''} onChange={e => set('mobile', e.target.value)} placeholder="+91 9876543210" />
-            </F>
-            <F label="Trade Name">
+            </EditField>
+            <EditField label="Trade Name">
               <Input className={ic} value={form.trade_name || ''} onChange={e => set('trade_name', e.target.value)} placeholder="Business name" />
-            </F>
+            </EditField>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <F label="Client Name">
+            <EditField label="Client Name">
               <Input className={ic} value={form.client_name || ''} onChange={e => set('client_name', e.target.value)} placeholder="Company name" />
-            </F>
-            <F label="Client ID">
+            </EditField>
+            <EditField label="Client ID">
               <Input className={ic} value={form.client_id || ''} onChange={e => set('client_id', e.target.value)} placeholder="Client code" />
-            </F>
+            </EditField>
           </div>
-          <F label="Notes">
+          <EditField label="Notes">
             <Textarea className={`${ic} resize-none`} rows={3} value={form.notes || ''} onChange={e => set('notes', e.target.value)} placeholder="Additional notes…" />
-          </F>
-          <F label="Tags (comma-separated)">
+          </EditField>
+          <EditField label="Tags (comma-separated)">
             <Input className={ic}
               value={Array.isArray(form.tags) ? form.tags.join(', ') : (form.tags || '')}
               onChange={e => set('tags', e.target.value.split(',').map(t => t.trim()).filter(Boolean))}
               placeholder="tag1, tag2" />
-          </F>
+          </EditField>
         </div>
         <DialogFooter className={`px-6 py-4 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-          <Button variant="ghost" className="rounded-xl" onClick={onClose}>Cancel</Button>
+          <Button variant="ghost" className="rounded-xl" onClick={handleExplicitClose}>Cancel</Button>
           <Button onClick={save} disabled={busy} className="rounded-xl font-bold text-white" style={{ background: C.green }}>
             {busy ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Saving…</> : 'Save Entry'}
           </Button>
@@ -1114,8 +1175,7 @@ export default function PasswordRepository() {
         </motion.div>
       ) : (
         <motion.div variants={iv} className={`rounded-xl border overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <div className="overflow-x-auto">
-          <table className="w-full text-sm" style={{minWidth:580}}>
+          <table className="w-full text-sm">
             <thead className={`border-b ${isDark ? 'bg-slate-700/80 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
               <tr>
                 {isAdmin && <th className="px-2 py-2.5 w-8" />}
@@ -1139,7 +1199,6 @@ export default function PasswordRepository() {
               ))}
             </motion.tbody>
           </table>
-          </div>
         </motion.div>
       )}
 
