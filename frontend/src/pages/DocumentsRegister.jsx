@@ -90,7 +90,7 @@ function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, 
 
   return (
     <div className="w-full overflow-x-auto">
-      <table className="w-full table-fixed border-collapse">
+      <table className="w-full table-fixed border-collapse" style={{minWidth:640}}>
         <colgroup>
           <col style={{ width: 36 }} />
           <col style={{ width: 36 }} />
