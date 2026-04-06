@@ -820,27 +820,27 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, is
         </div>
 
         {/* Footer actions */}
-        <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 dark:border-slate-700"
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 border-t border-slate-100 dark:border-slate-700"
           style={{ backgroundColor: isDark ? D.raised : "#f8fafc" }}>
-          <p className="text-xs" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+          <p className="text-xs truncate" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
             {conn.last_synced
               ? `Synced ${format(parseISO(conn.last_synced), "MMM d, h:mm a")}`
               : conn.connected_at ? `Connected ${format(parseISO(conn.connected_at), "MMM d, yyyy")}` : ""}
             {conn.imap_host && <><span className="mx-1.5">·</span><span className="font-medium">{conn.imap_host}</span></>}
           </p>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-shrink-0">
             <button onClick={handleSync} disabled={syncing}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700 whitespace-nowrap"
               style={{ color: isDark ? D.muted : "#64748b" }}>
               {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Sync
             </button>
             <button onClick={handleTest} disabled={testing}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700 whitespace-nowrap"
               style={{ color: isDark ? D.muted : "#64748b" }}>
               {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wifi className="w-3.5 h-3.5" />} Test
             </button>
             <button onClick={() => onToggle(conn.email_address, !conn.is_active)}
-              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700"
+              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700 whitespace-nowrap"
               style={{ color: isDark ? D.muted : "#64748b" }}>
               {conn.is_active ? "Pause" : "Resume"}
             </button>
