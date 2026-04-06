@@ -119,14 +119,14 @@ export default function GeneralSettings() {
           initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.05 }}
           className="lg:col-span-2 flex flex-col gap-3"
         >
-          <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <div className={`rounded-2xl border overflow-hidden shadow-sm flex flex-col flex-1 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
             {/* Mini header strip */}
             <div className="h-12 relative" style={{ background: GRADIENT }}>
               <div className="absolute inset-0 opacity-10"
                 style={{ background: 'radial-gradient(circle at 80% 50%, white 0%, transparent 60%)' }} />
             </div>
-            {/* Avatar */}
-            <div className="px-5 pb-5 -mt-7 flex flex-col items-center text-center">
+            {/* Avatar — no role badge */}
+            <div className="px-5 pb-4 -mt-7 flex flex-col items-center text-center">
               <div className="relative group mb-3">
                 <div
                   className="w-[72px] h-[72px] rounded-2xl overflow-hidden shadow-xl"
@@ -152,46 +152,60 @@ export default function GeneralSettings() {
               </div>
               <h2 className={`font-bold text-sm leading-tight ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{user?.full_name}</h2>
               <p className={`text-xs mt-0.5 truncate max-w-full ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{user?.email}</p>
-              <span
-                className="inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-xl text-[11px] font-bold capitalize"
-                style={{ background: isDark ? `${roleCfg.dot}20` : roleCfg.bg, color: roleCfg.text }}
-              >
-                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: roleCfg.dot }} />
-                {user?.role}
-              </span>
             </div>
 
-            {/* Meta rows */}
-            <div className={`border-t px-4 py-3 space-y-2 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-              {[
-                { icon: Hash,  label: 'Account ID', val: `#${user?.id?.slice(-6)}`, mono: true },
-                { icon: Star,  label: 'Status',     val: <span className="flex items-center gap-1 text-emerald-500 font-bold"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />Active</span> },
-                ...(user?.departments?.length ? [{
-                  icon: Settings, label: 'Depts',
-                  val: user.departments.slice(0,2).join(', ') + (user.departments.length > 2 ? ` +${user.departments.length - 2}` : ''),
-                }] : []),
-              ].map((row, i) => {
-                const Icon = row.icon;
-                return (
-                  <div key={i} className="flex items-center justify-between text-xs">
-                    <span className={`flex items-center gap-1.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                      <Icon className="h-3 w-3" />{row.label}
-                    </span>
-                    <span className={`${row.mono ? 'font-mono ' : ''}font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                      {row.val}
-                    </span>
-                  </div>
-                );
-              })}
+            {/* Meta rows — full depts, ranking row added */}
+            <div className={`border-t px-4 py-3 space-y-2.5 flex-1 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+              {/* Account ID */}
+              <div className="flex items-center justify-between text-xs">
+                <span className={`flex items-center gap-1.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  <Hash className="h-3 w-3" />Account ID
+                </span>
+                <span className={`font-mono font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                  #{user?.id?.slice(-6)}
+                </span>
+              </div>
+              {/* Status */}
+              <div className="flex items-center justify-between text-xs">
+                <span className={`flex items-center gap-1.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  <Star className="h-3 w-3" />Status
+                </span>
+                <span className="flex items-center gap-1 text-emerald-500 font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />Active
+                </span>
+              </div>
+              {/* Departments — full list, wrapping */}
+              {user?.departments?.length > 0 && (
+                <div className="flex items-start justify-between text-xs gap-2">
+                  <span className={`flex items-center gap-1.5 flex-shrink-0 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    <Settings className="h-3 w-3" />Depts
+                  </span>
+                  <span className={`font-semibold text-right leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                    {user.departments.join(', ')}
+                  </span>
+                </div>
+              )}
+              {/* Ranking */}
+              <div className="flex items-center justify-between text-xs">
+                <span className={`flex items-center gap-1.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  <Shield className="h-3 w-3" />Ranking
+                </span>
+                <span
+                  className="px-2 py-0.5 rounded-lg text-[11px] font-bold capitalize"
+                  style={{ background: isDark ? `${roleCfg.dot}20` : roleCfg.bg, color: roleCfg.text }}
+                >
+                  {user?.role === 'admin' ? 'Administrator' : user?.role === 'manager' ? 'Manager' : 'Staff'}
+                </span>
+              </div>
             </div>
-          </div>
 
-          {/* Security tip */}
-          <div className={`rounded-xl border p-3 flex items-start gap-2.5 ${isDark ? 'bg-blue-950/30 border-blue-900/50' : 'bg-blue-50/80 border-blue-100'}`}>
-            <Shield className="w-3.5 h-3.5 text-blue-500 flex-shrink-0 mt-0.5" />
-            <p className={`text-xs leading-relaxed ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
-              Contact your admin to change passwords or system permissions.
-            </p>
+            {/* Security tip — pinned to bottom of card */}
+            <div className={`border-t px-4 py-3 flex items-start gap-2.5 ${isDark ? 'border-slate-700 bg-blue-950/20' : 'border-slate-100 bg-blue-50/60'}`}>
+              <Shield className="w-3.5 h-3.5 text-blue-500 flex-shrink-0 mt-0.5" />
+              <p className={`text-xs leading-relaxed ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
+                Contact your admin to change passwords or system permissions.
+              </p>
+            </div>
           </div>
         </motion.div>
 
