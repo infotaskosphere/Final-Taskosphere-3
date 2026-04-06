@@ -1114,7 +1114,8 @@ export default function PasswordRepository() {
         </motion.div>
       ) : (
         <motion.div variants={iv} className={`rounded-xl border overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm" style={{minWidth:580}}>
             <thead className={`border-b ${isDark ? 'bg-slate-700/80 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
               <tr>
                 {isAdmin && <th className="px-2 py-2.5 w-8" />}
@@ -1138,6 +1139,7 @@ export default function PasswordRepository() {
               ))}
             </motion.tbody>
           </table>
+          </div>
         </motion.div>
       )}
 
