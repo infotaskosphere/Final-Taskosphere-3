@@ -434,9 +434,9 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
   const removeListItem = (list, i) => setForm(prev => ({ ...prev, [list]: prev[list].filter((_,idx)=>idx!==i) }));
 
   const handleSave = async () => {
-    if (!form.company_id) { toast.error('Please select a company'); return; }
-    if (!form.client_name.trim()) { toast.error('Client name is required'); return; }
-    if (!form.service.trim()) { toast.error('Service is required'); return; }
+    if (!form.company_id) { toast.error('Please select a company'); setStep(1); return; }
+    if (!form.client_name.trim()) { toast.error('Client name is required'); setStep(1); return; }
+    if (!form.service.trim()) { toast.error('Service is required — please select a service in Step 2'); setStep(2); return; }
     setSaving(true);
     try {
       const payload = { ...form, scope_of_work: form.scope_of_work.filter(s=>s.trim()), extra_terms: form.extra_terms.filter(t=>t.trim()), extra_checklist_items: form.extra_checklist_items.filter(c=>c.trim()), lead_id: form.lead_id||null, client_id: form.client_id||null };
