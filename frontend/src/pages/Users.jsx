@@ -1262,62 +1262,62 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
           </motion.div>
         )}
       </AnimatePresence>
-      <div className="p-5">
-        <div className="flex items-start gap-4">
+      <div className="p-4">
+        <div className="flex items-start gap-3">
           <div className="relative flex-shrink-0">
-            <div className="w-[60px] h-[60px] rounded-xl overflow-hidden shadow-sm ring-1 ring-slate-100 dark:ring-slate-700">
+            <div className="w-[52px] h-[52px] rounded-xl overflow-hidden shadow-sm ring-1 ring-slate-100 dark:ring-slate-700">
               {userData.profile_picture
                 ? <img src={userData.profile_picture} alt={userData.full_name} className="w-full h-full object-cover" />
-                : <div className={`w-full h-full flex items-center justify-center text-white text-2xl font-black bg-gradient-to-br ${roleCfg.gradient}`}>
+                : <div className={`w-full h-full flex items-center justify-center text-white text-xl font-black bg-gradient-to-br ${roleCfg.gradient}`}>
                     {userData.full_name?.charAt(0)?.toUpperCase()}
                   </div>}
             </div>
-            <div className={`absolute -bottom-1.5 -right-1.5 w-6 h-6 rounded-xl bg-gradient-to-br ${roleCfg.gradient} flex items-center justify-center ring-2 ring-white dark:ring-slate-800 shadow-sm`}>
-              <RoleIcon className="h-3 w-3 text-white" />
+            <div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-lg bg-gradient-to-br ${roleCfg.gradient} flex items-center justify-center ring-2 ring-white dark:ring-slate-800 shadow-sm`}>
+              <RoleIcon className="h-2.5 w-2.5 text-white" />
             </div>
           </div>
           <div className="flex-1 min-w-0 pt-0.5">
-            <h3 className="font-semibold text-base tracking-tight text-slate-900 dark:text-white truncate">{userData.full_name}</h3>
-            <div className="flex items-center gap-2 mt-2 flex-wrap">
-              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-bold text-white bg-gradient-to-r ${roleCfg.gradient}`}>
-                <RoleIcon className="h-3 w-3" />{roleCfg.label}
+            <h3 className="font-semibold text-sm tracking-tight text-slate-900 dark:text-white truncate">{userData.full_name}</h3>
+            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold text-white bg-gradient-to-r ${roleCfg.gradient}`}>
+                <RoleIcon className="h-2.5 w-2.5" />{roleCfg.label}
               </span>
               <StatusBadge status={userData.status} isActive={userData.is_active} />
             </div>
           </div>
         </div>
         {(userData.departments || []).length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-4">{userData.departments.map(d => <DeptPill key={d} dept={d} />)}</div>
+          <div className="flex flex-wrap gap-1 mt-3">{userData.departments.map(d => <DeptPill key={d} dept={d} />)}</div>
         )}
         <ModuleAccessBadges userData={userData} />
-        <div className="mt-4 space-y-2 text-xs text-slate-500 dark:text-slate-400">
-          <div className="flex items-center gap-2 truncate"><Mail className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" /><span className="truncate">{userData.email}</span></div>
-          <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />{userData.phone || '—'}</div>
+        <div className="mt-3 space-y-1.5 text-xs text-slate-500 dark:text-slate-400">
+          <div className="flex items-center gap-2 truncate"><Mail className="h-3 w-3 text-slate-400 flex-shrink-0" /><span className="truncate">{userData.email}</span></div>
+          <div className="flex items-center gap-2"><Phone className="h-3 w-3 text-slate-400 flex-shrink-0" />{userData.phone || '—'}</div>
           {(userData.punch_in_time || userData.punch_out_time) && (
-            <div className="flex items-center gap-2"><Clock className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />{userData.punch_in_time || '—'} → {userData.punch_out_time || '—'}</div>
+            <div className="flex items-center gap-2"><Clock className="h-3 w-3 text-slate-400 flex-shrink-0" />{userData.punch_in_time || '—'} → {userData.punch_out_time || '—'}</div>
           )}
-          <div className="flex items-center gap-2"><Calendar className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+          <div className="flex items-center gap-2"><Calendar className="h-3 w-3 text-slate-400 flex-shrink-0" />
             Joined {userData.created_at ? format(new Date(userData.created_at), 'dd MMM yyyy') : 'N/A'}
           </div>
         </div>
         {userData.role !== 'admin' && (
-          <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
-            <span className="text-[11px] text-slate-400 font-medium">Permissions</span>
-            <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold"
+          <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
+            <span className="text-[10px] text-slate-400 font-medium">Permissions</span>
+            <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold"
               style={{ background: `${COLORS.mediumBlue}10`, color: COLORS.mediumBlue }}>
               <ShieldCheck className="h-3 w-3" />{permCount} active
             </div>
           </div>
         )}
         {isPending && isAdmin && (
-          <div className="flex gap-2.5 mt-5 pt-4 border-t border-amber-100 dark:border-amber-900">
+          <div className="flex gap-2 mt-3 pt-3 border-t border-amber-100 dark:border-amber-900">
             <Button onClick={() => onApprove(userData)} disabled={approving === userData.id}
-              className="flex-1 h-10 rounded-xl font-semibold text-sm" style={{ background: COLORS.emeraldGreen, color: 'white' }}>
-              <UserCheck className="h-4 w-4 mr-1.5" />Approve
+              className="flex-1 h-9 rounded-xl font-semibold text-xs" style={{ background: COLORS.emeraldGreen, color: 'white' }}>
+              <UserCheck className="h-3.5 w-3.5 mr-1" />Approve
             </Button>
             <Button onClick={() => onReject(userData)} disabled={approving === userData.id}
-              variant="outline" className="flex-1 h-10 rounded-xl border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 font-semibold text-sm">
-              <UserX className="h-4 w-4 mr-1.5" />Reject
+              variant="outline" className="flex-1 h-9 rounded-xl border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 font-semibold text-xs">
+              <UserX className="h-3.5 w-3.5 mr-1" />Reject
             </Button>
           </div>
         )}
@@ -1343,11 +1343,7 @@ export default function Users() {
   // ── Identix sub-tab ───────────────────────────────────────────────────────
   const [identixTab, setIdentixTab] = useState('dashboard'); // 'dashboard' | 'devices' | 'enrollment' | 'logs'
   // ── Password reset requests (admin only) ──────────────────────────────────
-  const [resetRequests, setResetRequests]   = useState([]);
-  const [resetLoading,  setResetLoading]    = useState(false);
-  const [forceResetUser, setForceResetUser] = useState(null); // { id, full_name, email }
-  const [forceNewPass,   setForceNewPass]   = useState('');
-  const [forceLoading,   setForceLoading]   = useState(false);
+
 
   const [users,                setUsers]                = useState([]);
   const [clients,              setClients]              = useState([]);
@@ -1361,6 +1357,7 @@ export default function Users() {
   const [loading,              setLoading]              = useState(false);
   const [clientSearch,         setClientSearch]         = useState('');
   const [activePermTab,        setActivePermTab]        = useState('modules');
+  const [pwSearch,             setPwSearch]             = useState('');
 
   const [formData, setFormData] = useState({
     full_name: '', email: '', password: '', role: 'staff',
@@ -1389,40 +1386,11 @@ export default function Users() {
     } catch {}
   }, []);
 
-  // ── Password Reset Requests ───────────────────────────────────────────────
-  const fetchResetRequests = useCallback(async () => {
-    setResetLoading(true);
-    try {
-      const res = await api.get('/auth/reset-requests');
-      setResetRequests(Array.isArray(res.data) ? res.data : []);
-    } catch {
-      // Backend endpoint may not exist yet — silently show empty list
-      setResetRequests([]);
-    } finally { setResetLoading(false); }
-  }, []);
+  // ── Password Log (admin view of all users' account/password status) ───────
 
   useEffect(() => {
-    if (mainTab === 'password_resets' && isAdmin) fetchResetRequests();
-  }, [mainTab, isAdmin, fetchResetRequests]);
-
-  const handleForceReset = useCallback(async () => {
-    if (!forceResetUser || !forceNewPass.trim()) {
-      toast.error('Enter a new password'); return;
-    }
-    if (forceNewPass.trim().length < 6) {
-      toast.error('Password must be at least 6 characters'); return;
-    }
-    setForceLoading(true);
-    try {
-      await api.patch(`/users/${forceResetUser.id}`, { password: forceNewPass.trim() });
-      toast.success(`Password updated for ${forceResetUser.full_name}`);
-      setForceResetUser(null);
-      setForceNewPass('');
-      fetchResetRequests();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Failed to update password');
-    } finally { setForceLoading(false); }
-  }, [forceResetUser, forceNewPass, fetchResetRequests]);
+    if (mainTab === 'password_resets' && isAdmin && !users.length) fetchUsers();
+  }, [mainTab, isAdmin]);
 
   const fetchPermissions = useCallback(async (userId) => {
     try {
@@ -1689,14 +1657,14 @@ export default function Users() {
             {stats.map((s, i) => {
               const Icon = s.icon;
               return (
-                <motion.div key={i} variants={itemVariants} whileHover={{ y: -3, transition: springPhysics.card }} whileTap={{ scale: 0.985 }}
-                  className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700 shadow-sm hover:shadow-lg transition-all cursor-default">
-                  <div className="p-4 flex items-start justify-between">
+                <motion.div key={i} variants={itemVariants} whileHover={{ y: -2, transition: springPhysics.card }} whileTap={{ scale: 0.985 }}
+                  className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200/80 dark:border-slate-700 shadow-sm hover:shadow-md transition-all cursor-default">
+                  <div className="p-3.5 flex items-center justify-between gap-3">
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{s.label}</p>
-                      <p className="text-3xl font-bold mt-1 tracking-tight" style={{ color: s.color }}>{s.value}</p>
+                      <p className="text-2xl font-bold mt-0.5 tracking-tight" style={{ color: s.color }}>{s.value}</p>
                     </div>
-                    <div className="p-2 rounded-xl" style={{ background: `${s.color}12` }}>
+                    <div className="p-2 rounded-xl flex-shrink-0" style={{ background: `${s.color}12` }}>
                       <Icon className="h-4 w-4" style={{ color: s.color }} />
                     </div>
                   </div>
@@ -1778,142 +1746,120 @@ export default function Users() {
       {/* ════ PASSWORD RESETS TAB (Admin only) ════ */}
       {mainTab === 'password_resets' && isAdmin && (
         <motion.div variants={itemVariants} className="space-y-4">
-          {/* Header */}
-          <div className={`rounded-2xl p-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} shadow-sm`}>
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 rounded-xl" style={{ background: `${COLORS.mediumBlue}15` }}>
-                  <KeyRound className="h-5 w-5" style={{ color: COLORS.mediumBlue }} />
+          {/* Info banner */}
+          <div className={`flex items-start gap-3 px-4 py-3 rounded-xl border text-xs ${
+            isDark ? 'bg-blue-950/30 border-blue-900/50 text-blue-300' : 'bg-blue-50 border-blue-100 text-blue-700'
+          }`}>
+            <ShieldCheck className="h-4 w-4 mt-0.5 flex-shrink-0 text-blue-500" />
+            <span>To reset or change a user&apos;s password, open their profile via the <b>Users</b> tab → Edit (pencil icon) → New Password field.</span>
+          </div>
+
+          {/* Search bar */}
+          <div className="relative">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Input
+              placeholder="Search by name, email or role…"
+              value={pwSearch}
+              onChange={e => setPwSearch(e.target.value)}
+              className={`pl-10 h-10 rounded-xl text-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
+            />
+            {pwSearch && (
+              <button onClick={() => setPwSearch('')} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+
+          {/* Password log table */}
+          <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            {/* Table header */}
+            <div className={`flex items-center justify-between px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-800/80' : 'border-slate-100 bg-slate-50/80'}`}>
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.mediumBlue}15` }}>
+                  <KeyRound className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
                 </div>
                 <div>
-                  <h2 className={`font-bold text-base ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Password Reset Requests</h2>
-                  <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Users who requested a password reset · Admin can also force-set any user's password
-                  </p>
+                  <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Account Password Log</p>
+                  <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>All users · {users.length} accounts</p>
                 </div>
               </div>
-              <Button onClick={fetchResetRequests} disabled={resetLoading} variant="outline"
-                className={`h-9 px-4 rounded-xl text-xs gap-2 ${isDark ? 'border-slate-600 text-slate-300' : 'border-slate-200 text-slate-600'}`}>
-                <RefreshCw className={`h-3.5 w-3.5 ${resetLoading ? 'animate-spin' : ''}`} />
-                Refresh
+              <Button onClick={fetchUsers} variant="outline" className={`h-8 px-3 rounded-lg text-xs gap-1.5 ${isDark ? 'border-slate-600 text-slate-300' : ''}`}>
+                <RefreshCw className="h-3 w-3" />Refresh
               </Button>
             </div>
-          </div>
 
-          {/* Force-reset any user */}
-          <div className={`rounded-2xl p-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} shadow-sm`}>
-            <h3 className={`font-semibold text-sm mb-3 flex items-center gap-2 ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-              <ShieldCheck className="h-4 w-4 text-emerald-500" /> Force-Set Password for Any User
-            </h3>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="flex-1">
-                <select
-                  value={forceResetUser?.id || ''}
-                  onChange={e => {
-                    const u = users.find(u => u.id === e.target.value);
-                    setForceResetUser(u ? { id: u.id, full_name: u.full_name, email: u.email } : null);
-                    setForceNewPass('');
-                  }}
-                  className={`w-full h-10 px-3 rounded-xl border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200 text-slate-800'}`}
-                >
-                  <option value="">— Select user —</option>
-                  {users.map(u => (
-                    <option key={u.id} value={u.id}>{u.full_name} ({u.email})</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex-1">
-                <input
-                  type="password"
-                  placeholder="New password (min 6 chars)"
-                  value={forceNewPass}
-                  onChange={e => setForceNewPass(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleForceReset()}
-                  className={`w-full h-10 px-3 rounded-xl border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
-                />
-              </div>
-              <Button
-                onClick={handleForceReset}
-                disabled={forceLoading || !forceResetUser || !forceNewPass.trim()}
-                className="h-10 px-5 rounded-xl text-sm font-semibold text-white"
-                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
-              >
-                {forceLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4 mr-1.5" />}
-                {forceLoading ? 'Saving…' : 'Set Password'}
-              </Button>
-            </div>
-            {forceResetUser && (
-              <p className={`text-xs mt-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                Setting password for: <span className="font-semibold">{forceResetUser.full_name}</span> · {forceResetUser.email}
-              </p>
-            )}
-          </div>
-
-          {/* Reset requests list */}
-          <div className={`rounded-2xl border overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} shadow-sm`}>
-            <div className={`px-5 py-3.5 border-b ${isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-slate-50/60'}`}>
-              <p className={`text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                Reset Requests · {resetRequests.length} record{resetRequests.length !== 1 ? 's' : ''}
-              </p>
-            </div>
-            {resetLoading ? (
-              <div className="flex items-center justify-center py-16">
-                <Loader2 className="h-7 w-7 animate-spin text-slate-400" />
-              </div>
-            ) : resetRequests.length === 0 ? (
-              <div className={`py-16 text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                <KeyRound className="h-10 w-10 mx-auto mb-3 opacity-25" />
-                <p className="text-sm font-medium">No password reset requests</p>
-                <p className="text-xs mt-1 opacity-70">Requests will appear here when users click "Forgot Password"</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-slate-50'}`}>
-                      {['User', 'Email', 'Requested At', 'Status', 'Action'].map(h => (
-                        <th key={h} className={`text-left py-3 px-4 text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className={`divide-y ${isDark ? 'divide-slate-700/60' : 'divide-slate-50'}`}>
-                    {resetRequests.map((req, idx) => (
-                      <tr key={req.id || idx} className={`transition-colors ${isDark ? 'hover:bg-slate-700/40' : 'hover:bg-slate-50'}`}>
-                        <td className="py-3 px-4 font-semibold">{req.full_name || req.user_name || '—'}</td>
-                        <td className="py-3 px-4 text-xs text-slate-400">{req.email || '—'}</td>
-                        <td className="py-3 px-4 text-xs text-slate-400">
-                          {req.requested_at ? new Date(req.requested_at).toLocaleString() : '—'}
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold ${
-                            req.status === 'completed'
-                              ? isDark ? 'bg-emerald-900/40 text-emerald-400' : 'bg-emerald-100 text-emerald-700'
-                              : isDark ? 'bg-amber-900/40 text-amber-400' : 'bg-amber-100 text-amber-700'
-                          }`}>
-                            <span className={`w-1.5 h-1.5 rounded-full inline-block ${req.status === 'completed' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                            {req.status === 'completed' ? 'Completed' : 'Pending'}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setForceResetUser({ id: req.user_id, full_name: req.full_name || req.user_name, email: req.email });
-                              setForceNewPass('');
-                              window.scrollTo({ top: 0, behavior: 'smooth' });
-                            }}
-                            className={`h-7 px-3 rounded-lg text-xs ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                          >
-                            <Lock className="h-3 w-3 mr-1" /> Reset Now
-                          </Button>
-                        </td>
-                      </tr>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={`border-b ${isDark ? 'border-slate-700/80 bg-slate-800/50' : 'border-slate-100 bg-slate-50/50'}`}>
+                    {['Member', 'Role', 'Departments', 'Account Status', 'Last Updated', 'Action'].map(h => (
+                      <th key={h} className={`text-left py-2.5 px-4 text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{h}</th>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${isDark ? 'divide-slate-700/40' : 'divide-slate-50'}`}>
+                  {users
+                    .filter(u => {
+                      const q = pwSearch.toLowerCase();
+                      return !q || (u.full_name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q) || (u.role || '').toLowerCase().includes(q);
+                    })
+                    .map(u => {
+                      const roleCfg = ROLE_CONFIG[u.role?.toLowerCase()] || ROLE_CONFIG.staff;
+                      const RoleIcon = roleCfg.icon;
+                      return (
+                        <tr key={u.id} className={`transition-colors ${isDark ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50/80'}`}>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-3">
+                              <div className={`w-8 h-8 rounded-xl overflow-hidden flex-shrink-0 flex items-center justify-center text-white text-xs font-black bg-gradient-to-br ${roleCfg.gradient}`}>
+                                {u.profile_picture
+                                  ? <img src={u.profile_picture} alt="" className="w-full h-full object-cover" />
+                                  : u.full_name?.charAt(0)?.toUpperCase()}
+                              </div>
+                              <div>
+                                <p className={`font-semibold text-xs leading-tight ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{u.full_name}</p>
+                                <p className="text-[11px] text-slate-400 truncate max-w-[160px]">{u.email}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold text-white bg-gradient-to-r ${roleCfg.gradient}`}>
+                              <RoleIcon className="h-3 w-3" />{roleCfg.label}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex flex-wrap gap-1">
+                              {(u.departments || []).slice(0, 3).map(d => <DeptPill key={d} dept={d} />)}
+                              {(u.departments || []).length > 3 && <span className="text-[10px] text-slate-400">+{u.departments.length - 3}</span>}
+                              {!(u.departments || []).length && <span className="text-[11px] text-slate-400">—</span>}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4"><StatusBadge status={u.status} isActive={u.is_active} /></td>
+                          <td className="py-3 px-4 text-[11px] text-slate-400">
+                            {u.updated_at ? format(new Date(u.updated_at), 'dd MMM yyyy') : u.created_at ? format(new Date(u.created_at), 'dd MMM yyyy') : '—'}
+                          </td>
+                          <td className="py-3 px-4">
+                            <button
+                              onClick={() => handleEdit(u)}
+                              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-all"
+                              style={{ color: COLORS.mediumBlue, borderColor: `${COLORS.mediumBlue}30`, background: `${COLORS.mediumBlue}08` }}>
+                              <Lock className="h-3 w-3" />Set Password
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+              {users.filter(u => {
+                const q = pwSearch.toLowerCase();
+                return !q || (u.full_name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
+              }).length === 0 && (
+                <div className={`py-14 text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  <KeyRound className="h-8 w-8 mx-auto mb-2 opacity-25" />
+                  <p className="text-sm font-medium">No users found</p>
+                </div>
+              )}
+            </div>
           </div>
         </motion.div>
       )}
