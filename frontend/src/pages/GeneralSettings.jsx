@@ -1,5 +1,5 @@
 // =============================================================================
-// GeneralSettings.jsx — Modern compact layout, top banner preserved
+// GeneralSettings.jsx — Full width, real performance ranking, bigger avatar
 // =============================================================================
 import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -10,11 +10,11 @@ import { motion } from "framer-motion";
 import {
   User, Camera, Phone, Calendar as CalendarIcon,
   Save, Loader2, CheckCircle2, Mail, Shield,
-  Settings, Clock, Hash, Star,
+  Settings, Clock, Hash, Star, Trophy, TrendingUp,
+  CheckSquare, Timer, Zap,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 
 const COLORS = {
   deepBlue:     "#0D3B66",
@@ -32,6 +32,26 @@ const ROLE_COLORS = {
   staff:   { bg: '#f1f5f9', text: '#475569', dot: '#94a3b8' },
 };
 
+const BADGE_CFG = {
+  "Star Performer": { color: '#F59E0B', bg: '#FEF3C7', darkBg: '#78350f40', icon: '⭐' },
+  "Top Performer":  { color: '#3B82F6', bg: '#DBEAFE', darkBg: '#1e3a8a40', icon: '🏆' },
+  "Good Performer": { color: '#10B981', bg: '#D1FAE5', darkBg: '#065f4640', icon: '👍' },
+};
+
+function MiniBar({ value, color, isDark }) {
+  return (
+    <div className={`h-1.5 w-full rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+      <motion.div
+        initial={{ width: 0 }}
+        animate={{ width: `${Math.min(value || 0, 100)}%` }}
+        transition={{ duration: 0.8, ease: "easeOut" }}
+        className="h-full rounded-full"
+        style={{ background: color }}
+      />
+    </div>
+  );
+}
+
 export default function GeneralSettings() {
   const { user, refreshUser } = useAuth();
   const isDark  = useDark();
@@ -40,8 +60,10 @@ export default function GeneralSettings() {
   const [profile, setProfile] = useState({
     full_name: "", phone: "", birthday: "", profile_picture: "",
   });
-  const [loading, setSaving] = useState(false);
-  const [saved,   setSaved]  = useState(false);
+  const [loading,  setSaving]   = useState(false);
+  const [saved,    setSaved]    = useState(false);
+  const [perf,     setPerf]     = useState(null);
+  const [perfLoad, setPerfLoad] = useState(true);
 
   useEffect(() => {
     if (!user) return;
@@ -51,6 +73,18 @@ export default function GeneralSettings() {
       birthday:        user.birthday ? user.birthday.slice(0, 10) : "",
       profile_picture: user.profile_picture || "",
     });
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    api.get("/reports/performance-rankings?period=monthly")
+      .then(res => {
+        const list = res.data || [];
+        const mine = list.find(r => r.user_id === user.id || r.user_id === String(user.id));
+        setPerf(mine || null);
+      })
+      .catch(() => setPerf(null))
+      .finally(() => setPerfLoad(false));
   }, [user]);
 
   const handlePhoto = (e) => {
@@ -83,20 +117,20 @@ export default function GeneralSettings() {
     }
   };
 
-  const roleCfg = ROLE_COLORS[user?.role] || ROLE_COLORS.staff;
+  const roleCfg  = ROLE_COLORS[user?.role] || ROLE_COLORS.staff;
+  const badgeCfg = perf?.badge ? (BADGE_CFG[perf.badge] || BADGE_CFG["Good Performer"]) : null;
 
   return (
     <div className="space-y-4 w-full min-w-0 overflow-x-hidden">
+
       {/* TOP BANNER */}
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
         <div
           className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
           style={{ background: GRADIENT, boxShadow: "0 8px 32px rgba(13,59,102,0.2)" }}
         >
-          <div
-            className="absolute right-0 top-0 w-48 h-48 rounded-full -mr-16 -mt-16 opacity-10"
-            style={{ background: "radial-gradient(circle, white 0%, transparent 70%)" }}
-          />
+          <div className="absolute right-0 top-0 w-48 h-48 rounded-full -mr-16 -mt-16 opacity-10"
+            style={{ background: "radial-gradient(circle, white 0%, transparent 70%)" }} />
           <div className="relative flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
               <Settings className="h-5 w-5 text-white" />
@@ -111,31 +145,39 @@ export default function GeneralSettings() {
         </div>
       </motion.div>
 
-      {/* Main grid */}
+      {/* MAIN GRID */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-stretch">
 
-        {/* Left: Profile identity card */}
+        {/* LEFT: Profile card */}
         <motion.div
           initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.05 }}
-          className="lg:col-span-2 flex flex-col gap-3"
+          className="lg:col-span-2 flex flex-col"
         >
           <div className={`rounded-2xl border overflow-hidden shadow-sm flex flex-col flex-1 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            {/* Mini header strip */}
-            <div className="h-12 relative" style={{ background: GRADIENT }}>
+
+            {/* Taller gradient strip */}
+            <div className="h-20 relative flex-shrink-0" style={{ background: GRADIENT }}>
               <div className="absolute inset-0 opacity-10"
                 style={{ background: 'radial-gradient(circle at 80% 50%, white 0%, transparent 60%)' }} />
+              {perf && (
+                <div className="absolute top-3 right-3 flex items-center gap-1 bg-white/20 backdrop-blur-sm px-2.5 py-1 rounded-xl">
+                  <Trophy className="h-3 w-3 text-yellow-300" />
+                  <span className="text-white text-[11px] font-bold">#{perf.rank}</span>
+                </div>
+              )}
             </div>
-            {/* Avatar — no role badge */}
-            <div className="px-5 pb-4 -mt-7 flex flex-col items-center text-center">
+
+            {/* Avatar — 110px */}
+            <div className="px-5 pb-4 -mt-[52px] flex flex-col items-center text-center">
               <div className="relative group mb-3">
                 <div
-                  className="w-[72px] h-[72px] rounded-2xl overflow-hidden shadow-xl"
-                  style={{ boxShadow: `0 0 0 4px ${isDark ? '#1e293b' : '#fff'}, 0 8px 20px rgba(0,0,0,0.12)` }}
+                  className="w-[110px] h-[110px] rounded-2xl overflow-hidden"
+                  style={{ boxShadow: `0 0 0 4px ${isDark ? '#1e293b' : '#fff'}, 0 8px 24px rgba(0,0,0,0.18)` }}
                 >
                   {profile.profile_picture ? (
                     <img src={profile.profile_picture} alt="Profile" className="w-full h-full object-cover" />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-white text-2xl font-black"
+                    <div className="w-full h-full flex items-center justify-center text-white text-4xl font-black"
                       style={{ background: GRADIENT }}>
                       {user?.full_name?.[0]?.toUpperCase()}
                     </div>
@@ -144,19 +186,26 @@ export default function GeneralSettings() {
                 <button
                   type="button"
                   onClick={() => fileRef.current?.click()}
-                  className="absolute -bottom-1.5 -right-1.5 w-7 h-7 rounded-xl bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 shadow-lg flex items-center justify-center hover:scale-110 transition-all"
+                  className="absolute -bottom-1.5 -right-1.5 w-8 h-8 rounded-xl bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 shadow-lg flex items-center justify-center hover:scale-110 transition-all"
                 >
-                  <Camera className="w-3.5 h-3.5 text-blue-500" />
+                  <Camera className="w-4 h-4 text-blue-500" />
                 </button>
                 <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
               </div>
-              <h2 className={`font-bold text-sm leading-tight ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{user?.full_name}</h2>
+              <h2 className={`font-bold text-base leading-tight ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{user?.full_name}</h2>
               <p className={`text-xs mt-0.5 truncate max-w-full ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{user?.email}</p>
+              {badgeCfg && (
+                <span
+                  className="inline-flex items-center gap-1 mt-2 px-2.5 py-1 rounded-xl text-[11px] font-bold"
+                  style={{ background: isDark ? badgeCfg.darkBg : badgeCfg.bg, color: badgeCfg.color }}
+                >
+                  {badgeCfg.icon} {perf.badge}
+                </span>
+              )}
             </div>
 
-            {/* Meta rows — full depts, ranking row added */}
-            <div className={`border-t px-4 py-3 space-y-2.5 flex-1 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-              {/* Account ID */}
+            {/* Meta rows */}
+            <div className={`border-t px-4 py-3 space-y-2.5 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
               <div className="flex items-center justify-between text-xs">
                 <span className={`flex items-center gap-1.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                   <Hash className="h-3 w-3" />Account ID
@@ -165,7 +214,6 @@ export default function GeneralSettings() {
                   #{user?.id?.slice(-6)}
                 </span>
               </div>
-              {/* Status */}
               <div className="flex items-center justify-between text-xs">
                 <span className={`flex items-center gap-1.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                   <Star className="h-3 w-3" />Status
@@ -174,7 +222,6 @@ export default function GeneralSettings() {
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />Active
                 </span>
               </div>
-              {/* Departments — full list, wrapping */}
               {user?.departments?.length > 0 && (
                 <div className="flex items-start justify-between text-xs gap-2">
                   <span className={`flex items-center gap-1.5 flex-shrink-0 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -185,21 +232,62 @@ export default function GeneralSettings() {
                   </span>
                 </div>
               )}
-              {/* Ranking */}
               <div className="flex items-center justify-between text-xs">
                 <span className={`flex items-center gap-1.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                  <Shield className="h-3 w-3" />Ranking
+                  <Trophy className="h-3 w-3" />Ranking
                 </span>
-                <span
-                  className="px-2 py-0.5 rounded-lg text-[11px] font-bold capitalize"
-                  style={{ background: isDark ? `${roleCfg.dot}20` : roleCfg.bg, color: roleCfg.text }}
-                >
-                  {user?.role === 'admin' ? 'Administrator' : user?.role === 'manager' ? 'Manager' : 'Staff'}
-                </span>
+                {perfLoad ? (
+                  <span className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Loading…</span>
+                ) : perf ? (
+                  <span className="flex items-center gap-1 font-bold text-amber-500">
+                    #{perf.rank}
+                    <span className={`text-[10px] font-medium ml-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      · {perf.overall_score}% score
+                    </span>
+                  </span>
+                ) : (
+                  <span className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No data yet</span>
+                )}
               </div>
             </div>
 
-            {/* Security tip — pinned to bottom of card */}
+            {/* Performance mini-stats — fills empty space */}
+            <div className={`border-t px-4 py-3 space-y-3 flex-1 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+              <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                This Month's Performance
+              </p>
+              {perfLoad ? (
+                <div className={`flex items-center justify-center py-4 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  <span className="text-xs">Loading stats…</span>
+                </div>
+              ) : perf ? (
+                [
+                  { label: 'Attendance',      val: perf.attendance_percent,      color: '#3B82F6', icon: <Timer className="h-3 w-3" /> },
+                  { label: 'Task Completion', val: perf.task_completion_percent, color: '#10B981', icon: <CheckSquare className="h-3 w-3" /> },
+                  { label: 'Timely Punch-In', val: perf.timely_punchin_percent,  color: '#F59E0B', icon: <Zap className="h-3 w-3" /> },
+                  { label: 'Overall Score',   val: perf.overall_score,           color: '#8B5CF6', icon: <TrendingUp className="h-3 w-3" /> },
+                ].map(stat => (
+                  <div key={stat.label} className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-1 text-[11px]" style={{ color: stat.color }}>
+                        {stat.icon}{stat.label}
+                      </span>
+                      <span className="text-[11px] font-bold" style={{ color: stat.color }}>
+                        {(stat.val || 0).toFixed(1)}%
+                      </span>
+                    </div>
+                    <MiniBar value={stat.val} color={stat.color} isDark={isDark} />
+                  </div>
+                ))
+              ) : (
+                <p className={`text-xs text-center py-3 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  No performance data available yet.
+                </p>
+              )}
+            </div>
+
+            {/* Security tip — pinned to bottom */}
             <div className={`border-t px-4 py-3 flex items-start gap-2.5 ${isDark ? 'border-slate-700 bg-blue-950/20' : 'border-slate-100 bg-blue-50/60'}`}>
               <Shield className="w-3.5 h-3.5 text-blue-500 flex-shrink-0 mt-0.5" />
               <p className={`text-xs leading-relaxed ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
@@ -209,13 +297,12 @@ export default function GeneralSettings() {
           </div>
         </motion.div>
 
-        {/* Right: Edit form */}
+        {/* RIGHT: Edit form */}
         <motion.div
           initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.08 }}
           className="lg:col-span-3 flex flex-col"
         >
           <div className={`rounded-2xl border overflow-hidden shadow-sm flex flex-col flex-1 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            {/* Card header */}
             <div className={`flex items-center gap-2.5 px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-800/70' : 'border-slate-100 bg-slate-50/60'}`}>
               <div className={`p-1.5 rounded-lg ${isDark ? 'bg-blue-900/40' : 'bg-blue-50'}`}>
                 <User className="h-3.5 w-3.5 text-blue-500" />
@@ -227,7 +314,6 @@ export default function GeneralSettings() {
             </div>
 
             <form onSubmit={handleSave} className="p-5 space-y-4 flex flex-col flex-1">
-              {/* Full Name */}
               <div className="space-y-1.5">
                 <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Full Name</Label>
                 <Input
@@ -239,7 +325,6 @@ export default function GeneralSettings() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Phone */}
                 <div className="space-y-1.5">
                   <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Phone</Label>
                   <div className="relative">
@@ -253,7 +338,6 @@ export default function GeneralSettings() {
                     />
                   </div>
                 </div>
-                {/* Birthday */}
                 <div className="space-y-1.5">
                   <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Birthday</Label>
                   <div className="relative">
@@ -268,7 +352,6 @@ export default function GeneralSettings() {
                 </div>
               </div>
 
-              {/* Email (read-only) */}
               <div className="space-y-1.5">
                 <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Email Address</Label>
                 <div className="relative">
@@ -281,7 +364,6 @@ export default function GeneralSettings() {
                 </div>
               </div>
 
-              {/* Work shift (read-only) */}
               {(user?.punch_in_time || user?.punch_out_time) && (
                 <div className={`rounded-xl border p-3.5 ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
                   <div className="flex items-center gap-2 mb-2.5">
@@ -303,7 +385,6 @@ export default function GeneralSettings() {
                 </div>
               )}
 
-              {/* Save */}
               <div className={`flex justify-end pt-2 border-t mt-auto ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
                 <motion.button
                   type="submit"
@@ -324,6 +405,7 @@ export default function GeneralSettings() {
             </form>
           </div>
         </motion.div>
+
       </div>
     </div>
   );
