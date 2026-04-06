@@ -2,8 +2,8 @@ import React from "react";
 import { useDark } from "@/hooks/useDark";
 
 /**
- * GifLoader — centered full-page loading overlay using the app logo.
- * Adapts to light/dark theme automatically.
+ * GifLoader — full-page centered logo pulse.
+ * No text. Logo at 200% (144 px). Dark-mode aware.
  */
 export default function GifLoader() {
   const isDark = useDark();
@@ -18,47 +18,59 @@ export default function GifLoader() {
         justifyContent: "center",
         zIndex: 9999,
         background: isDark
-          ? "rgba(15, 23, 42, 0.75)"   /* dark: slate-900 tint */
-          : "rgba(255, 255, 255, 0.75)",
-        backdropFilter: "blur(2px)",
-        WebkitBackdropFilter: "blur(2px)",
+          ? "rgba(15, 23, 42, 0.80)"
+          : "rgba(255, 255, 255, 0.80)",
+        backdropFilter: "blur(3px)",
+        WebkitBackdropFilter: "blur(3px)",
         pointerEvents: "none",
       }}
     >
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
-        <img
-          src="/logo.png"
-          alt="Taskosphere"
-          style={{
-            width: 72,
-            height: 72,
-            objectFit: "contain",
-            pointerEvents: "none",
-            animation: "ts-pulse 1.4s ease-in-out infinite",
-          }}
-        />
-        <span style={{
-          fontSize: 11,
-          fontWeight: 700,
-          color: isDark ? "#94a3b8" : "#0D3B66",
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-          animation: "ts-fade 1.4s ease-in-out infinite",
-        }}>
-          Loading…
-        </span>
-      </div>
-
+      <img
+        src="/logo.png"
+        alt="Taskosphere"
+        style={{
+          width: 144,
+          height: 144,
+          objectFit: "contain",
+          pointerEvents: "none",
+          animation: "ts-pulse 1.4s ease-in-out infinite",
+        }}
+      />
       <style>{`
         @keyframes ts-pulse {
           0%,100% { transform: scale(1);    opacity: 1;   }
-          50%      { transform: scale(0.86); opacity: 0.65; }
-        }
-        @keyframes ts-fade {
-          0%,100% { opacity: 0.7; }
-          50%      { opacity: 0.35; }
+          50%      { transform: scale(0.82); opacity: 0.6; }
         }
       `}</style>
+    </div>
+  );
+}
+
+/**
+ * MiniLoader — inline skeleton for page sections (no text, just logo pulse).
+ * Use inside page bodies instead of "Loading…" text.
+ */
+export function MiniLoader({ height = 200 }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        height,
+        width: "100%",
+      }}
+    >
+      <img
+        src="/logo.png"
+        alt=""
+        style={{
+          width: 48,
+          height: 48,
+          objectFit: "contain",
+          animation: "ts-pulse 1.4s ease-in-out infinite",
+        }}
+      />
     </div>
   );
 }
