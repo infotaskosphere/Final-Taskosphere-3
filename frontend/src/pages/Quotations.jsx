@@ -322,7 +322,7 @@ function CompanyListModal({ open, onClose, onRefresh }) {
           <div className="flex justify-end mb-2">
             <Button onClick={() => { setEditingCompany(null); setShowForm(true); }} className="rounded-xl gap-2" style={{ background: COLORS.emeraldGreen }}><Plus className="h-4 w-4" />Add New Company</Button>
           </div>
-          {loading ? <div className="text-center py-8"><Loader2 className="h-6 w-6 animate-spin mx-auto text-slate-400" /></div>
+          {loading ? <MiniLoader height={120} />
             : companies.length === 0 ? <div className="text-center py-10 text-slate-400"><Building2 className="h-12 w-12 mx-auto mb-3 opacity-30" /><p>No companies added yet.</p></div>
             : <div className="max-h-[55vh] overflow-y-auto space-y-3 pr-1">
               {companies.map(company => (
@@ -430,7 +430,7 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
   if (loading) return (
     <Dialog open={true} onOpenChange={v=>{ if(!v) onClose(); }}>
       <DialogContent className="max-w-2xl"><DialogHeader><DialogTitle className="sr-only">Loading</DialogTitle><DialogDescription className="sr-only">Loading…</DialogDescription></DialogHeader>
-        <div className="flex items-center justify-center py-16 gap-3"><Loader2 className="h-6 w-6 animate-spin text-blue-500" /><span className="text-slate-500">Loading data…</span></div>
+        <MiniLoader height={160} />
       </DialogContent>
     </Dialog>
   );
@@ -812,7 +812,7 @@ export default function Quotations() {
       {loading ? (
         <div className={`rounded-2xl border p-16 text-center ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="w-10 h-10 rounded-2xl mx-auto flex items-center justify-center mb-3" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}20, ${COLORS.mediumBlue}20)` }}>
-            <Loader2 className="h-5 w-5 animate-spin" style={{ color: COLORS.mediumBlue }} />
+            <MiniLoader height={120} />
           </div>
           <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Loading quotations…</p>
         </div>
