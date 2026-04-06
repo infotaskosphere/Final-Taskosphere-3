@@ -373,7 +373,7 @@ class ScanRequest(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @identix_router.get("/devices")
-async def list_devices(current_user: User = Depends(require_admin)):
+async def list_devices(current_user: User = Depends(require_admin())):
     devices = await db.identix_devices.find({}, {"_id": 0}).to_list(100)
     return {"devices": devices}
 
@@ -381,7 +381,7 @@ async def list_devices(current_user: User = Depends(require_admin)):
 @identix_router.post("/devices")
 async def add_device(
     payload: DeviceCreate,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin()),
 ):
     device_id = str(uuid.uuid4())
     doc = {
@@ -405,7 +405,7 @@ async def add_device(
 async def update_device(
     device_id: str,
     payload: DeviceUpdate,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin()),
 ):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not updates:
@@ -424,7 +424,7 @@ async def update_device(
 @identix_router.delete("/devices/{device_id}")
 async def delete_device(
     device_id: str,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin()),
 ):
     result = await db.identix_devices.delete_one({"id": device_id})
     if result.deleted_count == 0:
@@ -435,7 +435,7 @@ async def delete_device(
 @identix_router.post("/devices/{device_id}/test")
 async def test_device(
     device_id: str,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin()),
 ):
     device = await db.identix_devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
@@ -464,7 +464,7 @@ async def test_device(
 @identix_router.post("/devices/{device_id}/sync-users")
 async def sync_users_to_device(
     device_id: str,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin()),
 ):
     device = await db.identix_devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
@@ -515,7 +515,7 @@ async def sync_users_to_device(
 async def start_lan_scan(
     payload: ScanRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin()),
 ):
     """
     Kick off an async LAN scan for ZKTeco/Identix devices.
@@ -554,7 +554,7 @@ async def start_lan_scan(
 @identix_router.get("/devices/scan/{scan_id}")
 async def poll_lan_scan(
     scan_id: str,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin()),
 ):
     """Poll the status and results of an in-progress LAN scan."""
     state = _SCAN_STATE.get(scan_id)
@@ -568,7 +568,7 @@ async def poll_lan_scan(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @identix_router.get("/attendance/summary")
-async def get_attendance_summary(current_user: User = Depends(require_admin)):
+async def get_attendance_summary(current_user: User = Depends(require_admin())):
     """
     Returns today's attendance summary for the Identix dashboard.
     Fixes the 404 that was caused by this route being missing.
@@ -636,7 +636,7 @@ async def get_identix_attendance(
     from_date:  Optional[str] = None,
     to_date:    Optional[str] = None,
     department: Optional[str] = None,
-    current_user: User        = Depends(require_admin),
+    current_user: User        = Depends(require_admin()),
 ):
     """Paginated list of raw machine punch records."""
     query: Dict[str, Any] = {}
@@ -661,7 +661,7 @@ async def get_identix_attendance(
 @identix_router.post("/attendance/sync")
 async def sync_attendance(
     payload:      SyncRequest,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin()),
 ):
     """
     Pull punch records from all active Identix/ZKTeco devices and mirror them
@@ -903,7 +903,7 @@ async def sync_attendance(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @identix_router.get("/users")
-async def get_identix_users(current_user: User = Depends(require_admin)):
+async def get_identix_users(current_user: User = Depends(require_admin())):
     users = await db.users.find(
         {},
         {
@@ -926,7 +926,7 @@ async def get_identix_users(current_user: User = Depends(require_admin)):
 @identix_router.patch("/users/{user_id}/thumb-enrolled")
 async def mark_thumb_enrolled(
     user_id:      str,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin()),
 ):
     result = await db.users.find_one_and_update(
         {"id": user_id},
@@ -941,7 +941,7 @@ async def mark_thumb_enrolled(
 @identix_router.post("/users/{user_id}/sync-to-device")
 async def sync_single_user_to_devices(
     user_id:      str,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin()),
 ):
     user = await db.users.find_one({"id": user_id}, {"_id": 0})
     if not user:
@@ -1027,6 +1027,6 @@ async def iclock_cdata(request: Request):
         print("❌ ERROR:", str(e))
         return "ERROR"
 
-  @identix_router.get("/")
-  async def root_test():
-      return {"status": "API LIVE"}
+@identix_router.get("/")
+async def root_test():
+    return {"status": "API LIVE"}
