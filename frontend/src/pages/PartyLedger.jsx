@@ -18,7 +18,7 @@ import React, {
   useCallback,
   useRef,
 } from 'react';
-import GifLoader from '@/components/ui/GifLoader.jsx';
+import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -1435,9 +1435,7 @@ export default function PartyLedger({
               {/* ── LEDGER TABLE ── */}
               <div className="flex-1 overflow-auto px-7 py-5">
                 {loadingPmts ? (
-                  <div className="flex items-center justify-center h-48">
-                    <GifLoader />
-                  </div>
+                  <MiniLoader height={192} />
                 ) : !hasData ? (
                   <div className="flex flex-col items-center justify-center h-48 text-slate-400 gap-2">
                     <BookOpen className="w-10 h-10 opacity-40" />
