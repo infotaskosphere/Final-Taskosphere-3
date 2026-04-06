@@ -2351,6 +2351,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   const previewRef = useRef(null);
 
   // ── useEffect ──
+  const INV_DRAFT_KEY = 'taskosphere_invoice_add_draft';
   useEffect(() => {
     if (open) {
       if (editingInv) {
@@ -2361,11 +2362,27 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
           due_date: (editingInv.due_date || '').slice(0, 10) || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
         });
       } else {
-        setForm(defaultForm);
+        // Restore draft if available
+        try {
+          const saved = localStorage.getItem(INV_DRAFT_KEY);
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed?.client_name?.trim() || parsed?.items?.length > 1) {
+              setForm(prev => ({ ...defaultForm, ...parsed }));
+            } else { setForm(defaultForm); }
+          } else { setForm(defaultForm); }
+        } catch { setForm(defaultForm); }
       }
       setActiveTab('details');
     }
   }, [open, editingInv]);
+
+  // Save draft when form changes in add mode
+  useEffect(() => {
+    if (open && !editingInv) {
+      try { localStorage.setItem(INV_DRAFT_KEY, JSON.stringify(form)); } catch {}
+    }
+  }, [form, open, editingInv]);
 
   useEffect(() => { api.get('/products').then(r => setProducts(r.data || [])).catch(() => {}); }, []);
 
@@ -2427,7 +2444,10 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     try {
       const payload = { ...form, ...totals };
       if (editingInv) await api.put(`/invoices/${editingInv.id}`, payload);
-      else await api.post('/invoices', payload);
+      else {
+        await api.post('/invoices', payload);
+        try { localStorage.removeItem(INV_DRAFT_KEY); } catch {}
+      }
       toast.success(editingInv ? 'Invoice updated successfully' : 'Invoice created successfully');
       saveItemMemory(form.items);
       onSuccess?.();
