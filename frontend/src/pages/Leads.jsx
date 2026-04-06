@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
@@ -992,6 +991,26 @@ export default function LeadsPage() {
   const resetForm = () => { setForm(emptyForm); setErrors({}); };
   const handleChange = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
+  // ── Draft persistence for add-lead form ──────────────────────────────────
+  const LEADS_DRAFT_KEY = 'taskosphere_leads_add_draft';
+  useEffect(() => {
+    if (dialogOpen && !editingLead) {
+      try { localStorage.setItem(LEADS_DRAFT_KEY, JSON.stringify(form)); } catch {}
+    }
+  }, [form, dialogOpen, editingLead]);
+
+  const openAddDialog = useCallback(() => {
+    try {
+      const saved = localStorage.getItem(LEADS_DRAFT_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.company_name?.trim()) setForm(prev => ({ ...prev, ...parsed }));
+      }
+    } catch {}
+    setEditingLead(null);
+    setDialogOpen(true);
+  }, [emptyForm]);
+
   const openEdit = (lead) => {
     setEditingLead(lead);
     setForm({
@@ -1044,6 +1063,7 @@ export default function LeadsPage() {
         toast.success('Lead updated!');
       } else {
         await api.post('/leads/', payload);
+        try { localStorage.removeItem(LEADS_DRAFT_KEY); } catch {}
         toast.success('Lead created!');
       }
       closeDialog(); fetchLeads();
@@ -1288,7 +1308,7 @@ export default function LeadsPage() {
               </div>
               <Button size="sm"
                 className="h-9 px-4 text-sm font-medium rounded-2xl shadow-sm hover:shadow-md bg-blue-700 hover:bg-blue-800 text-white active:scale-95 transition-all"
-                onClick={() => { resetForm(); setEditingLead(null); setDialogOpen(true); }}>
+                onClick={() => openAddDialog()}>
                 <Plus className="mr-2 h-5 w-5" />New Lead
               </Button>
             </div>
