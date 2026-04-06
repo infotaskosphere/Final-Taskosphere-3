@@ -107,16 +107,16 @@ export default function GeneralSettings() {
     <div className="p-4 md:p-6 space-y-4 max-w-4xl mx-auto transition-colors duration-200">
       {/* ── Page Header ── */}
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-        <div className="relative overflow-hidden rounded-2xl px-6 py-5" 
+        <div className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4" 
              style={{ background: bannerGradient, boxShadow: "0 8px 32px rgba(13,59,102,0.2)" }}>
           <div className="absolute right-0 top-0 w-48 h-48 rounded-full -mr-16 -mt-16 opacity-10"
                style={{ background: "radial-gradient(circle, white 0%, transparent 70%)" }} />
-          <div className="relative flex items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-white/15 flex items-center justify-center shadow-inner">
-              <Settings className="h-6 w-6 text-white" />
+          <div className="relative flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
+              <Settings className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-white tracking-tight">Account Settings</h1>
+              <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">Account Settings</h1>
               <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest mt-0.5">Manage identity & preferences</p>
             </div>
           </div>
