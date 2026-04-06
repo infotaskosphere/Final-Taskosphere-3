@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
@@ -385,6 +385,28 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
     fetchData();
   }, [editingQuotation]);
 
+  // ── Draft persistence for new quotation (not edit) ────────────────────────
+  const QTN_DRAFT_KEY = 'taskosphere_quotation_add_draft';
+  useEffect(() => {
+    if (!editingQuotation && !loading) {
+      try { localStorage.setItem(QTN_DRAFT_KEY, JSON.stringify({ form, step })); } catch {}
+    }
+  }, [form, step, editingQuotation, loading]);
+  useEffect(() => {
+    if (!editingQuotation) {
+      try {
+        const saved = localStorage.getItem(QTN_DRAFT_KEY);
+        if (saved) {
+          const { form: savedForm, step: savedStep } = JSON.parse(saved);
+          if (savedForm?.client_name?.trim() || savedForm?.service?.trim()) {
+            setForm(prev => ({ ...prev, ...savedForm }));
+            if (savedStep > 1) setStep(savedStep);
+          }
+        }
+      } catch {}
+    }
+  }, []); // eslint-disable-line
+
   const handleChange = e => setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
   const handleClientSelect = (clientId) => {
     if (!clientId || clientId === 'none') { setForm(prev => ({ ...prev, client_id: '' })); return; }
@@ -418,6 +440,7 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
     try {
       const payload = { ...form, scope_of_work: form.scope_of_work.filter(s=>s.trim()), extra_terms: form.extra_terms.filter(t=>t.trim()), extra_checklist_items: form.extra_checklist_items.filter(c=>c.trim()), lead_id: form.lead_id||null, client_id: form.client_id||null };
       editingQuotation ? await api.put(`/quotations/${editingQuotation.id}`, payload) : await api.post('/quotations', payload);
+      if (!editingQuotation) { try { localStorage.removeItem(QTN_DRAFT_KEY); } catch {} }
       toast.success(editingQuotation ? 'Quotation updated' : 'Quotation created'); onSaved(); onClose();
     } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to save quotation'); }
     finally { setSaving(false); }
