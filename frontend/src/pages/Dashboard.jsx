@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
+import React, { useState, useEffect, useMemo } from 'react';
+import GifLoader from '@/components/ui/GifLoader.jsx';
 import { useNavigate } from 'react-router-dom';
 import useDark from '../hooks/useDark';
-import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { format, parseISO, isToday, isTomorrow, startOfDay } from 'date-fns';
@@ -730,7 +729,7 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit, visits = [
       />
       <div className="p-3">
         {isLoading ? (
-          <MiniLoader height={160} />
+          <GifLoader />
         ) : isError ? (
           <div className="text-center py-7 space-y-3">
             <div className="flex justify-center">
@@ -1068,41 +1067,6 @@ export default function Dashboard() {
     );
     return sortNewestFirst(filtered).slice(0, 6);
   }, [tasks, user?.id]);
-
-  // ── DnD ordering for task strips ──────────────────────────────────────
-  const [toMeOrder, setToMeOrder]   = useState(null);
-  const [byMeOrder, setByMeOrder]   = useState(null);
-
-  // Reset on data change
-  useEffect(() => { setToMeOrder(null); }, [tasksAssignedToMe.length]);
-  useEffect(() => { setByMeOrder(null); }, [tasksAssignedByMe.length]);
-
-  const applyOrder = (base, order) => {
-    if (!order) return base;
-    const byId = Object.fromEntries(base.map(t => [String(t.id), t]));
-    const ordered = order.map(id => byId[id]).filter(Boolean);
-    const extras = base.filter(t => !order.includes(String(t.id)));
-    return [...ordered, ...extras];
-  };
-
-  const orderedToMe = applyOrder(tasksAssignedToMe, toMeOrder);
-  const orderedByMe = applyOrder(tasksAssignedByMe, byMeOrder);
-
-  const handleDashDragEnd = useCallback((listKey) => (result) => {
-    if (!result.destination) return;
-    const from = result.source.index;
-    const to   = result.destination.index;
-    if (from === to) return;
-    const setter  = listKey === 'toMe' ? setToMeOrder : setByMeOrder;
-    const base    = listKey === 'toMe' ? tasksAssignedToMe : tasksAssignedByMe;
-    setter(prev => {
-      const ids = (prev || base.map(t => String(t.id)));
-      const next = [...ids];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
-  }, [tasksAssignedToMe, tasksAssignedByMe]);
 
   const recentTasks = useMemo(() => {
     const filtered = tasks.filter(t => !isTaskHiddenAsCompleted(t));
@@ -1525,8 +1489,9 @@ export default function Dashboard() {
         {/* WELCOME BANNER */}
         <motion.div variants={itemVariants}>
           <div
-            className="banner-animated relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
+            className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
             style={{
+              background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`,
               boxShadow: `0 8px 32px rgba(13,59,102,0.28)`,
             }}
           >
@@ -2108,43 +2073,16 @@ export default function Dashboard() {
                 {tasksAssignedToMe.length === 0
                   ? <div className={`h-24 flex items-center justify-center text-sm border border-dashed rounded-xl ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-200'}`}>No tasks assigned to you</div>
                   : (
-                    <DragDropContext onDragEnd={handleDashDragEnd('toMe')}>
-                      <Droppable droppableId="dash-to-me">
-                        {(provided, snapshot) => (
-                          <div
-                            ref={provided.innerRef}
-                            {...provided.droppableProps}
-                            className={`slim-scroll space-y-1.5 max-h-[200px] overflow-y-auto rounded-xl transition-all ${snapshot.isDraggingOver ? (isDark ? 'bg-blue-900/10' : 'bg-blue-50/50') : ''}`}
-                            style={{ scrollbarWidth: 'thin' }}
-                          >
-                            {orderedToMe.map((task, idx) => (
-                              <Draggable key={String(task.id)} draggableId={`toMe-${task.id}`} index={idx}>
-                                {(dp, ds) => (
-                                  <div ref={dp.innerRef} {...dp.draggableProps}
-                                    className={`rounded-xl transition-shadow ${ds.isDragging ? 'shadow-xl ring-2 ring-blue-400/30' : ''}`}
-                                    style={dp.draggableProps.style}>
-                                    <div className="flex items-stretch gap-1">
-                                      <span {...dp.dragHandleProps}
-                                        className="flex items-center px-1 cursor-grab active:cursor-grabbing opacity-0 hover:opacity-100 transition-opacity flex-shrink-0"
-                                        style={{ touchAction: 'none' }}>
-                                        <GripVertical className="h-3.5 w-3.5 text-slate-300" />
-                                      </span>
-                                      <div className="flex-1 min-w-0">
-                                        <TaskStrip task={task} isToMe={true}
-                                          assignedName={task.assigned_by_name || task.created_by_name || 'Unknown'}
-                                          onUpdateStatus={updateAssignedTaskStatus} navigate={navigate}
-                                          onSelect={setSelectedTask} />
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-                              </Draggable>
-                            ))}
-                            {provided.placeholder}
-                          </div>
-                        )}
-                      </Droppable>
-                    </DragDropContext>
+                    <div className="slim-scroll space-y-1.5 max-h-[200px]" style={slimScroll}>
+                      <AnimatePresence>
+                        {tasksAssignedToMe.map(task => (
+                          <TaskStrip key={task.id} task={task} isToMe={true}
+                            assignedName={task.assigned_by_name || task.created_by_name || 'Unknown'}
+                            onUpdateStatus={updateAssignedTaskStatus} navigate={navigate}
+                            onSelect={setSelectedTask} />
+                        ))}
+                      </AnimatePresence>
+                    </div>
                   )}
               </div>
             </SectionCard>
@@ -2162,43 +2100,16 @@ export default function Dashboard() {
                 {tasksAssignedByMe.length === 0
                   ? <div className={`h-24 flex items-center justify-center text-sm border border-dashed rounded-xl ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-200'}`}>No tasks assigned yet</div>
                   : (
-                    <DragDropContext onDragEnd={handleDashDragEnd('byMe')}>
-                      <Droppable droppableId="dash-by-me">
-                        {(provided, snapshot) => (
-                          <div
-                            ref={provided.innerRef}
-                            {...provided.droppableProps}
-                            className={`slim-scroll space-y-1.5 max-h-[200px] overflow-y-auto rounded-xl transition-all ${snapshot.isDraggingOver ? (isDark ? 'bg-blue-900/10' : 'bg-blue-50/50') : ''}`}
-                            style={{ scrollbarWidth: 'thin' }}
-                          >
-                            {orderedByMe.map((task, idx) => (
-                              <Draggable key={String(task.id)} draggableId={`byMe-${task.id}`} index={idx}>
-                                {(dp, ds) => (
-                                  <div ref={dp.innerRef} {...dp.draggableProps}
-                                    className={`rounded-xl transition-shadow ${ds.isDragging ? 'shadow-xl ring-2 ring-blue-400/30' : ''}`}
-                                    style={dp.draggableProps.style}>
-                                    <div className="flex items-stretch gap-1">
-                                      <span {...dp.dragHandleProps}
-                                        className="flex items-center px-1 cursor-grab active:cursor-grabbing opacity-0 hover:opacity-100 transition-opacity flex-shrink-0"
-                                        style={{ touchAction: 'none' }}>
-                                        <GripVertical className="h-3.5 w-3.5 text-slate-300" />
-                                      </span>
-                                      <div className="flex-1 min-w-0">
-                                        <TaskStrip task={task} isToMe={false}
-                                          assignedName={task.assigned_to_name || 'Unknown'}
-                                          onUpdateStatus={updateAssignedTaskStatus} navigate={navigate}
-                                          onSelect={setSelectedTask} />
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-                              </Draggable>
-                            ))}
-                            {provided.placeholder}
-                          </div>
-                        )}
-                      </Droppable>
-                    </DragDropContext>
+                    <div className="slim-scroll space-y-1.5 max-h-[200px]" style={slimScroll}>
+                      <AnimatePresence>
+                        {tasksAssignedByMe.map(task => (
+                          <TaskStrip key={task.id} task={task} isToMe={false}
+                            assignedName={task.assigned_to_name || 'Unknown'}
+                            onUpdateStatus={updateAssignedTaskStatus} navigate={navigate}
+                            onSelect={setSelectedTask} />
+                        ))}
+                      </AnimatePresence>
+                    </div>
                   )}
               </div>
             </SectionCard>
@@ -2448,8 +2359,8 @@ export default function Dashboard() {
                 style={{ boxShadow: '0 32px 80px rgba(0,0,0,0.45)' }}
               >
                 <div
-                  className="banner-animated px-8 pt-8 pb-6 text-center"
-                  style={{ boxShadow: 'none' }}
+                  className="px-8 pt-8 pb-6 text-center"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
                 >
                   <div className="w-14 h-14 bg-white/15 rounded-2xl flex items-center justify-center mx-auto mb-4">
                     <Clock className="h-7 w-7 text-white" />
