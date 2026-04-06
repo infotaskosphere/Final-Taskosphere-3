@@ -1581,7 +1581,7 @@ export default function Users() {
 
       {/* ── Page Header ── */}
       <motion.div variants={slideIn}>
-        <div className="relative overflow-hidden rounded-2xl px-6 py-5"
+        <div className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
           style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`, boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
           <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10"
             style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
@@ -1589,15 +1589,15 @@ export default function Users() {
             style={{ background: 'white' }} />
           <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5" style={{ background: 'white' }} />
           <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-white/15 flex items-center justify-center flex-shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
                 {mainTab === 'identix'
-                  ? <Fingerprint className="h-6 w-6 text-white" />
-                  : <UsersIcon className="h-6 w-6 text-white" />}
+                  ? <Fingerprint className="h-5 w-5 text-white" />
+                  : <UsersIcon className="h-5 w-5 text-white" />}
               </div>
               <div>
                 <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-0.5">Team Management</p>
-                <h1 className="text-2xl font-bold text-white tracking-tight">
+                <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">
                   {mainTab === 'identix' ? 'Identix Machine Integration' : 'User Directory'}
                 </h1>
               </div>
