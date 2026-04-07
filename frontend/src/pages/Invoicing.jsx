@@ -3132,6 +3132,7 @@ const ProductModal = ({ open, onClose, isDark, onSaved }) => {
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════════
 const LIST_PAGE_SIZE = 20;
+const SECTION_PAGE_SIZE = 15; // rows per page inside Outstanding / Received sections
 function Invoicing() {
   // ── A. ALL useState (top of component) ──────────────────────────────────────
   const [invoices, setInvoices] = useState([]);
@@ -3163,6 +3164,8 @@ function Invoicing() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
   const [listPage, setListPage] = useState(1);
+  const [outstandingPage, setOutstandingPage] = useState(1);
+  const [receivedPage, setReceivedPage] = useState(1);
 
   // ── B. ALL useRef ─────────────────────────────────────────────────────────
   const iframeRef = useRef(null);
@@ -3251,6 +3254,27 @@ function Invoicing() {
   const outstandingInvoices = useMemo(() =>
     enrichedFiltered.filter(inv => inv.status !== 'paid' && (inv.amount_due > 0 || inv.status === 'draft' || inv.status === 'cancelled')),
     [enrichedFiltered]
+  );
+
+  // ── Paginated slices for each section ─────────────────────────────────────
+  const paginatedOutstanding = useMemo(() => {
+    const start = (outstandingPage - 1) * SECTION_PAGE_SIZE;
+    return outstandingInvoices.slice(start, start + SECTION_PAGE_SIZE);
+  }, [outstandingInvoices, outstandingPage]);
+
+  const totalOutstandingPages = useMemo(
+    () => Math.max(1, Math.ceil(outstandingInvoices.length / SECTION_PAGE_SIZE)),
+    [outstandingInvoices]
+  );
+
+  const paginatedReceived = useMemo(() => {
+    const start = (receivedPage - 1) * SECTION_PAGE_SIZE;
+    return receivedInvoices.slice(start, start + SECTION_PAGE_SIZE);
+  }, [receivedInvoices, receivedPage]);
+
+  const totalReceivedPages = useMemo(
+    () => Math.max(1, Math.ceil(receivedInvoices.length / SECTION_PAGE_SIZE)),
+    [receivedInvoices]
   );
 
   // ── G. ALL useCallback (AFTER ALL MEMOS) ─────────────────────────────────
@@ -3394,7 +3418,7 @@ const fetchAll = useCallback(async () => {
 
   // ── H. ALL useEffect ──────────────────────────────────────────────────────
 
-  useEffect(() => { const t = setTimeout(() => { setSearchTerm(searchInput); setListPage(1); }, 250); return () => clearTimeout(t); }, [searchInput]);
+  useEffect(() => { const t = setTimeout(() => { setSearchTerm(searchInput); setListPage(1); setOutstandingPage(1); setReceivedPage(1); }, 250); return () => clearTimeout(t); }, [searchInput]);
 
   useEffect(() => {
     const h = (e) => {
@@ -3407,7 +3431,7 @@ const fetchAll = useCallback(async () => {
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   // Reset list page whenever filters or search change
-  useEffect(() => { setListPage(1); }, [statusFilter, typeFilter, companyFilter, yearFilter, fromDate, toDate, searchTerm]);
+  useEffect(() => { setListPage(1); setOutstandingPage(1); setReceivedPage(1); }, [statusFilter, typeFilter, companyFilter, yearFilter, fromDate, toDate, searchTerm]);
 
   // ── I. JSX return ─────────────────────────────────────────────────────────
 
@@ -3528,7 +3552,7 @@ const fetchAll = useCallback(async () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {outstandingInvoices.map(inv => {
+                    {paginatedOutstanding.map(inv => {
                       const stripe = getInvoiceStripe(inv);
                       const isSelected = selectedIds.has(inv.id);
                       return (
@@ -3587,6 +3611,51 @@ const fetchAll = useCallback(async () => {
                   </tbody>
                 </table>
               </div>
+              {/* ── Outstanding pagination ── */}
+              {totalOutstandingPages > 1 && (
+                <div className={`flex items-center justify-between px-5 py-3 border-t ${
+                  isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-amber-50/40'
+                }`}>
+                  <span className={`text-xs ${ isDark ? 'text-slate-400' : 'text-slate-500' }`}>
+                    Showing {((outstandingPage - 1) * SECTION_PAGE_SIZE) + 1}–{Math.min(outstandingPage * SECTION_PAGE_SIZE, outstandingInvoices.length)} of {outstandingInvoices.length}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      disabled={outstandingPage === 1}
+                      onClick={() => setOutstandingPage(p => Math.max(1, p - 1))}
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors disabled:opacity-30 ${
+                        isDark ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-amber-100 text-slate-600'
+                      }`}
+                    >‹</button>
+                    {Array.from({ length: totalOutstandingPages }, (_, i) => i + 1)
+                      .filter(p => p === 1 || p === totalOutstandingPages || Math.abs(p - outstandingPage) <= 1)
+                      .reduce((acc, p, idx, arr) => {
+                        if (idx > 0 && p - arr[idx - 1] > 1) acc.push('...');
+                        acc.push(p); return acc;
+                      }, [])
+                      .map((p, i) => p === '...' ? (
+                        <span key={`od-ellipsis-${i}`} className="px-1 text-xs text-slate-400">…</span>
+                      ) : (
+                        <button key={p} onClick={() => setOutstandingPage(p)}
+                          className={`w-7 h-7 rounded-lg text-xs font-bold transition-colors ${
+                            outstandingPage === p
+                              ? 'text-white shadow-sm'
+                              : isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600 hover:bg-amber-100'
+                          }`}
+                          style={outstandingPage === p ? { background: 'linear-gradient(135deg, #F59E0B, #D97706)' } : {}}
+                        >{p}</button>
+                      ))
+                    }
+                    <button
+                      disabled={outstandingPage === totalOutstandingPages}
+                      onClick={() => setOutstandingPage(p => Math.min(totalOutstandingPages, p + 1))}
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors disabled:opacity-30 ${
+                        isDark ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-amber-100 text-slate-600'
+                      }`}
+                    >›</button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -3615,7 +3684,7 @@ const fetchAll = useCallback(async () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {receivedInvoices.map(inv => {
+                    {paginatedReceived.map(inv => {
                       const isSelected = selectedIds.has(inv.id);
                       return (
                         <tr key={inv.id}
@@ -3673,6 +3742,51 @@ const fetchAll = useCallback(async () => {
                   </tbody>
                 </table>
               </div>
+              {/* ── Received pagination ── */}
+              {totalReceivedPages > 1 && (
+                <div className={`flex items-center justify-between px-5 py-3 border-t ${
+                  isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-emerald-50/40'
+                }`}>
+                  <span className={`text-xs ${ isDark ? 'text-slate-400' : 'text-slate-500' }`}>
+                    Showing {((receivedPage - 1) * SECTION_PAGE_SIZE) + 1}–{Math.min(receivedPage * SECTION_PAGE_SIZE, receivedInvoices.length)} of {receivedInvoices.length}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      disabled={receivedPage === 1}
+                      onClick={() => setReceivedPage(p => Math.max(1, p - 1))}
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors disabled:opacity-30 ${
+                        isDark ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-emerald-100 text-slate-600'
+                      }`}
+                    >‹</button>
+                    {Array.from({ length: totalReceivedPages }, (_, i) => i + 1)
+                      .filter(p => p === 1 || p === totalReceivedPages || Math.abs(p - receivedPage) <= 1)
+                      .reduce((acc, p, idx, arr) => {
+                        if (idx > 0 && p - arr[idx - 1] > 1) acc.push('...');
+                        acc.push(p); return acc;
+                      }, [])
+                      .map((p, i) => p === '...' ? (
+                        <span key={`rc-ellipsis-${i}`} className="px-1 text-xs text-slate-400">…</span>
+                      ) : (
+                        <button key={p} onClick={() => setReceivedPage(p)}
+                          className={`w-7 h-7 rounded-lg text-xs font-bold transition-colors ${
+                            receivedPage === p
+                              ? 'text-white shadow-sm'
+                              : isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600 hover:bg-emerald-100'
+                          }`}
+                          style={receivedPage === p ? { background: 'linear-gradient(135deg, #10B981, #059669)' } : {}}
+                        >{p}</button>
+                      ))
+                    }
+                    <button
+                      disabled={receivedPage === totalReceivedPages}
+                      onClick={() => setReceivedPage(p => Math.min(totalReceivedPages, p + 1))}
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors disabled:opacity-30 ${
+                        isDark ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-emerald-100 text-slate-600'
+                      }`}
+                    >›</button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
