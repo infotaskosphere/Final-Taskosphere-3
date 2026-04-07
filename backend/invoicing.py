@@ -430,7 +430,34 @@ def _safe_date(val, default=None):
 
 
 def _parse_vyp_file(file_path: str) -> dict:
-    """Parse KhataBook .vyp / .vyb SQLite backup."""
+    """Parse KhataBook .vyp / .vyb SQLite backup.
+
+    .vyb files are ZIP archives that contain a single .vyp SQLite file inside.
+    We detect this and extract the inner database before connecting.
+    """
+    import zipfile as _zipfile
+    _tmp_vyp_path = None
+    try:
+        # .vyb = ZIP wrapper around a .vyp SQLite file
+        if _zipfile.is_zipfile(file_path):
+            with _zipfile.ZipFile(file_path, "r") as _zf:
+                _inner = next(
+                    (n for n in _zf.namelist() if n.lower().endswith((".vyp", ".db"))),
+                    _zf.namelist()[0] if _zf.namelist() else None,
+                )
+                if not _inner:
+                    raise HTTPException(400, "Empty .vyb archive — no database found inside.")
+                import tempfile as _tempfile
+                _tmp = _tempfile.NamedTemporaryFile(delete=False, suffix=".vyp")
+                _tmp.write(_zf.read(_inner))
+                _tmp.close()
+                _tmp_vyp_path = _tmp.name
+            file_path = _tmp_vyp_path
+    except HTTPException:
+        raise
+    except Exception as _e:
+        raise HTTPException(400, f"Failed to unpack .vyb archive: {_e}")
+
     try:
         conn = sqlite3.connect(file_path)
         conn.row_factory = sqlite3.Row
@@ -645,6 +672,14 @@ def _parse_vyp_file(file_path: str) -> dict:
         return result
     except Exception as e:
         raise HTTPException(400, f"Failed to parse .vyp/.vyb file: {e}")
+    finally:
+        # Clean up the temp .vyp extracted from a .vyb ZIP, if any
+        if _tmp_vyp_path:
+            try:
+                import os as _os
+                _os.unlink(_tmp_vyp_path)
+            except Exception:
+                pass
 
 
 def _parse_excel_file(file_path: str, filename: str) -> dict:
