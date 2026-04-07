@@ -1468,6 +1468,19 @@ export default function Clients() {
       if (!editingClient) { try { localStorage.removeItem(DRAFT_KEY); } catch {} }
       setDialogOpen(false); resetForm(); fetchClients();
       toast.success(editingClient ? 'Client updated!' : 'Client created!');
+      // Sync updated client details to all linked invoices (non-fatal)
+      if (editingClient) {
+        try {
+          await api.patch(`/invoices/sync-client/${editingClient.id}`, {
+            client_name:    payload.company_name,
+            client_gstin:   payload.gstin   || '',
+            client_phone:   cleanPhone      || '',
+            client_email:   payload.email   || '',
+            client_address: payload.address || '',
+            client_state:   payload.state   || '',
+          });
+        } catch { /* non-fatal */ }
+      }
     } catch (error) {
       const detail = error.response?.data?.detail;
       if (Array.isArray(detail)) toast.error(detail.map(e => `${e.loc?.slice(-1)[0]}: ${e.msg}`).join(' | '));
@@ -1871,6 +1884,85 @@ export default function Clients() {
                       </div>
                     )}
                   </div>
+                  {/* Tax & Billing */}
+                  <div className={`border rounded-2xl p-6 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`}>
+                    <SectionHeading icon={<FileCheck className="h-4 w-4" />} title="Tax & Billing" subtitle="GST, PAN, payment terms and Tally sync" isDark={isDark} />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className={labelCls}>GSTIN</label>
+                        <Input className={fieldCls(false)} placeholder="15-digit GSTIN" value={formData.gstin || ''} onChange={e => setFormData(p => ({ ...p, gstin: e.target.value.toUpperCase() }))} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>PAN</label>
+                        <Input className={fieldCls(false)} placeholder="10-digit PAN" value={formData.pan || ''} onChange={e => setFormData(p => ({ ...p, pan: e.target.value.toUpperCase() }))} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>GST Treatment</label>
+                        <Select value={formData.gst_treatment || 'regular'} onValueChange={v => setFormData(p => ({ ...p, gst_treatment: v }))}>
+                          <SelectTrigger className={`h-11 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="regular">Regular Taxpayer</SelectItem>
+                            <SelectItem value="composition">Composition Scheme</SelectItem>
+                            <SelectItem value="unregistered">Unregistered</SelectItem>
+                            <SelectItem value="consumer">Consumer (B2C)</SelectItem>
+                            <SelectItem value="overseas">Overseas / SEZ</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <label className={labelCls}>Place of Supply</label>
+                        <Input className={fieldCls(false)} placeholder="State / UT" value={formData.place_of_supply || ''} onChange={e => setFormData(p => ({ ...p, place_of_supply: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Default Payment Terms</label>
+                        <Select value={formData.default_payment_terms || 'Due on receipt'} onValueChange={v => setFormData(p => ({ ...p, default_payment_terms: v }))}>
+                          <SelectTrigger className={`h-11 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {['Due on receipt','Due in 7 days','Due in 15 days','Due in 30 days','Due in 45 days','Due in 60 days','Due in 90 days','Advance payment'].map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <label className={labelCls}>Credit Limit (₹)</label>
+                        <Input type="number" className={fieldCls(false)} placeholder="0" value={formData.credit_limit || ''} onChange={e => setFormData(p => ({ ...p, credit_limit: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Opening Balance (₹)</label>
+                        <div className="flex gap-2">
+                          <Input type="number" className={`${fieldCls(false)} flex-1`} placeholder="0" value={formData.opening_balance || ''} onChange={e => setFormData(p => ({ ...p, opening_balance: e.target.value }))} />
+                          <Select value={formData.opening_balance_type || 'Dr'} onValueChange={v => setFormData(p => ({ ...p, opening_balance_type: v }))}>
+                            <SelectTrigger className="h-11 w-20 rounded-xl text-sm border-slate-200"><SelectValue /></SelectTrigger>
+                            <SelectContent><SelectItem value="Dr">Dr</SelectItem><SelectItem value="Cr">Cr</SelectItem></SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div>
+                        <label className={labelCls}>Website</label>
+                        <Input type="url" className={fieldCls(false)} placeholder="https://..." value={formData.website || ''} onChange={e => setFormData(p => ({ ...p, website: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>MSME / Udyam Number</label>
+                        <Input className={fieldCls(false)} value={formData.msme_number || ''} onChange={e => setFormData(p => ({ ...p, msme_number: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Tally Ledger Name</label>
+                        <Input className={fieldCls(false)} value={formData.tally_ledger_name || ''} onChange={e => setFormData(p => ({ ...p, tally_ledger_name: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Tally Group</label>
+                        <Select value={formData.tally_group || 'Sundry Debtors'} onValueChange={v => setFormData(p => ({ ...p, tally_group: v }))}>
+                          <SelectTrigger className={`h-11 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {['Sundry Debtors','Sundry Creditors','Current Assets','Current Liabilities','Other'].map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+
+
+
+                  
                   {/* Notes */}
                   <div><label className={labelCls}>Internal Notes</label><Textarea className={`min-h-[110px] rounded-xl text-sm resize-y focus:border-blue-400 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} placeholder="Internal remarks…" value={formData.notes} onChange={e => setFormData(p => ({ ...p, notes: e.target.value }))} /></div>
                   {/* Staff Assignments */}
