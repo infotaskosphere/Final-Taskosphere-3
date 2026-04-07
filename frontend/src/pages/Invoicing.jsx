@@ -24,8 +24,7 @@ import {
   IndianRupee, CalendarDays, FileCheck, ArrowRightLeft, Layers,
   Upload, Database, FileUp, CheckSquare, AlertTriangle, Phone, Mail,
   FileSpreadsheet, Briefcase, PieChart, Settings, Table, FileDown, BookOpen,
-  ExternalLink
-} from 'lucide-react';
+  ExternalLink, GripVertical} from 'lucide-react';
 import InvoiceSettings, { getInvSettings, getNextInvoiceNumber } from './InvoiceSettings';
 import { COLOR_THEMES, INVOICE_TEMPLATES, generateInvoiceHTML } from './InvoiceTemplates';
 import PartyLedger from './PartyLedger';
@@ -1937,7 +1936,23 @@ const INLINE_STATUSES = ['draft', 'sent', 'partially_paid', 'paid', 'cancelled']
 const InlineStatusDropdown = ({ inv, onStatusChange, isDark }) => {
   const [open, setOpen]       = React.useState(false);
   const [loading, setLoading] = React.useState(false);
+  // Fixed-position coordinates — computed from the trigger button's screen rect
+  const [dropPos, setDropPos] = React.useState({ top: 0, left: 0 });
+  const triggerRef            = React.useRef(null);
   const m = getStatusMeta(inv);
+
+  const handleToggle = (e) => {
+    e.stopPropagation();
+    if (!open && triggerRef.current) {
+      const r = triggerRef.current.getBoundingClientRect();
+      // Position dropdown below the button, right-aligned, nudged inside viewport
+      setDropPos({
+        top:  r.bottom + 4,
+        left: Math.max(8, r.right - 160),   // 160 = w-40
+      });
+    }
+    setOpen(v => !v);
+  };
 
   const handleSelect = async (newStatus) => {
     if (newStatus === inv.status) { setOpen(false); return; }
@@ -1955,11 +1970,12 @@ const InlineStatusDropdown = ({ inv, onStatusChange, isDark }) => {
   };
 
   return (
-    <div className="relative" onClick={e => e.stopPropagation()}>
+    <div onClick={e => e.stopPropagation()}>
       {/* Trigger pill */}
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setOpen(v => !v)}
+        onClick={handleToggle}
         className={`inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full transition-all
           hover:ring-2 hover:ring-offset-1 hover:ring-current cursor-pointer select-none
           ${m.bg} ${m.text} whitespace-nowrap`}
@@ -1972,13 +1988,16 @@ const InlineStatusDropdown = ({ inv, onStatusChange, isDark }) => {
         <ChevronDown className={`w-2.5 h-2.5 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {/* Dropdown */}
+      {/* Dropdown — rendered fixed so it escapes overflow:hidden table containers */}
       {open && (
         <>
-          {/* Backdrop */}
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className={`absolute right-0 mt-1.5 z-50 w-40 rounded-xl border shadow-2xl overflow-hidden
-            ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-200'}`}>
+          {/* Full-screen backdrop to close on outside click */}
+          <div className="fixed inset-0 z-[9998]" onClick={() => setOpen(false)} />
+          <div
+            className={`fixed z-[9999] w-40 rounded-xl border shadow-2xl overflow-hidden
+              ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-200'}`}
+            style={{ top: dropPos.top, left: dropPos.left }}
+          >
             {/* Header */}
             <div className={`px-3 py-2 border-b text-[9px] font-bold uppercase tracking-widest
               ${isDark ? 'border-slate-700 text-slate-500' : 'border-slate-100 text-slate-400'}`}>
@@ -2462,6 +2481,9 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('details');
   const [products, setProducts] = useState([]);
+  const [focusedItemIdx, setFocusedItemIdx] = useState(-1); // which item description is focused
+  const [dragIdx, setDragIdx] = useState(null);             // which item is being dragged
+  const [dragOverIdx, setDragOverIdx] = useState(null);     // which item is the drop target
 
   // ── useRef ──
   const previewRef = useRef(null);
@@ -2537,6 +2559,17 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   const updateItem = useCallback((idx, k, val) => setForm(p => ({ ...p, items: p.items.map((it, i) => i !== idx ? it : { ...it, [k]: val }) })), []);
   const addItem = useCallback(() => setForm(p => ({ ...p, items: [...p.items, emptyItem()] })), []);
   const removeItem = useCallback((idx) => setForm(p => ({ ...p, items: p.items.filter((_, i) => i !== idx) })), []);
+
+  // Move item from fromIdx to toIdx (drag-and-drop reorder)
+  const reorderItems = useCallback((fromIdx, toIdx) => {
+    if (fromIdx === toIdx) return;
+    setForm(p => {
+      const next = [...p.items];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      return { ...p, items: next };
+    });
+  }, []);
 
   const handleClientSelect = useCallback((client) => {
     if (!client) { setForm(p => ({ ...p, client_id: '', client_name: '', client_email: '', client_phone: '', client_address: '', client_state: '', client_gstin: '' })); return; }
@@ -2766,59 +2799,158 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                 {form.items.map((item, idx) => {
                   const comp = computeItem(item, form.is_interstate);
                   const mem = getItemMemory();
-                  const suggestions = Object.values(mem).filter(m => m.description.toLowerCase().includes((item.description || '').toLowerCase()) && item.description.length > 1).slice(0, 5);
+                  const suggestions = Object.values(mem)
+                    .filter(m => m.description.toLowerCase().includes((item.description || '').toLowerCase()) && item.description.length > 1)
+                    .slice(0, 5);
+                  const isDragging   = dragIdx === idx;
+                  const isDropTarget = dragOverIdx === idx && dragIdx !== idx;
+
                   return (
-                    <div key={idx} className={`border rounded-2xl p-4 ${isDark ? 'border-slate-700 bg-slate-800/40' : 'border-slate-200 bg-slate-50/40'}`}>
-                      <div className="flex items-center justify-between mb-3">
-                        <span className={`text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Item #{idx + 1}</span>
-                        <div className="flex items-center gap-2">
-                          <Select value={item.product_id || '__none__'} onValueChange={v => fillFromProduct(idx, v)}>
-                            <SelectTrigger className="h-7 w-36 text-[10px] rounded-lg border-dashed"><SelectValue placeholder="From catalog" /></SelectTrigger>
-                            <SelectContent><SelectItem value="__none__">— From catalog —</SelectItem>{(products || []).map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
-                          </Select>
-                          {form.items.length > 1 && <button type="button" onClick={() => removeItem(idx)} className="w-6 h-6 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 transition-colors"><X className="h-3.5 w-3.5" /></button>}
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-6 gap-3 mb-3">
-                        <div className="col-span-6 md:col-span-3 relative">
-                          <label className={labelCls}>Description *</label>
-                          <Input className={inputCls} placeholder="Item / Service description" value={item.description} onChange={e => updateItem(idx, 'description', e.target.value)} />
-                          {suggestions.length > 0 && item.description && (
-                            <div className={`absolute z-10 w-full mt-1 rounded-xl border shadow-lg ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                              {suggestions.map(s => (
-                                <button key={s.description} type="button"
-                                  onClick={() => { updateItem(idx, 'description', s.description); updateItem(idx, 'unit_price', s.unit_price); updateItem(idx, 'gst_rate', s.gst_rate); updateItem(idx, 'unit', s.unit); }}
-                                  className={`w-full text-left px-3 py-2 text-xs hover:bg-blue-50 dark:hover:bg-blue-900/30 first:rounded-t-xl last:rounded-b-xl ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-                                  {s.description} <span className="text-slate-400">· {fmtC(s.unit_price)} · {s.gst_rate}%</span>
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        <div><label className={labelCls}>HSN/SAC</label><Input className={inputCls} placeholder="HSN" value={item.hsn_sac} onChange={e => updateItem(idx, 'hsn_sac', e.target.value)} /></div>
-                        <div><label className={labelCls}>Qty</label><Input type="number" min="0" step="any" className={inputCls} value={item.quantity} onChange={e => updateItem(idx, 'quantity', parseFloat(e.target.value) || 0)} /></div>
-                        <div><label className={labelCls}>Unit</label>
-                          <Select value={item.unit} onValueChange={v => updateItem(idx, 'unit', v)}>
-                            <SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
-                            <SelectContent>{UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-5 gap-3">
-                        <div><label className={labelCls}>Unit Price (₹)</label><Input type="number" min="0" step="any" className={inputCls} value={item.unit_price} onChange={e => updateItem(idx, 'unit_price', parseFloat(e.target.value) || 0)} /></div>
-                        <div><label className={labelCls}>Disc %</label><Input type="number" min="0" max="100" step="any" className={inputCls} value={item.discount_pct} onChange={e => updateItem(idx, 'discount_pct', parseFloat(e.target.value) || 0)} /></div>
-                        <div><label className={labelCls}>GST %</label>
-                          <Select value={String(item.gst_rate)} onValueChange={v => updateItem(idx, 'gst_rate', parseFloat(v))}>
-                            <SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
-                            <SelectContent>{GST_RATES.map(r => <SelectItem key={r} value={String(r)}>{r}%</SelectItem>)}</SelectContent>
-                          </Select>
-                        </div>
-                        <div><label className={labelCls}>Taxable</label><div className={`h-11 px-3 rounded-xl flex items-center text-sm font-medium ${isDark ? 'bg-slate-700/50 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>{fmtC(comp.taxable_value)}</div></div>
-                        <div><label className={labelCls}>Total</label><div className={`h-11 px-3 rounded-xl flex items-center text-sm font-bold ${isDark ? 'bg-blue-900/30 text-blue-300' : 'bg-blue-50 text-blue-700'}`}>{fmtC(comp.total_amount)}</div></div>
-                      </div>
-                      {item.item_details !== undefined && (
-                        <div className="mt-3"><label className={labelCls}>Item Details / Notes</label><Input className={`${inputCls} text-xs`} placeholder="Optional item notes" value={item.item_details || ''} onChange={e => updateItem(idx, 'item_details', e.target.value)} /></div>
+                    <div
+                      key={idx}
+                      draggable
+                      onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragIdx(idx); }}
+                      onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOverIdx(idx); }}
+                      onDrop={e => { e.preventDefault(); reorderItems(dragIdx, idx); setDragIdx(null); setDragOverIdx(null); }}
+                      onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
+                      className={`relative border rounded-2xl transition-all
+                        ${isDragging   ? 'opacity-40 scale-[0.98] shadow-inner' : ''}
+                        ${isDropTarget ? (isDark ? 'border-blue-500 shadow-lg shadow-blue-900/30 bg-blue-900/10' : 'border-blue-400 shadow-lg shadow-blue-100 bg-blue-50/60') : (isDark ? 'border-slate-700 bg-slate-800/40' : 'border-slate-200 bg-slate-50/40')}
+                      `}
+                    >
+                      {/* Drop indicator bar */}
+                      {isDropTarget && (
+                        <div className="absolute -top-0.5 left-4 right-4 h-0.5 rounded-full bg-blue-500 shadow shadow-blue-400" />
                       )}
+
+                      {/* Card header row */}
+                      <div className="flex items-center gap-2 px-3 pt-3 pb-2">
+                        {/* Drag handle */}
+                        <div
+                          className={`flex-shrink-0 cursor-grab active:cursor-grabbing p-1 rounded-lg transition-colors ${isDark ? 'text-slate-600 hover:text-slate-400 hover:bg-slate-700' : 'text-slate-300 hover:text-slate-500 hover:bg-slate-100'}`}
+                          title="Drag to reorder"
+                        >
+                          <GripVertical className="h-4 w-4" />
+                        </div>
+
+                        {/* Item number badge */}
+                        <span className={`text-[10px] font-black px-2.5 py-1 rounded-full flex-shrink-0 ${
+                          isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'
+                        }`}>
+                          # {idx + 1}
+                        </span>
+
+                        {/* Catalog picker */}
+                        <div className="flex-1" />
+                        <Select value={item.product_id || '__none__'} onValueChange={v => fillFromProduct(idx, v)}>
+                          <SelectTrigger className="h-7 w-36 text-[10px] rounded-lg border-dashed flex-shrink-0">
+                            <SelectValue placeholder="From catalog" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">— From catalog —</SelectItem>
+                            {(products || []).map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+
+                        {/* Remove button */}
+                        {form.items.length > 1 && (
+                          <button type="button" onClick={() => removeItem(idx)}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex-shrink-0"
+                            title="Remove item">
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="px-3 pb-3 space-y-3">
+                        {/* Row 1: Description + HSN + Qty + Unit */}
+                        <div className="grid grid-cols-6 gap-3">
+                          <div className="col-span-6 md:col-span-3 relative">
+                            <label className={labelCls}>Description *</label>
+                            <Input
+                              className={inputCls}
+                              placeholder="Item / Service description"
+                              value={item.description}
+                              onChange={e => updateItem(idx, 'description', e.target.value)}
+                              onFocus={() => setFocusedItemIdx(idx)}
+                              onBlur={() => setTimeout(() => setFocusedItemIdx(f => f === idx ? -1 : f), 160)}
+                            />
+                            {/* Suggestion dropdown — only when THIS input is focused */}
+                            {suggestions.length > 0 && item.description && focusedItemIdx === idx && (
+                              <div className={`absolute z-20 w-full mt-1 rounded-xl border shadow-xl overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                                <div className={`px-3 py-1.5 border-b text-[9px] font-bold uppercase tracking-wider ${isDark ? 'border-slate-700 text-slate-500' : 'border-slate-100 text-slate-400'}`}>
+                                  Suggestions from past invoices
+                                </div>
+                                {suggestions.map(s => (
+                                  <button key={s.description} type="button"
+                                    onMouseDown={e => e.preventDefault()} // prevent blur before click
+                                    onClick={() => {
+                                      updateItem(idx, 'description', s.description);
+                                      updateItem(idx, 'unit_price', s.unit_price);
+                                      updateItem(idx, 'gst_rate', s.gst_rate);
+                                      updateItem(idx, 'unit', s.unit);
+                                      setFocusedItemIdx(-1);
+                                    }}
+                                    className={`w-full flex items-center justify-between px-3 py-2.5 text-xs transition-colors border-b last:border-0
+                                      ${isDark ? 'hover:bg-blue-900/30 text-slate-200 border-slate-700' : 'hover:bg-blue-50 text-slate-700 border-slate-50'}`}>
+                                    <span className="font-medium truncate">{s.description}</span>
+                                    <span className={`text-[10px] ml-2 flex-shrink-0 font-semibold ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
+                                      {fmtC(s.unit_price)} · {s.gst_rate}%
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <div><label className={labelCls}>HSN/SAC</label><Input className={inputCls} placeholder="HSN" value={item.hsn_sac} onChange={e => updateItem(idx, 'hsn_sac', e.target.value)} /></div>
+                          <div><label className={labelCls}>Qty</label><Input type="number" min="0" step="any" className={inputCls} value={item.quantity} onChange={e => updateItem(idx, 'quantity', parseFloat(e.target.value) || 0)} /></div>
+                          <div><label className={labelCls}>Unit</label>
+                            <Select value={item.unit} onValueChange={v => updateItem(idx, 'unit', v)}>
+                              <SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
+                              <SelectContent>{UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+
+                        {/* Row 2: Price + Disc + GST + Taxable + Total */}
+                        <div className="grid grid-cols-5 gap-3">
+                          <div>
+                            <label className={labelCls}>Unit Price (₹)</label>
+                            <Input type="number" min="0" step="any" className={inputCls} value={item.unit_price} onChange={e => updateItem(idx, 'unit_price', parseFloat(e.target.value) || 0)} />
+                          </div>
+                          <div>
+                            <label className={labelCls}>Disc %</label>
+                            <Input type="number" min="0" max="100" step="any" className={inputCls} value={item.discount_pct} onChange={e => updateItem(idx, 'discount_pct', parseFloat(e.target.value) || 0)} />
+                          </div>
+                          <div>
+                            <label className={labelCls}>GST %</label>
+                            <Select value={String(item.gst_rate)} onValueChange={v => updateItem(idx, 'gst_rate', parseFloat(v))}>
+                              <SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
+                              <SelectContent>{GST_RATES.map(r => <SelectItem key={r} value={String(r)}>{r}%</SelectItem>)}</SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <label className={labelCls}>Taxable</label>
+                            <div className={`h-11 px-3 rounded-xl flex items-center text-sm font-medium ${isDark ? 'bg-slate-700/50 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                              {fmtC(comp.taxable_value)}
+                            </div>
+                          </div>
+                          <div>
+                            <label className={labelCls}>Total</label>
+                            <div className={`h-11 px-3 rounded-xl flex items-center text-sm font-black ${isDark ? 'bg-blue-900/30 text-blue-300' : 'bg-blue-50 text-blue-700'}`}>
+                              {fmtC(comp.total_amount)}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Optional notes */}
+                        {item.item_details !== undefined && (
+                          <div>
+                            <label className={labelCls}>Item Notes</label>
+                            <Input className={`${inputCls} text-xs`} placeholder="Optional item notes" value={item.item_details || ''} onChange={e => updateItem(idx, 'item_details', e.target.value)} />
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
