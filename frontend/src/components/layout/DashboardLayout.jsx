@@ -86,7 +86,7 @@ const NAV_GROUPS = [
     items: [
       // Settings — <Protected> routes, visible to all roles
       { path: '/settings/email', icon: Mail,     label: 'Email Accounts'   },
-      { path: '/settings',       icon: Settings, label: 'General Settings' },
+      { path: '/settings',       icon: Settings, label: 'General Settings', exact: true },
     ],
   },
 ];
@@ -216,7 +216,7 @@ const DashboardLayout = ({ children }) => {
   const visibleNavItems = allNavItems.filter(i => checkNavPermission(i.permission));
   const activeLabel     = visibleNavItems.find(i =>
     i.path === location.pathname ||
-    (location.pathname.startsWith(i.path + '/') && i.path !== '/')
+    (!i.exact && location.pathname.startsWith(i.path + '/') && i.path !== '/')
   )?.label || 'Dashboard';
 
   const sidebarPx = collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED;
@@ -225,8 +225,10 @@ const DashboardLayout = ({ children }) => {
   /* ── Nav Item ─────────────────────────────────────────────────────── */
   const NavItem = ({ item }) => {
     if (!checkNavPermission(item.permission)) return null;
+    // exact:true items only highlight on a precise path match
+    // (prevents /settings matching when the user is on /settings/email)
     const isActive = location.pathname === item.path ||
-      (location.pathname.startsWith(item.path + '/') && item.path !== '/');
+      (!item.exact && location.pathname.startsWith(item.path + '/') && item.path !== '/');
     const Icon = item.icon;
 
     return (
