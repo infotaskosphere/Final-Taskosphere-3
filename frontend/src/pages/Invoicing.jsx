@@ -2561,6 +2561,174 @@ const PaymentModal = ({ invoice, open, onClose, onSuccess, isDark }) => {
 // ════════════════════════════════════════════════════════════════════════════════
 // INVOICE FORM
 // ════════════════════════════════════════════════════════════════════════════════
+
+// ── Memoized Item Row — prevents full InvoiceForm re-render on every keystroke ──
+const ItemRow = React.memo(function ItemRow({
+  item, idx, isInterstate, isDark, inputCls, labelCls,
+  onUpdate, onRemove, fillFromProduct, products,
+  focusedItemIdx, setFocusedItemIdx,
+  dragIdx, dragOverIdx, setDragIdx, setDragOverIdx,
+  reorderItems, itemCount,
+}) {
+  const comp = computeItem(item, isInterstate);
+  const mem  = getItemMemory();
+
+  // Local state so number inputs don't cause full-form re-renders while typing
+  const [localQty,   setLocalQty]   = React.useState(String(item.quantity));
+  const [localPrice, setLocalPrice] = React.useState(String(item.unit_price));
+  const [localDisc,  setLocalDisc]  = React.useState(String(item.discount_pct));
+
+  // Keep local state in sync when parent pushes a change (product catalog fill, etc.)
+  React.useEffect(() => setLocalQty(String(item.quantity)),    [item.quantity]);
+  React.useEffect(() => setLocalPrice(String(item.unit_price)), [item.unit_price]);
+  React.useEffect(() => setLocalDisc(String(item.discount_pct)), [item.discount_pct]);
+
+  const suggestions = focusedItemIdx === idx && (item.description || '').length > 1
+    ? Object.values(mem).filter(m =>
+        m.description.toLowerCase().includes(item.description.toLowerCase())
+      ).slice(0, 5)
+    : [];
+
+  const isDragging   = dragIdx === idx;
+  const isDropTarget = dragOverIdx === idx && dragIdx !== idx;
+
+  return (
+    <div
+      draggable
+      onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragIdx(idx); }}
+      onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOverIdx(idx); }}
+      onDrop={e => { e.preventDefault(); reorderItems(dragIdx, idx); setDragIdx(null); setDragOverIdx(null); }}
+      onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
+      className={`relative border rounded-2xl transition-all
+        ${isDragging   ? 'opacity-40 scale-[0.98] shadow-inner' : ''}
+        ${isDropTarget
+          ? isDark ? 'border-blue-500 shadow-lg shadow-blue-900/30 bg-blue-900/10'
+                   : 'border-blue-400 shadow-lg shadow-blue-100 bg-blue-50/60'
+          : isDark ? 'border-slate-700 bg-slate-800/40'
+                   : 'border-slate-200 bg-slate-50/40'}`}
+    >
+      {isDropTarget && <div className="absolute -top-0.5 left-4 right-4 h-0.5 rounded-full bg-blue-500 shadow shadow-blue-400" />}
+
+      {/* Header row */}
+      <div className="flex items-center gap-2 px-3 pt-3 pb-2">
+        <div className={`flex-shrink-0 cursor-grab active:cursor-grabbing p-1 rounded-lg transition-colors ${isDark ? 'text-slate-600 hover:text-slate-400 hover:bg-slate-700' : 'text-slate-300 hover:text-slate-500 hover:bg-slate-100'}`} title="Drag to reorder">
+          <GripVertical className="h-4 w-4" />
+        </div>
+        <span className={`text-[10px] font-black px-2.5 py-1 rounded-full flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}># {idx + 1}</span>
+        <div className="flex-1" />
+        <Select value={item.product_id || '__none__'} onValueChange={v => fillFromProduct(idx, v)}>
+          <SelectTrigger className="h-7 w-36 text-[10px] rounded-lg border-dashed flex-shrink-0"><SelectValue placeholder="From catalog" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">— From catalog —</SelectItem>
+            {(products || []).map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        {itemCount > 1 && (
+          <button type="button" onClick={() => onRemove(idx)}
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex-shrink-0" title="Remove item">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+
+      <div className="px-3 pb-3 space-y-3">
+        {/* Row 1: Description, HSN, Qty, Unit */}
+        <div className="grid grid-cols-6 gap-3">
+          <div className="col-span-6 md:col-span-3 relative">
+            <label className={labelCls}>Description *</label>
+            <Input className={inputCls} placeholder="Item / Service description"
+              value={item.description}
+              onChange={e => onUpdate(idx, 'description', e.target.value)}
+              onFocus={() => setFocusedItemIdx(idx)}
+              onBlur={() => setTimeout(() => setFocusedItemIdx(f => f === idx ? -1 : f), 160)}
+            />
+            {suggestions.length > 0 && (
+              <div className={`absolute z-20 w-full mt-1 rounded-xl border shadow-xl overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                <div className={`px-3 py-1.5 border-b text-[9px] font-bold uppercase tracking-wider ${isDark ? 'border-slate-700 text-slate-500' : 'border-slate-100 text-slate-400'}`}>Suggestions from past invoices</div>
+                {suggestions.map(s => (
+                  <button key={s.description} type="button" onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      onUpdate(idx, 'description', s.description);
+                      onUpdate(idx, 'unit_price',  s.unit_price);
+                      onUpdate(idx, 'gst_rate',    s.gst_rate);
+                      onUpdate(idx, 'unit',        s.unit);
+                      setFocusedItemIdx(-1);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 text-xs transition-colors border-b last:border-0 ${isDark ? 'hover:bg-blue-900/30 text-slate-200 border-slate-700' : 'hover:bg-blue-50 text-slate-700 border-slate-50'}`}>
+                    <span className="font-medium truncate">{s.description}</span>
+                    <span className={`text-[10px] ml-2 flex-shrink-0 font-semibold ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{fmtC(s.unit_price)} · {s.gst_rate}%</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div><label className={labelCls}>HSN/SAC</label><Input className={inputCls} placeholder="HSN" value={item.hsn_sac} onChange={e => onUpdate(idx, 'hsn_sac', e.target.value)} /></div>
+          <div>
+            <label className={labelCls}>Qty</label>
+            <Input type="number" min="0" step="any" className={inputCls}
+              value={localQty}
+              onChange={e => setLocalQty(e.target.value)}
+              onBlur={e => { const v = parseFloat(e.target.value) || 0; setLocalQty(String(v)); onUpdate(idx, 'quantity', v); }}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Unit</label>
+            <Select value={item.unit} onValueChange={v => onUpdate(idx, 'unit', v)}>
+              <SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
+              <SelectContent>{UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* Row 2: Price, Disc, GST, Taxable, Total */}
+        <div className="grid grid-cols-5 gap-3">
+          <div>
+            <label className={labelCls}>Unit Price (₹)</label>
+            <Input type="number" min="0" step="any" className={inputCls}
+              value={localPrice}
+              onChange={e => setLocalPrice(e.target.value)}
+              onBlur={e => { const v = parseFloat(e.target.value) || 0; setLocalPrice(String(v)); onUpdate(idx, 'unit_price', v); }}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Disc %</label>
+            <Input type="number" min="0" max="100" step="any" className={inputCls}
+              value={localDisc}
+              onChange={e => setLocalDisc(e.target.value)}
+              onBlur={e => { const v = parseFloat(e.target.value) || 0; setLocalDisc(String(v)); onUpdate(idx, 'discount_pct', v); }}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>GST %</label>
+            <Select value={String(item.gst_rate)} onValueChange={v => onUpdate(idx, 'gst_rate', parseFloat(v))}>
+              <SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
+              <SelectContent>{GST_RATES.map(r => <SelectItem key={r} value={String(r)}>{r}%</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div>
+            <label className={labelCls}>Taxable</label>
+            <div className={`h-11 px-3 rounded-xl flex items-center text-sm font-medium ${isDark ? 'bg-slate-700/50 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>{fmtC(comp.taxable_value)}</div>
+          </div>
+          <div>
+            <label className={labelCls}>Total</label>
+            <div className={`h-11 px-3 rounded-xl flex items-center text-sm font-black ${isDark ? 'bg-blue-900/30 text-blue-300' : 'bg-blue-50 text-blue-700'}`}>{fmtC(comp.total_amount)}</div>
+          </div>
+        </div>
+
+        {item.item_details !== undefined && (
+          <div>
+            <label className={labelCls}>Item Notes</label>
+            <Input className={`${inputCls} text-xs`} placeholder="Optional item notes"
+              value={item.item_details || ''}
+              onChange={e => onUpdate(idx, 'item_details', e.target.value)}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
 const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onSuccess, isDark }) => {
   const navigate = useNavigate();
   const defaultForm = {
@@ -2682,7 +2850,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       is_interstate: p.supply_state ? (p.supply_state.toLowerCase() !== (client.state || '').toLowerCase()) : p.is_interstate,
     }));
     toast.success(`Auto-filled from "${client.company_name}"`, { duration: 1500 });
-  }, []);
+  }, [clients]);
 
   const fillFromProduct = useCallback((idx, productId) => {
     if (productId === '__none__') return;
@@ -2726,6 +2894,20 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       }
       toast.success(editingInv ? 'Invoice updated successfully' : 'Invoice created successfully');
       saveItemMemory(form.items);
+      // Auto-sync new client data back to client record (non-fatal)
+      if (form.client_id) {
+        try {
+          const syncFields = {};
+          if (form.client_gstin)  syncFields.gstin   = form.client_gstin;
+          if (form.client_phone)  syncFields.phone   = form.client_phone.replace(/\D/g, '');
+          if (form.client_email)  syncFields.email   = form.client_email;
+          if (form.client_address) syncFields.address = form.client_address;
+          if (form.client_state)  syncFields.state   = form.client_state;
+          if (Object.keys(syncFields).length > 0) {
+            await api.put(`/clients/${form.client_id}`, syncFields);
+          }
+        } catch { /* non-fatal */ }
+      }
       onSuccess?.();
       onClose();
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to save invoice'); }
@@ -2896,164 +3078,29 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                   </div>
                   <Button type="button" size="sm" onClick={addItem} className="h-8 px-3 text-xs rounded-xl text-white gap-1.5" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}><Plus className="h-3.5 w-3.5" /> Add Item</Button>
                 </div>
-                {form.items.map((item, idx) => {
-                  const comp = computeItem(item, form.is_interstate);
-                  const mem = getItemMemory();
-                  const suggestions = Object.values(mem)
-                    .filter(m => m.description.toLowerCase().includes((item.description || '').toLowerCase()) && item.description.length > 1)
-                    .slice(0, 5);
-                  const isDragging   = dragIdx === idx;
-                  const isDropTarget = dragOverIdx === idx && dragIdx !== idx;
-
-                  return (
-                    <div
-                      key={idx}
-                      draggable
-                      onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragIdx(idx); }}
-                      onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOverIdx(idx); }}
-                      onDrop={e => { e.preventDefault(); reorderItems(dragIdx, idx); setDragIdx(null); setDragOverIdx(null); }}
-                      onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
-                      className={`relative border rounded-2xl transition-all
-                        ${isDragging   ? 'opacity-40 scale-[0.98] shadow-inner' : ''}
-                        ${isDropTarget ? (isDark ? 'border-blue-500 shadow-lg shadow-blue-900/30 bg-blue-900/10' : 'border-blue-400 shadow-lg shadow-blue-100 bg-blue-50/60') : (isDark ? 'border-slate-700 bg-slate-800/40' : 'border-slate-200 bg-slate-50/40')}
-                      `}
-                    >
-                      {/* Drop indicator bar */}
-                      {isDropTarget && (
-                        <div className="absolute -top-0.5 left-4 right-4 h-0.5 rounded-full bg-blue-500 shadow shadow-blue-400" />
-                      )}
-
-                      {/* Card header row */}
-                      <div className="flex items-center gap-2 px-3 pt-3 pb-2">
-                        {/* Drag handle */}
-                        <div
-                          className={`flex-shrink-0 cursor-grab active:cursor-grabbing p-1 rounded-lg transition-colors ${isDark ? 'text-slate-600 hover:text-slate-400 hover:bg-slate-700' : 'text-slate-300 hover:text-slate-500 hover:bg-slate-100'}`}
-                          title="Drag to reorder"
-                        >
-                          <GripVertical className="h-4 w-4" />
-                        </div>
-
-                        {/* Item number badge */}
-                        <span className={`text-[10px] font-black px-2.5 py-1 rounded-full flex-shrink-0 ${
-                          isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'
-                        }`}>
-                          # {idx + 1}
-                        </span>
-
-                        {/* Catalog picker */}
-                        <div className="flex-1" />
-                        <Select value={item.product_id || '__none__'} onValueChange={v => fillFromProduct(idx, v)}>
-                          <SelectTrigger className="h-7 w-36 text-[10px] rounded-lg border-dashed flex-shrink-0">
-                            <SelectValue placeholder="From catalog" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">— From catalog —</SelectItem>
-                            {(products || []).map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-
-                        {/* Remove button */}
-                        {form.items.length > 1 && (
-                          <button type="button" onClick={() => removeItem(idx)}
-                            className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex-shrink-0"
-                            title="Remove item">
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="px-3 pb-3 space-y-3">
-                        {/* Row 1: Description + HSN + Qty + Unit */}
-                        <div className="grid grid-cols-6 gap-3">
-                          <div className="col-span-6 md:col-span-3 relative">
-                            <label className={labelCls}>Description *</label>
-                            <Input
-                              className={inputCls}
-                              placeholder="Item / Service description"
-                              value={item.description}
-                              onChange={e => updateItem(idx, 'description', e.target.value)}
-                              onFocus={() => setFocusedItemIdx(idx)}
-                              onBlur={() => setTimeout(() => setFocusedItemIdx(f => f === idx ? -1 : f), 160)}
-                            />
-                            {/* Suggestion dropdown — only when THIS input is focused */}
-                            {suggestions.length > 0 && item.description && focusedItemIdx === idx && (
-                              <div className={`absolute z-20 w-full mt-1 rounded-xl border shadow-xl overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                                <div className={`px-3 py-1.5 border-b text-[9px] font-bold uppercase tracking-wider ${isDark ? 'border-slate-700 text-slate-500' : 'border-slate-100 text-slate-400'}`}>
-                                  Suggestions from past invoices
-                                </div>
-                                {suggestions.map(s => (
-                                  <button key={s.description} type="button"
-                                    onMouseDown={e => e.preventDefault()} // prevent blur before click
-                                    onClick={() => {
-                                      updateItem(idx, 'description', s.description);
-                                      updateItem(idx, 'unit_price', s.unit_price);
-                                      updateItem(idx, 'gst_rate', s.gst_rate);
-                                      updateItem(idx, 'unit', s.unit);
-                                      setFocusedItemIdx(-1);
-                                    }}
-                                    className={`w-full flex items-center justify-between px-3 py-2.5 text-xs transition-colors border-b last:border-0
-                                      ${isDark ? 'hover:bg-blue-900/30 text-slate-200 border-slate-700' : 'hover:bg-blue-50 text-slate-700 border-slate-50'}`}>
-                                    <span className="font-medium truncate">{s.description}</span>
-                                    <span className={`text-[10px] ml-2 flex-shrink-0 font-semibold ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                                      {fmtC(s.unit_price)} · {s.gst_rate}%
-                                    </span>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                          <div><label className={labelCls}>HSN/SAC</label><Input className={inputCls} placeholder="HSN" value={item.hsn_sac} onChange={e => updateItem(idx, 'hsn_sac', e.target.value)} /></div>
-                          <div><label className={labelCls}>Qty</label><Input type="number" min="0" step="any" className={inputCls} value={item.quantity} onChange={e => updateItem(idx, 'quantity', parseFloat(e.target.value) || 0)} /></div>
-                          <div><label className={labelCls}>Unit</label>
-                            <Select value={item.unit} onValueChange={v => updateItem(idx, 'unit', v)}>
-                              <SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
-                              <SelectContent>{UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-
-                        {/* Row 2: Price + Disc + GST + Taxable + Total */}
-                        <div className="grid grid-cols-5 gap-3">
-                          <div>
-                            <label className={labelCls}>Unit Price (₹)</label>
-                            <Input type="number" min="0" step="any" className={inputCls} value={item.unit_price} onChange={e => updateItem(idx, 'unit_price', parseFloat(e.target.value) || 0)} />
-                          </div>
-                          <div>
-                            <label className={labelCls}>Disc %</label>
-                            <Input type="number" min="0" max="100" step="any" className={inputCls} value={item.discount_pct} onChange={e => updateItem(idx, 'discount_pct', parseFloat(e.target.value) || 0)} />
-                          </div>
-                          <div>
-                            <label className={labelCls}>GST %</label>
-                            <Select value={String(item.gst_rate)} onValueChange={v => updateItem(idx, 'gst_rate', parseFloat(v))}>
-                              <SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
-                              <SelectContent>{GST_RATES.map(r => <SelectItem key={r} value={String(r)}>{r}%</SelectItem>)}</SelectContent>
-                            </Select>
-                          </div>
-                          <div>
-                            <label className={labelCls}>Taxable</label>
-                            <div className={`h-11 px-3 rounded-xl flex items-center text-sm font-medium ${isDark ? 'bg-slate-700/50 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
-                              {fmtC(comp.taxable_value)}
-                            </div>
-                          </div>
-                          <div>
-                            <label className={labelCls}>Total</label>
-                            <div className={`h-11 px-3 rounded-xl flex items-center text-sm font-black ${isDark ? 'bg-blue-900/30 text-blue-300' : 'bg-blue-50 text-blue-700'}`}>
-                              {fmtC(comp.total_amount)}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Optional notes */}
-                        {item.item_details !== undefined && (
-                          <div>
-                            <label className={labelCls}>Item Notes</label>
-                            <Input className={`${inputCls} text-xs`} placeholder="Optional item notes" value={item.item_details || ''} onChange={e => updateItem(idx, 'item_details', e.target.value)} />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                {form.items.map((item, idx) => (
+                  <ItemRow
+                    key={idx}
+                    item={item}
+                    idx={idx}
+                    isInterstate={form.is_interstate}
+                    isDark={isDark}
+                    inputCls={inputCls}
+                    labelCls={labelCls}
+                    onUpdate={updateItem}
+                    onRemove={removeItem}
+                    fillFromProduct={fillFromProduct}
+                    products={products}
+                    focusedItemIdx={focusedItemIdx}
+                    setFocusedItemIdx={setFocusedItemIdx}
+                    dragIdx={dragIdx}
+                    dragOverIdx={dragOverIdx}
+                    setDragIdx={setDragIdx}
+                    setDragOverIdx={setDragOverIdx}
+                    reorderItems={reorderItems}
+                    itemCount={form.items.length}
+                  />
+                ))}
                 <Button type="button" variant="outline" onClick={addItem} className="w-full h-10 rounded-xl border-dashed text-xs gap-2"><Plus className="h-3.5 w-3.5" /> Add Another Item</Button>
               </div>
             )}
@@ -4031,7 +4078,7 @@ const fetchAll = useCallback(async () => {
                 <table className="w-full" style={{minWidth:700}}>
                   <thead>
                     <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
-                      <th className="w-[5px]" />
+                      <th className={`px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sr</th>
                       <th className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
                         <input type="checkbox"
                           className="w-4 h-4 rounded cursor-pointer accent-blue-600"
@@ -4052,17 +4099,15 @@ const fetchAll = useCallback(async () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {paginatedOutstanding.map(inv => {
-                      const stripe = getInvoiceStripe(inv);
+                    {paginatedOutstanding.map((inv, rowIdx) => {
                       const isSelected = selectedIds.has(inv.id);
+                      const srNo = ((outstandingPage - 1) * SECTION_PAGE_SIZE) + rowIdx + 1;
                       return (
                         <tr key={inv.id}
                           className={`border-b last:border-0 transition-colors cursor-pointer relative ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
                           onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
                           {/* Colour strip — identical to Tasks page left stripe */}
-                          <td className="p-0 w-[5px]">
-                            <div className="w-[5px] h-full min-h-[54px] rounded-sm" style={{ backgroundColor: stripe.color }} />
-                          </td>
+                          <td className={`px-3 py-3.5 text-xs font-mono w-10 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{srNo}</td>
                           <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
                             <input type="checkbox"
                               className="w-4 h-4 rounded cursor-pointer accent-blue-600"
@@ -4184,7 +4229,7 @@ const fetchAll = useCallback(async () => {
                 <table className="w-full" style={{minWidth:700}}>
                   <thead>
                     <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
-                      <th className="w-[5px]" />
+                      <th className={`px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sr</th>
                       <th className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
                         <input type="checkbox"
                           className="w-4 h-4 rounded cursor-pointer accent-blue-600"
@@ -4205,16 +4250,15 @@ const fetchAll = useCallback(async () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {paginatedReceived.map(inv => {
+                    {paginatedReceived.map((inv, rowIdx) => {
                       const isSelected = selectedIds.has(inv.id);
+                      const srNo = ((receivedPage - 1) * SECTION_PAGE_SIZE) + rowIdx + 1;
                       return (
                         <tr key={inv.id}
                           className={`border-b last:border-0 transition-colors cursor-pointer ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
                           onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
                           {/* Green strip for paid invoices */}
-                          <td className="p-0 w-[5px]">
-                            <div className="w-[5px] h-full min-h-[54px] rounded-sm bg-emerald-500" />
-                          </td>
+                          <td className={`px-3 py-3.5 text-xs font-mono w-10 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{srNo}</td>
                           <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
                             <input type="checkbox"
                               className="w-4 h-4 rounded cursor-pointer accent-blue-600"
