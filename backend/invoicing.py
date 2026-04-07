@@ -515,6 +515,7 @@ def _parse_vyp_file(file_path: str) -> dict:
         except Exception as e:
             logger.warning(f"VYP lineitems: {e}")
 
+        _seen_invoice_nos: set = set()  # guards against same-firm/year/type/num collisions
         try:
             cursor.execute("""SELECT txn_id, txn_date, txn_name_id, txn_cash_amount, txn_balance_amount,
                               txn_type, txn_discount_percent, txn_tax_percent, txn_discount_amount,
@@ -531,7 +532,32 @@ def _parse_vyp_file(file_path: str) -> dict:
                 due_date = _safe_date(row["txn_due_date"], txn_date)
                 prefix = _safe_str(row["txn_invoice_prefix"]) or "KB"
                 ref_num = _safe_str(row["txn_ref_number_char"])
-                invoice_no = f"{prefix}-{ref_num}" if ref_num else f"KB-{row['txn_id']}"
+                # Build a collision-proof invoice number:
+                #   {prefix}-{firm_id}-{fiscal_year}-{doc_type}-{ref_num}
+                # This ensures the same sequential number issued by different
+                # firms, in different years, or as different document types
+                # (invoice vs estimate vs delivery challan) never collides.
+                # e.g.  KB-1-2021-INV-52  ≠  KB-4-2022-INV-52  ≠  KB-1-2021-EST-52
+                _fy   = txn_date[:4] if txn_date and len(txn_date) >= 4 else "00"
+                _firm = str(row["txn_firm_id"]) if row["txn_firm_id"] else "0"
+                _type_code = {
+                    "tax_invoice":       "INV",
+                    "credit_note":       "CN",
+                    "estimate":          "EST",
+                    "proforma":          "PRO",
+                    "delivery_challan":  "DC",
+                }.get(txn_type, "TXN")
+                invoice_no = (
+                    f"{prefix}-{_firm}-{_fy}-{_type_code}-{ref_num}"
+                    if ref_num
+                    else f"KB-{row['txn_id']}"
+                )
+                # Last-resort tie-breaker: if two records in the SAME firm/year/type
+                # genuinely share a reference number (data-entry error in Vyapar),
+                # append the txn_id so neither record is lost during import.
+                if invoice_no in _seen_invoice_nos:
+                    invoice_no = f"{invoice_no}-{row['txn_id']}"
+                _seen_invoice_nos.add(invoice_no)
                 items_list = lineitem_map.get(row["txn_id"], [])
                 subtotal = sum(li["total_amount"] for li in items_list)
                 total_tax = sum(li["tax_amount"] for li in items_list)
@@ -1785,10 +1811,21 @@ async def import_backup(
             amount = float(pay.get("amount", 0))
             if amount <= 0:
                 continue
+            # Dedup guard: skip if a payment with the same source _kb_id
+            # and company was already imported (prevents double-import on re-run).
+            kb_id = pay.get("_kb_id")
+            if kb_id:
+                existing_pay = await db.payments.find_one({
+                    "company_id": data.company_id,
+                    "kb_source_id": str(kb_id),
+                })
+                if existing_pay:
+                    continue
             await db.payments.insert_one({
                 "id": str(uuid.uuid4()),
                 "invoice_id": "",
                 "company_id": data.company_id,
+                "kb_source_id": str(kb_id) if kb_id else "",
                 "client_name": (pay.get("client_name") or "").strip(),
                 "amount": amount,
                 "payment_date": pay.get("payment_date", date.today().isoformat()),
