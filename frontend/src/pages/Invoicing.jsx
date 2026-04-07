@@ -2371,7 +2371,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     invoice_type: 'tax_invoice', company_id: '', client_id: '', lead_id: '',
     client_name: '', client_address: '', client_email: '', client_phone: '', client_gstin: '', client_state: '',
     invoice_date: format(new Date(), 'yyyy-MM-dd'),
-    due_date: format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
+    due_date: '',  // intentionally empty — user sets this manually or via quick-fill buttons
     supply_state: '', is_interstate: false,
     items: [emptyItem()],
     gst_rate: 18, discount_amount: 0, shipping_charges: 0, other_charges: 0,
@@ -2398,7 +2398,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
           ...defaultForm,
           ...editingInv,
           invoice_date: (editingInv.invoice_date || '').slice(0, 10) || format(new Date(), 'yyyy-MM-dd'),
-          due_date: (editingInv.due_date || '').slice(0, 10) || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
+          due_date: (editingInv.due_date || '').slice(0, 10) || '',
         });
       } else {
         // Restore draft if available
@@ -2430,6 +2430,33 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
 
   // ── useCallback ──
   const setField = useCallback((k, v) => setForm(p => ({ ...p, [k]: v })), []);
+
+  // Auto-fill Due Date when Payment Terms is changed (only if invoice_date is set)
+  const TERMS_DAYS = {
+    'Due on receipt': 0, 'Due in 7 days': 7, 'Due in 15 days': 15,
+    'Due in 30 days': 30, 'Due in 45 days': 45, 'Due in 60 days': 60,
+    'Due in 90 days': 90,
+  };
+  const setPaymentTerms = useCallback((terms) => {
+    setForm(p => {
+      const days = TERMS_DAYS[terms];
+      if (days !== undefined && p.invoice_date) {
+        const base = new Date(p.invoice_date);
+        base.setDate(base.getDate() + days);
+        return { ...p, payment_terms: terms, due_date: format(base, 'yyyy-MM-dd') };
+      }
+      return { ...p, payment_terms: terms };
+    });
+  }, []);
+
+  // Quick-fill due date from invoice_date + N days
+  const quickFillDueDate = useCallback((days) => {
+    setForm(p => {
+      const base = p.invoice_date ? new Date(p.invoice_date) : new Date();
+      base.setDate(base.getDate() + days);
+      return { ...p, due_date: format(base, 'yyyy-MM-dd') };
+    });
+  }, []);
   const updateItem = useCallback((idx, k, val) => setForm(p => ({ ...p, items: p.items.map((it, i) => i !== idx ? it : { ...it, [k]: val }) })), []);
   const addItem = useCallback(() => setForm(p => ({ ...p, items: [...p.items, emptyItem()] })), []);
   const removeItem = useCallback((idx) => setForm(p => ({ ...p, items: p.items.filter((_, i) => i !== idx) })), []);
@@ -2550,23 +2577,76 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
             {activeTab === 'details' && (
               <div className="space-y-5">
                 <div className={sectionCls}>
-                  <h3 className={`text-sm font-semibold mb-4 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Invoice Details</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div><label className={labelCls}>Company Profile *</label>
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}20, ${COLORS.mediumBlue}20)` }}>
+                      <FileText className="h-3.5 w-3.5" style={{ color: COLORS.mediumBlue }} />
+                    </div>
+                    <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Invoice Details</h3>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <label className={labelCls}>Company Profile *</label>
                       <Select value={form.company_id} onValueChange={v => setField('company_id', v)}>
-                        <SelectTrigger className={inputCls}><SelectValue placeholder="Select company" /></SelectTrigger>
+                        <SelectTrigger className={`${inputCls} ${!form.company_id ? 'border-amber-300 dark:border-amber-600' : ''}`}>
+                          <SelectValue placeholder="— Select company profile —" />
+                        </SelectTrigger>
                         <SelectContent>{(companies || []).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
                       </Select>
+                      {!form.company_id && <p className="text-[10px] text-amber-500 mt-1">⚠ Required to generate invoice</p>}
                     </div>
-                    <div><label className={labelCls}>Invoice Date *</label><Input type="date" className={inputCls} value={form.invoice_date} onChange={e => setField('invoice_date', e.target.value)} /></div>
-                    <div><label className={labelCls}>Due Date</label><Input type="date" className={inputCls} value={form.due_date} onChange={e => setField('due_date', e.target.value)} /></div>
-                    <div><label className={labelCls}>Reference No.</label><Input className={inputCls} placeholder="PO/Reference" value={form.reference_no} onChange={e => setField('reference_no', e.target.value)} /></div>
+                    <div>
+                      <label className={labelCls}>Reference No. <span className="text-slate-400 font-normal normal-case">(PO / Order no.)</span></label>
+                      <Input className={inputCls} placeholder="e.g. PO-2024-001" value={form.reference_no} onChange={e => setField('reference_no', e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className={labelCls}>Invoice Date *</label>
+                      <Input type="date" className={inputCls} value={form.invoice_date} onChange={e => setField('invoice_date', e.target.value)} />
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className={labelCls + " mb-0"}>Due Date <span className={`font-normal normal-case ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>(optional)</span></label>
+                        {form.due_date && (
+                          <button type="button" onClick={() => setField('due_date', '')}
+                            className="text-[10px] text-slate-400 hover:text-red-400 transition-colors">✕ Clear</button>
+                        )}
+                      </div>
+                      <Input type="date" className={inputCls} value={form.due_date}
+                        onChange={e => setField('due_date', e.target.value)}
+                        placeholder="dd-mm-yyyy" />
+                      {/* Quick-fill shortcuts */}
+                      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                        <span className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Quick set:</span>
+                        {[['0d', 0, 'On receipt'], ['7d', 7, '+7'], ['15d', 15, '+15'], ['30d', 30, '+30'], ['45d', 45, '+45'], ['60d', 60, '+60']].map(([key, days, lbl]) => (
+                          <button key={key} type="button" onClick={() => quickFillDueDate(days)}
+                            className={`text-[10px] font-semibold px-2 py-0.5 rounded-md transition-colors ${
+                              isDark ? 'bg-slate-700 text-slate-300 hover:bg-blue-900/40 hover:text-blue-300' : 'bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-600'
+                            }`}>{lbl}</button>
+                        ))}
+                      </div>
+                      <p className={`text-[10px] mt-1 ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>
+                        Tip: selecting a Payment Term below auto-fills this date
+                      </p>
+                    </div>
                   </div>
                 </div>
                 <div className={sectionCls}>
-                  <h3 className={`text-sm font-semibold mb-4 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Client Details</h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: `${COLORS.emeraldGreen}20` }}>
+                        <Users className="h-3.5 w-3.5" style={{ color: COLORS.emeraldGreen }} />
+                      </div>
+                      <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Client Details</h3>
+                    </div>
+                    {form.client_name && (
+                      <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full ${isDark ? 'bg-emerald-900/30 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
+                        ✓ Client selected
+                      </span>
+                    )}
+                  </div>
                   <div className="mb-4">
-                    <label className={labelCls}>Search & Select Client</label>
+                    <label className={labelCls}>Search & Select Client <span className={`font-normal normal-case ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>— auto-fills fields below</span></label>
                     <ClientSearchCombobox
                       clients={clients || []}
                       value={form.client_id}
@@ -2597,7 +2677,13 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
             {activeTab === 'items' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Line Items</h3>
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: `${COLORS.mediumBlue}20` }}>
+                      <Package className="h-3.5 w-3.5" style={{ color: COLORS.mediumBlue }} />
+                    </div>
+                    <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Line Items</h3>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>{form.items.length}</span>
+                  </div>
                   <Button type="button" size="sm" onClick={addItem} className="h-8 px-3 text-xs rounded-xl text-white gap-1.5" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}><Plus className="h-3.5 w-3.5" /> Add Item</Button>
                 </div>
                 {form.items.map((item, idx) => {
@@ -2665,7 +2751,12 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
             {activeTab === 'totals' && (
               <div className="space-y-5">
                 <div className={sectionCls}>
-                  <h3 className={`text-sm font-semibold mb-4 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Additional Charges</h3>
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: `${COLORS.amber}20` }}>
+                      <IndianRupee className="h-3.5 w-3.5" style={{ color: COLORS.amber }} />
+                    </div>
+                    <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Additional Charges</h3>
+                  </div>
                   <div className="grid grid-cols-3 gap-4">
                     <div><label className={labelCls}>Discount (₹)</label><Input type="number" min="0" step="any" className={inputCls} value={form.discount_amount} onChange={e => setField('discount_amount', parseFloat(e.target.value) || 0)} /></div>
                     <div><label className={labelCls}>Shipping (₹)</label><Input type="number" min="0" step="any" className={inputCls} value={form.shipping_charges} onChange={e => setField('shipping_charges', parseFloat(e.target.value) || 0)} /></div>
@@ -2697,12 +2788,13 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                 </div>
                 <div className={sectionCls}>
                   <h3 className={`text-sm font-semibold mb-4 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Payment Terms</h3>
-                  <Select value={form.payment_terms} onValueChange={v => setField('payment_terms', v)}>
+                  <Select value={form.payment_terms} onValueChange={setPaymentTerms}>
                     <SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {['Due on receipt','Due in 7 days','Due in 15 days','Due in 30 days','Due in 45 days','Due in 60 days','Due in 90 days','Advance payment'].map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                     </SelectContent>
                   </Select>
+                  <p className={`text-[10px] mt-1.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Changing this will auto-update the Due Date field</p>
                   <div className="mt-4">
                     <Select value={form.status} onValueChange={v => setField('status', v)}>
                       <SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
