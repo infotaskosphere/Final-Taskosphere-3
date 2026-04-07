@@ -1527,8 +1527,9 @@ export default function Clients() {
 
   // Restore draft when opening add dialog
   const openAddDialog = useCallback(() => {
+    resetForm(); // ← ADD THIS FIRST
     try {
-      const saved = localStorage.getItem(DRAFT_KEY);
+      const saved = localStorage.getItem(DRAFT_KEY);;
       if (saved) {
         const { formData: savedForm, otherService: savedOther } = JSON.parse(saved);
         if (savedForm?.company_name?.trim()) {
@@ -2196,9 +2197,6 @@ export default function Clients() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(255px, 1fr))', gap: 10, padding: '10px 10px 4px 10px' }}>
               {boardPageClients.map((client, localIndex) => (
                 <ModernClientCard
-                  client={client}
-                  index={index}
-                  isDark={isDark}
                   onSendBirthdayWish={handleSendBirthdayWish}
                   key={client.id} client={client} index={boardPageStart + localIndex}
                   isDark={isDark} users={users} getClientAssignments={getClientAssignments}
@@ -2446,7 +2444,7 @@ export default function Clients() {
                   <button type="button" onClick={() => setMdsForm(f => ({ ...f, contact_persons: [...f.contact_persons, { name: '', designation: '', email: '', phone: '', birthday: '', din: '' }] }))} className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors"><Plus className="h-3 w-3" /> Add</button>
                 </div>
                 <button
-                  onClick={() => handleSendBirthdayWish(client.id, client.company_name)}
+                 onClick={() => toast.info('Save the client first to send a birthday wish')}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all"
                   style={{
                     background: 'rgba(251,191,36,0.15)',
