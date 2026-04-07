@@ -1410,6 +1410,104 @@ function parseSaleReportExcel(file) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
+// REMOVE BACKUP SECTION (shown inside ImportModal choose step)
+// ════════════════════════════════════════════════════════════════════════════════
+const RemoveBackupSection = ({ isDark }) => {
+  const [sources, setSources] = useState([]);
+  const [loadingSources, setLoadingSources] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [removing, setRemoving] = useState(null); // source string being removed
+
+  const SOURCE_LABELS = {
+    khatabook: 'KhataBook (.vyp / .vyb)',
+    tally: 'Tally Export (.xml)',
+    json: 'Vyapar / JSON',
+    excel: 'Excel / CSV',
+    unknown: 'Unknown Source',
+  };
+
+  const loadSources = async () => {
+    setLoadingSources(true);
+    try {
+      const res = await api.get('/invoices/backup-sources');
+      setSources(res.data || []);
+    } catch { setSources([]); }
+    setLoadingSources(false);
+  };
+
+  const handleExpand = () => {
+    if (!expanded) loadSources();
+    setExpanded(v => !v);
+  };
+
+  const handleRemove = async (source) => {
+    const src = sources.find(s => s.source === source);
+    if (!window.confirm(
+      `Remove all data imported from "${SOURCE_LABELS[source] || source}"?\n\n` +
+      `This will delete:\n• ${src?.invoice_count || 0} invoices\n• ${src?.client_count || 0} clients\n• ${src?.product_count || 0} products\n\nThis cannot be undone.`
+    )) return;
+    setRemoving(source);
+    try {
+      const res = await api.delete('/invoices/remove-backup', { params: { source } });
+      toast.success(`Removed: ${res.data.invoices_deleted} invoices, ${res.data.clients_deleted} clients, ${res.data.products_deleted} products`);
+      setSources(prev => prev.filter(s => s.source !== source));
+    } catch {
+      toast.error('Failed to remove backup data');
+    }
+    setRemoving(null);
+  };
+
+  return (
+    <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700 bg-slate-700/20' : 'border-red-100 bg-red-50/40'}`}>
+      <button
+        type="button"
+        onClick={handleExpand}
+        className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${isDark ? 'hover:bg-slate-700/40' : 'hover:bg-red-50'}`}>
+        <div className="w-9 h-9 rounded-xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
+          <Trash2 className="h-4 w-4 text-red-500" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Remove Imported Backup</p>
+          <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Delete all data from a previously imported backup</p>
+        </div>
+        {loadingSources ? <RefreshCw className="h-4 w-4 text-slate-400 animate-spin flex-shrink-0" /> : <ChevronDown className={`h-4 w-4 text-slate-400 flex-shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} />}
+      </button>
+      {expanded && (
+        <div className={`border-t px-4 py-3 space-y-2 ${isDark ? 'border-slate-700' : 'border-red-100'}`}>
+          {loadingSources ? (
+            <div className="flex items-center justify-center py-4">
+              <RefreshCw className="h-4 w-4 animate-spin text-slate-400" />
+              <span className="ml-2 text-xs text-slate-400">Loading imported backups…</span>
+            </div>
+          ) : sources.length === 0 ? (
+            <p className={`text-xs text-center py-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No imported backups found</p>
+          ) : (
+            sources.map(s => (
+              <div key={s.source} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${isDark ? 'bg-slate-700/40' : 'bg-white border border-red-100'}`}>
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{SOURCE_LABELS[s.source] || s.source}</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    {s.invoice_count} invoices · {s.client_count} clients · {s.product_count} products
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={removing === s.source}
+                  onClick={() => handleRemove(s.source)}
+                  className="flex-shrink-0 flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold text-red-500 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 disabled:opacity-50 transition-colors">
+                  {removing === s.source ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                  Remove
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ════════════════════════════════════════════════════════════════════════════════
 // UNIFIED IMPORT MODAL
 // ════════════════════════════════════════════════════════════════════════════════
 const KB_PAY_STATUS = { 1: 'sent', 2: 'partially_paid', 3: 'paid' };
@@ -1683,6 +1781,8 @@ const handleImport = async () => {
                   </button>
                 ))}
               </div>
+              {/* Remove Backup Section */}
+              <RemoveBackupSection isDark={isDark} />
             </div>
           )}
           {/* STEP: UPLOAD FILE */}
@@ -3658,17 +3758,26 @@ const fetchAll = useCallback(async () => {
   // handleBulkDelete depends on fetchAll — declared AFTER it ✓
   const handleBulkDelete = useCallback(async () => {
     if (!selectedIds.size) return;
-    if (!window.confirm(`Delete ${selectedIds.size} invoice${selectedIds.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
+    if (!window.confirm(`Permanently delete ${selectedIds.size} invoice${selectedIds.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
     setBulkDeleteLoading(true);
-    let deleted = 0, failed = 0;
-    for (const id of selectedIds) {
-      try { await api.delete(`/invoices/${id}`); deleted++; }
-      catch { failed++; }
+    try {
+      const ids = Array.from(selectedIds);
+      await api.delete('/invoices/bulk-delete', { data: ids });
+      setSelectedIds(new Set());
+      fetchAll();
+      toast.success(`Deleted ${ids.length} invoice${ids.length > 1 ? 's' : ''}`);
+    } catch {
+      // fallback: delete one by one
+      let deleted = 0, failed = 0;
+      for (const id of selectedIds) {
+        try { await api.delete(`/invoices/${id}`); deleted++; }
+        catch { failed++; }
+      }
+      setSelectedIds(new Set());
+      fetchAll();
+      toast.success(`Deleted ${deleted} invoice${deleted > 1 ? 's' : ''}${failed ? ` (${failed} failed)` : ''}`);
     }
     setBulkDeleteLoading(false);
-    setSelectedIds(new Set());
-    fetchAll();
-    toast.success(`Deleted ${deleted} invoice${deleted > 1 ? 's' : ''}${failed ? ` (${failed} failed)` : ''}`);
   }, [selectedIds, fetchAll]);
 
   const handleEdit = useCallback((inv) => { setEditingInv(inv); setFormOpen(true); }, []);
@@ -3837,12 +3946,24 @@ const fetchAll = useCallback(async () => {
           )}
         </div>
         {selectedIds.size > 0 && (
-          <div className={`px-4 py-2.5 border-t flex items-center gap-3 ${isDark ? 'border-slate-700 bg-slate-700/30' : 'border-slate-100 bg-blue-50/40'}`}>
-            <span className="text-xs font-semibold text-blue-700 dark:text-blue-400">{selectedIds.size} selected</span>
-            <Button size="sm" variant="ghost" onClick={handleBulkDelete} disabled={bulkDeleteLoading} className="h-7 px-3 text-xs text-red-500 hover:bg-red-50 rounded-lg gap-1.5">
-              {bulkDeleteLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />} Delete Selected
+          <div className={`px-4 py-2.5 border-t flex items-center gap-3 flex-wrap ${isDark ? 'border-slate-700 bg-blue-900/20' : 'border-blue-100 bg-blue-50/60'}`}>
+            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${isDark ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-100 text-blue-700'}`}>
+              <CheckSquare className="h-3 w-3" />
+              {selectedIds.size} invoice{selectedIds.size > 1 ? 's' : ''} selected
+            </div>
+            <button
+              onClick={() => setSelectedIds(new Set(enrichedFiltered.map(i => i.id)))}
+              className={`text-xs font-semibold px-2.5 py-1 rounded-full transition-colors ${isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-100'}`}>
+              Select all {enrichedFiltered.length}
+            </button>
+            <Button size="sm" variant="ghost" onClick={handleBulkDelete} disabled={bulkDeleteLoading}
+              className="h-7 px-3 text-xs text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg gap-1.5 font-semibold">
+              {bulkDeleteLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+              Delete {selectedIds.size} invoice{selectedIds.size > 1 ? 's' : ''}
             </Button>
-            <button onClick={() => setSelectedIds(new Set())} className="text-xs text-slate-400 hover:text-slate-600 ml-auto">Deselect all</button>
+            <button onClick={() => setSelectedIds(new Set())} className="text-xs text-slate-400 hover:text-slate-600 ml-auto flex items-center gap-1">
+              <X className="h-3 w-3" /> Clear selection
+            </button>
           </div>
         )}
       </div>
@@ -3911,7 +4032,20 @@ const fetchAll = useCallback(async () => {
                   <thead>
                     <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
                       <th className="w-[5px]" />
-                      <th className="px-4 py-3 w-10" />
+                      <th className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox"
+                          className="w-4 h-4 rounded cursor-pointer accent-blue-600"
+                          checked={outstandingInvoices.length > 0 && outstandingInvoices.every(i => selectedIds.has(i.id))}
+                          onChange={() => {
+                            const allSelected = outstandingInvoices.every(i => selectedIds.has(i.id));
+                            setSelectedIds(prev => {
+                              const next = new Set(prev);
+                              outstandingInvoices.forEach(i => allSelected ? next.delete(i.id) : next.add(i.id));
+                              return next;
+                            });
+                          }}
+                        />
+                      </th>
                       {['Invoice', 'Client', 'Date', 'Type', 'Amount', 'Status', 'Actions'].map(h => (
                         <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
                       ))}
@@ -3929,7 +4063,13 @@ const fetchAll = useCallback(async () => {
                           <td className="p-0 w-[5px]">
                             <div className="w-[5px] h-full min-h-[54px] rounded-sm" style={{ backgroundColor: stripe.color }} />
                           </td>
-                          <td className="px-4 py-3.5 w-10" />
+                          <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
+                            <input type="checkbox"
+                              className="w-4 h-4 rounded cursor-pointer accent-blue-600"
+                              checked={isSelected}
+                              onChange={() => toggleSelect(inv.id)}
+                            />
+                          </td>
                           <td className="px-4 py-3.5">
                             <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                               <Hl text={inv.invoice_no || '—'} query={searchTerm} />
@@ -4045,7 +4185,20 @@ const fetchAll = useCallback(async () => {
                   <thead>
                     <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
                       <th className="w-[5px]" />
-                      <th className="px-4 py-3 w-10" />
+                      <th className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox"
+                          className="w-4 h-4 rounded cursor-pointer accent-blue-600"
+                          checked={receivedInvoices.length > 0 && receivedInvoices.every(i => selectedIds.has(i.id))}
+                          onChange={() => {
+                            const allSelected = receivedInvoices.every(i => selectedIds.has(i.id));
+                            setSelectedIds(prev => {
+                              const next = new Set(prev);
+                              receivedInvoices.forEach(i => allSelected ? next.delete(i.id) : next.add(i.id));
+                              return next;
+                            });
+                          }}
+                        />
+                      </th>
                       {['Invoice', 'Client', 'Date', 'Type', 'Amount', 'Status', 'Actions'].map(h => (
                         <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
                       ))}
@@ -4062,7 +4215,13 @@ const fetchAll = useCallback(async () => {
                           <td className="p-0 w-[5px]">
                             <div className="w-[5px] h-full min-h-[54px] rounded-sm bg-emerald-500" />
                           </td>
-                          <td className="px-4 py-3.5 w-10" />
+                          <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
+                            <input type="checkbox"
+                              className="w-4 h-4 rounded cursor-pointer accent-blue-600"
+                              checked={isSelected}
+                              onChange={() => toggleSelect(inv.id)}
+                            />
+                          </td>
                           <td className="px-4 py-3.5">
                             <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                               <Hl text={inv.invoice_no || '—'} query={searchTerm} />
