@@ -4146,7 +4146,7 @@ const fetchAll = useCallback(async () => {
                           </td>
                           <td className="px-4 py-3.5">
                             <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(inv.grand_total)}</p>
-                            {inv.amount_due > 0 && <p className="text-[10px] font-semibold mt-0.5" style={{ color: stripe.color }}>Due: {fmtC(inv.amount_due)}</p>}
+                            {inv.amount_due > 0 && <p className="text-[10px] font-semibold mt-0.5" style={{ color: getInvoiceStripe(inv).color }}>Due: {fmtC(inv.amount_due)}</p>}
                           </td>
                           <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
                             <InlineStatusDropdown inv={inv} onStatusChange={handleStatusChange} isDark={isDark} />
