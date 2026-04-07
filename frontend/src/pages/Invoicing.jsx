@@ -1520,67 +1520,87 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
 const handleImport = async () => {
   if (!parsed) return;
   setStep('importing');
-  setProgress(10);
+  setProgress(5);
 
   const companyId = selectedCompanyId === '__none__' ? '' : selectedCompanyId;
+  const source    = parsed.source || parsed.mode || 'unknown';
+  const CHUNK     = 150; // invoices per request — keeps each call well under 30 s
 
   // Filter invoices by selected firm (for VYP multi-firm backups)
-  const invToImport = parsed.mode === 'excel'
+  const allInvToImport = (parsed.mode === 'excel'
     ? (parsed.invoices || [])
     : selectedFirm === '__none__'
       ? (parsed.invoices || [])
-      : (parsed.invoices || []).filter(i => String(i.company_id) === selectedFirm);
+      : (parsed.invoices || []).filter(i => String(i.company_id) === selectedFirm)
+  ).map(inv => {
+    const clean = { ...inv };
+    // Ensure items have at least one entry
+    if (!clean.items?.length) {
+      clean.items = [{
+        description: 'Imported service', hsn_sac: '', quantity: 1, unit: 'service',
+        unit_price: clean.grand_total || 0, discount_pct: 0, gst_rate: 18,
+        taxable_value: clean.grand_total || 0,
+        cgst_rate: 9, sgst_rate: 9, igst_rate: 0,
+        cgst_amount: 0, sgst_amount: 0, igst_amount: 0,
+        total_amount: clean.grand_total || 0,
+      }];
+    }
+    return clean;
+  });
+
+  const totals = { imported: 0, clients: 0, clients_updated: 0, skipped: 0, errors: [] };
 
   try {
-    // Use bulk import endpoint — much faster than one-by-one
-    const payload = {
-      company_id: companyId,
-      source: parsed.source || parsed.mode || 'unknown',
-      invoices: invToImport.map(inv => {
-        const clean = { ...inv };
-        delete clean._kb_id;
-        // Ensure items have at least one entry
-        if (!clean.items?.length) {
-          clean.items = [{
-            description: 'Imported service',
-            hsn_sac: '',
-            quantity: 1,
-            unit: 'service',
-            unit_price: clean.grand_total || 0,
-            discount_pct: 0,
-            gst_rate: 18,
-            taxable_value: clean.grand_total || 0,
-            cgst_rate: 9, sgst_rate: 9, igst_rate: 0,
-            cgst_amount: 0, sgst_amount: 0, igst_amount: 0,
-            total_amount: clean.grand_total || 0,
-          }];
-        }
-        return clean;
-      }),
-      clients: importClients && parsed.mode !== 'excel' ? (parsed.clients || []) : [],
-      items: parsed.items || [],
-      payments: parsed.payments || [],
-      skip_duplicates: true,
-    };
+    // ── Chunk 0: send clients + items + payments + first slice of invoices ──
+    const chunks = [];
+    for (let i = 0; i < allInvToImport.length; i += CHUNK) {
+      chunks.push(allInvToImport.slice(i, i + CHUNK));
+    }
+    if (chunks.length === 0) chunks.push([]); // at least one request
 
-    setProgress(30);
+    const totalChunks = chunks.length;
 
-    const resp = await api.post('/invoices/import-backup', payload);
-    const data = resp.data;
+    for (let ci = 0; ci < totalChunks; ci++) {
+      const isFirst = ci === 0;
+      const payload = {
+        company_id:      companyId,
+        source,
+        invoices:        chunks[ci],
+        // Only send clients / items / payments on the first chunk
+        clients:         isFirst && importClients && parsed.mode !== 'excel' ? (parsed.clients || []) : [],
+        items:           isFirst ? (parsed.items  || []) : [],
+        payments:        isFirst ? (parsed.payments || []) : [],
+        skip_duplicates: true,
+      };
+
+      // 5 minutes per chunk — bulk backend should finish in seconds but we give plenty of headroom
+      const resp = await api.post('/invoices/import-backup', payload, { timeout: 300_000 });
+      const d    = resp.data;
+
+      totals.imported        += d.invoices_imported  || 0;
+      totals.clients         += d.clients_imported   || 0;
+      totals.clients_updated += d.clients_updated    || 0;
+      totals.skipped         += d.invoices_skipped   || 0;
+      if (d.errors?.length)    totals.errors.push(...d.errors);
+
+      // Smooth progress: 5 % → 95 % across chunks, then 100 % on finish
+      setProgress(Math.round(5 + ((ci + 1) / totalChunks) * 90));
+    }
 
     setProgress(100);
     setResults({
-      imported: data.invoices_imported || 0,
-      clients: data.clients_imported || 0,
-      skipped: data.invoices_skipped || 0,
-      errors: data.errors || [],
+      imported:         totals.imported,
+      clients:          totals.clients,
+      clients_updated:  totals.clients_updated,
+      skipped:          totals.skipped,
+      errors:           totals.errors.slice(0, 50),
     });
     setStep('done');
     onImportComplete?.();
-    toast.success(`Imported ${data.invoices_imported} invoice${data.invoices_imported !== 1 ? 's' : ''} successfully`);
+    toast.success(`Imported ${totals.imported} invoice${totals.imported !== 1 ? 's' : ''} successfully`);
   } catch (err) {
     const detail = err.response?.data?.detail || err.message || 'Import failed';
-    setResults({ imported: 0, clients: 0, skipped: 0, errors: [detail] });
+    setResults({ imported: totals.imported, clients: totals.clients, skipped: totals.skipped, errors: [detail, ...totals.errors].slice(0, 50) });
     setStep('done');
     toast.error(`Import failed: ${detail}`);
   }
