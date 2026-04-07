@@ -1,3 +1,4 @@
+
 import Papa from 'papaparse/papaparse.js';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
@@ -4086,9 +4087,10 @@ const fetchAll = useCallback(async () => {
                   <thead>
                     <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
                       <th className="w-1 p-0" style={{ width: 4, padding: 0 }} />
+                      <th className={`px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sr</th>
                       <th className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
                         <input type="checkbox"
-                          className="w-4 h-4 rounded-full cursor-pointer accent-blue-600 appearance-none border-2 border-slate-300 checked:bg-blue-600 checked:border-blue-600 transition-all"
+                          className="w-4 h-4 rounded cursor-pointer accent-blue-600"
                           checked={outstandingInvoices.length > 0 && outstandingInvoices.every(i => selectedIds.has(i.id))}
                           onChange={() => {
                             const allSelected = outstandingInvoices.every(i => selectedIds.has(i.id));
@@ -4107,17 +4109,20 @@ const fetchAll = useCallback(async () => {
                   </thead>
                   <tbody>
                     {paginatedOutstanding.map((inv, idx) => {
+                      const srNo = (outstandingPage - 1) * SECTION_PAGE_SIZE + idx + 1;
                       const isSelected = selectedIds.has(inv.id);
                       return (
                     <tr key={inv.id}
                       className={`border-b last:border-0 transition-colors cursor-pointer relative ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
                       onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
+                      {/* Company-wise color strip */}
                       <td className="w-1 p-0" style={{ width: 4, padding: 0 }}>
                         <div style={{ width: 4, minHeight: 48, background: getCompanyStripColor(inv.company_id, companies), borderRadius: '0 4px 4px 0' }} />
                       </td>
+                      <td className={`px-3 py-3.5 text-xs font-mono w-10 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{srNo}</td>
                       <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
                         <input type="checkbox"
-                          className="w-4 h-4 rounded-full cursor-pointer accent-blue-600 appearance-none border-2 border-slate-300 checked:bg-blue-600 checked:border-blue-600 transition-all"
+                          className="w-4 h-4 rounded cursor-pointer accent-blue-600"
                           checked={isSelected}
                           onChange={() => toggleSelect(inv.id)}
                         />
@@ -4238,9 +4243,10 @@ const fetchAll = useCallback(async () => {
                   <thead>
                     <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
                       <th className="w-1 p-0" style={{ width: 4, padding: 0 }} />
+                      <th className={`px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sr</th>
                       <th className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
                         <input type="checkbox"
-                          className="w-4 h-4 rounded-full cursor-pointer accent-blue-600 appearance-none border-2 border-slate-300 checked:bg-blue-600 checked:border-blue-600 transition-all"
+                          className="w-4 h-4 rounded cursor-pointer accent-blue-600"
                           checked={receivedInvoices.length > 0 && receivedInvoices.every(i => selectedIds.has(i.id))}
                           onChange={() => {
                             const allSelected = receivedInvoices.every(i => selectedIds.has(i.id));
@@ -4259,17 +4265,20 @@ const fetchAll = useCallback(async () => {
                   </thead>
                   <tbody>
                     {paginatedReceived.map((inv, idx) => {
+                      const srNo = (receivedPage - 1) * SECTION_PAGE_SIZE + idx + 1;
                       const isSelected = selectedIds.has(inv.id);
                       return (
                     <tr key={inv.id}
                       className={`border-b last:border-0 transition-colors cursor-pointer ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
                       onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
+                      {/* Company-wise color strip */}
                       <td className="w-1 p-0" style={{ width: 4, padding: 0 }}>
                         <div style={{ width: 4, minHeight: 48, background: getCompanyStripColor(inv.company_id, companies), borderRadius: '0 4px 4px 0' }} />
                       </td>
+                      <td className={`px-3 py-3.5 text-xs font-mono w-10 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{srNo}</td>
                       <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
                         <input type="checkbox"
-                          className="w-4 h-4 rounded-full cursor-pointer accent-blue-600 appearance-none border-2 border-slate-300 checked:bg-blue-600 checked:border-blue-600 transition-all"
+                          className="w-4 h-4 rounded cursor-pointer accent-blue-600"
                           checked={isSelected}
                           onChange={() => toggleSelect(inv.id)}
                         />
