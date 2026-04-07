@@ -3244,7 +3244,7 @@ const ProductModal = ({ open, onClose, isDark, onSaved }) => {
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════════
 const LIST_PAGE_SIZE = 20;
-const SECTION_PAGE_SIZE = 15; // rows per page inside Outstanding / Received sections
+const SECTION_PAGE_SIZE = 10; // rows per page inside Outstanding / Received sections
 function Invoicing() {
   // ── A. ALL useState (top of component) ──────────────────────────────────────
   const [invoices, setInvoices] = useState([]);
@@ -3282,6 +3282,7 @@ function Invoicing() {
   // ── B. ALL useRef ─────────────────────────────────────────────────────────
   const iframeRef = useRef(null);
   const searchRef = useRef(null);
+  const invoiceListRef = useRef(null); // scroll target for stat-card clicks
 
   // ── hooks from context/router (treat as stable) ──
   const { user } = useAuth();
@@ -3332,7 +3333,11 @@ function Invoicing() {
       if (companyFilter !== 'all' && inv.company_id !== companyFilter) return false;
       if (fy && (inv.invoice_date < fy.from || inv.invoice_date > fy.to)) return false;
       if (searchTerm && !inv.invoice_no?.toLowerCase().includes(searchTerm.toLowerCase()) && !inv.client_name?.toLowerCase().includes(searchTerm.toLowerCase())) return false;
-      if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
+      if (statusFilter === 'outstanding') {
+        // Outstanding = anything with balance due OR draft (not cancelled, not paid)
+        if (inv.status === 'paid' || inv.status === 'cancelled') return false;
+        if ((inv.amount_due || 0) <= 0 && inv.status !== 'draft') return false;
+      } else if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
       if (typeFilter !== 'all' && inv.invoice_type !== typeFilter) return false;
       if (fromDate && inv.invoice_date < fromDate) return false;
       if (toDate && inv.invoice_date > toDate) return false;
@@ -3573,9 +3578,16 @@ const fetchAll = useCallback(async () => {
       {/* STATS */}
       {((localStats?.total_invoices || 0) > 0 || (invoices?.length || 0) > 0) && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Total Revenue" value={fmtC(localStats.total_revenue)} sub={`${localStats.total_invoices} invoices`} icon={IndianRupee} color={COLORS.mediumBlue} bg={`${COLORS.mediumBlue}12`} isDark={isDark} onClick={() => setStatusFilter('all')} />
-          <StatCard label="Outstanding" value={fmtC(localStats.total_outstanding)} sub={`${localStats.overdue_count} overdue`} icon={AlertCircle} color={COLORS.coral} bg={`${COLORS.coral}15`} isDark={isDark} onClick={() => setStatusFilter('overdue')} />
-          <StatCard label="This Month" value={fmtC(localStats.month_revenue)} sub={`${localStats.month_invoices} invoices`} icon={TrendingUp} color={COLORS.emeraldGreen} bg={`${COLORS.emeraldGreen}12`} isDark={isDark} />
+          <StatCard label="Total Revenue" value={fmtC(localStats.total_revenue)} sub={`${localStats.total_invoices} invoices`} icon={IndianRupee} color={COLORS.mediumBlue} bg={`${COLORS.mediumBlue}12`} isDark={isDark} onClick={() => { setStatusFilter('all'); setFromDate(''); setToDate(''); setTimeout(() => invoiceListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80); }} />
+          <StatCard label="Outstanding" value={fmtC(localStats.total_outstanding)} sub={`${localStats.overdue_count} overdue`} icon={AlertCircle} color={COLORS.coral} bg={`${COLORS.coral}15`} isDark={isDark} onClick={() => { setStatusFilter('outstanding'); setFromDate(''); setToDate(''); setTimeout(() => invoiceListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80); }} />
+          <StatCard label="This Month" value={fmtC(localStats.month_revenue)} sub={`${localStats.month_invoices} invoices`} icon={TrendingUp} color={COLORS.emeraldGreen} bg={`${COLORS.emeraldGreen}12`} isDark={isDark}
+            onClick={() => {
+              const now = new Date();
+              const first = format(new Date(now.getFullYear(), now.getMonth(), 1), 'yyyy-MM-dd');
+              const last  = format(new Date(now.getFullYear(), now.getMonth() + 1, 0), 'yyyy-MM-dd');
+              setFromDate(first); setToDate(last); setStatusFilter('all'); setYearFilter('all');
+              setTimeout(() => invoiceListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+            }} />
           <StatCard label="Total GST" value={fmtC(localStats.total_gst)} sub={`${localStats.paid_count} paid · ${localStats.draft_count} draft`} icon={Shield} color={COLORS.amber} bg={`${COLORS.amber}12`} isDark={isDark} onClick={() => setGstOpen(true)} />
         </div>
       )}
@@ -3599,7 +3611,7 @@ const fetchAll = useCallback(async () => {
             <Select value={companyFilter} onValueChange={setCompanyFilter}><SelectTrigger className={`h-9 w-[160px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-blue-50 text-blue-700'}`}><Building2 className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" /><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Companies</SelectItem>{(companies || []).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select>
           )}
           <Select value={yearFilter} onValueChange={setYearFilter}><SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><CalendarDays className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" /><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Years</SelectItem>{availableYears.map(y => <SelectItem key={y} value={y}>FY {y}-{String(parseInt(y) + 1).slice(2)}</SelectItem>)}</SelectContent></Select>
-          <Select value={statusFilter} onValueChange={setStatusFilter}><SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Status</SelectItem>{Object.entries(STATUS_META).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent></Select>
+          <Select value={statusFilter} onValueChange={setStatusFilter}><SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Status</SelectItem><SelectItem value="outstanding">Outstanding</SelectItem>{Object.entries(STATUS_META).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent></Select>
           <Select value={typeFilter} onValueChange={setTypeFilter}><SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Types</SelectItem>{INV_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent></Select>
           <div className="flex items-center gap-1.5">
             <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className={`h-9 px-2 rounded-xl text-xs border ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 [color-scheme:dark]' : 'bg-white border-slate-200'}`} />
@@ -3622,6 +3634,34 @@ const fetchAll = useCallback(async () => {
       </div>
 
       {/* INVOICE LIST — split into Outstanding and Received */}
+      <div ref={invoiceListRef} className="scroll-mt-4" />
+      {/* ── Active-filter banner ── */}
+      {(statusFilter !== 'all' || fromDate || toDate) && (
+        <div className={`flex items-center gap-3 px-4 py-2.5 rounded-xl border ${
+          isDark ? 'bg-slate-800 border-slate-700' : 'bg-blue-50 border-blue-100'
+        }`}>
+          <Filter className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
+          <div className="flex items-center gap-2 flex-wrap flex-1">
+            {statusFilter !== 'all' && (
+              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-500 text-white">
+                {statusFilter === 'outstanding' ? '⚠ Outstanding' : STATUS_META[statusFilter]?.label || statusFilter}
+              </span>
+            )}
+            {(fromDate || toDate) && (
+              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                isDark ? 'bg-emerald-900/40 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
+              }`}>
+                📅 {fromDate || '…'} → {toDate || '…'}
+              </span>
+            )}
+            <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              {enrichedFiltered.length} invoice{enrichedFiltered.length !== 1 ? 's' : ''} match
+            </span>
+          </div>
+          <button onClick={() => { setStatusFilter('all'); setFromDate(''); setToDate(''); }}
+            className="text-xs text-slate-400 hover:text-red-500 font-semibold flex-shrink-0 transition-colors">✕ Clear filter</button>
+        </div>
+      )}
       {loading ? (
         <GifLoader />
       ) : enrichedFiltered.length === 0 ? (
@@ -3631,7 +3671,7 @@ const fetchAll = useCallback(async () => {
           </div>
           <h3 className={`text-lg font-bold mb-2 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>No invoices found</h3>
           <p className={`text-sm mb-6 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            {searchTerm || statusFilter !== 'all' || typeFilter !== 'all' ? 'Try adjusting your filters' : 'Create your first GST invoice'}
+            {searchTerm || statusFilter !== 'all' || typeFilter !== 'all' || fromDate || toDate ? 'No invoices match the current filter' : 'Create your first GST invoice'}
           </p>
           <Button onClick={() => { setEditingInv(null); setFormOpen(true); }} className="h-10 px-6 rounded-xl text-white gap-2" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
             <Plus className="h-4 w-4" /> New Invoice
