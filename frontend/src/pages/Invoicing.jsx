@@ -4096,69 +4096,66 @@ const fetchAll = useCallback(async () => {
                       {['Invoice', 'Client', 'Date', 'Type', 'Amount', 'Status', 'Actions'].map(h => (
                         <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
                       ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginatedOutstanding.map((inv, rowIdx) => {
-                      const isSelected = selectedIds.has(inv.id);
-                      const srNo = ((outstandingPage - 1) * SECTION_PAGE_SIZE) + rowIdx + 1;
-                      return (
-                        <tr key={inv.id}
-                          className={`border-b last:border-0 transition-colors cursor-pointer relative ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
-                          onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
-                          {/* Colour strip — identical to Tasks page left stripe */}
-                          <td className={`px-3 py-3.5 text-xs font-mono w-10 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{srNo}</td>
-                          <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
-                            <input type="checkbox"
-                              className="w-4 h-4 rounded cursor-pointer accent-blue-600"
-                              checked={isSelected}
-                              onChange={() => toggleSelect(inv.id)}
-                            />
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                              <Hl text={inv.invoice_no || '—'} query={searchTerm} />
+                    <tr key={inv.id}
+                      className={`border-b last:border-0 transition-colors cursor-pointer relative ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
+                      onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
+                      {/* Company-wise color strip */}
+                      <td className="w-1 p-0" style={{ width: 4, padding: 0 }}>
+                        <div style={{ width: 4, minHeight: 48, background: getCompanyStripColor(inv.company_id, companies), borderRadius: '0 4px 4px 0' }} />
+                      </td>
+                      <td className={`px-3 py-3.5 text-xs font-mono w-10 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{srNo}</td>
+                      <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox"
+                          className="w-4 h-4 rounded cursor-pointer accent-blue-600"
+                          checked={isSelected}
+                          onChange={() => toggleSelect(inv.id)}
+                        />
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                          <Hl text={inv.invoice_no || '—'} query={searchTerm} />
+                        </p>
+                        {inv.reference_no && <p className="text-[10px] text-slate-400 mt-0.5">Ref: {inv.reference_no}</p>}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                            style={{ background: avatarGrad(inv.client_name) }}>
+                            {(inv.client_name || '?').charAt(0).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <p className={`text-sm font-medium truncate max-w-[180px] ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                              <Hl text={inv.client_name || '—'} query={searchTerm} />
                             </p>
-                            {inv.reference_no && <p className="text-[10px] text-slate-400 mt-0.5">Ref: {inv.reference_no}</p>}
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center gap-2.5">
-                              <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                                style={{ background: avatarGrad(inv.client_name) }}>
-                                {(inv.client_name || '?').charAt(0).toUpperCase()}
-                              </div>
-                              <div className="min-w-0">
-                                <p className={`text-sm font-medium truncate max-w-[180px] ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-                                  <Hl text={inv.client_name || '—'} query={searchTerm} />
-                                </p>
-                                {inv.client_gstin && <p className="text-[10px] text-slate-400 font-mono truncate">{inv.client_gstin}</p>}
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{inv.invoice_date}</p>
-                            {inv.due_date && <p className="text-[10px] text-slate-400">Due: {inv.due_date}</p>}
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
-                              {INV_TYPES.find(t => t.value === inv.invoice_type)?.label || inv.invoice_type}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(inv.grand_total)}</p>
-                            {inv.amount_due > 0 && <p className="text-[10px] font-semibold mt-0.5" style={{ color: getInvoiceStripe(inv).color }}>Due: {fmtC(inv.amount_due)}</p>}
-                          </td>
-                          <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
-                            <InlineStatusDropdown inv={inv} onStatusChange={handleStatusChange} isDark={isDark} />
-                          </td>
-                          <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
-                            <div className="flex items-center gap-1">
-                              <button onClick={() => { setEditingInv(inv); setFormOpen(true); }} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}><Edit className="h-3.5 w-3.5" /></button>
-                              <button onClick={() => handleDownloadPdf(inv)} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}><Download className="h-3.5 w-3.5" /></button>
-                              <button onClick={() => handleDelete(inv)} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}><Trash2 className="h-3.5 w-3.5" /></button>
-                            </div>
-                          </td>
-                        </tr>
+                            {inv.client_gstin && <p className="text-[10px] text-slate-400 font-mono truncate">{inv.client_gstin}</p>}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{inv.invoice_date}</p>
+                        {inv.due_date && <p className="text-[10px] text-slate-400">Due: {inv.due_date}</p>}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                          {INV_TYPES.find(t => t.value === inv.invoice_type)?.label || inv.invoice_type}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(inv.grand_total)}</p>
+                        {inv.amount_due > 0 && <p className="text-[10px] font-semibold mt-0.5" style={{ color: getInvoiceStripe(inv).color }}>Due: {fmtC(inv.amount_due)}</p>}
+                      </td>
+                      <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
+                        <InlineStatusDropdown inv={inv} onStatusChange={handleStatusChange} isDark={isDark} />
+                      </td>
+                      <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => { setEditingInv(inv); setFormOpen(true); }} title="Edit" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}><Edit className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => handleDuplicateInv(inv)} title="Duplicate" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-purple-400 hover:bg-purple-900/30' : 'text-slate-400 hover:text-purple-600 hover:bg-purple-50'}`}><Copy className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => handleDownloadPdf(inv)} title="Download PDF" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}><Download className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => handleDelete(inv)} title="Delete" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                        </div>
+                      </td>
+                    </tr>
                       );
                     })}
                   </tbody>
@@ -4247,69 +4244,66 @@ const fetchAll = useCallback(async () => {
                       {['Invoice', 'Client', 'Date', 'Type', 'Amount', 'Status', 'Actions'].map(h => (
                         <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
                       ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginatedReceived.map((inv, rowIdx) => {
-                      const isSelected = selectedIds.has(inv.id);
-                      const srNo = ((receivedPage - 1) * SECTION_PAGE_SIZE) + rowIdx + 1;
-                      return (
-                        <tr key={inv.id}
-                          className={`border-b last:border-0 transition-colors cursor-pointer ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
-                          onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
-                          {/* Green strip for paid invoices */}
-                          <td className={`px-3 py-3.5 text-xs font-mono w-10 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{srNo}</td>
-                          <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
-                            <input type="checkbox"
-                              className="w-4 h-4 rounded cursor-pointer accent-blue-600"
-                              checked={isSelected}
-                              onChange={() => toggleSelect(inv.id)}
-                            />
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                              <Hl text={inv.invoice_no || '—'} query={searchTerm} />
+                    <tr key={inv.id}
+                      className={`border-b last:border-0 transition-colors cursor-pointer ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
+                      onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
+                      {/* Company-wise color strip */}
+                      <td className="w-1 p-0" style={{ width: 4, padding: 0 }}>
+                        <div style={{ width: 4, minHeight: 48, background: getCompanyStripColor(inv.company_id, companies), borderRadius: '0 4px 4px 0' }} />
+                      </td>
+                      <td className={`px-3 py-3.5 text-xs font-mono w-10 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{srNo}</td>
+                      <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox"
+                          className="w-4 h-4 rounded cursor-pointer accent-blue-600"
+                          checked={isSelected}
+                          onChange={() => toggleSelect(inv.id)}
+                        />
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                          <Hl text={inv.invoice_no || '—'} query={searchTerm} />
+                        </p>
+                        {inv.reference_no && <p className="text-[10px] text-slate-400 mt-0.5">Ref: {inv.reference_no}</p>}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                            style={{ background: avatarGrad(inv.client_name) }}>
+                            {(inv.client_name || '?').charAt(0).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <p className={`text-sm font-medium truncate max-w-[180px] ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                              <Hl text={inv.client_name || '—'} query={searchTerm} />
                             </p>
-                            {inv.reference_no && <p className="text-[10px] text-slate-400 mt-0.5">Ref: {inv.reference_no}</p>}
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center gap-2.5">
-                              <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                                style={{ background: avatarGrad(inv.client_name) }}>
-                                {(inv.client_name || '?').charAt(0).toUpperCase()}
-                              </div>
-                              <div className="min-w-0">
-                                <p className={`text-sm font-medium truncate max-w-[180px] ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-                                  <Hl text={inv.client_name || '—'} query={searchTerm} />
-                                </p>
-                                {inv.client_gstin && <p className="text-[10px] text-slate-400 font-mono truncate">{inv.client_gstin}</p>}
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{inv.invoice_date}</p>
-                            {inv.due_date && <p className="text-[10px] text-slate-400">Due: {inv.due_date}</p>}
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
-                              {INV_TYPES.find(t => t.value === inv.invoice_type)?.label || inv.invoice_type}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(inv.grand_total)}</p>
-                            <p className="text-[10px] text-emerald-500 font-semibold mt-0.5">Paid in full</p>
-                          </td>
-                          <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
-                            <InlineStatusDropdown inv={inv} onStatusChange={handleStatusChange} isDark={isDark} />
-                          </td>
-                          <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
-                            <div className="flex items-center gap-1">
-                              <button onClick={() => { setEditingInv(inv); setFormOpen(true); }} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}><Edit className="h-3.5 w-3.5" /></button>
-                              <button onClick={() => handleDownloadPdf(inv)} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}><Download className="h-3.5 w-3.5" /></button>
-                              <button onClick={() => handleDelete(inv)} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}><Trash2 className="h-3.5 w-3.5" /></button>
-                            </div>
-                          </td>
-                        </tr>
+                            {inv.client_gstin && <p className="text-[10px] text-slate-400 font-mono truncate">{inv.client_gstin}</p>}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{inv.invoice_date}</p>
+                        {inv.due_date && <p className="text-[10px] text-slate-400">Due: {inv.due_date}</p>}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                          {INV_TYPES.find(t => t.value === inv.invoice_type)?.label || inv.invoice_type}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(inv.grand_total)}</p>
+                        <p className="text-[10px] text-emerald-500 font-semibold mt-0.5">Paid in full</p>
+                      </td>
+                      <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
+                        <InlineStatusDropdown inv={inv} onStatusChange={handleStatusChange} isDark={isDark} />
+                      </td>
+                      <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => { setEditingInv(inv); setFormOpen(true); }} title="Edit" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}><Edit className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => handleDuplicateInv(inv)} title="Duplicate" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-purple-400 hover:bg-purple-900/30' : 'text-slate-400 hover:text-purple-600 hover:bg-purple-50'}`}><Copy className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => handleDownloadPdf(inv)} title="Download PDF" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}><Download className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => handleDelete(inv)} title="Delete" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                        </div>
+                      </td>
+                    </tr>
                       );
                     })}
                   </tbody>
