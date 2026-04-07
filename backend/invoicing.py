@@ -1947,6 +1947,30 @@ async def import_backup(
 # ─────────────────────────────────────────────
 # ✅ NEW ENDPOINT (CHANGE 3 — ADD THIS HERE)
 # ─────────────────────────────────────────────
+
+@router.patch("/invoices/sync-client/{client_id}")
+async def sync_invoices_for_client(
+    client_id: str,
+    data: dict,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Bulk-update client details across all invoices that reference this client_id.
+    Called automatically when a client record is saved/updated.
+    """
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    allowed = {
+        "client_name", "client_gstin", "client_phone",
+        "client_email", "client_address", "client_state",
+    }
+    update_fields = {k: v for k, v in data.items() if k in allowed and v is not None and v != ""}
+    if update_fields:
+        update_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await db.invoices.update_many({"client_id": client_id}, {"$set": update_fields})
+    count = await db.invoices.count_documents({"client_id": client_id})
+    return {"synced_invoices": count, "fields_updated": list(update_fields.keys())}
+
 @router.post("/invoices/{inv_id}/upload-pdf-to-drive")
 async def upload_pdf_bytes_to_drive(
     inv_id: str,
