@@ -1931,6 +1931,83 @@ const StatusPill = ({ inv }) => {
   );
 };
 
+// Selectable statuses exposed in the inline dropdown (overdue is computed, not stored)
+const INLINE_STATUSES = ['draft', 'sent', 'partially_paid', 'paid', 'cancelled'];
+
+const InlineStatusDropdown = ({ inv, onStatusChange, isDark }) => {
+  const [open, setOpen]       = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const m = getStatusMeta(inv);
+
+  const handleSelect = async (newStatus) => {
+    if (newStatus === inv.status) { setOpen(false); return; }
+    setLoading(true);
+    try {
+      await api.patch(`/invoices/${inv.id}/status`, { status: newStatus });
+      onStatusChange(inv.id, newStatus);
+      toast.success(`Status updated → ${STATUS_META[newStatus]?.label || newStatus}`);
+    } catch {
+      toast.error('Failed to update status');
+    } finally {
+      setLoading(false);
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div className="relative" onClick={e => e.stopPropagation()}>
+      {/* Trigger pill */}
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className={`inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full transition-all
+          hover:ring-2 hover:ring-offset-1 hover:ring-current cursor-pointer select-none
+          ${m.bg} ${m.text} whitespace-nowrap`}
+        title="Click to change status"
+      >
+        {loading
+          ? <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+          : <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${m.dot}`} />}
+        {m.label}
+        <ChevronDown className={`w-2.5 h-2.5 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {/* Dropdown */}
+      {open && (
+        <>
+          {/* Backdrop */}
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className={`absolute right-0 mt-1.5 z-50 w-40 rounded-xl border shadow-2xl overflow-hidden
+            ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-200'}`}>
+            {/* Header */}
+            <div className={`px-3 py-2 border-b text-[9px] font-bold uppercase tracking-widest
+              ${isDark ? 'border-slate-700 text-slate-500' : 'border-slate-100 text-slate-400'}`}>
+              Change Status
+            </div>
+            {INLINE_STATUSES.map(s => {
+              const sm = STATUS_META[s];
+              const isCurrent = inv.status === s;
+              return (
+                <button key={s} type="button" onClick={() => handleSelect(s)}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-[11px] font-semibold transition-colors
+                    ${isCurrent
+                      ? `${sm.bg} ${sm.text}`
+                      : isDark
+                        ? 'text-slate-300 hover:bg-slate-700/70'
+                        : 'text-slate-600 hover:bg-slate-50'}`}>
+                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${sm.dot}`} />
+                  <span className="flex-1 text-left">{sm.label}</span>
+                  {isCurrent && <Check className="w-3 h-3 opacity-70" />}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 // ════════════════════════════════════════════════════════════════════════════════
 // STAT CARD
 // ════════════════════════════════════════════════════════════════════════════════
@@ -3516,6 +3593,11 @@ const fetchAll = useCallback(async () => {
     try { await api.post(`/invoices/${inv.id}/mark-sent`); fetchAll(); toast.success('Marked as sent'); } catch { toast.error('Failed'); }
   }, [fetchAll]);
 
+  // Optimistic status update — avoids a full refetch on every dropdown change
+  const handleStatusChange = useCallback((invId, newStatus) => {
+    setInvoices(prev => prev.map(i => i.id === invId ? { ...i, status: newStatus } : i));
+  }, []);
+
   const handleSendEmail = useCallback(async (inv) => {
     if (!inv.client_email) { toast.error('Client email address is missing'); return; }
     if (!window.confirm(`Send invoice ${inv.invoice_no} to ${inv.client_email}?`)) return;
@@ -3749,7 +3831,9 @@ const fetchAll = useCallback(async () => {
                             <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(inv.grand_total)}</p>
                             {inv.amount_due > 0 && <p className="text-[10px] font-semibold mt-0.5" style={{ color: stripe.color }}>Due: {fmtC(inv.amount_due)}</p>}
                           </td>
-                          <td className="px-4 py-3.5"><StatusPill inv={inv} /></td>
+                          <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
+                            <InlineStatusDropdown inv={inv} onStatusChange={handleStatusChange} isDark={isDark} />
+                          </td>
                           <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
                             <div className="flex items-center gap-1">
                               <button onClick={() => { setEditingInv(inv); setFormOpen(true); }} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}><Edit className="h-3.5 w-3.5" /></button>
@@ -3880,7 +3964,9 @@ const fetchAll = useCallback(async () => {
                             <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(inv.grand_total)}</p>
                             <p className="text-[10px] text-emerald-500 font-semibold mt-0.5">Paid in full</p>
                           </td>
-                          <td className="px-4 py-3.5"><StatusPill inv={inv} /></td>
+                          <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
+                            <InlineStatusDropdown inv={inv} onStatusChange={handleStatusChange} isDark={isDark} />
+                          </td>
                           <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
                             <div className="flex items-center gap-1">
                               <button onClick={() => { setEditingInv(inv); setFormOpen(true); }} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}><Edit className="h-3.5 w-3.5" /></button>
