@@ -2090,7 +2090,7 @@ const InlineStatusDropdown = ({ inv, onStatusChange, isDark }) => {
       >
         {loading
           ? <RefreshCw className="w-2.5 h-2.5 animate-spin" />
-          : null}
+          : <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${m.dot}`} />}
         {m.label}
         <ChevronDown className={`w-2.5 h-2.5 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -4085,6 +4085,7 @@ const fetchAll = useCallback(async () => {
                 <table className="w-full" style={{minWidth:700}}>
                   <thead>
                     <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
+                      <th className="w-1 p-0" style={{ width: 4, padding: 0 }} />
                       <th className={`px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sr</th>
                       <th className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
                         <input type="checkbox"
@@ -4113,6 +4114,10 @@ const fetchAll = useCallback(async () => {
                     <tr key={inv.id}
                       className={`border-b last:border-0 transition-colors cursor-pointer relative ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
                       onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
+                      {/* Company-wise color strip */}
+                      <td className="w-1 p-0" style={{ width: 4, padding: 0 }}>
+                        <div style={{ width: 4, minHeight: 48, background: getCompanyStripColor(inv.company_id, companies), borderRadius: '0 4px 4px 0' }} />
+                      </td>
                       <td className={`px-3 py-3.5 text-xs font-mono w-10 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{srNo}</td>
                       <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
                         <input type="checkbox"
@@ -4236,6 +4241,7 @@ const fetchAll = useCallback(async () => {
                 <table className="w-full" style={{minWidth:700}}>
                   <thead>
                     <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
+                      <th className="w-1 p-0" style={{ width: 4, padding: 0 }} />
                       <th className={`px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sr</th>
                       <th className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
                         <input type="checkbox"
@@ -4264,6 +4270,10 @@ const fetchAll = useCallback(async () => {
                     <tr key={inv.id}
                       className={`border-b last:border-0 transition-colors cursor-pointer ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
                       onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
+                      {/* Company-wise color strip */}
+                      <td className="w-1 p-0" style={{ width: 4, padding: 0 }}>
+                        <div style={{ width: 4, minHeight: 48, background: getCompanyStripColor(inv.company_id, companies), borderRadius: '0 4px 4px 0' }} />
+                      </td>
                       <td className={`px-3 py-3.5 text-xs font-mono w-10 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{srNo}</td>
                       <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
                         <input type="checkbox"
