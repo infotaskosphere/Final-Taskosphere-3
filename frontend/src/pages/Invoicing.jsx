@@ -4096,6 +4096,13 @@ const fetchAll = useCallback(async () => {
                       {['Invoice', 'Client', 'Date', 'Type', 'Amount', 'Status', 'Actions'].map(h => (
                         <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
                       ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedOutstanding.map((inv, idx) => {
+                      const srNo = (outstandingPage - 1) * SECTION_PAGE_SIZE + idx + 1;
+                      const isSelected = selectedIds.has(inv.id);
+                      return (
                     <tr key={inv.id}
                       className={`border-b last:border-0 transition-colors cursor-pointer relative ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
                       onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
@@ -4244,6 +4251,13 @@ const fetchAll = useCallback(async () => {
                       {['Invoice', 'Client', 'Date', 'Type', 'Amount', 'Status', 'Actions'].map(h => (
                         <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
                       ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedReceived.map((inv, idx) => {
+                      const srNo = (receivedPage - 1) * SECTION_PAGE_SIZE + idx + 1;
+                      const isSelected = selectedIds.has(inv.id);
+                      return (
                     <tr key={inv.id}
                       className={`border-b last:border-0 transition-colors cursor-pointer ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
                       onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
