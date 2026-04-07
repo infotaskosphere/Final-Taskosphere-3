@@ -159,7 +159,8 @@ function getLogoHTML(company, theme, size, shape, variant) {
   if ((company && company.logo_url) || (company && company.logo_base64)) {
     const src = company.logo_base64 || company.logo_url;
     const f   = variant==='on-color' ? 'brightness(0) invert(1)' : 'none';
-    return '<img src="' + src + '" alt="' + rawName + '" style="height:' + size + 'px;width:auto;max-width:' + (size*3) + 'px;object-fit:contain;filter:' + f + ';display:block;"/>';
+    const blendStyle = variant==='on-white' ? 'mix-blend-mode:multiply;background:white;' : '';
+    return '<img src="' + src + '" alt="' + rawName + '" style="height:' + size + 'px;width:auto;max-width:' + (size*3) + 'px;object-fit:contain;filter:' + f + ';display:block;' + blendStyle + '"/>';
   }
   return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '" xmlns="http://www.w3.org/2000/svg" style="display:block;flex-shrink:0;">'
     + '<rect width="' + size + '" height="' + size + '" rx="' + r + '" fill="' + bgFill + '"/>'
@@ -349,7 +350,7 @@ function signRow(company, inv) {
   if (sigImg) {
     // Show actual signature image above the line
     signatoryHtml = '<div style="margin-top:6px;margin-bottom:4px;text-align:right">'
-      + '<img src="' + sigImg + '" alt="Signature" style="height:38px;max-width:160px;object-fit:contain;display:inline-block;vertical-align:bottom"/>'
+      + '<img src="' + sigImg + '" alt="Signature" style="height:38px;max-width:160px;object-fit:contain;display:inline-block;vertical-align:bottom;mix-blend-mode:multiply;background:white;"/>'
       + '</div>'
       + '<div style="border-top:1px solid #9E9E9E;padding-top:5px;font-size:9.5px;color:#9E9E9E">'
       + ((company && company.signatory_name) ? '<span style="font-weight:600;color:#424242">' + company.signatory_name + '</span><br>' : '')
