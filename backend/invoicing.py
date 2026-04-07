@@ -1676,6 +1676,11 @@ async def import_backup(
     """
     Bulk-saves the JSON output of /invoices/parse-backup into MongoDB.
 
+    v7 — rewrote all four sections to use bulk DB operations instead of
+    one-by-one insert_one / find_one loops.  This drops ~4 800 individual
+    round-trips down to ~10 queries total, keeping well under the 60 s
+    Nginx / Render timeout even for large backups (1 000+ invoices).
+
     Frontend flow:
       1. POST /invoices/parse-backup  → preview JSON
       2. User reviews
@@ -1687,193 +1692,248 @@ async def import_backup(
     now = datetime.now(timezone.utc).isoformat()
     result = ImportBackupResult()
 
-    # ── 1. Clients ─────────────────────────────────────────────────────────
-    # ── 1. Clients ─────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════
+    # 1.  CLIENTS  — one pre-fetch → batch insert + bulk_write updates
+    # ══════════════════════════════════════════════════════════════════════
+    from pymongo import UpdateOne, InsertOne
+
     client_name_to_id: dict = {}
-    for c in data.clients:
-        name = (c.get("full_name") or c.get("client_name") or "").strip()
-        if not name:
-            continue
-        try:
-            existing = await db.clients.find_one({
-                "company_name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}
-            })
-            if existing:
-                client_name_to_id[name] = existing["id"]
-                # Upsert: fill only fields that are missing/empty in the existing record
+
+    if data.clients:
+        # Fetch ALL existing clients in one round-trip
+        existing_clients = await db.clients.find(
+            {}, {"_id": 0, "id": 1, "company_name": 1,
+                 "phone": 1, "email": 1, "address": 1,
+                 "client_gstin": 1, "state": 1}
+        ).to_list(100_000)
+        existing_map = {c["company_name"].strip().lower(): c for c in existing_clients}
+
+        bulk_inserts = []
+        bulk_updates = []   # list of UpdateOne operations
+
+        for c in data.clients:
+            name = (c.get("full_name") or c.get("client_name") or "").strip()
+            if not name:
+                continue
+            key = name.lower()
+            if key in existing_map:
+                ex = existing_map[key]
+                client_name_to_id[name] = ex["id"]
                 update_fields = {}
-                field_map = {
-                    "phone":        (c.get("phone_number") or "").strip(),
-                    "email":        (c.get("email") or "").strip(),
-                    "address":      (c.get("address") or "").strip(),
-                    "client_gstin": (c.get("name_gstin_number") or "").strip(),
-                    "state":        (c.get("name_state") or "").strip(),
-                }
-                for field, backup_val in field_map.items():
-                    existing_val = (existing.get(field) or "").strip()
-                    if backup_val and not existing_val:
-                        update_fields[field] = backup_val
+                for field, src_key in [
+                    ("phone",        "phone_number"),
+                    ("email",        "email"),
+                    ("address",      "address"),
+                    ("client_gstin", "name_gstin_number"),
+                    ("state",        "name_state"),
+                ]:
+                    bv = (c.get(src_key) or "").strip()
+                    if bv and not (ex.get(field) or "").strip():
+                        update_fields[field] = bv
                 if update_fields:
                     update_fields["updated_at"] = now
-                    await db.clients.update_one(
-                        {"id": existing["id"]},
-                        {"$set": update_fields}
+                    bulk_updates.append(
+                        UpdateOne({"id": ex["id"]}, {"$set": update_fields})
                     )
                     result.clients_updated += 1
-                continue
-            cid = str(uuid.uuid4())
-            await db.clients.insert_one({
-                "id": cid,
-                "company_name": name,
-                "phone":        (c.get("phone_number") or "").strip(),
-                "email":        (c.get("email") or "").strip(),
-                "address":      (c.get("address") or "").strip(),
-                "client_gstin": (c.get("name_gstin_number") or "").strip(),
-                "state":        (c.get("name_state") or "").strip(),
-                "client_type":  "other",
-                "status":       "active",
-                "imported_from": data.source,
-                "created_by":   current_user.id,
-                "created_at":   now,
-                "updated_at":   now,
-            })
-            client_name_to_id[name] = cid
-            result.clients_imported += 1
-        except Exception as e:
-            result.errors.append(f"Client '{name}': {e}")
+            else:
+                cid = str(uuid.uuid4())
+                doc = {
+                    "id":            cid,
+                    "company_name":  name,
+                    "phone":         (c.get("phone_number") or "").strip(),
+                    "email":         (c.get("email") or "").strip(),
+                    "address":       (c.get("address") or "").strip(),
+                    "client_gstin":  (c.get("name_gstin_number") or "").strip(),
+                    "state":         (c.get("name_state") or "").strip(),
+                    "client_type":   "other",
+                    "status":        "active",
+                    "imported_from": data.source,
+                    "created_by":    current_user.id,
+                    "created_at":    now,
+                    "updated_at":    now,
+                }
+                bulk_inserts.append(doc)
+                client_name_to_id[name] = cid
+                # also add to existing_map so duplicate names in same import batch
+                # don't each get inserted separately
+                existing_map[key] = {"id": cid, "company_name": name,
+                                     "phone": doc["phone"], "email": doc["email"],
+                                     "address": doc["address"],
+                                     "client_gstin": doc["client_gstin"],
+                                     "state": doc["state"]}
 
-    # ── 2. Items / Products ────────────────────────────────
-    for item in data.items:
-        item_name = (item.get("name") or "").strip()
-        if not item_name:
-            continue
         try:
-            existing = await db.products.find_one({
-                "company_id": data.company_id,
-                "name": {"$regex": f"^{re.escape(item_name)}$", "$options": "i"}
-            })
-            if existing:
-                continue
-            await db.products.insert_one({
-                "id": str(uuid.uuid4()),
-                "company_id": data.company_id,
-                "name": item_name,
-                "description": item.get("description", ""),
-                "hsn_sac": item.get("hsn_sac", ""),
-                "unit": "service",
-                "unit_price": float(item.get("sale_price", 0)),
-                "gst_rate": float(item.get("gst_rate", 18)),
-                "is_service": False,
-                "imported_from": data.source,
-                "created_by": current_user.id,
-                "created_at": now,
-            })
-            result.items_imported += 1
+            if bulk_inserts:
+                await db.clients.insert_many(bulk_inserts, ordered=False)
+                result.clients_imported += len(bulk_inserts)
+            if bulk_updates:
+                await db.clients.bulk_write(bulk_updates, ordered=False)
         except Exception as e:
-            result.errors.append(f"Item '{item_name}': {e}")
+            result.errors.append(f"Clients bulk write: {e}")
 
-    # ── 3. Invoices ────────────────────────────────────────
-    for inv in data.invoices:
-        inv_no = (inv.get("invoice_no") or "").strip()
+    # ══════════════════════════════════════════════════════════════════════
+    # 2.  PRODUCTS / ITEMS  — one pre-fetch → single insert_many
+    # ══════════════════════════════════════════════════════════════════════
+    if data.items:
+        existing_items = await db.products.find(
+            {"company_id": data.company_id}, {"_id": 0, "name": 1}
+        ).to_list(100_000)
+        existing_item_names = {i["name"].strip().lower() for i in existing_items}
+
+        new_items = []
+        for item in data.items:
+            item_name = (item.get("name") or "").strip()
+            if not item_name or item_name.lower() in existing_item_names:
+                continue
+            existing_item_names.add(item_name.lower())   # guard same-batch dups
+            new_items.append({
+                "id":            str(uuid.uuid4()),
+                "company_id":    data.company_id,
+                "name":          item_name,
+                "description":   item.get("description", ""),
+                "hsn_sac":       item.get("hsn_sac", ""),
+                "unit":          "service",
+                "unit_price":    float(item.get("sale_price", 0)),
+                "gst_rate":      float(item.get("gst_rate", 18)),
+                "is_service":    False,
+                "imported_from": data.source,
+                "created_by":    current_user.id,
+                "created_at":    now,
+            })
         try:
-            # Duplicate check
-            if data.skip_duplicates and inv_no:
-                existing = await db.invoices.find_one({
-                    "company_id": data.company_id,
-                    "invoice_no": inv_no,
-                })
-                if existing:
-                    result.invoices_skipped += 1
-                    continue
+            if new_items:
+                await db.products.insert_many(new_items, ordered=False)
+                result.items_imported += len(new_items)
+        except Exception as e:
+            result.errors.append(f"Items bulk insert: {e}")
+
+    # ══════════════════════════════════════════════════════════════════════
+    # 3.  INVOICES  — one pre-fetch of existing numbers → single insert_many
+    # ══════════════════════════════════════════════════════════════════════
+    if data.invoices:
+        # Pull every existing invoice_no for this company in one query
+        if data.skip_duplicates:
+            existing_inv_docs = await db.invoices.find(
+                {"company_id": data.company_id},
+                {"_id": 0, "invoice_no": 1}
+            ).to_list(200_000)
+            existing_inv_nos = {d["invoice_no"] for d in existing_inv_docs if d.get("invoice_no")}
+        else:
+            existing_inv_nos = set()
+
+        new_invoices = []
+        for inv in data.invoices:
+            inv_no = (inv.get("invoice_no") or "").strip()
+            if data.skip_duplicates and inv_no and inv_no in existing_inv_nos:
+                result.invoices_skipped += 1
+                continue
+
+            # Guard same-batch duplicates (two invoices with the same number sent
+            # in the same payload should not both be inserted)
+            if inv_no:
+                existing_inv_nos.add(inv_no)
 
             client_name = (inv.get("client_name") or "").strip()
-            invoice_doc = {
-                "id": str(uuid.uuid4()),
-                "company_id": data.company_id,
-                "client_id": client_name_to_id.get(client_name),
-                "invoice_no": inv_no or f"IMP-{str(uuid.uuid4())[:8].upper()}",
-                "invoice_type": inv.get("invoice_type", "tax_invoice"),
-                "invoice_date": inv.get("invoice_date", date.today().isoformat()),
-                "due_date": inv.get("due_date", date.today().isoformat()),
-                "client_name": client_name,
-                "client_email": inv.get("client_email", ""),
-                "client_phone": inv.get("client_phone", ""),
-                "client_gstin": inv.get("client_gstin", ""),
-                "client_address": inv.get("client_address", ""),
-                "client_state": inv.get("client_state", ""),
-                "is_interstate": inv.get("is_interstate", False),
-                "items": inv.get("items", []),
-                "subtotal": float(inv.get("subtotal", 0)),
-                "total_discount": float(inv.get("total_discount", 0)),
-                "total_taxable": float(inv.get("total_taxable", 0)),
-                "total_cgst": float(inv.get("total_cgst", 0)),
-                "total_sgst": float(inv.get("total_sgst", 0)),
-                "total_igst": float(inv.get("total_igst", 0)),
-                "total_gst": float(inv.get("total_gst", 0)),
-                "grand_total": float(inv.get("grand_total", 0)),
-                "amount_paid": float(inv.get("amount_paid", 0)),
-                "amount_due": float(inv.get("amount_due", 0)),
-                "status": inv.get("status", "draft"),
-                "payment_terms": inv.get("payment_terms", "Imported"),
-                "notes": inv.get("notes", ""),
-                "reference_no": inv.get("reference_no", ""),
-                "supply_state": inv.get("client_state", ""),
-                "discount_amount": 0.0,
-                "shipping_charges": 0.0,
-                "other_charges": 0.0,
-                "terms_conditions": "",
-                "is_recurring": False,
-                "recurrence_pattern": "monthly",
-                "recurrence_end": None,
-                "next_invoice_date": None,
-                "invoice_template": "prestige",
-                "invoice_theme": "classic_blue",
+            new_invoices.append({
+                "id":                   str(uuid.uuid4()),
+                "company_id":           data.company_id,
+                "client_id":            client_name_to_id.get(client_name),
+                "invoice_no":           inv_no or f"IMP-{str(uuid.uuid4())[:8].upper()}",
+                "invoice_type":         inv.get("invoice_type", "tax_invoice"),
+                "invoice_date":         inv.get("invoice_date", date.today().isoformat()),
+                "due_date":             inv.get("due_date", date.today().isoformat()),
+                "client_name":          client_name,
+                "client_email":         inv.get("client_email", ""),
+                "client_phone":         inv.get("client_phone", ""),
+                "client_gstin":         inv.get("client_gstin", ""),
+                "client_address":       inv.get("client_address", ""),
+                "client_state":         inv.get("client_state", ""),
+                "is_interstate":        inv.get("is_interstate", False),
+                "items":                inv.get("items", []),
+                "subtotal":             float(inv.get("subtotal", 0)),
+                "total_discount":       float(inv.get("total_discount", 0)),
+                "total_taxable":        float(inv.get("total_taxable", 0)),
+                "total_cgst":           float(inv.get("total_cgst", 0)),
+                "total_sgst":           float(inv.get("total_sgst", 0)),
+                "total_igst":           float(inv.get("total_igst", 0)),
+                "total_gst":            float(inv.get("total_gst", 0)),
+                "grand_total":          float(inv.get("grand_total", 0)),
+                "amount_paid":          float(inv.get("amount_paid", 0)),
+                "amount_due":           float(inv.get("amount_due", 0)),
+                "status":               inv.get("status", "draft"),
+                "payment_terms":        inv.get("payment_terms", "Imported"),
+                "notes":                inv.get("notes", ""),
+                "reference_no":         inv.get("reference_no", ""),
+                "supply_state":         inv.get("client_state", ""),
+                "discount_amount":      0.0,
+                "shipping_charges":     0.0,
+                "other_charges":        0.0,
+                "terms_conditions":     "",
+                "is_recurring":         False,
+                "recurrence_pattern":   "monthly",
+                "recurrence_end":       None,
+                "next_invoice_date":    None,
+                "invoice_template":     "prestige",
+                "invoice_theme":        "classic_blue",
                 "invoice_custom_color": "#0D3B66",
-                "pdf_drive_link": "",
-                "imported_from": data.source,
-                "created_by": current_user.id,
-                "created_at": now,
-                "updated_at": now,
-            }
-            await db.invoices.insert_one(invoice_doc)
-            result.invoices_imported += 1
-        except Exception as e:
-            result.errors.append(f"Invoice '{inv_no}': {e}")
+                "pdf_drive_link":       "",
+                "imported_from":        data.source,
+                "created_by":           current_user.id,
+                "created_at":           now,
+                "updated_at":           now,
+            })
 
-    # ── 4. Payments (orphaned — no invoice_id match) ───────
-    for pay in data.payments:
         try:
+            if new_invoices:
+                await db.invoices.insert_many(new_invoices, ordered=False)
+                result.invoices_imported += len(new_invoices)
+        except Exception as e:
+            result.errors.append(f"Invoices bulk insert: {e}")
+
+    # ══════════════════════════════════════════════════════════════════════
+    # 4.  PAYMENTS  — one pre-fetch of kb_source_ids → single insert_many
+    # ══════════════════════════════════════════════════════════════════════
+    if data.payments:
+        # Fetch all already-imported source IDs for this company in one query
+        existing_pay_docs = await db.payments.find(
+            {"company_id": data.company_id, "kb_source_id": {"$exists": True, "$ne": ""}},
+            {"_id": 0, "kb_source_id": 1}
+        ).to_list(500_000)
+        existing_kb_ids = {d["kb_source_id"] for d in existing_pay_docs if d.get("kb_source_id")}
+
+        new_payments = []
+        for pay in data.payments:
             amount = float(pay.get("amount", 0))
             if amount <= 0:
                 continue
-            # Dedup guard: skip if a payment with the same source _kb_id
-            # and company was already imported (prevents double-import on re-run).
             kb_id = pay.get("_kb_id")
-            if kb_id:
-                existing_pay = await db.payments.find_one({
-                    "company_id": data.company_id,
-                    "kb_source_id": str(kb_id),
-                })
-                if existing_pay:
-                    continue
-            await db.payments.insert_one({
-                "id": str(uuid.uuid4()),
-                "invoice_id": "",
-                "company_id": data.company_id,
-                "kb_source_id": str(kb_id) if kb_id else "",
-                "client_name": (pay.get("client_name") or "").strip(),
-                "amount": amount,
-                "payment_date": pay.get("payment_date", date.today().isoformat()),
-                "payment_mode": pay.get("payment_mode", "other"),
-                "reference_no": "",
-                "notes": f"Imported from {data.source}",
+            kb_id_str = str(kb_id) if kb_id else ""
+            if kb_id_str and kb_id_str in existing_kb_ids:
+                continue
+            if kb_id_str:
+                existing_kb_ids.add(kb_id_str)   # guard same-batch dups
+            new_payments.append({
+                "id":            str(uuid.uuid4()),
+                "invoice_id":    "",
+                "company_id":    data.company_id,
+                "kb_source_id":  kb_id_str,
+                "client_name":   (pay.get("client_name") or "").strip(),
+                "amount":        amount,
+                "payment_date":  pay.get("payment_date", date.today().isoformat()),
+                "payment_mode":  pay.get("payment_mode", "other"),
+                "reference_no":  "",
+                "notes":         f"Imported from {data.source}",
                 "imported_from": data.source,
-                "created_by": current_user.id,
-                "created_at": now,
+                "created_by":    current_user.id,
+                "created_at":    now,
             })
-            result.payments_imported += 1
+        try:
+            if new_payments:
+                await db.payments.insert_many(new_payments, ordered=False)
+                result.payments_imported += len(new_payments)
         except Exception as e:
-            result.errors.append(f"Payment: {e}")
+            result.errors.append(f"Payments bulk insert: {e}")
 
     result.errors = result.errors[:50]
     logger.info(
