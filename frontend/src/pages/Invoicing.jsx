@@ -149,6 +149,13 @@ const avatarGrad = (name = '') => {
   const i = (name.charCodeAt(0) || 0) % AVATAR_GRADS.length;
   return `linear-gradient(135deg, ${AVATAR_GRADS[i][0]}, ${AVATAR_GRADS[i][1]})`;
 };
+// Returns a solid colour for the left stripe based on which company the invoice belongs to
+const getCompanyStripColor = (companyId, companies = []) => {
+  if (!companyId) return AVATAR_GRADS[0][0];
+  const idx = companies.findIndex(c => c.id === companyId);
+  const slot = idx >= 0 ? idx : (String(companyId).split('').reduce((s, c) => s + c.charCodeAt(0), 0));
+  return AVATAR_GRADS[slot % AVATAR_GRADS.length][0];
+};
 // ─── Invoice age-based colour strip ─────────────────────────────────────────
 // green = paid / fully-received
 // orange = outstanding 15-30 days since invoice date
