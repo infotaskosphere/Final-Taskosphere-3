@@ -4085,6 +4085,7 @@ const fetchAll = useCallback(async () => {
                 <table className="w-full" style={{minWidth:700}}>
                   <thead>
                     <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
+                      <th className="w-1 p-0" style={{ width: 4, padding: 0 }} />
                       <th className={`px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sr</th>
                       <th className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
                         <input type="checkbox"
@@ -4240,6 +4241,7 @@ const fetchAll = useCallback(async () => {
                 <table className="w-full" style={{minWidth:700}}>
                   <thead>
                     <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
+                      <th className="w-1 p-0" style={{ width: 4, padding: 0 }} />
                       <th className={`px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sr</th>
                       <th className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
                         <input type="checkbox"
