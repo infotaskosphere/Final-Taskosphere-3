@@ -288,28 +288,31 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
   const [clientList, setClientList] = useState([]);
   const [clientMode, setClientMode] = useState('select'); // 'select' | 'manual'
   const qc = useQueryClient();
-
+  const entryRef = useRef(null);
+  useEffect(() => {
+    if (open) {
+      entryRef.current = entry;
+    }
+  }, [open]);
+  
   useEffect(() => {
     if (!open) return;
   
-    // Set form ONLY when modal opens
-    setForm(prev => {
-      // prevent unnecessary reset if already filled
-      if (prev && Object.keys(prev).length > 0) return prev;
+    const e = entryRef.current;
   
-      return entry
-        ? { ...entry, password_plain: '', department: entry.department || 'OTHER' }
-        : { portal_type: 'OTHER', holder_type: 'COMPANY', department: 'OTHER' };
-    });
+    setForm(
+      e
+        ? { ...e, password_plain: '', department: e.department || 'OTHER' }
+        : { portal_type: 'OTHER', holder_type: 'COMPANY', department: 'OTHER' }
+    );
   
-    // Fetch clients (no change needed)
     api.get('/clients')
       .then(r => {
         const list = Array.isArray(r.data) ? r.data : [];
         setClientList(list);
   
-        if (entry?.client_id) {
-          const found = list.find(c => String(c.id) === String(entry.client_id));
+        if (e?.client_id) {
+          const found = list.find(c => String(c.id) === String(e.client_id));
           setClientMode(found ? 'select' : 'manual');
         } else {
           setClientMode('select');
