@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import GifLoader from '@/components/ui/GifLoader.jsx';
+import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
@@ -468,7 +468,7 @@ export default function Reports() {
   };
 
   // ── Loading ───────────────────────────────────────────────────────────────
-  if (loading) return <GifLoader />;
+  if (loading) return <MiniLoader height={400} />;
 
   const tabs=[
     {id:'overview',   label:'Overview',    icon:BarChart3 },
