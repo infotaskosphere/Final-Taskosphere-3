@@ -488,8 +488,8 @@ const EditModal = React.memo(function EditModal({ open, onClose, entry, isDark, 
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
+);
+});
 
 function DeleteModal({ open, onClose, entry, isDark }) {
   const [busy, setBusy] = useState(false);
