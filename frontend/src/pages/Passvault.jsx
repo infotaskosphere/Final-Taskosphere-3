@@ -288,31 +288,31 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
   const [clientList, setClientList] = useState([]);
   const [clientMode, setClientMode] = useState('select'); // 'select' | 'manual'
   const qc = useQueryClient();
-  const entryRef = useRef(null);
-  useEffect(() => {
-    if (open) {
-      entryRef.current = entry;
-    }
-  }, [open]);
   
   useEffect(() => {
     if (!open) return;
   
-    const e = entryRef.current;
-  
-    setForm(
-      e
-        ? { ...e, password_plain: '', department: e.department || 'OTHER' }
-        : { portal_type: 'OTHER', holder_type: 'COMPANY', department: 'OTHER' }
-    );
+    if (entry) {
+      setForm({
+        ...entry,
+        password_plain: '',
+        department: entry.department || 'OTHER'
+      });
+    } else {
+      setForm({
+        portal_type: 'OTHER',
+        holder_type: 'COMPANY',
+        department: 'OTHER'
+      });
+    }
   
     api.get('/clients')
       .then(r => {
         const list = Array.isArray(r.data) ? r.data : [];
         setClientList(list);
   
-        if (e?.client_id) {
-          const found = list.find(c => String(c.id) === String(e.client_id));
+        if (entry?.client_id) {
+          const found = list.find(c => String(c.id) === String(entry.client_id));
           setClientMode(found ? 'select' : 'manual');
         } else {
           setClientMode('select');
@@ -325,7 +325,12 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
   
   }, [open]);
 
-  const set = useCallback((k, v) => setForm(p => ({ ...p, [k]: v })), []);
+  const set = (k, v) => {
+    setForm(prev => ({
+      ...prev,
+      [k]: v
+    }));
+  };
 
   const save = async () => {
     if (!form.portal_name?.trim()) return toast.error('Portal name is required');
