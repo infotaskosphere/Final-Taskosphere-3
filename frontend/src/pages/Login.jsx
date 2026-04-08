@@ -5,20 +5,20 @@ import { useDark } from "@/hooks/useDark";
 import api from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 /* ── Shared spring — same curve as DashboardLayout PAGE_VARIANTS ─────── */
 const spring = { type: 'spring', stiffness: 320, damping: 28, mass: 0.9 };
 
-/* ── Page-level variants — exit fires via AnimatePresence in App.jsx ─── */
+/* ── Page-level variants ─────────────────────────────────────────────── */
 const pageVariants = {
   initial:  { opacity: 0, y: 20 },
   animate:  { opacity: 1, y: 0,   transition: spring },
   exit:     { opacity: 0, y: -12, transition: { duration: 0.22, ease: 'easeIn' } },
 };
 
-/* ── Card variants — staggered slightly after page ───────────────────── */
+/* ── Card variants ───────────────────────────────────────────────────── */
 const cardVariants = {
   initial:  { opacity: 0, y: 28, scale: 0.98 },
   animate:  {
@@ -29,16 +29,17 @@ const cardVariants = {
 };
 
 export default function Login() {
-  const [email,            setEmail]            = useState('');
-  const [password,         setPassword]         = useState('');
-  const [showPassword,     setShowPassword]     = useState(false);
-  const [loading,          setLoading]          = useState(false);
-  const [serverWaking,     setServerWaking]     = useState(false);
-  const [wakingDots,       setWakingDots]       = useState('');
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
-  const [forgotEmail,      setForgotEmail]      = useState('');
-  const [readyToNavigate,  setReadyToNavigate]  = useState(false);
-  const [navigateTo,       setNavigateTo]       = useState(null);
+  const [email,               setEmail]               = useState('');
+  const [password,            setPassword]            = useState('');
+  const [showPassword,        setShowPassword]        = useState(false);
+  const [loading,             setLoading]             = useState(false);
+  const [serverWaking,        setServerWaking]        = useState(false);
+  const [wakingDots,          setWakingDots]          = useState('');
+  const [showForgotPassword,  setShowForgotPassword]  = useState(false);
+  const [forgotEmail,         setForgotEmail]         = useState('');
+  const [readyToNavigate,     setReadyToNavigate]     = useState(false);
+  const [navigateTo,          setNavigateTo]          = useState(null);
+  const [keepSignedIn,        setKeepSignedIn]        = useState(false);
 
   const navigate  = useNavigate();
   const { login } = useAuth();
@@ -94,12 +95,21 @@ export default function Login() {
       clearTimeout(wakingTimer);
       setServerWaking(false);
 
-      login(response.data, true);
+      // ── If "Keep me signed in" is checked, persist a flag so AuthContext
+      //    knows to keep the session alive until explicit punch-out.
+      //    We use localStorage so it survives tab/browser close.
+      if (keepSignedIn) {
+        localStorage.setItem('taskosphere_keep_signed_in', 'true');
+      } else {
+        localStorage.removeItem('taskosphere_keep_signed_in');
+      }
+
+      // Pass keepSignedIn as rememberMe so AuthContext stores token in
+      // localStorage (persistent) vs sessionStorage (tab-scoped).
+      login(response.data, keepSignedIn);
       sendTokenToExtension(response.data.access_token);
       toast.success('Welcome back!');
 
-      /* signal exit — AnimatePresence fires exit animation,
-         onAnimationComplete sets readyToNavigate → navigate fires  */
       setNavigateTo('/dashboard');
 
     } catch (error) {
@@ -126,9 +136,12 @@ export default function Login() {
   const headClr = isDark ? '#f1f5f9' : '#1e293b';
   const subClr  = isDark ? '#94a3b8' : '#64748b';
 
-  /* When navigateTo is set, App.jsx's AnimatePresence triggers exit.
-     onExitComplete fires after the exit animation fully finishes,
-     then we actually navigate — perfectly smooth, no setTimeout.   */
+  /* Checkbox theme colours */
+  const checkBorder  = keepSignedIn ? '#16a34a' : (isDark ? '#475569' : '#cbd5e1');
+  const checkBg      = keepSignedIn ? (isDark ? 'rgba(22,163,74,0.18)' : 'rgba(22,163,74,0.08)') : 'transparent';
+  const tooltipBg    = isDark ? '#1e293b' : '#f8fafc';
+  const tooltipBorder= isDark ? '#334155' : '#e2e8f0';
+
   return (
     <motion.div
       className="min-h-screen flex items-center justify-center"
@@ -137,7 +150,6 @@ export default function Login() {
       initial="initial"
       animate={navigateTo ? "exit" : "animate"}
       onAnimationComplete={(def) => {
-        /* only act when the exit animation completes */
         if (def === "exit" && navigateTo) {
           setReadyToNavigate(true);
         }
@@ -235,6 +247,97 @@ export default function Login() {
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
+
+              {/* ── Keep me signed in ───────────────────────────────────── */}
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ ...spring, delay: 0.12 }}
+                className="flex items-start gap-3 py-1"
+              >
+                {/* Custom checkbox */}
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={keepSignedIn}
+                  onClick={() => setKeepSignedIn(v => !v)}
+                  className="mt-0.5 shrink-0 h-4 w-4 rounded flex items-center justify-center transition-all duration-200"
+                  style={{
+                    border: `1.5px solid ${checkBorder}`,
+                    background: checkBg,
+                    outline: 'none',
+                  }}
+                >
+                  <AnimatePresence>
+                    {keepSignedIn && (
+                      <motion.svg
+                        key="check"
+                        initial={{ scale: 0, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0, opacity: 0 }}
+                        transition={{ duration: 0.15, ease: 'backOut' }}
+                        width="10"
+                        height="10"
+                        viewBox="0 0 10 10"
+                        fill="none"
+                      >
+                        <path
+                          d="M1.5 5L4 7.5L8.5 2.5"
+                          stroke="#16a34a"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </motion.svg>
+                    )}
+                  </AnimatePresence>
+                </button>
+
+                <div className="flex flex-col gap-0.5">
+                  <label
+                    onClick={() => setKeepSignedIn(v => !v)}
+                    className="text-sm font-medium cursor-pointer select-none leading-none"
+                    style={{ color: headClr }}
+                  >
+                    Keep me signed in
+                  </label>
+
+                  {/* Tooltip-style hint */}
+                  <AnimatePresence>
+                    {keepSignedIn && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="overflow-hidden"
+                      >
+                        <div
+                          className="flex items-center gap-1.5 mt-1 px-2.5 py-1.5 rounded-md text-xs"
+                          style={{
+                            background: tooltipBg,
+                            border: `1px solid ${tooltipBorder}`,
+                            color: subClr,
+                          }}
+                        >
+                          <Clock size={11} className="shrink-0" style={{ color: '#16a34a' }} />
+                          <span>
+                            Session stays active until you <strong style={{ color: '#16a34a' }}>Punch Out</strong>.
+                            Closing the browser won't log you out.
+                          </span>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {!keepSignedIn && (
+                    <span className="text-xs" style={{ color: subClr }}>
+                      Stay logged in until you punch out
+                    </span>
+                  )}
+                </div>
+              </motion.div>
+              {/* ───────────────────────────────────────────────────────── */}
 
               <motion.button
                 onClick={handleSubmit}
