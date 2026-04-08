@@ -694,8 +694,8 @@ function ImportModal({ open, onClose, isDark }) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-);
-});
+    );
+    }
 
 function ShareClientModal({ open, onClose, isDark, entries }) {
   const [selectedClientId, setSelectedClientId] = useState('');
