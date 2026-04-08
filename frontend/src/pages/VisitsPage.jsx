@@ -331,6 +331,21 @@ function BulkDeleteDialog({ count, onConfirm, onCancel, isPending }) {
   );
 }
 
+
+const getVisitStripeColor = (visit, isOver) => {
+  if (isOver) return 'bg-red-700';
+  const s = (visit.status || '').toLowerCase();
+  if (s === 'completed')   return 'bg-blue-600';
+  if (s === 'rescheduled') return 'bg-amber-500';
+  if (s === 'missed')      return 'bg-orange-500';
+  if (s === 'cancelled')   return 'bg-slate-300';
+  const p = (visit.priority || '').toLowerCase();
+  if (p === 'urgent')  return 'bg-red-600';
+  if (p === 'high')    return 'bg-orange-500';
+  if (p === 'medium')  return 'bg-amber-400';
+  return 'bg-blue-400';
+};
+
 // ─── Compact Visit Card ───────────────────────────────────────────────────────
 function VisitCard({ v, onClick, onEdit, currentUser, selected, onSelectToggle, selectionMode }) {
   const qc = useQueryClient();
@@ -388,26 +403,18 @@ function VisitCard({ v, onClick, onEdit, currentUser, selected, onSelectToggle, 
       whileTap={{ scale: 0.99, transition: springPhysics.tap }}
       onClick={handleCardClick}
       className={cn(
-        "bg-white dark:bg-slate-800 border rounded-xl cursor-pointer group transition-all",
+        "relative bg-white dark:bg-slate-800 border rounded-xl cursor-pointer group transition-all overflow-hidden",
         selected
           ? "border-blue-400 dark:border-blue-500 ring-2 ring-blue-100 dark:ring-blue-900 shadow-sm"
           : isOver
           ? "border-orange-200 dark:border-orange-900"
           : "border-slate-200/80 dark:border-slate-700/80 hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-md",
       )}>
-      <div className="flex">
-        {/* Left accent bar matching Dashboard priority stripe */}
-        <div className={cn(
-          "w-0.5 rounded-l-xl flex-shrink-0",
-          selected ? "bg-blue-400" :
-          v.status === "completed" ? "bg-emerald-400" :
-          v.status === "missed" ? "bg-orange-400" :
-          v.status === "cancelled" ? "bg-slate-300" :
-          v.status === "rescheduled" ? "bg-purple-400" :
-          isOver ? "bg-orange-400" : "bg-blue-400"
-        )} />
+      {/* Priority/status stripe — matches Tasks page exactly */}
+      <div className={`absolute left-0 top-0 h-full w-1 ${getVisitStripeColor(v, isOver)}`} />
 
-        <div className="flex items-center gap-3 px-3 py-2.5 flex-1 min-w-0">
+      <div className="flex">
+        <div className="flex items-center gap-3 pl-5 pr-3 py-2.5 flex-1 min-w-0">
           {selectionMode && (
             <div onClick={e => { e.stopPropagation(); onSelectToggle?.(v.id); }} className="flex-shrink-0">
               <div className={cn(
