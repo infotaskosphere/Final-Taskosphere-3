@@ -1,4 +1,3 @@
-
 import Papa from 'papaparse/papaparse.js';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
@@ -4053,7 +4052,7 @@ const fetchAll = useCallback(async () => {
         </div>
       )}
       {loading ? (
-        <GifLoader />
+        <MiniLoader height={350} />
       ) : enrichedFiltered.length === 0 ? (
         <div className={`rounded-2xl border p-16 text-center ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center mb-4" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}20, ${COLORS.mediumBlue}20)` }}>
