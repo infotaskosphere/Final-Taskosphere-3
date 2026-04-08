@@ -282,7 +282,7 @@ function DetailModal({ open, onClose, entry, isDark }) {
   );
 }
 
-function EditModal({ open, onClose, entry, isDark, onSuccess }) {
+const EditModal = React.memo(function EditModal({ open, onClose, entry, isDark, onSuccess }) {
   const [form, setForm] = useState({});
   const [busy, setBusy] = useState(false);
   const [clientList, setClientList] = useState([]);
