@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import GifLoader from '@/components/ui/GifLoader.jsx';
 import { useDark } from '@/hooks/useDark';
@@ -14,7 +13,7 @@ import {
   Building2, Filter, ExternalLink, Send, Download, Upload,
   FileUp, Users, LayoutGrid, List, AlertTriangle, Loader2,
   ArrowUpDown, ChevronLeft, ChevronRight, Smartphone, Store,
-  Activity, WifiOff, ServerCrash, ShieldAlert,
+  Activity, WifiOff, ServerCrash, ShieldAlert, Share2, ChevronDown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -286,6 +285,8 @@ function DetailModal({ open, onClose, entry, isDark }) {
 function EditModal({ open, onClose, entry, isDark, onSuccess }) {
   const [form, setForm] = useState({});
   const [busy, setBusy] = useState(false);
+  const [clientList, setClientList] = useState([]);
+  const [clientMode, setClientMode] = useState('select'); // 'select' | 'manual'
   const qc = useQueryClient();
 
   useEffect(() => {
@@ -294,6 +295,16 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
         ? { ...entry, password_plain: '', department: entry.department || 'OTHER' }
         : { portal_type: 'OTHER', holder_type: 'COMPANY', department: 'OTHER' }
       );
+      api.get('/clients').then(r => {
+        const list = Array.isArray(r.data) ? r.data : [];
+        setClientList(list);
+        if (entry?.client_id) {
+          const found = list.find(c => String(c.id) === String(entry.client_id));
+          setClientMode(found ? 'select' : 'manual');
+        } else {
+          setClientMode('select');
+        }
+      }).catch(() => { setClientList([]); setClientMode('manual'); });
     }
   }, [entry, open]);
 
@@ -393,13 +404,54 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
               <Input className={ic} value={form.trade_name || ''} onChange={e => set('trade_name', e.target.value)} placeholder="Business name" />
             </F>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <F label="Client Name">
-              <Input className={ic} value={form.client_name || ''} onChange={e => set('client_name', e.target.value)} placeholder="Company name" />
-            </F>
-            <F label="Client ID">
-              <Input className={ic} value={form.client_id || ''} onChange={e => set('client_id', e.target.value)} placeholder="Client code" />
-            </F>
+          {/* Client Selector */}
+          <div className={`rounded-xl border p-3 space-y-3 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-bold uppercase text-slate-500">Link to Client</Label>
+              <button type="button"
+                onClick={() => setClientMode(m => m === 'select' ? 'manual' : 'select')}
+                className={`text-[10px] font-semibold px-2 py-0.5 rounded-lg border transition-colors ${isDark ? 'border-slate-600 text-slate-400 hover:text-slate-200' : 'border-slate-300 text-slate-500 hover:text-slate-700'}`}>
+                {clientMode === 'select' ? '✏️ Enter Manually' : '🔍 Pick from Clients'}
+              </button>
+            </div>
+            {clientMode === 'select' ? (
+              <Select
+                value={form.client_id ? String(form.client_id) : '__none__'}
+                onValueChange={v => {
+                  if (v === '__none__') { set('client_id', ''); set('client_name', ''); }
+                  else {
+                    const c = clientList.find(x => String(x.id) === v);
+                    if (c) { set('client_id', String(c.id)); set('client_name', c.company_name); }
+                  }
+                }}>
+                <SelectTrigger className={`rounded-xl ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
+                  <Building2 className="h-3.5 w-3.5 mr-1.5 text-slate-400 flex-shrink-0" />
+                  <SelectValue placeholder="— Select a client —" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— No client —</SelectItem>
+                  {clientList.map(c => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.company_name}
+                    </SelectItem>
+                  ))}
+                  {clientList.length === 0 && (
+                    <SelectItem value="__loading__" disabled>Loading clients…</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-[10px] font-semibold uppercase text-slate-400">Client Name</Label>
+                  <Input className={`${ic} mt-1`} value={form.client_name || ''} onChange={e => set('client_name', e.target.value)} placeholder="Company name" />
+                </div>
+                <div>
+                  <Label className="text-[10px] font-semibold uppercase text-slate-400">Client ID</Label>
+                  <Input className={`${ic} mt-1`} value={form.client_id || ''} onChange={e => set('client_id', e.target.value)} placeholder="Client code" />
+                </div>
+              </div>
+            )}
           </div>
           <F label="Notes">
             <Textarea className={`${ic} resize-none`} rows={3} value={form.notes || ''} onChange={e => set('notes', e.target.value)} placeholder="Additional notes…" />
@@ -628,6 +680,174 @@ function ImportModal({ open, onClose, isDark }) {
   );
 }
 
+function ShareClientModal({ open, onClose, isDark, entries }) {
+  const [selectedClientId, setSelectedClientId] = useState('');
+  const [phone, setPhone] = useState('');
+  const [note, setNote] = useState('');
+  const [revealing, setRevealing] = useState(false);
+  const [revealedMap, setRevealedMap] = useState({});
+
+  // Build unique client list from entries
+  const clientOptions = useMemo(() => {
+    const m = {};
+    entries.forEach(e => {
+      if (e.client_id && e.client_name) m[e.client_id] = e.client_name;
+    });
+    return Object.entries(m).map(([id, name]) => ({ id, name }));
+  }, [entries]);
+
+  const clientEntries = useMemo(() =>
+    selectedClientId ? entries.filter(e => String(e.client_id) === String(selectedClientId)) : [],
+    [entries, selectedClientId]
+  );
+
+  useEffect(() => {
+    if (!open) { setSelectedClientId(''); setPhone(''); setNote(''); setRevealedMap({}); }
+  }, [open]);
+
+  useEffect(() => {
+    if (!selectedClientId || clientEntries.length === 0) return;
+    setRevealing(true);
+    setRevealedMap({});
+    Promise.all(
+      clientEntries.filter(e => e.has_password).map(e =>
+        api.get(`/passwords/${e.id}/reveal`)
+          .then(r => ({ id: e.id, pw: r.data.password || '' }))
+          .catch(() => ({ id: e.id, pw: '' }))
+      )
+    ).then(results => {
+      const m = {};
+      results.forEach(r => { m[r.id] = r.pw; });
+      setRevealedMap(m);
+    }).finally(() => setRevealing(false));
+  }, [selectedClientId, clientEntries.length]);
+
+  const buildMessage = () => {
+    const clientName = clientOptions.find(c => c.id === selectedClientId)?.name || 'Client';
+    const L = [
+      `🏢 *${clientName} — All Portal Credentials*`,
+      '━'.repeat(30),
+      ''
+    ];
+    clientEntries.forEach((e, idx) => {
+      const m = PM[e.portal_type] || PM.OTHER;
+      L.push(`${idx + 1}. ${m.icon} *${e.portal_name}* [${e.department}]`);
+      if (e.url) L.push(`   🌐 ${e.url}`);
+      if (e.username) L.push(`   👤 ID: ${e.username}`);
+      if (e.has_password) {
+        const pw = revealedMap[e.id];
+        L.push(`   🔑 Password: ${pw || '(loading…)'}`);
+      }
+      if (e.holder_name) L.push(`   👔 Holder: ${e.holder_name}${e.holder_din ? ` (DIN: ${e.holder_din})` : ''}`);
+      if (e.mobile) L.push(`   📱 Mobile: ${e.mobile}`);
+      L.push('');
+    });
+    if (note.trim()) L.push('📝 Note: ' + note.trim(), '');
+    L.push('━'.repeat(30), 'Sent via Taskosphere 📱');
+    return L.join('
+');
+  };
+
+  const send = () => {
+    if (!selectedClientId) return toast.error('Please select a client');
+    if (!phone) return toast.error('Enter a phone number');
+    const digits = phone.replace(/\D/g, '');
+    const e164 = digits.startsWith('91') ? digits : `91${digits}`;
+    window.open(`https://web.whatsapp.com/send?phone=${e164}&text=${encodeURIComponent(buildMessage())}`, '_blank');
+    toast.success('Opening WhatsApp Web…');
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className={`max-w-xl rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+        <ModalHead
+          icon={<Share2 className="h-4 w-4 text-white" />}
+          title="Share Client Credentials"
+          sub="Bundle all passwords for a client"
+          grad="linear-gradient(135deg,#075E54,#25D366)"
+          onClose={onClose}
+        />
+        <div className="p-5 space-y-4 max-h-[72vh] overflow-y-auto">
+          <div>
+            <Label className="text-xs font-bold uppercase text-slate-500">Select Client</Label>
+            <Select value={selectedClientId} onValueChange={setSelectedClientId}>
+              <SelectTrigger className={`rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
+                <Building2 className="h-3.5 w-3.5 mr-1.5 text-slate-400 flex-shrink-0" />
+                <SelectValue placeholder="— Pick a client —" />
+              </SelectTrigger>
+              <SelectContent>
+                {clientOptions.map(c => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+                {clientOptions.length === 0 && (
+                  <SelectItem value="__empty__" disabled>No clients linked to passwords yet</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {selectedClientId && (
+            <>
+              {revealing ? (
+                <div className="flex items-center gap-2 text-xs text-slate-400 py-2">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Revealing passwords for {clientEntries.length} entries…
+                </div>
+              ) : clientEntries.length > 0 ? (
+                <div className={`rounded-xl border divide-y text-xs max-h-52 overflow-y-auto ${isDark ? 'border-slate-600 divide-slate-600 bg-slate-700/30' : 'border-slate-200 divide-slate-100 bg-slate-50'}`}>
+                  {clientEntries.map(e => {
+                    const m = PM[e.portal_type] || PM.OTHER;
+                    return (
+                      <div key={e.id} className="px-3 py-2 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span>{m.icon}</span>
+                          <span className={`font-semibold truncate ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{e.portal_name}</span>
+                          <PortalBadge type={e.portal_type} />
+                        </div>
+                        <div className={`font-mono shrink-0 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                          {e.username && <span className="mr-2">{e.username}</span>}
+                          {e.has_password && (revealedMap[e.id]
+                            ? <span className="text-green-600 font-bold">✓ Ready</span>
+                            : <span className="text-amber-500">…</span>)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400">No password entries found for this client.</p>
+              )}
+            </>
+          )}
+
+          <div>
+            <Label className="text-xs font-bold uppercase text-slate-500">Phone Number</Label>
+            <Input className={`rounded-xl h-9 mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+              placeholder="+91 9876543210" value={phone} onChange={e => setPhone(e.target.value)} />
+          </div>
+          <div>
+            <Label className="text-xs font-bold uppercase text-slate-500">Additional Note (optional)</Label>
+            <Textarea className={`rounded-xl resize-none text-sm mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}
+              rows={2} placeholder="Any extra info…" value={note} onChange={e => setNote(e.target.value)} />
+          </div>
+        </div>
+        <DialogFooter className={`px-5 py-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          <Button variant="ghost" className="rounded-xl" onClick={onClose}>Cancel</Button>
+          <Button
+            disabled={!selectedClientId || !phone || revealing || clientEntries.length === 0}
+            onClick={send}
+            className="rounded-xl font-bold text-white gap-2"
+            style={{ background: C.whatsapp }}>
+            <Send className="h-4 w-4" />
+            Share {clientEntries.length > 0 ? `${clientEntries.length} Credentials` : 'All'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function Pager({ total, page, size, onPage, onSize, isDark }) {
   const pages = Math.ceil(total / size);
   if (total === 0) return null;
@@ -821,6 +1041,7 @@ export default function PasswordRepository() {
   const [shareOpen, setShareOpen] = useState(false);
   const [shareEntry, setShareEntry] = useState(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [shareClientOpen, setShareClientOpen] = useState(false);
 
   const isAdmin = user?.role === 'admin';
   const canView = isAdmin || hasPerm(user, 'can_view_passwords');
@@ -936,6 +1157,12 @@ export default function PasswordRepository() {
                   className="rounded-lg font-bold h-8 text-xs gap-1.5 text-white hover:bg-white/20"
                   style={{ background: 'rgba(255,255,255,0.15)' }}>
                   <Upload className="h-3.5 w-3.5" /> Import
+                </Button>
+                <Button onClick={() => setShareClientOpen(true)} size="sm"
+                  className="rounded-lg font-bold h-8 text-xs gap-1.5 text-white hover:bg-white/20"
+                  style={{ background: 'rgba(255,255,255,0.15)' }}
+                  title="Share all credentials of a client via WhatsApp">
+                  <Share2 className="h-3.5 w-3.5" /> Share Client
                 </Button>
                 <Button onClick={() => { setEditEntry(null); setEditOpen(true); }} size="sm"
                   className="rounded-lg font-bold h-8 text-xs gap-1.5 text-white shadow-lg"
@@ -1155,6 +1382,7 @@ export default function PasswordRepository() {
       <DeleteModal open={delOpen} onClose={() => setDelOpen(false)} entry={delEntry} isDark={isDark} />
       <WAModal open={shareOpen} onClose={() => setShareOpen(false)} entry={shareEntry} isDark={isDark} />
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} isDark={isDark} />
+      <ShareClientModal open={shareClientOpen} onClose={() => setShareClientOpen(false)} isDark={isDark} entries={entries} />
     </motion.div>
   );
 }
