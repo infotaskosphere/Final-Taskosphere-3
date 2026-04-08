@@ -86,7 +86,7 @@ const NAV_GROUPS = [
     items: [
       // Settings — <Protected> routes, visible to all roles
       { path: '/settings/email', icon: Mail,     label: 'Email Accounts'   },
-      { path: '/settings',       icon: Settings, label: 'General Settings', exact: true },
+      { path: '/settings/general', icon: Settings, label: 'General Settings' },
     ],
   },
 ];
