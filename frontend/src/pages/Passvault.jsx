@@ -282,6 +282,10 @@ function DetailModal({ open, onClose, entry, isDark }) {
   );
 }
 
+const F = ({ label, children }) => (
+  <div><Label className="text-xs font-bold uppercase text-slate-500">{label}</Label>{children}</div>
+);
+
 function EditModal({ open, onClose, entry, isDark, onSuccess }) {
   const [form, setForm] = useState({});
   const [busy, setBusy] = useState(false);
@@ -353,10 +357,6 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
 
   const ic = `rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`;
   const sc = `rounded-xl mt-1 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`;
-
-  const F = ({ label, children }) => (
-    <div><Label className="text-xs font-bold uppercase text-slate-500">{label}</Label>{children}</div>
-  );
 
   return (
     <Dialog open={open} onOpenChange={(val) => { if (!val) onClose(); }}>
