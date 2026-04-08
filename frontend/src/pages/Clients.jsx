@@ -1132,7 +1132,7 @@ export default function Clients() {
 
   // ── Persisted preferences (inlined localStorage — avoids custom hook bundler issues) ──
   const [viewMode, setViewModeRaw] = useState(() => {
-    try { return localStorage.getItem('clients_viewMode') || 'board'; } catch { return 'board'; }
+    try { return localStorage.getItem('clients_viewMode') || 'list'; } catch { return 'list'; }
   });
   const setViewMode = useCallback((v) => {
     setViewModeRaw(v);
