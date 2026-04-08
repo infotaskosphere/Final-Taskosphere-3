@@ -991,7 +991,7 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
 // MAIN COMPONENT
 // ═════════════════════════════════════════════════════════════════════════════
 export default function Attendance() {
-  const { user, hasPermission } = useAuth();
+  const { user, hasPermission, logout } = useAuth();
   const isDark = useDark();
   const isAdmin         = user?.role === 'admin';
   const canViewRankings = hasPermission('can_view_staff_rankings');
@@ -1405,7 +1405,12 @@ export default function Attendance() {
       } else {
         const duration = response.data?.duration || 0;
         toast.success(`Punched out — ${formatDuration(duration)}`);
+        // If "Keep me signed in" was active, end the session on punch-out
+        if (localStorage.getItem('taskosphere_keep_signed_in') === 'true') {
+          setTimeout(() => logout(), 1500); // small delay so toast is visible
+        }
       }
+      await fetchData();
       await fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to record attendance');
