@@ -45,37 +45,26 @@ export default function GifLoader() {
  * ContentLoader — in-layout page loader.
  * Used as the <Suspense> fallback INSIDE DashboardLayout so the
  * sidebar and header stay visible while a lazy page is loading.
- * Logo stays centered within the main content area only.
+ * Renders inline (no overlay, no backdrop) — just centered in content area.
  */
 export function ContentLoader() {
-  const isDark = useDark();
-
   return (
     <div
       style={{
-        position: "absolute",
-        inset: 0,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 100,
-        background: isDark
-          ? "rgba(15, 23, 42, 0.85)"
-          : "rgba(255, 255, 255, 0.85)",
-        backdropFilter: "blur(3px)",
-        WebkitBackdropFilter: "blur(3px)",
-        pointerEvents: "none",
-        borderRadius: "inherit",
+        minHeight: "60vh",
+        width: "100%",
       }}
     >
       <img
         src="/loader.gif"
         alt="Loading…"
         style={{
-          width: 150,
-          height: 150,
+          width: 120,
+          height: 120,
           objectFit: "contain",
-          pointerEvents: "none",
         }}
       />
     </div>
