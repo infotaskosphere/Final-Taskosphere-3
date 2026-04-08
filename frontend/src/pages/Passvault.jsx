@@ -488,8 +488,8 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-);
-});
+    );
+    }
 
 function DeleteModal({ open, onClose, entry, isDark }) {
   const [busy, setBusy] = useState(false);
