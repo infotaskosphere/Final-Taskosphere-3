@@ -60,7 +60,7 @@ export const AuthProvider = ({ children }) => {
   (NOT on hard refresh — hard refresh is a reload, not a close)
   ============================================================ */
 
-  const INACTIVITY_LIMIT_MS = 20 * 60 * 1000; // 20 minutes
+  const INACTIVITY_LIMIT_MS = 6 * 60 * 60 * 1000; // 20 minutes
   const LAST_ACTIVE_KEY = 'taskosphere_last_active';
 
   useEffect(() => {
