@@ -290,23 +290,37 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
   const qc = useQueryClient();
 
   useEffect(() => {
-    if (open) {
-      setForm(entry
+    if (!open) return;
+  
+    // Set form ONLY when modal opens
+    setForm(prev => {
+      // prevent unnecessary reset if already filled
+      if (prev && Object.keys(prev).length > 0) return prev;
+  
+      return entry
         ? { ...entry, password_plain: '', department: entry.department || 'OTHER' }
-        : { portal_type: 'OTHER', holder_type: 'COMPANY', department: 'OTHER' }
-      );
-      api.get('/clients').then(r => {
+        : { portal_type: 'OTHER', holder_type: 'COMPANY', department: 'OTHER' };
+    });
+  
+    // Fetch clients (no change needed)
+    api.get('/clients')
+      .then(r => {
         const list = Array.isArray(r.data) ? r.data : [];
         setClientList(list);
+  
         if (entry?.client_id) {
           const found = list.find(c => String(c.id) === String(entry.client_id));
           setClientMode(found ? 'select' : 'manual');
         } else {
           setClientMode('select');
         }
-      }).catch(() => { setClientList([]); setClientMode('manual'); });
-    }
-  }, [entry, open]);
+      })
+      .catch(() => {
+        setClientList([]);
+        setClientMode('manual');
+      });
+  
+  }, [open]);
 
   const set = useCallback((k, v) => setForm(p => ({ ...p, [k]: v })), []);
 
