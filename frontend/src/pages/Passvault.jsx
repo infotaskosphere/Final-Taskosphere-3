@@ -14,6 +14,7 @@ import {
   FileUp, Users, LayoutGrid, List, AlertTriangle, Loader2,
   ArrowUpDown, ChevronLeft, ChevronRight, Smartphone, Store,
   Activity, WifiOff, ServerCrash, ShieldAlert, Share2, ChevronDown,
+  CheckSquare, Square, Info,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -619,7 +620,7 @@ function WAModal({ open, onClose, entry, isDark }) {
   );
 }
 
-function ImportModal({ open, onClose, isDark }) {
+function ImportModal({ open, onClose, isDark, onDownloadTemplate }) {
   const [step, setStep] = useState(1);
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -651,14 +652,55 @@ function ImportModal({ open, onClose, isDark }) {
 
   const close_ = () => { setStep(1); setFile(null); setResult(null); onClose(); };
 
+  // Template columns reference — must match backend exactly
+  const TEMPLATE_COLS = [
+    { col: 'portal_name', req: true,  eg: 'GST Portal', note: 'Portal or site name' },
+    { col: 'portal_type', req: true,  eg: 'GST / MCA / DGFT / TDS…', note: 'Use uppercase keys from the list' },
+    { col: 'department',  req: true,  eg: 'GST / ROC / TDS…', note: 'Department code (uppercase)' },
+    { col: 'url',         req: false, eg: 'https://www.gst.gov.in', note: 'Full portal URL' },
+    { col: 'username',    req: false, eg: 'user@example.com', note: 'Login ID / email' },
+    { col: 'password_plain', req: false, eg: 'SecurePass@123', note: 'Plain-text; encrypted on import' },
+    { col: 'holder_type', req: false, eg: 'COMPANY / DIRECTOR / INDIVIDUAL', note: 'Defaults to COMPANY' },
+    { col: 'holder_name', req: false, eg: 'Rajesh Kumar', note: 'Director / individual name' },
+    { col: 'holder_pan',  req: false, eg: 'ABCPK1234D', note: '10-char PAN' },
+    { col: 'holder_din',  req: false, eg: '08123456', note: '8-digit DIN' },
+    { col: 'mobile',      req: false, eg: '9876543210', note: 'Registered mobile' },
+    { col: 'trade_name',  req: false, eg: 'ABC Enterprises', note: 'Business / trade name' },
+    { col: 'client_name', req: false, eg: 'XYZ Pvt Ltd', note: 'Client company name' },
+    { col: 'client_id',   req: false, eg: 'CL001', note: 'Client code / ID' },
+    { col: 'notes',       req: false, eg: 'Quarterly GST filing', note: 'Any extra notes' },
+    { col: 'tags',        req: false, eg: 'GST,Client,Q1', note: 'Comma-separated tags' },
+  ];
+
   return (
     <Dialog open={open} onOpenChange={close_}>
       <DialogContent className={`max-w-2xl rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
         <ModalHead icon={<Upload className="h-4 w-4 text-white" />} title="Bulk Import"
-          sub="Upload Excel or CSV" grad={`linear-gradient(135deg,${C.deepBlue},${C.medBlue})`} onClose={close_} />
-        <div className="p-6 space-y-4">
+          sub="Upload Excel or CSV to import credentials" grad={`linear-gradient(135deg,${C.deepBlue},${C.medBlue})`} onClose={close_} />
+        <div className="p-6 space-y-4 max-h-[76vh] overflow-y-auto">
+
+          {/* ── Step 1 — Upload ── */}
           {step === 1 && (
             <>
+              {/* Template download prompt */}
+              <div className={`flex items-start gap-3 px-4 py-3 rounded-xl border ${isDark ? 'bg-blue-900/20 border-blue-800/40' : 'bg-blue-50 border-blue-200'}`}>
+                <Info className="h-4 w-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className={`text-xs font-semibold ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
+                    Use the official template to ensure correct column order and valid values.
+                  </p>
+                  <p className={`text-[11px] mt-0.5 ${isDark ? 'text-blue-400' : 'text-blue-500'}`}>
+                    Required columns: <span className="font-mono font-bold">portal_name, portal_type, department</span> — all others optional.
+                  </p>
+                </div>
+                <Button size="sm" onClick={onDownloadTemplate}
+                  className="flex-shrink-0 rounded-lg font-bold h-7 text-xs gap-1.5 text-white"
+                  style={{ background: C.deepBlue }}>
+                  <Download className="h-3 w-3" /> Template
+                </Button>
+              </div>
+
+              {/* File drop zone */}
               <label htmlFor="imp-file"
                 className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer transition-colors
                   ${isDark ? 'border-slate-600 hover:border-slate-400 hover:bg-slate-700/40' : 'border-slate-300 hover:border-blue-400 hover:bg-blue-50'}`}>
@@ -667,21 +709,90 @@ function ImportModal({ open, onClose, isDark }) {
                 <p className={`text-xs mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Excel (.xlsx, .xls) or CSV (.csv)</p>
                 <input id="imp-file" type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={pick} />
               </label>
-              {file && <p className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>📎 {file.name}</p>}
+              {file && (
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium ${isDark ? 'bg-slate-700 border-slate-600 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                  <FileUp className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                  {file.name}
+                  <button type="button" onClick={() => setFile(null)} className="ml-auto p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-600">
+                    <X className="h-3.5 w-3.5 text-slate-400" />
+                  </button>
+                </div>
+              )}
+
+              {/* Column reference table */}
+              <details className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                <summary className={`px-4 py-2.5 text-xs font-bold uppercase tracking-wide cursor-pointer select-none flex items-center gap-2
+                  ${isDark ? 'bg-slate-700/60 text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
+                  <Info className="h-3.5 w-3.5" /> Column Reference (click to expand)
+                </summary>
+                <div className={`overflow-x-auto ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+                  <table className="w-full text-[11px]" style={{ minWidth: 520 }}>
+                    <thead className={isDark ? 'bg-slate-700/50' : 'bg-slate-50'}>
+                      <tr>
+                        {['Column Name', 'Required', 'Example Value', 'Description'].map(h => (
+                          <th key={h} className={`px-3 py-2 text-left font-bold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {TEMPLATE_COLS.map((c, i) => (
+                        <tr key={c.col} className={`border-t ${isDark ? 'border-slate-700' : 'border-slate-100'} ${i % 2 === 0 ? (isDark ? 'bg-slate-800' : 'bg-white') : (isDark ? 'bg-slate-750' : 'bg-slate-50/50')}`}>
+                          <td className="px-3 py-1.5 font-mono font-semibold text-blue-500">{c.col}</td>
+                          <td className="px-3 py-1.5 text-center">
+                            {c.req
+                              ? <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-red-100 text-red-600">YES</span>
+                              : <span className="px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-slate-100 text-slate-400">opt</span>}
+                          </td>
+                          <td className={`px-3 py-1.5 font-mono ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{c.eg}</td>
+                          <td className={`px-3 py-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{c.note}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+
+              {/* Valid portal_type values */}
+              <div className={`px-4 py-3 rounded-xl border text-xs ${isDark ? 'bg-slate-700/30 border-slate-600 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                <span className="font-bold uppercase text-[10px] tracking-wide">Valid portal_type values: </span>
+                {['MCA', 'ROC', 'DGFT', 'TRADEMARK', 'GST', 'INCOME_TAX', 'TDS', 'TRACES', 'EPFO', 'ESIC', 'MSME', 'RERA', 'OTHER'].map(t => (
+                  <span key={t} className="inline-block font-mono px-1.5 py-0.5 rounded bg-slate-200/60 dark:bg-slate-600/60 mr-1 mt-0.5">{t}</span>
+                ))}
+              </div>
             </>
           )}
+
+          {/* ── Step 2 — Result ── */}
           {step === 2 && result && (
-            <div className={`rounded-lg p-4 ${isDark ? 'bg-green-900/20 border border-green-800/40' : 'bg-green-50 border border-green-200'}`}>
-              <p className={`font-semibold ${isDark ? 'text-green-300' : 'text-green-700'}`}>✓ Import complete!</p>
-              <p className={`text-sm mt-1 ${isDark ? 'text-green-400' : 'text-green-600'}`}>
-                {result.successful_imports} imported · {result.failed_imports} failed · {result.total_processed} total
-              </p>
+            <div className={`rounded-xl p-5 space-y-3 ${isDark ? 'bg-green-900/20 border border-green-800/40' : 'bg-green-50 border border-green-200'}`}>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
+                  <CheckSquare className="h-4 w-4 text-white" />
+                </div>
+                <p className={`font-bold text-base ${isDark ? 'text-green-300' : 'text-green-700'}`}>Import Complete!</p>
+              </div>
+              <div className={`grid grid-cols-3 gap-3 text-center text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                <div className={`rounded-lg p-2 ${isDark ? 'bg-green-900/30' : 'bg-green-100'}`}>
+                  <p className="text-lg text-green-600">{result.successful_imports}</p>
+                  <p>Imported</p>
+                </div>
+                <div className={`rounded-lg p-2 ${isDark ? 'bg-red-900/30' : 'bg-red-50'}`}>
+                  <p className="text-lg text-red-500">{result.failed_imports}</p>
+                  <p>Failed</p>
+                </div>
+                <div className={`rounded-lg p-2 ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                  <p className="text-lg text-slate-500">{result.total_processed}</p>
+                  <p>Total</p>
+                </div>
+              </div>
               {result.errors?.length > 0 && (
                 <details className="mt-2">
-                  <summary className="text-xs cursor-pointer text-red-400">Show errors ({result.errors.length})</summary>
-                  <div className="mt-1 space-y-1">
-                    {result.errors.slice(0, 10).map((err, i) => (
-                      <p key={i} className="text-xs text-red-400">Row {err.row}: {typeof err.error === 'string' ? err.error : JSON.stringify(err.error)}</p>
+                  <summary className="text-xs cursor-pointer text-red-400 font-semibold">Show errors ({result.errors.length})</summary>
+                  <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+                    {result.errors.slice(0, 15).map((err, i) => (
+                      <p key={i} className="text-xs text-red-400 bg-red-900/10 px-2 py-1 rounded">
+                        Row {err.row}: {typeof err.error === 'string' ? err.error : JSON.stringify(err.error)}
+                      </p>
                     ))}
                   </div>
                 </details>
@@ -693,14 +804,14 @@ function ImportModal({ open, onClose, isDark }) {
           <Button variant="ghost" className="rounded-xl" onClick={close_}>Close</Button>
           {step === 1 && (
             <Button onClick={doImport} disabled={!file || busy} className="rounded-xl font-bold text-white" style={{ background: C.green }}>
-              {busy ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Importing…</> : 'Import Now'}
+              {busy ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Importing…</> : <><Upload className="h-4 w-4 mr-1.5" />Import Now</>}
             </Button>
           )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    );
-    }
+  );
+}
 
 function ShareClientModal({ open, onClose, isDark, entries }) {
   const [selectedClientId, setSelectedClientId] = useState('');
@@ -1006,34 +1117,123 @@ function Card({ entry, no, canEdit, isAdmin, onEdit, onDel, onShare, onDetail, i
 function Row({ entry, no, canEdit, isAdmin, onEdit, onDel, onShare, onDetail, isDark, sel, onSel }) {
   const m = PM[entry.portal_type] || PM.OTHER;
   const primary = entry.client_name || entry.holder_name || '—';
+  const isOD = entry.updated_at && false; // no due date concept for passwords
+
   return (
-    <motion.tr variants={iv} onClick={() => onDetail(entry)}
-      className={`border-b cursor-pointer transition-colors
-        ${sel ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50')
-          : (isDark ? 'border-slate-700 hover:bg-slate-700/40' : 'border-slate-100 hover:bg-slate-50/80')}`}
-      style={{ borderLeftColor: m.color, borderLeftWidth: '3px' }}>
-      {isAdmin && <td className="px-2 py-2.5" onClick={e => e.stopPropagation()}><input type="checkbox" checked={sel} onChange={() => onSel(entry.id)} className="w-3.5 h-3.5 rounded cursor-pointer accent-blue-500" /></td>}
-      <td className="px-3 py-2.5 text-center"><span className="text-[10px] font-black text-white rounded px-1.5 py-0.5" style={{ background: m.color }}>{no}</span></td>
-      <td className="px-3 py-2.5">
-        <span className={`font-semibold text-sm block ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{primary}</span>
-        {entry.client_name && entry.holder_name && <span className={`text-xs ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>{entry.holder_name}</span>}
-      </td>
-      <td className="px-3 py-2.5">
-        <span className={`font-semibold text-sm block ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{entry.portal_name}</span>
-        <div className="flex items-center gap-1 flex-wrap mt-0.5"><PortalBadge type={entry.portal_type} /><DeptBadge dept={entry.department} /></div>
-      </td>
-      <td className="px-3 py-2.5"><span className={`font-mono text-xs ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{entry.username}</span></td>
-      <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}><RevealPw entryId={entry.id} isDark={isDark} /></td>
-      <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-1 justify-end">
-          {canEdit && <button type="button" onClick={() => onEdit(entry)} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}><Edit2 className="h-3 w-3 text-slate-400" /></button>}
-          {isAdmin && <button type="button" onClick={() => onDel(entry)} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}><Trash2 className="h-3 w-3 text-red-400" /></button>}
-          <button type="button" onClick={() => onShare(entry)} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}>
-            <WA className="h-3.5 w-3.5" style={{ color: C.whatsapp }} />
-          </button>
+    <motion.div variants={iv} layout>
+      <div
+        className={`relative rounded-xl border transition-all duration-200 overflow-hidden group cursor-pointer
+          ${sel
+            ? (isDark ? 'bg-blue-900/20 border-blue-600' : 'bg-blue-50 border-blue-300')
+            : (isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-sm' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm')}`}
+        onClick={() => onDetail(entry)}
+      >
+        {/* Left color stripe matching Tasks strip */}
+        <div className="absolute left-0 top-0 h-full w-1 rounded-l-xl" style={{ background: m.color }} />
+
+        <div
+          className="pl-5 pr-3 py-2.5 grid items-center gap-0"
+          style={{ gridTemplateColumns: isAdmin ? '16px 28px minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr) 120px 120px 96px' : '28px minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr) 120px 120px 96px' }}
+        >
+          {/* Checkbox */}
+          {isAdmin && (
+            <div onClick={e => { e.stopPropagation(); onSel(entry.id); }}>
+              <input type="checkbox" checked={sel} readOnly
+                className="w-3.5 h-3.5 rounded cursor-pointer accent-blue-500" />
+            </div>
+          )}
+
+          {/* Row number */}
+          <span className="text-center">
+            <span className="text-[10px] font-black text-white rounded px-1.5 py-0.5"
+              style={{ background: m.color }}>{no}</span>
+          </span>
+
+          {/* Client / Holder */}
+          <div className="pl-1 min-w-0">
+            <span className={`font-semibold text-sm block truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{primary}</span>
+            {entry.client_name && entry.holder_name && (
+              <span className={`text-xs truncate block ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>{entry.holder_name}</span>
+            )}
+            {entry.trade_name && (
+              <span className={`text-[10px] truncate block ${isDark ? 'text-amber-300' : 'text-amber-600'}`}>{entry.trade_name}</span>
+            )}
+          </div>
+
+          {/* Portal name */}
+          <div className="min-w-0 pr-2">
+            <span className={`font-semibold text-sm block truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{entry.portal_name}</span>
+            {entry.url && (
+              <button type="button"
+                onClick={e => { e.stopPropagation(); window.open(entry.url, '_blank'); }}
+                className="flex items-center gap-1 text-[10px] text-blue-500 hover:underline truncate max-w-full">
+                <Globe className="h-2.5 w-2.5 flex-shrink-0" />
+                <span className="truncate">{entry.url.replace(/^https?:\/\/(www\.)?/, '')}</span>
+              </button>
+            )}
+          </div>
+
+          {/* Username / Password */}
+          <div className="min-w-0 pr-2" onClick={e => e.stopPropagation()}>
+            {entry.username && (
+              <div className="flex items-center gap-1.5 mb-1">
+                <UserIcon className="h-3 w-3 text-slate-400 flex-shrink-0" />
+                <span className={`font-mono text-xs truncate flex-1 ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{entry.username}</span>
+                <button type="button" onClick={() => navigator.clipboard.writeText(entry.username).then(() => toast.success('Copied'))}
+                  className={`flex-shrink-0 p-0.5 rounded ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}>
+                  <Copy className="h-2.5 w-2.5 text-slate-400" />
+                </button>
+              </div>
+            )}
+            <RevealPw entryId={entry.id} isDark={isDark} />
+          </div>
+
+          {/* Type & Dept badges */}
+          <div className="flex flex-col items-center gap-1">
+            <PortalBadge type={entry.portal_type} />
+            <DeptBadge dept={entry.department} />
+          </div>
+
+          {/* URL/date */}
+          <div className="flex flex-col items-center gap-1 text-[10px]">
+            {entry.mobile && (
+              <span className={`flex items-center gap-1 font-mono ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                <Smartphone className="h-2.5 w-2.5" />{entry.mobile}
+              </span>
+            )}
+            <span className={`flex items-center gap-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              <Clock className="h-2.5 w-2.5" />
+              {entry.updated_at ? format(new Date(entry.updated_at), 'MMM d') : '—'}
+            </span>
+          </div>
+
+          {/* Actions — show on group hover like Tasks */}
+          <div className="flex items-center justify-end gap-0 opacity-0 group-hover:opacity-100 transition-opacity"
+            onClick={e => e.stopPropagation()}>
+            {canEdit && (
+              <button type="button" onClick={() => onEdit(entry)}
+                className={`p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 text-slate-400 hover:text-blue-600 transition-colors`}
+                title="Edit">
+                <Edit2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+            <button type="button" onClick={() => onShare(entry)}
+              className={`p-1 rounded transition-colors`}
+              title="Share via WhatsApp"
+              style={{ color: C.whatsapp }}>
+              <WA className="h-3.5 w-3.5" />
+            </button>
+            {isAdmin && (
+              <button type="button" onClick={() => onDel(entry)}
+                className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-600 transition-colors"
+                title="Delete">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
         </div>
-      </td>
-    </motion.tr>
+      </div>
+    </motion.div>
   );
 }
 
@@ -1042,7 +1242,7 @@ export default function PasswordRepository() {
   const { user } = useAuth();
   const qc = useQueryClient();
 
-  const [view, setView] = useState('grid');
+  const [view, setView] = useState('list');
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(20);
   const [search, setSearch] = useState('');
@@ -1281,16 +1481,39 @@ export default function PasswordRepository() {
       </motion.div>
 
       {!isLoading && !isError && entries.length > 0 && (
-        <motion.div variants={iv} className="flex items-center justify-between px-1">
-          <span className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            {entries.length} result{entries.length !== 1 ? 's' : ''}{hasFilter && ' (filtered)'}
-          </span>
+        <motion.div variants={iv} className="flex items-center justify-between px-1 gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            {isAdmin && (
+              <button type="button"
+                onClick={() => {
+                  if (selIds.size === paginated.length && paginated.length > 0) {
+                    setSelIds(new Set());
+                  } else {
+                    setSelIds(new Set(paginated.map(e => e.id)));
+                  }
+                }}
+                className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-all
+                  ${selIds.size > 0
+                    ? (isDark ? 'border-blue-500 text-blue-400 bg-blue-900/20' : 'border-blue-400 text-blue-600 bg-blue-50')
+                    : (isDark ? 'border-slate-600 text-slate-400 hover:border-slate-500' : 'border-slate-300 text-slate-500 hover:border-slate-400')}`}>
+                {selIds.size === paginated.length && paginated.length > 0
+                  ? <CheckSquare className="h-3.5 w-3.5" />
+                  : <Square className="h-3.5 w-3.5" />}
+                {selIds.size > 0 ? `${selIds.size} selected` : 'Select all'}
+              </button>
+            )}
+            <span className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              {entries.length} result{entries.length !== 1 ? 's' : ''}{hasFilter && ' (filtered)'}
+            </span>
+          </div>
           {selIds.size > 0 && isAdmin && (
             <Button size="sm" variant="destructive" className="h-7 text-xs rounded-lg gap-1.5"
               onClick={async () => {
+                const count = selIds.size;
+                if (!window.confirm(`Delete ${count} selected entr${count === 1 ? 'y' : 'ies'}? This cannot be undone.`)) return;
                 try {
                   await Promise.all([...selIds].map(id => api.delete(`/passwords/${id}`)));
-                  toast.success(`${selIds.size} entries deleted`);
+                  toast.success(`${count} entr${count === 1 ? 'y' : 'ies'} deleted`);
                   setSelIds(new Set());
                   qc.invalidateQueries({ queryKey: ['passwords'] });
                   qc.invalidateQueries({ queryKey: ['pw-stats'] });
@@ -1362,33 +1585,55 @@ export default function PasswordRepository() {
           ))}
         </motion.div>
       ) : (
-        <motion.div variants={iv} className={`rounded-xl border overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <div className="overflow-x-auto">
-          <table className="w-full text-sm" style={{minWidth:580}}>
-            <thead className={`border-b ${isDark ? 'bg-slate-700/80 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-              <tr>
-                {isAdmin && <th className="px-2 py-2.5 w-8" />}
-                <th className="px-3 py-2.5 text-center text-xs font-semibold w-8">#</th>
-                <th className="px-3 py-2.5 text-left text-xs font-semibold">Client / Holder</th>
-                <th className="px-3 py-2.5 text-left text-xs font-semibold">Portal</th>
-                <th className="px-3 py-2.5 text-left text-xs font-semibold">Username</th>
-                <th className="px-3 py-2.5 text-left text-xs font-semibold">Password</th>
-                <th className="px-3 py-2.5 text-right text-xs font-semibold">Actions</th>
-              </tr>
-            </thead>
-            <motion.tbody variants={cv} initial="hidden" animate="visible">
-              {paginated.map((e, i) => (
-                <Row key={e.id} entry={e} no={(page - 1) * size + i + 1}
-                  canEdit={canEdit} isAdmin={isAdmin}
-                  onEdit={x => { setEditEntry(x); setEditOpen(true); }}
-                  onDel={x => { setDelEntry(x); setDelOpen(true); }}
-                  onShare={x => { setShareEntry(x); setShareOpen(true); }}
-                  onDetail={x => { setDetailEntry(x); setDetailOpen(true); }}
-                  isDark={isDark} sel={selIds.has(e.id)} onSel={toggleSel} />
-              ))}
-            </motion.tbody>
-          </table>
+        <motion.div variants={iv} className="space-y-1.5">
+          {/* ── Column header — mirrors Tasks list header style ── */}
+          <div
+            className={`hidden sm:grid items-center pl-4 pr-3 py-2 text-[10px] font-bold uppercase tracking-widest select-none border-b mb-1
+              ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-100'}`}
+            style={{ gridTemplateColumns: isAdmin ? '16px 28px minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr) 120px 120px 96px' : '28px minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr) 120px 120px 96px' }}
+          >
+            {isAdmin && (
+              <button type="button"
+                onClick={() => {
+                  if (selIds.size === paginated.length && paginated.length > 0) setSelIds(new Set());
+                  else setSelIds(new Set(paginated.map(e => e.id)));
+                }}
+                className="flex items-center justify-center"
+                title={selIds.size === paginated.length ? 'Deselect all' : 'Select all on page'}
+              >
+                {selIds.size === paginated.length && paginated.length > 0
+                  ? <CheckSquare className="h-3.5 w-3.5 text-blue-500" />
+                  : <Square className="h-3.5 w-3.5 text-slate-400" />}
+              </button>
+            )}
+            <span className="text-center">#</span>
+            <span className="pl-1">Client / Holder</span>
+            <span>Portal</span>
+            <span>Username / Password</span>
+            <span className="text-center">Type &amp; Dept</span>
+            <span className="text-center">URL / Date</span>
+            <span className="text-right">Actions</span>
           </div>
+
+          {paginated.map((e, i) => (
+            <Row key={e.id} entry={e} no={(page - 1) * size + i + 1}
+              canEdit={canEdit} isAdmin={isAdmin}
+              onEdit={x => { setEditEntry(x); setEditOpen(true); }}
+              onDel={x => { setDelEntry(x); setDelOpen(true); }}
+              onShare={x => { setShareEntry(x); setShareOpen(true); }}
+              onDetail={x => { setDetailEntry(x); setDetailOpen(true); }}
+              isDark={isDark} sel={selIds.has(e.id)} onSel={toggleSel} />
+          ))}
+
+          {paginated.length === 0 && (
+            <div className="text-center py-16">
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3 ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                <Search className="h-5 w-5 text-slate-400" />
+              </div>
+              <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No entries found</p>
+              <p className="text-xs text-slate-400 mt-1">Try adjusting your filters</p>
+            </div>
+          )}
         </motion.div>
       )}
 
@@ -1402,7 +1647,7 @@ export default function PasswordRepository() {
         onSuccess={() => qc.invalidateQueries({ queryKey: ['passwords'] })} />
       <DeleteModal open={delOpen} onClose={() => setDelOpen(false)} entry={delEntry} isDark={isDark} />
       <WAModal open={shareOpen} onClose={() => setShareOpen(false)} entry={shareEntry} isDark={isDark} />
-      <ImportModal open={importOpen} onClose={() => setImportOpen(false)} isDark={isDark} />
+      <ImportModal open={importOpen} onClose={() => setImportOpen(false)} isDark={isDark} onDownloadTemplate={dlTemplate} />
       <ShareClientModal open={shareClientOpen} onClose={() => setShareClientOpen(false)} isDark={isDark} entries={entries} />
     </motion.div>
   );
