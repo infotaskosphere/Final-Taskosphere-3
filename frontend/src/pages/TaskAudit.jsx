@@ -3,7 +3,7 @@
 // =============================================================================
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import GifLoader from "@/components/ui/GifLoader.jsx";
+import GifLoader, { MiniLoader } from "@/components/ui/GifLoader.jsx";
 import { useDark } from "@/hooks/useDark";
 import api from "@/lib/api";
 import {
@@ -86,7 +86,7 @@ export default function TaskAudit() {
   const selectBdr= isDark ? "#334155"  : "#e2e8f0";
 
   if (isLoading) {
-    return <GifLoader />;
+    return <MiniLoader height={400} />;
   }
 
   return (
