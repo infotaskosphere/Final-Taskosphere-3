@@ -200,7 +200,7 @@ function DetailModal({ open, onClose, entry, isDark }) {
   ) : null;
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={(val) => { if (!val) onClose(); }}>
       <DialogContent className={`max-w-2xl rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
         <ModalHead icon={<span className="text-2xl">{m.icon}</span>} title={entry.portal_name}
           sub={m.full} grad={`linear-gradient(135deg,${m.color},${m.border})`} onClose={onClose} />
@@ -354,7 +354,7 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
   );
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={(val) => { if (!val) onClose(); }}>
       <DialogContent className={`max-w-2xl rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
         <ModalHead
           icon={entry?.id ? <Edit2 className="h-4 w-4 text-white" /> : <Plus className="h-4 w-4 text-white" />}
@@ -508,7 +508,7 @@ function DeleteModal({ open, onClose, entry, isDark }) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={(val) => { if (!val) onClose(); }}>
       <DialogContent className={`max-w-md rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
         <ModalHead icon={<Trash2 className="h-4 w-4 text-white" />} title="Delete Entry"
           sub="This action cannot be undone" grad="linear-gradient(135deg,#DC2626,#EF4444)" onClose={onClose} />
@@ -775,7 +775,7 @@ function ShareClientModal({ open, onClose, isDark, entries }) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={(val) => { if (!val) onClose(); }}>
       <DialogContent className={`max-w-xl rounded-3xl p-0 border-none overflow-hidden [&>button]:hidden ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
         <ModalHead
           icon={<Share2 className="h-4 w-4 text-white" />}
