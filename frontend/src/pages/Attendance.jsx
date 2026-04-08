@@ -2764,14 +2764,14 @@ export default function Attendance() {
 
               {/* ══ APPLY FOR LEAVE CARD ══ */}
               {!isViewingOther && (
-                <SectionCard className="flex-1">
+                <SectionCard className="flex-1 flex flex-col">
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
                     icon={<CalendarX className="h-4 w-4" style={{ color: COLORS.orange }} />}
                     title="Apply for Leave"
                     subtitle={upcomingLeaves.length > 0 ? `${upcomingLeaves.length} upcoming leave${upcomingLeaves.length !== 1 ? 's' : ''}` : 'Request time off'}
                   />
-                  <div className="p-4 space-y-3">
+                  <div className="p-4 space-y-3 flex-1">
                     {upcomingLeaves.length > 0 && (
                       <div className="space-y-1.5 mb-1">
                         {upcomingLeaves.slice(0, 3).map(leave => {
