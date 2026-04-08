@@ -1282,7 +1282,7 @@ export default function PasswordRepository() {
       )}
 
       {isLoading ? (
-        <GifLoader />
+        <MiniLoader height={350} />
       ) : isError ? (
         <motion.div variants={iv}
           className={`text-center py-14 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
