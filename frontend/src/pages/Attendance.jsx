@@ -2759,7 +2759,7 @@ export default function Attendance() {
 
               {/* ══ APPLY FOR LEAVE CARD ══ */}
               {!isViewingOther && (
-                <SectionCard>
+                <SectionCard className="flex-1">
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
                     icon={<CalendarX className="h-4 w-4" style={{ color: COLORS.orange }} />}
