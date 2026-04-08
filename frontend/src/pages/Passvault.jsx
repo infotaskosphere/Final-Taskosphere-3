@@ -744,8 +744,7 @@ function ShareClientModal({ open, onClose, isDark, entries }) {
     });
     if (note.trim()) L.push('📝 Note: ' + note.trim(), '');
     L.push('━'.repeat(30), 'Sent via Taskosphere 📱');
-    return L.join('
-');
+    return L.join('\n');
   };
 
   const send = () => {
