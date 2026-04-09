@@ -70,7 +70,8 @@ from backend.models import (
     DashboardStats, AuditLog,
     HolidayResponse, HolidayCreate,
     DEFAULT_ROLE_PERMISSIONS,
-    Reminder, ReminderCreate
+    Reminder, ReminderCreate,
+    OffboardRequest
 )
 from backend.dependencies import (
     db,
@@ -1498,6 +1499,164 @@ async def delete_user(user_id: str, current_user: User = Depends(get_current_use
     await create_audit_log(current_user, "DELETE_USER", "user", record_id=user_id, old_data=existing)
     await db.users.delete_one({"id": user_id})
     return {"message": "User deleted successfully"}
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# EMPLOYEE OFFBOARDING / REPLACEMENT
+# ════════════════════════════════════════════════════════════════════════════════
+
+@api_router.get("/users/{user_id}/offboard-preview")
+async def offboard_preview(
+    user_id: str,
+    current_user: User = Depends(require_admin()),
+):
+    """Preview what data belongs to this user before offboarding."""
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    counts = {
+        "tasks_assigned": await db.tasks.count_documents({"assigned_to": user_id}),
+        "tasks_created": await db.tasks.count_documents({"created_by": user_id}),
+        "clients": await db.clients.count_documents({"assigned_to": user_id}),
+        "dsc": await db.dsc_register.count_documents({"assigned_to": user_id}),
+        "documents": await db.documents.count_documents(
+            {"$or": [{"assigned_to": user_id}, {"created_by": user_id}]}
+        ),
+        "todos": await db.todos.count_documents({"user_id": user_id}),
+        "visits": await db.visits.count_documents({"assigned_to": user_id}),
+        "leads": await db.leads.count_documents({"assigned_to": user_id}),
+    }
+
+    return {
+        "user": {
+            "id": user.get("id"),
+            "full_name": user.get("full_name"),
+            "email": user.get("email"),
+            "role": user.get("role"),
+            "departments": user.get("departments", []),
+        },
+        "data_counts": counts,
+        "total_items": sum(counts.values()),
+    }
+
+
+@api_router.post("/users/{user_id}/offboard")
+async def offboard_user(
+    user_id: str,
+    body: OffboardRequest,
+    current_user: User = Depends(require_admin()),
+):
+    """
+    Offboard an employee: transfer all their data to a replacement user,
+    keep an audit trail, then optionally delete the old account.
+    """
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot offboard yourself")
+    if user_id == body.replacement_user_id:
+        raise HTTPException(status_code=400, detail="Old and replacement user cannot be the same")
+
+    old_user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not old_user:
+        raise HTTPException(status_code=404, detail="User to offboard not found")
+
+    new_user = await db.users.find_one({"id": body.replacement_user_id}, {"_id": 0})
+    if not new_user:
+        raise HTTPException(status_code=404, detail="Replacement user not found")
+
+    transfer_summary = {}
+
+    # 1. Tasks
+    if body.transfer_tasks:
+        r1 = await db.tasks.update_many({"assigned_to": user_id}, {"$set": {"assigned_to": body.replacement_user_id}})
+        r2 = await db.tasks.update_many({"created_by": user_id}, {"$set": {"created_by": body.replacement_user_id}})
+        transfer_summary["tasks_assigned"] = r1.modified_count
+        transfer_summary["tasks_created"] = r2.modified_count
+
+    # 2. Clients
+    if body.transfer_clients:
+        r = await db.clients.update_many({"assigned_to": user_id}, {"$set": {"assigned_to": body.replacement_user_id}})
+        transfer_summary["clients_reassigned"] = r.modified_count
+
+    # 3. DSC
+    if body.transfer_dsc:
+        r = await db.dsc_register.update_many({"assigned_to": user_id}, {"$set": {"assigned_to": body.replacement_user_id}})
+        transfer_summary["dsc_transferred"] = r.modified_count
+
+    # 4. Documents
+    if body.transfer_documents:
+        r = await db.documents.update_many(
+            {"$or": [{"assigned_to": user_id}, {"created_by": user_id}]},
+            {"$set": {"assigned_to": body.replacement_user_id}}
+        )
+        transfer_summary["documents_transferred"] = r.modified_count
+
+    # 5. Todos
+    if body.transfer_todos:
+        r = await db.todos.update_many({"user_id": user_id}, {"$set": {"user_id": body.replacement_user_id}})
+        transfer_summary["todos_transferred"] = r.modified_count
+
+    # 6. Visits
+    if body.transfer_visits:
+        r = await db.visits.update_many({"assigned_to": user_id}, {"$set": {"assigned_to": body.replacement_user_id}})
+        transfer_summary["visits_transferred"] = r.modified_count
+
+    # 7. Leads
+    if body.transfer_leads:
+        r = await db.leads.update_many({"assigned_to": user_id}, {"$set": {"assigned_to": body.replacement_user_id}})
+        transfer_summary["leads_transferred"] = r.modified_count
+
+    # 8. Update cross-user permission references in all other users
+    for field in [
+        "permissions.view_other_tasks", "permissions.view_other_attendance",
+        "permissions.view_other_reports", "permissions.view_other_todos",
+        "permissions.view_other_activity", "permissions.view_other_visits",
+        "permissions.assigned_clients",
+    ]:
+        await db.users.update_many(
+            {field: user_id},
+            {"$set": {f"{field}.$[elem]": body.replacement_user_id}},
+            array_filters=[{"elem": user_id}]
+        )
+    transfer_summary["permission_references_updated"] = True
+
+    # 9. Optionally update the replacement user's email
+    if body.update_email and body.update_email.strip():
+        new_email = body.update_email.strip().lower()
+        email_exists = await db.users.find_one(
+            {"email": new_email, "id": {"$ne": body.replacement_user_id}}, {"_id": 0, "id": 1}
+        )
+        if email_exists:
+            raise HTTPException(status_code=400, detail=f"Email {new_email} is already in use")
+        await db.users.update_one({"id": body.replacement_user_id}, {"$set": {"email": new_email}})
+        transfer_summary["email_updated"] = new_email
+
+    # 10. Audit Log
+    await create_audit_log(
+        current_user, "OFFBOARD_USER", "user", record_id=user_id,
+        old_data={
+            "offboarded_user": {"id": old_user.get("id"), "full_name": old_user.get("full_name"),
+                                "email": old_user.get("email"), "role": old_user.get("role"),
+                                "departments": old_user.get("departments", [])},
+            "replacement_user": {"id": new_user.get("id"), "full_name": new_user.get("full_name"),
+                                 "email": new_user.get("email")},
+            "transfer_summary": transfer_summary, "notes": body.notes,
+        },
+    )
+
+    # 11. Delete or deactivate old user
+    if body.delete_old_user:
+        await db.users.delete_one({"id": user_id})
+        transfer_summary["old_user_deleted"] = True
+    else:
+        await db.users.update_one({"id": user_id}, {"$set": {"is_active": False, "status": "inactive"}})
+        transfer_summary["old_user_deactivated"] = True
+
+    return {
+        "message": f"Successfully offboarded {old_user.get('full_name')} → {new_user.get('full_name')}",
+        "transfer_summary": transfer_summary,
+    }
+
 
 @api_router.get("/users/{user_id}/permissions")
 async def get_permissions(user_id: str, current_user: User = Depends(get_current_user)):
