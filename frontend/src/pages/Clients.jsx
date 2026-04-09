@@ -1786,10 +1786,10 @@ export default function Clients() {
     const clientAssignments = getClientAssignments(client);
     return (
       <div style={style} className="px-1">
-        <div className={`flex items-center gap-4 px-5 border-b transition-colors group cursor-pointer ${isArchived ? 'opacity-60' : ''} ${isDark ? 'bg-slate-800 hover:bg-slate-700/60 border-slate-700' : 'bg-white hover:bg-slate-50/60 border-slate-100'}`}
+        <div className={`relative flex items-center gap-4 pl-6 pr-5 border-b transition-colors group cursor-pointer overflow-hidden ${isArchived ? 'opacity-60' : ''} ${isDark ? 'bg-slate-800 hover:bg-slate-700/60 border-slate-700' : 'bg-white hover:bg-slate-50/60 border-slate-100'}`}
           style={{ height: LIST_ROW_HEIGHT }}
           onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}>
-          <div className="w-1 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.strip }} />
+          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, background: cfg.strip }} />
           <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0" style={{ background: getAvatarGradient(client.company_name) }}>
             {client.company_name?.charAt(0).toUpperCase() || '?'}
           </div>
@@ -2363,7 +2363,7 @@ export default function Clients() {
           <div className="overflow-x-auto">
           <div style={{minWidth:780}}>
           <div className={`flex items-center gap-4 px-5 py-3 border-b flex-shrink-0 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
-            <div className="w-1 flex-shrink-0" /><div className="w-8 flex-shrink-0" />
+            <div className="w-8 flex-shrink-0" />
             <div className="w-56 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Company</div>
             <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Type</div>
             <div className="w-36 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Phone</div>
