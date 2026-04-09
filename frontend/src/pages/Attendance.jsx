@@ -3131,7 +3131,7 @@ export default function Attendance() {
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 items-stretch">
 
                     {/* Stat: Present */}
-                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center h-full"
                       style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0' }}>
                       <CheckCircle2 className="w-5 h-5 mb-1.5 text-emerald-500" />
                       <p className="text-2xl font-black tabular-nums" style={{ color: COLORS.emeraldGreen }}>{monthDaysPresent}</p>
@@ -3139,7 +3139,7 @@ export default function Attendance() {
                     </div>
 
                     {/* Stat: Absent */}
-                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center h-full"
                       style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2', borderColor: isDark ? '#7f1d1d' : '#fecaca' }}>
                       <UserX className="w-5 h-5 mb-1.5 text-red-500" />
                       <p className="text-2xl font-black tabular-nums text-red-500">{monthDaysAbsent}</p>
@@ -3147,7 +3147,7 @@ export default function Attendance() {
                     </div>
 
                     {/* Stat: Late */}
-                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center h-full"
                       style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? '#92400e' : '#fde68a' }}>
                       <AlarmClock className="w-5 h-5 mb-1.5 text-amber-500" />
                       <p className="text-2xl font-black tabular-nums" style={{ color: COLORS.amber }}>{totalDaysLateThisMonth}</p>
@@ -3155,7 +3155,7 @@ export default function Attendance() {
                     </div>
 
                     {/* Stat: Total Hours */}
-                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center h-full"
                       style={{ backgroundColor: isDark ? `${COLORS.deepBlue}18` : `${COLORS.deepBlue}08`, borderColor: isDark ? '#1d4ed8' : '#bfdbfe' }}>
                       <Clock className="w-5 h-5 mb-1.5" style={{ color: COLORS.deepBlue }} />
                       <p className="text-2xl font-black tabular-nums font-mono" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
@@ -3165,7 +3165,7 @@ export default function Attendance() {
                     </div>
 
                     {/* Stat: Avg/Day */}
-                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center h-full"
                       style={{ backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : '#f5f3ff', borderColor: isDark ? '#4c1d95' : '#ddd6fe' }}>
                       <BarChart3 className="w-5 h-5 mb-1.5 text-purple-500" />
                       <p className="text-2xl font-black tabular-nums" style={{ color: COLORS.purple }}>{avgDailyHours}h</p>
@@ -3173,7 +3173,7 @@ export default function Attendance() {
                     </div>
 
                     {/* Stat: Streak */}
-                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center h-full"
                       style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? '#92400e' : '#fde68a' }}>
                       <Flame className="w-5 h-5 mb-1.5 text-amber-400" />
                       <p className="text-2xl font-black tabular-nums" style={{ color: COLORS.amber }}>{attendanceStreak}</p>
