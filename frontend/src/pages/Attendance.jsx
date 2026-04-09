@@ -1222,9 +1222,9 @@ export default function Attendance() {
 
     try {
       let historyUrl;
-      if (isEveryoneReq)      historyUrl = '/attendance/history';
+      if (isEveryoneReq)       historyUrl = '/attendance/history';
       else if (resolvedUserId) historyUrl = `/attendance/history?user_id=${resolvedUserId}`;
-      else                    historyUrl = '/attendance/history';
+      else                     historyUrl = `/attendance/history?user_id=${user?.id}`;
 
       const requests = [
         api.get(historyUrl).catch(() => ({ data: [] })),
@@ -1678,6 +1678,7 @@ export default function Attendance() {
   const monthAttendance = useMemo(() => {
     const start = startOfMonth(selectedDate), end = endOfMonth(selectedDate);
     let atts = (Array.isArray(attendanceHistory) ? attendanceHistory : []).filter(a => {
+      if (!isViewingOther && !isEveryoneView && a.user_id && a.user_id !== user?.id) return false;
       const d = safeParseISO(a.date);
       return d && d >= start && d <= end;
     });
@@ -1705,10 +1706,17 @@ export default function Attendance() {
 
   const attendanceMap = useMemo(() => {
     const map = {};
-    (Array.isArray(attendanceHistory) ? attendanceHistory : []).forEach(a => { map[a.date] = a; });
+    const records = Array.isArray(attendanceHistory) ? attendanceHistory : [];
+    // For calendar, only map own records when not in everyone/other view
+    const filtered = isEveryoneView
+      ? records
+      : isViewingOther
+        ? records
+        : records.filter(a => !a.user_id || a.user_id === user?.id);
+    filtered.forEach(a => { map[a.date] = a; });
     if (displayTodayAttendance) map[displayTodayAttendance.date] = displayTodayAttendance;
     return map;
-  }, [attendanceHistory, displayTodayAttendance]);
+  }, [attendanceHistory, displayTodayAttendance, isEveryoneView, isViewingOther, user?.id]);
 
   const viewedUserName = useMemo(() => {
     if (isEveryoneView) return 'All Employees';
@@ -1734,8 +1742,13 @@ export default function Attendance() {
 
   const recentAttendance = useMemo(() => {
     const safe = Array.isArray(attendanceHistory) ? attendanceHistory : [];
-    return isEveryoneView ? safe.slice(0, 25) : safe.slice(0, 15);
-  }, [attendanceHistory, isEveryoneView]);
+    if (isEveryoneView) return safe.slice(0, 25);
+    // When viewing self (admin or not), ensure only own records show
+    if (!isViewingOther) {
+      return safe.filter(a => !a.user_id || a.user_id === user?.id).slice(0, 15);
+    }
+    return safe.slice(0, 15);
+  }, [attendanceHistory, isEveryoneView, isViewingOther, user?.id]);
 
   const userMap = useMemo(() => {
     const map = {};
@@ -2965,7 +2978,8 @@ export default function Attendance() {
             {/* Punch Location History */}
             {!isEveryoneView && (() => {
               const locRecords = (Array.isArray(attendanceHistory) ? attendanceHistory : [])
-                .filter(r => r.punch_in && r.status === 'present')
+                .filter(r => r.punch_in && r.status === 'present'
+                  && (!isViewingOther ? (!r.user_id || r.user_id === user?.id) : true))
                 .slice(0, 5);
               return (
                 <SectionCard className="flex flex-col" style={{ maxHeight: 480 }}>
