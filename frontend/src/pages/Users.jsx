@@ -1413,7 +1413,7 @@ function OffboardingDialog({ open, onClose, targetUser, allUsers, onComplete }) 
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v && !executing) onClose(); }}>
-      <DialogContent className="max-w-2xl p-0 overflow-hidden rounded-2xl" style={{ maxHeight: '90vh' }}>
+      <DialogContent className="max-w-2xl p-0 overflow-hidden rounded-2xl" style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
         <DialogGradHeader
           gradient="linear-gradient(135deg, #991b1b 0%, #dc2626 50%, #ef4444 100%)"
           icon={UserMinus}
@@ -1423,7 +1423,7 @@ function OffboardingDialog({ open, onClose, targetUser, allUsers, onComplete }) 
           onClose={executing ? undefined : onClose}
         />
 
-        <div className="users-slim overflow-y-auto" style={{ ...slimScroll, maxHeight: 'calc(90vh - 180px)' }}>
+      <div className="users-slim flex-1 overflow-y-auto" style={slimScroll}>
 
           {/* STEP 1: Confirm & Preview */}
           {step === 1 && (
