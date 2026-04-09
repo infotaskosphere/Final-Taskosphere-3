@@ -1785,11 +1785,13 @@ export default function Clients() {
     const serviceCount = client.services?.length || 0;
     const clientAssignments = getClientAssignments(client);
     return (
-      <div style={style} className="px-1">
-        <div className={`relative flex items-center gap-4 pl-6 pr-5 border-b transition-colors group cursor-pointer overflow-hidden ${isArchived ? 'opacity-60' : ''} ${isDark ? 'bg-slate-800 hover:bg-slate-700/60 border-slate-700' : 'bg-white hover:bg-slate-50/60 border-slate-100'}`}
-          style={{ height: LIST_ROW_HEIGHT }}
+      <div style={{ ...style, paddingTop: 2, paddingBottom: 2, paddingLeft: 4, paddingRight: 4 }}>
+        <div
+          className={`relative rounded-xl border transition-all duration-200 overflow-hidden group cursor-pointer flex items-center gap-4 pl-5 pr-3 h-full
+            ${isArchived ? 'opacity-60' : ''}
+            ${isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-sm' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'}`}
           onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}>
-          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, background: cfg.strip }} />
+          <div className="absolute left-0 top-0 h-full w-1" style={{ background: cfg.strip }} />
           <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0" style={{ background: getAvatarGradient(client.company_name) }}>
             {client.company_name?.charAt(0).toUpperCase() || '?'}
           </div>
