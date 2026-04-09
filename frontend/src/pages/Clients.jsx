@@ -527,12 +527,12 @@ const ModernClientCard = React.memo(({
       }}
       onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}
     >
-      {/* ── HORIZONTAL TOP STRIP ── */}
-      <div style={{ height: 4, width: '100%', background: stripeColor, borderRadius: '16px 16px 0 0' }} />
+      {/* ── VERTICAL LEFT STRIP ── */}
+      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, borderRadius: '16px 0 0 16px', background: stripeColor }} />
  
       {/* ── HEADER ── */}
       <div style={{
-        padding: '12px 14px 10px 14px',
+        padding: '12px 14px 10px 18px',
         background: isDark
           ? `linear-gradient(135deg, ${stripeColor}18 0%, transparent 60%)`
           : `linear-gradient(135deg, ${stripeColor}0f 0%, transparent 60%)`,
@@ -589,7 +589,7 @@ const ModernClientCard = React.memo(({
       </div>
  
       {/* ── BODY ── */}
-      <div style={{ padding: '10px 14px 10px 14px', display: 'flex', flexDirection: 'column', gap: 7, flex: 1 }}>
+      <div style={{ padding: '10px 14px 10px 18px', display: 'flex', flexDirection: 'column', gap: 7, flex: 1 }}>
  
         {/* Contact person */}
         <div style={{ height: 34, display: 'flex', alignItems: 'center', gap: 8 }}>
