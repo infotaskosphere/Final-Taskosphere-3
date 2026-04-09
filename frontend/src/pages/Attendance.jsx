@@ -170,7 +170,7 @@ if (typeof document !== 'undefined' && !document.getElementById('att-pulse-style
 function SectionCard({ children, className = '', style = {} }) {
   return (
     <div
-      className={`relative bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm ${className}`}
+      className={`relative bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-[0_1px_3px_0_rgba(0,0,0,0.06),0_1px_2px_-1px_rgba(0,0,0,0.06)] ${className}`}
       style={style}
     >
       {children}
@@ -1951,14 +1951,15 @@ export default function Attendance() {
       />
 
       <motion.div
-        className="min-h-screen p-4 sm:p-5 md:p-6 lg:p-7 space-y-4 sm:space-y-5 overflow-x-hidden"
+        className="min-h-screen p-4 sm:p-5 md:p-6 lg:p-8 overflow-x-hidden"
         style={{ background: isDark ? D.bg : '#f8fafc' }}
         variants={containerVariants} initial="hidden" animate="visible"
       >
+        <div className="max-w-[1600px] mx-auto w-full space-y-6">
         {/* ══ PAGE HEADER ══════════════════════════════════════════════════════ */}
         <motion.div variants={itemVariants}>
           <div
-            className="relative overflow-hidden rounded-2xl px-6 py-5"
+            className="relative overflow-hidden rounded-2xl px-6 py-5 w-full"
             style={{
               background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
               boxShadow: '0 8px 32px rgba(13,59,102,0.25)',
@@ -2109,7 +2110,7 @@ export default function Attendance() {
         )}
 
         {/* ── Customize Layout button ─────────────────────────────────── */}
-        <div className="flex justify-end -mt-1">
+        <div className="flex justify-end">
           <button
             onClick={() => setShowLayoutCustomizer(true)}
             className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all active:scale-95"
@@ -2366,7 +2367,7 @@ export default function Attendance() {
                 subtitle="Confirm or reject suggested holidays"
                 badge={pendingHolidays.length}
               />
-              <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {pendingHolidays.map(holiday => (
                   <div key={holiday.date}
                     className="p-4 rounded-xl border"
@@ -2400,7 +2401,7 @@ export default function Attendance() {
                 subtitle="Auto-marked at 7:00 PM IST"
                 badge={absentSummary.length}
               />
-              <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+              <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                 {absentSummary.map(item => (
                   <motion.div key={item.user_id} whileHover={{ scale: 1.02 }}
                     className="flex items-center gap-2.5 p-3 rounded-xl border"
@@ -2430,7 +2431,7 @@ export default function Attendance() {
           if (sectionId === 'stat_cards') return (
             <React.Fragment key="stat_cards">
               <motion.div
-          className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6"
+          className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
           variants={itemVariants}
         >
           <StatCard isDark={isDark} icon={Timer}
@@ -2465,7 +2466,7 @@ export default function Attendance() {
           if (sectionId === 'holidays_reminders') return (
             <React.Fragment key="holidays_reminders">
               {!isEveryoneView && (
-          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6">
 
             {/* HOLIDAYS CARD */}
             <SectionCard className="flex flex-col h-[340px]">
@@ -2652,12 +2653,12 @@ export default function Attendance() {
           if (sectionId === 'calendar_area') return (
             <React.Fragment key="calendar_area">
               <motion.div
-          className={`grid gap-5 items-stretch ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-3'}`}
+          className={`grid gap-6 ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-12'}`}
           variants={itemVariants}
         >
           {/* ── LEFT COLUMN: Calendar + Date Detail + Apply Leave ── */}
           {!isEveryoneView && (
-            <div className="xl:col-span-1 flex flex-col gap-4 min-h-0">
+            <div className="xl:col-span-5 flex flex-col gap-4 min-h-0">
               <SectionCard>
                 <CardHeaderRow
                   iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
@@ -2852,10 +2853,10 @@ export default function Attendance() {
           )}
 
           {/* ── RIGHT COLUMN: Recent Attendance + Location History ── */}
-          <div className={isEveryoneView ? '' : 'xl:col-span-2 flex flex-col gap-4 min-h-0'}>
+          <div className={isEveryoneView ? '' : 'xl:col-span-7 flex flex-col gap-4 min-h-0'}>
 
             {/* Recent Attendance */}
-            <SectionCard className="flex flex-col" style={{ height: 380, minHeight: 380, maxHeight: 380 }}>
+            <SectionCard className="flex flex-col" style={{ maxHeight: 480 }}>
               <CardHeaderRow
                 iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
                 icon={<Clock className="h-4 w-4 text-blue-500" />}
@@ -2967,7 +2968,7 @@ export default function Attendance() {
                 .filter(r => r.punch_in && r.status === 'present')
                 .slice(0, 5);
               return (
-                <SectionCard className="flex flex-col" style={{ height: 380, minHeight: 380, maxHeight: 380 }}>
+                <SectionCard className="flex flex-col" style={{ maxHeight: 480 }}>
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-teal-900/40' : 'bg-teal-50'}
                     icon={<MapPin className="h-4 w-4 text-teal-500" />}
@@ -3128,7 +3129,7 @@ export default function Attendance() {
                   }
                 />
                 <div className="p-5">
-                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 items-stretch">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-4 items-stretch">
 
                     {/* Stat: Present */}
                     <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center h-full"
@@ -3822,6 +3823,7 @@ export default function Attendance() {
           return null;
         })}
 
+        </div>{/* end max-w wrapper */}
       </motion.div>
     </TooltipProvider>
   );
