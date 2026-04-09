@@ -2658,7 +2658,7 @@ export default function Attendance() {
         >
           {/* ── LEFT COLUMN: Calendar + Date Detail + Apply Leave ── */}
           {!isEveryoneView && (
-            <div className="xl:col-span-5 flex flex-col gap-4 min-h-0">
+            <div className="xl:col-span-4 flex flex-col gap-4 min-h-0">
               <SectionCard>
                 <CardHeaderRow
                   iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
@@ -2853,7 +2853,7 @@ export default function Attendance() {
           )}
 
           {/* ── RIGHT COLUMN: Recent Attendance + Location History ── */}
-          <div className={isEveryoneView ? '' : 'xl:col-span-7 flex flex-col gap-4 min-h-0'}>
+          <div className={isEveryoneView ? '' : 'xl:col-span-8 flex flex-col gap-4 min-h-0'}>
 
             {/* Recent Attendance */}
             <SectionCard className="flex flex-col" style={{ maxHeight: 480 }}>
