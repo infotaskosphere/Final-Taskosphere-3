@@ -507,14 +507,6 @@ const ModuleAccessCard = ({ icon: Icon, title, desc, permKey, permissions, setPe
         <Switch checked={isEnabled} onCheckedChange={toggle} />
       </div>
 
-      {/* ════ OFFBOARDING DIALOG ════ */}
-      <OffboardingDialog
-        open={offboardDialogOpen}
-        onClose={() => { setOffboardDialogOpen(false); setOffboardTarget(null); }}
-        targetUser={offboardTarget}
-        allUsers={users}
-        onComplete={() => { fetchUsers(); }}
-      />
     </motion.div>
   );
 };
@@ -2618,6 +2610,15 @@ export default function Users() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* OFFBOARDING DIALOG */}
+      <OffboardingDialog
+        open={offboardDialogOpen}
+        onClose={() => { setOffboardDialogOpen(false); setOffboardTarget(null); }}
+        targetUser={offboardTarget}
+        allUsers={users}
+        onComplete={() => { fetchUsers(); }}
+      />
     </motion.div>
   );
 }
