@@ -26,7 +26,7 @@ import {
   Calendar as CalendarIcon, History, Users, Search, X,
   User as UserIcon, Activity, Layers, CheckSquare, Circle,
   ChevronRight, Briefcase, Clock, FileText, Tag, ArrowUpRight,
-  ArrowRight, Building2,
+  ArrowRight, Building2, List, LayoutGrid,
 } from 'lucide-react';
 
 // ── Brand Colors ──────────────────────────────────────────────────────────────
@@ -104,6 +104,15 @@ const getDueLabel = (due_date) => {
     if (isPast(d))     return { label: 'Overdue',  color: COLORS.coral  };
     return { label: format(d, 'MMM d'), color: '#94A3B8' };
   } catch { return null; }
+};
+
+// ── STRIPE COLOR HELPER ───────────────────────────────────────────────────────
+const getTodoStripeColor = (todo) => {
+  const isCompleted = todo.is_completed === true || todo.status === 'completed';
+  if (isCompleted) return 'bg-blue-600';
+  if (!todo.due_date) return 'bg-slate-300';
+  try { if (isPast(parseISO(todo.due_date))) return 'bg-red-700'; } catch {}
+  return 'bg-emerald-500';
 };
 
 // ── SECTION CARD ──────────────────────────────────────────────────────────────
@@ -688,11 +697,12 @@ function TodoDetailModal({ todo, isDark, onClose, onToggle, onPromote, onDelete,
   );
 }
 
-// ── TODO ITEM ─────────────────────────────────────────────────────────────────
-function TodoItem({ todo, onToggle, onPromote, onDelete, showOwner, ownerName, onClickDetail }) {
+// ── TODO ROW (list view — matches TaskRow strip layout) ───────────────────────
+function TodoRow({ todo, onToggle, onPromote, onDelete, showOwner, ownerName, onClickDetail }) {
   const isCompleted = todo.is_completed === true || todo.status === 'completed';
   const due         = getDueLabel(todo.due_date);
   const isOverdue   = due?.label === 'Overdue';
+  const stripe      = getTodoStripeColor(todo);
 
   return (
     <motion.div
@@ -701,92 +711,235 @@ function TodoItem({ todo, onToggle, onPromote, onDelete, showOwner, ownerName, o
       initial="hidden"
       animate="visible"
       exit="exit"
-      whileHover={{ y: -1 }}
-      className={`relative flex items-center gap-3 px-4 py-3 border-b last:border-b-0 transition-all group cursor-pointer
-        ${isOverdue && !isCompleted
-          ? 'bg-red-50/70 dark:bg-red-900/20 border-red-200 dark:border-red-800'
-          : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'
-        }
-      `}
-      onClick={() => onClickDetail(todo)}
     >
-      {isOverdue && !isCompleted && (
-        <div className="absolute left-0 top-0 bottom-0 w-0.5 rounded-r bg-red-400" />
-      )}
-
-      <motion.button
-        whileHover={{ scale: 1.12 }}
-        whileTap={{ scale: 0.88 }}
-        transition={springPhysics.button}
-        onClick={(e) => { e.stopPropagation(); onToggle(todo.id || todo._id); }}
-        className="w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all"
-        style={{
-          background:  isCompleted ? COLORS.emeraldGreen : 'transparent',
-          borderColor: isCompleted ? COLORS.emeraldGreen : '#CBD5E1',
-        }}
+      <div
+        className={`relative rounded-xl border transition-all duration-200 overflow-hidden group mx-4 my-1
+          ${isCompleted
+            ? 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 opacity-70'
+            : isOverdue
+              ? 'bg-red-50/60 dark:bg-red-900/10 border-red-200 dark:border-red-800 hover:border-red-300 dark:hover:border-red-700 hover:shadow-sm'
+              : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-500 hover:shadow-sm'
+          }`}
       >
-        {isCompleted && (
-          <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={springPhysics.button}>
-            <CheckCircle2 size={11} color="#fff" />
-          </motion.div>
-        )}
-      </motion.button>
+        {/* Left colored stripe */}
+        <div className={`absolute left-0 top-0 h-full w-1 ${stripe}`} />
 
-      <div className="flex-1 min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`text-sm font-medium truncate max-w-[260px] ${
-            isCompleted
-              ? 'line-through text-slate-400 dark:text-slate-500'
-              : 'text-slate-800 dark:text-slate-100'
-          }`}>
-            {todo.title || 'Untitled'}
-          </span>
-          {showOwner && ownerName && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
-              <UserIcon size={9} />{ownerName}
-            </span>
-          )}
-          {due && (
+        <div
+          className="pl-5 pr-3 py-2.5 grid items-center gap-0"
+          style={{ gridTemplateColumns: '24px minmax(0,1fr) 110px 76px 90px 100px' }}
+        >
+          {/* Toggle circle */}
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggle(todo.id || todo._id); }}
+            className="flex items-center justify-center"
+            title="Toggle complete"
+          >
             <span
-              className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full"
-              style={{ background: `${due.color}18`, color: due.color }}
+              className="w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all"
+              style={{
+                borderColor:     isCompleted ? COLORS.emeraldGreen : '#CBD5E1',
+                backgroundColor: isCompleted ? COLORS.emeraldGreen : 'transparent',
+              }}
             >
-              <CalendarIcon size={9} />{due.label}
+              {isCompleted && (
+                <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ duration: 0.15 }}>
+                  <CheckCircle2 size={9} color="#fff" />
+                </motion.div>
+              )}
             </span>
-          )}
-          {isCompleted && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400">
-              ✓ Done
-            </span>
+          </button>
+
+          {/* Title */}
+          <button
+            className={`min-w-0 text-left font-medium truncate transition-colors pl-1 pr-2 text-sm
+              ${isCompleted
+                ? 'text-slate-400 dark:text-slate-500 line-through'
+                : 'text-slate-800 dark:text-slate-100 hover:text-blue-700 dark:hover:text-blue-400'
+              }`}
+            onClick={() => onClickDetail(todo)}
+          >
+            {todo.title || 'Untitled'}
+            {showOwner && ownerName && (
+              <span className="ml-2 text-[10px] font-normal text-slate-400">· {ownerName}</span>
+            )}
+          </button>
+
+          {/* Due label */}
+          <div className="flex items-center justify-center overflow-hidden">
+            {due ? (
+              <span
+                className="text-[10px] font-bold px-2 py-0.5 rounded-md whitespace-nowrap"
+                style={{ background: `${due.color}18`, color: due.color }}
+              >
+                {due.label === 'Overdue' || due.label === 'Today' || due.label === 'Tomorrow'
+                  ? due.label
+                  : format(parseISO(todo.due_date), 'MMM d')}
+              </span>
+            ) : (
+              <span className="text-slate-300 dark:text-slate-600 text-[10px]">—</span>
+            )}
+          </div>
+
+          {/* Status badge */}
+          <div className="flex items-center justify-center overflow-hidden">
+            {isOverdue && !isCompleted ? (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 whitespace-nowrap">
+                OVERDUE
+              </span>
+            ) : isCompleted ? (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 whitespace-nowrap">
+                DONE
+              </span>
+            ) : (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                PENDING
+              </span>
+            )}
+          </div>
+
+          {/* Created date */}
+          <div className="flex items-center justify-center gap-1 overflow-hidden text-slate-400 dark:text-slate-500">
+            {todo.created_at ? (
+              <>
+                <Clock className="h-3 w-3 flex-shrink-0" />
+                <span className="text-[10px] font-medium truncate">
+                  {format(new Date(todo.created_at), 'MMM d')}
+                </span>
+              </>
+            ) : <span className="text-[10px]">—</span>}
+          </div>
+
+          {/* Actions — visible on hover */}
+          <div
+            className="flex items-center justify-end gap-0 opacity-0 group-hover:opacity-100 transition-opacity overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              onClick={() => onClickDetail(todo)}
+              className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+              title="View details"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => onPromote(todo)}
+              disabled={isCompleted}
+              className="p-1 rounded hover:bg-amber-50 dark:hover:bg-amber-900/30 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title="Promote to Task"
+            >
+              <Zap className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => onDelete(todo.id || todo._id)}
+              className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+              title="Delete"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ── TODO BOARD CARD (board view) ──────────────────────────────────────────────
+function TodoBoardCard({ todo, onToggle, onPromote, onDelete, onClickDetail, showOwner, ownerName }) {
+  const isCompleted = todo.is_completed === true || todo.status === 'completed';
+  const due         = getDueLabel(todo.due_date);
+  const isOverdue   = due?.label === 'Overdue';
+  const stripe      = getTodoStripeColor(todo);
+
+  return (
+    <motion.div layout variants={itemVariants}>
+      <div
+        className={`relative rounded-xl border overflow-hidden transition-all duration-200 group cursor-pointer
+          ${isCompleted
+            ? 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 opacity-75'
+            : isOverdue
+              ? 'bg-red-50/60 dark:bg-red-900/10 border-red-200 dark:border-red-800 hover:border-red-300 dark:hover:border-red-700 hover:shadow-md'
+              : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-500 hover:shadow-md'
+          }`}
+        onClick={() => onClickDetail(todo)}
+      >
+        {/* Top stripe */}
+        <div className={`h-1 w-full ${stripe}`} />
+
+        <div className="p-3 space-y-2.5">
+          {/* Title row */}
+          <div className="flex items-start justify-between gap-2">
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggle(todo.id || todo._id); }}
+              className="mt-0.5 flex-shrink-0"
+            >
+              <span
+                className="w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all"
+                style={{
+                  borderColor:     isCompleted ? COLORS.emeraldGreen : '#CBD5E1',
+                  backgroundColor: isCompleted ? COLORS.emeraldGreen : 'transparent',
+                }}
+              >
+                {isCompleted && <CheckCircle2 size={9} color="#fff" />}
+              </span>
+            </button>
+            <p
+              className={`flex-1 text-sm font-semibold leading-snug
+                ${isCompleted
+                  ? 'line-through text-slate-400 dark:text-slate-500'
+                  : 'text-slate-800 dark:text-slate-100'
+                }`}
+            >
+              {todo.title || 'Untitled'}
+            </p>
+            {/* Hover actions */}
+            <div
+              className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+              onClick={e => e.stopPropagation()}
+            >
+              <button
+                onClick={() => onPromote(todo)}
+                disabled={isCompleted}
+                className="p-1 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/30 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                title="Promote to Task"
+              >
+                <Zap size={13} />
+              </button>
+              <button
+                onClick={() => onDelete(todo.id || todo._id)}
+                className="p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                title="Delete"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          </div>
+
+          {/* Badges */}
+          <div className="flex flex-wrap gap-1.5">
+            {due && (
+              <span
+                className="text-[10px] font-bold px-2 py-0.5 rounded-md"
+                style={{ background: `${due.color}18`, color: due.color }}
+              >
+                {due.label === 'Overdue' || due.label === 'Today' || due.label === 'Tomorrow'
+                  ? due.label
+                  : format(parseISO(todo.due_date), 'MMM d')}
+              </span>
+            )}
+            {showOwner && ownerName && (
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">
+                {ownerName}
+              </span>
+            )}
+          </div>
+
+          {/* Description preview */}
+          {todo.description && (
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed line-clamp-2">
+              {todo.description}
+            </p>
           )}
         </div>
-        {todo.description && (
-          <p className="text-xs mt-0.5 line-clamp-1 text-slate-400 dark:text-slate-500">{todo.description}</p>
-        )}
-      </div>
-
-      <ChevronRight size={13} className="text-slate-300 dark:text-slate-600 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-
-      <div className="flex items-center gap-1.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150" onClick={e => e.stopPropagation()}>
-        <motion.button
-          whileTap={{ scale: 0.88 }}
-          onClick={(e) => { e.stopPropagation(); onPromote(todo); }}
-          disabled={isCompleted}
-          className={`flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border transition-all ${
-            isCompleted
-              ? 'bg-slate-100 dark:bg-slate-700 text-slate-400 border-slate-200 dark:border-slate-600 cursor-not-allowed'
-              : 'border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30'
-          }`}
-        >
-          <Zap size={11} /> Promote
-        </motion.button>
-        <motion.button
-          whileTap={{ scale: 0.88 }}
-          onClick={(e) => { e.stopPropagation(); onDelete(todo.id || todo._id); }}
-          className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 text-slate-400 dark:text-slate-500 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500 dark:hover:text-red-400 hover:border-red-200 dark:hover:border-red-700 transition-all"
-        >
-          <Trash2 size={13} />
-        </motion.button>
       </div>
     </motion.div>
   );
@@ -918,12 +1071,13 @@ export default function TodoDashboard() {
   const [todoFilter,   setTodoFilter]   = useState('all');
   const [search,       setSearch]       = useState('');
   const [logSearch,    setLogSearch]    = useState('');
+  const [viewMode,     setViewMode]     = useState('list'); // 'list' | 'board'
 
   // ── Detail popup ──────────────────────────────────────────────────────────
   const [selectedTodo, setSelectedTodo] = useState(null);
 
   // ── Promote modal ─────────────────────────────────────────────────────────
-  const [promoteTarget,    setPromoteTarget]    = useState(null); // the todo being promoted
+  const [promoteTarget,    setPromoteTarget]    = useState(null);
   const [promoteLoading,   setPromoteLoading]   = useState(false);
 
   // ── Activity log ──────────────────────────────────────────────────────────
@@ -961,28 +1115,25 @@ export default function TodoDashboard() {
   const permittedUsers = useMemo(() => {
     const selfId = user?.id;
     if (isAdmin) return allUsers.filter(u => (u.id || u._id) !== selfId);
-    // Managers only see others if they have explicit view_other_todos permission
     if (isManager) {
       const list = Array.isArray(user?.permissions?.view_other_todos)
         ? user.permissions.view_other_todos.filter(id => id !== 'everyone')
         : [];
       if (canSeeEveryone) return allUsers.filter(u => (u.id || u._id) !== selfId);
       if (list.length > 0) return allUsers.filter(u => list.includes(u.id || u._id) && (u.id || u._id) !== selfId);
-      return []; // No cross-visibility → no dropdown entries
+      return [];
     }
-    // Regular staff: only show users explicitly listed in permissions
     const list = Array.isArray(user?.permissions?.view_other_todos)
       ? user.permissions.view_other_todos.filter(id => id !== 'everyone')
       : [];
     return allUsers.filter(u => list.includes(u.id || u._id) && (u.id || u._id) !== selfId);
   }, [isAdmin, isManager, allUsers, user, canSeeEveryone]);
 
-  // Only show the dropdown if the user actually has someone else to view
   const showDropdown = isAdmin || canSeeEveryone || permittedUsers.length > 0;
 
   // ── Resolved user id ───────────────────────────────────────────────────────
   const resolvedUserId = useMemo(() => {
-    if (selectedUser === 'self')     return user?.id || 'self';  // ← FIX: 'self' sentinel instead of null
+    if (selectedUser === 'self')     return user?.id || 'self';
     if (selectedUser === 'everyone') return 'all';
     return selectedUser;
   }, [selectedUser, user?.id]);
@@ -990,9 +1141,8 @@ export default function TodoDashboard() {
   // ── Fetch todos ────────────────────────────────────────────────────────────
   const { data: todosRaw = [], isLoading } = useQuery({
     queryKey: ['todos', 'page', resolvedUserId],
-    enabled:  true,                               // ← FIX: always fetch; backend scopes by JWT
+    enabled:  true,
     queryFn:  async () => {
-      // Build params: 'all' → user_id=all, specific id → user_id=<id>, self → no param
       const params = {};
       if (resolvedUserId === 'all') {
         params.user_id = 'all';
@@ -1140,25 +1290,20 @@ export default function TodoDashboard() {
     onError: () => toast.error('Failed to create todo'),
   });
 
- const toggleMutation = useMutation({
-  mutationFn: ({ id }) => {
-    const todo = todos.find(t => (t.id || t._id) === id);
-    if (!todo) throw new Error('Todo not found');
-
-    const nowCompleted = !(todo.is_completed === true || todo.status === 'completed');
-
-    const payload = {
-      title: todo.title || "",
-      description: todo.description || "",
-      due_date: todo.due_date || null,
-      is_completed: nowCompleted,
-      status: nowCompleted ? "completed" : "pending"
-    };
-
-    console.log("TOGGLE PAYLOAD:", payload);
-
-    return api.patch(`/todos/${id}`, payload);
-  },
+  const toggleMutation = useMutation({
+    mutationFn: ({ id }) => {
+      const todo = todos.find(t => (t.id || t._id) === id);
+      if (!todo) throw new Error('Todo not found');
+      const nowCompleted = !(todo.is_completed === true || todo.status === 'completed');
+      const payload = {
+        title: todo.title || "",
+        description: todo.description || "",
+        due_date: todo.due_date || null,
+        is_completed: nowCompleted,
+        status: nowCompleted ? "completed" : "pending"
+      };
+      return api.patch(`/todos/${id}`, payload);
+    },
     onSuccess: (_, { id }) => {
       const todo = todos.find(t => (t.id || t._id) === id);
       if (todo) {
@@ -1207,33 +1352,29 @@ export default function TodoDashboard() {
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleAdd = () => {
     if (!title.trim()) return;
- 
     addMutation.mutate({
       title:        title.trim(),
       description:  description.trim(),
-      due_date:     dueDate || null,   // ← FIX: send "YYYY-MM-DD" string directly, not ISO
+      due_date:     dueDate || null,
       is_completed: false,
       status:       'pending',
     });
   };
 
-  const handleToggle = (id) => toggleMutation.mutate({ id });
+  const handleToggle  = (id) => toggleMutation.mutate({ id });
   const handleDelete  = (id) => deleteMutation.mutate(id);
 
-  // Open promote modal instead of firing directly
   const handleOpenPromote = (todo) => {
-    setSelectedTodo(null); // close detail modal if open
+    setSelectedTodo(null);
     setPromoteTarget(todo);
   };
 
-  // Called from PromoteToTaskModal on form submit
   const handleConfirmPromote = async (todoId, taskData) => {
     setPromoteLoading(true);
     try {
       await api.post(`/todos/${todoId}/promote-to-task`, taskData);
       toast.success('Promoted to Master Task!');
 
-      // Log it
       const todo = todos.find(t => (t.id || t._id) === todoId);
       if (todo) {
         setTodoLog(prev => [{
@@ -1404,525 +1545,651 @@ export default function TodoDashboard() {
       {/* ORDERED SECTIONS */}
       {tdOrder.map((sectionId) => {
         if (sectionId === 'stats_row') return (
-      <React.Fragment key="stats_row">
-      {/* ── Key Metrics ─────────────────────────────────────────────────────── */}
-      <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-3" variants={itemVariants}>
-        <MetricCard icon={Layers}      label="Total"        value={stats.total}                sub="todos tracked"                              accent={COLORS.deepBlue} />
-        <MetricCard icon={AlertCircle} label="Overdue"      value={stats.overdue}              sub="need attention"                             accent={stats.overdue > 0 ? COLORS.coral : '#94A3B8'} />
-        <MetricCard icon={TrendingUp}  label="Completion"   value={`${stats.completionRate}%`} sub={`${stats.completed} of ${stats.total}`}     accent={COLORS.emeraldGreen} progress={stats.completionRate} />
-        <MetricCard icon={Sparkles}    label="Health Score" value={`${stats.healthScore}%`}    sub={stats.healthScore >= 80 ? 'On track' : 'Needs focus'} accent={stats.healthScore >= 80 ? '#1F6FB2' : COLORS.amber} progress={stats.healthScore} />
-      </motion.div>
-      </React.Fragment>
+          <React.Fragment key="stats_row">
+            <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-3" variants={itemVariants}>
+              <MetricCard icon={Layers}      label="Total"        value={stats.total}                sub="todos tracked"                              accent={COLORS.deepBlue} />
+              <MetricCard icon={AlertCircle} label="Overdue"      value={stats.overdue}              sub="need attention"                             accent={stats.overdue > 0 ? COLORS.coral : '#94A3B8'} />
+              <MetricCard icon={TrendingUp}  label="Completion"   value={`${stats.completionRate}%`} sub={`${stats.completed} of ${stats.total}`}     accent={COLORS.emeraldGreen} progress={stats.completionRate} />
+              <MetricCard icon={Sparkles}    label="Health Score" value={`${stats.healthScore}%`}    sub={stats.healthScore >= 80 ? 'On track' : 'Needs focus'} accent={stats.healthScore >= 80 ? '#1F6FB2' : COLORS.amber} progress={stats.healthScore} />
+            </motion.div>
+          </React.Fragment>
         );
+
         if (sectionId === 'content_area') return (
-      <React.Fragment key="content_area">
-      <AnimatePresence mode="wait">
+          <React.Fragment key="content_area">
+            <AnimatePresence mode="wait">
 
-        {/* ─────────────── TODOS TAB ───────────────────────────────────────── */}
-        {activeTab === 'todos' && (
-          <motion.div key="todos" variants={containerVariants} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+              {/* ─────────────── TODOS TAB ───────────────────────────────────────── */}
+              {activeTab === 'todos' && (
+                <motion.div key="todos" variants={containerVariants} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
+                  <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
 
-              {/* LEFT — Create form */}
-              <div className="xl:col-span-4 flex flex-col gap-4">
+                    {/* LEFT — Create form */}
+                    <div className="xl:col-span-4 flex flex-col gap-4">
 
-                <motion.div variants={itemVariants}>
-                  <SectionCard>
-                    <CardHeaderRow
-                      iconBg="bg-emerald-50 dark:bg-emerald-900/40"
-                      icon={<Plus className="h-4 w-4 text-emerald-600" />}
-                      title="New Todo"
-                      subtitle="Add to your list"
-                    />
-                    <div className="p-4 space-y-4">
-                      <div>
-                        <label className="block text-[10px] font-semibold uppercase tracking-widest mb-1.5 text-slate-400">Title *</label>
-                        <input
-                          type="text" value={title} onChange={e => setTitle(e.target.value)}
-                          onKeyDown={e => e.key === 'Enter' && handleAdd()}
-                          placeholder="What needs to get done?"
-                          className="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-600 px-3 text-sm font-medium placeholder:font-normal bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-semibold uppercase tracking-widest mb-1.5 text-slate-400">Notes</label>
-                        <textarea
-                          value={description} onChange={e => setDescription(e.target.value)}
-                          placeholder="Additional context…" rows={3}
-                          className="w-full rounded-xl border border-slate-200 dark:border-slate-600 px-3 py-2.5 text-sm resize-none bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-semibold uppercase tracking-widest mb-1.5 text-slate-400">Due Date</label>
-                        <input
-                          type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
-                          className="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-600 px-3 text-sm bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40"
-                        />
-                      </div>
-                      <Button
-                        onClick={handleAdd}
-                        disabled={!title.trim() || addMutation.isPending}
-                        className="w-full h-10 rounded-xl text-sm font-semibold flex items-center justify-center gap-2"
-                        style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
-                      >
-                        {addMutation.isPending
-                          ? <><RefreshCw size={14} className="animate-spin" /> Creating…</>
-                          : <><Plus size={14} /> Create Todo</>
-                        }
-                      </Button>
-                    </div>
-                  </SectionCard>
-                </motion.div>
-
-                {/* Quick stats */}
-                <motion.div variants={itemVariants}>
-                  <SectionCard>
-                    <div className="grid grid-cols-3 divide-x divide-slate-100 dark:divide-slate-700">
-                      {[
-                        { label: 'Done',  value: `${stats.completionRate}%`, color: COLORS.emeraldGreen },
-                        { label: 'Alert', value: stats.overdue,              color: COLORS.amber         },
-                        { label: 'Left',  value: stats.pending,              color: COLORS.deepBlue      },
-                      ].map(({ label, value, color }) => (
-                        <div key={label} className="px-3 py-4 text-center">
-                          <div className="text-xl font-bold tabular-nums" style={{ color }}>{value}</div>
-                          <div className="text-[9px] font-semibold uppercase tracking-widest mt-0.5 text-slate-400">{label}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </SectionCard>
-                </motion.div>
-
-                {/* Progress bar */}
-                <motion.div variants={itemVariants}>
-                  <SectionCard>
-                    <div className="p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Overall Progress</span>
-                        <span className="text-xs font-bold tabular-nums text-slate-700 dark:text-slate-200">{stats.completionRate}%</span>
-                      </div>
-                      <div className="h-2 rounded-full overflow-hidden flex gap-0.5 bg-slate-100 dark:bg-slate-700">
-                        {stats.total > 0 ? (
-                          <>
-                            {stats.completed > 0 && (
-                              <motion.div className="h-full rounded-l-full" style={{ background: COLORS.emeraldGreen, width: `${(stats.completed / stats.total) * 100}%`, minWidth: 4 }}
-                                initial={{ width: 0 }} animate={{ width: `${(stats.completed / stats.total) * 100}%` }} transition={{ duration: 0.9, ease: 'easeOut', delay: 0.1 }} />
-                            )}
-                            {stats.overdue > 0 && (
-                              <motion.div className="h-full" style={{ background: COLORS.coral, width: `${(stats.overdue / stats.total) * 100}%`, minWidth: 4 }}
-                                initial={{ width: 0 }} animate={{ width: `${(stats.overdue / stats.total) * 100}%` }} transition={{ duration: 0.9, ease: 'easeOut', delay: 0.25 }} />
-                            )}
-                            {(stats.pending - stats.overdue) > 0 && (
-                              <motion.div className="h-full rounded-r-full flex-1 bg-slate-200 dark:bg-slate-600" style={{ minWidth: 4 }}
-                                initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5, delay: 0.4 }} />
-                            )}
-                          </>
-                        ) : (
-                          <div className="h-full w-full rounded-full bg-slate-200 dark:bg-slate-600" />
-                        )}
-                      </div>
-                      <div className="flex items-center gap-4 mt-2.5 flex-wrap">
-                        {[
-                          { color: COLORS.emeraldGreen, label: 'Completed', count: stats.completed,               hide: false },
-                          { color: COLORS.coral,        label: 'Overdue',   count: stats.overdue,                 hide: stats.overdue === 0 },
-                          { color: '#CBD5E1',            label: 'Pending',   count: stats.pending - stats.overdue, hide: false },
-                        ].filter(i => !i.hide).map(({ color, label, count }) => (
-                          <div key={label} className="flex items-center gap-1.5">
-                            <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
-                            <span className="text-[10px] font-medium text-slate-400">
-                              {label} <span className="font-bold text-slate-600 dark:text-slate-300">{count}</span>
-                            </span>
+                      <motion.div variants={itemVariants}>
+                        <SectionCard>
+                          <CardHeaderRow
+                            iconBg="bg-emerald-50 dark:bg-emerald-900/40"
+                            icon={<Plus className="h-4 w-4 text-emerald-600" />}
+                            title="New Todo"
+                            subtitle="Add to your list"
+                          />
+                          <div className="p-4 space-y-4">
+                            <div>
+                              <label className="block text-[10px] font-semibold uppercase tracking-widest mb-1.5 text-slate-400">Title *</label>
+                              <input
+                                type="text" value={title} onChange={e => setTitle(e.target.value)}
+                                onKeyDown={e => e.key === 'Enter' && handleAdd()}
+                                placeholder="What needs to get done?"
+                                className="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-600 px-3 text-sm font-medium placeholder:font-normal bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-semibold uppercase tracking-widest mb-1.5 text-slate-400">Notes</label>
+                              <textarea
+                                value={description} onChange={e => setDescription(e.target.value)}
+                                placeholder="Additional context…" rows={3}
+                                className="w-full rounded-xl border border-slate-200 dark:border-slate-600 px-3 py-2.5 text-sm resize-none bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-semibold uppercase tracking-widest mb-1.5 text-slate-400">Due Date</label>
+                              <input
+                                type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+                                className="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-600 px-3 text-sm bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40"
+                              />
+                            </div>
+                            <Button
+                              onClick={handleAdd}
+                              disabled={!title.trim() || addMutation.isPending}
+                              className="w-full h-10 rounded-xl text-sm font-semibold flex items-center justify-center gap-2"
+                              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+                            >
+                              {addMutation.isPending
+                                ? <><RefreshCw size={14} className="animate-spin" /> Creating…</>
+                                : <><Plus size={14} /> Create Todo</>
+                              }
+                            </Button>
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  </SectionCard>
-                </motion.div>
+                        </SectionCard>
+                      </motion.div>
 
-                {/* AI Audit */}
-                <motion.div variants={itemVariants} className="flex-1">
-                  <SectionCard className="h-full">
-                    <div className="p-4 h-full flex flex-col">
-                      <div className="flex items-center gap-3">
-                        <div className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-900/40">
-                          <Sparkles className="h-4 w-4 text-purple-500" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">AI Audit</h3>
-                          <p className="text-xs text-slate-400 dark:text-slate-500">
-                            {stats.total === 0 ? 'No todos yet — add some to get started'
-                              : stats.overdue > 0 ? `⚠️ ${stats.overdue} overdue ${stats.overdue === 1 ? 'todo' : 'todos'} need attention`
-                              : stats.completionRate === 100 ? '🎉 All todos completed — great work!'
-                              : stats.completionRate >= 75 ? `✅ ${stats.completionRate}% done — almost there!`
-                              : `📋 ${stats.pending} remaining · ${stats.completionRate}% on track`
-                            }
-                          </p>
-                        </div>
-                        <div className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                          style={{
-                            background: stats.overdue > 0 ? COLORS.coral : stats.completionRate >= 75 ? COLORS.emeraldGreen : COLORS.amber,
-                            boxShadow:  `0 0 0 3px ${(stats.overdue > 0 ? COLORS.coral : stats.completionRate >= 75 ? COLORS.emeraldGreen : COLORS.amber)}28`,
-                          }}
-                        />
-                      </div>
-                      {stats.total > 0 && (
-                        <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-start gap-2">
-                          <AlertCircle size={12} style={{ color: stats.overdue > 0 ? COLORS.coral : COLORS.mediumBlue, marginTop: 1, flexShrink: 0 }} />
-                          <p className="text-[11px] font-medium leading-relaxed text-slate-400 dark:text-slate-500">
-                            {stats.overdue > 0
-                              ? `Address your ${stats.overdue} overdue ${stats.overdue === 1 ? 'item' : 'items'} first to improve your health score from ${stats.healthScore}%.`
-                              : stats.pending > 0
-                                ? `${stats.pending} ${stats.pending === 1 ? 'todo' : 'todos'} left. Health score: ${stats.healthScore}% — keep the momentum!`
-                                : `Perfect score! Health at ${stats.healthScore}%. Consider adding new goals.`
-                            }
-                          </p>
-                        </div>
+                      {/* Quick stats */}
+                      <motion.div variants={itemVariants}>
+                        <SectionCard>
+                          <div className="grid grid-cols-3 divide-x divide-slate-100 dark:divide-slate-700">
+                            {[
+                              { label: 'Done',  value: `${stats.completionRate}%`, color: COLORS.emeraldGreen },
+                              { label: 'Alert', value: stats.overdue,              color: COLORS.amber         },
+                              { label: 'Left',  value: stats.pending,              color: COLORS.deepBlue      },
+                            ].map(({ label, value, color }) => (
+                              <div key={label} className="px-3 py-4 text-center">
+                                <div className="text-xl font-bold tabular-nums" style={{ color }}>{value}</div>
+                                <div className="text-[9px] font-semibold uppercase tracking-widest mt-0.5 text-slate-400">{label}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </SectionCard>
+                      </motion.div>
+
+                      {/* Progress bar */}
+                      <motion.div variants={itemVariants}>
+                        <SectionCard>
+                          <div className="p-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Overall Progress</span>
+                              <span className="text-xs font-bold tabular-nums text-slate-700 dark:text-slate-200">{stats.completionRate}%</span>
+                            </div>
+                            <div className="h-2 rounded-full overflow-hidden flex gap-0.5 bg-slate-100 dark:bg-slate-700">
+                              {stats.total > 0 ? (
+                                <>
+                                  {stats.completed > 0 && (
+                                    <motion.div className="h-full rounded-l-full" style={{ background: COLORS.emeraldGreen, width: `${(stats.completed / stats.total) * 100}%`, minWidth: 4 }}
+                                      initial={{ width: 0 }} animate={{ width: `${(stats.completed / stats.total) * 100}%` }} transition={{ duration: 0.9, ease: 'easeOut', delay: 0.1 }} />
+                                  )}
+                                  {stats.overdue > 0 && (
+                                    <motion.div className="h-full" style={{ background: COLORS.coral, width: `${(stats.overdue / stats.total) * 100}%`, minWidth: 4 }}
+                                      initial={{ width: 0 }} animate={{ width: `${(stats.overdue / stats.total) * 100}%` }} transition={{ duration: 0.9, ease: 'easeOut', delay: 0.25 }} />
+                                  )}
+                                  {(stats.pending - stats.overdue) > 0 && (
+                                    <motion.div className="h-full rounded-r-full flex-1 bg-slate-200 dark:bg-slate-600" style={{ minWidth: 4 }}
+                                      initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5, delay: 0.4 }} />
+                                  )}
+                                </>
+                              ) : (
+                                <div className="h-full w-full rounded-full bg-slate-200 dark:bg-slate-600" />
+                              )}
+                            </div>
+                            <div className="flex items-center gap-4 mt-2.5 flex-wrap">
+                              {[
+                                { color: COLORS.emeraldGreen, label: 'Completed', count: stats.completed,               hide: false },
+                                { color: COLORS.coral,        label: 'Overdue',   count: stats.overdue,                 hide: stats.overdue === 0 },
+                                { color: '#CBD5E1',            label: 'Pending',   count: stats.pending - stats.overdue, hide: false },
+                              ].filter(i => !i.hide).map(({ color, label, count }) => (
+                                <div key={label} className="flex items-center gap-1.5">
+                                  <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
+                                  <span className="text-[10px] font-medium text-slate-400">
+                                    {label} <span className="font-bold text-slate-600 dark:text-slate-300">{count}</span>
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </SectionCard>
+                      </motion.div>
+
+                      {/* AI Audit */}
+                      <motion.div variants={itemVariants} className="flex-1">
+                        <SectionCard className="h-full">
+                          <div className="p-4 h-full flex flex-col">
+                            <div className="flex items-center gap-3">
+                              <div className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-900/40">
+                                <Sparkles className="h-4 w-4 text-purple-500" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">AI Audit</h3>
+                                <p className="text-xs text-slate-400 dark:text-slate-500">
+                                  {stats.total === 0 ? 'No todos yet — add some to get started'
+                                    : stats.overdue > 0 ? `⚠️ ${stats.overdue} overdue ${stats.overdue === 1 ? 'todo' : 'todos'} need attention`
+                                    : stats.completionRate === 100 ? '🎉 All todos completed — great work!'
+                                    : stats.completionRate >= 75 ? `✅ ${stats.completionRate}% done — almost there!`
+                                    : `📋 ${stats.pending} remaining · ${stats.completionRate}% on track`
+                                  }
+                                </p>
+                              </div>
+                              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                style={{
+                                  background: stats.overdue > 0 ? COLORS.coral : stats.completionRate >= 75 ? COLORS.emeraldGreen : COLORS.amber,
+                                  boxShadow:  `0 0 0 3px ${(stats.overdue > 0 ? COLORS.coral : stats.completionRate >= 75 ? COLORS.emeraldGreen : COLORS.amber)}28`,
+                                }}
+                              />
+                            </div>
+                            {stats.total > 0 && (
+                              <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-start gap-2">
+                                <AlertCircle size={12} style={{ color: stats.overdue > 0 ? COLORS.coral : COLORS.mediumBlue, marginTop: 1, flexShrink: 0 }} />
+                                <p className="text-[11px] font-medium leading-relaxed text-slate-400 dark:text-slate-500">
+                                  {stats.overdue > 0
+                                    ? `Address your ${stats.overdue} overdue ${stats.overdue === 1 ? 'item' : 'items'} first to improve your health score from ${stats.healthScore}%.`
+                                    : stats.pending > 0
+                                      ? `${stats.pending} ${stats.pending === 1 ? 'todo' : 'todos'} left. Health score: ${stats.healthScore}% — keep the momentum!`
+                                      : `Perfect score! Health at ${stats.healthScore}%. Consider adding new goals.`
+                                  }
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </SectionCard>
+                      </motion.div>
+
+                    </div>
+
+                    {/* RIGHT — Todo list / board */}
+                    <div className="xl:col-span-8 space-y-4">
+
+                      {showDropdown && (
+                        <motion.div variants={itemVariants}>
+                          <SectionCard>
+                            <CardHeaderRow
+                              iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
+                              icon={<Users className="h-4 w-4 text-blue-500" />}
+                              title={isAdmin ? 'Filter by Team Member' : 'View Todo List'}
+                              subtitle="Switch between user views"
+                              action={
+                                isAdmin && (
+                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md uppercase tracking-widest bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                    Admin
+                                  </span>
+                                )
+                              }
+                            />
+                            <div className="p-4">
+                              <UserSelector />
+                            </div>
+                          </SectionCard>
+                        </motion.div>
                       )}
+
+                      <motion.div variants={itemVariants}>
+                        <SectionCard>
+                          {/* ── Section header with List/Board toggle ── */}
+                          <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700">
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                              <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                                <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/40">
+                                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                                </div>
+                                <div className="min-w-0">
+                                  <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100 truncate">{selectedUserLabel}</h3>
+                                  <p className="text-xs text-slate-400 dark:text-slate-500">{filteredTodos.length} items · click any row for details</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                {/* List / Board toggle */}
+                                <div className={`flex items-center gap-0.5 p-0.5 rounded-lg border ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-100 border-slate-200'}`}>
+                                  <button
+                                    onClick={() => setViewMode('list')}
+                                    title="List view"
+                                    className={`p-1.5 rounded-md transition-all ${viewMode === 'list'
+                                      ? isDark ? 'bg-slate-600 text-slate-100 shadow-sm' : 'bg-white text-slate-700 shadow-sm'
+                                      : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                                  >
+                                    <List size={13} />
+                                  </button>
+                                  <button
+                                    onClick={() => setViewMode('board')}
+                                    title="Board view"
+                                    className={`p-1.5 rounded-md transition-all ${viewMode === 'board'
+                                      ? isDark ? 'bg-slate-600 text-slate-100 shadow-sm' : 'bg-white text-slate-700 shadow-sm'
+                                      : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                                  >
+                                    <LayoutGrid size={13} />
+                                  </button>
+                                </div>
+                                <div className="w-52">
+                                  <SearchInput value={search} onChange={setSearch} placeholder="Search todos…" />
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 mt-3 flex-wrap">
+                              <FilterChip id="all"       label="All"       count={todos.length}    todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
+                              <FilterChip id="pending"   label="Pending"   count={stats.pending}   todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
+                              <FilterChip id="completed" label="Completed" count={stats.completed} todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
+                              {stats.overdue > 0 && (
+                                <FilterChip id="overdue" label="Overdue" count={stats.overdue} todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
+                              )}
+                            </div>
+                          </div>
+
+                          {/* ── LIST VIEW ── */}
+                          {viewMode === 'list' && (
+                            <>
+                              <div
+                                className="px-4 py-2 border-b border-slate-100 dark:border-slate-700 grid items-center bg-slate-50/80 dark:bg-slate-700/30"
+                                style={{ gridTemplateColumns: '20px minmax(0,1fr) 110px 76px 90px 100px', paddingLeft: '1.75rem', paddingRight: '0.75rem' }}
+                              >
+                                <div />
+                                <span className="pl-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400">Title</span>
+                                <span className="text-center text-[10px] font-semibold uppercase tracking-widest text-slate-400">Due</span>
+                                <span className="text-center text-[10px] font-semibold uppercase tracking-widest text-slate-400">Status</span>
+                                <span className="text-center text-[10px] font-semibold uppercase tracking-widest text-slate-400">Created</span>
+                                <span className="text-right text-[10px] font-semibold uppercase tracking-widest text-slate-400">Actions</span>
+                              </div>
+                              <div style={{ maxHeight: 500, overflowY: 'auto' }} className="todo-slim py-1">
+                                {isLoading ? (
+                                  <MiniLoader height={300} />
+                                ) : filteredTodos.length === 0 ? (
+                                  <div className="py-16 flex flex-col items-center gap-3">
+                                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center bg-slate-100 dark:bg-slate-700">
+                                      <CheckSquare size={24} className="text-slate-300 dark:text-slate-500" />
+                                    </div>
+                                    <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">
+                                      {search || todoFilter !== 'all' ? 'No matching todos' : 'No todos yet'}
+                                    </p>
+                                    <p className="text-xs font-medium text-slate-400 dark:text-slate-500">
+                                      {search || todoFilter !== 'all' ? 'Try adjusting your filters' : 'Create one using the form on the left'}
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <AnimatePresence>
+                                    {filteredTodos.map(todo => (
+                                      <TodoRow
+                                        key={todo.id || todo._id}
+                                        todo={todo}
+                                        onToggle={handleToggle}
+                                        onPromote={handleOpenPromote}
+                                        onDelete={handleDelete}
+                                        showOwner={selectedUser === 'everyone'}
+                                        ownerName={resolveUserName(todo.user_id)}
+                                        onClickDetail={setSelectedTodo}
+                                      />
+                                    ))}
+                                  </AnimatePresence>
+                                )}
+                              </div>
+                            </>
+                          )}
+
+                          {/* ── BOARD VIEW ── */}
+                          {viewMode === 'board' && (
+                            <div className="p-4">
+                              {isLoading ? (
+                                <MiniLoader height={300} />
+                              ) : (
+                                (() => {
+                                  const columns = [
+                                    {
+                                      id:    'pending',
+                                      label: 'To Do',
+                                      color: '#EF4444',
+                                      bg:    isDark ? 'bg-red-900/10 border-red-800' : 'bg-red-50/60 border-red-200',
+                                      items: filteredTodos.filter(t => {
+                                        const done = t.is_completed === true || t.status === 'completed';
+                                        if (done) return false;
+                                        try { return t.due_date ? !isPast(parseISO(t.due_date)) : true; } catch { return true; }
+                                      }),
+                                    },
+                                    {
+                                      id:    'overdue',
+                                      label: 'Overdue',
+                                      color: '#B91C1C',
+                                      bg:    isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-100/60 border-red-300',
+                                      items: filteredTodos.filter(t => {
+                                        if (t.is_completed === true || t.status === 'completed') return false;
+                                        if (!t.due_date) return false;
+                                        try { return isPast(parseISO(t.due_date)); } catch { return false; }
+                                      }),
+                                    },
+                                    {
+                                      id:    'completed',
+                                      label: 'Done',
+                                      color: '#2563EB',
+                                      bg:    isDark ? 'bg-blue-900/10 border-blue-800' : 'bg-blue-50/60 border-blue-200',
+                                      items: filteredTodos.filter(t => t.is_completed === true || t.status === 'completed'),
+                                    },
+                                  ];
+
+                                  return (
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                      {columns.map(col => (
+                                        <div key={col.id} className={`rounded-xl border ${col.bg} p-3`}>
+                                          {/* Column header */}
+                                          <div className="flex items-center justify-between mb-3">
+                                            <div className="flex items-center gap-2">
+                                              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: col.color }} />
+                                              <span className="text-xs font-bold uppercase tracking-widest" style={{ color: col.color }}>{col.label}</span>
+                                            </div>
+                                            <span
+                                              className="text-[10px] font-black px-2 py-0.5 rounded-full"
+                                              style={{ background: `${col.color}18`, color: col.color }}
+                                            >
+                                              {col.items.length}
+                                            </span>
+                                          </div>
+
+                                          {/* Cards */}
+                                          <div className="space-y-2 max-h-[520px] overflow-y-auto todo-slim">
+                                            {col.items.length === 0 ? (
+                                              <div className="py-8 flex flex-col items-center gap-2 opacity-50">
+                                                <CheckSquare size={18} className="text-slate-400" />
+                                                <p className="text-[11px] font-medium text-slate-400">Empty</p>
+                                              </div>
+                                            ) : (
+                                              <AnimatePresence>
+                                                {col.items.map(todo => (
+                                                  <TodoBoardCard
+                                                    key={todo.id || todo._id}
+                                                    todo={todo}
+                                                    onToggle={handleToggle}
+                                                    onPromote={handleOpenPromote}
+                                                    onDelete={handleDelete}
+                                                    onClickDetail={setSelectedTodo}
+                                                    showOwner={selectedUser === 'everyone'}
+                                                    ownerName={resolveUserName(todo.user_id)}
+                                                  />
+                                                ))}
+                                              </AnimatePresence>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  );
+                                })()
+                              )}
+                            </div>
+                          )}
+
+                        </SectionCard>
+                      </motion.div>
                     </div>
-                  </SectionCard>
+                  </div>
+
+                  {/* ── Focus Board — Full-width horizontal card below both columns ── */}
+                  <motion.div variants={itemVariants}>
+                    <SectionCard>
+                      <div className="p-5">
+                        <div className="flex flex-col lg:flex-row gap-6">
+
+                          {/* Left section: header + health score ring */}
+                          <div className="flex items-start gap-4 lg:w-64 flex-shrink-0">
+                            <div className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-900/40 flex-shrink-0 mt-0.5">
+                              <Target className="h-4 w-4 text-amber-500" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Focus Board</h3>
+                              <p className="text-xs text-slate-400 dark:text-slate-500 mb-3">Today's priority queue</p>
+                              <div className="flex items-center gap-3">
+                                <div className="relative w-14 h-14 flex-shrink-0">
+                                  <svg viewBox="0 0 44 44" className="w-14 h-14 -rotate-90">
+                                    <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none"
+                                      stroke={isDark ? '#334155' : '#e2e8f0'} />
+                                    <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none"
+                                      strokeDasharray={`${(stats.healthScore / 100) * 106.8} 106.8`}
+                                      strokeLinecap="round"
+                                      stroke={stats.healthScore >= 80 ? COLORS.emeraldGreen : stats.healthScore >= 50 ? COLORS.amber : COLORS.coral} />
+                                  </svg>
+                                  <span className="absolute inset-0 flex items-center justify-center text-[12px] font-black"
+                                    style={{ color: stats.healthScore >= 80 ? COLORS.emeraldGreen : stats.healthScore >= 50 ? COLORS.amber : COLORS.coral }}>
+                                    {stats.healthScore}
+                                  </span>
+                                </div>
+                                <div>
+                                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Health Score</p>
+                                  <p className="text-sm font-bold mt-0.5" style={{ color: stats.healthScore >= 80 ? COLORS.emeraldGreen : stats.healthScore >= 50 ? COLORS.amber : COLORS.coral }}>
+                                    {stats.healthScore >= 80 ? 'Excellent' : stats.healthScore >= 50 ? 'Fair' : 'Needs Work'}
+                                  </p>
+                                  <p className="text-[10px] text-slate-400 mt-0.5">{stats.completed}/{stats.total} done</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Vertical divider */}
+                          <div className="hidden lg:block w-px bg-slate-100 dark:bg-slate-700 flex-shrink-0" />
+
+                          {/* Middle section: priority todo grid */}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2.5">
+                              {stats.overdue > 0 ? '🔥 Clear These First' : '📌 Up Next'}
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                              {(() => {
+                                const overdueTodos = todos.filter(t => {
+                                  if (t.is_completed === true || t.status === 'completed') return false;
+                                  if (!t.due_date) return false;
+                                  try { return isPast(parseISO(t.due_date)); } catch { return false; }
+                                });
+                                const pendingTodos = todos.filter(t => {
+                                  if (t.is_completed === true || t.status === 'completed') return false;
+                                  if (!t.due_date) return true;
+                                  try { return !isPast(parseISO(t.due_date)); } catch { return true; }
+                                });
+                                const focusList = [...overdueTodos, ...pendingTodos].slice(0, 6);
+                                if (focusList.length === 0) return (
+                                  <div className="col-span-3 flex flex-col items-center justify-center py-4 gap-2">
+                                    <CheckCircle2 size={20} className="text-emerald-400" />
+                                    <p className="text-xs font-semibold text-slate-400">All clear — nothing pending!</p>
+                                  </div>
+                                );
+                                return focusList.map((t, i) => {
+                                  const isOvrd = t.due_date && !t.is_completed
+                                    ? (() => { try { return isPast(parseISO(t.due_date)); } catch { return false; } })()
+                                    : false;
+                                  return (
+                                    <motion.div
+                                      key={t.id || t._id}
+                                      initial={{ opacity: 0, y: 6 }}
+                                      animate={{ opacity: 1, y: 0 }}
+                                      transition={{ delay: i * 0.04 }}
+                                      onClick={() => setSelectedTodo(t)}
+                                      className="flex items-center gap-2 px-2.5 py-2 rounded-lg border cursor-pointer group transition-all hover:shadow-sm"
+                                      style={{
+                                        borderColor: isOvrd ? (isDark ? '#7f1d1d' : '#fecaca') : (isDark ? '#334155' : '#e2e8f0'),
+                                        backgroundColor: isOvrd
+                                          ? (isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2')
+                                          : (isDark ? 'rgba(255,255,255,0.02)' : '#fafafa'),
+                                      }}
+                                    >
+                                      <span
+                                        className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-black"
+                                        style={{
+                                          backgroundColor: isOvrd ? `${COLORS.coral}18` : `${COLORS.mediumBlue}12`,
+                                          color: isOvrd ? COLORS.coral : COLORS.mediumBlue,
+                                        }}
+                                      >
+                                        {i + 1}
+                                      </span>
+                                      <span className="flex-1 text-xs font-medium truncate" style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>
+                                        {t.title}
+                                      </span>
+                                      {isOvrd && (
+                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-500 flex-shrink-0">
+                                          Late
+                                        </span>
+                                      )}
+                                    </motion.div>
+                                  );
+                                });
+                              })()}
+                            </div>
+                          </div>
+
+                          {/* Vertical divider */}
+                          <div className="hidden lg:block w-px bg-slate-100 dark:bg-slate-700 flex-shrink-0" />
+
+                          {/* Right section: tip + overdue alert */}
+                          <div className="lg:w-52 flex-shrink-0 flex flex-col justify-between gap-3">
+                            <div>
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Quick Tip</p>
+                              <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/40">
+                                <Zap size={12} className="text-amber-500 mt-0.5 flex-shrink-0" />
+                                <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300 leading-relaxed">
+                                  {stats.total === 0
+                                    ? 'Add your first todo to get started tracking your work.'
+                                    : stats.overdue > 0
+                                    ? `Knock out ${Math.min(stats.overdue, 3)} overdue items today to boost your score by ${Math.min(stats.overdue, 3) * 10}pts.`
+                                    : stats.pending > 3
+                                    ? `Focus on 3 todos at a time. You have ${stats.pending} pending — pick the most impactful ones.`
+                                    : stats.pending > 0
+                                    ? `You're almost there! Complete your last ${stats.pending} ${stats.pending === 1 ? 'todo' : 'todos'} to hit 100%.`
+                                    : 'Perfect score! Consider adding new goals to keep the momentum.'
+                                  }
+                                </p>
+                              </div>
+                            </div>
+                            {stats.overdue > 0 && (
+                              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/40">
+                                <AlertCircle size={12} className="text-red-500 flex-shrink-0" />
+                                <p className="text-[11px] font-semibold text-red-600 dark:text-red-400">
+                                  {stats.overdue} overdue · health at {stats.healthScore}%
+                                </p>
+                              </div>
+                            )}
+                          </div>
+
+                        </div>
+                      </div>
+                    </SectionCard>
+                  </motion.div>
+
                 </motion.div>
-                
-              </div>
+              )}
 
-              {/* RIGHT — Todo list */}
-              <div className="xl:col-span-8 space-y-4">
+              {/* ─────────────── LOG TAB ─────────────────────────────────────────── */}
+              {activeTab === 'log' && (
+                <motion.div key="log" variants={containerVariants} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
 
-                {showDropdown && (
+                  <motion.div variants={itemVariants} className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                    <div className="flex-1 min-w-0 max-w-sm">
+                      <SearchInput value={logSearch} onChange={setLogSearch} placeholder="Search activity log…" />
+                    </div>
+                    {showDropdown && (
+                      <div className="flex-shrink-0 w-64"><UserSelector /></div>
+                    )}
+                    <div className="flex-shrink-0">
+                      <span className="text-xs font-semibold px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">
+                        {filteredLog.length} entries
+                      </span>
+                    </div>
+                  </motion.div>
+
                   <motion.div variants={itemVariants}>
                     <SectionCard>
                       <CardHeaderRow
                         iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
-                        icon={<Users className="h-4 w-4 text-blue-500" />}
-                        title={isAdmin ? 'Filter by Team Member' : 'View Todo List'}
-                        subtitle="Switch between user views"
+                        icon={<Activity className="h-4 w-4 text-blue-500" />}
+                        title="Todo Activity Log"
+                        subtitle={
+                          selectedUser === 'everyone' ? 'All users'
+                            : selectedUser === 'self' ? 'My activity'
+                            : (() => { const u = allUsers.find(u => (u.id||u._id) === selectedUser); return u ? `${u.full_name || u.user_name}'s activity` : 'Selected user'; })()
+                        }
                         action={
-                          isAdmin && (
-                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md uppercase tracking-widest bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
-                              Admin
-                            </span>
-                          )
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">
+                            {filteredLog.length}
+                          </span>
                         }
                       />
-                      <div className="p-4">
-                        <UserSelector />
-                      </div>
-                    </SectionCard>
-                  </motion.div>
-                )}
 
-                <motion.div variants={itemVariants}>
-                  <SectionCard>
-                    <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700">
-                      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                        <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                          <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/40">
-                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                          </div>
-                          <div className="min-w-0">
-                            <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100 truncate">{selectedUserLabel}</h3>
-                            <p className="text-xs text-slate-400 dark:text-slate-500">{filteredTodos.length} items · click any row for details</p>
-                          </div>
-                        </div>
-                        <div className="flex-shrink-0 w-full sm:w-52">
-                          <SearchInput value={search} onChange={setSearch} placeholder="Search todos…" />
+                      <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-700/30">
+                        <div className="grid gap-4 items-center" style={{ gridTemplateColumns: '1fr 150px 150px 190px' }}>
+                          <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Todo Title</span>
+                          <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Owner</span>
+                          <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Created On</span>
+                          <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Event</span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 mt-3 flex-wrap">
-                        <FilterChip id="all"       label="All"       count={todos.length}    todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
-                        <FilterChip id="pending"   label="Pending"   count={stats.pending}   todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
-                        <FilterChip id="completed" label="Completed" count={stats.completed} todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
-                        {stats.overdue > 0 && (
-                          <FilterChip id="overdue" label="Overdue" count={stats.overdue} todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
-                        )}
-                      </div>
-                    </div>
 
-                    <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-700 grid grid-cols-[20px_1fr_auto] gap-4 items-center bg-slate-50/80 dark:bg-slate-700/30">
-                      <div />
-                      <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Task · Click for details</span>
-                      <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Actions</span>
-                    </div>
-
-                    <div style={{ maxHeight: 560, overflowY: 'auto' }} className="todo-slim">
-                      {isLoading ? (
-                        <MiniLoader height={350} />
-                      ) : filteredTodos.length === 0 ? (
+                      {filteredLog.length === 0 ? (
                         <div className="py-16 flex flex-col items-center gap-3">
                           <div className="w-14 h-14 rounded-2xl flex items-center justify-center bg-slate-100 dark:bg-slate-700">
-                            <CheckSquare size={24} className="text-slate-300 dark:text-slate-500" />
+                            <History size={24} className="text-slate-300 dark:text-slate-500" />
                           </div>
-                          <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">
-                            {search || todoFilter !== 'all' ? 'No matching todos' : 'No todos yet'}
-                          </p>
-                          <p className="text-xs font-medium text-slate-400 dark:text-slate-500">
-                            {search || todoFilter !== 'all' ? 'Try adjusting your filters' : 'Create one using the form on the left'}
-                          </p>
+                          <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">No activity yet</p>
+                          <p className="text-xs font-medium text-slate-400 dark:text-slate-500">Complete or delete a todo and it will appear here</p>
                         </div>
                       ) : (
-                        <AnimatePresence>
-                          {filteredTodos.map(todo => (
-                            <TodoItem
-                              key={todo.id || todo._id}
-                              todo={todo}
-                              onToggle={handleToggle}
-                              onPromote={handleOpenPromote}
-                              onDelete={handleDelete}
-                              showOwner={selectedUser === 'everyone'}
-                              ownerName={resolveUserName(todo.user_id)}
-                              onClickDetail={setSelectedTodo}
-                            />
-                          ))}
-                        </AnimatePresence>
-                      )}
-                    </div>
-                  </SectionCard>
-                </motion.div>
-              </div>
-            </div>
-
-            {/* ── Focus Board — Full-width horizontal card below both columns ── */}
-            <motion.div variants={itemVariants}>
-              <SectionCard>
-                <div className="p-5">
-                  <div className="flex flex-col lg:flex-row gap-6">
-
-                    {/* Left section: header + health score ring */}
-                    <div className="flex items-start gap-4 lg:w-64 flex-shrink-0">
-                      <div className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-900/40 flex-shrink-0 mt-0.5">
-                        <Target className="h-4 w-4 text-amber-500" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Focus Board</h3>
-                        <p className="text-xs text-slate-400 dark:text-slate-500 mb-3">Today's priority queue</p>
-                        <div className="flex items-center gap-3">
-                          <div className="relative w-14 h-14 flex-shrink-0">
-                            <svg viewBox="0 0 44 44" className="w-14 h-14 -rotate-90">
-                              <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none"
-                                stroke={isDark ? '#334155' : '#e2e8f0'} />
-                              <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none"
-                                strokeDasharray={`${(stats.healthScore / 100) * 106.8} 106.8`}
-                                strokeLinecap="round"
-                                stroke={stats.healthScore >= 80 ? COLORS.emeraldGreen : stats.healthScore >= 50 ? COLORS.amber : COLORS.coral} />
-                            </svg>
-                            <span className="absolute inset-0 flex items-center justify-center text-[12px] font-black"
-                              style={{ color: stats.healthScore >= 80 ? COLORS.emeraldGreen : stats.healthScore >= 50 ? COLORS.amber : COLORS.coral }}>
-                              {stats.healthScore}
-                            </span>
-                          </div>
-                          <div>
-                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Health Score</p>
-                            <p className="text-sm font-bold mt-0.5" style={{ color: stats.healthScore >= 80 ? COLORS.emeraldGreen : stats.healthScore >= 50 ? COLORS.amber : COLORS.coral }}>
-                              {stats.healthScore >= 80 ? 'Excellent' : stats.healthScore >= 50 ? 'Fair' : 'Needs Work'}
-                            </p>
-                            <p className="text-[10px] text-slate-400 mt-0.5">{stats.completed}/{stats.total} done</p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Vertical divider */}
-                    <div className="hidden lg:block w-px bg-slate-100 dark:bg-slate-700 flex-shrink-0" />
-
-                    {/* Middle section: priority todo grid */}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2.5">
-                        {stats.overdue > 0 ? '🔥 Clear These First' : '📌 Up Next'}
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                        {(() => {
-                          const overdueTodos = todos.filter(t => {
-                            if (t.is_completed === true || t.status === 'completed') return false;
-                            if (!t.due_date) return false;
-                            try { return isPast(parseISO(t.due_date)); } catch { return false; }
-                          });
-                          const pendingTodos = todos.filter(t => {
-                            if (t.is_completed === true || t.status === 'completed') return false;
-                            if (!t.due_date) return true;
-                            try { return !isPast(parseISO(t.due_date)); } catch { return true; }
-                          });
-                          const focusList = [...overdueTodos, ...pendingTodos].slice(0, 6);
-                          if (focusList.length === 0) return (
-                            <div className="col-span-3 flex flex-col items-center justify-center py-4 gap-2">
-                              <CheckCircle2 size={20} className="text-emerald-400" />
-                              <p className="text-xs font-semibold text-slate-400">All clear — nothing pending!</p>
-                            </div>
-                          );
-                          return focusList.map((t, i) => {
-                            const isOvrd = t.due_date && !t.is_completed
-                              ? (() => { try { return isPast(parseISO(t.due_date)); } catch { return false; } })()
-                              : false;
-                            return (
-                              <motion.div
-                                key={t.id || t._id}
-                                initial={{ opacity: 0, y: 6 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: i * 0.04 }}
-                                onClick={() => setSelectedTodo(t)}
-                                className="flex items-center gap-2 px-2.5 py-2 rounded-lg border cursor-pointer group transition-all hover:shadow-sm"
-                                style={{
-                                  borderColor: isOvrd ? (isDark ? '#7f1d1d' : '#fecaca') : (isDark ? '#334155' : '#e2e8f0'),
-                                  backgroundColor: isOvrd
-                                    ? (isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2')
-                                    : (isDark ? 'rgba(255,255,255,0.02)' : '#fafafa'),
-                                }}
-                              >
-                                <span
-                                  className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-black"
-                                  style={{
-                                    backgroundColor: isOvrd ? `${COLORS.coral}18` : `${COLORS.mediumBlue}12`,
-                                    color: isOvrd ? COLORS.coral : COLORS.mediumBlue,
-                                  }}
+                        <div style={{ maxHeight: 600, overflowY: 'auto' }} className="todo-slim">
+                          <AnimatePresence>
+                            {filteredLog.map((entry, idx) => {
+                              const ownerName   = resolveUserName(entry.owner_id || entry.created_by_id);
+                              const createdDate = entry.created_at
+                                ? (() => { try { return format(new Date(entry.created_at), 'MMM d, yyyy'); } catch { return '—'; } })()
+                                : '—';
+                              return (
+                                <motion.div
+                                  key={`${entry.id}-${idx}`}
+                                  variants={rowVariant}
+                                  initial="hidden"
+                                  animate="visible"
+                                  exit="exit"
+                                  className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors"
                                 >
-                                  {i + 1}
-                                </span>
-                                <span className="flex-1 text-xs font-medium truncate" style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>
-                                  {t.title}
-                                </span>
-                                {isOvrd && (
-                                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-500 flex-shrink-0">
-                                    Late
-                                  </span>
-                                )}
-                              </motion.div>
-                            );
-                          });
-                        })()}
-                      </div>
-                    </div>
-
-                    {/* Vertical divider */}
-                    <div className="hidden lg:block w-px bg-slate-100 dark:bg-slate-700 flex-shrink-0" />
-
-                    {/* Right section: tip + overdue alert */}
-                    <div className="lg:w-52 flex-shrink-0 flex flex-col justify-between gap-3">
-                      <div>
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Quick Tip</p>
-                        <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/40">
-                          <Zap size={12} className="text-amber-500 mt-0.5 flex-shrink-0" />
-                          <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300 leading-relaxed">
-                            {stats.total === 0
-                              ? 'Add your first todo to get started tracking your work.'
-                              : stats.overdue > 0
-                              ? `Knock out ${Math.min(stats.overdue, 3)} overdue items today to boost your score by ${Math.min(stats.overdue, 3) * 10}pts.`
-                              : stats.pending > 3
-                              ? `Focus on 3 todos at a time. You have ${stats.pending} pending — pick the most impactful ones.`
-                              : stats.pending > 0
-                              ? `You're almost there! Complete your last ${stats.pending} ${stats.pending === 1 ? 'todo' : 'todos'} to hit 100%.`
-                              : 'Perfect score! Consider adding new goals to keep the momentum.'
-                            }
-                          </p>
-                        </div>
-                      </div>
-                      {stats.overdue > 0 && (
-                        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/40">
-                          <AlertCircle size={12} className="text-red-500 flex-shrink-0" />
-                          <p className="text-[11px] font-semibold text-red-600 dark:text-red-400">
-                            {stats.overdue} overdue · health at {stats.healthScore}%
-                          </p>
+                                  <div className="grid gap-4 items-center" style={{ gridTemplateColumns: '1fr 150px 150px 190px' }}>
+                                    <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate" title={entry.title}>{entry.title}</p>
+                                    <div className="flex items-center gap-1.5">
+                                      <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 bg-blue-50 dark:bg-blue-900/30">
+                                        <UserIcon size={10} className="text-blue-500" />
+                                      </div>
+                                      <span className="text-xs font-medium truncate text-slate-600 dark:text-slate-300">{ownerName}</span>
+                                    </div>
+                                    <span className="text-xs font-medium text-slate-400 dark:text-slate-500">{createdDate}</span>
+                                    <div className="flex justify-start"><EventBadge entry={entry} /></div>
+                                  </div>
+                                </motion.div>
+                              );
+                            })}
+                          </AnimatePresence>
                         </div>
                       )}
-                    </div>
-
-                  </div>
-                </div>
-              </SectionCard>
-            </motion.div>
-
-          </motion.div>
-        )}
-        {/* ─────────────── LOG TAB ─────────────────────────────────────────── */}
-        {activeTab === 'log' && (
-          <motion.div key="log" variants={containerVariants} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
-
-            <motion.div variants={itemVariants} className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-              <div className="flex-1 min-w-0 max-w-sm">
-                <SearchInput value={logSearch} onChange={setLogSearch} placeholder="Search activity log…" />
-              </div>
-              {showDropdown && (
-                <div className="flex-shrink-0 w-64"><UserSelector /></div>
+                    </SectionCard>
+                  </motion.div>
+                </motion.div>
               )}
-              <div className="flex-shrink-0">
-                <span className="text-xs font-semibold px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">
-                  {filteredLog.length} entries
-                </span>
-              </div>
-            </motion.div>
 
-            <motion.div variants={itemVariants}>
-              <SectionCard>
-                <CardHeaderRow
-                  iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
-                  icon={<Activity className="h-4 w-4 text-blue-500" />}
-                  title="Todo Activity Log"
-                  subtitle={
-                    selectedUser === 'everyone' ? 'All users'
-                      : selectedUser === 'self' ? 'My activity'
-                      : (() => { const u = allUsers.find(u => (u.id||u._id) === selectedUser); return u ? `${u.full_name || u.user_name}'s activity` : 'Selected user'; })()
-                  }
-                  action={
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">
-                      {filteredLog.length}
-                    </span>
-                  }
-                />
-
-                <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-700/30">
-                  <div className="grid gap-4 items-center" style={{ gridTemplateColumns: '1fr 150px 150px 190px' }}>
-                    <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Todo Title</span>
-                    <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Owner</span>
-                    <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Created On</span>
-                    <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Event</span>
-                  </div>
-                </div>
-
-                {filteredLog.length === 0 ? (
-                  <div className="py-16 flex flex-col items-center gap-3">
-                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center bg-slate-100 dark:bg-slate-700">
-                      <History size={24} className="text-slate-300 dark:text-slate-500" />
-                    </div>
-                    <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">No activity yet</p>
-                    <p className="text-xs font-medium text-slate-400 dark:text-slate-500">Complete or delete a todo and it will appear here</p>
-                  </div>
-                ) : (
-                  <div style={{ maxHeight: 600, overflowY: 'auto' }} className="todo-slim">
-                    <AnimatePresence>
-                      {filteredLog.map((entry, idx) => {
-                        const ownerName   = resolveUserName(entry.owner_id || entry.created_by_id);
-                        const createdDate = entry.created_at
-                          ? (() => { try { return format(new Date(entry.created_at), 'MMM d, yyyy'); } catch { return '—'; } })()
-                          : '—';
-                        return (
-                          <motion.div
-                            key={`${entry.id}-${idx}`}
-                            variants={rowVariant}
-                            initial="hidden"
-                            animate="visible"
-                            exit="exit"
-                            className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors"
-                          >
-                            <div className="grid gap-4 items-center" style={{ gridTemplateColumns: '1fr 150px 150px 190px' }}>
-                              <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate" title={entry.title}>{entry.title}</p>
-                              <div className="flex items-center gap-1.5">
-                                <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 bg-blue-50 dark:bg-blue-900/30">
-                                  <UserIcon size={10} className="text-blue-500" />
-                                </div>
-                                <span className="text-xs font-medium truncate text-slate-600 dark:text-slate-300">{ownerName}</span>
-                              </div>
-                              <span className="text-xs font-medium text-slate-400 dark:text-slate-500">{createdDate}</span>
-                              <div className="flex justify-start"><EventBadge entry={entry} /></div>
-                            </div>
-                          </motion.div>
-                        );
-                      })}
-                    </AnimatePresence>
-                  </div>
-                )}
-              </SectionCard>
-            </motion.div>
-          </motion.div>
-        )}
-
-      </AnimatePresence>
-      </React.Fragment>
+            </AnimatePresence>
+          </React.Fragment>
         );
         return null;
       })}
