@@ -94,6 +94,14 @@ const COLORS = {
   slate200:     '#E2E8F0',
 };
 
+const LEAVE_TYPES = [
+  { value: 'full_day',           label: 'Full Day',           icon: '🗓️', desc: 'Absent the entire day' },
+  { value: 'half_day_morning',   label: 'Half Day — Morning', icon: '🌅', desc: 'Off in the morning, join after noon' },
+  { value: 'half_day_afternoon', label: 'Half Day — Afternoon', icon: '🌇', desc: 'Present morning, leave after lunch' },
+  { value: 'early_leave',        label: 'Early Leave',        icon: '🚪', desc: 'Present but leaving before office hours end' },
+];
+
+
 // Dark palette (mirrors Dashboard)
 const D = {
   bg:        '#0f172a',
@@ -1031,7 +1039,8 @@ export default function Attendance() {
   const [absentSummary,      setAbsentSummary]      = useState([]);
   const [dataError,          setDataError]          = useState(null);
   const absentWarningShownRef = useRef(false);
-
+  const [leaveType,          setLeaveType]          = useState('full_day');
+  const [earlyLeaveTime,     setEarlyLeaveTime]     = useState('');
   const [showPunchInModal,  setShowPunchInModal]  = useState(false);
   const [modalActionDone,   setModalActionDone]   = useState(false);
   const [geoError,          setGeoError]          = useState(null);
@@ -1420,17 +1429,26 @@ export default function Attendance() {
   // ── Leave ──────────────────────────────────────────────────────────────────
   const handleApplyLeave = useCallback(async () => {
     if (!leaveFrom) { toast.error('Select a leave start date'); return; }
+    if (leaveType === 'early_leave' && !earlyLeaveTime) {
+      toast.error('Please specify your early departure time'); return;
+    }
+    const isPartialDay = leaveType !== 'full_day';
+    const effectiveTo = isPartialDay ? leaveFrom : (leaveTo || leaveFrom);
     try {
       await api.post('/attendance/apply-leave', {
-        from_date: format(leaveFrom, 'yyyy-MM-dd'),
-        to_date:   leaveTo ? format(leaveTo, 'yyyy-MM-dd') : format(leaveFrom, 'yyyy-MM-dd'),
-        reason:    leaveReason || 'Personal Leave',
+        from_date:        format(leaveFrom, 'yyyy-MM-dd'),
+        to_date:          format(effectiveTo, 'yyyy-MM-dd'),
+        reason:           leaveReason || 'Leave Applied',
+        leave_type:       leaveType,
+        early_leave_time: leaveType === 'early_leave' ? earlyLeaveTime : undefined,
       });
       toast.success('Leave request submitted');
-      setShowLeaveForm(false); setLeaveFrom(null); setLeaveTo(null); setLeaveReason('');
+      setShowLeaveForm(false);
+      setLeaveFrom(null); setLeaveTo(null); setLeaveReason('');
+      setLeaveType('full_day'); setEarlyLeaveTime('');
       await fetchData();
     } catch { toast.error('Failed to submit leave request'); }
-  }, [leaveFrom, leaveTo, leaveReason, fetchData]);
+  }, [leaveFrom, leaveTo, leaveReason, leaveType, earlyLeaveTime, fetchData]);
 
   // ── Holidays ───────────────────────────────────────────────────────────────
   const handleAddHolidays = useCallback(async () => {
@@ -3378,311 +3396,177 @@ export default function Attendance() {
             <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <motion.div
-                className="w-full max-w-2xl rounded-3xl shadow-2xl p-8 max-h-[90vh] overflow-y-auto"
+                className="w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto"
                 style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
                 initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
                 transition={{ type: 'spring', stiffness: 220, damping: 20 }}
-              >
-                <div className="flex justify-between items-start mb-6">
-                  <div>
-                    <h2 className="text-xl font-black" style={{ color: isDark ? D.text : COLORS.deepBlue }}>Request Leave</h2>
-                    <p className="text-sm text-slate-400 mt-0.5">Select your leave dates below</p>
-                  </div>
-                  <button onClick={() => setShowLeaveForm(false)} className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-700">
-                    <X className="w-4 h-4 text-slate-400" />
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-2 mb-6">
-                  {[1, 3, 7, 15, 30].map(days => (
-                    <Button key={days} variant="outline" size="sm"
-                      onClick={() => { const from = new Date(), to = new Date(); to.setDate(from.getDate() + days - 1); setLeaveFrom(from); setLeaveTo(to); }}
-                      className="rounded-lg font-semibold text-xs"
-                      style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#374151', backgroundColor: isDark ? D.raised : undefined }}>
-                      {days === 1 ? '1 Day' : `${days} Days`}
-                    </Button>
-                  ))}
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                  <div>
-                    <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>From Date</label>
-                    <Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom}
-                      disabled={date => isBefore(date, startOfDay(new Date()))}
-                      className="rounded-xl border"
-                      style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>To Date</label>
-                    <Calendar mode="single" selected={leaveTo} onSelect={setLeaveTo}
-                      disabled={date => leaveFrom ? isBefore(date, leaveFrom) : true}
-                      className="rounded-xl border"
-                      style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
-                  </div>
-                </div>
-                {leaveFrom && (
-                  <div className="relative px-4 py-3 pl-5 rounded-xl mb-6 overflow-hidden" style={{ backgroundColor: isDark ? `${COLORS.deepBlue}18` : `${COLORS.deepBlue}08` }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.deepBlue }} />
-                    <p className="text-xs text-slate-400 mb-0.5">Total Duration</p>
-                    <p className="text-2xl font-black" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
-                      {Math.max(1, leaveTo ? Math.ceil((leaveTo.getTime() - leaveFrom.getTime()) / 86400000) + 1 : 1)} days
-                    </p>
-                  </div>
-                )}
-                <div className="mb-6">
-                  <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Reason</label>
-                  <textarea value={leaveReason} onChange={e => setLeaveReason(e.target.value)}
-                    placeholder="Reason for leave…" className={`${inputCls} min-h-[90px] resize-none`} style={inputStyle} />
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="ghost" onClick={() => setShowLeaveForm(false)} className="font-semibold rounded-xl" style={{ color: isDark ? D.muted : undefined }}>Cancel</Button>
-                  <Button disabled={!leaveFrom} onClick={handleApplyLeave} className="font-semibold text-white rounded-xl" style={{ backgroundColor: COLORS.deepBlue }}>
-                    Submit Request
-                  </Button>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Add Holiday Modal */}
-        <AnimatePresence>
-          {showHolidayModal && (
-            <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => { setShowHolidayModal(false); setCalendarOpenIdx(null); }}>
-              <motion.div
-                className="w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
-                style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
-                initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
-                transition={{ type: 'spring', stiffness: 220, damping: 20 }}
-                onClick={e => e.stopPropagation()}
               >
                 {/* Header */}
-                <div className="px-7 py-5 text-white flex items-center justify-between flex-shrink-0"
+                <div className="px-7 py-5 flex items-center justify-between"
                   style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
                   <div>
-                    <h2 className="text-xl font-black">Add Holidays</h2>
-                    <p className="text-blue-200 text-sm mt-0.5">Add one or multiple holidays — click the date to pick from calendar</p>
+                    <h2 className="text-xl font-black text-white">Request Leave</h2>
+                    <p className="text-blue-200 text-sm mt-0.5">Select type and dates below</p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input ref={pdfInputRef} type="file" accept=".pdf" onChange={handlePdfImport} className="hidden" />
-                    <button onClick={() => pdfInputRef.current?.click()} disabled={pdfImporting}
-                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border-2 border-white/30 text-white hover:bg-white/15 transition-all">
-                      {pdfImporting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Extracting…</> : <><FileUp className="w-3.5 h-3.5" />Import PDF</>}
-                    </button>
-                    <button onClick={() => { setShowHolidayModal(false); setCalendarOpenIdx(null); }}
-                      className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
-                      <X className="w-4 h-4 text-white" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Body */}
-                <div className="p-6 overflow-y-auto slim-scroll flex-1" style={slimScroll}
-                  onClick={() => calendarOpenIdx !== null && setCalendarOpenIdx(null)}>
-
-                  {/* Column labels */}
-                  <div className="grid grid-cols-[1fr_200px_36px] gap-2 mb-2 px-1">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Holiday Name</span>
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Date</span>
-                    <span />
-                  </div>
-
-                  <div className="space-y-2.5 mb-5">
-                    {holidayRows.map((row, idx) => {
-                      const parsedDate = row.date ? safeParseISO(row.date) : null;
-                      const isCalOpen = calendarOpenIdx === idx;
-                      return (
-                        <div key={idx} className="grid grid-cols-[1fr_200px_36px] gap-2 items-start">
-                          {/* Name input */}
-                          <input
-                            type="text"
-                            value={row.name}
-                            onChange={e => {
-                              const u = [...holidayRows];
-                              u[idx] = { ...u[idx], name: e.target.value };
-                              setHolidayRows(u);
-                            }}
-                            placeholder="e.g., Diwali"
-                            className={inputCls}
-                            style={inputStyle}
-                          />
-
-                          {/* Calendar date picker */}
-                          <div className="relative" onClick={e => e.stopPropagation()}>
-                            {/* Trigger button */}
-                            <button
-                              type="button"
-                              onClick={() => setCalendarOpenIdx(isCalOpen ? null : idx)}
-                              className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 border rounded-xl text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              style={{
-                                backgroundColor: isDark ? D.raised : '#ffffff',
-                                borderColor: isCalOpen
-                                  ? COLORS.deepBlue
-                                  : parsedDate ? (isDark ? COLORS.emeraldGreen + '60' : COLORS.emeraldGreen + '40')
-                                  : isDark ? D.border : '#d1d5db',
-                                color: isDark ? D.text : '#1e293b',
-                              }}
-                            >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <CalendarIcon className="w-3.5 h-3.5 flex-shrink-0"
-                                  style={{ color: parsedDate ? COLORS.emeraldGreen : isDark ? D.muted : '#9ca3af' }} />
-                                <span className={`text-sm truncate ${!parsedDate ? 'text-slate-400' : ''}`}>
-                                  {parsedDate ? format(parsedDate, 'EEE, MMM d yyyy') : 'Pick a date…'}
-                                </span>
-                              </div>
-                              <ChevronRight className={`w-3.5 h-3.5 flex-shrink-0 transition-transform ${isCalOpen ? 'rotate-90' : ''}`}
-                                style={{ color: isDark ? D.muted : '#9ca3af' }} />
-                            </button>
-
-                            {/* Calendar popover */}
-                            <AnimatePresence>
-                              {isCalOpen && (
-                                <motion.div
-                                  className="absolute left-0 top-full mt-1 z-[99999] rounded-2xl shadow-2xl border overflow-hidden"
-                                  style={{
-                                    backgroundColor: isDark ? D.card : '#ffffff',
-                                    borderColor: isDark ? D.border : '#e2e8f0',
-                                    minWidth: 280,
-                                  }}
-                                  initial={{ opacity: 0, y: -6, scale: 0.97 }}
-                                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                                  exit={{ opacity: 0, y: -6, scale: 0.97 }}
-                                  transition={{ duration: 0.15 }}
-                                >
-                                  {/* Mini header */}
-                                  <div className="px-4 py-2.5 border-b flex items-center justify-between"
-                                    style={{ borderColor: isDark ? D.border : '#f1f5f9', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
-                                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                                      {parsedDate ? format(parsedDate, 'MMMM yyyy') : 'Select date'}
-                                    </span>
-                                    {parsedDate && (
-                                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                                        style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.18)' : '#dcfce7', color: COLORS.emeraldGreen }}>
-                                        {format(parsedDate, 'MMM d')}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="p-2">
-                                    <Calendar
-                                      mode="single"
-                                      selected={parsedDate || undefined}
-                                      onSelect={d => {
-                                        if (d) {
-                                          const u = [...holidayRows];
-                                          u[idx] = { ...u[idx], date: format(d, 'yyyy-MM-dd') };
-                                          setHolidayRows(u);
-                                          setCalendarOpenIdx(null);
-                                        }
-                                      }}
-                                      className="rounded-xl border-0"
-                                      classNames={{
-                                        months: 'w-full',
-                                        month: 'w-full space-y-2',
-                                        table: 'w-full border-collapse',
-                                        head_row: 'flex w-full justify-between',
-                                        head_cell: 'rounded-lg w-8 font-bold text-[0.65rem] text-center text-slate-400',
-                                        row: 'flex w-full mt-1 justify-between',
-                                        cell: 'relative p-0 text-center text-sm focus-within:relative focus-within:z-20',
-                                        day: 'h-8 w-8 p-0 font-semibold rounded-full transition-all text-xs',
-                                        day_selected: 'text-white rounded-full',
-                                        day_today: 'font-black',
-                                      }}
-                                    />
-                                  </div>
-                                  {/* Quick picks */}
-                                  <div className="px-3 pb-3 flex flex-wrap gap-1.5 border-t pt-2"
-                                    style={{ borderColor: isDark ? D.border : '#f1f5f9' }}>
-                                    {[
-                                      { label: 'Today', d: new Date() },
-                                      { label: 'Tomorrow', d: new Date(Date.now() + 86400000) },
-                                      { label: 'Next Mon', d: (() => { const n = new Date(); n.setDate(n.getDate() + ((8 - n.getDay()) % 7 || 7)); return n; })() },
-                                    ].map(({ label, d }) => (
-                                      <button key={label}
-                                        onClick={() => {
-                                          const u = [...holidayRows];
-                                          u[idx] = { ...u[idx], date: format(d, 'yyyy-MM-dd') };
-                                          setHolidayRows(u);
-                                          setCalendarOpenIdx(null);
-                                        }}
-                                        className="text-[10px] font-semibold px-2.5 py-1 rounded-lg border transition-all hover:shadow-sm active:scale-95"
-                                        style={{
-                                          borderColor: isDark ? D.border : '#e2e8f0',
-                                          color: isDark ? D.muted : '#475569',
-                                          backgroundColor: isDark ? D.raised : '#f8fafc',
-                                        }}>
-                                        {label}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
-                          </div>
-
-                          {/* Remove row */}
-                          <button
-                            onClick={() => {
-                              setHolidayRows(holidayRows.filter((_, i) => i !== idx));
-                              if (calendarOpenIdx === idx) setCalendarOpenIdx(null);
-                            }}
-                            disabled={holidayRows.length === 1}
-                            className="w-9 h-10 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-500 disabled:opacity-30 mt-0.5">
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Add another row */}
-                  <button
-                    onClick={() => {
-                      setHolidayRows([...holidayRows, { name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
-                      setCalendarOpenIdx(null);
-                    }}
-                    className="flex items-center gap-2 text-sm font-semibold"
-                    style={{ color: COLORS.deepBlue }}>
-                    <span className="w-5 h-5 rounded-full border-2 flex items-center justify-center"
-                      style={{ borderColor: COLORS.deepBlue, color: COLORS.deepBlue }}>+</span>
-                    Add Another Holiday
+                  <button onClick={() => setShowLeaveForm(false)}
+                    className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
+                    <X className="w-4 h-4 text-white" />
                   </button>
-
-                  {/* Summary chips */}
-                  {holidayRows.filter(r => r.name.trim() && r.date).length > 0 && (
-                    <div className="mt-4 flex flex-wrap gap-1.5">
-                      {holidayRows.filter(r => r.name.trim() && r.date).map((r, i) => (
-                        <div key={i} className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
-                          style={{
-                            backgroundColor: isDark ? 'rgba(31,175,90,0.12)' : '#dcfce7',
-                            color: COLORS.emeraldGreen,
-                          }}>
-                          <CalendarIcon className="w-3 h-3" />
-                          {r.name} · {safeFormatDate(r.date, 'MMM d', r.date)}
-                        </div>
+                </div>
+          
+                <div className="p-6 space-y-5">
+          
+                  {/* ── Leave Type Picker ── */}
+                  <div>
+                    <p className="text-sm font-semibold mb-2.5" style={{ color: isDark ? D.muted : '#374151' }}>Leave Type</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {LEAVE_TYPES.map(lt => (
+                        <motion.button
+                          key={lt.value}
+                          whileTap={{ scale: 0.97 }}
+                          onClick={() => {
+                            const from = new Date();
+                            from.setDate(from.getDate() + (label === 'Tomorrow' ? 1 : 0));
+                            const to = new Date(from);
+                            to.setDate(from.getDate() + days - 1);
+                            setLeaveFrom(from);
+                            setLeaveTo(to);
+                            setLeaveType('full_day');  // ← add this line
+                            setShowLeaveForm(true);
+                          }}
+                        >
+                          <span style={{ fontSize: 18, lineHeight: 1 }}>{lt.icon}</span>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold leading-snug truncate"
+                              style={{ color: leaveType === lt.value ? (isDark ? '#60a5fa' : COLORS.deepBlue) : isDark ? D.text : '#1e293b' }}>
+                              {lt.label}
+                            </p>
+                            <p className="text-[11px] leading-snug mt-0.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                              {lt.desc}
+                            </p>
+                          </div>
+                          {leaveType === lt.value && (
+                            <div className="ml-auto flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center"
+                              style={{ backgroundColor: COLORS.deepBlue }}>
+                              <div className="w-1.5 h-1.5 rounded-full bg-white" />
+                            </div>
+                          )}
+                        </motion.button>
                       ))}
                     </div>
-                  )}
-                </div>
-
-                {/* Footer */}
-                <div className="px-6 py-4 flex items-center justify-between flex-shrink-0 border-t"
-                  style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
-                  <span className="text-xs font-medium text-slate-400">
-                    {holidayRows.filter(r => r.name.trim() && r.date).length} of {holidayRows.length} ready to save
-                  </span>
-                  <div className="flex gap-2">
-                    <Button variant="ghost" onClick={() => { setShowHolidayModal(false); setCalendarOpenIdx(null); }}
-                      className="font-semibold rounded-xl" style={{ color: isDark ? D.muted : undefined }}>Cancel</Button>
-                    <Button
-                      disabled={holidayRows.filter(r => r.name.trim() && r.date).length === 0}
-                      onClick={handleAddHolidays}
-                      className="font-semibold text-white rounded-xl px-5"
-                      style={{ backgroundColor: COLORS.deepBlue }}>
-                      <CalendarPlus className="w-3.5 h-3.5 mr-1.5" />
-                      Save {holidayRows.filter(r => r.name.trim() && r.date).length > 1
-                        ? `${holidayRows.filter(r => r.name.trim() && r.date).length} Holidays`
-                        : 'Holiday'}
-                    </Button>
                   </div>
+          
+                  {/* ── Early leave time picker ── */}
+                  {leaveType === 'early_leave' && (
+                    <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}>
+                      <label className="text-sm font-semibold mb-1.5 block" style={{ color: isDark ? D.muted : '#374151' }}>
+                        Departure Time
+                      </label>
+                      <input
+                        type="time"
+                        value={earlyLeaveTime}
+                        onChange={e => setEarlyLeaveTime(e.target.value)}
+                        className={inputCls}
+                        style={inputStyle}
+                      />
+                      <p className="text-[11px] mt-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                        The time you plan to leave the office (IST)
+                      </p>
+                    </motion.div>
+                  )}
+          
+                  {/* ── Date pickers — full day only shows range; partial shows single date ── */}
+                  {leaveType === 'full_day' ? (
+                    <>
+                      <div className="flex flex-wrap gap-2">
+                        {[1, 3, 7, 15, 30].map(days => (
+                          <Button key={days} variant="outline" size="sm"
+                            onClick={() => {
+                              const from = new Date(), to = new Date();
+                              to.setDate(from.getDate() + days - 1);
+                              setLeaveFrom(from); setLeaveTo(to);
+                            }}
+                            className="rounded-lg font-semibold text-xs"
+                            style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#374151', backgroundColor: isDark ? D.raised : undefined }}>
+                            {days === 1 ? '1 Day' : `${days} Days`}
+                          </Button>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                          <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>From Date</label>
+                          <Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom}
+                            disabled={date => isBefore(date, startOfDay(new Date()))}
+                            className="rounded-xl border"
+                            style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
+                        </div>
+                        <div>
+                          <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>To Date</label>
+                          <Calendar mode="single" selected={leaveTo} onSelect={setLeaveTo}
+                            disabled={date => leaveFrom ? isBefore(date, leaveFrom) : true}
+                            className="rounded-xl border"
+                            style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
+                        </div>
+                      </div>
+                      {leaveFrom && (
+                        <div className="relative px-4 py-3 pl-5 rounded-xl overflow-hidden"
+                          style={{ backgroundColor: isDark ? `${COLORS.deepBlue}18` : `${COLORS.deepBlue}08` }}>
+                          <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.deepBlue }} />
+                          <p className="text-xs text-slate-400 mb-0.5">Total Duration</p>
+                          <p className="text-2xl font-black" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
+                            {Math.max(1, leaveTo
+                              ? Math.ceil((leaveTo.getTime() - leaveFrom.getTime()) / 86400000) + 1
+                              : 1)} days
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    /* Single date picker for partial-day leave */
+                    <div>
+                      <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Date</label>
+                      <Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom}
+                        disabled={date => isBefore(date, startOfDay(new Date()))}
+                        className="rounded-xl border"
+                        style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
+                      {leaveFrom && (
+                        <div className="flex items-center gap-2 mt-3 px-3 py-2.5 rounded-xl border text-sm font-semibold"
+                          style={{
+                            backgroundColor: isDark ? `${COLORS.deepBlue}12` : `${COLORS.deepBlue}06`,
+                            borderColor: isDark ? 'rgba(31,111,178,0.3)' : `${COLORS.deepBlue}25`,
+                            color: isDark ? '#60a5fa' : COLORS.deepBlue,
+                          }}>
+                          <CalendarIcon className="w-4 h-4 flex-shrink-0" />
+                          {format(leaveFrom, 'EEEE, MMMM d, yyyy')}
+                        </div>
+                      )}
+                    </div>
+                  )}
+          
+                  {/* Reason */}
+                  <div>
+                    <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Reason</label>
+                    <textarea value={leaveReason} onChange={e => setLeaveReason(e.target.value)}
+                      placeholder="Reason for leave…" className={`${inputCls} min-h-[80px] resize-none`} style={inputStyle} />
+                  </div>
+                </div>
+          
+                {/* Footer */}
+                <div className="px-6 py-4 flex justify-end gap-2 border-t"
+                  style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
+                  <Button variant="ghost" onClick={() => {
+                    setShowLeaveForm(false);
+                    setLeaveType('full_day'); setEarlyLeaveTime('');
+                  }} className="font-semibold rounded-xl" style={{ color: isDark ? D.muted : undefined }}>
+                    Cancel
+                  </Button>
+                  <Button
+                    disabled={!leaveFrom || (leaveType === 'early_leave' && !earlyLeaveTime)}
+                    onClick={handleApplyLeave}
+                    className="font-semibold text-white rounded-xl"
+                    style={{ backgroundColor: COLORS.deepBlue }}>
+                    Submit Request
+                  </Button>
                 </div>
               </motion.div>
             </motion.div>
