@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
@@ -23,7 +22,7 @@ import {
   Hash, ArrowUpRight, SlidersHorizontal, ShieldCheck,
   ShieldOff, Fingerprint, Download, Pencil, Inbox, X,
   Monitor, Wifi, WifiOff, RefreshCw, Radar, Loader2,
-  Network, Save, ClipboardList, LayoutDashboard, AlertTriangle, MapPin,
+  Network, Save, ClipboardList, LayoutDashboard, AlertTriangle, MapPin, UserMinus, ArrowRight,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -507,6 +506,15 @@ const ModuleAccessCard = ({ icon: Icon, title, desc, permKey, permissions, setPe
       <div className="flex-shrink-0 flex items-center" onClick={e => e.stopPropagation()}>
         <Switch checked={isEnabled} onCheckedChange={toggle} />
       </div>
+
+      {/* ════ OFFBOARDING DIALOG ════ */}
+      <OffboardingDialog
+        open={offboardDialogOpen}
+        onClose={() => { setOffboardDialogOpen(false); setOffboardTarget(null); }}
+        targetUser={offboardTarget}
+        allUsers={users}
+        onComplete={() => { fetchUsers(); }}
+      />
     </motion.div>
   );
 };
@@ -1222,7 +1230,7 @@ const PendingUserCard = ({ userData, onApprove, onReject, approving }) => (
   </motion.div>
 );
 
-const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReject, currentUserId, isAdmin, canEditUsers, canManagePermissions, approving }) => {
+const UserCard = ({ userData, onEdit, onDelete, onOffboard, onPermissions, onApprove, onReject, currentUserId, isAdmin, canEditUsers, canManagePermissions, approving }) => {
   const [hovered, setHovered] = useState(false);
   const isPending = userData.status === 'pending_approval';
   const roleCfg   = ROLE_CONFIG[userData.role?.toLowerCase()] || ROLE_CONFIG.staff;
@@ -1258,6 +1266,12 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
               <button onClick={() => onDelete(userData.id)} title="Delete User"
                 className="w-8 h-8 bg-red-50 dark:bg-red-900/40 hover:bg-red-100 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 rounded-xl flex items-center justify-center border border-red-100 dark:border-red-800 shadow-sm transition-all">
                 <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {isAdmin && userData.id !== currentUserId && (
+              <button onClick={() => onOffboard(userData)} title="Offboard & Replace"
+                className="w-8 h-8 bg-amber-50 dark:bg-amber-900/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-600 dark:text-amber-400 rounded-xl flex items-center justify-center border border-amber-100 dark:border-amber-800 shadow-sm transition-all">
+                <UserMinus className="h-3.5 w-3.5" />
               </button>
             )}
           </motion.div>
@@ -1327,6 +1341,372 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
   );
 };
 
+
+// ════════════════════════════════════════════════════════════════════════════════
+// OFFBOARDING DIALOG — Employee Replacement Workflow
+// ════════════════════════════════════════════════════════════════════════════════
+
+const TRANSFER_OPTIONS = [
+  { key: 'transfer_tasks',     label: 'Tasks',      icon: Layers,      color: '#3B82F6', desc: 'All assigned & created tasks',      countKey: 'tasks_assigned' },
+  { key: 'transfer_clients',   label: 'Clients',    icon: Briefcase,   color: '#0F766E', desc: 'Client portfolio assignments',      countKey: 'clients' },
+  { key: 'transfer_dsc',       label: 'DSC',        icon: Fingerprint, color: '#7C3AED', desc: 'Digital Signature Certificates',    countKey: 'dsc' },
+  { key: 'transfer_documents', label: 'Documents',  icon: FileText,    color: '#F59E0B', desc: 'Document register entries',         countKey: 'documents' },
+  { key: 'transfer_todos',     label: 'Todos',      icon: CheckCircle, color: '#10B981', desc: 'Personal todo items',               countKey: 'todos' },
+  { key: 'transfer_visits',    label: 'Visits',     icon: MapPin,      color: '#EF4444', desc: 'Client visit records',              countKey: 'visits' },
+  { key: 'transfer_leads',     label: 'Leads',      icon: Target,      color: '#1F6FB2', desc: 'Lead pipeline entries',             countKey: 'leads' },
+];
+
+function OffboardingDialog({ open, onClose, targetUser, allUsers, onComplete }) {
+  const isDark = useDark();
+  const [step, setStep]                   = useState(1);
+  const [replacementId, setReplacementId] = useState('');
+  const [searchTerm, setSearchTerm]       = useState('');
+  const [newEmail, setNewEmail]           = useState('');
+  const [notes, setNotes]                 = useState('');
+  const [preview, setPreview]             = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [executing, setExecuting]         = useState(false);
+  const [result, setResult]               = useState(null);
+  const [transfers, setTransfers]         = useState({
+    transfer_tasks: true, transfer_clients: true, transfer_dsc: true,
+    transfer_documents: true, transfer_todos: true, transfer_visits: true,
+    transfer_leads: true,
+  });
+
+  useEffect(() => {
+    if (open && targetUser) {
+      setStep(1); setReplacementId(''); setSearchTerm(''); setNewEmail('');
+      setNotes(''); setPreview(null); setResult(null);
+      setTransfers({ transfer_tasks:true, transfer_clients:true, transfer_dsc:true,
+        transfer_documents:true, transfer_todos:true, transfer_visits:true, transfer_leads:true });
+      (async () => {
+        setLoadingPreview(true);
+        try {
+          const { data } = await api.get(`/users/${targetUser.id}/offboard-preview`);
+          setPreview(data);
+        } catch { toast.error('Failed to load offboarding preview'); }
+        finally { setLoadingPreview(false); }
+      })();
+    }
+  }, [open, targetUser?.id]);
+
+  const eligibleUsers = useMemo(() =>
+    allUsers
+      .filter(u => u.id !== targetUser?.id && u.status !== 'pending_approval' && u.status !== 'rejected' && u.is_active !== false)
+      .filter(u => !searchTerm || u.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) || u.email?.toLowerCase().includes(searchTerm.toLowerCase()))
+  , [allUsers, targetUser?.id, searchTerm]);
+
+  const selectedReplacement = useMemo(() => allUsers.find(u => u.id === replacementId), [allUsers, replacementId]);
+
+  const handleExecute = async () => {
+    if (!replacementId) { toast.error('Please select a replacement'); return; }
+    setExecuting(true); setStep(4);
+    try {
+      const { data } = await api.post(`/users/${targetUser.id}/offboard`, {
+        replacement_user_id: replacementId, ...transfers,
+        update_email: newEmail || null, delete_old_user: true, notes: notes || null,
+      });
+      setResult(data);
+      toast.success(data.message || 'Offboarding complete');
+      if (onComplete) onComplete();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Offboarding failed');
+      setStep(3);
+    } finally { setExecuting(false); }
+  };
+
+  if (!open || !targetUser) return null;
+  const roleCfg = ROLE_CONFIG[targetUser.role?.toLowerCase()] || ROLE_CONFIG.staff;
+  const totalItems = preview?.total_items || 0;
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v && !executing) onClose(); }}>
+      <DialogContent className="max-w-2xl p-0 overflow-hidden rounded-2xl" style={{ maxHeight: '90vh' }}>
+        <DialogGradHeader
+          gradient="linear-gradient(135deg, #991b1b 0%, #dc2626 50%, #ef4444 100%)"
+          icon={UserMinus}
+          eyebrow="Employee Offboarding"
+          title={step === 4 && result ? 'Offboarding Complete' : `Offboard ${targetUser.full_name}`}
+          subtitle={step === 4 && result ? result.message : 'Transfer data \u2192 Replace \u2192 Archive'}
+          onClose={executing ? undefined : onClose}
+        />
+
+        <div className="users-slim overflow-y-auto" style={{ ...slimScroll, maxHeight: 'calc(90vh - 180px)' }}>
+
+          {/* STEP 1: Confirm & Preview */}
+          {step === 1 && (
+            <div className="p-6 space-y-5">
+              <div className={`flex items-center gap-4 p-4 rounded-xl border-2 ${isDark ? 'bg-red-950/20 border-red-900/50' : 'bg-red-50 border-red-200'}`}>
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white text-lg font-black bg-gradient-to-br ${roleCfg.gradient}`}>
+                  {targetUser.full_name?.charAt(0)?.toUpperCase()}
+                </div>
+                <div className="flex-1">
+                  <p className="font-bold text-sm text-slate-900 dark:text-white">{targetUser.full_name}</p>
+                  <p className="text-xs text-slate-500">{targetUser.email} \u00b7 {roleCfg.label}</p>
+                  {(targetUser.departments || []).length > 0 && (
+                    <div className="flex gap-1 mt-1">{targetUser.departments.map(d => <DeptPill key={d} dept={d} />)}</div>
+                  )}
+                </div>
+                <Badge variant="destructive" className="text-xs">Leaving</Badge>
+              </div>
+
+              <div>
+                <h3 className="font-bold text-sm text-slate-800 dark:text-white mb-3 flex items-center gap-2">
+                  <BarChart2 className="h-4 w-4 text-blue-500" /> Data Owned by This Employee
+                </h3>
+                {loadingPreview ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+                  </div>
+                ) : preview ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {Object.entries(preview.data_counts).map(([key, count]) => {
+                      const label = key.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
+                      return (
+                        <div key={key} className={`p-3 rounded-xl border text-center ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                          <p className="text-xl font-bold text-slate-900 dark:text-white">{count}</p>
+                          <p className="text-[10px] text-slate-500 font-medium mt-0.5">{label}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                {preview && (
+                  <div className={`mt-3 p-3 rounded-xl text-sm font-semibold text-center ${
+                    totalItems > 0
+                      ? isDark ? 'bg-amber-950/30 text-amber-400 border border-amber-900/50' : 'bg-amber-50 text-amber-700 border border-amber-200'
+                      : isDark ? 'bg-emerald-950/30 text-emerald-400' : 'bg-emerald-50 text-emerald-700'
+                  }`}>
+                    <AlertCircle className="h-4 w-4 inline mr-2" />
+                    {totalItems > 0
+                      ? `${totalItems} total items will be transferred to the replacement`
+                      : 'No data to transfer — account can be safely removed'}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* STEP 2: Select Replacement */}
+          {step === 2 && (
+            <div className="p-6 space-y-4">
+              <div>
+                <h3 className="font-bold text-sm text-slate-800 dark:text-white mb-1 flex items-center gap-2">
+                  <UsersIcon className="h-4 w-4 text-blue-500" /> Select Replacement Employee
+                </h3>
+                <p className="text-xs text-slate-500 mb-3">All data from {targetUser.full_name} will be transferred to this person</p>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Input placeholder="Search employees\u2026" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="pl-10 h-10 rounded-xl" />
+              </div>
+              <div className="users-slim max-h-[300px] overflow-y-auto space-y-2 pr-1" style={slimScroll}>
+                {eligibleUsers.length === 0 ? (
+                  <div className="text-center py-8 text-slate-400 text-sm">No eligible users found</div>
+                ) : eligibleUsers.map(u => {
+                  const uRole = ROLE_CONFIG[u.role?.toLowerCase()] || ROLE_CONFIG.staff;
+                  const URoleIcon = uRole.icon;
+                  const isSelected = replacementId === u.id;
+                  return (
+                    <button key={u.id} onClick={() => setReplacementId(u.id)}
+                      className={`w-full flex items-center gap-3 p-3.5 rounded-xl border-2 text-left transition-all hover:shadow-sm ${
+                        isSelected ? 'border-emerald-500 shadow-sm'
+                          : isDark ? 'border-slate-700 bg-slate-800 hover:border-slate-600' : 'border-slate-200 bg-white hover:border-slate-300'
+                      }`}
+                      style={isSelected ? { background: isDark ? 'rgba(16,185,129,0.1)' : '#f0fdf4' } : {}}>
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold bg-gradient-to-br ${uRole.gradient}`}>
+                        {u.full_name?.charAt(0)?.toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-sm text-slate-900 dark:text-white truncate">{u.full_name}</p>
+                        <p className="text-xs text-slate-500 truncate">{u.email}</p>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold text-white bg-gradient-to-r ${uRole.gradient}`}>
+                            <URoleIcon className="h-2.5 w-2.5" />{uRole.label}
+                          </span>
+                          {(u.departments || []).map(d => <DeptPill key={d} dept={d} />)}
+                        </div>
+                      </div>
+                      {isSelected && (
+                        <div className="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0">
+                          <CheckCircle className="h-4 w-4 text-white" />
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* STEP 3: Transfer Options & Confirm */}
+          {step === 3 && (
+            <div className="p-6 space-y-5">
+              <div className={`flex items-center gap-3 p-4 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold bg-gradient-to-br ${roleCfg.gradient}`}>
+                  {targetUser.full_name?.charAt(0)?.toUpperCase()}
+                </div>
+                <div className="flex-1 text-center">
+                  <ArrowRight className="h-5 w-5 text-slate-400 mx-auto" />
+                  <p className="text-[10px] text-slate-400 font-semibold mt-0.5">REPLACE WITH</p>
+                </div>
+                {selectedReplacement && (
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold bg-gradient-to-br ${(ROLE_CONFIG[selectedReplacement.role?.toLowerCase()] || ROLE_CONFIG.staff).gradient}`}>
+                    {selectedReplacement.full_name?.charAt(0)?.toUpperCase()}
+                  </div>
+                )}
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="font-semibold text-red-600 dark:text-red-400">{targetUser.full_name} (leaving)</span>
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">{selectedReplacement?.full_name} (replacement)</span>
+              </div>
+
+              <div>
+                <h3 className="font-bold text-sm text-slate-800 dark:text-white mb-3 flex items-center gap-2">
+                  <SlidersHorizontal className="h-4 w-4 text-blue-500" /> Transfer Options
+                </h3>
+                <div className="space-y-2">
+                  {TRANSFER_OPTIONS.map(opt => {
+                    const Icon = opt.icon;
+                    const isOn = !!transfers[opt.key];
+                    const count = preview?.data_counts?.[opt.countKey] || 0;
+                    return (
+                      <div key={opt.key}
+                        className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${
+                          isOn ? isDark ? 'bg-emerald-950/30 border-emerald-800' : 'bg-emerald-50 border-emerald-200'
+                            : isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
+                        }`}>
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `${opt.color}15` }}>
+                            <Icon className="h-4 w-4" style={{ color: opt.color }} />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-sm text-slate-800 dark:text-white">{opt.label}</p>
+                            <p className="text-xs text-slate-400">{opt.desc}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {count > 0 && (
+                            <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: `${opt.color}15`, color: opt.color }}>{count}</span>
+                          )}
+                          <Switch checked={isOn} onCheckedChange={v => setTransfers(p => ({ ...p, [opt.key]: v }))} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <h3 className="font-bold text-sm text-slate-800 dark:text-white mb-2 flex items-center gap-2">
+                  <Mail className="h-4 w-4 text-violet-500" /> Update Replacement's Email
+                  <span className="text-[10px] text-slate-400 font-normal">(optional)</span>
+                </h3>
+                <Input placeholder={`e.g. ${targetUser.email}`} value={newEmail} onChange={e => setNewEmail(e.target.value)} className="h-10 rounded-xl" />
+                <p className="text-[10px] text-slate-400 mt-1">Leave empty to keep {selectedReplacement?.email}</p>
+              </div>
+
+              <div>
+                <h3 className="font-bold text-sm text-slate-800 dark:text-white mb-2 flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-slate-500" /> Offboarding Notes
+                  <span className="text-[10px] text-slate-400 font-normal">(optional)</span>
+                </h3>
+                <textarea value={notes} onChange={e => setNotes(e.target.value)}
+                  placeholder="Reason for leaving, handover notes, etc." rows={2}
+                  className={`w-full px-3 py-2 rounded-xl border text-sm resize-none ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`} />
+              </div>
+
+              <div className={`flex items-start gap-3 p-3 rounded-xl border text-xs ${isDark ? 'bg-red-950/30 border-red-900/50 text-red-300' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0 text-red-500" />
+                <div>
+                  <p className="font-bold">This action cannot be undone</p>
+                  <p className="mt-0.5">{targetUser.full_name}'s account will be permanently deleted. All selected data will be transferred to {selectedReplacement?.full_name}. An audit log entry will be created.</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 4: Executing / Result */}
+          {step === 4 && (
+            <div className="p-6">
+              {executing ? (
+                <div className="flex flex-col items-center py-12">
+                  <Loader2 className="h-10 w-10 animate-spin text-blue-500 mb-4" />
+                  <p className="font-bold text-sm text-slate-800 dark:text-white">Processing offboarding\u2026</p>
+                  <p className="text-xs text-slate-500 mt-1">Transferring data and removing account</p>
+                </div>
+              ) : result ? (
+                <div className="space-y-4">
+                  <div className="flex flex-col items-center py-6">
+                    <div className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center mb-4">
+                      <CheckCircle className="h-8 w-8 text-emerald-500" />
+                    </div>
+                    <p className="font-bold text-lg text-slate-900 dark:text-white">Offboarding Complete</p>
+                    <p className="text-sm text-slate-500 mt-1">{result.message}</p>
+                  </div>
+                  <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                    <div className={`px-4 py-2.5 border-b text-xs font-semibold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                      Transfer Summary
+                    </div>
+                    <div className="p-4 space-y-1.5">
+                      {Object.entries(result.transfer_summary || {}).map(([key, val]) => (
+                        <div key={key} className="flex justify-between text-xs">
+                          <span className="text-slate-500">{key.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase())}</span>
+                          <span className="font-semibold text-slate-800 dark:text-white">{typeof val === 'boolean' ? (val ? '\u2713' : '\u2717') : val}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {step !== 4 || !result ? (
+          <div className={`px-6 py-4 border-t flex items-center justify-between gap-4 ${isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-100 bg-slate-50'}`}>
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <span>Step {step} of 3</span>
+              <div className="flex gap-1">
+                {[1,2,3].map(s => (
+                  <div key={s} className={`w-6 h-1 rounded-full transition-all ${s <= step ? 'bg-red-500' : isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-3">
+              {step > 1 && <Button variant="outline" onClick={() => setStep(s => s - 1)} className="h-10 px-6 rounded-xl text-sm">Back</Button>}
+              {step === 1 && (
+                <Button onClick={() => setStep(2)} className="h-10 px-6 rounded-xl font-semibold text-sm text-white" style={{ background: GRADIENT }}>
+                  Select Replacement <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              )}
+              {step === 2 && (
+                <Button onClick={() => setStep(3)} disabled={!replacementId}
+                  className="h-10 px-6 rounded-xl font-semibold text-sm text-white"
+                  style={{ background: replacementId ? GRADIENT : '#94a3b8' }}>
+                  Configure Transfer <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              )}
+              {step === 3 && (
+                <Button onClick={handleExecute} disabled={executing}
+                  className="h-10 px-8 rounded-xl font-semibold text-sm text-white"
+                  style={{ background: 'linear-gradient(135deg, #991b1b, #dc2626)' }}>
+                  {executing ? 'Processing\u2026' : 'Confirm Offboarding'}
+                </Button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className={`px-6 py-4 border-t flex justify-end ${isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-100 bg-slate-50'}`}>
+            <Button onClick={onClose} className="h-10 px-8 rounded-xl font-semibold text-sm text-white" style={{ background: GRAD_GREEN }}>Done</Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ════════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1359,6 +1739,9 @@ export default function Users() {
   const [clientSearch,         setClientSearch]         = useState('');
   const [activePermTab,        setActivePermTab]        = useState('modules');
   const [pwSearch,             setPwSearch]             = useState('');
+
+  const [offboardDialogOpen, setOffboardDialogOpen] = useState(false);
+  const [offboardTarget, setOffboardTarget]         = useState(null);
 
   const [formData, setFormData] = useState({
     full_name: '', email: '', password: '', role: 'staff',
@@ -1476,6 +1859,11 @@ export default function Users() {
     try { await api.delete(`/users/${id}`); toast.success('User removed'); fetchUsers(); }
     catch (err) { toast.error(err.response?.data?.detail || 'Failed to delete user'); }
   }, [isAdmin, canEditUsers, user?.id, fetchUsers]);
+
+  const handleOffboard = useCallback((userData) => {
+    setOffboardTarget(userData);
+    setOffboardDialogOpen(true);
+  }, []);
 
   const openPermissionsDialog = useCallback(async (userData) => {
     setSelectedUserForPerms(userData);
@@ -1725,7 +2113,7 @@ export default function Users() {
             {filteredUsers.length > 0
               ? filteredUsers.map(u => (
                   <UserCard key={u.id} userData={u} onEdit={handleEdit} onDelete={handleDelete}
-                    onPermissions={openPermissionsDialog} onApprove={handleApprove} onReject={handleReject}
+                    onOffboard={handleOffboard} onPermissions={openPermissionsDialog} onApprove={handleApprove} onReject={handleReject}
                     currentUserId={user?.id || ''} isAdmin={isAdmin} canEditUsers={canEditUsers}
                     canManagePermissions={canManagePermissions} approving={approvingId} />
                 ))
