@@ -170,7 +170,7 @@ if (typeof document !== 'undefined' && !document.getElementById('att-pulse-style
 function SectionCard({ children, className = '', style = {} }) {
   return (
     <div
-      className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm ${className}`}
+      className={`relative bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm ${className}`}
       style={style}
     >
       {children}
@@ -2430,7 +2430,7 @@ export default function Attendance() {
           if (sectionId === 'stat_cards') return (
             <React.Fragment key="stat_cards">
               <motion.div
-          className={`grid gap-3 ${canViewRankings ? 'grid-cols-2 md:grid-cols-3 lg:grid-cols-6' : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-5'}`}
+          className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6"
           variants={itemVariants}
         >
           <StatCard isDark={isDark} icon={Timer}
@@ -2468,7 +2468,7 @@ export default function Attendance() {
           <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-5">
 
             {/* HOLIDAYS CARD */}
-            <SectionCard style={{ maxHeight: 340 }} className="flex flex-col">
+            <SectionCard className="flex flex-col h-[340px]">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-amber-900/40' : 'bg-amber-50'}
                 icon={<CalendarIcon className="h-4 w-4 text-amber-500" />}
@@ -2512,7 +2512,7 @@ export default function Attendance() {
                   </div>
                 ) : monthHolidaysGrid.map(h => (
                   <motion.div key={h.date}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer group transition-all hover:shadow-sm"
+                    className="relative flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer group transition-all hover:shadow-sm"
                     style={{
                       borderColor: isDark ? 'rgba(245,158,11,0.22)' : `${COLORS.amber}35`,
                       backgroundColor: isDark ? 'rgba(245,158,11,0.06)' : `${COLORS.amber}05`,
@@ -2550,7 +2550,7 @@ export default function Attendance() {
             </SectionCard>
 
             {/* REMINDERS CARD */}
-            <SectionCard style={{ maxHeight: 340 }} className="flex flex-col">
+            <SectionCard className="flex flex-col h-[340px]">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-purple-900/40' : 'bg-purple-50'}
                 icon={<AlarmClock className="h-4 w-4 text-purple-500" />}
@@ -2657,7 +2657,7 @@ export default function Attendance() {
         >
           {/* ── LEFT COLUMN: Calendar + Date Detail + Apply Leave ── */}
           {!isEveryoneView && (
-            <div className="xl:col-span-1 flex flex-col gap-4">
+            <div className="xl:col-span-1 flex flex-col gap-4 min-h-0">
               <SectionCard>
                 <CardHeaderRow
                   iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
@@ -2852,7 +2852,7 @@ export default function Attendance() {
           )}
 
           {/* ── RIGHT COLUMN: Recent Attendance + Location History ── */}
-          <div className={isEveryoneView ? '' : 'xl:col-span-2 flex flex-col gap-4'}>
+          <div className={isEveryoneView ? '' : 'xl:col-span-2 flex flex-col gap-4 min-h-0'}>
 
             {/* Recent Attendance */}
             <SectionCard className="flex flex-col" style={{ height: 380, minHeight: 380, maxHeight: 380 }}>
