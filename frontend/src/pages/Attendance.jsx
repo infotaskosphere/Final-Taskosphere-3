@@ -2709,12 +2709,12 @@ export default function Attendance() {
               <SectionCard>
                 <div className="p-0">
                   {selectedAttendance?.status === 'absent' ? (
-                    <div className="p-5 border-l-4 rounded-xl" style={{ borderLeftColor: COLORS.red, backgroundColor: isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2' }}>
+                    <div className="relative p-5 pl-6 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.red }} />
                       <p className="font-bold text-base mb-1 text-red-500">Absent</p>
                       <p className="text-sm text-slate-400">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
                     </div>
                   ) : selectedAttendance?.punch_in ? (
-                    <div className="p-5 border-l-4 rounded-xl" style={{ borderLeftColor: COLORS.emeraldGreen, backgroundColor: isDark ? 'rgba(31,175,90,0.06)' : '#f0fdf4' }}>
+                    <div className="relative p-5 pl-6 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.06)' : '#f0fdf4' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.emeraldGreen }} />
                       <p className="font-bold text-base mb-3" style={{ color: isDark ? D.text : '#1e293b' }}>{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
@@ -2743,17 +2743,17 @@ export default function Attendance() {
                       </div>
                     </div>
                   ) : selectedAttendance?.status === 'leave' ? (
-                    <div className="p-5 border-l-4 rounded-xl" style={{ borderLeftColor: COLORS.orange, backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed' }}>
+                    <div className="relative p-5 pl-6 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.orange }} />
                       <p className="font-bold text-base mb-1" style={{ color: COLORS.orange }}>On Leave</p>
                       <p className="text-sm text-slate-400">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
                     </div>
                   ) : selectedHoliday ? (
-                    <div className="p-5 border-l-4 rounded-xl" style={{ borderLeftColor: COLORS.amber, backgroundColor: isDark ? 'rgba(245,158,11,0.06)' : '#fffbeb' }}>
+                    <div className="relative p-5 pl-6 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.06)' : '#fffbeb' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.amber }} />
                       <p className="font-bold text-base mb-1" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>Public Holiday</p>
                       <p className="text-sm font-medium" style={{ color: isDark ? D.muted : '#78716c' }}>{selectedHoliday.name}</p>
                     </div>
                   ) : (
-                    <div className="p-5 border-l-4 rounded-xl" style={{ borderLeftColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
+                    <div className="relative p-5 pl-6 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? D.raised : '#f8fafc' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: isDark ? D.border : '#e2e8f0' }} />
                       <p className="text-sm font-medium" style={{ color: isDark ? D.muted : '#64748b' }}>
                         No record for {format(selectedDate, 'MMM d, yyyy')}
                       </p>
@@ -2764,7 +2764,7 @@ export default function Attendance() {
 
               {/* ══ APPLY FOR LEAVE CARD ══ */}
               {!isViewingOther && (
-                <SectionCard className="flex-1 flex flex-col">
+                <SectionCard className="flex flex-col">
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
                     icon={<CalendarX className="h-4 w-4" style={{ color: COLORS.orange }} />}
@@ -2888,7 +2888,7 @@ export default function Attendance() {
                       key={`${record.date}-${record.user_id || idx}`}
                       variants={itemVariants}
                       whileHover={{ x: 2, transition: springPhysics.lift }}
-                      className="p-2.5 rounded-xl border transition-all"
+                      className="relative p-2.5 rounded-xl border transition-all overflow-hidden"
                       style={{
                         backgroundColor: isOngoing
                           ? isDark ? 'rgba(245,158,11,0.10)' : '#fffbeb'
@@ -2900,13 +2900,10 @@ export default function Attendance() {
                           : isDark
                             ? isAbsent ? '#7f1d1d' : isLeave ? '#7c2d12' : isPresent ? '#14532d' : D.border
                             : isAbsent ? '#fecaca' : isLeave ? '#fed7aa' : isPresent ? '#bbf7d0' : '#e2e8f0',
-                        borderLeftWidth: 3,
-                        borderLeftColor: isOngoing ? COLORS.amber
-                          : isAbsent ? COLORS.red : isLeave ? COLORS.orange
-                          : isPresent ? COLORS.emeraldGreen : isDark ? D.border : COLORS.slate200,
                         flexShrink: 0,
                       }}
                     >
+                      <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: isOngoing ? COLORS.amber : isAbsent ? COLORS.red : isLeave ? COLORS.orange : isPresent ? COLORS.emeraldGreen : isDark ? D.border : COLORS.slate200 }} />
                       <div className="flex justify-between items-center gap-2">
                         <div className="flex-1 min-w-0">
                           {recordUserName && (
@@ -3007,14 +3004,13 @@ export default function Attendance() {
                           initial={{ opacity: 0, y: 6 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: idx * 0.05, duration: 0.25 }}
-                          className="rounded-xl border overflow-hidden flex-shrink-0"
+                          className="relative rounded-xl border overflow-hidden flex-shrink-0"
                           style={{
                             borderColor: isOngoing ? isDark ? '#92400e' : '#fde68a' : isDark ? D.border : '#e2e8f0',
                             backgroundColor: isOngoing ? isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb' : isDark ? D.raised : '#fafafa',
-                            borderLeftWidth: 3,
-                            borderLeftColor: isOngoing ? COLORS.amber : '#0d9488',
                           }}
                         >
+                          <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: isOngoing ? COLORS.amber : '#0d9488' }} />
                           {/* Compact header */}
                           <div className="flex items-center justify-between px-2.5 py-1.5 border-b"
                             style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#f8fafc' }}>
@@ -3408,7 +3404,7 @@ export default function Attendance() {
                   </div>
                 </div>
                 {leaveFrom && (
-                  <div className="px-4 py-3 rounded-xl mb-6 border-l-4" style={{ backgroundColor: isDark ? `${COLORS.deepBlue}18` : `${COLORS.deepBlue}08`, borderLeftColor: COLORS.deepBlue }}>
+                  <div className="relative px-4 py-3 pl-5 rounded-xl mb-6 overflow-hidden" style={{ backgroundColor: isDark ? `${COLORS.deepBlue}18` : `${COLORS.deepBlue}08` }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.deepBlue }} />
                     <p className="text-xs text-slate-400 mb-0.5">Total Duration</p>
                     <p className="text-2xl font-black" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
                       {Math.max(1, leaveTo ? Math.ceil((leaveTo.getTime() - leaveFrom.getTime()) / 86400000) + 1 : 1)} days
