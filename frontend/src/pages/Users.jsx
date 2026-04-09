@@ -1338,15 +1338,9 @@ const UserCard = ({ userData, onEdit, onDelete, onOffboard, onPermissions, onApp
 // OFFBOARDING DIALOG — Employee Replacement Workflow
 // ════════════════════════════════════════════════════════════════════════════════
 
-const TRANSFER_OPTIONS = [
-  { key: 'transfer_tasks',     label: 'Tasks',      icon: Layers,      color: '#3B82F6', desc: 'All assigned & created tasks',      countKey: 'tasks_assigned' },
-  { key: 'transfer_clients',   label: 'Clients',    icon: Briefcase,   color: '#0F766E', desc: 'Client portfolio assignments',      countKey: 'clients' },
-  { key: 'transfer_dsc',       label: 'DSC',        icon: Fingerprint, color: '#7C3AED', desc: 'Digital Signature Certificates',    countKey: 'dsc' },
-  { key: 'transfer_documents', label: 'Documents',  icon: FileText,    color: '#F59E0B', desc: 'Document register entries',         countKey: 'documents' },
-  { key: 'transfer_todos',     label: 'Todos',      icon: CheckCircle, color: '#10B981', desc: 'Personal todo items',               countKey: 'todos' },
-  { key: 'transfer_visits',    label: 'Visits',     icon: MapPin,      color: '#EF4444', desc: 'Client visit records',              countKey: 'visits' },
-  { key: 'transfer_leads',     label: 'Leads',      icon: Target,      color: '#1F6FB2', desc: 'Lead pipeline entries',             countKey: 'leads' },
-];
+// ════════════════════════════════════════════════════════════════════════════════
+// OFFBOARDING DIALOG — Employee Replacement Workflow (REDESIGNED)
+// ════════════════════════════════════════════════════════════════════════════════
 
 function OffboardingDialog({ open, onClose, targetUser, allUsers, onComplete }) {
   const isDark = useDark();
@@ -1411,119 +1405,233 @@ function OffboardingDialog({ open, onClose, targetUser, allUsers, onComplete }) 
   const roleCfg = ROLE_CONFIG[targetUser.role?.toLowerCase()] || ROLE_CONFIG.staff;
   const totalItems = preview?.total_items || 0;
 
+  // Step labels for the progress indicator
+  const STEPS = ['Preview', 'Select Replacement', 'Configure & Confirm'];
+
   return (
     <Dialog open={open} onOpenChange={v => { if (!v && !executing) onClose(); }}>
-      <DialogContent className="max-w-2xl p-0 overflow-hidden rounded-2xl" style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
-        <DialogGradHeader
-          gradient="linear-gradient(135deg, #991b1b 0%, #dc2626 50%, #ef4444 100%)"
-          icon={UserMinus}
-          eyebrow="Employee Offboarding"
-          title={step === 4 && result ? 'Offboarding Complete' : `Offboard ${targetUser.full_name}`}
-          subtitle={step === 4 && result ? result.message : 'Transfer data \u2192 Replace \u2192 Archive'}
-          onClose={executing ? undefined : onClose}
-        />
+      <DialogContent
+        className="p-0 overflow-hidden rounded-2xl border-0 shadow-2xl"
+        style={{
+          maxWidth: 680,
+          width: '95vw',
+          maxHeight: '92vh',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        {/* ── Gradient Header ── */}
+        <div className="relative overflow-hidden flex-shrink-0" style={{ background: 'linear-gradient(135deg, #7f1d1d 0%, #b91c1c 50%, #ef4444 100%)' }}>
+          <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-24 -mt-24 opacity-10"
+            style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+          <div className="relative px-6 py-5 flex items-start justify-between gap-4">
+            <div className="flex items-start gap-4 flex-1 min-w-0">
+              <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center flex-shrink-0 mt-0.5">
+                <UserMinus className="h-5 w-5 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1">Employee Offboarding</p>
+                <h2 className="text-xl font-bold text-white leading-snug tracking-tight">
+                  {step === 4 && result ? 'Offboarding Complete' : `Offboard ${targetUser.full_name}`}
+                </h2>
+                <p className="text-white/55 text-sm mt-1">
+                  {step === 4 && result ? result.message : 'Transfer data → Replace → Archive'}
+                </p>
+              </div>
+            </div>
+            {!executing && (
+              <button onClick={onClose}
+                className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center flex-shrink-0 transition-all active:scale-90 mt-0.5">
+                <X className="h-4 w-4 text-white" />
+              </button>
+            )}
+          </div>
 
-      <div className="users-slim flex-1 overflow-y-auto" style={slimScroll}>
+          {/* Step progress bar inside header */}
+          {step !== 4 && (
+            <div className="px-6 pb-4">
+              <div className="flex items-center gap-2">
+                {STEPS.map((label, i) => {
+                  const s = i + 1;
+                  const isActive = s === step;
+                  const isDone   = s < step;
+                  return (
+                    <React.Fragment key={s}>
+                      <div className="flex items-center gap-2">
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0 transition-all ${
+                          isDone   ? 'bg-white text-red-700' :
+                          isActive ? 'bg-white/90 text-red-700 ring-2 ring-white/50' :
+                                     'bg-white/20 text-white/60'
+                        }`}>
+                          {isDone ? '✓' : s}
+                        </div>
+                        <span className={`text-[11px] font-semibold whitespace-nowrap ${
+                          isActive ? 'text-white' : isDone ? 'text-white/70' : 'text-white/40'
+                        }`}>{label}</span>
+                      </div>
+                      {i < STEPS.length - 1 && (
+                        <div className={`flex-1 h-0.5 rounded-full min-w-[16px] transition-all ${s < step ? 'bg-white/70' : 'bg-white/20'}`} />
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
 
-          {/* STEP 1: Confirm & Preview */}
+        {/* ── Scrollable Body ── */}
+        <div className="flex-1 overflow-y-auto users-slim" style={slimScroll}>
+
+          {/* STEP 1 — Preview */}
           {step === 1 && (
             <div className="p-6 space-y-5">
-              <div className={`flex items-center gap-4 p-4 rounded-xl border-2 ${isDark ? 'bg-red-950/20 border-red-900/50' : 'bg-red-50 border-red-200'}`}>
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white text-lg font-black bg-gradient-to-br ${roleCfg.gradient}`}>
+              {/* Target user card */}
+              <div className={`flex items-center gap-4 p-4 rounded-2xl border ${isDark ? 'bg-red-950/20 border-red-900/40' : 'bg-red-50/80 border-red-200'}`}>
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white text-lg font-bold bg-gradient-to-br ${roleCfg.gradient} flex-shrink-0`}>
                   {targetUser.full_name?.charAt(0)?.toUpperCase()}
                 </div>
-                <div className="flex-1">
-                  <p className="font-bold text-sm text-slate-900 dark:text-white">{targetUser.full_name}</p>
-                  <p className="text-xs text-slate-500">{targetUser.email} \u00b7 {roleCfg.label}</p>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-bold text-sm text-slate-900 dark:text-white">{targetUser.full_name}</p>
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold text-white bg-gradient-to-r ${roleCfg.gradient}`}>
+                      <roleCfg.icon className="h-2.5 w-2.5" />{roleCfg.label}
+                    </span>
+                    <Badge variant="destructive" className="text-[10px] h-5">Leaving</Badge>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">{targetUser.email}</p>
                   {(targetUser.departments || []).length > 0 && (
-                    <div className="flex gap-1 mt-1">{targetUser.departments.map(d => <DeptPill key={d} dept={d} />)}</div>
+                    <div className="flex gap-1 mt-2 flex-wrap">
+                      {targetUser.departments.map(d => <DeptPill key={d} dept={d} />)}
+                    </div>
                   )}
                 </div>
-                <Badge variant="destructive" className="text-xs">Leaving</Badge>
               </div>
 
+              {/* Data counts */}
               <div>
-                <h3 className="font-bold text-sm text-slate-800 dark:text-white mb-3 flex items-center gap-2">
-                  <BarChart2 className="h-4 w-4 text-blue-500" /> Data Owned by This Employee
-                </h3>
+                <div className="flex items-center gap-2 mb-3">
+                  <BarChart2 className="h-4 w-4 text-blue-500" />
+                  <h3 className="font-bold text-sm text-slate-800 dark:text-white">Data Owned by This Employee</h3>
+                </div>
                 {loadingPreview ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+                  <div className="flex items-center justify-center py-10">
+                    <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
                   </div>
                 ) : preview ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {Object.entries(preview.data_counts).map(([key, count]) => {
-                      const label = key.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
-                      return (
-                        <div key={key} className={`p-3 rounded-xl border text-center ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                          <p className="text-xl font-bold text-slate-900 dark:text-white">{count}</p>
-                          <p className="text-[10px] text-slate-500 font-medium mt-0.5">{label}</p>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <>
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-3">
+                      {Object.entries(preview.data_counts).map(([key, count]) => {
+                        const label = key.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
+                        return (
+                          <div key={key} className={`p-3 rounded-xl border text-center ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                            <p className="text-2xl font-bold text-slate-900 dark:text-white leading-none">{count}</p>
+                            <p className="text-[10px] text-slate-500 font-medium mt-1 leading-tight">{label}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className={`p-3.5 rounded-xl text-sm font-semibold flex items-center gap-2.5 ${
+                      totalItems > 0
+                        ? isDark ? 'bg-amber-950/30 text-amber-400 border border-amber-900/50' : 'bg-amber-50 text-amber-700 border border-amber-200'
+                        : isDark ? 'bg-emerald-950/30 text-emerald-400 border border-emerald-900/40' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    }`}>
+                      <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                      {totalItems > 0
+                        ? `${totalItems} total items will be transferred to the replacement`
+                        : 'No data to transfer — account can be safely removed'}
+                    </div>
+                  </>
                 ) : null}
-                {preview && (
-                  <div className={`mt-3 p-3 rounded-xl text-sm font-semibold text-center ${
-                    totalItems > 0
-                      ? isDark ? 'bg-amber-950/30 text-amber-400 border border-amber-900/50' : 'bg-amber-50 text-amber-700 border border-amber-200'
-                      : isDark ? 'bg-emerald-950/30 text-emerald-400' : 'bg-emerald-50 text-emerald-700'
-                  }`}>
-                    <AlertCircle className="h-4 w-4 inline mr-2" />
-                    {totalItems > 0
-                      ? `${totalItems} total items will be transferred to the replacement`
-                      : 'No data to transfer — account can be safely removed'}
-                  </div>
-                )}
               </div>
             </div>
           )}
 
-          {/* STEP 2: Select Replacement */}
+          {/* STEP 2 — Select Replacement */}
           {step === 2 && (
             <div className="p-6 space-y-4">
               <div>
-                <h3 className="font-bold text-sm text-slate-800 dark:text-white mb-1 flex items-center gap-2">
+                <h3 className="font-bold text-sm text-slate-800 dark:text-white flex items-center gap-2 mb-1">
                   <UsersIcon className="h-4 w-4 text-blue-500" /> Select Replacement Employee
                 </h3>
-                <p className="text-xs text-slate-500 mb-3">All data from {targetUser.full_name} will be transferred to this person</p>
+                <p className="text-xs text-slate-500">All data from {targetUser.full_name} will be transferred to this person</p>
               </div>
+
+              {/* Search */}
               <div className="relative">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <Input placeholder="Search employees\u2026" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="pl-10 h-10 rounded-xl" />
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                <Input
+                  placeholder="Search by name or email…"
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  className={`pl-10 h-10 rounded-xl text-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
+                />
+                {searchTerm && (
+                  <button onClick={() => setSearchTerm('')} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
               </div>
-              <div className="users-slim max-h-[300px] overflow-y-auto space-y-2 pr-1" style={slimScroll}>
+
+              {/* User list */}
+              <div className="space-y-2">
                 {eligibleUsers.length === 0 ? (
-                  <div className="text-center py-8 text-slate-400 text-sm">No eligible users found</div>
+                  <div className={`flex flex-col items-center py-10 rounded-2xl border border-dashed ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                    <UsersIcon className="h-8 w-8 text-slate-300 mb-2" />
+                    <p className="text-sm text-slate-400">No eligible users found</p>
+                  </div>
                 ) : eligibleUsers.map(u => {
-                  const uRole = ROLE_CONFIG[u.role?.toLowerCase()] || ROLE_CONFIG.staff;
+                  const uRole     = ROLE_CONFIG[u.role?.toLowerCase()] || ROLE_CONFIG.staff;
                   const URoleIcon = uRole.icon;
                   const isSelected = replacementId === u.id;
+                  const depts = u.departments || [];
+
                   return (
-                    <button key={u.id} onClick={() => setReplacementId(u.id)}
-                      className={`w-full flex items-center gap-3 p-3.5 rounded-xl border-2 text-left transition-all hover:shadow-sm ${
-                        isSelected ? 'border-emerald-500 shadow-sm'
+                    <button
+                      key={u.id}
+                      onClick={() => setReplacementId(u.id)}
+                      className={`w-full text-left rounded-2xl border-2 transition-all hover:shadow-sm overflow-hidden ${
+                        isSelected
+                          ? isDark ? 'border-emerald-500 bg-emerald-950/20' : 'border-emerald-500 bg-emerald-50'
                           : isDark ? 'border-slate-700 bg-slate-800 hover:border-slate-600' : 'border-slate-200 bg-white hover:border-slate-300'
                       }`}
-                      style={isSelected ? { background: isDark ? 'rgba(16,185,129,0.1)' : '#f0fdf4' } : {}}>
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold bg-gradient-to-br ${uRole.gradient}`}>
-                        {u.full_name?.charAt(0)?.toUpperCase()}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm text-slate-900 dark:text-white truncate">{u.full_name}</p>
-                        <p className="text-xs text-slate-500 truncate">{u.email}</p>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold text-white bg-gradient-to-r ${uRole.gradient}`}>
-                            <URoleIcon className="h-2.5 w-2.5" />{uRole.label}
-                          </span>
-                          {(u.departments || []).map(d => <DeptPill key={d} dept={d} />)}
+                    >
+                      <div className="flex items-start gap-3.5 p-3.5">
+                        {/* Avatar */}
+                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0 bg-gradient-to-br ${uRole.gradient}`}>
+                          {u.profile_picture
+                            ? <img src={u.profile_picture} alt="" className="w-full h-full object-cover rounded-xl" />
+                            : u.full_name?.charAt(0)?.toUpperCase()}
                         </div>
-                      </div>
-                      {isSelected && (
-                        <div className="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0">
-                          <CheckCircle className="h-4 w-4 text-white" />
+
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          {/* Name + role badge row */}
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <span className={`font-semibold text-sm ${isSelected ? 'text-emerald-800 dark:text-emerald-200' : 'text-slate-900 dark:text-white'}`}>
+                              {u.full_name}
+                            </span>
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold text-white bg-gradient-to-r ${uRole.gradient}`}>
+                              <URoleIcon className="h-2.5 w-2.5" />{uRole.label}
+                            </span>
+                          </div>
+                          {/* Email */}
+                          <p className="text-[11px] text-slate-400 truncate mb-2">{u.email}</p>
+                          {/* Dept pills — wrap freely, no truncation */}
+                          {depts.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {depts.map(d => <DeptPill key={d} dept={d} />)}
+                            </div>
+                          )}
                         </div>
-                      )}
+
+                        {/* Selected check */}
+                        {isSelected && (
+                          <div className="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <CheckCircle className="h-4 w-4 text-white" />
+                          </div>
+                        )}
+                      </div>
                     </button>
                   );
                 })}
@@ -1531,55 +1639,70 @@ function OffboardingDialog({ open, onClose, targetUser, allUsers, onComplete }) 
             </div>
           )}
 
-          {/* STEP 3: Transfer Options & Confirm */}
+          {/* STEP 3 — Configure Transfer */}
           {step === 3 && (
             <div className="p-6 space-y-5">
-              <div className={`flex items-center gap-3 p-4 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold bg-gradient-to-br ${roleCfg.gradient}`}>
-                  {targetUser.full_name?.charAt(0)?.toUpperCase()}
+              {/* From → To banner */}
+              <div className={`grid grid-cols-[1fr_auto_1fr] items-center gap-3 p-4 rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0 bg-gradient-to-br ${roleCfg.gradient}`}>
+                    {targetUser.full_name?.charAt(0)?.toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-xs text-red-600 dark:text-red-400 truncate">{targetUser.full_name}</p>
+                    <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold">Leaving</p>
+                  </div>
                 </div>
-                <div className="flex-1 text-center">
-                  <ArrowRight className="h-5 w-5 text-slate-400 mx-auto" />
-                  <p className="text-[10px] text-slate-400 font-semibold mt-0.5">REPLACE WITH</p>
+                <div className="flex flex-col items-center gap-0.5">
+                  <ArrowRight className="h-5 w-5 text-slate-400" />
+                  <p className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide">Replace</p>
                 </div>
                 {selectedReplacement && (
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold bg-gradient-to-br ${(ROLE_CONFIG[selectedReplacement.role?.toLowerCase()] || ROLE_CONFIG.staff).gradient}`}>
-                    {selectedReplacement.full_name?.charAt(0)?.toUpperCase()}
+                  <div className="flex items-center gap-2.5 min-w-0 justify-end">
+                    <div className="min-w-0 text-right">
+                      <p className="font-semibold text-xs text-emerald-600 dark:text-emerald-400 truncate">{selectedReplacement.full_name}</p>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold">Replacement</p>
+                    </div>
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0 bg-gradient-to-br ${(ROLE_CONFIG[selectedReplacement.role?.toLowerCase()] || ROLE_CONFIG.staff).gradient}`}>
+                      {selectedReplacement.full_name?.charAt(0)?.toUpperCase()}
+                    </div>
                   </div>
                 )}
               </div>
-              <div className="flex justify-between text-xs">
-                <span className="font-semibold text-red-600 dark:text-red-400">{targetUser.full_name} (leaving)</span>
-                <span className="font-semibold text-emerald-600 dark:text-emerald-400">{selectedReplacement?.full_name} (replacement)</span>
-              </div>
 
+              {/* Transfer toggles */}
               <div>
-                <h3 className="font-bold text-sm text-slate-800 dark:text-white mb-3 flex items-center gap-2">
-                  <SlidersHorizontal className="h-4 w-4 text-blue-500" /> Transfer Options
-                </h3>
-                <div className="space-y-2">
+                <div className="flex items-center gap-2 mb-3">
+                  <SlidersHorizontal className="h-4 w-4 text-blue-500" />
+                  <h3 className="font-bold text-sm text-slate-800 dark:text-white">Transfer Options</h3>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {TRANSFER_OPTIONS.map(opt => {
-                    const Icon = opt.icon;
-                    const isOn = !!transfers[opt.key];
+                    const Icon  = opt.icon;
+                    const isOn  = !!transfers[opt.key];
                     const count = preview?.data_counts?.[opt.countKey] || 0;
                     return (
-                      <div key={opt.key}
-                        className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${
-                          isOn ? isDark ? 'bg-emerald-950/30 border-emerald-800' : 'bg-emerald-50 border-emerald-200'
-                            : isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
-                        }`}>
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `${opt.color}15` }}>
+                      <div
+                        key={opt.key}
+                        className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-all cursor-pointer ${
+                          isOn
+                            ? isDark ? 'bg-emerald-950/25 border-emerald-800' : 'bg-emerald-50 border-emerald-200'
+                            : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'
+                        }`}
+                        onClick={() => setTransfers(p => ({ ...p, [opt.key]: !p[opt.key] }))}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `${opt.color}18` }}>
                             <Icon className="h-4 w-4" style={{ color: opt.color }} />
                           </div>
                           <div>
-                            <p className="font-semibold text-sm text-slate-800 dark:text-white">{opt.label}</p>
-                            <p className="text-xs text-slate-400">{opt.desc}</p>
+                            <p className="font-semibold text-[13px] text-slate-800 dark:text-white">{opt.label}</p>
+                            <p className="text-[11px] text-slate-400 leading-tight">{opt.desc}</p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2 flex-shrink-0" onClick={e => e.stopPropagation()}>
                           {count > 0 && (
-                            <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: `${opt.color}15`, color: opt.color }}>{count}</span>
+                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ background: `${opt.color}18`, color: opt.color }}>{count}</span>
                           )}
                           <Switch checked={isOn} onCheckedChange={v => setTransfers(p => ({ ...p, [opt.key]: v }))} />
                         </div>
@@ -1589,62 +1712,82 @@ function OffboardingDialog({ open, onClose, targetUser, allUsers, onComplete }) 
                 </div>
               </div>
 
+              {/* Optional email update */}
               <div>
-                <h3 className="font-bold text-sm text-slate-800 dark:text-white mb-2 flex items-center gap-2">
-                  <Mail className="h-4 w-4 text-violet-500" /> Update Replacement's Email
+                <div className="flex items-center gap-2 mb-2">
+                  <Mail className="h-4 w-4 text-violet-500" />
+                  <h3 className="font-bold text-sm text-slate-800 dark:text-white">Update Replacement's Email</h3>
                   <span className="text-[10px] text-slate-400 font-normal">(optional)</span>
-                </h3>
-                <Input placeholder={`e.g. ${targetUser.email}`} value={newEmail} onChange={e => setNewEmail(e.target.value)} className="h-10 rounded-xl" />
-                <p className="text-[10px] text-slate-400 mt-1">Leave empty to keep {selectedReplacement?.email}</p>
+                </div>
+                <Input
+                  placeholder={`e.g. ${targetUser.email}`}
+                  value={newEmail}
+                  onChange={e => setNewEmail(e.target.value)}
+                  className="h-10 rounded-xl text-sm"
+                />
+                <p className="text-[11px] text-slate-400 mt-1.5">Leave empty to keep {selectedReplacement?.email}</p>
               </div>
 
+              {/* Notes */}
               <div>
-                <h3 className="font-bold text-sm text-slate-800 dark:text-white mb-2 flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-slate-500" /> Offboarding Notes
+                <div className="flex items-center gap-2 mb-2">
+                  <FileText className="h-4 w-4 text-slate-400" />
+                  <h3 className="font-bold text-sm text-slate-800 dark:text-white">Offboarding Notes</h3>
                   <span className="text-[10px] text-slate-400 font-normal">(optional)</span>
-                </h3>
-                <textarea value={notes} onChange={e => setNotes(e.target.value)}
-                  placeholder="Reason for leaving, handover notes, etc." rows={2}
-                  className={`w-full px-3 py-2 rounded-xl border text-sm resize-none ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`} />
+                </div>
+                <textarea
+                  value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                  placeholder="Reason for leaving, handover notes, etc."
+                  rows={2}
+                  className={`w-full px-3.5 py-2.5 rounded-xl border text-sm resize-none focus:outline-none focus:ring-2 focus:ring-red-400 transition-all ${
+                    isDark ? 'bg-slate-800 border-slate-700 text-slate-100 placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-900 placeholder:text-slate-400'
+                  }`}
+                />
               </div>
 
-              <div className={`flex items-start gap-3 p-3 rounded-xl border text-xs ${isDark ? 'bg-red-950/30 border-red-900/50 text-red-300' : 'bg-red-50 border-red-200 text-red-700'}`}>
+              {/* Warning */}
+              <div className={`flex items-start gap-3 p-3.5 rounded-xl border text-xs ${isDark ? 'bg-red-950/25 border-red-900/50 text-red-300' : 'bg-red-50 border-red-200 text-red-700'}`}>
                 <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0 text-red-500" />
                 <div>
-                  <p className="font-bold">This action cannot be undone</p>
-                  <p className="mt-0.5">{targetUser.full_name}'s account will be permanently deleted. All selected data will be transferred to {selectedReplacement?.full_name}. An audit log entry will be created.</p>
+                  <p className="font-bold mb-0.5">This action cannot be undone</p>
+                  <p className="leading-relaxed">
+                    {targetUser.full_name}'s account will be permanently deleted. All selected data will be transferred to {selectedReplacement?.full_name}. An audit log entry will be created.
+                  </p>
                 </div>
               </div>
             </div>
           )}
 
-          {/* STEP 4: Executing / Result */}
+          {/* STEP 4 — Result */}
           {step === 4 && (
             <div className="p-6">
               {executing ? (
-                <div className="flex flex-col items-center py-12">
+                <div className="flex flex-col items-center py-14">
                   <Loader2 className="h-10 w-10 animate-spin text-blue-500 mb-4" />
-                  <p className="font-bold text-sm text-slate-800 dark:text-white">Processing offboarding\u2026</p>
+                  <p className="font-bold text-sm text-slate-800 dark:text-white">Processing offboarding…</p>
                   <p className="text-xs text-slate-500 mt-1">Transferring data and removing account</p>
                 </div>
               ) : result ? (
-                <div className="space-y-4">
+                <div className="space-y-5">
                   <div className="flex flex-col items-center py-6">
                     <div className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center mb-4">
                       <CheckCircle className="h-8 w-8 text-emerald-500" />
                     </div>
-                    <p className="font-bold text-lg text-slate-900 dark:text-white">Offboarding Complete</p>
-                    <p className="text-sm text-slate-500 mt-1">{result.message}</p>
+                    <p className="font-bold text-xl text-slate-900 dark:text-white">Offboarding Complete</p>
+                    <p className="text-sm text-slate-500 mt-1 text-center max-w-xs">{result.message}</p>
                   </div>
-                  <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                    <div className={`px-4 py-2.5 border-b text-xs font-semibold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                  <div className={`rounded-2xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                    <div className={`px-4 py-3 border-b text-xs font-semibold uppercase tracking-wider ${isDark ? 'bg-slate-800 border-slate-700 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
                       Transfer Summary
                     </div>
-                    <div className="p-4 space-y-1.5">
+                    <div className="p-4 grid grid-cols-2 gap-x-8 gap-y-2">
                       {Object.entries(result.transfer_summary || {}).map(([key, val]) => (
-                        <div key={key} className="flex justify-between text-xs">
+                        <div key={key} className="flex justify-between text-xs border-b border-slate-100 dark:border-slate-700/50 pb-2 last:border-0">
                           <span className="text-slate-500">{key.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase())}</span>
-                          <span className="font-semibold text-slate-800 dark:text-white">{typeof val === 'boolean' ? (val ? '\u2713' : '\u2717') : val}</span>
+                          <span className={`font-semibold ${typeof val === 'boolean' ? (val ? 'text-emerald-600' : 'text-red-500') : 'text-slate-800 dark:text-white'}`}>
+                            {typeof val === 'boolean' ? (val ? '✓' : '✗') : val}
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -1655,43 +1798,54 @@ function OffboardingDialog({ open, onClose, targetUser, allUsers, onComplete }) 
           )}
         </div>
 
-        {/* Footer */}
-        {step !== 4 || !result ? (
-          <div className={`px-6 py-4 border-t flex items-center justify-between gap-4 ${isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-100 bg-slate-50'}`}>
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              <span>Step {step} of 3</span>
-              <div className="flex gap-1">
-                {[1,2,3].map(s => (
-                  <div key={s} className={`w-6 h-1 rounded-full transition-all ${s <= step ? 'bg-red-500' : isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
-                ))}
-              </div>
+        {/* ── Sticky Footer ── */}
+        {(step !== 4 || !result) ? (
+          <div className={`px-6 py-4 border-t flex-shrink-0 flex items-center justify-between gap-4 ${isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-100 bg-white'}`}>
+            <div className="text-xs text-slate-400">
+              Step {step} of 3
             </div>
             <div className="flex gap-3">
-              {step > 1 && <Button variant="outline" onClick={() => setStep(s => s - 1)} className="h-10 px-6 rounded-xl text-sm">Back</Button>}
+              {step > 1 && !executing && (
+                <Button variant="outline" onClick={() => setStep(s => s - 1)} className="h-10 px-5 rounded-xl text-sm">
+                  ← Back
+                </Button>
+              )}
               {step === 1 && (
-                <Button onClick={() => setStep(2)} className="h-10 px-6 rounded-xl font-semibold text-sm text-white" style={{ background: GRADIENT }}>
+                <Button
+                  onClick={() => setStep(2)}
+                  className="h-10 px-6 rounded-xl font-semibold text-sm text-white"
+                  style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
+                >
                   Select Replacement <ChevronRight className="h-4 w-4 ml-1" />
                 </Button>
               )}
               {step === 2 && (
-                <Button onClick={() => setStep(3)} disabled={!replacementId}
+                <Button
+                  onClick={() => setStep(3)}
+                  disabled={!replacementId}
                   className="h-10 px-6 rounded-xl font-semibold text-sm text-white"
-                  style={{ background: replacementId ? GRADIENT : '#94a3b8' }}>
+                  style={{ background: replacementId ? 'linear-gradient(135deg, #0D3B66, #1F6FB2)' : '#94a3b8' }}
+                >
                   Configure Transfer <ChevronRight className="h-4 w-4 ml-1" />
                 </Button>
               )}
               {step === 3 && (
-                <Button onClick={handleExecute} disabled={executing}
-                  className="h-10 px-8 rounded-xl font-semibold text-sm text-white"
-                  style={{ background: 'linear-gradient(135deg, #991b1b, #dc2626)' }}>
-                  {executing ? 'Processing\u2026' : 'Confirm Offboarding'}
+                <Button
+                  onClick={handleExecute}
+                  disabled={executing}
+                  className="h-10 px-7 rounded-xl font-semibold text-sm text-white"
+                  style={{ background: 'linear-gradient(135deg, #991b1b, #dc2626)' }}
+                >
+                  {executing ? 'Processing…' : 'Confirm Offboarding'}
                 </Button>
               )}
             </div>
           </div>
         ) : (
-          <div className={`px-6 py-4 border-t flex justify-end ${isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-100 bg-slate-50'}`}>
-            <Button onClick={onClose} className="h-10 px-8 rounded-xl font-semibold text-sm text-white" style={{ background: GRAD_GREEN }}>Done</Button>
+          <div className={`px-6 py-4 border-t flex-shrink-0 flex justify-end ${isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-100 bg-white'}`}>
+            <Button onClick={onClose} className="h-10 px-8 rounded-xl font-semibold text-sm text-white" style={{ background: GRAD_GREEN }}>
+              Done ✓
+            </Button>
           </div>
         )}
       </DialogContent>
