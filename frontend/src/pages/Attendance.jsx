@@ -1232,7 +1232,7 @@ export default function Attendance() {
         api.get('/attendance/today').catch(() => ({ data: null })),
         api.get('/tasks').catch(() => ({ data: [] })),
         api.get('/holidays').catch(() => ({ data: [] })),
-        canViewRankings ? api.get('/reports/performance-rankings?period=monthly').catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
+        api.get('/reports/performance-rankings?period=monthly').catch(() => ({ data: [] })),
       ];
       const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes] = await Promise.all(requests);
 
@@ -1306,8 +1306,8 @@ export default function Attendance() {
 
       const rankingList = Array.isArray(rankingRes.data) ? rankingRes.data : (rankingRes.data?.rankings || rankingRes.data?.data || []);
       const rankUserId  = isOtherReq ? rawTargetId : user?.id;
-      const myEntry     = rankingList.find(r => r.user_id === rankUserId);
-      setMyRank(myEntry ? `#${myEntry.rank}` : '—');
+      const myEntry     = (!isEveryoneReq && rankUserId) ? rankingList.find(r => r.user_id === rankUserId) : null;
+      setMyRank(myEntry ? `#${myEntry.rank}` : isEveryoneReq ? 'N/A' : '—');
 
       if (isAdmin) {
         try {
@@ -2004,15 +2004,15 @@ export default function Attendance() {
                     <option value="" style={{ color: '#1e293b', background: '#ffffff' }}>
                       {user?.full_name ? `${user.full_name} (Me)` : 'My Attendance'}
                     </option>
-                    {/* Admin can see Everyone aggregate view */}
-                    {isAdmin && (
-                      <option value="everyone" style={{ color: '#1e293b', background: '#ffffff' }}>Everyone (All Users)</option>
-                    )}
                     {(Array.isArray(allUsers) ? allUsers : []).filter(u => u.id !== user?.id).map(u => (
                       <option key={u.id} value={u.id} style={{ color: '#1e293b', background: '#ffffff' }}>
                         {u.full_name}
                       </option>
                     ))}
+                    {/* Everyone option at the bottom */}
+                    {isAdmin && (
+                      <option value="everyone" style={{ color: '#1e293b', background: '#ffffff' }}>Everyone (All Users)</option>
+                    )}
                   </select>
                 )}
                 {isAdmin && (
@@ -2451,7 +2451,7 @@ export default function Attendance() {
           <StatCard isDark={isDark} icon={Flame}
             label="Streak" value={attendanceStreak} unit="consecutive days" color="#f59e0b"
             trend={attendanceStreak >= 5 ? 'Keep it up!' : 'Build momentum'} />
-          {canViewRankings && !isEveryoneView && (
+          {!isEveryoneView && (
             <StatCard isDark={isDark} icon={TrendingUp}
               label={isViewingOther ? 'Their Rank' : 'Your Rank'}
               value={myRank} unit="overall" color={COLORS.mediumBlue}
