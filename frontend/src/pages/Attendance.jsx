@@ -2967,7 +2967,7 @@ export default function Attendance() {
                 .filter(r => r.punch_in && r.status === 'present')
                 .slice(0, 5);
               return (
-                <SectionCard className="flex-1 flex flex-col" style={{ minHeight: 280 }}>
+                <SectionCard className="flex flex-col" style={{ height: 380, minHeight: 380, maxHeight: 380 }}>
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-teal-900/40' : 'bg-teal-50'}
                     icon={<MapPin className="h-4 w-4 text-teal-500" />}
@@ -3128,7 +3128,7 @@ export default function Attendance() {
                   }
                 />
                 <div className="p-5">
-                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 items-center">
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 items-stretch">
 
                     {/* Stat: Present */}
                     <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center"
@@ -3183,7 +3183,7 @@ export default function Attendance() {
                     </div>
 
                     {/* Punctuality bar */}
-                    <div className="flex flex-col justify-center gap-3 px-4 py-3 rounded-2xl border col-span-2 md:col-span-4 lg:col-span-1"
+                    <div className="flex flex-col justify-center gap-3 px-4 py-3 rounded-2xl border"
                       style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}>
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Punctuality</span>
