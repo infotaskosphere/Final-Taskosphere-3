@@ -1,4 +1,5 @@
 import Papa from 'papaparse/papaparse.js';
+import { motion } from 'framer-motion';
 import { useDark } from '@/hooks/useDark';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';import { useAuth } from '@/contexts/AuthContext';
@@ -55,7 +56,14 @@ const AVATAR_GRADIENTS = [
   ['#4c1d95', '#7c3aed'], ['#1e3a5f', '#2563eb'], ['#831843', '#db2777'],
   ['#134e4a', '#0d9488'], ['#1e1b4b', '#4f46e5'],
 ];
-
+const springPhysics = {
+  card: { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
+};
+ 
+const cardVariants = {
+  hidden:  { opacity: 0, y: 18, scale: 0.98 },
+  visible: { opacity: 1, y: 0,  scale: 1, transition: { type: 'spring', stiffness: 380, damping: 28 } },
+};
 const SORT_OPTIONS = [
   { value: 'fifo', label: 'Oldest First', icon: '↑', hint: 'FIFO' },
   { value: 'lifo', label: 'Newest First', icon: '↓', hint: 'LIFO' },
@@ -431,88 +439,179 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
 // ═══════════════════════════════════════════════════════════════════════════
 // CLIENT CARD — lifted outside Clients() so it never re-creates on render
 // ═══════════════════════════════════════════════════════════════════════════
-const ModernClientCard = React.memo(({ onSendBirthdayWish, client, index, isDark, users, getClientAssignments, openWhatsApp, handleEdit, canDeleteData, onDelete, setSelectedClient, setDetailDialogOpen, getClientNumber }) => {
-  const cfg = TYPE_CONFIG[client.client_type] || TYPE_CONFIG.proprietor;
-  const avatarGrad = getAvatarGradient(client.company_name);
-  const isArchived = client.status === 'inactive';
+const ModernClientCard = React.memo(({
+  onSendBirthdayWish, client, index, isDark, users,
+  getClientAssignments, openWhatsApp, handleEdit,
+  canDeleteData, onDelete, setSelectedClient, setDetailDialogOpen, getClientNumber,
+}) => {
+  const cfg            = TYPE_CONFIG[client.client_type] || TYPE_CONFIG.proprietor;
+  const avatarGrad     = getAvatarGradient(client.company_name);
+  const isArchived     = client.status === 'inactive';
   const primaryContact = client.contact_persons?.find(cp => cp.name?.trim());
   const clientAssignments = getClientAssignments(client);
-  const serviceCount = client.services?.length || 0;
-  const today = new Date();
-
+  const serviceCount   = client.services?.length || 0;
+  const today          = new Date();
+  const stripeColor    = cfg.strip;
+ 
   const worstDsc = useMemo(() => {
     if (!client.dsc_details?.length) return null;
     return client.dsc_details.reduce((worst, d) => {
       const days = getDscDaysLeft(d.expiry_date);
       if (days === null) return worst;
-      if (worst === null || days < worst) return days;
-      return worst;
+      return (worst === null || days < worst) ? days : worst;
     }, null);
   }, [client.dsc_details]);
-  
+ 
   const hasBirthdayToday = useMemo(() =>
     client.contact_persons?.some(cp => {
       if (!cp?.birthday) return false;
       const bday = new Date(cp.birthday);
       return bday.getMonth() === today.getMonth() && bday.getDate() === today.getDate();
-    }) ?? false
-  , [client.contact_persons]);
-
+    }) ?? false,
+  [client.contact_persons]);
+ 
   const firstAssignee = useMemo(() => {
     const a = clientAssignments[0];
     if (!a) return null;
     return users.find(x => x.id === a.user_id) || null;
   }, [clientAssignments, users]);
-
+ 
   const extraAssignees = clientAssignments.length > 1 ? clientAssignments.length - 1 : 0;
-  const svcSlots = [0, 1, 2].map(i => client.services?.[i]?.replace('Other: ', '') || null);
+  const svcSlots  = [0, 1, 2].map(i => client.services?.[i]?.replace('Other: ', '') || null);
   const extraSvcs = serviceCount > 3 ? serviceCount - 3 : 0;
-  const iconBg = isDark ? 'rgba(255,255,255,0.07)' : cfg.bg;
-
+  const iconBg    = isDark ? 'rgba(255,255,255,0.07)' : cfg.bg;
+ 
+  const actionBtns = [
+    {
+      onClick: e => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); },
+      icon: <MessageCircle style={{ width: 12, height: 12 }} />,
+      label: 'Chat',
+      color: '#16a34a',
+      hoverBg: isDark ? 'rgba(34,197,94,0.1)' : '#f0fdf4',
+    },
+    {
+      onClick: e => { e.stopPropagation(); handleEdit(client); },
+      icon: <Edit style={{ width: 12, height: 12 }} />,
+      label: 'Edit',
+      color: '#2563eb',
+      hoverBg: isDark ? 'rgba(59,130,246,0.1)' : '#eff6ff',
+    },
+    {
+      onClick: e => { e.stopPropagation(); onSendBirthdayWish(client.id, client.company_name); },
+      icon: <span style={{ fontSize: 11 }}>🎂</span>,
+      label: 'Wish',
+      color: '#d97706',
+      hoverBg: isDark ? 'rgba(217,119,6,0.1)' : '#fffbeb',
+    },
+    ...(canDeleteData ? [{
+      onClick: e => { e.stopPropagation(); onDelete(client); },
+      icon: <Trash2 style={{ width: 12, height: 12 }} />,
+      label: 'Del',
+      color: '#ef4444',
+      hoverBg: isDark ? 'rgba(239,68,68,0.1)' : '#fef2f2',
+    }] : []),
+  ];
+ 
   return (
-    <div
-      className={`group relative flex flex-col overflow-hidden cursor-pointer select-none ${isArchived ? 'opacity-55' : ''}`}
-      style={{ borderRadius: 16, background: isDark ? '#1e293b' : '#ffffff', border: `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'}`, boxShadow: isDark ? '0 2px 8px rgba(0,0,0,0.35)' : '0 1px 4px rgba(0,0,0,0.06)', transition: 'transform 0.15s ease, box-shadow 0.15s ease' }}
-      onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = isDark ? '0 12px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.1)' : `0 12px 32px rgba(0,0,0,0.1), 0 0 0 1px ${cfg.border}`; }}
-      onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = isDark ? '0 2px 8px rgba(0,0,0,0.35)' : '0 1px 4px rgba(0,0,0,0.06)'; }}
+    <motion.div
+      variants={cardVariants}
+      whileHover={{ y: -3, transition: springPhysics.card }}
+      whileTap={{ scale: 0.985 }}
+      layout
+      className={`relative flex flex-col overflow-hidden cursor-pointer select-none group ${isArchived ? 'opacity-55' : ''}`}
+      style={{
+        borderRadius: 16,
+        background: isDark ? '#1e293b' : '#ffffff',
+        border: `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'}`,
+        boxShadow: isDark ? '0 2px 8px rgba(0,0,0,0.35)' : '0 1px 4px rgba(0,0,0,0.06)',
+      }}
       onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}
     >
-      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, borderRadius: '16px 0 0 16px', background: `linear-gradient(180deg, ${cfg.strip} 0%, ${cfg.strip}55 100%)` }} />
-      <div style={{ padding: '14px 14px 12px 18px', background: isDark ? `linear-gradient(135deg, ${cfg.strip}18 0%, transparent 60%)` : `linear-gradient(135deg, ${cfg.strip}0f 0%, transparent 60%)`, borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)'}` }}>
+      {/* ── HORIZONTAL TOP STRIP ── */}
+      <div style={{ height: 4, width: '100%', background: stripeColor, borderRadius: '16px 16px 0 0' }} />
+ 
+      {/* ── HEADER ── */}
+      <div style={{
+        padding: '12px 14px 10px 14px',
+        background: isDark
+          ? `linear-gradient(135deg, ${stripeColor}18 0%, transparent 60%)`
+          : `linear-gradient(135deg, ${stripeColor}0f 0%, transparent 60%)`,
+        borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)'}`,
+      }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
           <div style={{ position: 'relative', flexShrink: 0 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 10, background: avatarGrad, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 16, fontWeight: 900, boxShadow: `0 4px 12px ${cfg.strip}55` }}>
+            <div style={{
+              width: 40, height: 40, borderRadius: 10,
+              background: avatarGrad,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: '#fff', fontSize: 16, fontWeight: 900,
+              boxShadow: `0 4px 12px ${stripeColor}55`,
+            }}>
               {client.company_name?.charAt(0).toUpperCase() || '?'}
             </div>
-            {hasBirthdayToday && <div style={{ position: 'absolute', top: -4, right: -4, width: 16, height: 16, background: '#ec4899', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, border: '2px solid #fff' }}>🎂</div>}
-            {isArchived && <div style={{ position: 'absolute', bottom: -4, right: -4, width: 14, height: 14, background: '#f59e0b', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Archive style={{ width: 8, height: 8, color: '#fff' }} /></div>}
+            {hasBirthdayToday && (
+              <div style={{
+                position: 'absolute', top: -4, right: -4, width: 16, height: 16,
+                background: '#ec4899', borderRadius: '50%',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 9, border: '2px solid #fff',
+              }}>🎂</div>
+            )}
+            {isArchived && (
+              <div style={{
+                position: 'absolute', bottom: -4, right: -4, width: 14, height: 14,
+                background: '#f59e0b', borderRadius: '50%',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Archive style={{ width: 8, height: 8, color: '#fff' }} />
+              </div>
+            )}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 9, fontFamily: 'monospace', fontWeight: 700, color: isDark ? '#475569' : '#cbd5e1', flexShrink: 0 }}>#{getClientNumber(index)}</span>
+              <span style={{ fontSize: 9, fontFamily: 'monospace', fontWeight: 700, color: isDark ? '#475569' : '#cbd5e1', flexShrink: 0 }}>
+                #{getClientNumber(index)}
+              </span>
               <TypePill type={client.client_type} customLabel={client.client_type_label} />
               <DscBadge daysLeft={worstDsc} />
             </div>
-            <h3 style={{ fontSize: 12, fontWeight: 700, lineHeight: 1.35, color: isDark ? '#f1f5f9' : '#0f172a', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', wordBreak: 'break-word', minHeight: '2.7em', margin: 0 }}>
+            <h3 style={{
+              fontSize: 12, fontWeight: 700, lineHeight: 1.35,
+              color: isDark ? '#f1f5f9' : '#0f172a',
+              overflow: 'hidden', display: '-webkit-box',
+              WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+              wordBreak: 'break-word', minHeight: '2.7em', margin: 0,
+            }}>
               {client.company_name}
             </h3>
           </div>
         </div>
       </div>
-      <div style={{ padding: '10px 14px 10px 18px', display: 'flex', flexDirection: 'column', gap: 7, flex: 1 }}>
+ 
+      {/* ── BODY ── */}
+      <div style={{ padding: '10px 14px 10px 14px', display: 'flex', flexDirection: 'column', gap: 7, flex: 1 }}>
+ 
+        {/* Contact person */}
         <div style={{ height: 34, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ width: 22, height: 22, borderRadius: 6, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><User style={{ width: 11, height: 11, color: cfg.strip }} /></div>
+          <div style={{ width: 22, height: 22, borderRadius: 6, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <User style={{ width: 11, height: 11, color: stripeColor }} />
+          </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <p style={{ fontSize: 11, fontWeight: 600, color: isDark ? '#e2e8f0' : '#1e293b', margin: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', lineHeight: 1.3 }}>
               {primaryContact?.name || <span style={{ color: isDark ? '#475569' : '#cbd5e1', fontStyle: 'italic' }}>No contact</span>}
             </p>
-            <p style={{ fontSize: 10, color: isDark ? '#64748b' : '#94a3b8', margin: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', lineHeight: 1.2 }}>{primaryContact?.designation || '\u00a0'}</p>
+            <p style={{ fontSize: 10, color: isDark ? '#64748b' : '#94a3b8', margin: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', lineHeight: 1.2 }}>
+              {primaryContact?.designation || '\u00a0'}
+            </p>
           </div>
         </div>
-        {/* Phone & email row — click to copy */}
+ 
+        {/* Phone + email */}
         <div style={{ height: 24, display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
-            <div style={{ width: 18, height: 18, borderRadius: 5, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Phone style={{ width: 10, height: 10, color: cfg.strip }} /></div>
+            <div style={{ width: 18, height: 18, borderRadius: 5, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Phone style={{ width: 10, height: 10, color: stripeColor }} />
+            </div>
             <span
               title={client.phone ? 'Click to copy' : ''}
               onClick={client.phone ? e => { e.stopPropagation(); copyToClipboard(client.phone, 'Phone'); } : undefined}
@@ -522,7 +621,9 @@ const ModernClientCard = React.memo(({ onSendBirthdayWish, client, index, isDark
           </div>
           <div style={{ width: 1, height: 12, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)', flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
-            <div style={{ width: 18, height: 18, borderRadius: 5, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Mail style={{ width: 10, height: 10, color: cfg.strip }} /></div>
+            <div style={{ width: 18, height: 18, borderRadius: 5, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Mail style={{ width: 10, height: 10, color: stripeColor }} />
+            </div>
             <span
               title={client.email ? 'Click to copy' : ''}
               onClick={client.email ? e => { e.stopPropagation(); copyToClipboard(client.email, 'Email'); } : undefined}
@@ -531,82 +632,94 @@ const ModernClientCard = React.memo(({ onSendBirthdayWish, client, index, isDark
             </span>
           </div>
         </div>
+ 
+        {/* Services */}
         <div style={{ height: 24, display: 'flex', alignItems: 'center', gap: 5 }}>
-          <div style={{ width: 18, height: 18, borderRadius: 5, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><BarChart3 style={{ width: 10, height: 10, color: cfg.strip }} /></div>
+          <div style={{ width: 18, height: 18, borderRadius: 5, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <BarChart3 style={{ width: 10, height: 10, color: stripeColor }} />
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0, overflow: 'hidden' }}>
             {svcSlots.map((svc, i) => (
-              <span key={i} style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 20, flexShrink: 0, background: svc ? (isDark ? `${cfg.strip}28` : cfg.bg) : 'transparent', color: svc ? cfg.text : 'transparent', border: `1px solid ${svc ? (isDark ? cfg.strip + '45' : cfg.border) : 'transparent'}`, whiteSpace: 'nowrap', maxWidth: 64, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <span key={i} style={{
+                fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 20, flexShrink: 0,
+                background: svc ? (isDark ? `${stripeColor}28` : cfg.bg) : 'transparent',
+                color: svc ? cfg.text : 'transparent',
+                border: `1px solid ${svc ? (isDark ? stripeColor + '45' : cfg.border) : 'transparent'}`,
+                whiteSpace: 'nowrap', maxWidth: 64, overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>
                 {svc || '·'}
               </span>
             ))}
-            {extraSvcs > 0 && <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 20, background: isDark ? 'rgba(255,255,255,0.08)' : '#f1f5f9', color: '#64748b', flexShrink: 0 }}>+{extraSvcs}</span>}
-            {serviceCount === 0 && <span style={{ fontSize: 10, color: isDark ? '#334155' : '#e2e8f0', fontStyle: 'italic' }}>No services</span>}
+            {extraSvcs > 0 && (
+              <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 20, background: isDark ? 'rgba(255,255,255,0.08)' : '#f1f5f9', color: '#64748b', flexShrink: 0 }}>
+                +{extraSvcs}
+              </span>
+            )}
+            {serviceCount === 0 && (
+              <span style={{ fontSize: 10, color: isDark ? '#334155' : '#e2e8f0', fontStyle: 'italic' }}>No services</span>
+            )}
           </div>
         </div>
+ 
+        {/* Assignee + referred by */}
         <div style={{ height: 24, display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
-            <div style={{ width: 18, height: 18, borderRadius: 5, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Briefcase style={{ width: 10, height: 10, color: cfg.strip }} /></div>
+            <div style={{ width: 18, height: 18, borderRadius: 5, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Briefcase style={{ width: 10, height: 10, color: stripeColor }} />
+            </div>
             <span style={{ fontSize: 10, color: firstAssignee ? (isDark ? '#94a3b8' : '#475569') : (isDark ? '#334155' : '#e2e8f0'), overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
-              {firstAssignee ? <>{firstAssignee.full_name || firstAssignee.name}{extraAssignees > 0 && <span style={{ color: isDark ? '#475569' : '#94a3b8' }}> +{extraAssignees}</span>}</> : '—'}
+              {firstAssignee
+                ? <>{firstAssignee.full_name || firstAssignee.name}{extraAssignees > 0 && <span style={{ color: isDark ? '#475569' : '#94a3b8' }}> +{extraAssignees}</span>}</>
+                : '—'}
             </span>
           </div>
           {client.referred_by && (
             <>
               <div style={{ width: 1, height: 12, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)', flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
-                <div style={{ width: 18, height: 18, borderRadius: 5, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Share2 style={{ width: 10, height: 10, color: cfg.strip }} /></div>
-                <span style={{ fontSize: 10, color: isDark ? '#64748b' : '#64748b', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{client.referred_by}</span>
+                <div style={{ width: 18, height: 18, borderRadius: 5, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Share2 style={{ width: 10, height: 10, color: stripeColor }} />
+                </div>
+                <span style={{ fontSize: 10, color: isDark ? '#64748b' : '#64748b', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                  {client.referred_by}
+                </span>
               </div>
             </>
           )}
         </div>
       </div>
-      <div style={{ height: 38, display: 'flex', alignItems: 'stretch', flexShrink: 0, borderTop: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}` }}>
-        <button onClick={e => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
-          style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, background: 'transparent', border: 'none', cursor: 'pointer', borderRight: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`, color: '#16a34a', fontSize: 10, fontWeight: 700, transition: 'background 0.12s' }}
-          onMouseEnter={e => e.currentTarget.style.background = isDark ? 'rgba(34,197,94,0.1)' : '#f0fdf4'}
-          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-          <MessageCircle style={{ width: 12, height: 12 }} />Chat
-        </button>
-        <button onClick={e => { e.stopPropagation(); handleEdit(client); }}
-          style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, background: 'transparent', border: 'none', cursor: 'pointer', borderRight: canDeleteData ? `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}` : 'none', color: '#2563eb', fontSize: 10, fontWeight: 700, transition: 'background 0.12s' }}
-          onMouseEnter={e => e.currentTarget.style.background = isDark ? 'rgba(59,130,246,0.1)' : '#eff6ff'}
-          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-          <Edit style={{ width: 12, height: 12 }} />Edit
-        </button>
-        <button
-          onClick={e => {
-          e.stopPropagation();
-            onSendBirthdayWish(client.id, client.company_name);
-          }}
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 4,
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-            color: '#d97706',
-            fontSize: 10,
-            fontWeight: 700,
-          }}
-        >
-          🎂 Wish
-        </button>
-        {canDeleteData && (
-          <button onClick={e => { e.stopPropagation(); onDelete(client); }}
-            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, background: 'transparent', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: 10, fontWeight: 700, transition: 'background 0.12s' }}
-            onMouseEnter={e => e.currentTarget.style.background = isDark ? 'rgba(239,68,68,0.1)' : '#fef2f2'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-            <Trash2 style={{ width: 12, height: 12 }} />Del
+ 
+      {/* ── ACTION ROW ── */}
+      <div style={{
+        borderTop: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`,
+        display: 'grid',
+        gridTemplateColumns: `repeat(${actionBtns.length}, 1fr)`,
+      }}>
+        {actionBtns.map((btn, i) => (
+          <button
+            key={btn.label}
+            onClick={btn.onClick}
+            style={{
+              height: 36,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: btn.color, fontSize: 10, fontWeight: 700,
+              borderRight: i < actionBtns.length - 1
+                ? `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`
+                : 'none',
+              transition: 'background 0.12s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = btn.hoverBg; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            {btn.icon}
+            {btn.label}
           </button>
-        )}
+        ))}
       </div>
-    </div>
+    </motion.div>
   );
-});
+})
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CLIENT DETAIL POPUP — lifted outside so it never re-creates on render
@@ -2192,23 +2305,58 @@ export default function Clients() {
           )}
         </div>
       ) : viewMode === 'board' ? (
-        <div className="rounded-2xl border shadow-sm flex flex-col" style={{ background: isDark ? '#1e293b' : '#F8FAFC', borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', overflow: 'hidden' }}>
-          <div style={{ overflowY: 'auto', overflowX: 'hidden', flex: 1 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(255px, 1fr))', gap: 10, padding: '10px 10px 4px 10px' }}>
+        <div
+          className="rounded-2xl border shadow-sm flex flex-col"
+          style={{
+            background: isDark ? '#1e293b' : '#F8FAFC',
+            borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+            overflow: 'hidden',
+          }}
+        >
+          <motion.div
+            style={{ overflowY: 'auto', overflowX: 'hidden', flex: 1 }}
+            variants={{
+              hidden:   { opacity: 0 },
+              visible:  { opacity: 1, transition: { staggerChildren: 0.04, delayChildren: 0.02 } },
+            }}
+            initial="hidden"
+            animate="visible"
+          >
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(255px, 1fr))',
+              gap: 10,
+              padding: '10px 10px 4px 10px',
+            }}>
               {boardPageClients.map((client, localIndex) => (
                 <ModernClientCard
                   onSendBirthdayWish={handleSendBirthdayWish}
-                  key={client.id} client={client} index={boardPageStart + localIndex}
-                  isDark={isDark} users={users} getClientAssignments={getClientAssignments}
-                  openWhatsApp={openWhatsApp} handleEdit={handleEdit}
-                  canDeleteData={canDeleteData} onDelete={handleDelete}
-                  setSelectedClient={setSelectedClient} setDetailDialogOpen={setDetailDialogOpen}
+                  key={client.id}
+                  client={client}
+                  index={boardPageStart + localIndex}
+                  isDark={isDark}
+                  users={users}
+                  getClientAssignments={getClientAssignments}
+                  openWhatsApp={openWhatsApp}
+                  handleEdit={handleEdit}
+                  canDeleteData={canDeleteData}
+                  onDelete={handleDelete}
+                  setSelectedClient={setSelectedClient}
+                  setDetailDialogOpen={setDetailDialogOpen}
                   getClientNumber={getClientNumber}
                 />
               ))}
             </div>
-          </div>
-          <PaginationBar safePg={boardSafePage} totalPgs={boardTotalPages} pageStart={boardPageStart} pageSize={BOARD_PAGE_SIZE} totalCount={sortedClients.length} onPageChange={setBoardPage} isDark={isDark} />
+          </motion.div>
+          <PaginationBar
+            safePg={boardSafePage}
+            totalPgs={boardTotalPages}
+            pageStart={boardPageStart}
+            pageSize={BOARD_PAGE_SIZE}
+            totalCount={sortedClients.length}
+            onPageChange={setBoardPage}
+            isDark={isDark}
+          />
         </div>
       ) : (
         <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={{ background: isDark ? '#1e293b' : '#ffffff', borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}>
