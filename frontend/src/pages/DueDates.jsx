@@ -16,14 +16,14 @@ import {
   CheckCircle, Filter, Upload, Sparkles, FileText,
   X, CheckSquare, Loader2, SkipForward, ChevronRight,
   Target, AlertCircle, TrendingUp, Clock, CalendarIcon,
-  ArrowUpRight, Tag, Layers, Settings2,
+  ArrowUpRight, Tag, Layers, Settings2, List, LayoutGrid,
 } from 'lucide-react';
 import LayoutCustomizer from '../components/layout/LayoutCustomizer';
 import { usePageLayout } from '../hooks/usePageLayout';
 import { format, differenceInDays } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// ── Brand Colors (matching Dashboard) ────────────────────────────────────────
+// ── Brand Colors ──────────────────────────────────────────────────────────────
 const COLORS = {
   deepBlue:    '#0D3B66',
   mediumBlue:  '#1F6FB2',
@@ -33,7 +33,7 @@ const COLORS = {
   amber:       '#F59E0B',
 };
 
-// ── Spring Physics (matching Dashboard) ──────────────────────────────────────
+// ── Spring Physics ────────────────────────────────────────────────────────────
 const springPhysics = {
   card:   { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
   lift:   { type: 'spring', stiffness: 320, damping: 24, mass: 0.9  },
@@ -41,7 +41,7 @@ const springPhysics = {
   tap:    { type: 'spring', stiffness: 500, damping: 30 },
 };
 
-// ── Animation Variants (matching Dashboard) ───────────────────────────────────
+// ── Animation Variants ─────────────────────────────────────────────────────────
 const containerVariants = {
   hidden:  { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
@@ -51,8 +51,26 @@ const itemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] } },
   exit:    { opacity: 0, y: 12, transition: { duration: 0.3 } },
 };
+const rowVariant = {
+  hidden:  { opacity: 0, x: -10 },
+  visible: { opacity: 1, x: 0, transition: { duration: 0.28, ease: [0.22, 1, 0.36, 1] } },
+  exit:    { opacity: 0, x: 10, transition: { duration: 0.18 } },
+};
 
-// ── Slim scrollbar (matching Dashboard) ──────────────────────────────────────
+// ── Slim scroll injection ─────────────────────────────────────────────────────
+if (typeof document !== 'undefined' && !document.getElementById('dd-slim-scroll')) {
+  const s = document.createElement('style');
+  s.id = 'dd-slim-scroll';
+  s.textContent = `
+    .dd-slim::-webkit-scrollbar { width: 3px; }
+    .dd-slim::-webkit-scrollbar-track { background: transparent; }
+    .dd-slim::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+    .dd-slim::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    .dark .dd-slim::-webkit-scrollbar-thumb { background: #475569; }
+  `;
+  document.head.appendChild(s);
+}
+
 const slimScroll = {
   overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: '#cbd5e1 transparent',
 };
@@ -67,7 +85,15 @@ const STATUS_STYLES = {
   upcoming:  { bg:'bg-blue-50 dark:bg-blue-900/20',      text:'text-blue-700 dark:text-blue-400',      border:'border-blue-200 dark:border-blue-800',      dot:'bg-blue-400',    label:'Upcoming'  },
 };
 
-// ── Shared Card Shell (matching Dashboard) ────────────────────────────────────
+// ── STRIPE COLOR HELPER ───────────────────────────────────────────────────────
+const getDueDateStripeColor = (ds) => {
+  if (ds === 'completed') return 'bg-blue-600';
+  if (ds === 'overdue')   return 'bg-red-700';
+  if (ds === 'upcoming')  return 'bg-amber-400';
+  return 'bg-slate-300';
+};
+
+// ── Shared Card Shell ─────────────────────────────────────────────────────────
 function SectionCard({ children, className = '' }) {
   return (
     <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm ${className}`}>
@@ -76,7 +102,7 @@ function SectionCard({ children, className = '' }) {
   );
 }
 
-// ── Card Header Row (matching Dashboard) ─────────────────────────────────────
+// ── Card Header Row ───────────────────────────────────────────────────────────
 function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
   return (
     <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
@@ -97,13 +123,236 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
   );
 }
 
-// ── Deadline colour helper (matching Dashboard getDeadlineColor) ───────────────
-const getDeadlineHeaderGradient = (daysLeft) => {
-  if (daysLeft <= 0)  return `linear-gradient(135deg, #DC2626, #B91C1C)`;
-  if (daysLeft <= 7)  return `linear-gradient(135deg, #EA580C, #C2410C)`;
-  if (daysLeft <= 15) return `linear-gradient(135deg, ${COLORS.amber}, #D97706)`;
-  return `linear-gradient(135deg, ${COLORS.emeraldGreen}, #15803d)`;
-};
+// ── DUE DATE ROW (list view — task-strip style) ───────────────────────────────
+function DueDateRow({ dd, ds, dLeft, isOwnOrAdmin, onEdit, onDelete, onCalendar, user, getClientName, getUserName, isDark }) {
+  const sty    = STATUS_STYLES[ds];
+  const stripe = getDueDateStripeColor(ds);
+
+  const rowBg = ds === 'overdue'
+    ? 'bg-red-50/60 dark:bg-red-900/10 border-red-200 dark:border-red-800 hover:border-red-300 dark:hover:border-red-700'
+    : ds === 'upcoming'
+    ? 'bg-amber-50/40 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800 hover:border-amber-300 dark:hover:border-amber-700'
+    : ds === 'completed'
+    ? 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 opacity-75'
+    : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-500';
+
+  return (
+    <motion.div layout variants={rowVariant} initial="hidden" animate="visible" exit="exit">
+      <div className={`relative rounded-xl border transition-all duration-200 overflow-hidden group mx-4 my-1 hover:shadow-sm ${rowBg}`}>
+        {/* Left colored stripe */}
+        <div className={`absolute left-0 top-0 h-full w-1 ${stripe}`} />
+
+        <div
+          className="pl-5 pr-3 py-2.5 grid items-center gap-0"
+          style={{ gridTemplateColumns: 'minmax(0,1fr) 88px 120px 110px 110px 70px 88px' }}
+        >
+          {/* Title + description */}
+          <div className="min-w-0 pr-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className={`font-semibold text-sm truncate ${isDark ? 'text-slate-100' : 'text-slate-800'} ${ds === 'completed' ? 'line-through opacity-60' : ''}`}>
+                {dd.title}
+              </p>
+              {dd.assigned_to === user?.id && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: `${COLORS.mediumBlue}15`, color: COLORS.mediumBlue }}>You</span>
+              )}
+            </div>
+            {dd.description && (
+              <p className={`text-[11px] truncate mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{dd.description}</p>
+            )}
+          </div>
+
+          {/* Status badge */}
+          <div className="flex items-center justify-center overflow-hidden">
+            <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${sty.bg} ${sty.text} ${sty.border} whitespace-nowrap`}>
+              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sty.dot}`} />
+              {sty.label}
+            </span>
+          </div>
+
+          {/* Category / Dept */}
+          <div className="flex flex-col gap-0.5 items-center overflow-hidden">
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: `${COLORS.mediumBlue}12`, color: COLORS.mediumBlue }}>
+              <Layers className="h-2.5 w-2.5" />{dd.category || 'Other'}
+            </span>
+            {dd.department && (
+              <span className={`text-[10px] font-semibold flex items-center gap-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                <Tag className="h-2.5 w-2.5" />{dd.department}
+              </span>
+            )}
+          </div>
+
+          {/* Client */}
+          <div className="flex items-center justify-center gap-1.5 overflow-hidden">
+            {dd.client_id ? (
+              <>
+                <Building2 className="h-3 w-3 text-slate-300 flex-shrink-0" />
+                <span className={`text-xs truncate ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{getClientName(dd.client_id)}</span>
+              </>
+            ) : (
+              <span className={`text-xs ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>—</span>
+            )}
+          </div>
+
+          {/* Due date */}
+          <div className="flex items-center justify-center gap-1.5 overflow-hidden">
+            <Calendar className="h-3 w-3 text-slate-400 flex-shrink-0" />
+            <span className={`text-xs font-semibold whitespace-nowrap ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+              {format(new Date(dd.due_date), 'dd MMM yyyy')}
+            </span>
+          </div>
+
+          {/* Days left */}
+          <div className="flex items-center justify-center overflow-hidden">
+            {dd.status === 'completed' ? (
+              <span className="flex items-center gap-1 text-[10px] text-emerald-500 font-bold whitespace-nowrap">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Done
+              </span>
+            ) : (
+              <span className={`text-xs font-bold tabular-nums whitespace-nowrap ${
+                dLeft < 0 ? 'text-red-500' : dLeft <= 7 ? 'text-amber-500' : isDark ? 'text-slate-300' : 'text-slate-600'
+              }`}>
+                {dLeft < 0 ? `${Math.abs(dLeft)}d over` : `${dLeft}d left`}
+              </span>
+            )}
+          </div>
+
+          {/* Actions — visible on hover */}
+          <div className="flex items-center justify-end gap-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+            {isOwnOrAdmin && (
+              <>
+                <button onClick={() => onEdit(dd)}
+                  className="p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/30 text-slate-400 hover:text-blue-500 transition-colors"
+                  title="Edit">
+                  <Edit className="h-3.5 w-3.5" />
+                </button>
+                <button onClick={() => onCalendar(dd)}
+                  className="p-1 rounded hover:bg-emerald-50 dark:hover:bg-emerald-900/30 text-slate-400 hover:text-emerald-500 transition-colors"
+                  title="Add to Calendar">
+                  <Calendar className="h-3.5 w-3.5" />
+                </button>
+                <button onClick={() => onDelete(dd.id)}
+                  className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 text-slate-400 hover:text-red-500 transition-colors"
+                  title="Delete">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ── DUE DATE BOARD CARD (board view) ─────────────────────────────────────────
+function DueDateBoardCard({ dd, ds, dLeft, isOwnOrAdmin, onEdit, onDelete, onCalendar, user, getClientName, getUserName, isDark }) {
+  const sty    = STATUS_STYLES[ds];
+  const stripe = getDueDateStripeColor(ds);
+
+  const cardBg = ds === 'overdue'
+    ? 'bg-red-50/60 dark:bg-red-900/10 border-red-200 dark:border-red-800 hover:border-red-300 dark:hover:border-red-700'
+    : ds === 'upcoming'
+    ? 'bg-amber-50/40 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800 hover:border-amber-300 dark:hover:border-amber-700'
+    : ds === 'completed'
+    ? 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 opacity-80'
+    : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-500';
+
+  return (
+    <motion.div layout variants={itemVariants}>
+      <div className={`relative rounded-xl border overflow-hidden transition-all duration-200 group hover:shadow-md ${cardBg}`}>
+        {/* Top stripe */}
+        <div className={`h-1 w-full ${stripe}`} />
+
+        <div className="p-3 space-y-2.5">
+          {/* Title + hover actions */}
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <p className={`font-semibold text-sm leading-snug ${isDark ? 'text-slate-100' : 'text-slate-800'} ${ds === 'completed' ? 'line-through opacity-60' : ''}`}>
+                {dd.title}
+              </p>
+              {dd.assigned_to === user?.id && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full mt-1 inline-block" style={{ background: `${COLORS.mediumBlue}15`, color: COLORS.mediumBlue }}>You</span>
+              )}
+            </div>
+            {isOwnOrAdmin && (
+              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" onClick={e => e.stopPropagation()}>
+                <button onClick={() => onEdit(dd)}
+                  className="p-1 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 text-slate-400 hover:text-blue-500 transition-colors"
+                  title="Edit">
+                  <Edit size={13} />
+                </button>
+                <button onClick={() => onCalendar(dd)}
+                  className="p-1 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/30 text-slate-400 hover:text-emerald-500 transition-colors"
+                  title="Add to Calendar">
+                  <Calendar size={13} />
+                </button>
+                <button onClick={() => onDelete(dd.id)}
+                  className="p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 text-slate-400 hover:text-red-500 transition-colors"
+                  title="Delete">
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Description */}
+          {dd.description && (
+            <p className={`text-[11px] leading-relaxed line-clamp-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{dd.description}</p>
+          )}
+
+          {/* Badges row */}
+          <div className="flex flex-wrap gap-1.5">
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: `${COLORS.mediumBlue}12`, color: COLORS.mediumBlue }}>
+              <Layers className="h-2.5 w-2.5" />{dd.category || 'Other'}
+            </span>
+            {dd.department && (
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full inline-flex items-center gap-0.5 ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+                {dd.department}
+              </span>
+            )}
+          </div>
+
+          {/* Footer: due date + days left */}
+          <div className={`flex items-center justify-between pt-2 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+            <div className="flex items-center gap-1">
+              <Calendar className="h-3 w-3 text-slate-400 flex-shrink-0" />
+              <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                {format(new Date(dd.due_date), 'dd MMM yyyy')}
+              </span>
+            </div>
+            {dd.status === 'completed' ? (
+              <span className="text-[10px] font-bold text-emerald-500">Done</span>
+            ) : (
+              <span className={`text-[10px] font-bold tabular-nums ${
+                dLeft < 0 ? 'text-red-500' : dLeft <= 7 ? 'text-amber-500' : isDark ? 'text-slate-400' : 'text-slate-500'
+              }`}>
+                {dLeft < 0 ? `${Math.abs(dLeft)}d overdue` : `${dLeft}d left`}
+              </span>
+            )}
+          </div>
+
+          {/* Client + assigned to */}
+          {(dd.client_id || dd.assigned_to) && (
+            <div className="flex items-center gap-3 flex-wrap">
+              {dd.client_id && (
+                <div className="flex items-center gap-1">
+                  <Building2 className="h-3 w-3 text-slate-300 flex-shrink-0" />
+                  <span className={`text-[11px] truncate max-w-[100px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{getClientName(dd.client_id)}</span>
+                </div>
+              )}
+              {dd.assigned_to && (
+                <div className="flex items-center gap-1">
+                  <User className="h-3 w-3 text-slate-300 flex-shrink-0" />
+                  <span className={`text-[11px] truncate max-w-[100px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{getUserName(dd.assigned_to)}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
 
 // ─────────────────────────────────────────────
 // SMART IMPORT MODAL
@@ -183,7 +432,6 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
           <DialogDescription>Upload PDF or Word to extract compliance dates</DialogDescription>
         </DialogHeader>
 
-        {/* Header matching Dashboard banner style */}
         <div className="sticky top-0 z-10 px-6 py-5 relative overflow-hidden"
           style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}>
           <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
@@ -213,7 +461,6 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
 
         <div className="p-6">
           <AnimatePresence mode="wait">
-            {/* ── STEP 1: UPLOAD ── */}
             {step === 'upload' && (
               <motion.div key="upload" initial={{opacity:0,x:-20}} animate={{opacity:1,x:0}} exit={{opacity:0,x:20}} className="space-y-4">
                 <div
@@ -274,7 +521,6 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
               </motion.div>
             )}
 
-            {/* ── STEP 2: REVIEW ── */}
             {step === 'review' && (
               <motion.div key="review" initial={{opacity:0,x:20}} animate={{opacity:1,x:0}} exit={{opacity:0,x:-20}} className="space-y-4">
                 <div className={`flex items-center justify-between p-3 rounded-xl border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
@@ -288,7 +534,7 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
                     <button onClick={clearAll} className="text-xs text-slate-500 font-semibold hover:underline">Clear All</button>
                   </div>
                 </div>
-                <div className="space-y-2 max-h-80 overflow-y-auto pr-1 slim-scroll" style={slimScroll}>
+                <div className="space-y-2 max-h-80 overflow-y-auto pr-1" style={slimScroll}>
                   {extractedDates.map(item => {
                     const isSel = selected[item._id];
                     return (
@@ -356,7 +602,6 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
 // MAIN PAGE
 // ─────────────────────────────────────────────
 export default function DueDates() {
-  // ── Layout customizer ───────────────────────────────────────────────────
   const DD_SECTIONS = ['banner', 'metrics', 'filters', 'table'];
   const DD_LABELS = {
     banner:  { name: 'Page Header',   icon: '🏷️', desc: 'Welcome banner and quick actions' },
@@ -379,6 +624,7 @@ export default function DueDates() {
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterCat, setFilterCat]       = useState('all');
   const [filterMonth, setFilterMonth]   = useState('all');
+  const [viewMode, setViewMode]         = useState('list'); // 'list' | 'board'
   const [formData, setFormData]         = useState({
     title:'', description:'', due_date:'', reminder_days:30,
     category:'', department:'', assigned_to:'unassigned', client_id:'no_client', status:'pending',
@@ -461,8 +707,7 @@ export default function DueDates() {
     window.open(`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${t}&details=${desc}&dates=${s}/${e}`,'_blank');
   };
 
-  // ── Metric Card (matching Dashboard metric card pattern) ────────────────────
-  const metricCardCls = 'rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border';
+  const metricCardCls     = 'rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border';
   const metricCardDefault = isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200/80 hover:border-slate-300';
 
   const StatCard = ({ label, value, color, iconColor, iconBg, icon: Icon, status, ring, isActive, onClick }) => (
@@ -492,7 +737,6 @@ export default function DueDates() {
 
   return (
     <>
-      {/* ── Layout Customizer Panel ─────────────────────────────────────── */}
       <LayoutCustomizer
         isOpen={showLayoutCustomizer}
         onClose={() => setShowLayoutCustomizer(false)}
@@ -505,7 +749,6 @@ export default function DueDates() {
 
       <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
 
-        {/* ── Customize Layout Button ───────────────────────────────────── */}
         <div className="flex justify-end">
           <button
             onClick={() => setShowLayoutCustomizer(true)}
@@ -521,376 +764,416 @@ export default function DueDates() {
           </button>
         </div>
 
-        {/* ── Ordered Sections ─────────────────────────────────────────── */}
         {ddOrder.map((sectionId) => {
-          /* ── BANNER ───────────────────────────────────────────────── */
+
+          /* ── BANNER ─────────────────────────────────────────────────── */
           if (sectionId === 'banner') return (
             <motion.div key="banner" variants={itemVariants}>
-        <div className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
-          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: `0 8px 32px rgba(13,59,102,0.28)` }}>
-          <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
-            style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
-          <div className="absolute right-24 bottom-0 w-32 h-32 rounded-full mb-[-30px] opacity-5" style={{ background: 'white' }} />
-          <div className="relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-            <div>
-              <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest mb-1">{format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
-              <h1 className="text-2xl font-bold text-white tracking-tight">Compliance Calendar 📋</h1>
-              <p className="text-white/60 text-sm mt-1">Track and manage all statutory filing deadlines</p>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <motion.button
-                whileHover={{ scale: 1.03, y: -2, transition: springPhysics.card }}
-                whileTap={{ scale: 0.97, transition: springPhysics.tap }}
-                onClick={() => setImportOpen(true)}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all"
-                style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.18)', color: 'white', backdropFilter: 'blur(8px)' }}>
-                <Sparkles className="h-4 w-4" />Smart Import
-              </motion.button>
-              <Dialog open={dialogOpen} onOpenChange={o=>{setDialogOpen(o);if(!o)resetForm();}}>
-                <DialogTrigger asChild>
-                  <motion.button
-                    whileHover={{ scale: 1.03, y: -2, transition: springPhysics.card }}
-                    whileTap={{ scale: 0.97, transition: springPhysics.tap }}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm bg-white/95 shadow-lg transition-all"
-                    style={{ color: COLORS.deepBlue }}>
-                    <Plus className="h-4 w-4" />New Due Date
-                  </motion.button>
-                </DialogTrigger>
-                <DialogContent className="max-w-lg rounded-2xl">
-                  <DialogHeader>
-                    <DialogTitle className="text-xl font-bold" style={{ color: isDark ? '#93c5fd' : COLORS.deepBlue }}>
-                      {editingDueDate ? 'Edit Due Date' : 'Add New Due Date'}
-                    </DialogTitle>
-                    <DialogDescription className="text-slate-500 text-sm">
-                      {editingDueDate ? 'Update compliance due date details.' : 'Create a new compliance due date reminder.'}
-                    </DialogDescription>
-                  </DialogHeader>
-                  <form onSubmit={handleSubmit} className="space-y-4 mt-2">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Title *</Label>
-                      <Input placeholder="e.g., GST Return Filing" value={formData.title} onChange={e=>setFormData({...formData,title:e.target.value})} required className="rounded-xl" />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Department *</Label>
-                      <Select value={formData.department} onValueChange={v=>setFormData({...formData,department:v})}>
-                        <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select department" /></SelectTrigger>
-                        <SelectContent>{DEPARTMENTS.map(d=><SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
-                      </Select>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Category *</Label>
-                        <Select value={formData.category||undefined} onValueChange={v=>setFormData({...formData,category:v})}>
-                          <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select category" /></SelectTrigger>
-                          <SelectContent>{CATEGORIES.map(c=><SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Due Date *</Label>
-                        <Input type="date" value={formData.due_date} onChange={e=>setFormData({...formData,due_date:e.target.value})} required className="rounded-xl" />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Client</Label>
-                        <Select value={formData.client_id||'no_client'} onValueChange={v=>setFormData({...formData,client_id:v==='no_client'?'':v})}>
-                          <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select client" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="no_client">No Client</SelectItem>
-                            {clients.map(c=><SelectItem key={c.id} value={c.id}>{c.company_name}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      {(user?.role==='admin'||user?.role==='manager') && (
-                        <div className="space-y-1.5">
-                          <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Assign To</Label>
-                          <Select value={formData.assigned_to} onValueChange={v=>setFormData({...formData,assigned_to:v})}>
-                            <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select user" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="unassigned">Unassigned</SelectItem>
-                              {users.map(u=><SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Remind Before (days)</Label>
-                        <Input type="number" min="1" value={formData.reminder_days} onChange={e=>setFormData({...formData,reminder_days:parseInt(e.target.value)||30})} className="rounded-xl" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</Label>
-                        <Select value={formData.status} onValueChange={v=>setFormData({...formData,status:v})}>
-                          <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="pending">Pending</SelectItem>
-                            <SelectItem value="completed">Completed</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Description</Label>
-                      <Textarea placeholder="Additional notes..." value={formData.description} onChange={e=>setFormData({...formData,description:e.target.value})} rows={2} className="rounded-xl resize-none" />
-                    </div>
-                    <DialogFooter className="gap-2">
-                      <Button type="button" variant="outline" onClick={()=>{setDialogOpen(false);resetForm();}} className="rounded-xl">Cancel</Button>
-                      <Button type="submit" disabled={loading} className="text-white rounded-xl px-6" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-                        {loading ? 'Saving...' : editingDueDate ? 'Update' : 'Create'}
-                      </Button>
-                    </DialogFooter>
-                  </form>
-                </DialogContent>
-              </Dialog>
-            </div>
-          </div>
-        </div>
-      </motion.div>
+              <div className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
+                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: `0 8px 32px rgba(13,59,102,0.28)` }}>
+                <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
+                  style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+                <div className="absolute right-24 bottom-0 w-32 h-32 rounded-full mb-[-30px] opacity-5" style={{ background: 'white' }} />
+                <div className="relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                  <div>
+                    <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest mb-1">{format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
+                    <h1 className="text-2xl font-bold text-white tracking-tight">Compliance Calendar 📋</h1>
+                    <p className="text-white/60 text-sm mt-1">Track and manage all statutory filing deadlines</p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <motion.button
+                      whileHover={{ scale: 1.03, y: -2, transition: springPhysics.card }}
+                      whileTap={{ scale: 0.97, transition: springPhysics.tap }}
+                      onClick={() => setImportOpen(true)}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all"
+                      style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.18)', color: 'white', backdropFilter: 'blur(8px)' }}>
+                      <Sparkles className="h-4 w-4" />Smart Import
+                    </motion.button>
+                    <Dialog open={dialogOpen} onOpenChange={o=>{setDialogOpen(o);if(!o)resetForm();}}>
+                      <DialogTrigger asChild>
+                        <motion.button
+                          whileHover={{ scale: 1.03, y: -2, transition: springPhysics.card }}
+                          whileTap={{ scale: 0.97, transition: springPhysics.tap }}
+                          className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm bg-white/95 shadow-lg transition-all"
+                          style={{ color: COLORS.deepBlue }}>
+                          <Plus className="h-4 w-4" />New Due Date
+                        </motion.button>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-lg rounded-2xl">
+                        <DialogHeader>
+                          <DialogTitle className="text-xl font-bold" style={{ color: isDark ? '#93c5fd' : COLORS.deepBlue }}>
+                            {editingDueDate ? 'Edit Due Date' : 'Add New Due Date'}
+                          </DialogTitle>
+                          <DialogDescription className="text-slate-500 text-sm">
+                            {editingDueDate ? 'Update compliance due date details.' : 'Create a new compliance due date reminder.'}
+                          </DialogDescription>
+                        </DialogHeader>
+                        <form onSubmit={handleSubmit} className="space-y-4 mt-2">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Title *</Label>
+                            <Input placeholder="e.g., GST Return Filing" value={formData.title} onChange={e=>setFormData({...formData,title:e.target.value})} required className="rounded-xl" />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Department *</Label>
+                            <Select value={formData.department} onValueChange={v=>setFormData({...formData,department:v})}>
+                              <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select department" /></SelectTrigger>
+                              <SelectContent>{DEPARTMENTS.map(d=><SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
+                            </Select>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                              <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Category *</Label>
+                              <Select value={formData.category||undefined} onValueChange={v=>setFormData({...formData,category:v})}>
+                                <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select category" /></SelectTrigger>
+                                <SelectContent>{CATEGORIES.map(c=><SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Due Date *</Label>
+                              <Input type="date" value={formData.due_date} onChange={e=>setFormData({...formData,due_date:e.target.value})} required className="rounded-xl" />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                              <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Client</Label>
+                              <Select value={formData.client_id||'no_client'} onValueChange={v=>setFormData({...formData,client_id:v==='no_client'?'':v})}>
+                                <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select client" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="no_client">No Client</SelectItem>
+                                  {clients.map(c=><SelectItem key={c.id} value={c.id}>{c.company_name}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            {(user?.role==='admin'||user?.role==='manager') && (
+                              <div className="space-y-1.5">
+                                <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Assign To</Label>
+                                <Select value={formData.assigned_to} onValueChange={v=>setFormData({...formData,assigned_to:v})}>
+                                  <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select user" /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="unassigned">Unassigned</SelectItem>
+                                    {users.map(u=><SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                              <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Remind Before (days)</Label>
+                              <Input type="number" min="1" value={formData.reminder_days} onChange={e=>setFormData({...formData,reminder_days:parseInt(e.target.value)||30})} className="rounded-xl" />
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</Label>
+                              <Select value={formData.status} onValueChange={v=>setFormData({...formData,status:v})}>
+                                <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="pending">Pending</SelectItem>
+                                  <SelectItem value="completed">Completed</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Description</Label>
+                            <Textarea placeholder="Additional notes..." value={formData.description} onChange={e=>setFormData({...formData,description:e.target.value})} rows={2} className="rounded-xl resize-none" />
+                          </div>
+                          <DialogFooter className="gap-2">
+                            <Button type="button" variant="outline" onClick={()=>{setDialogOpen(false);resetForm();}} className="rounded-xl">Cancel</Button>
+                            <Button type="submit" disabled={loading} className="text-white rounded-xl px-6" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                              {loading ? 'Saving...' : editingDueDate ? 'Update' : 'Create'}
+                            </Button>
+                          </DialogFooter>
+                        </form>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
           );
 
-          /* ── METRICS ──────────────────────────────────────────────── */
+          /* ── METRICS ─────────────────────────────────────────────────── */
           if (sectionId === 'metrics') return (
             <motion.div key="metrics" className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3" variants={itemVariants}>
-        <StatCard label="Total" value={stats.total} color={COLORS.deepBlue} iconColor={COLORS.deepBlue}
-          iconBg={{ light: `${COLORS.deepBlue}12`, dark: 'rgba(96,165,250,0.12)' }}
-          icon={Target} status="all" ring="ring-slate-400"
-          isActive={filterStatus==='all'} onClick={()=>setFilterStatus('all')} />
-        <StatCard label="Upcoming" value={stats.upcoming} color={COLORS.mediumBlue} iconColor={COLORS.mediumBlue}
-          iconBg={{ light: `${COLORS.mediumBlue}12`, dark: 'rgba(31,111,178,0.2)' }}
-          icon={Clock} status="upcoming" ring="ring-blue-400"
-          isActive={filterStatus==='upcoming'} onClick={()=>setFilterStatus(filterStatus==='upcoming'?'all':'upcoming')} />
-        <StatCard label="Pending" value={stats.pending} color={COLORS.amber} iconColor={COLORS.amber}
-          iconBg={{ light: `${COLORS.amber}12`, dark: 'rgba(245,158,11,0.2)' }}
-          icon={AlertCircle} status="pending" ring="ring-amber-400"
-          isActive={filterStatus==='pending'} onClick={()=>setFilterStatus(filterStatus==='pending'?'all':'pending')} />
-        <StatCard label="Overdue" value={stats.overdue} color={COLORS.coral} iconColor={COLORS.coral}
-          iconBg={{ light: `${COLORS.coral}15`, dark: 'rgba(255,107,107,0.15)' }}
-          icon={AlertCircle} status="overdue" ring="ring-red-400"
-          isActive={filterStatus==='overdue'} onClick={()=>setFilterStatus(filterStatus==='overdue'?'all':'overdue')} />
-        <StatCard label="Completed" value={stats.completed} color={COLORS.emeraldGreen} iconColor={COLORS.emeraldGreen}
-          iconBg={{ light: `${COLORS.emeraldGreen}12`, dark: 'rgba(31,175,90,0.2)' }}
-          icon={TrendingUp} status="completed" ring="ring-emerald-400"
-          isActive={filterStatus==='completed'} onClick={()=>setFilterStatus(filterStatus==='completed'?'all':'completed')} />
-      </motion.div>
-
+              <StatCard label="Total" value={stats.total} color={COLORS.deepBlue} iconColor={COLORS.deepBlue}
+                iconBg={{ light: `${COLORS.deepBlue}12`, dark: 'rgba(96,165,250,0.12)' }}
+                icon={Target} status="all" ring="ring-slate-400"
+                isActive={filterStatus==='all'} onClick={()=>setFilterStatus('all')} />
+              <StatCard label="Upcoming" value={stats.upcoming} color={COLORS.mediumBlue} iconColor={COLORS.mediumBlue}
+                iconBg={{ light: `${COLORS.mediumBlue}12`, dark: 'rgba(31,111,178,0.2)' }}
+                icon={Clock} status="upcoming" ring="ring-blue-400"
+                isActive={filterStatus==='upcoming'} onClick={()=>setFilterStatus(filterStatus==='upcoming'?'all':'upcoming')} />
+              <StatCard label="Pending" value={stats.pending} color={COLORS.amber} iconColor={COLORS.amber}
+                iconBg={{ light: `${COLORS.amber}12`, dark: 'rgba(245,158,11,0.2)' }}
+                icon={AlertCircle} status="pending" ring="ring-amber-400"
+                isActive={filterStatus==='pending'} onClick={()=>setFilterStatus(filterStatus==='pending'?'all':'pending')} />
+              <StatCard label="Overdue" value={stats.overdue} color={COLORS.coral} iconColor={COLORS.coral}
+                iconBg={{ light: `${COLORS.coral}15`, dark: 'rgba(255,107,107,0.15)' }}
+                icon={AlertCircle} status="overdue" ring="ring-red-400"
+                isActive={filterStatus==='overdue'} onClick={()=>setFilterStatus(filterStatus==='overdue'?'all':'overdue')} />
+              <StatCard label="Completed" value={stats.completed} color={COLORS.emeraldGreen} iconColor={COLORS.emeraldGreen}
+                iconBg={{ light: `${COLORS.emeraldGreen}12`, dark: 'rgba(31,175,90,0.2)' }}
+                icon={TrendingUp} status="completed" ring="ring-emerald-400"
+                isActive={filterStatus==='completed'} onClick={()=>setFilterStatus(filterStatus==='completed'?'all':'completed')} />
+            </motion.div>
           );
 
-          /* ── FILTERS ──────────────────────────────────────────────── */
+          /* ── FILTERS ─────────────────────────────────────────────────── */
           if (sectionId === 'filters') return (
             <React.Fragment key="filters">
-      <motion.div variants={itemVariants} className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Search due dates..."
-            value={searchQuery}
-            onChange={e=>setSearchQuery(e.target.value)}
-            className={`w-full pl-10 pr-4 py-2.5 text-sm border rounded-xl focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all ${
-              isDark ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-400 focus:ring-blue-900/40' : 'bg-white border-slate-200 text-slate-800 placeholder:text-slate-400'
-            }`}
-          />
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative">
-            <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
-            <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}
-              className={`pl-8 pr-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-200 text-slate-700'}`}>
-              <option value="all">All Statuses</option>
-              <option value="upcoming">Upcoming</option>
-              <option value="pending">Pending</option>
-              <option value="overdue">Overdue</option>
-              <option value="completed">Completed</option>
-            </select>
-          </div>
-          <select value={filterCat} onChange={e=>setFilterCat(e.target.value)}
-            className={`px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-200 text-slate-700'}`}>
-            <option value="all">All Categories</option>
-            {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
-          </select>
-          <div className="relative">
-            <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
-            <select value={filterMonth} onChange={e=>setFilterMonth(e.target.value)}
-              className={`pl-8 pr-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-200 text-slate-700'}`}>
-              <option value="all">All Months</option>
-              {months.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}
-            </select>
-          </div>
-        </div>
-      </motion.div>
-
+              <motion.div variants={itemVariants} className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
+                <div className="relative flex-1 max-w-sm">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="Search due dates..."
+                    value={searchQuery}
+                    onChange={e=>setSearchQuery(e.target.value)}
+                    className={`w-full pl-10 pr-4 py-2.5 text-sm border rounded-xl focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all ${
+                      isDark ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-400 focus:ring-blue-900/40' : 'bg-white border-slate-200 text-slate-800 placeholder:text-slate-400'
+                    }`}
+                  />
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="relative">
+                    <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+                    <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}
+                      className={`pl-8 pr-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-200 text-slate-700'}`}>
+                      <option value="all">All Statuses</option>
+                      <option value="upcoming">Upcoming</option>
+                      <option value="pending">Pending</option>
+                      <option value="overdue">Overdue</option>
+                      <option value="completed">Completed</option>
+                    </select>
+                  </div>
+                  <select value={filterCat} onChange={e=>setFilterCat(e.target.value)}
+                    className={`px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-200 text-slate-700'}`}>
+                    <option value="all">All Categories</option>
+                    {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <div className="relative">
+                    <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+                    <select value={filterMonth} onChange={e=>setFilterMonth(e.target.value)}
+                      className={`pl-8 pr-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-200 text-slate-700'}`}>
+                      <option value="all">All Months</option>
+                      {months.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </motion.div>
             </React.Fragment>
           );
 
-          /* ── TABLE ────────────────────────────────────────────────── */
+          /* ── TABLE / LIST / BOARD ────────────────────────────────────── */
           if (sectionId === 'table') return (
             <React.Fragment key="table">
-      <motion.div variants={itemVariants}>
-        <SectionCard>
-          <CardHeaderRow
-            iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
-            icon={<Calendar className="h-4 w-4 text-orange-500" />}
-            title="Compliance Deadlines"
-            subtitle={`Showing ${filtered.length} of ${dueDates.length} due dates`}
-            badge={stats.overdue || undefined}
-            action={
-              <div className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500 pr-1">
-                {(filterStatus!=='all'||filterCat!=='all'||filterMonth!=='all'||searchQuery) && (
-                  <button onClick={()=>{setFilterStatus('all');setFilterCat('all');setFilterMonth('all');setSearchQuery('');}}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 font-semibold transition-colors">
-                    <X className="h-3 w-3" />Clear
-                  </button>
-                )}
-              </div>
-            }
-          />
+              <motion.div variants={itemVariants}>
+                <SectionCard>
 
-          <div className="overflow-x-auto">
-            <table className="w-full" style={{minWidth:700}}>
-              <thead>
-                <tr className={isDark ? 'bg-slate-800/80' : 'bg-slate-50/80'}>
-                  {['Status','Title','Category / Dept','Client','Due Date','Assigned To','Days Left','Actions'].map(h=>(
-                    <th key={h} className={`text-left text-[10px] font-bold uppercase tracking-widest px-4 py-3 border-b ${isDark ? 'text-slate-400 border-slate-700' : 'text-slate-400 border-slate-100'}`}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.length===0 ? (
-                  <tr>
-                    <td colSpan={8} className="px-6 py-16 text-center">
-                      <div className="flex flex-col items-center gap-3">
-                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                          <Calendar className="h-6 w-6 text-slate-300 dark:text-slate-500" />
+                  {/* ── Section header with List/Board toggle ── */}
+                  <CardHeaderRow
+                    iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
+                    icon={<Calendar className="h-4 w-4 text-orange-500" />}
+                    title="Compliance Deadlines"
+                    subtitle={`Showing ${filtered.length} of ${dueDates.length} due dates`}
+                    badge={stats.overdue || undefined}
+                    action={
+                      <div className="flex items-center gap-2">
+                        {/* List / Board toggle */}
+                        <div className={`flex items-center gap-0.5 p-0.5 rounded-lg border ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-100 border-slate-200'}`}>
+                          <button
+                            onClick={() => setViewMode('list')}
+                            title="List view"
+                            className={`p-1.5 rounded-md transition-all ${viewMode === 'list'
+                              ? isDark ? 'bg-slate-600 text-slate-100 shadow-sm' : 'bg-white text-slate-700 shadow-sm'
+                              : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                          >
+                            <List size={13} />
+                          </button>
+                          <button
+                            onClick={() => setViewMode('board')}
+                            title="Board view"
+                            className={`p-1.5 rounded-md transition-all ${viewMode === 'board'
+                              ? isDark ? 'bg-slate-600 text-slate-100 shadow-sm' : 'bg-white text-slate-700 shadow-sm'
+                              : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                          >
+                            <LayoutGrid size={13} />
+                          </button>
                         </div>
-                        <p className={`text-sm font-semibold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No due dates found</p>
-                        <p className={`text-xs ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>Try Smart Import to extract from a compliance document</p>
+                        {(filterStatus!=='all'||filterCat!=='all'||filterMonth!=='all'||searchQuery) && (
+                          <button onClick={()=>{setFilterStatus('all');setFilterCat('all');setFilterMonth('all');setSearchQuery('');}}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 font-semibold text-xs transition-colors">
+                            <X className="h-3 w-3" />Clear
+                          </button>
+                        )}
                       </div>
-                    </td>
-                  </tr>
-                ) : (
-                  <AnimatePresence>
-                    {filtered.map((dd, idx) => {
-                      const ds    = getStatus(dd);
-                      const sty   = STATUS_STYLES[ds];
-                      const dLeft = differenceInDays(new Date(dd.due_date), new Date());
-                      const isOwnOrAdmin = user?.role==='admin'||dd.assigned_to===user?.id;
-                      return (
-                        <motion.tr
-                          key={dd.id}
-                          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: idx * 0.03 }}
-                          className={`transition-colors group border-b last:border-0 ${isDark ? 'hover:bg-slate-700/30 border-slate-700/50' : 'hover:bg-slate-50/70 border-slate-100'}`}
-                        >
-                          <td className="px-4 py-3.5">
-                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${sty.bg} ${sty.text} ${sty.border}`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${sty.dot}`} />{sty.label}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5 max-w-[200px]">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <p className={`font-semibold text-sm truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{dd.title}</p>
-                              {dd.assigned_to===user?.id && (
-                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: `${COLORS.mediumBlue}15`, color: COLORS.mediumBlue }}>You</span>
-                              )}
+                    }
+                  />
+
+                  {/* ── LIST VIEW ── */}
+                  {viewMode === 'list' && (
+                    <>
+                      {/* Column headers */}
+                      <div
+                        className="px-4 py-2 border-b border-slate-100 dark:border-slate-700 grid items-center bg-slate-50/80 dark:bg-slate-700/30"
+                        style={{ gridTemplateColumns: 'minmax(0,1fr) 88px 120px 110px 110px 70px 88px', paddingLeft: '1.75rem', paddingRight: '0.75rem' }}
+                      >
+                        <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Title</span>
+                        <span className="text-center text-[10px] font-semibold uppercase tracking-widest text-slate-400">Status</span>
+                        <span className="text-center text-[10px] font-semibold uppercase tracking-widest text-slate-400">Category</span>
+                        <span className="text-center text-[10px] font-semibold uppercase tracking-widest text-slate-400">Client</span>
+                        <span className="text-center text-[10px] font-semibold uppercase tracking-widest text-slate-400">Due Date</span>
+                        <span className="text-center text-[10px] font-semibold uppercase tracking-widest text-slate-400">Left</span>
+                        <span className="text-right text-[10px] font-semibold uppercase tracking-widest text-slate-400">Actions</span>
+                      </div>
+
+                      {/* Rows */}
+                      <div style={{ maxHeight: 560, overflowY: 'auto' }} className="dd-slim py-1">
+                        {filtered.length === 0 ? (
+                          <div className="py-16 flex flex-col items-center gap-3">
+                            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                              <Calendar className="h-6 w-6 text-slate-300 dark:text-slate-500" />
                             </div>
-                            {dd.description && <p className={`text-xs mt-0.5 truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{dd.description}</p>}
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <div className="space-y-1">
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: `${COLORS.mediumBlue}12`, color: COLORS.mediumBlue }}>
-                                <Layers className="h-2.5 w-2.5" />{dd.category||'Other'}
-                              </span>
-                              {dd.department && (
-                                <span className={`block text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                                  <Tag className="h-2.5 w-2.5 inline mr-0.5" />{dd.department}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            {dd.client_id
-                              ? <div className="flex items-center gap-1.5">
-                                  <Building2 className="h-3.5 w-3.5 text-slate-300" />
-                                  <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{getClientName(dd.client_id)}</span>
+                            <p className={`text-sm font-semibold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No due dates found</p>
+                            <p className={`text-xs ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>Try Smart Import to extract from a compliance document</p>
+                          </div>
+                        ) : (
+                          <AnimatePresence>
+                            {filtered.map(dd => {
+                              const ds    = getStatus(dd);
+                              const dLeft = differenceInDays(new Date(dd.due_date), new Date());
+                              const isOwnOrAdmin = user?.role==='admin'||dd.assigned_to===user?.id;
+                              return (
+                                <DueDateRow
+                                  key={dd.id}
+                                  dd={dd}
+                                  ds={ds}
+                                  dLeft={dLeft}
+                                  isOwnOrAdmin={isOwnOrAdmin}
+                                  onEdit={handleEdit}
+                                  onDelete={handleDelete}
+                                  onCalendar={addToCalendar}
+                                  user={user}
+                                  getClientName={getClientName}
+                                  getUserName={getUserName}
+                                  isDark={isDark}
+                                />
+                              );
+                            })}
+                          </AnimatePresence>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* ── BOARD VIEW ── */}
+                  {viewMode === 'board' && (
+                    <div className="p-4">
+                      {(() => {
+                        const columns = [
+                          {
+                            id:    'overdue',
+                            label: 'Overdue',
+                            color: '#DC2626',
+                            bg:    isDark ? 'bg-red-900/15 border-red-800' : 'bg-red-50/60 border-red-200',
+                            items: filtered.filter(dd => getStatus(dd) === 'overdue'),
+                          },
+                          {
+                            id:    'upcoming',
+                            label: 'Due Soon',
+                            color: '#F59E0B',
+                            bg:    isDark ? 'bg-amber-900/15 border-amber-800' : 'bg-amber-50/60 border-amber-200',
+                            items: filtered.filter(dd => getStatus(dd) === 'upcoming'),
+                          },
+                          {
+                            id:    'pending',
+                            label: 'Pending',
+                            color: '#1F6FB2',
+                            bg:    isDark ? 'bg-blue-900/10 border-blue-800' : 'bg-blue-50/40 border-blue-200',
+                            items: filtered.filter(dd => getStatus(dd) === 'pending'),
+                          },
+                          {
+                            id:    'completed',
+                            label: 'Completed',
+                            color: '#1FAF5A',
+                            bg:    isDark ? 'bg-emerald-900/10 border-emerald-800' : 'bg-emerald-50/40 border-emerald-200',
+                            items: filtered.filter(dd => getStatus(dd) === 'completed'),
+                          },
+                        ];
+
+                        return (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                            {columns.map(col => (
+                              <div key={col.id} className={`rounded-xl border ${col.bg} p-3`}>
+                                {/* Column header */}
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: col.color }} />
+                                    <span className="text-xs font-bold uppercase tracking-widest" style={{ color: col.color }}>{col.label}</span>
+                                  </div>
+                                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full" style={{ background: `${col.color}18`, color: col.color }}>
+                                    {col.items.length}
+                                  </span>
                                 </div>
-                              : <span className={`text-xs ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>—</span>
-                            }
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center gap-1.5">
-                              <Calendar className="h-3.5 w-3.5 text-slate-400" />
-                              <span className={`text-xs font-semibold whitespace-nowrap ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {format(new Date(dd.due_date),'dd MMM yyyy')}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center gap-1.5">
-                              <User className="h-3.5 w-3.5 text-slate-300" />
-                              <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{getUserName(dd.assigned_to)}</span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            {dd.status==='completed'
-                              ? <span className="flex items-center gap-1 text-xs text-emerald-500 font-bold">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Done
-                                </span>
-                              : <span className={`text-xs font-bold tabular-nums ${
-                                  dLeft<0 ? 'text-red-500' : dLeft<=7 ? 'text-amber-500' : isDark ? 'text-slate-300' : 'text-slate-600'
-                                }`}>
-                                  {dLeft<0 ? `${Math.abs(dLeft)}d overdue` : `${dLeft}d left`}
-                                </span>
-                            }
-                          </td>
-                          <td className="px-4 py-3.5">
-                            {isOwnOrAdmin && (
-                              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                                  onClick={()=>handleEdit(dd)}
-                                  className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
-                                  title="Edit">
-                                  <Edit className="h-3.5 w-3.5" />
-                                </motion.button>
-                                <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                                  onClick={()=>handleDelete(dd.id)}
-                                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
-                                  title="Delete">
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </motion.button>
-                                <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                                  onClick={()=>addToCalendar(dd)}
-                                  className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors"
-                                  title="Add to Google Calendar">
-                                  <Calendar className="h-3.5 w-3.5" />
-                                </motion.button>
+
+                                {/* Cards */}
+                                <div className="space-y-2 max-h-[560px] overflow-y-auto dd-slim">
+                                  {col.items.length === 0 ? (
+                                    <div className="py-8 flex flex-col items-center gap-2 opacity-50">
+                                      <Calendar size={18} className="text-slate-400" />
+                                      <p className="text-[11px] font-medium text-slate-400">Empty</p>
+                                    </div>
+                                  ) : (
+                                    <AnimatePresence>
+                                      {col.items.map(dd => {
+                                        const ds    = getStatus(dd);
+                                        const dLeft = differenceInDays(new Date(dd.due_date), new Date());
+                                        const isOwnOrAdmin = user?.role==='admin'||dd.assigned_to===user?.id;
+                                        return (
+                                          <DueDateBoardCard
+                                            key={dd.id}
+                                            dd={dd}
+                                            ds={ds}
+                                            dLeft={dLeft}
+                                            isOwnOrAdmin={isOwnOrAdmin}
+                                            onEdit={handleEdit}
+                                            onDelete={handleDelete}
+                                            onCalendar={addToCalendar}
+                                            user={user}
+                                            getClientName={getClientName}
+                                            getUserName={getUserName}
+                                            isDark={isDark}
+                                          />
+                                        );
+                                      })}
+                                    </AnimatePresence>
+                                  )}
+                                </div>
                               </div>
-                            )}
-                          </td>
-                        </motion.tr>
-                      );
-                    })}
-                  </AnimatePresence>
-                )}
-              </tbody>
-            </table>
-          </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
 
-          {filtered.length>0 && (
-            <div className={`px-4 py-3 border-t flex items-center justify-between ${isDark ? 'border-slate-700 bg-slate-800/50' : 'border-slate-100 bg-slate-50/50'}`}>
-              <div className="flex items-center gap-3">
-                {stats.overdue > 0 && <span className="text-xs font-bold text-red-500">{stats.overdue} Overdue</span>}
-                {stats.upcoming > 0 && <span className="text-xs font-bold text-blue-500">{stats.upcoming} Due Soon</span>}
-                {stats.completed > 0 && <span className="text-xs font-bold text-emerald-500">{stats.completed} Completed</span>}
-              </div>
-              <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                Showing <span className={`font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{filtered.length}</span> of{' '}
-                <span className={`font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{dueDates.length}</span> due dates
-              </p>
-            </div>
-          )}
-        </SectionCard>
-      </motion.div>
+                  {/* ── Footer ── */}
+                  {filtered.length > 0 && (
+                    <div className={`px-4 py-3 border-t flex items-center justify-between ${isDark ? 'border-slate-700 bg-slate-800/50' : 'border-slate-100 bg-slate-50/50'}`}>
+                      <div className="flex items-center gap-3">
+                        {stats.overdue > 0 && <span className="text-xs font-bold text-red-500">{stats.overdue} Overdue</span>}
+                        {stats.upcoming > 0 && <span className="text-xs font-bold text-blue-500">{stats.upcoming} Due Soon</span>}
+                        {stats.completed > 0 && <span className="text-xs font-bold text-emerald-500">{stats.completed} Completed</span>}
+                      </div>
+                      <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                        Showing <span className={`font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{filtered.length}</span> of{' '}
+                        <span className={`font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{dueDates.length}</span> due dates
+                      </p>
+                    </div>
+                  )}
 
+                </SectionCard>
+              </motion.div>
             </React.Fragment>
           );
 
