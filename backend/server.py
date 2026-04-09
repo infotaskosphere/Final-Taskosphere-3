@@ -1879,27 +1879,118 @@ async def apply_leave(
         from_date = datetime.fromisoformat(data["from_date"]).date()
         to_date = datetime.fromisoformat(data.get("to_date", data["from_date"])).date()
         reason = data.get("reason", "Leave Applied")
+        leave_type = data.get("leave_type", "full_day")  # full_day | half_day_morning | half_day_afternoon | early_leave
+        early_leave_time = data.get("early_leave_time")  # "HH:MM" string for early leave
+
+        VALID_LEAVE_TYPES = ("full_day", "half_day_morning", "half_day_afternoon", "early_leave")
+        if leave_type not in VALID_LEAVE_TYPES:
+            raise HTTPException(status_code=400, detail=f"Invalid leave_type. Must be one of: {VALID_LEAVE_TYPES}")
+
         if to_date < from_date:
             raise HTTPException(status_code=400, detail="Invalid date range")
+
+        # For partial-day leave types, only single-day makes sense
+        if leave_type in ("half_day_morning", "half_day_afternoon", "early_leave"):
+            if to_date != from_date:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Half-day and early leave can only be applied for a single day"
+                )
+
         current = from_date
         while current <= to_date:
+            current_str = current.isoformat()
+            existing = await db.attendance.find_one(
+                {"user_id": current_user.id, "date": current_str}, {"_id": 0}
+            )
+
+            if leave_type == "full_day":
+                update_fields = {
+                    "status": "leave",
+                    "leave_reason": reason,
+                    "leave_type": "full_day",
+                    "punch_in": None,
+                    "punch_out": None,
+                    "duration_minutes": 0,
+                }
+
+            elif leave_type == "half_day_morning":
+                # Morning off — not expected to punch in before noon
+                update_fields = {
+                    "status": "present",
+                    "leave_reason": reason,
+                    "leave_type": "half_day_morning",
+                    "is_half_day": True,
+                    # Don't wipe punch_in/out if already recorded
+                }
+                if not existing or not existing.get("punch_in"):
+                    update_fields["punch_in"] = None
+                    update_fields["punch_out"] = None
+                    update_fields["duration_minutes"] = 0
+
+            elif leave_type == "half_day_afternoon":
+                # Afternoon off — present in morning, leaves at noon
+                update_fields = {
+                    "status": "present",
+                    "leave_reason": reason,
+                    "leave_type": "half_day_afternoon",
+                    "is_half_day": True,
+                }
+                # Set a nominal punch-out at 13:30 IST if not already punched out
+                if existing and existing.get("punch_in") and not existing.get("punch_out"):
+                    punch_in_dt = existing["punch_in"]
+                    if isinstance(punch_in_dt, str):
+                        punch_in_dt = datetime.fromisoformat(punch_in_dt)
+                    if punch_in_dt.tzinfo is None:
+                        punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
+                    half_day_out = datetime.now(timezone.utc).replace(hour=8, minute=0, second=0, microsecond=0)  # 13:30 IST = 08:00 UTC
+                    delta = half_day_out - punch_in_dt
+                    dur = max(0, int(delta.total_seconds() / 60))
+                    update_fields["punch_out"] = half_day_out
+                    update_fields["duration_minutes"] = dur
+                    update_fields["punched_out_early"] = True
+
+            elif leave_type == "early_leave":
+                # Present but left early at a specified time
+                update_fields = {
+                    "status": "present",
+                    "leave_reason": reason,
+                    "leave_type": "early_leave",
+                    "is_early_leave": True,
+                    "early_leave_time": early_leave_time,
+                }
+                # If a departure time given and user is punched in without punch-out, record it
+                if early_leave_time and existing and existing.get("punch_in") and not existing.get("punch_out"):
+                    try:
+                        punch_in_dt = existing["punch_in"]
+                        if isinstance(punch_in_dt, str):
+                            punch_in_dt = datetime.fromisoformat(punch_in_dt)
+                        if punch_in_dt.tzinfo is None:
+                            punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
+                        # Parse "HH:MM" departure time as IST then convert to UTC
+                        h, m = map(int, early_leave_time.split(":"))
+                        today_ist = datetime.now(ZoneInfo("Asia/Kolkata")).replace(
+                            hour=h, minute=m, second=0, microsecond=0
+                        )
+                        early_out_utc = today_ist.astimezone(timezone.utc)
+                        delta = early_out_utc - punch_in_dt
+                        dur = max(0, int(delta.total_seconds() / 60))
+                        update_fields["punch_out"] = early_out_utc
+                        update_fields["duration_minutes"] = dur
+                        update_fields["punched_out_early"] = True
+                    except Exception:
+                        pass
+
             await db.attendance.update_one(
-                {
-                    "user_id": current_user.id,
-                    "date": current.isoformat()
-                },
-                {
-                    "$set": {
-                        "status": "leave",
-                        "leave_reason": reason,
-                        "punch_in": None,
-                        "punch_out": None
-                    }
-                },
+                {"user_id": current_user.id, "date": current_str},
+                {"$set": update_fields},
                 upsert=True
             )
             current += timedelta(days=1)
-        return {"message": "Leave applied successfully"}
+
+        return {"message": "Leave applied successfully", "leave_type": leave_type}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
