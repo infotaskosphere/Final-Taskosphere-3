@@ -2764,7 +2764,7 @@ export default function Attendance() {
 
               {/* ══ APPLY FOR LEAVE CARD ══ */}
               {!isViewingOther && (
-                <SectionCard className="flex flex-col">
+                <SectionCard className="flex-1 flex flex-col">
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
                     icon={<CalendarX className="h-4 w-4" style={{ color: COLORS.orange }} />}
@@ -2967,7 +2967,7 @@ export default function Attendance() {
                 .filter(r => r.punch_in && r.status === 'present')
                 .slice(0, 5);
               return (
-                <SectionCard className="flex flex-col" style={{ height: 380, minHeight: 380, maxHeight: 380 }}>
+                <SectionCard className="flex-1 flex flex-col" style={{ minHeight: 280 }}>
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-teal-900/40' : 'bg-teal-50'}
                     icon={<MapPin className="h-4 w-4 text-teal-500" />}
