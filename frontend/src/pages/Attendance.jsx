@@ -1038,6 +1038,8 @@ export default function Attendance() {
   const [absentSummary,      setAbsentSummary]      = useState([]);
   const [dataError,          setDataError]          = useState(null);
   const absentWarningShownRef = useRef(false);
+  const leftColRef = useRef(null);
+  const [leftColHeight, setLeftColHeight] = useState(null);
   const [leaveType,          setLeaveType]          = useState('full_day');
   const [earlyLeaveTime,     setEarlyLeaveTime]     = useState('');
   const [showPunchInModal,  setShowPunchInModal]  = useState(false);
@@ -1085,6 +1087,16 @@ export default function Attendance() {
   const [editingReminder,        setEditingReminder]        = useState(null);
   const [showEmailImporter,      setShowEmailImporter]      = useState(false);
   const [showReminderCalendar,   setShowReminderCalendar]   = useState(false);
+
+  // ── Measure left column height for right column sync ─────────────────────
+  useEffect(() => {
+    if (!leftColRef.current) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setLeftColHeight(entry.contentRect.height);
+    });
+    ro.observe(leftColRef.current);
+    return () => ro.disconnect();
+  }, []);
 
   // ── Derived flags ──────────────────────────────────────────────────────────
   const isEveryoneView = isAdmin && selectedUserId === 'everyone';
@@ -2692,8 +2704,8 @@ export default function Attendance() {
         >
           {/* ── LEFT COLUMN: Calendar + Date Detail + Apply Leave ── */}
           {!isEveryoneView && (
-            <div className="xl:col-span-5 flex flex-col gap-6">
-              <SectionCard className="flex flex-col flex-1 min-h-0">
+            <div className="xl:col-span-5 flex flex-col gap-4" ref={leftColRef}>
+              <SectionCard className="flex flex-col">
                 <CardHeaderRow
                   iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
                   icon={<CalendarIcon className="h-4 w-4 text-blue-500" />}
@@ -2741,7 +2753,7 @@ export default function Attendance() {
               </SectionCard>
 
               {/* Selected date detail */}
-              <SectionCard className="flex flex-col flex-1 min-h-0">
+              <SectionCard className="flex flex-col">
                 <div className="p-0">
                   {selectedAttendance?.status === 'absent' ? (
                     <div className="relative p-5 pl-6 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.red }} />
@@ -2799,7 +2811,7 @@ export default function Attendance() {
 
 
               {/* Apply for Leave */}
-              <SectionCard className="flex flex-col flex-1 min-h-0">
+              <SectionCard className="flex flex-col">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
                 icon={<CalendarX className="h-4 w-4" style={{ color: COLORS.orange }} />}
@@ -2913,7 +2925,10 @@ export default function Attendance() {
           )}
 
           {/* ── RIGHT COLUMN: Location History + Recent Attendance ── */}
-          <div className={isEveryoneView ? 'flex flex-col gap-6' : 'xl:col-span-7 flex flex-col gap-6'}>
+          <div
+            className={isEveryoneView ? 'flex flex-col gap-4' : 'xl:col-span-7 flex flex-col gap-4'}
+            style={leftColHeight ? { maxHeight: leftColHeight, height: leftColHeight } : {}}
+          >
 
             {/* Location History */}
             {(() => {
