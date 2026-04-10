@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
-// useNavigate removed — not used in this component
 import { motion, AnimatePresence } from "framer-motion";
+import { FixedSizeList as List } from "react-window";
 import {
   format, startOfMonth, endOfMonth, eachDayOfInterval,
   isToday, parseISO, addMonths, subMonths, isBefore, getDay, isValid,
