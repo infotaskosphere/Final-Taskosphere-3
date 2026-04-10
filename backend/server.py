@@ -16,6 +16,7 @@ from datetime import datetime, date, timezone, timedelta
 
 # --- FIXED ROUTER IMPORTS ---
 # Added 'backend.' to invoicing to match the others
+from reminders_router import router as reminders_router
 from backend.quotations import router as quotation_router
 from backend.attendance_identix import identix_router
 from backend.google_auth import router as google_auth_router
@@ -5707,6 +5708,7 @@ api_router.include_router(quotation_router)
 api_router.include_router(telegram_router)
 api_router.include_router(leads_router)
 api_router.include_router(notification_router)
+app.include_router(reminders_router, prefix="/api")
 api_router.include_router(email_router)
 app.include_router(google_auth_router)
 app.include_router(api_router)
