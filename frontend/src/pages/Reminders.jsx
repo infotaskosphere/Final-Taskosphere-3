@@ -1,24 +1,28 @@
 // Reminders.jsx — Dedicated Reminders & Meetings page
-// Design language matches Dashboard / Attendance exactly
+// WelcomeBanner + Full Calendar View + Popup Notifications
 
 import { useDark } from '@/hooks/useDark';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
-import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { WelcomeBanner } from '@/components/ui/WelcomeBanner';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { format, parseISO, isPast, isToday as dateFnsIsToday } from 'date-fns';
+import {
+  format, parseISO, isPast, isToday as dateFnsIsToday,
+  startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isSameMonth,
+  addMonths, subMonths, getDay,
+} from 'date-fns';
 import {
   Bell, BellRing, Plus, Trash2, X, Edit2, Clock,
-  Calendar as CalendarIcon, Users, ChevronRight,
+  Calendar as CalendarIcon, Users, ChevronRight, ChevronLeft,
   AlertTriangle, CheckCircle2, ExternalLink,
-  Settings2, GripVertical, Search, Filter,
+  Settings2, Search,
 } from 'lucide-react';
 import LayoutCustomizer from '../components/layout/LayoutCustomizer';
 import { usePageLayout } from '../hooks/usePageLayout';
@@ -44,7 +48,6 @@ const itemVariants = {
 const springPhysics = {
   card: { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
   lift: { type: 'spring', stiffness: 320, damping: 24, mass: 0.9  },
-  tap:  { type: 'spring', stiffness: 500, damping: 30 },
 };
 
 const slimScroll = {
@@ -81,6 +84,33 @@ const buildGCalURL = (reminder) => {
     return `https://calendar.google.com/calendar/r/eventedit?dates=${fmt(start)}/${fmt(end)}&text=${encodeURIComponent(reminder.title)}&details=${encodeURIComponent(reminder.description || '')}`;
   } catch { return '#'; }
 };
+
+// ── Notification helpers ─────────────────────────────────────────────────────
+function getFiredIds() {
+  try {
+    const stored = sessionStorage.getItem('rem_fired_ids');
+    return new Set(stored ? JSON.parse(stored) : []);
+  } catch { return new Set(); }
+}
+function addFiredId(id) {
+  try {
+    const set = getFiredIds();
+    set.add(String(id));
+    sessionStorage.setItem('rem_fired_ids', JSON.stringify([...set]));
+  } catch {}
+}
+
+function requestNotificationPermission() {
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+}
+
+function sendBrowserNotification(title, body) {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try { new Notification(title, { body, icon: '/favicon.ico', tag: title }); } catch {}
+  }
+}
 
 // ── Layout Primitives ────────────────────────────────────────────────────────
 function SectionCard({ children, className = '' }) {
@@ -125,7 +155,10 @@ export default function Reminders() {
   const [showForm, setShowForm] = useState(false);
   const [editingReminder, setEditingReminder] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState('all'); // all, upcoming, overdue, dismissed
+  const [filterStatus, setFilterStatus] = useState('all');
+
+  // Calendar state
+  const [calendarMonth, setCalendarMonth] = useState(new Date());
 
   // Form state
   const [formTitle, setFormTitle] = useState('');
@@ -133,13 +166,17 @@ export default function Reminders() {
   const [formDatetime, setFormDatetime] = useState('');
 
   // Layout customizer
-  const REM_SECTIONS = ['overview', 'reminders_list'];
+  const REM_SECTIONS = ['overview', 'calendar_view', 'reminders_list'];
   const REM_LABELS = {
     overview:       { name: 'Overview Stats', icon: '📊', desc: 'Reminder statistics' },
+    calendar_view:  { name: 'Calendar View', icon: '📅', desc: 'Monthly calendar with reminders' },
     reminders_list: { name: 'Reminders List', icon: '🔔', desc: 'All reminders and meetings' },
   };
   const { order: remOrder, moveSection: remMove, resetOrder: remReset } = usePageLayout('reminders', REM_SECTIONS);
   const [showCustomize, setShowCustomize] = useState(false);
+
+  // Request notification permission on mount
+  useEffect(() => { requestNotificationPermission(); }, []);
 
   // Fetch users for admin dropdown
   useEffect(() => {
@@ -169,9 +206,56 @@ export default function Reminders() {
     }
   }, [isAdmin, selectedUserId]);
 
+  useEffect(() => { fetchReminders(); }, [fetchReminders]);
+
+  // ── Popup Reminder Notifications ──────────────────────────────────────────
   useEffect(() => {
-    fetchReminders();
-  }, [fetchReminders]);
+    if (!reminders.length) return;
+    const checkReminders = () => {
+      const firedIds = getFiredIds();
+      const now = new Date();
+      reminders.forEach(rem => {
+        if (rem.is_dismissed) return;
+        const remId = resolveId(rem);
+        if (!remId || firedIds.has(remId)) return;
+        if (!rem.remind_at) return;
+        try {
+          const remDate = new Date(rem.remind_at);
+          const diffMs = remDate.getTime() - now.getTime();
+          // Fire if within 1 minute window (past or upcoming)
+          if (diffMs <= 60000 && diffMs >= -300000) {
+            addFiredId(remId);
+            // In-app toast notification
+            toast.warning(`🔔 Reminder: ${rem.title}`, {
+              description: rem.description ? stripHtml(rem.description).slice(0, 100) : formatReminderTime(rem.remind_at),
+              duration: 10000,
+              action: {
+                label: 'Dismiss',
+                onClick: () => handleDismiss(remId),
+              },
+            });
+            // Browser notification
+            sendBrowserNotification(
+              `🔔 ${rem.title}`,
+              rem.description ? stripHtml(rem.description).slice(0, 100) : `Due: ${formatReminderTime(rem.remind_at)}`
+            );
+          }
+        } catch {}
+      });
+    };
+    checkReminders();
+    const interval = setInterval(checkReminders, 30000);
+    return () => clearInterval(interval);
+  }, [reminders]);
+
+  // Dismiss reminder
+  const handleDismiss = async (id) => {
+    if (!id) return;
+    try {
+      await api.patch(`/email/reminders/${id}`, { is_dismissed: true });
+      setReminders(prev => prev.map(r => resolveId(r) === String(id) ? { ...r, is_dismissed: true } : r));
+    } catch {}
+  };
 
   // Create reminder
   const handleCreate = async () => {
@@ -285,7 +369,28 @@ export default function Reminders() {
     return { total: active.length, overdue: overdue.length, upcoming: upcoming.length, today: todayCount.length };
   }, [reminders]);
 
+  // Calendar data — reminders grouped by date
+  const calendarDays = useMemo(() => {
+    const monthStart = startOfMonth(calendarMonth);
+    const monthEnd = endOfMonth(calendarMonth);
+    return eachDayOfInterval({ start: monthStart, end: monthEnd });
+  }, [calendarMonth]);
+
+  const remindersByDate = useMemo(() => {
+    const map = {};
+    const active = reminders.filter(r => !r.is_dismissed && r.remind_at);
+    active.forEach(r => {
+      try {
+        const dateKey = format(new Date(r.remind_at), 'yyyy-MM-dd');
+        if (!map[dateKey]) map[dateKey] = [];
+        map[dateKey].push(r);
+      } catch {}
+    });
+    return map;
+  }, [reminders]);
+
   const isViewingOther = isAdmin && selectedUserId && selectedUserId !== user?.id;
+  const startDayOfWeek = getDay(startOfMonth(calendarMonth)); // 0=Sun
 
   return (
     <>
@@ -305,48 +410,44 @@ export default function Reminders() {
         initial="hidden"
         animate="visible"
       >
-        {/* PAGE HEADER */}
-        <motion.div variants={itemVariants} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div>
-            <h1 className={`text-2xl font-bold tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-              Reminders & Meetings
-            </h1>
-            <p className={`text-sm mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              {isViewingOther ? 'Viewing another user\'s reminders' : 'Manage your reminders and meetings'}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {isAdmin && (
-              <Select value={selectedUserId || 'all'} onValueChange={(v) => setSelectedUserId(v === 'all' ? '' : v)}>
-                <SelectTrigger className={`w-[200px] h-9 text-sm rounded-xl ${isDark ? 'bg-slate-800 border-slate-700' : ''}`}>
-                  <SelectValue placeholder="All Users" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">My Reminders</SelectItem>
-                  {allUsers.map(u => (
-                    <SelectItem key={u.id || u._id} value={String(u.id || u._id)}>
-                      {u.full_name || u.name || u.email}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-            <Button
-              onClick={() => { resetForm(); setShowForm(true); }}
-              className="h-9 rounded-xl text-sm font-semibold"
-              style={{ background: `linear-gradient(135deg, ${COLORS.purple}, ${COLORS.mediumBlue})` }}
-            >
-              <Plus className="h-4 w-4 mr-1" /> New Reminder
-            </Button>
-            <button
-              onClick={() => setShowCustomize(true)}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all hover:shadow-md ${
-                isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-500'
-              }`}
-            >
-              <Settings2 size={13} /> Customize
-            </button>
-          </div>
+        {/* WELCOME BANNER */}
+        <motion.div variants={itemVariants}>
+          <WelcomeBanner
+            title="Reminders & Meetings"
+            subtitle={isViewingOther ? "Viewing another user's reminders" : 'Manage your reminders and meetings'}
+            icon={BellRing}
+            actions={
+              <div className="flex items-center gap-2 flex-wrap">
+                {isAdmin && (
+                  <Select value={selectedUserId || 'all'} onValueChange={(v) => setSelectedUserId(v === 'all' ? '' : v)}>
+                    <SelectTrigger className="w-[180px] h-9 text-sm rounded-xl bg-white/15 border-white/20 text-white placeholder:text-white/50">
+                      <SelectValue placeholder="All Users" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">My Reminders</SelectItem>
+                      {allUsers.map(u => (
+                        <SelectItem key={u.id || u._id} value={String(u.id || u._id)}>
+                          {u.full_name || u.name || u.email}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <Button
+                  onClick={() => { resetForm(); setShowForm(true); }}
+                  className="h-9 rounded-xl text-sm font-semibold bg-white/15 hover:bg-white/25 text-white border border-white/20"
+                >
+                  <Plus className="h-4 w-4 mr-1" /> New Reminder
+                </Button>
+                <button
+                  onClick={() => setShowCustomize(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/20 text-white/70 border border-white/15 transition-all"
+                >
+                  <Settings2 size={13} /> Customize
+                </button>
+              </div>
+            }
+          />
         </motion.div>
 
         {/* ORDERED SECTIONS */}
@@ -372,6 +473,114 @@ export default function Reminders() {
                   </div>
                 </motion.div>
               ))}
+            </motion.div>
+          );
+
+          // ── BIG CALENDAR VIEW ──────────────────────────────────────────────
+          if (sectionId === 'calendar_view') return (
+            <motion.div key="calendar_view" variants={itemVariants}>
+              <SectionCard>
+                <CardHeaderRow
+                  iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
+                  icon={<CalendarIcon className="h-4 w-4 text-blue-500" />}
+                  title="Reminder Calendar"
+                  subtitle={format(calendarMonth, 'MMMM yyyy')}
+                  action={
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => setCalendarMonth(subMonths(calendarMonth, 1))}
+                        className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}>
+                        <ChevronLeft className="h-4 w-4 text-slate-400" />
+                      </button>
+                      <button onClick={() => setCalendarMonth(new Date())}
+                        className={`px-2 py-1 text-xs font-semibold rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700 text-blue-400' : 'hover:bg-slate-100 text-blue-500'}`}>
+                        Today
+                      </button>
+                      <button onClick={() => setCalendarMonth(addMonths(calendarMonth, 1))}
+                        className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}>
+                        <ChevronRight className="h-4 w-4 text-slate-400" />
+                      </button>
+                    </div>
+                  }
+                />
+                <div className="p-4">
+                  {/* Day headers */}
+                  <div className="grid grid-cols-7 mb-2">
+                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+                      <div key={d} className="text-center text-[10px] font-bold uppercase tracking-widest text-slate-400 py-2">{d}</div>
+                    ))}
+                  </div>
+                  {/* Calendar grid */}
+                  <div className="grid grid-cols-7 gap-1">
+                    {/* Empty cells for days before month start */}
+                    {Array.from({ length: startDayOfWeek }).map((_, i) => (
+                      <div key={`empty-${i}`} className="min-h-[80px] sm:min-h-[100px]" />
+                    ))}
+                    {calendarDays.map(day => {
+                      const dateKey = format(day, 'yyyy-MM-dd');
+                      const dayReminders = remindersByDate[dateKey] || [];
+                      const isToday = dateFnsIsToday(day);
+                      const hasOverdue = dayReminders.some(r => isPast(new Date(r.remind_at)));
+                      return (
+                        <motion.div
+                          key={dateKey}
+                          whileHover={{ scale: 1.02 }}
+                          className={`min-h-[80px] sm:min-h-[100px] rounded-xl border p-1.5 transition-all cursor-pointer ${
+                            isToday
+                              ? isDark ? 'border-blue-500 bg-blue-900/20' : 'border-blue-400 bg-blue-50'
+                              : isDark ? 'border-slate-700 hover:border-slate-600' : 'border-slate-200 hover:border-slate-300'
+                          }`}
+                          onClick={() => {
+                            if (dayReminders.length === 0) {
+                              const dt = format(day, "yyyy-MM-dd'T'09:00");
+                              setFormDatetime(dt);
+                              resetForm();
+                              setFormDatetime(dt);
+                              setShowForm(true);
+                            }
+                          }}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full ${
+                              isToday
+                                ? 'bg-blue-500 text-white'
+                                : isDark ? 'text-slate-300' : 'text-slate-700'
+                            }`}>
+                              {format(day, 'd')}
+                            </span>
+                            {dayReminders.length > 0 && (
+                              <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full ${
+                                hasOverdue ? 'bg-red-500 text-white' : 'bg-purple-500 text-white'
+                              }`}>
+                                {dayReminders.length}
+                              </span>
+                            )}
+                          </div>
+                          <div className="space-y-0.5 overflow-hidden">
+                            {dayReminders.slice(0, 2).map(rem => (
+                              <div
+                                key={resolveId(rem)}
+                                onClick={(e) => { e.stopPropagation(); startEdit(rem); }}
+                                className={`text-[9px] sm:text-[10px] font-semibold px-1.5 py-0.5 rounded-md truncate cursor-pointer transition-all hover:opacity-80 ${
+                                  isPast(new Date(rem.remind_at))
+                                    ? isDark ? 'bg-red-900/30 text-red-400' : 'bg-red-100 text-red-600'
+                                    : isDark ? 'bg-purple-900/30 text-purple-400' : 'bg-purple-100 text-purple-700'
+                                }`}
+                              >
+                                {rem.title}
+                              </div>
+                            ))}
+                            {dayReminders.length > 2 && (
+                              <p className={`text-[9px] font-medium text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                                +{dayReminders.length - 2} more
+                              </p>
+                            )}
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </SectionCard>
             </motion.div>
           );
 
