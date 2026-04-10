@@ -3002,14 +3002,15 @@ export default function Attendance() {
                       </div>
                     </SectionCard>
                   </div>
-                </motion.div>
-              </React.Fragment>
+                </div>
+              </motion.div>
+            </React.Fragment>
             );
 
             return null;
           })}
         </div>
-      </motion.div>
+      </motion.div>>
 
       {/* ══ MODALS ════════════════════════════════════════════════════════════ */}
 
