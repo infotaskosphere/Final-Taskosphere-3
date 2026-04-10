@@ -96,9 +96,6 @@ const COLORS = {
 
 const LEAVE_TYPES = [
   { value: 'full_day',           label: 'Full Day',           icon: '🗓️', desc: 'Absent the entire day' },
-  { value: 'half_day_morning',   label: 'Half Day — Morning', icon: '🌅', desc: 'Off in the morning, join after noon' },
-  { value: 'half_day_afternoon', label: 'Half Day — Afternoon', icon: '🌇', desc: 'Present morning, leave after lunch' },
-  { value: 'early_leave',        label: 'Early Leave',        icon: '🚪', desc: 'Present but leaving before office hours end' },
 ];
 
 
@@ -2847,9 +2844,44 @@ export default function Attendance() {
                       }}
                     >
                       <Send className="w-4 h-4" />
-                      Request Leave
+                      Apply Leave
                     </motion.button>
-                    <div className="flex gap-2 flex-wrap">
+
+                    {/* Half Day & Early Leave quick actions */}
+                    <div className="flex gap-2">
+                      <motion.button
+                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                        onClick={() => {
+                          setLeaveType('half_day');
+                          setShowLeaveForm(true);
+                        }}
+                        className="flex items-center justify-center gap-2 flex-1 py-2.5 rounded-xl text-xs font-bold transition-all border"
+                        style={{
+                          borderColor: isDark ? 'rgba(139,92,246,0.4)' : '#c4b5fd',
+                          color: isDark ? '#a78bfa' : '#7c3aed',
+                          backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : '#f5f3ff',
+                        }}
+                      >
+                        <span>🌗</span>
+                        Half Day
+                      </motion.button>
+                      <motion.button
+                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                        onClick={() => {
+                          setLeaveType('early_leave');
+                          setShowLeaveForm(true);
+                        }}
+                        className="flex items-center justify-center gap-2 flex-1 py-2.5 rounded-xl text-xs font-bold transition-all border"
+                        style={{
+                          borderColor: isDark ? 'rgba(245,158,11,0.4)' : '#fcd34d',
+                          color: isDark ? '#fbbf24' : '#d97706',
+                          backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb',
+                        }}
+                      >
+                        <span>🚪</span>
+                        Early Leave
+                      </motion.button>
+                    </div>
                       {[
                         { label: 'Tomorrow', days: 1 },
                         { label: '3 Days',   days: 3 },
@@ -3405,7 +3437,7 @@ export default function Attendance() {
                 <div className="px-7 py-5 flex items-center justify-between"
                   style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
                   <div>
-                    <h2 className="text-xl font-black text-white">Request Leave</h2>
+                    <h2 className="text-xl font-black text-white">Apply Leave</h2>
                     <p className="text-blue-200 text-sm mt-0.5">Select type and dates below</p>
                   </div>
                   <button onClick={() => setShowLeaveForm(false)}
