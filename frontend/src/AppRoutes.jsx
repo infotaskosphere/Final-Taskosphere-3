@@ -28,6 +28,7 @@ const Quotations        = lazy(() => import("@/pages/Quotations.jsx"));
 const GeneralSettings   = lazy(() => import("@/pages/GeneralSettings.jsx"));
 const Passvault         = lazy(() => import("@/pages/Passvault.jsx"));
 const Invoicing         = lazy(() => import("@/pages/Invoicing.jsx"));
+const Reminders         = lazy(() => import("@/pages/Reminders.jsx"));
 
 /* ── Route Guards ───────────────────────────────────────────────────────── */
 
@@ -116,6 +117,7 @@ function AppRoutes() {
       <Route path="/tasks"      element={<Protected><PageLoader><Tasks /></PageLoader></Protected>} />
       <Route path="/todos"      element={<Protected><PageLoader><TodoDashboard /></PageLoader></Protected>} />
       <Route path="/attendance" element={<Protected><PageLoader><Attendance /></PageLoader></Protected>} />
+      <Route path="/reminders" element={<Protected><PageLoader><Reminders /></PageLoader></Protected>} />
       <Route path="/visits"     element={<Protected><PageLoader><VisitsPage /></PageLoader></Protected>} />
       <Route path="/duedates"   element={<Protected><PageLoader><DueDates /></PageLoader></Protected>} />
       <Route path="/reports"    element={<Protected><PageLoader><Reports /></PageLoader></Protected>} />
