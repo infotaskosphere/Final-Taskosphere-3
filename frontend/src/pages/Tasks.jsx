@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import useDark from '../hooks/useDark';
 
@@ -913,6 +912,17 @@ export default function Tasks() {
     setEditingTask(task);
     setFormData({ title: task.title, description: task.description || '', assigned_to: task.assigned_to || 'unassigned', sub_assignees: task.sub_assignees || [], due_date: task.due_date ? format(new Date(task.due_date), 'yyyy-MM-dd') : '', priority: task.priority, status: task.status, category: task.category || 'other', client_id: task.client_id || '', is_recurring: task.is_recurring || false, recurrence_pattern: task.recurrence_pattern || 'monthly', recurrence_interval: task.recurrence_interval || 1 });
     setDialogOpen(true);
+  };
+
+  const handleAddToReminder = async (task) => {
+    try {
+      await api.post('/email/save-as-reminder', {
+        title: `Task: ${task.title}`,
+        description: task.description || '',
+        remind_at: task.due_date ? new Date(task.due_date).toISOString() : new Date(Date.now() + 86400000).toISOString(),
+      });
+      toast.success('Added to Reminders!');
+    } catch { toast.error('Failed to add reminder'); }
   };
 
   const handleDelete = async (taskId) => {
@@ -2196,6 +2206,7 @@ export default function Tasks() {
                 <div className={`flex gap-2 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
                   {canModifyTask(selectedDetailTask) && <Button onClick={() => { handleEdit(selectedDetailTask); setTaskDetailOpen(false); }} className="h-9 text-sm rounded-lg bg-blue-700 hover:bg-blue-800 text-white gap-1.5"><Edit className="h-3.5 w-3.5" /> Edit</Button>}
                   {canModifyTask(selectedDetailTask) && <Button variant="outline" onClick={() => { handleDuplicateTask(selectedDetailTask); setTaskDetailOpen(false); }} className="h-9 text-sm rounded-lg gap-1.5"><Copy className="h-3.5 w-3.5" /> Duplicate</Button>}
+                  <Button variant="outline" onClick={() => handleAddToReminder(selectedDetailTask)} className="h-9 text-sm rounded-lg text-purple-600 hover:bg-purple-50 border-purple-200 gap-1.5"><Bell className="h-3.5 w-3.5" /> Add to Reminders</Button>
                   {canDeleteTasks && <Button variant="outline" onClick={() => { handleDelete(selectedDetailTask.id); setTaskDetailOpen(false); }} className="h-9 text-sm rounded-lg text-red-600 hover:bg-red-50 border-red-200 gap-1.5"><Trash2 className="h-3.5 w-3.5" /> Delete</Button>}
                 </div>
               </div>
