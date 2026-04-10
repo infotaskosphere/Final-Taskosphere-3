@@ -2203,14 +2203,14 @@ export default function Attendance() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
                   {/* Duration / progress */}
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">Daily Progress</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Daily Progress</p>
                     <motion.p
                       key={displayLiveDuration}
                       initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-                      className="text-4xl font-black tracking-tight mb-1"
+                      className="text-3xl font-black tracking-tight mb-1"
                       style={{
                         color: displayTodayAttendance?.status === 'absent' ? COLORS.red
                           : todayIsHoliday ? COLORS.amber
@@ -2235,7 +2235,7 @@ export default function Attendance() {
                     </p>
 
                     {/* Progress bar */}
-                    <div className="h-2 rounded-full overflow-hidden mb-4"
+                    <div className="h-1.5 rounded-full overflow-hidden mb-3"
                       style={{ backgroundColor: isDark ? D.raised : '#f1f5f9' }}>
                       <motion.div
                         className="h-full rounded-full"
@@ -2253,16 +2253,16 @@ export default function Attendance() {
                     </div>
 
                     {/* Goal / progress chips */}
-                    <div className="flex gap-3">
-                      <div className="flex-1 px-3.5 py-2.5 rounded-xl border text-center"
+                    <div className="flex gap-2">
+                      <div className="flex-1 px-3 py-2 rounded-xl border text-center"
                         style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff', borderColor: isDark ? '#1d4ed8' : '#bfdbfe' }}>
                         <p className="text-[10px] font-bold uppercase text-slate-400 mb-0.5">Daily Goal</p>
-                        <p className="text-xl font-black" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>8.5h</p>
+                        <p className="text-lg font-black" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>8.5h</p>
                       </div>
-                      <div className="flex-1 px-3.5 py-2.5 rounded-xl border text-center"
+                      <div className="flex-1 px-3 py-2 rounded-xl border text-center"
                         style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0' }}>
                         <p className="text-[10px] font-bold uppercase text-slate-400 mb-0.5">Progress</p>
-                        <p className="text-xl font-black text-emerald-500">
+                        <p className="text-lg font-black text-emerald-500">
                           {displayTodayAttendance?.status === 'absent' ? '0%' : todayIsHoliday ? '—' : `${progressPct}%`}
                         </p>
                       </div>
@@ -2535,7 +2535,7 @@ export default function Attendance() {
                   </div>
                 )}
               />
-              <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5 min-h-0" style={slimScroll}>
+              <div className="flex-1 overflow-y-auto slim-scroll p-2.5 space-y-1 min-h-0" style={slimScroll}>
                 {monthHolidaysGrid.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full py-8">
                     <CalendarIcon className="w-8 h-8 mb-2 text-slate-300 dark:text-slate-600" />
@@ -2543,7 +2543,7 @@ export default function Attendance() {
                   </div>
                 ) : monthHolidaysGrid.map(h => (
                   <motion.div key={h.date}
-                    className="relative flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer group transition-all hover:shadow-sm"
+                    className="relative flex items-center gap-2.5 px-2.5 py-2 rounded-xl border cursor-pointer group transition-all hover:shadow-sm"
                     style={{
                       borderColor: isDark ? 'rgba(245,158,11,0.22)' : `${COLORS.amber}35`,
                       backgroundColor: isDark ? 'rgba(245,158,11,0.06)' : `${COLORS.amber}05`,
@@ -2551,18 +2551,18 @@ export default function Attendance() {
                     whileHover={{ backgroundColor: isDark ? 'rgba(245,158,11,0.12)' : `${COLORS.amber}10`, y: -1 }}
                     onClick={() => setSelectedHolidayDetail(h)}
                   >
-                    <div className="w-10 h-10 rounded-xl flex flex-col items-center justify-center flex-shrink-0 text-white shadow-sm"
+                    <div className="w-9 h-9 rounded-lg flex flex-col items-center justify-center flex-shrink-0 text-white shadow-sm"
                       style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
-                      <span className="text-[8px] leading-none uppercase">{safeFormatDate(h.date, 'MMM', '')}</span>
-                      <span className="text-sm leading-none font-black">{safeFormatDate(h.date, 'd', '?')}</span>
+                      <span className="text-[7px] leading-none uppercase">{safeFormatDate(h.date, 'MMM', '')}</span>
+                      <span className="text-xs leading-none font-black">{safeFormatDate(h.date, 'd', '?')}</span>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate" style={{ color: isDark ? D.text : '#1e293b' }}>{h.name}</p>
-                      <p className="text-xs" style={{ color: isDark ? D.muted : '#64748b' }}>
+                      <p className="text-xs font-semibold truncate" style={{ color: isDark ? D.text : '#1e293b' }}>{h.name}</p>
+                      <p className="text-[11px]" style={{ color: isDark ? D.muted : '#64748b' }}>
                         {safeFormatDate(h.date, 'EEEE', '—')}
                       </p>
                     </div>
-                    <ChevronRight className="w-4 h-4 flex-shrink-0 text-slate-300 dark:text-slate-600" />
+                    <ChevronRight className="w-3.5 h-3.5 flex-shrink-0 text-slate-300 dark:text-slate-600" />
                     {isAdmin && (
                       <div className="absolute right-8 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
                         <button onClick={() => { setEditingHoliday(h); setEditName(h.name); setEditDate(h.date); }}
@@ -2604,44 +2604,44 @@ export default function Attendance() {
                   }
                 />
                 <div className="flex-1 overflow-y-auto slim-scroll p-4" style={slimScroll}>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="flex flex-col items-center justify-center px-3 py-3 rounded-2xl border text-center"
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0' }}>
-                      <CheckCircle2 className="w-5 h-5 mb-1.5 text-emerald-500" />
-                      <p className="text-2xl font-black tabular-nums" style={{ color: COLORS.emeraldGreen }}>{monthDaysPresent}</p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Present</p>
+                      <CheckCircle2 className="w-4 h-4 mb-1 text-emerald-500" />
+                      <p className="text-xl font-black tabular-nums" style={{ color: COLORS.emeraldGreen }}>{monthDaysPresent}</p>
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Present</p>
                     </div>
-                    <div className="flex flex-col items-center justify-center px-3 py-3 rounded-2xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2', borderColor: isDark ? '#7f1d1d' : '#fecaca' }}>
-                      <UserX className="w-5 h-5 mb-1.5 text-red-500" />
-                      <p className="text-2xl font-black tabular-nums text-red-500">{monthDaysAbsent}</p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Absent</p>
+                      <UserX className="w-4 h-4 mb-1 text-red-500" />
+                      <p className="text-xl font-black tabular-nums text-red-500">{monthDaysAbsent}</p>
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Absent</p>
                     </div>
-                    <div className="flex flex-col items-center justify-center px-3 py-3 rounded-2xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? '#92400e' : '#fde68a' }}>
-                      <AlarmClock className="w-5 h-5 mb-1.5 text-amber-500" />
-                      <p className="text-2xl font-black tabular-nums" style={{ color: COLORS.amber }}>{totalDaysLateThisMonth}</p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Late</p>
+                      <AlarmClock className="w-4 h-4 mb-1 text-amber-500" />
+                      <p className="text-xl font-black tabular-nums" style={{ color: COLORS.amber }}>{totalDaysLateThisMonth}</p>
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Late</p>
                     </div>
-                    <div className="flex flex-col items-center justify-center px-3 py-3 rounded-2xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? `${COLORS.deepBlue}18` : `${COLORS.deepBlue}08`, borderColor: isDark ? '#1d4ed8' : '#bfdbfe' }}>
-                      <Clock className="w-5 h-5 mb-1.5" style={{ color: COLORS.deepBlue }} />
-                      <p className="text-2xl font-black tabular-nums font-mono" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
+                      <Clock className="w-4 h-4 mb-1" style={{ color: COLORS.deepBlue }} />
+                      <p className="text-xl font-black tabular-nums font-mono" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
                         {Math.floor(monthTotalMinutes / 60)}h
                       </p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">{monthTotalMinutes % 60}m total</p>
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">{monthTotalMinutes % 60}m total</p>
                     </div>
-                    <div className="flex flex-col items-center justify-center px-3 py-3 rounded-2xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : '#f5f3ff', borderColor: isDark ? '#4c1d95' : '#ddd6fe' }}>
-                      <BarChart3 className="w-5 h-5 mb-1.5 text-purple-500" />
-                      <p className="text-2xl font-black tabular-nums" style={{ color: COLORS.purple }}>{avgDailyHours}h</p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Avg / Day</p>
+                      <BarChart3 className="w-4 h-4 mb-1 text-purple-500" />
+                      <p className="text-xl font-black tabular-nums" style={{ color: COLORS.purple }}>{avgDailyHours}h</p>
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Avg/Day</p>
                     </div>
-                    <div className="flex flex-col items-center justify-center px-3 py-3 rounded-2xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? '#92400e' : '#fde68a' }}>
-                      <Flame className="w-5 h-5 mb-1.5 text-amber-400" />
-                      <p className="text-2xl font-black tabular-nums" style={{ color: COLORS.amber }}>{attendanceStreak}</p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">
+                      <Flame className="w-4 h-4 mb-1 text-amber-400" />
+                      <p className="text-xl font-black tabular-nums" style={{ color: COLORS.amber }}>{attendanceStreak}</p>
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">
                         {attendanceStreak >= 10 ? '🔥 Streak' : '⚡ Streak'}
                       </p>
                     </div>
@@ -2708,7 +2708,7 @@ export default function Attendance() {
                     </Button>
                   }
                 />
-                <div className="p-4">
+                <div className="p-3">
                   <Calendar
                     mode="single" selected={selectedDate}
                     onSelect={date => date && setSelectedDate(date)}
@@ -2726,7 +2726,7 @@ export default function Attendance() {
                     components={{ Day: props => <CustomDay {...props} attendance={attendanceMap} holidays={holidays} /> }}
                   />
                   {/* Legend */}
-                  <div className="flex flex-wrap gap-x-3 gap-y-1.5 mt-4 pt-4 border-t border-slate-100 dark:border-slate-700 text-xs justify-center">
+                  <div className="flex flex-wrap gap-x-2 gap-y-1 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 text-xs justify-center">
                     {[
                       { color: COLORS.emeraldGreen, label: 'Present'     },
                       { color: COLORS.red,          label: 'Late/Absent' },
@@ -2746,33 +2746,35 @@ export default function Attendance() {
               <SectionCard className="flex flex-col flex-1 min-h-0">
                 <div className="p-0">
                   {selectedAttendance?.status === 'absent' ? (
-                    <div className="relative p-5 pl-6 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.red }} />
-                      <p className="font-bold text-base mb-1 text-red-500">Absent</p>
-                      <p className="text-sm text-slate-400">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
+                    <div className="relative p-4 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2' }}>
+                      <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.red }} />
+                      <p className="font-bold text-sm mb-0.5 text-red-500">Absent</p>
+                      <p className="text-xs text-slate-400">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
                     </div>
                   ) : selectedAttendance?.punch_in ? (
-                    <div className="relative p-5 pl-6 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.06)' : '#f0fdf4' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.emeraldGreen }} />
-                      <p className="font-bold text-base mb-3" style={{ color: isDark ? D.text : '#1e293b' }}>{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
-                      <div className="space-y-2 text-sm">
-                        <div className="flex justify-between">
+                    <div className="relative p-4 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.06)' : '#f0fdf4' }}>
+                      <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.emeraldGreen }} />
+                      <p className="font-bold text-sm mb-2.5" style={{ color: isDark ? D.text : '#1e293b' }}>{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
+                      <div className="space-y-1.5 text-xs">
+                        <div className="flex justify-between items-center">
                           <span className="font-medium text-slate-400">Punch In</span>
                           <span className="font-bold font-mono" style={{ color: isDark ? D.text : '#1e293b' }}>{formatAttendanceTime(selectedAttendance.punch_in)}</span>
                         </div>
                         {selectedAttendance.punch_out && (
-                          <div className="flex justify-between">
+                          <div className="flex justify-between items-center">
                             <span className="font-medium text-slate-400">Punch Out</span>
                             <span className="font-bold font-mono" style={{ color: isDark ? D.text : '#1e293b' }}>{formatAttendanceTime(selectedAttendance.punch_out)}</span>
                           </div>
                         )}
                         {selectedAttendance.is_late && (
-                          <div className="flex justify-between">
+                          <div className="flex justify-between items-center">
                             <span className="font-medium text-slate-400">Status</span>
-                            <span className="text-xs font-bold text-red-500 px-2 py-0.5 rounded"
+                            <span className="text-[10px] font-bold text-red-500 px-2 py-0.5 rounded"
                               style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>Late</span>
                           </div>
                         )}
-                        <div className="pt-2 flex justify-between border-t border-slate-100 dark:border-slate-700">
-                          <span className="font-semibold" style={{ color: isDark ? D.text : '#1e293b' }}>Duration</span>
+                        <div className="pt-1.5 flex justify-between items-center border-t border-slate-100 dark:border-slate-700">
+                          <span className="font-semibold text-xs" style={{ color: isDark ? D.text : '#1e293b' }}>Duration</span>
                           <span className="font-bold font-mono text-sm" style={{ color: COLORS.emeraldGreen }}>
                             {formatDuration(selectedAttendance.duration_minutes)}
                           </span>
@@ -2780,18 +2782,21 @@ export default function Attendance() {
                       </div>
                     </div>
                   ) : selectedAttendance?.status === 'leave' ? (
-                    <div className="relative p-5 pl-6 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.orange }} />
-                      <p className="font-bold text-base mb-1" style={{ color: COLORS.orange }}>On Leave</p>
-                      <p className="text-sm text-slate-400">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
+                    <div className="relative p-4 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed' }}>
+                      <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.orange }} />
+                      <p className="font-bold text-sm mb-0.5" style={{ color: COLORS.orange }}>On Leave</p>
+                      <p className="text-xs text-slate-400">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
                     </div>
                   ) : selectedHoliday ? (
-                    <div className="relative p-5 pl-6 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.06)' : '#fffbeb' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.amber }} />
-                      <p className="font-bold text-base mb-1" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>Public Holiday</p>
-                      <p className="text-sm font-medium" style={{ color: isDark ? D.muted : '#78716c' }}>{selectedHoliday.name}</p>
+                    <div className="relative p-4 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.06)' : '#fffbeb' }}>
+                      <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.amber }} />
+                      <p className="font-bold text-sm mb-0.5" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>Public Holiday</p>
+                      <p className="text-xs font-medium" style={{ color: isDark ? D.muted : '#78716c' }}>{selectedHoliday.name}</p>
                     </div>
                   ) : (
-                    <div className="relative p-5 pl-6 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? D.raised : '#f8fafc' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: isDark ? D.border : '#e2e8f0' }} />
-                      <p className="text-sm font-medium" style={{ color: isDark ? D.muted : '#64748b' }}>
+                    <div className="relative p-4 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? D.raised : '#f8fafc' }}>
+                      <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: isDark ? D.border : '#e2e8f0' }} />
+                      <p className="text-xs font-medium" style={{ color: isDark ? D.muted : '#64748b' }}>
                         No record for {format(selectedDate, 'MMM d, yyyy')}
                       </p>
                     </div>
