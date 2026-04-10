@@ -2062,6 +2062,15 @@ export default function Attendance() {
                 >
                   {exportingPDF ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Exporting…</> : 'Export PDF'}
                 </button>
+                {/* Dark Mode Toggle */}
+                <button
+                  onClick={() => document.documentElement.classList.toggle('dark')}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 border"
+                  style={{ backgroundColor: 'rgba(255,255,255,0.15)', borderColor: 'rgba(255,255,255,0.25)', color: '#ffffff' }}
+                  title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                >
+                  {isDark ? '☀️' : '🌙'}
+                </button>
               </div>
             </div>
           </div>
@@ -2795,16 +2804,17 @@ export default function Attendance() {
 
               {/* ══ APPLY FOR LEAVE CARD ══ */}
               {!isViewingOther && (
-                <SectionCard className="flex-1 flex flex-col">
+                <SectionCard className="flex flex-col">
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
                     icon={<CalendarX className="h-4 w-4" style={{ color: COLORS.orange }} />}
                     title="Apply for Leave"
                     subtitle={upcomingLeaves.length > 0 ? `${upcomingLeaves.length} upcoming leave${upcomingLeaves.length !== 1 ? 's' : ''}` : 'Request time off'}
                   />
-                  <div className="p-4 space-y-3 flex-1">
+                  <div className="p-4 space-y-3">
+                    {/* Upcoming leaves */}
                     {upcomingLeaves.length > 0 && (
-                      <div className="space-y-1.5 mb-1">
+                      <div className="space-y-1.5">
                         {upcomingLeaves.slice(0, 3).map(leave => {
                           const leaveDate = safeParseISO(leave.date);
                           return (
@@ -2835,10 +2845,12 @@ export default function Attendance() {
                         )}
                       </div>
                     )}
+
+                    {/* Main Apply Leave button */}
                     <motion.button
                       whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
                       onClick={() => setShowLeaveForm(true)}
-                      className="flex items-center justify-center gap-2.5 w-full py-3 rounded-xl text-sm font-bold transition-all border-2"
+                      className="flex items-center justify-center gap-2.5 w-full py-3.5 rounded-xl text-sm font-bold transition-all border-2"
                       style={{
                         borderColor: isDark ? 'rgba(249,115,22,0.4)' : `${COLORS.orange}40`,
                         color: isDark ? '#fb923c' : COLORS.orange,
@@ -2848,12 +2860,13 @@ export default function Attendance() {
                       <Send className="w-4 h-4" />
                       Apply Leave
                     </motion.button>
+
                     {/* Quick leave type buttons */}
-                    <div className="flex gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       <motion.button
                         whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
                         onClick={() => { setLeaveType('half_day'); setShowLeaveForm(true); }}
-                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all border"
+                        className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all border"
                         style={{
                           borderColor: isDark ? 'rgba(139,92,246,0.3)' : '#ddd6fe',
                           color: isDark ? '#c4b5fd' : '#7c3aed',
@@ -2865,7 +2878,7 @@ export default function Attendance() {
                       <motion.button
                         whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
                         onClick={() => { setLeaveType('early_leave'); setShowLeaveForm(true); }}
-                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all border"
+                        className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all border"
                         style={{
                           borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#fde68a',
                           color: isDark ? '#fbbf24' : '#d97706',
@@ -2875,7 +2888,9 @@ export default function Attendance() {
                         <span>🚪</span> Early Leave
                       </motion.button>
                     </div>
-                    <div className="flex gap-2 flex-wrap">
+
+                    {/* Quick date presets */}
+                    <div className="grid grid-cols-3 gap-2">
                       {[
                         { label: 'Tomorrow', days: 1 },
                         { label: '3 Days',   days: 3 },
@@ -2892,7 +2907,7 @@ export default function Attendance() {
                             setLeaveTo(to);
                             setShowLeaveForm(true);
                           }}
-                          className="text-[11px] font-semibold px-3 py-1.5 rounded-lg border transition-all hover:shadow-sm active:scale-95"
+                          className="text-xs font-semibold px-3 py-2.5 rounded-xl border transition-all hover:shadow-sm active:scale-95 text-center"
                           style={{
                             borderColor: isDark ? D.border : '#e2e8f0',
                             color: isDark ? D.muted : '#64748b',
