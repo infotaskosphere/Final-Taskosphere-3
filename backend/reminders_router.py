@@ -23,8 +23,7 @@ from bson import ObjectId
 # from app.auth import get_current_user          # your JWT dependency
 # from app.database import db                     # your motor database instance
 # Example placeholders (replace with your actual imports):
-from app.dependencies import get_current_user
-from app.database import db
+from backend.dependencies import get_current_user, db
 
 router = APIRouter()
 
@@ -74,7 +73,7 @@ async def get_reminders(
     Fetch reminders for the current user.
     Admin can pass ?user_id=<id> to view another user's reminders.
     """
-    query_uid = current_user["_id"]
+    query_uid = current_user.id
 
     # If admin requests another user's reminders
     if user_id and current_user.get("role") == "admin":
@@ -105,7 +104,7 @@ async def create_reminder(
     now = datetime.now(timezone.utc).isoformat()
 
     doc = {
-        "user_id": str(current_user["_id"]),
+        "user_id": str(current_user.id),
         "title": body.title,
         "description": body.description or "",
         "remind_at": body.remind_at,
@@ -154,7 +153,7 @@ async def update_reminder(
     # Verify ownership (admin can update any)
     query = {"_id": obj_id}
     if current_user.get("role") != "admin":
-        query["user_id"] = str(current_user["_id"])
+        query["user_id"] = str(current_user.id)
 
     result = await reminders_col.update_one(query, {"$set": update_fields})
 
@@ -180,7 +179,7 @@ async def delete_reminder(
     # Verify ownership (admin can delete any)
     query = {"_id": obj_id}
     if current_user.get("role") != "admin":
-        query["user_id"] = str(current_user["_id"])
+        query["user_id"] = str(current_user.id)
 
     result = await reminders_col.delete_one(query)
 
