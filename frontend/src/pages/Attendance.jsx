@@ -1015,7 +1015,7 @@ export default function Attendance() {
   const ATT_LABELS = {
     today_status:       { name: "Today's Status",      icon: '🕐', desc: 'Punch-in / punch-out card' },
     stat_cards:         { name: 'Statistics',           icon: '📊', desc: 'Monthly hours, streak, rank' },
-    holidays_reminders: { name: 'Holidays & Reminders', icon: '🗓️', desc: 'Upcoming holidays and reminders' },
+    holidays_reminders: { name: 'Upcoming Holidays', icon: '🗓️', desc: 'Upcoming holidays' },
     calendar_area:      { name: 'Calendar & History',   icon: '📅', desc: 'Attendance calendar and recent records' },
   };
   const { order: attOrder, moveSection: attMove, resetOrder: attReset } = usePageLayout('attendance', ATT_SECTIONS);
@@ -2496,8 +2496,7 @@ export default function Attendance() {
           if (sectionId === 'holidays_reminders') return (
             <React.Fragment key="holidays_reminders">
               {!isEveryoneView && (
-          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-
+          <motion.div variants={itemVariants} className="grid grid-cols-1 gap-6">
             {/* HOLIDAYS CARD */}
             <SectionCard className="flex flex-col h-[380px]">
               <CardHeaderRow
@@ -2580,99 +2579,8 @@ export default function Attendance() {
               </div>
             </SectionCard>
 
-            {/* REMINDERS CARD */}
-            <SectionCard className="flex flex-col h-[380px]">
-              <CardHeaderRow
-                iconBg={isDark ? 'bg-purple-900/40' : 'bg-purple-50'}
-                icon={<AlarmClock className="h-4 w-4 text-purple-500" />}
-                title={
-                  <span
-                    className="cursor-pointer hover:underline"
-                    onClick={() => setShowReminderCalendar(true)}
-                    title="Click for calendar view"
-                  >
-                    {isViewingOther ? `${viewedUserName?.split(' ')[0]}'s Reminders` : 'Reminders & Meetings'}
-                  </span>
-                }
-                subtitle={
-                  <span>
-                    {upcomingReminders.length} upcoming ·{' '}
-                    <span className="cursor-pointer hover:underline" style={{ color: COLORS.purple }}
-                      onClick={() => setShowReminderCalendar(true)}>
-                      calendar view
-                    </span>
-                  </span>
-                }
-                badge={upcomingReminders.filter(r => r.remind_at ? isPast(new Date(r.remind_at)) : false).length || undefined}
-                action={!isViewingOther && (
-                  <>
-                    <Button onClick={() => setShowEmailImporter(true)} size="sm" variant="outline"
-                      className="h-8 px-3 text-xs font-semibold rounded-lg"
-                      style={{ borderColor: isDark ? 'rgba(139,92,246,0.35)' : '#ddd6fe', color: isDark ? '#c4b5fd' : '#7c3aed', backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : undefined }}>
-                      <Mail className="w-3 h-3 mr-1" /> From Email
-                    </Button>
-                    <Button onClick={() => setShowReminderForm(true)} size="sm"
-                      className="h-8 px-3 text-xs font-semibold text-white rounded-lg"
-                      style={{ backgroundColor: COLORS.purple }}>
-                      <Plus className="w-3 h-3 mr-1" /> New
-                    </Button>
-                  </>
-                )}
-              />
-              <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5 min-h-0" style={slimScroll}>
-                {upcomingReminders.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full py-8">
-                    <Bell className="w-8 h-8 mb-2 text-slate-300 dark:text-slate-600" />
-                    <p className="text-sm font-medium text-slate-400 dark:text-slate-500">
-                      {isViewingOther ? 'No upcoming reminders' : 'No reminders — create one to get started'}
-                    </p>
-                  </div>
-                ) : upcomingReminders.map((r, index) => {
-                  const isDue = r.remind_at ? isPast(new Date(r.remind_at)) : false;
-                  const rid   = resolveId(r);
-                  return (
-                    <motion.div key={rid || `idx-${index}`}
-                      className="relative flex items-center gap-2.5 px-3 py-2.5 rounded-xl border cursor-pointer group transition-all hover:shadow-sm"
-                      style={{
-                        borderColor: isDue ? isDark ? '#7f1d1d' : `${COLORS.red}35` : isDark ? 'rgba(139,92,246,0.22)' : `${COLORS.purple}25`,
-                        backgroundColor: isDue ? isDark ? 'rgba(239,68,68,0.06)' : `${COLORS.red}04` : isDark ? 'rgba(139,92,246,0.05)' : `${COLORS.purple}04`,
-                      }}
-                      whileHover={{ y: -1 }}
-                      onClick={() => setSelectedReminderDetail(r)}
-                    >
-                      <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-xs font-black"
-                        style={{
-                          backgroundColor: isDue ? isDark ? 'rgba(239,68,68,0.18)' : `${COLORS.red}15` : isDark ? 'rgba(139,92,246,0.18)' : `${COLORS.purple}15`,
-                          color: isDue ? COLORS.red : COLORS.purple,
-                        }}>
-                        {index + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold truncate leading-snug" style={{ color: isDark ? D.text : '#1e293b' }}>{r.title}</p>
-                        <p className="text-[11px] font-mono font-semibold truncate" style={{ color: isDue ? COLORS.red : COLORS.purple }}>
-                          {formatReminderTime(r.remind_at)}
-                        </p>
-                      </div>
-                      {isDue && (
-                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase flex-shrink-0 hidden sm:block"
-                          style={{ color: COLORS.red, backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>
-                          Due
-                        </span>
-                      )}
-                      <ChevronRight className="w-4 h-4 flex-shrink-0 text-slate-300 dark:text-slate-600" />
-                      {!isViewingOther && (
-                        <div className="absolute right-8 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                          <button onClick={() => { if (rid) handleDeleteReminder(rid); else toast.error('ID missing'); }}
-                            className="w-6 h-6 flex items-center justify-center rounded text-red-400 hover:bg-red-500/20 active:scale-90">
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
-                      )}
-                    </motion.div>
-                  );
-                })}
-              </div>
-            </SectionCard>
+
+
           </motion.div>
         )}
 
