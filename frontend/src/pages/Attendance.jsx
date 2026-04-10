@@ -1981,7 +1981,7 @@ export default function Attendance() {
       />
 
       <motion.div
-        className="min-h-screen p-4 sm:p-5 md:p-6 lg:p-8 overflow-x-hidden"
+        className="min-h-screen p-3 sm:p-4 md:p-6 lg:p-8 overflow-x-hidden"
         style={{ background: isDark ? D.bg : '#f8fafc' }}
         variants={containerVariants} initial="hidden" animate="visible"
       >
@@ -2461,7 +2461,7 @@ export default function Attendance() {
           if (sectionId === 'stat_cards') return (
             <React.Fragment key="stat_cards">
               <motion.div
-          className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
+          className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
           variants={itemVariants}
         >
           <StatCard isDark={isDark} icon={Timer}
@@ -2496,10 +2496,10 @@ export default function Attendance() {
           if (sectionId === 'holidays_reminders') return (
             <React.Fragment key="holidays_reminders">
               {!isEveryoneView && (
-          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-stretch">
+          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6">
 
             {/* HOLIDAYS CARD */}
-            <SectionCard className="flex flex-col min-h-[340px] h-full">
+            <SectionCard className="flex flex-col h-[380px]">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-amber-900/40' : 'bg-amber-50'}
                 icon={<CalendarIcon className="h-4 w-4 text-amber-500" />}
@@ -2581,7 +2581,7 @@ export default function Attendance() {
             </SectionCard>
 
             {/* REMINDERS CARD */}
-            <SectionCard className="flex flex-col min-h-[340px] h-full">
+            <SectionCard className="flex flex-col h-[380px]">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-purple-900/40' : 'bg-purple-50'}
                 icon={<AlarmClock className="h-4 w-4 text-purple-500" />}
@@ -2683,12 +2683,12 @@ export default function Attendance() {
           if (sectionId === 'calendar_area') return (
             <React.Fragment key="calendar_area">
               <motion.div
-          className={`grid gap-6 items-end ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-12'}`}
+          className={`grid gap-6 ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-12'}`}
           variants={itemVariants}
         >
           {/* ── LEFT COLUMN: Calendar + Date Detail + Apply Leave ── */}
           {!isEveryoneView && (
-            <div className="xl:col-span-4 flex flex-col gap-4 min-h-0">
+            <div className="xl:col-span-4 flex flex-col gap-4">
               <SectionCard>
                 <CardHeaderRow
                   iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
@@ -2795,14 +2795,14 @@ export default function Attendance() {
 
               {/* ══ APPLY FOR LEAVE CARD ══ */}
               {!isViewingOther && (
-                <SectionCard className="flex flex-col">
+                <SectionCard className="flex flex-col h-[320px]">
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
                     icon={<CalendarX className="h-4 w-4" style={{ color: COLORS.orange }} />}
                     title="Apply for Leave"
                     subtitle={upcomingLeaves.length > 0 ? `${upcomingLeaves.length} upcoming leave${upcomingLeaves.length !== 1 ? 's' : ''}` : 'Request time off'}
                   />
-                  <div className="p-4 space-y-3">
+                  <div className="p-4 flex-1 overflow-y-auto slim-scroll flex flex-col gap-3" style={slimScroll}>
                     {/* Upcoming leaves */}
                     {upcomingLeaves.length > 0 && (
                       <div className="space-y-1.5">
@@ -2916,17 +2916,17 @@ export default function Attendance() {
           )}
 
           {/* ── RIGHT COLUMN: Recent Attendance + Location History ── */}
-          <div className={isEveryoneView ? '' : 'xl:col-span-8 flex flex-col gap-4 min-h-0 justify-end'}>
+          <div className={isEveryoneView ? 'flex flex-col gap-4' : 'xl:col-span-8 flex flex-col gap-4'}>
 
             {/* Recent Attendance */}
-            <SectionCard className="flex flex-col" style={{ maxHeight: 480 }}>
+            <SectionCard className="flex flex-col h-[480px]">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
                 icon={<Clock className="h-4 w-4 text-blue-500" />}
                 title={isEveryoneView ? 'All Employees — Attendance' : 'Recent Attendance'}
                 subtitle={isEveryoneView ? 'Latest 25 records' : 'Last 15 records'}
               />
-              <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5" style={{ ...slimScroll, minHeight: 0 }}>
+              <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5 min-h-0" style={slimScroll}>
                 {loading && attendanceHistory.length === 0 ? (
                   <div className="flex items-center justify-center h-full">
                     <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
@@ -3032,7 +3032,7 @@ export default function Attendance() {
                   && (!isViewingOther ? (!r.user_id || r.user_id === user?.id) : true))
                 .slice(0, 5);
               return (
-                <SectionCard className="flex flex-col" style={{ maxHeight: 480 }}>
+                <SectionCard className="flex flex-col h-[380px]">
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-teal-900/40' : 'bg-teal-50'}
                     icon={<MapPin className="h-4 w-4 text-teal-500" />}
@@ -3189,7 +3189,7 @@ export default function Attendance() {
                   }
                 />
                 <div className="p-5">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 items-stretch">
+                  <div className="grid grid-cols-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 items-stretch">
 
                     {/* Stat: Present */}
                     <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center h-full"
