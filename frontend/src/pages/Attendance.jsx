@@ -2704,7 +2704,7 @@ export default function Attendance() {
         >
           {/* ── LEFT COLUMN: Calendar + Date Detail + Apply Leave ── */}
           {!isEveryoneView && (
-            <div className="xl:col-span-5 flex flex-col gap-4" ref={leftColRef}>
+            <div className="xl:col-span-5 flex flex-col gap-3" ref={leftColRef}>
               <SectionCard className="flex flex-col">
                 <CardHeaderRow
                   iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
@@ -2718,33 +2718,33 @@ export default function Attendance() {
                     </Button>
                   }
                 />
-                <div className="p-5">
+                <div className="px-3 py-2">
                   <Calendar
                     mode="single" selected={selectedDate}
                     onSelect={date => date && setSelectedDate(date)}
                     disabled={date => isAfter(date, new Date())}
                     className="rounded-xl border-0 w-full"
                     classNames={{
-                      months: 'w-full', month: 'w-full space-y-3', table: 'w-full border-collapse',
-                      head_row: 'flex w-full justify-between mb-2',
-                      head_cell: 'rounded-lg w-9 font-bold text-[0.7rem] text-center text-slate-400',
-                      row: 'flex w-full mt-2 justify-between',
+                      months: 'w-full', month: 'w-full space-y-0', table: 'w-full border-collapse',
+                      head_row: 'flex w-full justify-between',
+                      head_cell: 'rounded-lg w-8 font-bold text-[0.65rem] text-center text-slate-400',
+                      row: 'flex w-full mt-0.5 justify-between',
                       cell: 'relative p-0 text-center text-sm focus-within:relative focus-within:z-20',
-                      day: 'h-10 w-10 p-0 font-semibold rounded-full transition-all',
+                      day: 'h-8 w-8 p-0 font-semibold rounded-full transition-all text-[0.8rem]',
                       day_today: 'font-black',
                     }}
                     components={{ Day: props => <CustomDay {...props} attendance={attendanceMap} holidays={holidays} /> }}
                   />
                   {/* Legend */}
-                  <div className="flex flex-wrap gap-x-3 gap-y-1.5 mt-4 pt-4 border-t border-slate-100 dark:border-slate-700 text-xs justify-center">
+                  <div className="flex flex-wrap gap-x-2.5 gap-y-0.5 mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-700 text-[10px] justify-center">
                     {[
                       { color: COLORS.emeraldGreen, label: 'Present'     },
                       { color: COLORS.red,          label: 'Late/Absent' },
                       { color: COLORS.amber,        label: 'Holiday'     },
                       { color: COLORS.orange,       label: 'Leave'       },
                     ].map(({ color, label }) => (
-                      <div key={label} className="flex items-center gap-1.5">
-                        <span className="w-3.5 h-3.5 rounded-full border-2 flex-shrink-0" style={{ borderColor: color, backgroundColor: `${color}20` }} />
+                      <div key={label} className="flex items-center gap-1">
+                        <span className="w-3 h-3 rounded-full border-2 flex-shrink-0" style={{ borderColor: color, backgroundColor: `${color}20` }} />
                         <span className="text-slate-400 dark:text-slate-500">{label}</span>
                       </div>
                     ))}
@@ -2756,14 +2756,14 @@ export default function Attendance() {
               <SectionCard className="flex flex-col">
                 <div className="p-0">
                   {selectedAttendance?.status === 'absent' ? (
-                    <div className="relative p-5 pl-6 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.red }} />
-                      <p className="font-bold text-base mb-1 text-red-500">Absent</p>
-                      <p className="text-sm text-slate-400">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
+                    <div className="relative p-3 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.red }} />
+                      <p className="font-bold text-sm mb-0.5 text-red-500">Absent</p>
+                      <p className="text-xs text-slate-400">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
                     </div>
                   ) : selectedAttendance?.punch_in ? (
-                    <div className="relative p-5 pl-6 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.06)' : '#f0fdf4' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.emeraldGreen }} />
-                      <p className="font-bold text-base mb-3" style={{ color: isDark ? D.text : '#1e293b' }}>{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
-                      <div className="space-y-2 text-sm">
+                    <div className="relative p-3 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.06)' : '#f0fdf4' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.emeraldGreen }} />
+                      <p className="font-bold text-sm mb-2" style={{ color: isDark ? D.text : '#1e293b' }}>{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
+                      <div className="space-y-1.5 text-sm">
                         <div className="flex justify-between">
                           <span className="font-medium text-slate-400">Punch In</span>
                           <span className="font-bold font-mono" style={{ color: isDark ? D.text : '#1e293b' }}>{formatAttendanceTime(selectedAttendance.punch_in)}</span>
@@ -2781,7 +2781,7 @@ export default function Attendance() {
                               style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>Late</span>
                           </div>
                         )}
-                        <div className="pt-2 flex justify-between border-t border-slate-100 dark:border-slate-700">
+                        <div className="pt-1.5 flex justify-between border-t border-slate-100 dark:border-slate-700">
                           <span className="font-semibold" style={{ color: isDark ? D.text : '#1e293b' }}>Duration</span>
                           <span className="font-bold font-mono text-sm" style={{ color: COLORS.emeraldGreen }}>
                             {formatDuration(selectedAttendance.duration_minutes)}
@@ -2790,18 +2790,18 @@ export default function Attendance() {
                       </div>
                     </div>
                   ) : selectedAttendance?.status === 'leave' ? (
-                    <div className="relative p-5 pl-6 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.orange }} />
-                      <p className="font-bold text-base mb-1" style={{ color: COLORS.orange }}>On Leave</p>
-                      <p className="text-sm text-slate-400">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
+                    <div className="relative p-3 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.orange }} />
+                      <p className="font-bold text-sm mb-0.5" style={{ color: COLORS.orange }}>On Leave</p>
+                      <p className="text-xs text-slate-400">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
                     </div>
                   ) : selectedHoliday ? (
-                    <div className="relative p-5 pl-6 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.06)' : '#fffbeb' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.amber }} />
-                      <p className="font-bold text-base mb-1" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>Public Holiday</p>
-                      <p className="text-sm font-medium" style={{ color: isDark ? D.muted : '#78716c' }}>{selectedHoliday.name}</p>
+                    <div className="relative p-3 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.06)' : '#fffbeb' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.amber }} />
+                      <p className="font-bold text-sm mb-0.5" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>Public Holiday</p>
+                      <p className="text-xs font-medium" style={{ color: isDark ? D.muted : '#78716c' }}>{selectedHoliday.name}</p>
                     </div>
                   ) : (
-                    <div className="relative p-5 pl-6 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? D.raised : '#f8fafc' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: isDark ? D.border : '#e2e8f0' }} />
-                      <p className="text-sm font-medium" style={{ color: isDark ? D.muted : '#64748b' }}>
+                    <div className="relative p-3 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? D.raised : '#f8fafc' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: isDark ? D.border : '#e2e8f0' }} />
+                      <p className="text-xs font-medium" style={{ color: isDark ? D.muted : '#64748b' }}>
                         No record for {format(selectedDate, 'MMM d, yyyy')}
                       </p>
                     </div>
@@ -2818,7 +2818,7 @@ export default function Attendance() {
                 title="Apply for Leave"
                 subtitle={upcomingLeaves.length > 0 ? `${upcomingLeaves.length} upcoming leave${upcomingLeaves.length !== 1 ? 's' : ''}` : 'Request time off'}
               />
-              <div className="p-5 flex-1 overflow-y-auto slim-scroll flex flex-col gap-4" style={slimScroll}>
+              <div className="p-3 flex-1 overflow-y-auto slim-scroll flex flex-col gap-3" style={slimScroll}>
                 {upcomingLeaves.length > 0 && (
                   <div className="space-y-1.5">
                     {upcomingLeaves.slice(0, 3).map(leave => {
@@ -2854,7 +2854,7 @@ export default function Attendance() {
                 <motion.button
                   whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
                   onClick={() => setShowLeaveForm(true)}
-                  className="flex items-center justify-center gap-2.5 w-full py-3.5 rounded-xl text-sm font-bold transition-all border-2"
+                  className="flex items-center justify-center gap-2.5 w-full py-2.5 rounded-xl text-sm font-bold transition-all border-2"
                   style={{
                     borderColor: isDark ? 'rgba(249,115,22,0.4)' : `${COLORS.orange}40`,
                     color: isDark ? '#fb923c' : COLORS.orange,
@@ -2868,7 +2868,7 @@ export default function Attendance() {
                   <motion.button
                     whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
                     onClick={() => { setLeaveType('half_day'); setShowLeaveForm(true); }}
-                    className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all border"
+                    className="flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold transition-all border"
                     style={{
                       borderColor: isDark ? 'rgba(139,92,246,0.3)' : '#ddd6fe',
                       color: isDark ? '#c4b5fd' : '#7c3aed',
@@ -2880,7 +2880,7 @@ export default function Attendance() {
                   <motion.button
                     whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
                     onClick={() => { setLeaveType('early_leave'); setShowLeaveForm(true); }}
-                    className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all border"
+                    className="flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold transition-all border"
                     style={{
                       borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#fde68a',
                       color: isDark ? '#fbbf24' : '#d97706',
@@ -2907,7 +2907,7 @@ export default function Attendance() {
                         setLeaveTo(to);
                         setShowLeaveForm(true);
                       }}
-                      className="text-xs font-semibold px-3 py-2.5 rounded-xl border transition-all hover:shadow-sm active:scale-95 text-center"
+                      className="text-xs font-semibold px-3 py-2 rounded-xl border transition-all hover:shadow-sm active:scale-95 text-center"
                       style={{
                         borderColor: isDark ? D.border : '#e2e8f0',
                         color: isDark ? D.muted : '#64748b',
@@ -2926,7 +2926,7 @@ export default function Attendance() {
 
           {/* ── RIGHT COLUMN: Location History + Recent Attendance ── */}
           <div
-            className={isEveryoneView ? 'flex flex-col gap-4' : 'xl:col-span-7 flex flex-col gap-4'}
+            className={isEveryoneView ? 'flex flex-col gap-3' : 'xl:col-span-7 flex flex-col gap-3'}
             style={leftColHeight ? { maxHeight: leftColHeight, height: leftColHeight } : {}}
           >
 
@@ -2937,7 +2937,7 @@ export default function Attendance() {
                   && (!isViewingOther ? (!r.user_id || r.user_id === user?.id) : true))
                 .slice(0, 5);
               return (
-                <SectionCard className="flex flex-col flex-1 min-h-0">
+                <SectionCard className="flex flex-col min-h-0" style={{ flex: '60 1 0%' }}>
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-teal-900/40' : 'bg-teal-50'}
                     icon={<MapPin className="h-4 w-4 text-teal-500" />}
@@ -3068,7 +3068,7 @@ export default function Attendance() {
             })()}
 
             {/* Recent Attendance */}
-            <SectionCard className="flex flex-col flex-1 min-h-0">
+            <SectionCard className="flex flex-col min-h-0" style={{ flex: '40 1 0%' }}>
               <CardHeaderRow
                 iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
                 icon={<Clock className="h-4 w-4 text-blue-500" />}
