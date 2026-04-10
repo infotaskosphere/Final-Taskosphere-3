@@ -2492,13 +2492,13 @@ export default function Attendance() {
             </React.Fragment>
           );
 
-          /* ══ HOLIDAYS + REMINDERS ════════════════════════════════════════ */
+          /* ══ HOLIDAYS + MONTHLY INSIGHTS (side by side) ═══════════════ */
           if (sectionId === 'holidays_reminders') return (
             <React.Fragment key="holidays_reminders">
               {!isEveryoneView && (
-          <motion.div variants={itemVariants} className="grid grid-cols-1 gap-6">
+          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             {/* HOLIDAYS CARD */}
-            <SectionCard className="flex flex-col h-[380px]">
+            <SectionCard className="flex flex-col h-[420px]">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-amber-900/40' : 'bg-amber-50'}
                 icon={<CalendarIcon className="h-4 w-4 text-amber-500" />}
@@ -2579,8 +2579,105 @@ export default function Attendance() {
               </div>
             </SectionCard>
 
-
-
+            {/* MONTHLY INSIGHTS CARD (side by side with holidays) */}
+            {(() => {
+              const onTimeCount = monthDaysPresent - totalDaysLateThisMonth;
+              const onTimePct   = monthDaysPresent > 0 ? Math.round((onTimeCount / monthDaysPresent) * 100) : 0;
+              return (
+              <SectionCard className="flex flex-col h-[420px]">
+                <CardHeaderRow
+                  iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
+                  icon={<BarChart3 className="h-4 w-4 text-emerald-500" />}
+                  title="Monthly Insights"
+                  subtitle={format(selectedDate, 'MMMM yyyy')}
+                  action={
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                      style={{
+                        backgroundColor: totalDaysLateThisMonth === 0
+                          ? (isDark ? 'rgba(31,175,90,0.18)' : '#dcfce7')
+                          : (isDark ? 'rgba(239,68,68,0.15)' : '#fee2e2'),
+                        color: totalDaysLateThisMonth === 0 ? COLORS.emeraldGreen : COLORS.red,
+                      }}>
+                      {totalDaysLateThisMonth === 0 ? '✓ Perfect Punctuality' : `${totalDaysLateThisMonth} Late Arrival${totalDaysLateThisMonth !== 1 ? 's' : ''}`}
+                    </span>
+                  }
+                />
+                <div className="flex-1 overflow-y-auto slim-scroll p-4" style={slimScroll}>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col items-center justify-center px-3 py-3 rounded-2xl border text-center"
+                      style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0' }}>
+                      <CheckCircle2 className="w-5 h-5 mb-1.5 text-emerald-500" />
+                      <p className="text-2xl font-black tabular-nums" style={{ color: COLORS.emeraldGreen }}>{monthDaysPresent}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Present</p>
+                    </div>
+                    <div className="flex flex-col items-center justify-center px-3 py-3 rounded-2xl border text-center"
+                      style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2', borderColor: isDark ? '#7f1d1d' : '#fecaca' }}>
+                      <UserX className="w-5 h-5 mb-1.5 text-red-500" />
+                      <p className="text-2xl font-black tabular-nums text-red-500">{monthDaysAbsent}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Absent</p>
+                    </div>
+                    <div className="flex flex-col items-center justify-center px-3 py-3 rounded-2xl border text-center"
+                      style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? '#92400e' : '#fde68a' }}>
+                      <AlarmClock className="w-5 h-5 mb-1.5 text-amber-500" />
+                      <p className="text-2xl font-black tabular-nums" style={{ color: COLORS.amber }}>{totalDaysLateThisMonth}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Late</p>
+                    </div>
+                    <div className="flex flex-col items-center justify-center px-3 py-3 rounded-2xl border text-center"
+                      style={{ backgroundColor: isDark ? `${COLORS.deepBlue}18` : `${COLORS.deepBlue}08`, borderColor: isDark ? '#1d4ed8' : '#bfdbfe' }}>
+                      <Clock className="w-5 h-5 mb-1.5" style={{ color: COLORS.deepBlue }} />
+                      <p className="text-2xl font-black tabular-nums font-mono" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
+                        {Math.floor(monthTotalMinutes / 60)}h
+                      </p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">{monthTotalMinutes % 60}m total</p>
+                    </div>
+                    <div className="flex flex-col items-center justify-center px-3 py-3 rounded-2xl border text-center"
+                      style={{ backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : '#f5f3ff', borderColor: isDark ? '#4c1d95' : '#ddd6fe' }}>
+                      <BarChart3 className="w-5 h-5 mb-1.5 text-purple-500" />
+                      <p className="text-2xl font-black tabular-nums" style={{ color: COLORS.purple }}>{avgDailyHours}h</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Avg / Day</p>
+                    </div>
+                    <div className="flex flex-col items-center justify-center px-3 py-3 rounded-2xl border text-center"
+                      style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? '#92400e' : '#fde68a' }}>
+                      <Flame className="w-5 h-5 mb-1.5 text-amber-400" />
+                      <p className="text-2xl font-black tabular-nums" style={{ color: COLORS.amber }}>{attendanceStreak}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">
+                        {attendanceStreak >= 10 ? '🔥 Streak' : '⚡ Streak'}
+                      </p>
+                    </div>
+                  </div>
+                  {/* Punctuality bar */}
+                  <div className="flex flex-col justify-center gap-2 px-3 py-3 rounded-2xl border mt-3"
+                    style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Punctuality</span>
+                      <span className="text-lg font-black tabular-nums"
+                        style={{ color: onTimePct >= 80 ? COLORS.emeraldGreen : onTimePct >= 60 ? COLORS.amber : COLORS.red }}>
+                        {onTimePct}%
+                      </span>
+                    </div>
+                    <div className="h-3 rounded-full overflow-hidden"
+                      style={{ backgroundColor: isDark ? D.border : '#e2e8f0' }}>
+                      <motion.div className="h-full rounded-full"
+                        style={{
+                          background: onTimePct >= 80
+                            ? `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`
+                            : onTimePct >= 60
+                              ? `linear-gradient(90deg, ${COLORS.amber}, #fbbf24)`
+                              : `linear-gradient(90deg, ${COLORS.red}, #f87171)`,
+                        }}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${onTimePct}%` }}
+                        transition={{ duration: 0.9, ease: 'easeOut', delay: 0.2 }}
+                      />
+                    </div>
+                    <p className="text-[11px] font-medium text-center" style={{ color: isDark ? D.muted : '#64748b' }}>
+                      {onTimeCount} on-time · {totalDaysLateThisMonth} late
+                    </p>
+                  </div>
+                </div>
+              </SectionCard>
+              );
+            })()}
           </motion.div>
         )}
 
@@ -2701,129 +2798,10 @@ export default function Attendance() {
                 </div>
               </SectionCard>
 
-              {/* ══ APPLY FOR LEAVE CARD ══ */}
-              {!isViewingOther && (
-                <SectionCard className="flex flex-col h-[320px]">
-                  <CardHeaderRow
-                    iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
-                    icon={<CalendarX className="h-4 w-4" style={{ color: COLORS.orange }} />}
-                    title="Apply for Leave"
-                    subtitle={upcomingLeaves.length > 0 ? `${upcomingLeaves.length} upcoming leave${upcomingLeaves.length !== 1 ? 's' : ''}` : 'Request time off'}
-                  />
-                  <div className="p-4 flex-1 overflow-y-auto slim-scroll flex flex-col gap-3" style={slimScroll}>
-                    {/* Upcoming leaves */}
-                    {upcomingLeaves.length > 0 && (
-                      <div className="space-y-1.5">
-                        {upcomingLeaves.slice(0, 3).map(leave => {
-                          const leaveDate = safeParseISO(leave.date);
-                          return (
-                            <div key={leave.date}
-                              className="flex items-center justify-between px-3 py-2 rounded-lg border text-xs"
-                              style={{
-                                backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed',
-                                borderColor: isDark ? '#7c2d12' : '#fed7aa',
-                              }}>
-                              <div className="flex items-center gap-2">
-                                <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: COLORS.orange }} />
-                                <span className="font-semibold" style={{ color: isDark ? D.text : '#1e293b' }}>
-                                  {leaveDate ? format(leaveDate, 'EEE, MMM d') : leave.date}
-                                </span>
-                              </div>
-                              {leave.leave_reason && (
-                                <span className="text-[10px] truncate max-w-[100px]" style={{ color: isDark ? D.muted : '#78716c' }}>
-                                  {leave.leave_reason}
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })}
-                        {upcomingLeaves.length > 3 && (
-                          <p className="text-[11px] font-medium text-center" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
-                            +{upcomingLeaves.length - 3} more upcoming
-                          </p>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Main Apply Leave button */}
-                    <motion.button
-                      whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                      onClick={() => setShowLeaveForm(true)}
-                      className="flex items-center justify-center gap-2.5 w-full py-3.5 rounded-xl text-sm font-bold transition-all border-2"
-                      style={{
-                        borderColor: isDark ? 'rgba(249,115,22,0.4)' : `${COLORS.orange}40`,
-                        color: isDark ? '#fb923c' : COLORS.orange,
-                        backgroundColor: isDark ? 'rgba(249,115,22,0.08)' : `${COLORS.orange}06`,
-                      }}
-                    >
-                      <Send className="w-4 h-4" />
-                      Apply Leave
-                    </motion.button>
-
-                    {/* Quick leave type buttons */}
-                    <div className="grid grid-cols-2 gap-2">
-                      <motion.button
-                        whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
-                        onClick={() => { setLeaveType('half_day'); setShowLeaveForm(true); }}
-                        className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all border"
-                        style={{
-                          borderColor: isDark ? 'rgba(139,92,246,0.3)' : '#ddd6fe',
-                          color: isDark ? '#c4b5fd' : '#7c3aed',
-                          backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : '#f5f3ff',
-                        }}
-                      >
-                        <span>🌗</span> Half Day
-                      </motion.button>
-                      <motion.button
-                        whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
-                        onClick={() => { setLeaveType('early_leave'); setShowLeaveForm(true); }}
-                        className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all border"
-                        style={{
-                          borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#fde68a',
-                          color: isDark ? '#fbbf24' : '#d97706',
-                          backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb',
-                        }}
-                      >
-                        <span>🚪</span> Early Leave
-                      </motion.button>
-                    </div>
-
-                    {/* Quick date presets */}
-                    <div className="grid grid-cols-3 gap-2">
-                      {[
-                        { label: 'Tomorrow', days: 1 },
-                        { label: '3 Days',   days: 3 },
-                        { label: '1 Week',   days: 7 },
-                      ].map(({ label, days }) => (
-                        <button
-                          key={label}
-                          onClick={() => {
-                            const from = new Date();
-                            from.setDate(from.getDate() + (label === 'Tomorrow' ? 1 : 0));
-                            const to = new Date(from);
-                            to.setDate(from.getDate() + days - 1);
-                            setLeaveFrom(from);
-                            setLeaveTo(to);
-                            setShowLeaveForm(true);
-                          }}
-                          className="text-xs font-semibold px-3 py-2.5 rounded-xl border transition-all hover:shadow-sm active:scale-95 text-center"
-                          style={{
-                            borderColor: isDark ? D.border : '#e2e8f0',
-                            color: isDark ? D.muted : '#64748b',
-                            backgroundColor: isDark ? D.raised : '#f8fafc',
-                          }}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </SectionCard>
-              )}
             </div>
           )}
 
-          {/* ── RIGHT COLUMN: Recent Attendance + Location History ── */}
+          {/* ── RIGHT COLUMN: Recent Attendance only ── */}
           <div className={isEveryoneView ? 'flex flex-col gap-4' : 'xl:col-span-8 flex flex-col gap-4'}>
 
             {/* Recent Attendance */}
@@ -2933,8 +2911,125 @@ export default function Attendance() {
               </div>
             </SectionCard>
 
-            {/* Punch Location History */}
-            {!isEveryoneView && (() => {
+          </div> {/* ── END RIGHT COLUMN ── */}
+        </motion.div> {/* ── END CALENDAR + ATTENDANCE GRID ── */}
+
+        {/* ══ APPLY LEAVE + LOCATION HISTORY (same row, aligned bottoms) ══ */}
+        {!isEveryoneView && !isViewingOther && (
+          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-stretch">
+            {/* APPLY FOR LEAVE CARD */}
+            <SectionCard className="flex flex-col h-[380px]">
+              <CardHeaderRow
+                iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
+                icon={<CalendarX className="h-4 w-4" style={{ color: COLORS.orange }} />}
+                title="Apply for Leave"
+                subtitle={upcomingLeaves.length > 0 ? `${upcomingLeaves.length} upcoming leave${upcomingLeaves.length !== 1 ? 's' : ''}` : 'Request time off'}
+              />
+              <div className="p-4 flex-1 overflow-y-auto slim-scroll flex flex-col gap-3" style={slimScroll}>
+                {upcomingLeaves.length > 0 && (
+                  <div className="space-y-1.5">
+                    {upcomingLeaves.slice(0, 3).map(leave => {
+                      const leaveDate = safeParseISO(leave.date);
+                      return (
+                        <div key={leave.date}
+                          className="flex items-center justify-between px-3 py-2 rounded-lg border text-xs"
+                          style={{
+                            backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed',
+                            borderColor: isDark ? '#7c2d12' : '#fed7aa',
+                          }}>
+                          <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: COLORS.orange }} />
+                            <span className="font-semibold" style={{ color: isDark ? D.text : '#1e293b' }}>
+                              {leaveDate ? format(leaveDate, 'EEE, MMM d') : leave.date}
+                            </span>
+                          </div>
+                          {leave.leave_reason && (
+                            <span className="text-[10px] truncate max-w-[100px]" style={{ color: isDark ? D.muted : '#78716c' }}>
+                              {leave.leave_reason}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {upcomingLeaves.length > 3 && (
+                      <p className="text-[11px] font-medium text-center" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                        +{upcomingLeaves.length - 3} more upcoming
+                      </p>
+                    )}
+                  </div>
+                )}
+                <motion.button
+                  whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                  onClick={() => setShowLeaveForm(true)}
+                  className="flex items-center justify-center gap-2.5 w-full py-3.5 rounded-xl text-sm font-bold transition-all border-2"
+                  style={{
+                    borderColor: isDark ? 'rgba(249,115,22,0.4)' : `${COLORS.orange}40`,
+                    color: isDark ? '#fb923c' : COLORS.orange,
+                    backgroundColor: isDark ? 'rgba(249,115,22,0.08)' : `${COLORS.orange}06`,
+                  }}
+                >
+                  <Send className="w-4 h-4" />
+                  Apply Leave
+                </motion.button>
+                <div className="grid grid-cols-2 gap-2">
+                  <motion.button
+                    whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
+                    onClick={() => { setLeaveType('half_day'); setShowLeaveForm(true); }}
+                    className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all border"
+                    style={{
+                      borderColor: isDark ? 'rgba(139,92,246,0.3)' : '#ddd6fe',
+                      color: isDark ? '#c4b5fd' : '#7c3aed',
+                      backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : '#f5f3ff',
+                    }}
+                  >
+                    <span>🌗</span> Half Day
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
+                    onClick={() => { setLeaveType('early_leave'); setShowLeaveForm(true); }}
+                    className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all border"
+                    style={{
+                      borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#fde68a',
+                      color: isDark ? '#fbbf24' : '#d97706',
+                      backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb',
+                    }}
+                  >
+                    <span>🚪</span> Early Leave
+                  </motion.button>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: 'Tomorrow', days: 1 },
+                    { label: '3 Days',   days: 3 },
+                    { label: '1 Week',   days: 7 },
+                  ].map(({ label, days }) => (
+                    <button
+                      key={label}
+                      onClick={() => {
+                        const from = new Date();
+                        from.setDate(from.getDate() + (label === 'Tomorrow' ? 1 : 0));
+                        const to = new Date(from);
+                        to.setDate(from.getDate() + days - 1);
+                        setLeaveFrom(from);
+                        setLeaveTo(to);
+                        setShowLeaveForm(true);
+                      }}
+                      className="text-xs font-semibold px-3 py-2.5 rounded-xl border transition-all hover:shadow-sm active:scale-95 text-center"
+                      style={{
+                        borderColor: isDark ? D.border : '#e2e8f0',
+                        color: isDark ? D.muted : '#64748b',
+                        backgroundColor: isDark ? D.raised : '#f8fafc',
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </SectionCard>
+
+            {/* LOCATION HISTORY CARD */}
+            {(() => {
               const locRecords = (Array.isArray(attendanceHistory) ? attendanceHistory : [])
                 .filter(r => r.punch_in && r.status === 'present'
                   && (!isViewingOther ? (!r.user_id || r.user_id === user?.id) : true))
@@ -2984,7 +3079,6 @@ export default function Attendance() {
                           }}
                         >
                           <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: isOngoing ? COLORS.amber : '#0d9488' }} />
-                          {/* Compact header */}
                           <div className="flex items-center justify-between px-2.5 py-1.5 border-b"
                             style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#f8fafc' }}>
                             <div className="flex items-center gap-1.5">
@@ -3012,7 +3106,6 @@ export default function Attendance() {
                               )}
                             </div>
                           </div>
-                          {/* IN row */}
                           <div className="px-2.5 py-1.5 flex items-center gap-2 border-b"
                             style={{ borderColor: isDark ? 'rgba(255,255,255,0.04)' : '#f1f5f9' }}>
                             <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0"
@@ -3038,7 +3131,6 @@ export default function Attendance() {
                               </p>
                             </div>
                           </div>
-                          {/* OUT row */}
                           <div className="px-2.5 py-1.5 flex items-center gap-2">
                             <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0"
                               style={{ backgroundColor: isOngoing ? isDark ? 'rgba(245,158,11,0.20)' : '#fef3c7' : isDark ? 'rgba(249,115,22,0.15)' : '#ffedd5' }}>
@@ -3072,123 +3164,8 @@ export default function Attendance() {
                 </SectionCard>
               );
             })()}
-
-            {/* ══ MONTHLY INSIGHTS — inside right column ══ */}
-            {!isEveryoneView && (() => {
-              const onTimeCount = monthDaysPresent - totalDaysLateThisMonth;
-              const onTimePct   = monthDaysPresent > 0 ? Math.round((onTimeCount / monthDaysPresent) * 100) : 0;
-              return (
-              <SectionCard>
-                <CardHeaderRow
-                  iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
-                  icon={<BarChart3 className="h-4 w-4 text-emerald-500" />}
-                  title="Monthly Insights"
-                  subtitle={format(selectedDate, 'MMMM yyyy')}
-                  action={
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                      style={{
-                        backgroundColor: totalDaysLateThisMonth === 0
-                          ? (isDark ? 'rgba(31,175,90,0.18)' : '#dcfce7')
-                          : (isDark ? 'rgba(239,68,68,0.15)' : '#fee2e2'),
-                        color: totalDaysLateThisMonth === 0 ? COLORS.emeraldGreen : COLORS.red,
-                      }}>
-                      {totalDaysLateThisMonth === 0 ? '✓ Perfect Punctuality' : `${totalDaysLateThisMonth} Late Arrival${totalDaysLateThisMonth !== 1 ? 's' : ''}`}
-                    </span>
-                  }
-                />
-                <div className="p-5">
-                  <div className="grid grid-cols-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 items-stretch">
-
-                    {/* Stat: Present */}
-                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center h-full"
-                      style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0' }}>
-                      <CheckCircle2 className="w-5 h-5 mb-1.5 text-emerald-500" />
-                      <p className="text-2xl font-black tabular-nums" style={{ color: COLORS.emeraldGreen }}>{monthDaysPresent}</p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Present</p>
-                    </div>
-
-                    {/* Stat: Absent */}
-                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center h-full"
-                      style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2', borderColor: isDark ? '#7f1d1d' : '#fecaca' }}>
-                      <UserX className="w-5 h-5 mb-1.5 text-red-500" />
-                      <p className="text-2xl font-black tabular-nums text-red-500">{monthDaysAbsent}</p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Absent</p>
-                    </div>
-
-                    {/* Stat: Late */}
-                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center h-full"
-                      style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? '#92400e' : '#fde68a' }}>
-                      <AlarmClock className="w-5 h-5 mb-1.5 text-amber-500" />
-                      <p className="text-2xl font-black tabular-nums" style={{ color: COLORS.amber }}>{totalDaysLateThisMonth}</p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Late</p>
-                    </div>
-
-                    {/* Stat: Total Hours */}
-                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center h-full"
-                      style={{ backgroundColor: isDark ? `${COLORS.deepBlue}18` : `${COLORS.deepBlue}08`, borderColor: isDark ? '#1d4ed8' : '#bfdbfe' }}>
-                      <Clock className="w-5 h-5 mb-1.5" style={{ color: COLORS.deepBlue }} />
-                      <p className="text-2xl font-black tabular-nums font-mono" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
-                        {Math.floor(monthTotalMinutes / 60)}h
-                      </p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">{monthTotalMinutes % 60}m total</p>
-                    </div>
-
-                    {/* Stat: Avg/Day */}
-                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center h-full"
-                      style={{ backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : '#f5f3ff', borderColor: isDark ? '#4c1d95' : '#ddd6fe' }}>
-                      <BarChart3 className="w-5 h-5 mb-1.5 text-purple-500" />
-                      <p className="text-2xl font-black tabular-nums" style={{ color: COLORS.purple }}>{avgDailyHours}h</p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Avg / Day</p>
-                    </div>
-
-                    {/* Stat: Streak */}
-                    <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center h-full"
-                      style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? '#92400e' : '#fde68a' }}>
-                      <Flame className="w-5 h-5 mb-1.5 text-amber-400" />
-                      <p className="text-2xl font-black tabular-nums" style={{ color: COLORS.amber }}>{attendanceStreak}</p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">
-                        {attendanceStreak >= 10 ? '🔥 Day Streak' : '⚡ Day Streak'}
-                      </p>
-                    </div>
-
-                    {/* Punctuality bar */}
-                    <div className="flex flex-col justify-center gap-3 px-4 py-3 rounded-2xl border"
-                      style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}>
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Punctuality</span>
-                        <span className="text-lg font-black tabular-nums"
-                          style={{ color: onTimePct >= 80 ? COLORS.emeraldGreen : onTimePct >= 60 ? COLORS.amber : COLORS.red }}>
-                          {onTimePct}%
-                        </span>
-                      </div>
-                      <div className="h-3 rounded-full overflow-hidden"
-                        style={{ backgroundColor: isDark ? D.border : '#e2e8f0' }}>
-                        <motion.div className="h-full rounded-full"
-                          style={{
-                            background: onTimePct >= 80
-                              ? `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`
-                              : onTimePct >= 60
-                                ? `linear-gradient(90deg, ${COLORS.amber}, #fbbf24)`
-                                : `linear-gradient(90deg, ${COLORS.red}, #f87171)`,
-                          }}
-                          initial={{ width: 0 }}
-                          animate={{ width: `${onTimePct}%` }}
-                          transition={{ duration: 0.9, ease: 'easeOut', delay: 0.2 }}
-                        />
-                      </div>
-                      <p className="text-[11px] font-medium text-center" style={{ color: isDark ? D.muted : '#64748b' }}>
-                        {onTimeCount} on-time · {totalDaysLateThisMonth} late
-                      </p>
-                    </div>
-
-                  </div>
-                </div>
-              </SectionCard>
-              );
-            })()}
-
-          </div> {/* ── END RIGHT COLUMN ── */}
-        </motion.div> {/* ── END CALENDAR + ATTENDANCE GRID ── */}
+          </motion.div>
+        )}
 
         {/* ══ MODALS ════════════════════════════════════════════════════════════ */}
 
