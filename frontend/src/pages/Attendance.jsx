@@ -2202,7 +2202,7 @@ export default function Attendance() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
                   {/* Duration / progress */}
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">Daily Progress</p>
@@ -2496,10 +2496,10 @@ export default function Attendance() {
           if (sectionId === 'holidays_reminders') return (
             <React.Fragment key="holidays_reminders">
               {!isEveryoneView && (
-          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-stretch">
 
             {/* HOLIDAYS CARD */}
-            <SectionCard className="flex flex-col h-[340px]">
+            <SectionCard className="flex flex-col min-h-[340px] h-full">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-amber-900/40' : 'bg-amber-50'}
                 icon={<CalendarIcon className="h-4 w-4 text-amber-500" />}
@@ -2581,7 +2581,7 @@ export default function Attendance() {
             </SectionCard>
 
             {/* REMINDERS CARD */}
-            <SectionCard className="flex flex-col h-[340px]">
+            <SectionCard className="flex flex-col min-h-[340px] h-full">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-purple-900/40' : 'bg-purple-50'}
                 icon={<AlarmClock className="h-4 w-4 text-purple-500" />}
@@ -2683,7 +2683,7 @@ export default function Attendance() {
           if (sectionId === 'calendar_area') return (
             <React.Fragment key="calendar_area">
               <motion.div
-          className={`grid gap-6 ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-12'}`}
+          className={`grid gap-6 items-end ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-12'}`}
           variants={itemVariants}
         >
           {/* ── LEFT COLUMN: Calendar + Date Detail + Apply Leave ── */}
@@ -2916,7 +2916,7 @@ export default function Attendance() {
           )}
 
           {/* ── RIGHT COLUMN: Recent Attendance + Location History ── */}
-          <div className={isEveryoneView ? '' : 'xl:col-span-8 flex flex-col gap-4 min-h-0'}>
+          <div className={isEveryoneView ? '' : 'xl:col-span-8 flex flex-col gap-4 min-h-0 justify-end'}>
 
             {/* Recent Attendance */}
             <SectionCard className="flex flex-col" style={{ maxHeight: 480 }}>
