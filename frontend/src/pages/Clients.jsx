@@ -23,7 +23,22 @@ import {
 } from 'lucide-react';
 import { format, startOfDay, differenceInDays } from 'date-fns';
 import * as XLSX from 'xlsx';
-const FixedSizeList = ({ children, height, itemCount, itemSize, width }) => React.createElement("div", { style: { height, width, overflow: "auto" } }, Array.from({ length: itemCount }, (_, i) => children({ index: i, style: { height: itemSize } })));
+
+const FixedSizeList = ({ children, height, itemCount, itemSize, width }) =>
+  React.createElement(
+    "div",
+    { style: { height, width, overflow: "auto" } },
+    Array.from({ length: itemCount || 0 }, (_, i) => {
+      if (!children) return null;
+
+      const result = children({ index: i, style: { height: itemSize } });
+
+      if (result === undefined || result === null) return null;
+
+      return result;
+    })
+  );
+
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CLIENT_TYPES = [
@@ -847,7 +862,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                               <div className="flex items-center gap-2 flex-wrap">
                                 <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{inv.invoice_no}</p>
                                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border" style={{ background: sc.bg, color: sc.text, borderColor: sc.border }}>
-                                  {(inv.status || 'draft').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                  {(inv.status || 'draft').replace(/_/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase())}
                                 </span>
                               </div>
                               <p className="text-xs text-slate-400 mt-0.5">
