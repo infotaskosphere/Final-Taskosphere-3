@@ -2062,15 +2062,6 @@ export default function Attendance() {
                 >
                   {exportingPDF ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Exporting…</> : 'Export PDF'}
                 </button>
-                {/* Dark Mode Toggle */}
-                <button
-                  onClick={() => document.documentElement.classList.toggle('dark')}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 border"
-                  style={{ backgroundColor: 'rgba(255,255,255,0.15)', borderColor: 'rgba(255,255,255,0.25)', color: '#ffffff' }}
-                  title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-                >
-                  {isDark ? '☀️' : '🌙'}
-                </button>
               </div>
             </div>
           </div>
@@ -3174,15 +3165,11 @@ export default function Attendance() {
               );
             })()}
 
-          </div> {/* ── END RIGHT COLUMN ── */}
-        </motion.div> {/* ── END CALENDAR + ATTENDANCE GRID ── */}
-
-        {/* ══ MONTHLY INSIGHTS — FULL WIDTH HORIZONTAL ══════════════════════════ */}
-        {!isEveryoneView && (() => {
-          const onTimeCount = monthDaysPresent - totalDaysLateThisMonth;
-          const onTimePct   = monthDaysPresent > 0 ? Math.round((onTimeCount / monthDaysPresent) * 100) : 0;
-          return (
-            <motion.div variants={itemVariants}>
+            {/* ══ MONTHLY INSIGHTS — inside right column ══ */}
+            {!isEveryoneView && (() => {
+              const onTimeCount = monthDaysPresent - totalDaysLateThisMonth;
+              const onTimePct   = monthDaysPresent > 0 ? Math.round((onTimeCount / monthDaysPresent) * 100) : 0;
+              return (
               <SectionCard>
                 <CardHeaderRow
                   iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
@@ -3202,7 +3189,7 @@ export default function Attendance() {
                   }
                 />
                 <div className="p-5">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-4 items-stretch">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 items-stretch">
 
                     {/* Stat: Present */}
                     <div className="flex flex-col items-center justify-center px-4 py-3 rounded-2xl border text-center h-full"
@@ -3289,9 +3276,11 @@ export default function Attendance() {
                   </div>
                 </div>
               </SectionCard>
-            </motion.div>
-          );
-        })()}
+              );
+            })()}
+
+          </div> {/* ── END RIGHT COLUMN ── */}
+        </motion.div> {/* ── END CALENDAR + ATTENDANCE GRID ── */}
 
         {/* ══ MODALS ════════════════════════════════════════════════════════════ */}
 
