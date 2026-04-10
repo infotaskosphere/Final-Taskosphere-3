@@ -2202,7 +2202,7 @@ export default function Attendance() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                   {/* Duration / progress */}
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Daily Progress</p>
@@ -2461,7 +2461,7 @@ export default function Attendance() {
           if (sectionId === 'stat_cards') return (
             <React.Fragment key="stat_cards">
               <motion.div
-          className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
+          className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6"
           variants={itemVariants}
         >
           <StatCard isDark={isDark} icon={Timer}
@@ -2470,23 +2470,20 @@ export default function Attendance() {
             trend={`${monthDaysPresent} days present`} />
           <StatCard isDark={isDark} icon={CheckCircle2}
             label="Tasks Done" value={tasksCompleted} unit="completed" color={COLORS.emeraldGreen}
-            trend=" " />
+            trend={tasksCompleted > 0 ? 'Great progress' : 'None yet'} />
           <StatCard isDark={isDark} icon={CalendarX}
             label="Days Late" value={totalDaysLateThisMonth} unit="this month" color={COLORS.orange}
-            trend=" " />
+            trend={totalDaysLateThisMonth === 0 ? 'On time always' : 'Work on punctuality'} />
           <StatCard isDark={isDark} icon={UserX}
             label="Days Absent" value={monthDaysAbsent} unit="this month" color={COLORS.red}
             trend={monthDaysAbsent > 0 ? 'Auto-marked at 7 PM' : 'Perfect attendance'} />
-          {/* FEATURE ENHANCEMENT: Streak + Avg Hours cards */}
           <StatCard isDark={isDark} icon={Flame}
             label="Streak" value={attendanceStreak} unit="consecutive days" color="#f59e0b"
             trend={attendanceStreak >= 5 ? 'Keep it up!' : 'Build momentum'} />
-          {!isEveryoneView && (
-            <StatCard isDark={isDark} icon={TrendingUp}
-              label={isViewingOther ? 'Their Rank' : 'Your Rank'}
-              value={myRank} unit="overall" color={COLORS.mediumBlue}
-              trend={`Avg ${avgDailyHours}h/day`} />
-          )}
+          <StatCard isDark={isDark} icon={TrendingUp}
+            label={isEveryoneView ? 'Avg Hours' : isViewingOther ? 'Their Rank' : 'Your Rank'}
+            value={isEveryoneView ? `${avgDailyHours}h` : myRank} unit={isEveryoneView ? 'per day' : 'overall'} color={COLORS.mediumBlue}
+            trend={`Avg ${avgDailyHours}h/day`} />
         </motion.div>
 
             </React.Fragment>
@@ -2496,9 +2493,9 @@ export default function Attendance() {
           if (sectionId === 'holidays_reminders') return (
             <React.Fragment key="holidays_reminders">
               {!isEveryoneView && (
-          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
             {/* HOLIDAYS CARD */}
-            <SectionCard className="flex flex-col h-[420px]">
+            <SectionCard className="flex flex-col" style={{ minHeight: 420 }}>
               <CardHeaderRow
                 iconBg={isDark ? 'bg-amber-900/40' : 'bg-amber-50'}
                 icon={<CalendarIcon className="h-4 w-4 text-amber-500" />}
@@ -2534,9 +2531,9 @@ export default function Attendance() {
                   </div>
                 )}
               />
-              <div className="flex-1 overflow-y-auto slim-scroll p-2.5 space-y-1 min-h-0" style={slimScroll}>
+              <div className="flex-1 overflow-y-auto slim-scroll p-2.5 space-y-1" style={{ ...slimScroll, maxHeight: 360 }}>
                 {monthHolidaysGrid.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full py-8">
+                  <div className="flex flex-col items-center justify-center py-16">
                     <CalendarIcon className="w-8 h-8 mb-2 text-slate-300 dark:text-slate-600" />
                     <p className="text-sm font-medium text-slate-400 dark:text-slate-500">No holidays this month</p>
                   </div>
@@ -2584,7 +2581,7 @@ export default function Attendance() {
               const onTimeCount = monthDaysPresent - totalDaysLateThisMonth;
               const onTimePct   = monthDaysPresent > 0 ? Math.round((onTimeCount / monthDaysPresent) * 100) : 0;
               return (
-              <SectionCard className="flex flex-col h-[420px]">
+              <SectionCard className="flex flex-col" style={{ minHeight: 420 }}>
                 <CardHeaderRow
                   iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
                   icon={<BarChart3 className="h-4 w-4 text-emerald-500" />}
@@ -2602,27 +2599,27 @@ export default function Attendance() {
                     </span>
                   }
                 />
-                <div className="flex-1 overflow-y-auto slim-scroll p-4" style={slimScroll}>
+                <div className="flex-1 p-4 overflow-y-auto slim-scroll" style={slimScroll}>
                   <div className="grid grid-cols-3 gap-2">
-                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0' }}>
                       <CheckCircle2 className="w-4 h-4 mb-1 text-emerald-500" />
                       <p className="text-xl font-black tabular-nums" style={{ color: COLORS.emeraldGreen }}>{monthDaysPresent}</p>
                       <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Present</p>
                     </div>
-                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2', borderColor: isDark ? '#7f1d1d' : '#fecaca' }}>
                       <UserX className="w-4 h-4 mb-1 text-red-500" />
                       <p className="text-xl font-black tabular-nums text-red-500">{monthDaysAbsent}</p>
                       <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Absent</p>
                     </div>
-                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? '#92400e' : '#fde68a' }}>
                       <AlarmClock className="w-4 h-4 mb-1 text-amber-500" />
                       <p className="text-xl font-black tabular-nums" style={{ color: COLORS.amber }}>{totalDaysLateThisMonth}</p>
                       <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Late</p>
                     </div>
-                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? `${COLORS.deepBlue}18` : `${COLORS.deepBlue}08`, borderColor: isDark ? '#1d4ed8' : '#bfdbfe' }}>
                       <Clock className="w-4 h-4 mb-1" style={{ color: COLORS.deepBlue }} />
                       <p className="text-xl font-black tabular-nums font-mono" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
@@ -2630,13 +2627,13 @@ export default function Attendance() {
                       </p>
                       <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">{monthTotalMinutes % 60}m total</p>
                     </div>
-                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : '#f5f3ff', borderColor: isDark ? '#4c1d95' : '#ddd6fe' }}>
                       <BarChart3 className="w-4 h-4 mb-1 text-purple-500" />
                       <p className="text-xl font-black tabular-nums" style={{ color: COLORS.purple }}>{avgDailyHours}h</p>
                       <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Avg/Day</p>
                     </div>
-                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? '#92400e' : '#fde68a' }}>
                       <Flame className="w-4 h-4 mb-1 text-amber-400" />
                       <p className="text-xl font-black tabular-nums" style={{ color: COLORS.amber }}>{attendanceStreak}</p>
@@ -2688,13 +2685,13 @@ export default function Attendance() {
           if (sectionId === 'calendar_area') return (
             <React.Fragment key="calendar_area">
               <motion.div
-          className={`grid gap-6 items-stretch ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-12'}`}
+          className={`grid gap-6 ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-2'}`}
           variants={itemVariants}
         >
           {/* ── LEFT COLUMN: Calendar + Date Detail + Apply Leave ── */}
           {!isEveryoneView && (
-            <div className="xl:col-span-5 flex flex-col gap-4">
-              <SectionCard className="flex flex-col flex-1 min-h-0">
+            <div className="flex flex-col gap-4">
+              <SectionCard className="flex flex-col">
                 <CardHeaderRow
                   iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
                   icon={<CalendarIcon className="h-4 w-4 text-blue-500" />}
@@ -2725,7 +2722,7 @@ export default function Attendance() {
                     components={{ Day: props => <CustomDay {...props} attendance={attendanceMap} holidays={holidays} /> }}
                   />
                   {/* Legend */}
-                  <div className="flex flex-wrap gap-x-2 gap-y-1 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 text-xs justify-center">
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 text-xs justify-center">
                     {[
                       { color: COLORS.emeraldGreen, label: 'Present'     },
                       { color: COLORS.red,          label: 'Late/Absent' },
@@ -2742,7 +2739,7 @@ export default function Attendance() {
               </SectionCard>
 
               {/* Selected date detail */}
-              <SectionCard className="flex flex-col flex-1 min-h-0">
+              <SectionCard>
                 <div className="p-0">
                   {selectedAttendance?.status === 'absent' ? (
                     <div className="relative p-4 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2' }}>
@@ -2803,16 +2800,15 @@ export default function Attendance() {
                 </div>
               </SectionCard>
 
-
               {/* Apply for Leave */}
-              <SectionCard className="flex flex-col flex-1 min-h-0">
+              <SectionCard className="flex flex-col">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
                 icon={<CalendarX className="h-4 w-4" style={{ color: COLORS.orange }} />}
                 title="Apply for Leave"
                 subtitle={upcomingLeaves.length > 0 ? `${upcomingLeaves.length} upcoming leave${upcomingLeaves.length !== 1 ? 's' : ''}` : 'Request time off'}
               />
-              <div className="p-4 flex-1 overflow-y-auto slim-scroll flex flex-col gap-3" style={slimScroll}>
+              <div className="p-4 flex flex-col gap-3">
                 {upcomingLeaves.length > 0 && (
                   <div className="space-y-1.5">
                     {upcomingLeaves.slice(0, 3).map(leave => {
@@ -2919,7 +2915,7 @@ export default function Attendance() {
           )}
 
           {/* ── RIGHT COLUMN: Location History + Recent Attendance ── */}
-          <div className={isEveryoneView ? 'flex flex-col gap-4' : 'xl:col-span-7 flex flex-col gap-4'}>
+          <div className="flex flex-col gap-4">
 
             {/* Location History */}
             {(() => {
@@ -2928,7 +2924,7 @@ export default function Attendance() {
                   && (!isViewingOther ? (!r.user_id || r.user_id === user?.id) : true))
                 .slice(0, 5);
               return (
-                <SectionCard className="flex flex-col flex-shrink-0">
+                <SectionCard className="flex flex-col">
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-teal-900/40' : 'bg-teal-50'}
                     icon={<MapPin className="h-4 w-4 text-teal-500" />}
@@ -2941,15 +2937,15 @@ export default function Attendance() {
                       </span>
                     }
                   />
-                  <div className="overflow-x-auto slim-scroll p-3" style={{ scrollbarWidth: 'thin' }}>
-                  <div className="flex gap-3" style={{ minWidth: 'max-content' }}>
-                    {locRecords.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-6 px-10 gap-2">
-                        <MapPin className="w-8 h-8 text-slate-300 dark:text-slate-600" />
-                        <p className="text-sm font-medium text-slate-400">No location data yet</p>
-                        <p className="text-xs text-slate-400 text-center max-w-[180px]">Enable GPS when clocking in/out</p>
-                      </div>
-                    ) : locRecords.map((record, idx) => {
+                  {locRecords.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-10 gap-2">
+                      <MapPin className="w-8 h-8 text-slate-300 dark:text-slate-600" />
+                      <p className="text-sm font-medium text-slate-400">No location data yet</p>
+                      <p className="text-xs text-slate-400 text-center max-w-[200px]">Enable GPS when clocking in/out</p>
+                    </div>
+                  ) : (
+                    <div className="p-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-3">
+                    {locRecords.map((record, idx) => {
                       const recordDate   = safeParseISO(record.date);
                       const inLoc        = record.location;
                       const outLoc       = record.punch_out_location;
@@ -2966,17 +2962,16 @@ export default function Attendance() {
                           initial={{ opacity: 0, y: 6 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: idx * 0.05, duration: 0.25 }}
-                          className="relative rounded-xl border overflow-hidden flex-shrink-0"
+                          className="relative rounded-xl border overflow-hidden"
                           style={{
-                            width: 220,
                             borderColor: isOngoing ? isDark ? '#92400e' : '#fde68a' : isDark ? D.border : '#e2e8f0',
                             backgroundColor: isOngoing ? isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb' : isDark ? D.raised : '#fafafa',
                           }}
                         >
                           <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: isOngoing ? COLORS.amber : '#0d9488' }} />
-                          <div className="flex items-center justify-between px-2.5 py-1.5 border-b"
+                          <div className="flex items-center justify-between px-3 py-2 border-b"
                             style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#f8fafc' }}>
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-2">
                               <div className="w-5 h-5 rounded flex items-center justify-center text-white text-[9px] font-black"
                                 style={{ background: isOngoing ? `linear-gradient(135deg,${COLORS.amber},#d97706)` : `linear-gradient(135deg,${COLORS.deepBlue},${COLORS.mediumBlue})` }}>
                                 {idx + 1}
@@ -3001,14 +2996,14 @@ export default function Attendance() {
                               )}
                             </div>
                           </div>
-                          <div className="px-2.5 py-1.5 flex items-center gap-2 border-b"
+                          <div className="px-3 py-2 flex items-start gap-2 border-b"
                             style={{ borderColor: isDark ? 'rgba(255,255,255,0.04)' : '#f1f5f9' }}>
-                            <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0"
+                            <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5"
                               style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.20)' : '#dcfce7' }}>
                               <LogIn className="w-3 h-3 text-emerald-500" />
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-1.5 flex-wrap">
                                 <span className="text-[9px] font-black uppercase text-emerald-500">IN</span>
                                 <span className="text-[10px] font-mono font-semibold" style={{ color: isDark ? D.muted : '#64748b' }}>
                                   {formatAttendanceTime(record.punch_in)}
@@ -3021,18 +3016,18 @@ export default function Attendance() {
                                   </a>
                                 )}
                               </div>
-                              <p className="text-[10px] leading-tight truncate" style={{ color: isDark ? D.dimmer : '#64748b' }}>
+                              <p className="text-[10px] leading-tight break-words" style={{ color: isDark ? D.dimmer : '#64748b' }}>
                                 {hasInCoords ? inLabel : <span className="italic text-slate-400">Location not recorded</span>}
                               </p>
                             </div>
                           </div>
-                          <div className="px-2.5 py-1.5 flex items-center gap-2">
-                            <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0"
+                          <div className="px-3 py-2 flex items-start gap-2">
+                            <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5"
                               style={{ backgroundColor: isOngoing ? isDark ? 'rgba(245,158,11,0.20)' : '#fef3c7' : isDark ? 'rgba(249,115,22,0.15)' : '#ffedd5' }}>
                               <LogOut className={`w-3 h-3 ${isOngoing ? 'text-amber-500' : 'text-orange-400'}`} />
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-1.5 flex-wrap">
                                 <span className={`text-[9px] font-black uppercase ${isOngoing ? 'text-amber-500' : 'text-orange-400'}`}>OUT</span>
                                 <span className="text-[10px] font-mono font-semibold" style={{ color: isDark ? D.muted : '#64748b' }}>
                                   {record.punch_out ? formatAttendanceTime(record.punch_out) : '—'}
@@ -3046,7 +3041,7 @@ export default function Attendance() {
                                 )}
                               </div>
                               <p className="text-[10px] leading-tight" style={{ color: isOngoing ? COLORS.amber : isDark ? D.dimmer : '#64748b' }}>
-                                {hasOutCoords ? <span className="truncate">{outLabel}</span>
+                                {hasOutCoords ? <span className="break-words">{outLabel}</span>
                                   : record.punch_out ? <span className="italic text-slate-400">Location not recorded</span>
                                   : <span className="italic">⏳ Still clocked in</span>}
                               </p>
@@ -3055,28 +3050,27 @@ export default function Attendance() {
                         </motion.div>
                       );
                     })}
-                  </div>{/* end flex gap-3 */}
-                  </div>{/* end overflow-x-auto */}
+                    </div>
+                  )}
                 </SectionCard>
               );
             })()}
 
-            {/* Recent Attendance — fixed height aligned with left column bottom */}
-            <SectionCard className="flex flex-col" style={{ height: 420 }}>
+            {/* Recent Attendance */}
+            <SectionCard className="flex flex-col">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
                 icon={<Clock className="h-4 w-4 text-blue-500" />}
                 title={isEveryoneView ? 'All Employees — Attendance' : 'Recent Attendance'}
                 subtitle={isEveryoneView ? 'Latest 25 records' : 'Last 15 records'}
               />
-              <div className="overflow-y-auto slim-scroll p-3 space-y-1.5" style={{ ...slimScroll, height: 360 }}>
+              <div className="p-3 space-y-1.5 overflow-y-auto slim-scroll" style={{ ...slimScroll, maxHeight: 480 }}>
                 {loading && attendanceHistory.length === 0 ? (
-                  <div className="flex items-center justify-center h-full">
+                  <div className="flex items-center justify-center py-12">
                     <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                    
                   </div>
                 ) : recentAttendance.length === 0 ? (
-                  <div className="flex items-center justify-center h-full">
+                  <div className="flex items-center justify-center py-12">
                     <p className="text-sm font-medium text-slate-400">No records yet</p>
                   </div>
                 ) : recentAttendance.map((record, idx) => {
