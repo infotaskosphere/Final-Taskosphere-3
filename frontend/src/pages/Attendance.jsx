@@ -1,11 +1,3 @@
-// Attendance.jsx — redesigned to match Dashboard design language
-// • LiveClock removed (lives in Dashboard)
-// • Layout, fonts, card shells, header rows match Dashboard exactly
-// • Holiday safe-parsing: all parseISO wrapped in try/catch
-// • All v8 bug-fixes preserved (triple-fallback id, normalizeReminder, etc.)
-// • v9: Apply for Leave moved to dedicated card below calendar detail
-// • v9: Feature enhancements — streak counter, avg hours, weekly summary, overtime alert
-
 import { useDark } from '@/hooks/useDark';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -96,6 +88,8 @@ const COLORS = {
 
 const LEAVE_TYPES = [
   { value: 'full_day',           label: 'Full Day',           icon: '🗓️', desc: 'Absent the entire day' },
+  { value: 'half_day',           label: 'Half Day',           icon: '🌗', desc: 'Off for half the day' },
+  { value: 'early_leave',        label: 'Early Leave',        icon: '🚪', desc: 'Present but leaving before office hours end' },
 ];
 
 
@@ -1429,7 +1423,7 @@ export default function Attendance() {
     if (leaveType === 'early_leave' && !earlyLeaveTime) {
       toast.error('Please specify your early departure time'); return;
     }
-    const isPartialDay = leaveType !== 'full_day';
+    const isPartialDay = leaveType !== 'full_day'; // half_day + early_leave are partial
     const effectiveTo = isPartialDay ? leaveFrom : (leaveTo || leaveFrom);
     try {
       await api.post('/attendance/apply-leave', {
@@ -2846,40 +2840,31 @@ export default function Attendance() {
                       <Send className="w-4 h-4" />
                       Apply Leave
                     </motion.button>
-
-                    {/* Half Day & Early Leave quick actions */}
+                    {/* Quick leave type buttons */}
                     <div className="flex gap-2">
                       <motion.button
-                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                        onClick={() => {
-                          setLeaveType('half_day');
-                          setShowLeaveForm(true);
-                        }}
-                        className="flex items-center justify-center gap-2 flex-1 py-2.5 rounded-xl text-xs font-bold transition-all border"
+                        whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
+                        onClick={() => { setLeaveType('half_day'); setShowLeaveForm(true); }}
+                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all border"
                         style={{
-                          borderColor: isDark ? 'rgba(139,92,246,0.4)' : '#c4b5fd',
-                          color: isDark ? '#a78bfa' : '#7c3aed',
+                          borderColor: isDark ? 'rgba(139,92,246,0.3)' : '#ddd6fe',
+                          color: isDark ? '#c4b5fd' : '#7c3aed',
                           backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : '#f5f3ff',
                         }}
                       >
-                        <span>🌗</span>
-                        Half Day
+                        <span>🌗</span> Half Day
                       </motion.button>
                       <motion.button
-                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                        onClick={() => {
-                          setLeaveType('early_leave');
-                          setShowLeaveForm(true);
-                        }}
-                        className="flex items-center justify-center gap-2 flex-1 py-2.5 rounded-xl text-xs font-bold transition-all border"
+                        whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
+                        onClick={() => { setLeaveType('early_leave'); setShowLeaveForm(true); }}
+                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all border"
                         style={{
-                          borderColor: isDark ? 'rgba(245,158,11,0.4)' : '#fcd34d',
+                          borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#fde68a',
                           color: isDark ? '#fbbf24' : '#d97706',
                           backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb',
                         }}
                       >
-                        <span>🚪</span>
-                        Early Leave
+                        <span>🚪</span> Early Leave
                       </motion.button>
                     </div>
                     <div className="flex gap-2 flex-wrap">
@@ -3426,7 +3411,8 @@ export default function Attendance() {
         {/* Leave Form Modal */}
         <AnimatePresence>
           {showLeaveForm && (
-            <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
+            <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+              style={{ background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <motion.div
                 className="w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto"
@@ -3457,16 +3443,7 @@ export default function Attendance() {
                         <motion.button
                           key={lt.value}
                           whileTap={{ scale: 0.97 }}
-                          onClick={() => {
-                            const from = new Date();
-                            from.setDate(from.getDate() + (label === 'Tomorrow' ? 1 : 0));
-                            const to = new Date(from);
-                            to.setDate(from.getDate() + days - 1);
-                            setLeaveFrom(from);
-                            setLeaveTo(to);
-                            setLeaveType('full_day');  // ← add this line
-                            setShowLeaveForm(true);
-                          }}
+                          onClick={() => setLeaveType(lt.value)}
                         >
                           <span style={{ fontSize: 18, lineHeight: 1 }}>{lt.icon}</span>
                           <div className="min-w-0">
@@ -3530,14 +3507,14 @@ export default function Attendance() {
                           <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>From Date</label>
                           <Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom}
                             disabled={date => isBefore(date, startOfDay(new Date()))}
-                            className="rounded-xl border"
+                            className="rounded-xl border w-full [&_.rdp-months]:w-full [&_.rdp-month]:w-full [&_.rdp-table]:w-full [&_.rdp-head_row]:flex [&_.rdp-head_row]:justify-between [&_.rdp-row]:flex [&_.rdp-row]:justify-between"
                             style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
                         </div>
                         <div>
                           <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>To Date</label>
                           <Calendar mode="single" selected={leaveTo} onSelect={setLeaveTo}
                             disabled={date => leaveFrom ? isBefore(date, leaveFrom) : true}
-                            className="rounded-xl border"
+                            className="rounded-xl border w-full [&_.rdp-months]:w-full [&_.rdp-month]:w-full [&_.rdp-table]:w-full [&_.rdp-head_row]:flex [&_.rdp-head_row]:justify-between [&_.rdp-row]:flex [&_.rdp-row]:justify-between"
                             style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
                         </div>
                       </div>
@@ -3560,7 +3537,7 @@ export default function Attendance() {
                       <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Date</label>
                       <Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom}
                         disabled={date => isBefore(date, startOfDay(new Date()))}
-                        className="rounded-xl border"
+                        className="rounded-xl border w-full [&_.rdp-months]:w-full [&_.rdp-month]:w-full [&_.rdp-table]:w-full [&_.rdp-head_row]:flex [&_.rdp-head_row]:justify-between [&_.rdp-row]:flex [&_.rdp-row]:justify-between"
                         style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
                       {leaveFrom && (
                         <div className="flex items-center gap-2 mt-3 px-3 py-2.5 rounded-xl border text-sm font-semibold"
@@ -3609,7 +3586,8 @@ export default function Attendance() {
         {/* Edit Holiday Modal */}
         <AnimatePresence>
           {editingHoliday && (
-            <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
+            <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+              style={{ background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <motion.div
                 className="w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
@@ -3649,7 +3627,8 @@ export default function Attendance() {
         {/* New Reminder Modal */}
         <AnimatePresence>
           {showReminderForm && (
-            <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
+            <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+              style={{ background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <motion.div
                 className="w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
