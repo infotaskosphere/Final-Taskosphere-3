@@ -1,10 +1,10 @@
-
-// Attendance.jsx — v10 full rewrite
-// • Modern design aligned with Dashboard design language
-// • All features, banner, and colour language fully preserved
-// • Improved card layout, typography, and visual hierarchy
-// • Better stat cards, progress indicators, and interactive elements
-// • All bug-fixes preserved (triple-fallback id, normalizeReminder, etc.)
+// Attendance.jsx — redesigned to match Dashboard design language
+// • LiveClock removed (lives in Dashboard)
+// • Layout, fonts, card shells, header rows match Dashboard exactly
+// • Holiday safe-parsing: all parseISO wrapped in try/catch
+// • All v8 bug-fixes preserved (triple-fallback id, normalizeReminder, etc.)
+// • v9: Apply for Leave moved to dedicated card below calendar detail
+// • v9: Feature enhancements — streak counter, avg hours, weekly summary, overtime alert
 
 import { useDark } from '@/hooks/useDark';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -72,9 +72,6 @@ import {
   ExternalLink,
   Settings2,
   GripVertical,
-  ArrowUpRight,
-  CheckSquare,
-  Target,
 } from 'lucide-react';
 import LayoutCustomizer from '../components/layout/LayoutCustomizer';
 import { usePageLayout } from '../hooks/usePageLayout';
@@ -95,15 +92,16 @@ const COLORS = {
   red:          '#EF4444',
   purple:       '#8B5CF6',
   slate200:     '#E2E8F0',
-  coral:        '#FF6B6B',
 };
 
 const LEAVE_TYPES = [
-  { value: 'full_day',    label: 'Full Day',    icon: '🗓️', desc: 'Absent the entire day' },
-  { value: 'half_day',    label: 'Half Day',    icon: '🌗', desc: 'Off for half the day' },
-  { value: 'early_leave', label: 'Early Leave', icon: '🚪', desc: 'Present but leaving before office hours end' },
+  { value: 'full_day',           label: 'Full Day',           icon: '🗓️', desc: 'Absent the entire day' },
+  { value: 'half_day',           label: 'Half Day',           icon: '🌗', desc: 'Off for half the day' },
+  { value: 'early_leave',        label: 'Early Leave',        icon: '🚪', desc: 'Present but leaving before office hours end' },
 ];
 
+
+// Dark palette (mirrors Dashboard)
 const D = {
   bg:        '#0f172a',
   card:      '#1e293b',
@@ -125,17 +123,15 @@ const containerVariants = {
 const itemVariants = {
   hidden:  { opacity: 0, y: 24 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] } },
-  exit:    { opacity: 0, y: 12, transition: { duration: 0.3 } },
 };
 const springPhysics = {
-  card:   { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
-  lift:   { type: 'spring', stiffness: 320, damping: 24, mass: 0.9  },
-  button: { type: 'spring', stiffness: 400, damping: 28 },
-  tap:    { type: 'spring', stiffness: 500, damping: 30 },
+  card: { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
+  lift: { type: 'spring', stiffness: 320, damping: 24, mass: 0.9  },
+  tap:  { type: 'spring', stiffness: 500, damping: 30 },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SLIM SCROLL
+// SLIM SCROLL (same id-guard as Dashboard)
 // ─────────────────────────────────────────────────────────────────────────────
 const slimScroll = {
   overflowY:      'auto',
@@ -156,6 +152,7 @@ if (typeof document !== 'undefined' && !document.getElementById('dash-slim-scrol
   document.head.appendChild(s);
 }
 
+// Pulse animations for punch-in / absent
 if (typeof document !== 'undefined' && !document.getElementById('att-pulse-styles')) {
   const s = document.createElement('style');
   s.id = 'att-pulse-styles';
@@ -174,14 +171,6 @@ if (typeof document !== 'undefined' && !document.getElementById('att-pulse-style
   document.head.appendChild(s);
 }
 
-if (typeof document !== 'undefined' && !document.getElementById('roboto-mono-font')) {
-  const link = document.createElement('link');
-  link.id   = 'roboto-mono-font';
-  link.rel  = 'stylesheet';
-  link.href = 'https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;400;500;600;700&display=swap';
-  document.head.appendChild(link);
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // SHARED LAYOUT PRIMITIVES (matches Dashboard)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -198,7 +187,7 @@ function SectionCard({ children, className = '', style = {} }) {
 
 function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700/70">
+    <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
       <div className="flex items-center gap-2.5">
         <div className={`p-1.5 rounded-lg ${iconBg}`}>{icon}</div>
         <div>
@@ -210,7 +199,7 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
               </span>
             )}
           </div>
-          {subtitle && <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{subtitle}</p>}
+          {subtitle && <p className="text-xs text-slate-400 dark:text-slate-500">{subtitle}</p>}
         </div>
       </div>
       {action && <div className="flex items-center gap-1.5 flex-shrink-0">{action}</div>}
@@ -331,6 +320,7 @@ const buildGCalURL = (reminder) => {
   } catch { return 'https://calendar.google.com'; }
 };
 
+// Safe parseISO — returns null instead of throwing
 const safeParseISO = (dateStr) => {
   if (!dateStr) return null;
   try {
@@ -339,6 +329,7 @@ const safeParseISO = (dateStr) => {
   } catch { return null; }
 };
 
+// Safe format with parseISO — returns fallback string instead of throwing
 const safeFormatDate = (dateStr, fmt, fallback = '—') => {
   const d = safeParseISO(dateStr);
   if (!d) return fallback;
@@ -370,33 +361,27 @@ const extractHolidaysFromPDF = async (file) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STAT CARD — modernized with trend indicator
+// STAT CARD (Dashboard metric-card style)
 // ─────────────────────────────────────────────────────────────────────────────
-function StatCard({ icon: Icon, label, value, unit, color, trend, isDark, highlight }) {
+function StatCard({ icon: Icon, label, value, unit, color, trend, isDark }) {
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -3, transition: springPhysics.lift }} whileTap={{ scale: 0.985 }}>
-      <div className={`rounded-2xl h-full border transition-all ${highlight ? 'shadow-md' : 'shadow-sm hover:shadow-md'}`}
-        style={{
-          background: isDark
-            ? highlight ? `linear-gradient(135deg, ${color}18, ${color}08)` : D.card
-            : highlight ? `linear-gradient(135deg, ${color}0a, #ffffff)` : '#ffffff',
-          borderColor: highlight ? `${color}35` : isDark ? D.border : '#e2e8f0',
-        }}>
+      <div className={`rounded-2xl shadow-sm border h-full bg-white dark:bg-slate-800 border-slate-200/80 dark:border-slate-700 hover:shadow-md transition-all`}>
         <div className="p-4">
           <div className="flex items-start justify-between mb-3">
-            <div className="flex-1 min-w-0 mr-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: isDark ? D.muted : '#94a3b8' }}>{label}</p>
-              <p className="text-2xl font-black tracking-tight leading-none" style={{ color, fontFamily: "'Roboto Mono', monospace" }}>{value}</p>
-              <p className="text-xs font-medium mt-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>{unit}</p>
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">{label}</p>
+              <p className="text-2xl font-bold tracking-tight" style={{ color }}>{value}</p>
+              <p className="text-xs font-medium text-slate-400 dark:text-slate-500 mt-0.5">{unit}</p>
             </div>
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${color}15` }}>
+            <div className="p-2 rounded-xl" style={{ backgroundColor: `${color}15` }}>
               <Icon className="w-4 h-4" style={{ color }} />
             </div>
           </div>
           {trend && (
-            <div className="flex items-center gap-1.5 pt-2 mt-1 border-t" style={{ borderColor: isDark ? D.border : '#f1f5f9' }}>
-              <p className="text-[11px] font-medium truncate" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>{trend}</p>
-            </div>
+            <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500 truncate border-t border-slate-100 dark:border-slate-700 pt-2 mt-1">
+              {trend}
+            </p>
           )}
         </div>
       </div>
@@ -546,6 +531,7 @@ function ReminderPopup({ reminder, onDismiss, isDark }) {
 function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete, isDark }) {
   if (!holiday) return null;
 
+  // Safe date formatting
   const dayOfWeek = safeFormatDate(holiday.date, 'EEEE, MMMM d, yyyy', holiday.date || '—');
 
   const daysLeft = (() => {
@@ -564,7 +550,6 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete, isDar
   return (
     <motion.div
       className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
-      style={{ backdropFilter: 'blur(8px)' }}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClose}
     >
@@ -578,11 +563,12 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete, isDar
         transition={{ type: 'spring', stiffness: 220, damping: 22 }}
         onClick={e => e.stopPropagation()}
       >
+        {/* Header */}
         <div className="px-6 py-5 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
-          <div className="absolute top-0 right-0 w-48 h-48 rounded-full opacity-10" style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)', transform: 'translate(30%,-30%)' }} />
+          <div className="absolute top-0 right-0 w-32 h-32 rounded-full opacity-10" style={{ background: 'white', transform: 'translate(30%,-30%)' }} />
           <div className="relative flex items-start justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
                 <CalendarIcon className="w-6 h-6 text-white" />
               </div>
               <div>
@@ -596,6 +582,7 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete, isDar
           </div>
         </div>
 
+        {/* Body */}
         <div className="p-6 space-y-3">
           <div className="flex items-center gap-3 p-3.5 rounded-xl border"
             style={{ backgroundColor: isDark ? `${COLORS.amber}12` : `${COLORS.amber}08`, borderColor: `${COLORS.amber}30` }}>
@@ -627,6 +614,7 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete, isDar
           )}
         </div>
 
+        {/* Footer */}
         <div className="px-6 py-4 flex justify-between items-center border-t"
           style={{ borderColor: isDark ? D.border : '#f1f5f9', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
           {isAdmin ? (
@@ -670,7 +658,6 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
   return (
     <motion.div
       className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
-      style={{ backdropFilter: 'blur(8px)' }}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClose}
     >
@@ -681,6 +668,7 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
         transition={{ type: 'spring', stiffness: 220, damping: 22 }}
         onClick={e => e.stopPropagation()}
       >
+        {/* Header */}
         <div
           className="px-6 py-5 text-white relative overflow-hidden flex-shrink-0"
           style={{ background: isDue ? `linear-gradient(135deg, ${COLORS.red}, #B91C1C)` : `linear-gradient(135deg, ${COLORS.purple}, #6D28D9)` }}
@@ -689,7 +677,7 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
           <div className="relative flex items-start justify-between">
             <div className="flex items-center gap-3 flex-1 min-w-0">
               <motion.div
-                className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center flex-shrink-0"
+                className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0"
                 animate={isDue ? { scale: [1, 1.1, 1] } : {}} transition={{ duration: 1, repeat: Infinity }}
               >
                 <AlarmClock className="w-6 h-6 text-white" />
@@ -707,6 +695,7 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
           </div>
         </div>
 
+        {/* Body */}
         <div className="p-6 space-y-3 overflow-y-auto slim-scroll flex-1" style={slimScroll}>
           <div className="flex items-center gap-3 p-3.5 rounded-xl border"
             style={{
@@ -753,6 +742,7 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
           </a>
         </div>
 
+        {/* Footer */}
         <div className="px-6 py-4 flex justify-between items-center flex-shrink-0 border-t"
           style={{ borderColor: isDark ? D.border : '#f1f5f9', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
           {!isViewingOther ? (
@@ -811,7 +801,6 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave, isDark }) {
   return (
     <motion.div
       className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
-      style={{ backdropFilter: 'blur(8px)' }}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClose}
     >
@@ -822,22 +811,16 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave, isDark }) {
         transition={{ type: 'spring', stiffness: 220, damping: 22 }}
         onClick={e => e.stopPropagation()}
       >
-        <div className="px-6 py-5 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${COLORS.mediumBlue}, #1d4ed8)` }}>
-          <div className="absolute top-0 right-0 w-32 h-32 rounded-full opacity-10" style={{ background: 'white', transform: 'translate(30%,-30%)' }} />
-          <div className="relative flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
-                <AlarmClock className="w-5 h-5 text-white" />
-              </div>
-              <h2 className="text-lg font-bold">Edit Reminder</h2>
-            </div>
+        <div className="px-6 py-5 text-white" style={{ background: `linear-gradient(135deg, ${COLORS.mediumBlue}, #1d4ed8)` }}>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold">Edit Reminder</h2>
             <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center"><X className="w-4 h-4 text-white" /></button>
           </div>
         </div>
         <div className="p-6 space-y-4">
           {[
-            { label: 'Title', type: 'text',           val: title,    set: setTitle,    placeholder: 'Reminder title' },
-            { label: 'Remind At', type: 'datetime-local', val: remindAt, set: setRemindAt, placeholder: '' },
+            { label: 'Title', type: 'text',           val: title,       set: setTitle,       placeholder: 'Reminder title' },
+            { label: 'Remind At', type: 'datetime-local', val: remindAt,    set: setRemindAt,    placeholder: '' },
           ].map(({ label, type, val, set, placeholder }) => (
             <div key={label}>
               <label className="text-sm font-semibold mb-1.5 block text-slate-600 dark:text-slate-400">{label}</label>
@@ -852,7 +835,7 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave, isDark }) {
             <label className="text-sm font-semibold mb-1.5 block text-slate-600 dark:text-slate-400">Description</label>
             <textarea
               value={description} onChange={e => setDescription(e.target.value)} rows={3}
-              className="w-full px-3.5 py-2.5 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all resize-none"
+              placeholder="Add details..." className="w-full px-3.5 py-2.5 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none transition-all"
               style={inputStyle}
             />
           </div>
@@ -910,7 +893,6 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
   return (
     <motion.div
       className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
-      style={{ backdropFilter: 'blur(8px)' }}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClose}
     >
@@ -921,6 +903,7 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
         transition={{ type: 'spring', stiffness: 220, damping: 22 }}
         onClick={e => e.stopPropagation()}
       >
+        {/* Header */}
         <div className="px-5 py-4 flex items-center justify-between flex-shrink-0"
           style={{ background: `linear-gradient(135deg, ${COLORS.purple}, #6D28D9)` }}>
           <div className="flex items-center gap-3">
@@ -938,6 +921,7 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
           </div>
         </div>
 
+        {/* Calendar Grid */}
         <div className="flex-1 overflow-y-auto p-4" style={slimScroll}>
           <div className="grid grid-cols-7 mb-1">
             {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
@@ -999,6 +983,7 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
           </div>
         </div>
 
+        {/* Footer */}
         <div className="px-5 py-3 flex justify-between items-center flex-shrink-0 border-t"
           style={{ borderColor: isDark ? D.border : '#f1f5f9', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
           <p className="text-xs font-medium text-slate-400">{safeReminders.length} total · click a chip to open details</p>
@@ -1018,16 +1003,20 @@ export default function Attendance() {
   const isAdmin         = user?.role === 'admin';
   const canViewRankings = hasPermission('can_view_staff_rankings');
 
+  // ── Cross-visibility ───────────────────────────────────────────────────────
+  // view_other_attendance is an array of user IDs that this user can view
   const crossVisAttendance  = user?.permissions?.view_other_attendance || [];
   const hasCrossVisAttendance = crossVisAttendance.length > 0;
+  // canSwitchUser: admin can switch to any user; others only if they have cross-vis
   const canSwitchUser = isAdmin || hasCrossVisAttendance;
 
+  // ── Layout customizer ─────────────────────────────────────────────────────
   const ATT_SECTIONS = ['today_status', 'stat_cards', 'holidays_reminders', 'calendar_area'];
   const ATT_LABELS = {
     today_status:       { name: "Today's Status",      icon: '🕐', desc: 'Punch-in / punch-out card' },
     stat_cards:         { name: 'Statistics',           icon: '📊', desc: 'Monthly hours, streak, rank' },
-    holidays_reminders: { name: 'Upcoming Holidays',   icon: '🗓️', desc: 'Upcoming holidays' },
-    calendar_area:      { name: 'Calendar & History',  icon: '📅', desc: 'Attendance calendar and recent records' },
+    holidays_reminders: { name: 'Upcoming Holidays', icon: '🗓️', desc: 'Upcoming holidays' },
+    calendar_area:      { name: 'Calendar & History',   icon: '📅', desc: 'Attendance calendar and recent records' },
   };
   const { order: attOrder, moveSection: attMove, resetOrder: attReset } = usePageLayout('attendance', ATT_SECTIONS);
   const [showLayoutCustomizer, setShowLayoutCustomizer] = React.useState(false);
@@ -1058,6 +1047,7 @@ export default function Attendance() {
   const [userLocation,      setUserLocation]      = useState(null);
   const [isWithinGeofence,  setIsWithinGeofence]  = useState(null);
 
+  // GEO-FENCE CONFIG — Office: 21.18796, 72.81375 (Surat)
   const OFFICE_LAT        = 21.18796;
   const OFFICE_LNG        = 72.81375;
   const GEOFENCE_RADIUS_M = 200;
@@ -1098,6 +1088,7 @@ export default function Attendance() {
 
   // ── Derived flags ──────────────────────────────────────────────────────────
   const isEveryoneView = isAdmin && selectedUserId === 'everyone';
+  // isViewingOther: admin viewing specific user OR non-admin with cross-vis permission
   const isViewingOther = canSwitchUser && !!selectedUserId && selectedUserId !== 'everyone';
   const todayDateStr   = format(new Date(), 'yyyy-MM-dd');
 
@@ -1141,16 +1132,19 @@ export default function Attendance() {
       }
       const timer = setTimeout(() => {
         setShowPunchInModal(true);
+        // Auto-check location when modal opens
         setGeoError(null); setUserLocation(null); setIsWithinGeofence(null);
       }, 800);
       return () => clearTimeout(timer);
     }
   }, [todayAttendance, isViewingOther, todayIsHoliday, modalActionDone]);
 
+  // Block app body scroll when punch-in modal is open
   useEffect(() => {
     if (showPunchInModal) {
       document.body.style.overflow = 'hidden';
       document.body.style.pointerEvents = 'none';
+      // The modal itself re-enables pointer events via inline style
     } else {
       document.body.style.overflow = '';
       document.body.style.pointerEvents = '';
@@ -1169,6 +1163,7 @@ export default function Attendance() {
     }
   }, [todayAttendance]);
 
+  // Reminder popup checker
   useEffect(() => {
     const check = () => {
       const now = new Date();
@@ -1227,9 +1222,10 @@ export default function Attendance() {
   // ── Data Fetch ─────────────────────────────────────────────────────────────
   const fetchData = useCallback(async (overrideUserId = undefined) => {
     setLoading(true); setDataError(null);
+    // For admin: can target anyone or 'everyone'. For cross-vis users: target specific permitted user.
     const rawTargetId    = canSwitchUser ? (overrideUserId !== undefined ? overrideUserId : selectedUserId) : null;
     const isEveryoneReq  = isAdmin && rawTargetId === 'everyone';
-    const isOtherReq     = !!rawTargetId && rawTargetId !== 'everyone';
+    const isOtherReq     = !!rawTargetId && rawTargetId !== 'everyone'; // works for both admin and cross-vis
     const resolvedUserId = isEveryoneReq ? null : isOtherReq ? rawTargetId : null;
 
     try {
@@ -1249,20 +1245,26 @@ export default function Attendance() {
       const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes] = await Promise.all(requests);
 
       const allHolidays = holidaysRes.data || [];
+      // Show holidays that are confirmed OR have no status (manually added holidays
+      // often come without an explicit 'confirmed' status from the backend)
       const allConfirmed = (Array.isArray(allHolidays) ? allHolidays : []).filter(h => h.status !== 'rejected');
       setHolidays(allConfirmed);
 
+      // If no holidays exist at all, trigger a background auto-sync so the
+      // Indian public holiday calendar self-populates without any admin action.
       if (allConfirmed.length === 0) {
         api.post('/holidays/auto-sync').then(async () => {
+          // Re-fetch after sync so the calendar shows holidays immediately
           const refreshed = await api.get('/holidays').catch(() => ({ data: [] }));
           setHolidays((refreshed.data || []).filter(h => h.status !== 'rejected'));
-        }).catch(() => {});
+        }).catch(() => {/* non-fatal — holidays will appear on next page load */});
       }
       if (isAdmin) setPendingHolidays((Array.isArray(allHolidays) ? allHolidays : []).filter(h => h.status === 'pending'));
 
       if (isAdmin) {
         try { const usersRes = await api.get('/users'); setAllUsers(usersRes.data || []); } catch {}
       } else if (hasCrossVisAttendance) {
+        // Non-admin with cross-visibility: always keep permitted user list fresh
         try {
           const usersRes = await api.get('/users');
           const permitted = (usersRes.data || []).filter(u =>
@@ -1341,7 +1343,8 @@ export default function Attendance() {
     }
   }, [isViewingOther, selectedUserId]);
 
-  // ── Haversine Distance ─────────────────────────────────────────────────────
+  // ── Punch Action ───────────────────────────────────────────────────────────
+  // ── HAVERSINE DISTANCE (metres) ──────────────────────────────────────────
   const haversineMetres = useCallback((lat1, lng1, lat2, lng2) => {
     const R = 6371000;
     const toRad = d => (d * Math.PI) / 180;
@@ -1351,7 +1354,7 @@ export default function Attendance() {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }, []);
 
-  // ── Check Geo-fence ───────────────────────────────────────────────────────
+  // ── CHECK GEO-FENCE ───────────────────────────────────────────────────────
   const checkGeofence = useCallback(async () => {
     setGeoChecking(true); setGeoError(null);
     return new Promise((resolve) => {
@@ -1389,11 +1392,20 @@ export default function Attendance() {
   const handlePunchAction = useCallback(async (action) => {
     setLoading(true); setGeoError(null);
     try {
+      // Always attempt GPS location for both punch-in and punch-out
       const { ok, location } = await checkGeofence();
+
+      // For punch-in: enforce geo-fence ONLY when we successfully obtained
+      // the user's location AND it is outside the allowed radius.
+      // If geolocation is unavailable (permission denied, HTTP context, GPS
+      // hardware missing), we still allow the punch so the web app is not
+      // completely blocked — the server records the attempt without coordinates.
       if (action === 'punch_in' && !ok && location !== null) {
+        // We have a valid location reading but it's outside the fence
         setLoading(false);
-        return;
+        return; // geoError is already set — modal will show it
       }
+
       const response = await api.post('/attendance', { action, location });
       if (action === 'punch_in') {
         toast.success('Punched in successfully ✓');
@@ -1401,8 +1413,9 @@ export default function Attendance() {
       } else {
         const duration = response.data?.duration || 0;
         toast.success(`Punched out — ${formatDuration(duration)}`);
+        // If "Keep me signed in" was active, end the session on punch-out
         if (localStorage.getItem('taskosphere_keep_signed_in') === 'true') {
-          setTimeout(() => logout(), 1500);
+          setTimeout(() => logout(), 1500); // small delay so toast is visible
         }
       }
       await fetchData();
@@ -1418,7 +1431,7 @@ export default function Attendance() {
     if (leaveType === 'early_leave' && !earlyLeaveTime) {
       toast.error('Please specify your early departure time'); return;
     }
-    const isPartialDay = leaveType !== 'full_day';
+    const isPartialDay = leaveType !== 'full_day'; // half_day + early_leave are partial
     const effectiveTo = isPartialDay ? leaveFrom : (leaveTo || leaveFrom);
     try {
       await api.post('/attendance/apply-leave', {
@@ -1507,13 +1520,14 @@ export default function Attendance() {
     if (!reminderTitle.trim() || !reminderDatetime) { toast.error('Title and date/time are required'); return; }
     try {
       const res = await api.post('/email/save-as-reminder', {
-        event_id:    `manual-${Date.now()}`,
+        event_id:    `manual-${Date.now()}`,         // required by backend model
         title:       reminderTitle.trim(),
         description: reminderDesc.trim() || '',
         remind_at:   reminderDatetime ? new Date(reminderDatetime).toISOString() : undefined,
       });
       toast.success(res.data?.status === 'already_exists' ? 'Reminder already exists' : 'Reminder set');
       setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null);
+      // Re-fetch reminders since the response is {status, id} not a full reminder doc
       await fetchReminders();
     } catch { toast.error('Failed to create reminder'); }
   }, [reminderTitle, reminderDesc, reminderDatetime]);
@@ -1710,6 +1724,7 @@ export default function Attendance() {
   const attendanceMap = useMemo(() => {
     const map = {};
     const records = Array.isArray(attendanceHistory) ? attendanceHistory : [];
+    // For calendar, only map own records when not in everyone/other view
     const filtered = isEveryoneView
       ? records
       : isViewingOther
@@ -1733,7 +1748,7 @@ export default function Attendance() {
 
   const upcomingReminders = useMemo(() =>
     (Array.isArray(reminders) ? reminders : [])
-      .filter(r => r.is_dismissed !== true)
+      .filter(r => r.is_dismissed !== true)   // null / undefined → show; only true → hide
       .sort((a, b) => {
         const da = a.remind_at ? new Date(a.remind_at) : new Date(0);
         const db = b.remind_at ? new Date(b.remind_at) : new Date(0);
@@ -1745,6 +1760,7 @@ export default function Attendance() {
   const recentAttendance = useMemo(() => {
     const safe = Array.isArray(attendanceHistory) ? attendanceHistory : [];
     if (isEveryoneView) return safe.slice(0, 25);
+    // When viewing self (admin or not), ensure only own records show
     if (!isViewingOther) {
       return safe.filter(a => !a.user_id || a.user_id === user?.id).slice(0, 15);
     }
@@ -1777,7 +1793,7 @@ export default function Attendance() {
     return hLeft > 0 ? `${hLeft}h ${mLeft}m until auto-absent at 7:00 PM` : `${mLeft} minute(s) until auto-absent at 7:00 PM`;
   }, [todayAttendance, isViewingOther, isEveryoneView, todayIsHoliday]);
 
-  // ── Attendance Streak ──────────────────────────────────────────────────────
+  // ── FEATURE ENHANCEMENT: Attendance Streak ──────────────────────────────────
   const attendanceStreak = useMemo(() => {
     const safeHistory = Array.isArray(attendanceHistory) ? attendanceHistory : [];
     const presentDates = safeHistory
@@ -1788,14 +1804,18 @@ export default function Attendance() {
     if (presentDates.length === 0) return 0;
     let streak = 0;
     let checkDate = new Date();
+    // If today has attendance or is ongoing, count it
+    const todayStr = format(checkDate, 'yyyy-MM-dd');
     const hasTodayRecord = displayTodayAttendance?.punch_in && displayTodayAttendance?.status === 'present';
     if (hasTodayRecord) {
       streak = 1;
       checkDate = subDays(checkDate, 1);
     }
+    // Walk backward
     for (let i = 0; i < 365; i++) {
       const dateStr = format(checkDate, 'yyyy-MM-dd');
       const dayOfWeek = checkDate.getDay();
+      // Skip Sundays (or holidays)
       const isHolidayDate = (Array.isArray(holidays) ? holidays : []).some(h => h.date === dateStr);
       if (dayOfWeek === 0 || isHolidayDate) {
         checkDate = subDays(checkDate, 1);
@@ -1811,7 +1831,7 @@ export default function Attendance() {
     return streak;
   }, [attendanceHistory, displayTodayAttendance, holidays]);
 
-  // ── Average Daily Hours ────────────────────────────────────────────────────
+  // ── FEATURE ENHANCEMENT: Average Daily Hours ───────────────────────────────
   const avgDailyHours = useMemo(() => {
     const presentDays = monthAttendance.filter(a => a.punch_in && a.status === 'present' && a.duration_minutes > 0);
     if (presentDays.length === 0) return '0.0';
@@ -1819,10 +1839,10 @@ export default function Attendance() {
     return (totalMins / presentDays.length / 60).toFixed(1);
   }, [monthAttendance]);
 
-  // ── Weekly Summary ─────────────────────────────────────────────────────────
+  // ── FEATURE ENHANCEMENT: This Week's Summary ──────────────────────────────
   const weekSummary = useMemo(() => {
     const today = new Date();
-    const weekStart = startOfWeek(today, { weekStartsOn: 1 });
+    const weekStart = startOfWeek(today, { weekStartsOn: 1 }); // Monday
     const weekEnd = endOfWeek(today, { weekStartsOn: 1 });
     const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd });
     const safeHistory = Array.isArray(attendanceHistory) ? attendanceHistory : [];
@@ -1852,7 +1872,7 @@ export default function Attendance() {
     });
   }, [attendanceHistory, displayTodayAttendance, holidays]);
 
-  // ── Overtime detection ─────────────────────────────────────────────────────
+  // ── FEATURE ENHANCEMENT: Overtime detection ─────────────────────────────────
   const overtimeToday = useMemo(() => {
     if (!displayTodayAttendance?.punch_in) return null;
     const hrs = parseDurationToHours(displayLiveDuration);
@@ -1877,6 +1897,7 @@ export default function Attendance() {
     [holidays, selectedDate]
   );
 
+  // Count upcoming leaves from attendance history
   const upcomingLeaves = useMemo(() => {
     const safe = Array.isArray(attendanceHistory) ? attendanceHistory : [];
     return safe.filter(a => {
@@ -1900,6 +1921,7 @@ export default function Attendance() {
         {firedReminder && <ReminderPopup reminder={firedReminder} onDismiss={handleDismissPopup} isDark={isDark} />}
       </AnimatePresence>
 
+      {/* ── Holiday detail ── */}
       <AnimatePresence>
         {selectedHolidayDetail && (
           <HolidayDetailPopup
@@ -1911,6 +1933,7 @@ export default function Attendance() {
         )}
       </AnimatePresence>
 
+      {/* ── Reminder detail ── */}
       <AnimatePresence>
         {selectedReminderDetail && (
           <ReminderDetailPopup
@@ -1922,6 +1945,7 @@ export default function Attendance() {
         )}
       </AnimatePresence>
 
+      {/* ── Reminder edit ── */}
       <AnimatePresence>
         {isEditModalOpen && editingReminder && (
           <ReminderEditModal
@@ -1933,6 +1957,7 @@ export default function Attendance() {
         )}
       </AnimatePresence>
 
+      {/* ── Reminder calendar ── */}
       <AnimatePresence>
         {showReminderCalendar && (
           <ReminderCalendarModal
@@ -1944,6 +1969,7 @@ export default function Attendance() {
         )}
       </AnimatePresence>
 
+      {/* ── Layout Customizer Panel ─────────────────────────────────────────── */}
       <LayoutCustomizer
         isOpen={showLayoutCustomizer}
         onClose={() => setShowLayoutCustomizer(false)}
@@ -1959,1702 +1985,1756 @@ export default function Attendance() {
         style={{ background: isDark ? D.bg : '#f8fafc' }}
         variants={containerVariants} initial="hidden" animate="visible"
       >
-        <div className="max-w-[1600px] mx-auto w-full space-y-5">
-
-          {/* ══ PAGE HEADER BANNER ════════════════════════════════════════════ */}
-          <motion.div variants={itemVariants}>
-            <div
-              className="relative overflow-hidden rounded-2xl px-6 py-5 w-full"
-              style={{
-                background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
-                boxShadow: '0 8px 32px rgba(13,59,102,0.25)',
-              }}
-            >
-              {/* Decorative circles */}
-              <div className="absolute right-0 top-0 w-80 h-80 rounded-full -mr-24 -mt-24 opacity-[0.07]"
-                style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
-              <div className="absolute left-1/2 bottom-0 w-48 h-48 rounded-full -mb-24 opacity-[0.05]"
-                style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
-
-              <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div>
-                  <p className="text-white/55 text-[11px] font-semibold uppercase tracking-widest mb-1">
-                    {format(new Date(), 'EEEE, MMMM d, yyyy')} · IST
-                  </p>
-                  <h1 className="text-2xl font-black text-white tracking-tight">
-                    {isAdmin ? 'Attendance Management' : isViewingOther ? 'Team Attendance View' : 'My Attendance'}
-                  </h1>
-                  <p className="text-white/60 text-sm mt-1">
-                    {isAdmin
-                      ? 'Manage team attendance — auto-absent marks at 7:00 PM IST daily'
-                      : isViewingOther
-                        ? `Viewing attendance for ${allUsers.find(u=>u.id===selectedUserId)?.full_name || 'team member'}`
-                        : 'Track your daily hours — auto-absent at 7:00 PM if not punched in'}
-                  </p>
-                </div>
-                <div className="flex gap-2 flex-wrap items-center">
-                  {canSwitchUser && (
-                    <select
-                      className="rounded-xl px-3.5 py-2 text-sm font-medium cursor-pointer border focus:outline-none focus:ring-2 focus:ring-white/40 transition-all"
-                      style={{
-                        backgroundColor: 'rgba(255,255,255,0.15)',
-                        borderColor: 'rgba(255,255,255,0.25)',
-                        color: '#ffffff',
-                        backdropFilter: 'blur(8px)',
-                      }}
-                      value={selectedUserId || ''}
-                      onChange={e => {
-                        const val = e.target.value || null;
-                        setSelectedUserId(val);
-                        fetchData(val);
-                        fetchReminders(val);
-                      }}
-                    >
-                      <option value="" style={{ color: '#1e293b', background: '#ffffff' }}>
-                        {user?.full_name ? `${user.full_name} (Me)` : 'My Attendance'}
-                      </option>
-                      {(Array.isArray(allUsers) ? allUsers : []).filter(u => u.id !== user?.id).map(u => (
-                        <option key={u.id} value={u.id} style={{ color: '#1e293b', background: '#ffffff' }}>
-                          {u.full_name}
-                        </option>
-                      ))}
-                      {isAdmin && (
-                        <option value="everyone" style={{ color: '#1e293b', background: '#ffffff' }}>Everyone (All Users)</option>
-                      )}
-                    </select>
-                  )}
-                  {isAdmin && (
-                    <button
-                      onClick={() => handleMarkAbsentBulk()} disabled={absentLoading}
-                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 border"
-                      style={{ backgroundColor: 'rgba(239,68,68,0.2)', borderColor: 'rgba(239,68,68,0.4)', color: '#fca5a5' }}
-                    >
-                      <UserX className="w-3.5 h-3.5" />
-                      {absentLoading ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Marking…</> : 'Mark Absent'}
-                    </button>
-                  )}
-                  <button
-                    onClick={handleExportPDF} disabled={exportingPDF}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 border"
-                    style={{ backgroundColor: 'rgba(255,255,255,0.15)', borderColor: 'rgba(255,255,255,0.25)', color: '#ffffff' }}
+        <div className="max-w-[1600px] mx-auto w-full space-y-6">
+        {/* ══ PAGE HEADER ══════════════════════════════════════════════════════ */}
+        <motion.div variants={itemVariants}>
+          <div
+            className="relative overflow-hidden rounded-2xl px-6 py-5 w-full"
+            style={{
+              background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
+              boxShadow: '0 8px 32px rgba(13,59,102,0.25)',
+            }}
+          >
+            <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
+              style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+            <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <p className="text-white/60 text-xs font-medium uppercase tracking-widest mb-1">
+                  {format(new Date(), 'EEEE, MMMM d, yyyy')}
+                </p>
+                <h1 className="text-2xl font-bold text-white tracking-tight">
+                  {isAdmin ? 'Attendance Management' : isViewingOther ? 'Team Attendance View' : 'My Attendance'}
+                </h1>
+                <p className="text-white/60 text-sm mt-1">
+                  {isAdmin
+                    ? 'Manage team attendance — auto-absent marks at 7:00 PM IST daily'
+                    : isViewingOther
+                      ? `Viewing attendance for ${allUsers.find(u=>u.id===selectedUserId)?.full_name || 'team member'}`
+                      : 'Track your daily hours — auto-absent at 7:00 PM if not punched in'}
+                </p>
+              </div>
+              <div className="flex gap-2 flex-wrap items-center">
+                {canSwitchUser && (
+                  <select
+                    className="rounded-xl px-3.5 py-2 text-sm font-medium cursor-pointer border focus:outline-none focus:ring-2 focus:ring-white/40 transition-all"
+                    style={{
+                      backgroundColor: 'rgba(255,255,255,0.15)',
+                      borderColor: 'rgba(255,255,255,0.25)',
+                      color: '#ffffff',
+                      backdropFilter: 'blur(8px)',
+                    }}
+                    value={selectedUserId || ''}
+                    onChange={e => {
+                      const val = e.target.value || null;
+                      setSelectedUserId(val);
+                      fetchData(val);
+                      fetchReminders(val);
+                    }}
                   >
-                    {exportingPDF ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Exporting…</> : 'Export PDF'}
+                    <option value="" style={{ color: '#1e293b', background: '#ffffff' }}>
+                      {user?.full_name ? `${user.full_name} (Me)` : 'My Attendance'}
+                    </option>
+                    {(Array.isArray(allUsers) ? allUsers : []).filter(u => u.id !== user?.id).map(u => (
+                      <option key={u.id} value={u.id} style={{ color: '#1e293b', background: '#ffffff' }}>
+                        {u.full_name}
+                      </option>
+                    ))}
+                    {/* Everyone option at the bottom */}
+                    {isAdmin && (
+                      <option value="everyone" style={{ color: '#1e293b', background: '#ffffff' }}>Everyone (All Users)</option>
+                    )}
+                  </select>
+                )}
+                {isAdmin && (
+                  <button
+                    onClick={() => handleMarkAbsentBulk()} disabled={absentLoading}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 border"
+                    style={{ backgroundColor: 'rgba(239,68,68,0.2)', borderColor: 'rgba(239,68,68,0.4)', color: '#fca5a5' }}
+                  >
+                    <UserX className="w-3.5 h-3.5" />
+                    {absentLoading ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Marking…</> : 'Mark Absent'}
                   </button>
-                </div>
+                )}
+                <button
+                  onClick={handleExportPDF} disabled={exportingPDF}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 border"
+                  style={{ backgroundColor: 'rgba(255,255,255,0.15)', borderColor: 'rgba(255,255,255,0.25)', color: '#ffffff' }}
+                >
+                  {exportingPDF ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Exporting…</> : 'Export PDF'}
+                </button>
               </div>
             </div>
-          </motion.div>
-
-          {/* ══ ALERT BANNERS ════════════════════════════════════════════════ */}
-          {dataError && (
-            <motion.div variants={itemVariants}
-              className="flex items-center gap-3 px-4 py-3 rounded-xl border text-sm"
-              style={{
-                borderColor: isDark ? '#7f1d1d' : '#fecaca',
-                backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2',
-              }}>
-              <ShieldAlert className="w-4 h-4 text-red-500 flex-shrink-0" />
-              <span className="font-semibold text-red-500">Connection error: </span>
-              <span style={{ color: isDark ? '#fca5a5' : '#dc2626' }} className="flex-1">{dataError}</span>
-              <button onClick={() => fetchData()} className="text-red-400 text-xs font-bold underline hover:text-red-300">Retry</button>
-            </motion.div>
-          )}
-
-          {absentCountdown && !isViewingOther && !isEveryoneView && (
-            <motion.div variants={itemVariants}
-              className="flex items-center gap-3 px-4 py-3 rounded-xl border-2 absent-pulse"
-              style={{ borderColor: isDark ? '#991b1b' : '#fca5a5', backgroundColor: isDark ? 'rgba(239,68,68,0.10)' : '#fff1f2' }}>
-              <motion.div animate={{ scale: [1, 1.25, 1] }} transition={{ duration: 0.9, repeat: Infinity }}>
-                <AlertTriangle className="w-4 h-4 text-red-500" />
-              </motion.div>
-              <span className="text-sm font-semibold flex-1" style={{ color: isDark ? '#f87171' : '#991b1b' }}>
-                Not punched in today — {absentCountdown}
-              </span>
-              <Button size="sm" onClick={() => handlePunchAction('punch_in')}
-                className="bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg px-3 h-8 text-xs">
-                <LogIn className="w-3.5 h-3.5 mr-1" /> Punch In Now
-              </Button>
-            </motion.div>
-          )}
-
-          {(isViewingOther || isEveryoneView) && (
-            <motion.div variants={itemVariants}
-              className="flex items-center gap-3 px-4 py-3 rounded-xl border text-sm"
-              style={{ borderColor: isDark ? '#1d4ed8' : '#bfdbfe', backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff' }}>
-              <Users className="w-4 h-4 text-blue-500" />
-              <span className="font-semibold" style={{ color: isDark ? '#93c5fd' : '#1e40af' }}>
-                {isEveryoneView ? 'Viewing all employees' : <>Viewing: <span className="underline decoration-dotted">{viewedUserName}</span></>}
-              </span>
-              <button className="ml-auto text-blue-400 hover:text-blue-300 text-xs font-semibold underline"
-                onClick={() => { setSelectedUserId(null); fetchData(null); fetchReminders(null); }}>
-                Back to my data
-              </button>
-            </motion.div>
-          )}
-
-          {overtimeToday && !isViewingOther && !isEveryoneView && (
-            <motion.div variants={itemVariants}
-              className="flex items-center gap-3 px-4 py-3 rounded-xl border text-sm"
-              style={{
-                borderColor: overtimeToday.level === 'high'
-                  ? isDark ? '#7f1d1d' : '#fecaca'
-                  : isDark ? 'rgba(245,158,11,0.35)' : '#fde68a',
-                backgroundColor: overtimeToday.level === 'high'
-                  ? isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2'
-                  : isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb',
-              }}>
-              <Zap className="w-4 h-4 flex-shrink-0" style={{ color: overtimeToday.level === 'high' ? COLORS.red : COLORS.amber }} />
-              <span className="font-semibold flex-1" style={{
-                color: overtimeToday.level === 'high'
-                  ? isDark ? '#f87171' : '#991b1b'
-                  : isDark ? '#fbbf24' : '#92400e',
-              }}>
-                {overtimeToday.level === 'high'
-                  ? `You've been working for ${overtimeToday.hours.toFixed(1)}h — consider wrapping up!`
-                  : `${overtimeToday.hours.toFixed(1)}h logged — you've exceeded the 8.5h daily goal`}
-              </span>
-            </motion.div>
-          )}
-
-          {/* ── Customize Layout button ─────────────────────────────────────── */}
-          <div className="flex justify-end">
-            <button
-              onClick={() => setShowLayoutCustomizer(true)}
-              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all active:scale-95"
-              style={{
-                background:  isDark ? 'rgba(31,111,178,0.15)' : 'rgba(31,111,178,0.07)',
-                borderColor: isDark ? 'rgba(31,111,178,0.4)'  : 'rgba(31,111,178,0.22)',
-                color:       isDark ? '#60a5fa'                : '#1F6FB2',
-              }}
-            >
-              <Settings2 size={13} />
-              Customize Layout
-            </button>
           </div>
+        </motion.div>
 
-          {/* ── Ordered sections ──────────────────────────────────────────────── */}
-          {attOrder.map((sectionId) => {
+        {/* ══ ALERT BANNERS ════════════════════════════════════════════════════ */}
+        {dataError && (
+          <motion.div variants={itemVariants}
+            className="flex items-center gap-3 px-4 py-3 rounded-xl border text-sm"
+            style={{
+              borderColor: isDark ? '#7f1d1d' : '#fecaca',
+              backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2',
+            }}>
+            <ShieldAlert className="w-4 h-4 text-red-500 flex-shrink-0" />
+            <span className="font-semibold text-red-500">Connection error: </span>
+            <span style={{ color: isDark ? '#fca5a5' : '#dc2626' }} className="flex-1">{dataError}</span>
+            <button onClick={() => fetchData()} className="text-red-400 text-xs font-bold underline hover:text-red-300">Retry</button>
+          </motion.div>
+        )}
 
-            /* ══ TODAY STATUS ════════════════════════════════════════════════ */
-            if (sectionId === 'today_status') return (
-              <React.Fragment key="today_status">
-                {!isEveryoneView && (
-                  <motion.div variants={itemVariants}>
-                    <SectionCard>
-                      <CardHeaderRow
-                        iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
-                        icon={<Activity className="h-4 w-4 text-blue-500" />}
-                        title={isTodaySelected ? (isViewingOther ? `${viewedUserName}'s Status` : "Today's Attendance") : format(selectedDate, 'EEEE, MMM d')}
-                        subtitle={isViewingOther ? 'Read-only view' : 'Real-time · Auto-absent at 7:00 PM IST'}
+        {absentCountdown && !isViewingOther && !isEveryoneView && (
+          <motion.div variants={itemVariants}
+            className="flex items-center gap-3 px-4 py-3 rounded-xl border-2 absent-pulse"
+            style={{ borderColor: isDark ? '#991b1b' : '#fca5a5', backgroundColor: isDark ? 'rgba(239,68,68,0.10)' : '#fff1f2' }}>
+            <motion.div animate={{ scale: [1, 1.25, 1] }} transition={{ duration: 0.9, repeat: Infinity }}>
+              <AlertTriangle className="w-4 h-4 text-red-500" />
+            </motion.div>
+            <span className="text-sm font-semibold flex-1" style={{ color: isDark ? '#f87171' : '#991b1b' }}>
+              Not punched in today — {absentCountdown}
+            </span>
+            <Button size="sm" onClick={() => handlePunchAction('punch_in')}
+              className="bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg px-3 h-8 text-xs">
+              <LogIn className="w-3.5 h-3.5 mr-1" /> Punch In Now
+            </Button>
+          </motion.div>
+        )}
+
+        {(isViewingOther || isEveryoneView) && (
+          <motion.div variants={itemVariants}
+            className="flex items-center gap-3 px-4 py-3 rounded-xl border text-sm"
+            style={{ borderColor: isDark ? '#1d4ed8' : '#bfdbfe', backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff' }}>
+            <Users className="w-4 h-4 text-blue-500" />
+            <span className="font-semibold" style={{ color: isDark ? '#93c5fd' : '#1e40af' }}>
+              {isEveryoneView ? 'Viewing all employees' : <>Viewing: <span className="underline decoration-dotted">{viewedUserName}</span></>}
+            </span>
+            <button className="ml-auto text-blue-400 hover:text-blue-300 text-xs font-semibold underline"
+              onClick={() => { setSelectedUserId(null); fetchData(null); fetchReminders(null); }}>
+              Back to my data
+            </button>
+          </motion.div>
+        )}
+
+        {/* ══ OVERTIME ALERT (Feature Enhancement) ═════════════════════════════ */}
+        {overtimeToday && !isViewingOther && !isEveryoneView && (
+          <motion.div variants={itemVariants}
+            className="flex items-center gap-3 px-4 py-3 rounded-xl border text-sm"
+            style={{
+              borderColor: overtimeToday.level === 'high'
+                ? isDark ? '#7f1d1d' : '#fecaca'
+                : isDark ? 'rgba(245,158,11,0.35)' : '#fde68a',
+              backgroundColor: overtimeToday.level === 'high'
+                ? isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2'
+                : isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb',
+            }}>
+            <Zap className="w-4 h-4 flex-shrink-0" style={{ color: overtimeToday.level === 'high' ? COLORS.red : COLORS.amber }} />
+            <span className="font-semibold flex-1" style={{
+              color: overtimeToday.level === 'high'
+                ? isDark ? '#f87171' : '#991b1b'
+                : isDark ? '#fbbf24' : '#92400e',
+            }}>
+              {overtimeToday.level === 'high'
+                ? `You've been working for ${overtimeToday.hours.toFixed(1)}h — consider wrapping up!`
+                : `${overtimeToday.hours.toFixed(1)}h logged — you've exceeded the 8.5h daily goal`}
+            </span>
+          </motion.div>
+        )}
+
+        {/* ── Customize Layout button ─────────────────────────────────── */}
+        <div className="flex justify-end">
+          <button
+            onClick={() => setShowLayoutCustomizer(true)}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all active:scale-95"
+            style={{
+              background:  isDark ? 'rgba(31,111,178,0.15)' : 'rgba(31,111,178,0.07)',
+              borderColor: isDark ? 'rgba(31,111,178,0.4)'  : 'rgba(31,111,178,0.22)',
+              color:       isDark ? '#60a5fa'                : '#1F6FB2',
+            }}
+          >
+            <Settings2 size={13} />
+            Customize Layout
+          </button>
+        </div>
+
+        {/* ── Ordered sections ─────────────────────────────────────────────── */}
+        {attOrder.map((sectionId) => {
+
+          /* ══ TODAY STATUS ═════════════════════════════════════════════════ */
+          if (sectionId === 'today_status') return (
+            <React.Fragment key="today_status">
+              {!isEveryoneView && (
+          <motion.div variants={itemVariants}>
+            <SectionCard>
+              <CardHeaderRow
+                iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
+                icon={<Activity className="h-4 w-4 text-blue-500" />}
+                title={isTodaySelected ? (isViewingOther ? `${viewedUserName}'s Status` : "Today's Attendance") : format(selectedDate, 'EEEE, MMM d')}
+                subtitle={isViewingOther ? 'Read-only view' : 'Real-time • Auto-absent at 7:00 PM IST'}
+              />
+              <div className="p-5">
+                {/* Holiday notice */}
+                {todayIsHoliday && (
+                  <div className="mb-4 flex items-center gap-3 px-4 py-3 rounded-xl border"
+                    style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.10)' : '#fffbeb', borderColor: isDark ? 'rgba(245,158,11,0.25)' : '#fde68a' }}>
+                    <CalendarIcon className="w-4 h-4 flex-shrink-0" style={{ color: COLORS.amber }} />
+                    <p className="text-sm font-semibold" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
+                      Today is a public holiday{todayHolidayName ? ` — ${todayHolidayName}` : ''}
+                    </p>
+                  </div>
+                )}
+
+                {/* Absent notice */}
+                {displayTodayAttendance?.status === 'absent' && (
+                  <div className="mb-4 flex items-center gap-3 px-4 py-3 rounded-xl border"
+                    style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.10)' : '#fef2f2', borderColor: isDark ? '#7f1d1d' : '#fecaca' }}>
+                    <X className="w-4 h-4 flex-shrink-0 text-red-500" />
+                    <p className="text-sm font-semibold text-red-500">
+                      Marked absent today{displayTodayAttendance.auto_marked ? ' (auto-marked at 7:00 PM)' : ''}
+                    </p>
+                  </div>
+                )}
+
+                {/* Leave notice */}
+                {displayTodayAttendance?.status === 'leave' && (
+                  <div className="mb-4 flex items-center gap-3 px-4 py-3 rounded-xl border"
+                    style={{ backgroundColor: isDark ? 'rgba(249,115,22,0.08)' : '#fff7ed', borderColor: isDark ? '#7c2d12' : '#fed7aa' }}>
+                    <CalendarX className="w-4 h-4 flex-shrink-0" style={{ color: COLORS.orange }} />
+                    <p className="text-sm font-semibold" style={{ color: isDark ? '#fb923c' : '#c2410c' }}>On leave today</p>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
+                  {/* Duration / progress */}
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Daily Progress</p>
+                    <motion.p
+                      key={displayLiveDuration}
+                      initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                      className="text-3xl font-black tracking-tight mb-1"
+                      style={{
+                        color: displayTodayAttendance?.status === 'absent' ? COLORS.red
+                          : todayIsHoliday ? COLORS.amber
+                          : COLORS.emeraldGreen,
+                      }}
+                    >
+                      {displayTodayAttendance?.status === 'absent' ? 'Absent'
+                        : todayIsHoliday ? 'Holiday'
+                        : displayLiveDuration}
+                    </motion.p>
+                    <p className="text-xs font-semibold uppercase tracking-wider mb-4"
+                      style={{
+                        color: displayTodayAttendance?.status === 'absent' ? COLORS.red
+                          : todayIsHoliday ? COLORS.amber
+                          : COLORS.emeraldGreen,
+                      }}>
+                      {displayTodayAttendance?.status === 'absent' ? 'Auto-marked absent'
+                        : todayIsHoliday ? 'Office closed'
+                        : (!isViewingOther && displayTodayAttendance?.punch_in && !displayTodayAttendance?.punch_out
+                            ? 'Live — updating every minute'
+                            : 'Total for today')}
+                    </p>
+
+                    {/* Progress bar */}
+                    <div className="h-1.5 rounded-full overflow-hidden mb-3"
+                      style={{ backgroundColor: isDark ? D.raised : '#f1f5f9' }}>
+                      <motion.div
+                        className="h-full rounded-full"
+                        style={{
+                          background: displayTodayAttendance?.status === 'absent'
+                            ? `linear-gradient(90deg, ${COLORS.red}, #fca5a5)`
+                            : todayIsHoliday
+                              ? `linear-gradient(90deg, ${COLORS.amber}, #fcd34d)`
+                              : `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`,
+                        }}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${displayTodayAttendance?.status === 'absent' ? 100 : todayIsHoliday ? 100 : progressPct}%` }}
+                        transition={{ duration: 1.2, ease: 'easeOut' }}
                       />
-                      <div className="p-5">
-                        {/* Notices */}
-                        {todayIsHoliday && (
-                          <div className="mb-4 flex items-center gap-3 px-4 py-3 rounded-xl border"
-                            style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.10)' : '#fffbeb', borderColor: isDark ? 'rgba(245,158,11,0.25)' : '#fde68a' }}>
-                            <CalendarIcon className="w-4 h-4 flex-shrink-0" style={{ color: COLORS.amber }} />
-                            <p className="text-sm font-semibold" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
-                              Today is a public holiday{todayHolidayName ? ` — ${todayHolidayName}` : ''}
-                            </p>
-                          </div>
-                        )}
-                        {displayTodayAttendance?.status === 'absent' && (
-                          <div className="mb-4 flex items-center gap-3 px-4 py-3 rounded-xl border"
-                            style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.10)' : '#fef2f2', borderColor: isDark ? '#7f1d1d' : '#fecaca' }}>
-                            <X className="w-4 h-4 flex-shrink-0 text-red-500" />
-                            <p className="text-sm font-semibold text-red-500">
-                              Marked absent today{displayTodayAttendance.auto_marked ? ' (auto-marked at 7:00 PM)' : ''}
-                            </p>
-                          </div>
-                        )}
-                        {displayTodayAttendance?.status === 'leave' && (
-                          <div className="mb-4 flex items-center gap-3 px-4 py-3 rounded-xl border"
-                            style={{ backgroundColor: isDark ? 'rgba(249,115,22,0.08)' : '#fff7ed', borderColor: isDark ? '#7c2d12' : '#fed7aa' }}>
-                            <CalendarX className="w-4 h-4 flex-shrink-0" style={{ color: COLORS.orange }} />
-                            <p className="text-sm font-semibold" style={{ color: isDark ? '#fb923c' : '#c2410c' }}>On leave today</p>
-                          </div>
-                        )}
+                    </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
-                          {/* Duration / progress */}
-                          <div>
-                            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: isDark ? D.muted : '#94a3b8' }}>Daily Progress</p>
-                            <motion.p
-                              key={displayLiveDuration}
-                              initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-                              className="font-black tracking-tight mb-1"
-                              style={{
-                                fontSize: '2.25rem',
-                                fontFamily: "'Roboto Mono', monospace",
-                                color: displayTodayAttendance?.status === 'absent' ? COLORS.red
-                                  : todayIsHoliday ? COLORS.amber
-                                  : COLORS.emeraldGreen,
-                              }}
+                    {/* Goal / progress chips */}
+                    <div className="flex gap-2">
+                      <div className="flex-1 px-3 py-2 rounded-xl border text-center"
+                        style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff', borderColor: isDark ? '#1d4ed8' : '#bfdbfe' }}>
+                        <p className="text-[10px] font-bold uppercase text-slate-400 mb-0.5">Daily Goal</p>
+                        <p className="text-lg font-black" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>8.5h</p>
+                      </div>
+                      <div className="flex-1 px-3 py-2 rounded-xl border text-center"
+                        style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0' }}>
+                        <p className="text-[10px] font-bold uppercase text-slate-400 mb-0.5">Progress</p>
+                        <p className="text-lg font-black text-emerald-500">
+                          {displayTodayAttendance?.status === 'absent' ? '0%' : todayIsHoliday ? '—' : `${progressPct}%`}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Punch controls — "Apply for Leave" REMOVED from here */}
+                  <div className="space-y-3">
+                    {displayTodayAttendance?.punch_in && (
+                      <>
+                        <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl border"
+                          style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0' }}>
+                          <div className="flex items-center gap-2 text-sm">
+                            <LogIn className="h-4 w-4 text-emerald-500" />
+                            <span className="font-medium" style={{ color: isDark ? D.muted : '#475569' }}>Punch In</span>
+                          </div>
+                          <span className="font-bold text-sm" style={{ color: isDark ? D.text : '#1e293b' }}>
+                            {formatAttendanceTime(displayTodayAttendance.punch_in)}
+                          </span>
+                        </div>
+                        {displayTodayAttendance.punch_out && (
+                          <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl border"
+                            style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2', borderColor: isDark ? '#7f1d1d' : '#fecaca' }}>
+                            <div className="flex items-center gap-2 text-sm">
+                              <LogOut className="h-4 w-4 text-red-500" />
+                              <span className="font-medium" style={{ color: isDark ? D.muted : '#475569' }}>Punch Out</span>
+                            </div>
+                            <span className="font-bold text-sm" style={{ color: isDark ? D.text : '#1e293b' }}>
+                              {formatAttendanceTime(displayTodayAttendance.punch_out)}
+                            </span>
+                          </div>
+                        )}
+                        {displayTodayAttendance.is_late && (
+                          <div className="px-3.5 py-2 rounded-xl text-xs font-semibold text-red-500"
+                            style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.12)' : '#fee2e2' }}>
+                            Late arrival recorded
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {!isViewingOther && (
+                      <div className="flex flex-col gap-2 pt-1">
+                        {!displayTodayAttendance?.punch_in && displayTodayAttendance?.status !== 'absent' ? (
+                          isTodaySelected && (
+                            <motion.button
+                              whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                              onClick={() => handlePunchAction('punch_in')} disabled={loading}
+                              className={`flex items-center justify-center gap-2 w-full h-11 rounded-xl text-sm font-bold text-white transition-all ${!loading ? 'punch-in-pulse' : ''}`}
+                              style={{ backgroundColor: COLORS.emeraldGreen }}
                             >
-                              {displayTodayAttendance?.status === 'absent' ? 'Absent'
-                                : todayIsHoliday ? 'Holiday'
-                                : displayLiveDuration}
-                            </motion.p>
-                            <p className="text-xs font-semibold uppercase tracking-wider mb-4"
-                              style={{
-                                color: displayTodayAttendance?.status === 'absent' ? COLORS.red
-                                  : todayIsHoliday ? COLORS.amber
-                                  : COLORS.emeraldGreen,
-                              }}>
-                              {displayTodayAttendance?.status === 'absent' ? 'Auto-marked absent'
-                                : todayIsHoliday ? 'Office closed'
-                                : (!isViewingOther && displayTodayAttendance?.punch_in && !displayTodayAttendance?.punch_out
-                                    ? 'Live — updating every minute'
-                                    : 'Total for today')}
-                            </p>
-
-                            {/* Progress bar */}
-                            <div className="h-2 rounded-full overflow-hidden mb-3"
-                              style={{ backgroundColor: isDark ? D.raised : '#f1f5f9' }}>
-                              <motion.div
-                                className="h-full rounded-full"
-                                style={{
-                                  background: displayTodayAttendance?.status === 'absent'
-                                    ? `linear-gradient(90deg, ${COLORS.red}, #fca5a5)`
-                                    : todayIsHoliday
-                                      ? `linear-gradient(90deg, ${COLORS.amber}, #fcd34d)`
-                                      : `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`,
-                                }}
-                                initial={{ width: 0 }}
-                                animate={{ width: `${displayTodayAttendance?.status === 'absent' ? 100 : todayIsHoliday ? 100 : progressPct}%` }}
-                                transition={{ duration: 1.2, ease: 'easeOut' }}
-                              />
-                            </div>
-
-                            {/* Goal / progress chips */}
-                            <div className="flex gap-2">
-                              <div className="flex-1 px-3 py-2 rounded-xl border text-center"
-                                style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff', borderColor: isDark ? '#1d4ed8' : '#bfdbfe' }}>
-                                <p className="text-[10px] font-bold uppercase text-slate-400 mb-0.5">Daily Goal</p>
-                                <p className="text-lg font-black" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue, fontFamily: "'Roboto Mono', monospace" }}>8.5h</p>
-                              </div>
-                              <div className="flex-1 px-3 py-2 rounded-xl border text-center"
-                                style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0' }}>
-                                <p className="text-[10px] font-bold uppercase text-slate-400 mb-0.5">Progress</p>
-                                <p className="text-lg font-black text-emerald-500" style={{ fontFamily: "'Roboto Mono', monospace" }}>
-                                  {displayTodayAttendance?.status === 'absent' ? '0%' : todayIsHoliday ? '—' : `${progressPct}%`}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Punch controls */}
-                          <div className="space-y-3">
-                            {displayTodayAttendance?.punch_in && (
-                              <>
-                                <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl border"
-                                  style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0' }}>
-                                  <div className="flex items-center gap-2 text-sm">
-                                    <LogIn className="h-4 w-4 text-emerald-500" />
-                                    <span className="font-medium" style={{ color: isDark ? D.muted : '#475569' }}>Punch In</span>
-                                  </div>
-                                  <span className="font-black text-sm font-mono" style={{ color: isDark ? D.text : '#1e293b' }}>
-                                    {formatAttendanceTime(displayTodayAttendance.punch_in)}
-                                  </span>
-                                </div>
-                                {displayTodayAttendance.punch_out && (
-                                  <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl border"
-                                    style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2', borderColor: isDark ? '#7f1d1d' : '#fecaca' }}>
-                                    <div className="flex items-center gap-2 text-sm">
-                                      <LogOut className="h-4 w-4 text-red-500" />
-                                      <span className="font-medium" style={{ color: isDark ? D.muted : '#475569' }}>Punch Out</span>
-                                    </div>
-                                    <span className="font-black text-sm font-mono" style={{ color: isDark ? D.text : '#1e293b' }}>
-                                      {formatAttendanceTime(displayTodayAttendance.punch_out)}
-                                    </span>
-                                  </div>
-                                )}
-                                {displayTodayAttendance.is_late && (
-                                  <div className="px-3.5 py-2 rounded-xl text-xs font-semibold text-red-500"
-                                    style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.12)' : '#fee2e2' }}>
-                                    Late arrival recorded
-                                  </div>
-                                )}
-                              </>
-                            )}
-
-                            {!isViewingOther && (
-                              <div className="flex flex-col gap-2 pt-1">
-                                {!displayTodayAttendance?.punch_in && displayTodayAttendance?.status !== 'absent' ? (
-                                  isTodaySelected && (
-                                    <motion.button
-                                      whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                                      onClick={() => handlePunchAction('punch_in')} disabled={loading}
-                                      className={`flex items-center justify-center gap-2 w-full h-12 rounded-xl text-sm font-black text-white transition-all ${!loading ? 'punch-in-pulse' : ''}`}
-                                      style={{ backgroundColor: COLORS.emeraldGreen, boxShadow: '0 4px 16px rgba(31,175,90,0.3)' }}
-                                    >
-                                      {loading
-                                        ? <><Loader2 className="w-4 h-4 animate-spin" />Punching In…</>
-                                        : <><LogIn className="w-4 h-4" />Punch In</>}
-                                    </motion.button>
-                                  )
-                                ) : !displayTodayAttendance?.punch_out && displayTodayAttendance?.punch_in && isTodaySelected ? (
-                                  <motion.button
-                                    whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                                    onClick={() => handlePunchAction('punch_out')} disabled={loading}
-                                    className="flex items-center justify-center gap-2 w-full h-12 rounded-xl text-sm font-black text-white transition-all"
-                                    style={{ backgroundColor: COLORS.red, boxShadow: '0 4px 16px rgba(239,68,68,0.3)' }}
-                                  >
-                                    {loading
-                                      ? <><Loader2 className="w-4 h-4 animate-spin" />Punching Out…</>
-                                      : <><LogOut className="w-4 h-4" />Punch Out</>}
-                                  </motion.button>
-                                ) : displayTodayAttendance?.punch_out ? (
-                                  <div className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border"
-                                    style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.10)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0', color: COLORS.emeraldGreen }}>
-                                    <CheckCircle2 className="w-4 h-4" /> {formatDuration(displayTodayAttendance.duration_minutes)} — Day complete
-                                  </div>
-                                ) : null}
-                              </div>
-                            )}
-
-                            {/* Weekly mini-bar chart */}
-                            <div className="pt-1">
-                              <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: isDark ? D.muted : '#94a3b8' }}>This Week</p>
-                              <div className="flex items-end gap-1.5 h-12">
-                                {weekSummary.map((d) => {
-                                  const barHeight = d.hours ? Math.min(100, (parseFloat(d.hours) / 10) * 100) : 0;
-                                  const barColor = d.status === 'present' ? COLORS.emeraldGreen
-                                    : d.status === 'absent' ? COLORS.red
-                                    : d.status === 'leave' ? COLORS.orange
-                                    : d.status === 'holiday' ? COLORS.amber
-                                    : isDark ? D.border : '#e2e8f0';
-
-                                  return (
-                                    <Tooltip key={d.dateStr}>
-                                      <TooltipTrigger asChild>
-                                        <div className="flex-1 flex flex-col items-center gap-0.5">
-                                          <motion.div
-                                            className="w-full rounded-t-md"
-                                            style={{
-                                              backgroundColor: barColor,
-                                              opacity: d.status === 'future' ? 0.25 : d.status === 'none' ? 0.3 : 0.85,
-                                              minHeight: 3,
-                                            }}
-                                            initial={{ height: 0 }}
-                                            animate={{ height: `${Math.max(6, barHeight)}%` }}
-                                            transition={{ duration: 0.6, delay: 0.1 }}
-                                          />
-                                          <span className={`text-[9px] font-bold ${d.isToday ? 'text-blue-500' : 'text-slate-400 dark:text-slate-500'}`}>
-                                            {d.day}
-                                          </span>
-                                        </div>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="top" className="text-xs">
-                                        <p className="font-bold">{d.day}</p>
-                                        <p>{d.status === 'present' ? `${d.hours}h` : d.status === 'future' ? 'Upcoming' : d.status.charAt(0).toUpperCase() + d.status.slice(1)}</p>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </SectionCard>
-                  </motion.div>
-                )}
-              </React.Fragment>
-            );
-
-            /* ══ STAT CARDS ══════════════════════════════════════════════════ */
-            if (sectionId === 'stat_cards') return (
-              <React.Fragment key="stat_cards">
-                <motion.div
-                  className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
-                  variants={itemVariants}
-                >
-                  <StatCard isDark={isDark} icon={Timer}
-                    label={isEveryoneView ? 'Total (All Staff)' : 'This Month'}
-                    value={Math.floor(monthTotalMinutes / 60)} unit="hours worked" color={COLORS.deepBlue}
-                    trend={`${monthDaysPresent} days present`} />
-                  <StatCard isDark={isDark} icon={CheckCircle2}
-                    label="Tasks Done" value={tasksCompleted} unit="completed" color={COLORS.emeraldGreen}
-                    trend=" " />
-                  <StatCard isDark={isDark} icon={AlarmClock}
-                    label="Days Late" value={totalDaysLateThisMonth} unit="this month" color={COLORS.orange}
-                    trend=" " />
-                  <StatCard isDark={isDark} icon={UserX}
-                    label="Days Absent" value={monthDaysAbsent} unit="this month" color={COLORS.red}
-                    trend={monthDaysAbsent > 0 ? 'Auto-marked at 7 PM' : 'Perfect attendance'} />
-                  <StatCard isDark={isDark} icon={Flame}
-                    label="Streak" value={attendanceStreak} unit="consecutive days" color={COLORS.amber}
-                    trend={attendanceStreak >= 5 ? 'Keep it up!' : 'Build momentum'}
-                    highlight={attendanceStreak >= 7} />
-                  {!isEveryoneView && (
-                    <StatCard isDark={isDark} icon={TrendingUp}
-                      label={isViewingOther ? 'Their Rank' : 'Your Rank'}
-                      value={myRank} unit="overall" color={COLORS.mediumBlue}
-                      trend={`Avg ${avgDailyHours}h/day`} />
-                  )}
-                </motion.div>
-              </React.Fragment>
-            );
-
-            /* ══ HOLIDAYS + MONTHLY INSIGHTS ═════════════════════════════════ */
-            if (sectionId === 'holidays_reminders') return (
-              <React.Fragment key="holidays_reminders">
-                {!isEveryoneView && (
-                  <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-                    {/* HOLIDAYS CARD */}
-                    <SectionCard className="flex flex-col" style={{ minHeight: 400 }}>
-                      <CardHeaderRow
-                        iconBg={isDark ? 'bg-amber-900/40' : 'bg-amber-50'}
-                        icon={<CalendarIcon className="h-4 w-4 text-amber-500" />}
-                        title={`Holidays — ${format(selectedDate, 'MMM yyyy')}`}
-                        subtitle={`${monthHolidaysGrid.length} holiday${monthHolidaysGrid.length !== 1 ? 's' : ''} this month`}
-                        badge={monthHolidaysGrid.length}
-                        action={isAdmin && (
-                          <div className="flex items-center gap-1.5">
-                            <Button size="sm" onClick={() => {
-                              setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
-                              setCalendarOpenIdx(null);
-                              setShowHolidayModal(true);
-                            }}
-                              className="h-7 px-2.5 text-xs font-semibold text-white rounded-lg"
-                              style={{ backgroundColor: COLORS.deepBlue }}>
-                              <Plus className="w-3 h-3 mr-1" /> Add
-                            </Button>
-                            <Button size="sm" onClick={async () => {
-                              try {
-                                const r = await api.post('/holidays/auto-sync');
-                                const { added = 0, upgraded = 0 } = r.data || {};
-                                const msg = added + upgraded > 0
-                                  ? `${added} new · ${upgraded} confirmed`
-                                  : 'Already up to date';
-                                toast.success(`Holidays synced — ${msg}`);
-                                await fetchData();
-                              } catch { toast.error('Sync failed'); }
-                            }}
-                              className="h-7 px-2.5 text-xs font-semibold text-white rounded-lg"
-                              style={{ backgroundColor: COLORS.amber }}>
-                              <Zap className="w-3 h-3 mr-1" /> Sync
-                            </Button>
-                          </div>
-                        )}
-                      />
-                      <div className="flex-1 overflow-y-auto slim-scroll p-2.5 space-y-1.5 min-h-0" style={slimScroll}>
-                        {monthHolidaysGrid.length === 0 ? (
-                          <div className="flex flex-col items-center justify-center h-40 py-8">
-                            <div className="w-12 h-12 rounded-2xl flex items-center justify-center mb-3"
-                              style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.12)' : '#fef3c7' }}>
-                              <CalendarIcon className="w-6 h-6" style={{ color: COLORS.amber }} />
-                            </div>
-                            <p className="text-sm font-semibold" style={{ color: isDark ? D.muted : '#64748b' }}>No holidays this month</p>
-                          </div>
-                        ) : monthHolidaysGrid.map(h => (
-                          <motion.div key={h.date}
-                            className="relative flex items-center gap-2.5 px-3 py-2.5 rounded-xl border cursor-pointer group transition-all"
-                            style={{
-                              borderColor: isDark ? 'rgba(245,158,11,0.22)' : `${COLORS.amber}35`,
-                              backgroundColor: isDark ? 'rgba(245,158,11,0.06)' : `${COLORS.amber}05`,
-                            }}
-                            whileHover={{ backgroundColor: isDark ? 'rgba(245,158,11,0.12)' : `${COLORS.amber}10`, y: -1 }}
-                            onClick={() => setSelectedHolidayDetail(h)}
-                          >
-                            <div className="w-10 h-10 rounded-xl flex flex-col items-center justify-center flex-shrink-0 text-white shadow-sm"
-                              style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
-                              <span className="text-[8px] leading-none uppercase font-bold">{safeFormatDate(h.date, 'MMM', '')}</span>
-                              <span className="text-sm leading-none font-black">{safeFormatDate(h.date, 'd', '?')}</span>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-semibold truncate" style={{ color: isDark ? D.text : '#1e293b' }}>{h.name}</p>
-                              <p className="text-xs mt-0.5" style={{ color: isDark ? D.muted : '#64748b' }}>
-                                {safeFormatDate(h.date, 'EEEE', '—')}
-                              </p>
-                            </div>
-                            <ChevronRight className="w-4 h-4 flex-shrink-0 text-slate-300 dark:text-slate-600" />
-                            {isAdmin && (
-                              <div className="absolute right-8 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                                <button onClick={() => { setEditingHoliday(h); setEditName(h.name); setEditDate(h.date); }}
-                                  className="w-6 h-6 flex items-center justify-center rounded text-blue-400 hover:bg-blue-500/20">
-                                  <Edit2 className="w-3 h-3" />
-                                </button>
-                                <button onClick={() => handleDeleteHoliday(h.date, h.name)}
-                                  className="w-6 h-6 flex items-center justify-center rounded text-red-400 hover:bg-red-500/20">
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
-                              </div>
-                            )}
-                          </motion.div>
-                        ))}
-                      </div>
-                    </SectionCard>
-
-                    {/* MONTHLY INSIGHTS CARD */}
-                    {(() => {
-                      const onTimeCount = monthDaysPresent - totalDaysLateThisMonth;
-                      const onTimePct   = monthDaysPresent > 0 ? Math.round((onTimeCount / monthDaysPresent) * 100) : 0;
-                      return (
-                        <SectionCard className="flex flex-col" style={{ minHeight: 400 }}>
-                          <CardHeaderRow
-                            iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
-                            icon={<BarChart3 className="h-4 w-4 text-emerald-500" />}
-                            title="Monthly Insights"
-                            subtitle={format(selectedDate, 'MMMM yyyy')}
-                            action={
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                                style={{
-                                  backgroundColor: totalDaysLateThisMonth === 0
-                                    ? (isDark ? 'rgba(31,175,90,0.18)' : '#dcfce7')
-                                    : (isDark ? 'rgba(239,68,68,0.15)' : '#fee2e2'),
-                                  color: totalDaysLateThisMonth === 0 ? COLORS.emeraldGreen : COLORS.red,
-                                }}>
-                                {totalDaysLateThisMonth === 0 ? '✓ Perfect Punctuality' : `${totalDaysLateThisMonth} Late`}
-                              </span>
-                            }
-                          />
-                          <div className="flex-1 overflow-y-auto slim-scroll p-4" style={slimScroll}>
-                            <div className="grid grid-cols-3 gap-2 mb-4">
-                              {[
-                                { icon: CheckCircle2, value: monthDaysPresent, label: 'Present', bg: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', border: isDark ? '#14532d' : '#bbf7d0', color: COLORS.emeraldGreen },
-                                { icon: UserX,        value: monthDaysAbsent, label: 'Absent',  bg: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2', border: isDark ? '#7f1d1d' : '#fecaca', color: COLORS.red },
-                                { icon: AlarmClock,   value: totalDaysLateThisMonth, label: 'Late', bg: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', border: isDark ? '#92400e' : '#fde68a', color: COLORS.amber },
-                              ].map(({ icon: Icon, value, label, bg, border, color }) => (
-                                <div key={label} className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
-                                  style={{ backgroundColor: bg, borderColor: border }}>
-                                  <Icon className="w-4 h-4 mb-1.5" style={{ color }} />
-                                  <p className="text-xl font-black tabular-nums" style={{ color, fontFamily: "'Roboto Mono', monospace" }}>{value}</p>
-                                  <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">{label}</p>
-                                </div>
-                              ))}
-                            </div>
-                            <div className="grid grid-cols-3 gap-2 mb-4">
-                              <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
-                                style={{ backgroundColor: isDark ? `${COLORS.deepBlue}18` : `${COLORS.deepBlue}08`, borderColor: isDark ? '#1d4ed8' : '#bfdbfe' }}>
-                                <Clock className="w-4 h-4 mb-1.5" style={{ color: COLORS.deepBlue }} />
-                                <p className="text-xl font-black tabular-nums font-mono" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
-                                  {Math.floor(monthTotalMinutes / 60)}h
-                                </p>
-                                <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">{monthTotalMinutes % 60}m total</p>
-                              </div>
-                              <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
-                                style={{ backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : '#f5f3ff', borderColor: isDark ? '#4c1d95' : '#ddd6fe' }}>
-                                <BarChart3 className="w-4 h-4 mb-1.5 text-purple-500" />
-                                <p className="text-xl font-black tabular-nums" style={{ color: COLORS.purple, fontFamily: "'Roboto Mono', monospace" }}>{avgDailyHours}h</p>
-                                <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Avg/Day</p>
-                              </div>
-                              <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
-                                style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? '#92400e' : '#fde68a' }}>
-                                <Flame className="w-4 h-4 mb-1.5 text-amber-400" />
-                                <p className="text-xl font-black tabular-nums" style={{ color: COLORS.amber, fontFamily: "'Roboto Mono', monospace" }}>{attendanceStreak}</p>
-                                <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">
-                                  {attendanceStreak >= 10 ? '🔥 Streak' : '⚡ Streak'}
-                                </p>
-                              </div>
-                            </div>
-
-                            {/* Punctuality bar */}
-                            <div className="flex flex-col justify-center gap-2.5 px-4 py-4 rounded-2xl border"
-                              style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}>
-                              <div className="flex items-center justify-between">
-                                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Punctuality Rate</span>
-                                <span className="text-xl font-black tabular-nums"
-                                  style={{ color: onTimePct >= 80 ? COLORS.emeraldGreen : onTimePct >= 60 ? COLORS.amber : COLORS.red, fontFamily: "'Roboto Mono', monospace" }}>
-                                  {onTimePct}%
-                                </span>
-                              </div>
-                              <div className="h-3 rounded-full overflow-hidden"
-                                style={{ backgroundColor: isDark ? D.border : '#e2e8f0' }}>
-                                <motion.div className="h-full rounded-full"
-                                  style={{
-                                    background: onTimePct >= 80
-                                      ? `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`
-                                      : onTimePct >= 60
-                                        ? `linear-gradient(90deg, ${COLORS.amber}, #fbbf24)`
-                                        : `linear-gradient(90deg, ${COLORS.red}, #f87171)`,
-                                  }}
-                                  initial={{ width: 0 }}
-                                  animate={{ width: `${onTimePct}%` }}
-                                  transition={{ duration: 0.9, ease: 'easeOut', delay: 0.2 }}
-                                />
-                              </div>
-                              <p className="text-[11px] font-medium text-center" style={{ color: isDark ? D.muted : '#64748b' }}>
-                                {onTimeCount} on-time · {totalDaysLateThisMonth} late
-                              </p>
-                            </div>
-                          </div>
-                        </SectionCard>
-                      );
-                    })()}
-                  </motion.div>
-                )}
-              </React.Fragment>
-            );
-
-            /* ══ PENDING HOLIDAY REVIEW ══════════════════════════════════════ */
-            /* ══ ABSENT SUMMARY ══════════════════════════════════════════════ */
-            /* NOTE: These appear inline below the ordered sections */
-
-            /* ══ CALENDAR AREA ════════════════════════════════════════════════ */
-            if (sectionId === 'calendar_area') return (
-              <React.Fragment key="calendar_area">
-                {/* Pending Holiday Review */}
-                {isAdmin && Array.isArray(pendingHolidays) && pendingHolidays.length > 0 && (
-                  <motion.div variants={itemVariants}>
-                    <SectionCard>
-                      <CardHeaderRow
-                        iconBg={isDark ? 'bg-amber-900/40' : 'bg-amber-50'}
-                        icon={<AlertTriangle className="h-4 w-4 text-amber-500" />}
-                        title={`Holiday Review (${pendingHolidays.length})`}
-                        subtitle="Confirm or reject suggested holidays"
-                        badge={pendingHolidays.length}
-                      />
-                      <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {pendingHolidays.map(holiday => (
-                          <div key={holiday.date}
-                            className="p-4 rounded-xl border"
-                            style={{ backgroundColor: isDark ? D.raised : '#fffbeb', borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#fde68a' }}>
-                            <p className="font-semibold text-sm mb-1" style={{ color: isDark ? D.text : '#1e293b' }}>{holiday.name}</p>
-                            <p className="text-xs mb-3" style={{ color: isDark ? D.muted : '#78716c' }}>
-                              {safeFormatDate(holiday.date, 'EEEE, MMMM d, yyyy', holiday.date || '—')}
-                            </p>
-                            <div className="flex gap-2">
-                              <Button size="sm" className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg h-8 text-xs"
-                                onClick={() => handleHolidayDecision(holiday.date, 'confirmed')}>Confirm</Button>
-                              <Button size="sm" variant="outline" className="flex-1 font-semibold rounded-lg h-8 text-xs"
-                                style={{ borderColor: isDark ? '#7f1d1d' : '#fca5a5', color: isDark ? '#f87171' : '#dc2626', backgroundColor: isDark ? 'rgba(239,68,68,0.06)' : undefined }}
-                                onClick={() => handleHolidayDecision(holiday.date, 'rejected')}>Reject</Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </SectionCard>
-                  </motion.div>
-                )}
-
-                {/* Absent Summary */}
-                {isAdmin && Array.isArray(absentSummary) && absentSummary.length > 0 && (
-                  <motion.div variants={itemVariants}>
-                    <SectionCard>
-                      <CardHeaderRow
-                        iconBg={isDark ? 'bg-red-900/40' : 'bg-red-50'}
-                        icon={<UserX className="h-4 w-4 text-red-500" />}
-                        title={`Absent This Month — ${absentSummary.length} Staff`}
-                        subtitle="Auto-marked at 7:00 PM IST"
-                        badge={absentSummary.length}
-                      />
-                      <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                        {absentSummary.map(item => (
-                          <motion.div key={item.user_id} whileHover={{ scale: 1.02 }}
-                            className="flex items-center gap-2.5 p-3 rounded-xl border"
-                            style={{
-                              backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2',
-                              borderColor: isDark ? '#7f1d1d' : '#fecaca',
-                            }}>
-                            <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
-                              style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.20)' : '#fecaca' }}>
-                              <span className="font-black text-sm text-red-500">{(item.user_name || '?')[0]}</span>
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold truncate" style={{ color: isDark ? D.text : '#1e293b' }}>{item.user_name || 'Unknown'}</p>
-                              <p className="text-xs font-semibold text-red-500">{item.absent_days} day{item.absent_days !== 1 ? 's' : ''} absent</p>
-                            </div>
-                          </motion.div>
-                        ))}
-                      </div>
-                    </SectionCard>
-                  </motion.div>
-                )}
-
-                {/* Calendar + Right Column + Location History */}
-                <motion.div className="flex flex-col gap-5" variants={itemVariants}>
-
-                  {/* ── Top 2-col: [Calendar/Detail/Leave] | [Recent Attendance] ── */}
-                  <div className={`grid gap-5 items-stretch ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-12'}`}>
-
-                    {/* ── LEFT: Calendar + Date Detail + Apply Leave ── */}
-                    {!isEveryoneView && (
-                    <div className="xl:col-span-5 flex flex-col gap-4">
-                      {/* Attendance Calendar */}
-                      <SectionCard>
-                        <CardHeaderRow
-                          iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
-                          icon={<CalendarIcon className="h-4 w-4 text-blue-500" />}
-                          title="Attendance Calendar"
-                          subtitle="Click a date for details"
-                          action={
-                            <Button variant="ghost" size="sm" onClick={() => setSelectedDate(new Date())}
-                              className="text-xs h-7 px-3 font-semibold text-blue-500">
-                              Today
-                            </Button>
-                          }
-                        />
-                        <div className="p-3">
-                          <Calendar
-                            mode="single" selected={selectedDate}
-                            onSelect={date => date && setSelectedDate(date)}
-                            disabled={date => isAfter(date, new Date())}
-                            className="rounded-xl border-0 w-full"
-                            classNames={{
-                              months: 'w-full', month: 'w-full space-y-3', table: 'w-full border-collapse',
-                              head_row: 'flex w-full justify-between mb-2',
-                              head_cell: 'rounded-lg w-9 font-bold text-[0.7rem] text-center text-slate-400',
-                              row: 'flex w-full mt-2 justify-between',
-                              cell: 'relative p-0 text-center text-sm focus-within:relative focus-within:z-20',
-                              day: 'h-10 w-10 p-0 font-semibold rounded-full transition-all',
-                              day_today: 'font-black',
-                            }}
-                            components={{ Day: props => <CustomDay {...props} attendance={attendanceMap} holidays={holidays} /> }}
-                          />
-                          {/* Legend */}
-                          <div className="flex flex-wrap gap-x-3 gap-y-1.5 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 text-xs justify-center">
-                            {[
-                              { color: COLORS.emeraldGreen, label: 'Present'     },
-                              { color: COLORS.red,          label: 'Late/Absent' },
-                              { color: COLORS.amber,        label: 'Holiday'     },
-                              { color: COLORS.orange,       label: 'Leave'       },
-                            ].map(({ color, label }) => (
-                              <div key={label} className="flex items-center gap-1.5">
-                                <span className="w-3 h-3 rounded-full border-2 flex-shrink-0" style={{ borderColor: color, backgroundColor: `${color}20` }} />
-                                <span className="text-slate-400 dark:text-slate-500 font-medium">{label}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </SectionCard>
-
-                      {/* Selected date detail */}
-                      <SectionCard>
-                        <div className="p-0">
-                          {selectedAttendance?.status === 'absent' ? (
-                            <div className="relative p-4 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2' }}>
-                              <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.red }} />
-                              <p className="font-bold text-sm mb-0.5 text-red-500">Absent</p>
-                              <p className="text-xs text-slate-400">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
-                            </div>
-                          ) : selectedAttendance?.punch_in ? (
-                            <div className="relative p-4 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.06)' : '#f0fdf4' }}>
-                              <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.emeraldGreen }} />
-                              <p className="font-bold text-sm mb-2.5" style={{ color: isDark ? D.text : '#1e293b' }}>{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
-                              <div className="space-y-1.5 text-xs">
-                                <div className="flex justify-between items-center">
-                                  <span className="font-medium text-slate-400">Punch In</span>
-                                  <span className="font-black font-mono" style={{ color: isDark ? D.text : '#1e293b' }}>{formatAttendanceTime(selectedAttendance.punch_in)}</span>
-                                </div>
-                                {selectedAttendance.punch_out && (
-                                  <div className="flex justify-between items-center">
-                                    <span className="font-medium text-slate-400">Punch Out</span>
-                                    <span className="font-black font-mono" style={{ color: isDark ? D.text : '#1e293b' }}>{formatAttendanceTime(selectedAttendance.punch_out)}</span>
-                                  </div>
-                                )}
-                                {selectedAttendance.is_late && (
-                                  <div className="flex justify-between items-center">
-                                    <span className="font-medium text-slate-400">Status</span>
-                                    <span className="text-[10px] font-bold text-red-500 px-2 py-0.5 rounded"
-                                      style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>Late</span>
-                                  </div>
-                                )}
-                                <div className="pt-1.5 flex justify-between items-center border-t border-slate-100 dark:border-slate-700">
-                                  <span className="font-semibold text-xs" style={{ color: isDark ? D.text : '#1e293b' }}>Duration</span>
-                                  <span className="font-black font-mono text-sm" style={{ color: COLORS.emeraldGreen }}>
-                                    {formatDuration(selectedAttendance.duration_minutes)}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          ) : selectedAttendance?.status === 'leave' ? (
-                            <div className="relative p-4 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed' }}>
-                              <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.orange }} />
-                              <p className="font-bold text-sm mb-0.5" style={{ color: COLORS.orange }}>On Leave</p>
-                              <p className="text-xs text-slate-400">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
-                            </div>
-                          ) : selectedHoliday ? (
-                            <div className="relative p-4 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.06)' : '#fffbeb' }}>
-                              <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.amber }} />
-                              <p className="font-bold text-sm mb-0.5" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>Public Holiday</p>
-                              <p className="text-xs font-medium" style={{ color: isDark ? D.muted : '#78716c' }}>{selectedHoliday.name}</p>
-                            </div>
-                          ) : (
-                            <div className="relative p-4 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? D.raised : '#f8fafc' }}>
-                              <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: isDark ? D.border : '#e2e8f0' }} />
-                              <p className="text-xs font-medium" style={{ color: isDark ? D.muted : '#64748b' }}>
-                                No record for {format(selectedDate, 'MMM d, yyyy')}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      </SectionCard>
-
-                      {/* Apply for Leave */}
-                      <SectionCard>
-                        <CardHeaderRow
-                          iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
-                          icon={<CalendarX className="h-4 w-4" style={{ color: COLORS.orange }} />}
-                          title="Apply for Leave"
-                          subtitle={upcomingLeaves.length > 0 ? `${upcomingLeaves.length} upcoming leave${upcomingLeaves.length !== 1 ? 's' : ''}` : 'Request time off'}
-                        />
-                        <div className="p-4 flex flex-col gap-3">
-                          {upcomingLeaves.length > 0 && (
-                            <div className="space-y-1.5">
-                              {upcomingLeaves.slice(0, 3).map(leave => {
-                                const leaveDate = safeParseISO(leave.date);
-                                return (
-                                  <div key={leave.date}
-                                    className="flex items-center justify-between px-3 py-2 rounded-lg border text-xs"
-                                    style={{
-                                      backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed',
-                                      borderColor: isDark ? '#7c2d12' : '#fed7aa',
-                                    }}>
-                                    <div className="flex items-center gap-2">
-                                      <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: COLORS.orange }} />
-                                      <span className="font-semibold" style={{ color: isDark ? D.text : '#1e293b' }}>
-                                        {leaveDate ? format(leaveDate, 'EEE, MMM d') : leave.date}
-                                      </span>
-                                    </div>
-                                    {leave.leave_reason && (
-                                      <span className="text-[10px] truncate max-w-[100px]" style={{ color: isDark ? D.muted : '#78716c' }}>
-                                        {leave.leave_reason}
-                                      </span>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                              {upcomingLeaves.length > 3 && (
-                                <p className="text-[11px] font-medium text-center" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
-                                  +{upcomingLeaves.length - 3} more upcoming
-                                </p>
-                              )}
-                            </div>
-                          )}
+                              {loading
+                                ? <><Loader2 className="w-4 h-4 animate-spin" />Punching In…</>
+                                : <><LogIn className="w-4 h-4" />Punch In</>}
+                            </motion.button>
+                          )
+                        ) : !displayTodayAttendance?.punch_out && displayTodayAttendance?.punch_in && isTodaySelected ? (
                           <motion.button
                             whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                            onClick={() => setShowLeaveForm(true)}
-                            className="flex items-center justify-center gap-2.5 w-full py-3.5 rounded-xl text-sm font-bold transition-all border-2"
-                            style={{
-                              borderColor: isDark ? 'rgba(249,115,22,0.4)' : `${COLORS.orange}40`,
-                              color: isDark ? '#fb923c' : COLORS.orange,
-                              backgroundColor: isDark ? 'rgba(249,115,22,0.08)' : `${COLORS.orange}06`,
-                            }}
+                            onClick={() => handlePunchAction('punch_out')} disabled={loading}
+                            className="flex items-center justify-center gap-2 w-full h-11 rounded-xl text-sm font-bold text-white transition-all"
+                            style={{ backgroundColor: COLORS.red }}
                           >
-                            <Send className="w-4 h-4" />
-                            Apply Leave
+                            {loading
+                              ? <><Loader2 className="w-4 h-4 animate-spin" />Punching Out…</>
+                              : <><LogOut className="w-4 h-4" />Punch Out</>}
                           </motion.button>
-                          <div className="grid grid-cols-2 gap-2">
-                            <motion.button
-                              whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
-                              onClick={() => { setLeaveType('half_day'); setShowLeaveForm(true); }}
-                              className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all border"
-                              style={{
-                                borderColor: isDark ? 'rgba(139,92,246,0.3)' : '#ddd6fe',
-                                color: isDark ? '#c4b5fd' : '#7c3aed',
-                                backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : '#f5f3ff',
-                              }}
-                            >
-                              <span>🌗</span> Half Day
-                            </motion.button>
-                            <motion.button
-                              whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
-                              onClick={() => { setLeaveType('early_leave'); setShowLeaveForm(true); }}
-                              className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all border"
-                              style={{
-                                borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#fde68a',
-                                color: isDark ? '#fbbf24' : '#d97706',
-                                backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb',
-                              }}
-                            >
-                              <span>🚪</span> Early Leave
-                            </motion.button>
+                        ) : displayTodayAttendance?.punch_out ? (
+                          <div className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border"
+                            style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.10)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0', color: COLORS.emeraldGreen }}>
+                            <CheckCircle2 className="w-4 h-4" /> {formatDuration(displayTodayAttendance.duration_minutes)} — Day complete
                           </div>
-                          <div className="grid grid-cols-3 gap-2">
-                            {[
-                              { label: 'Tomorrow', days: 1 },
-                              { label: '3 Days',   days: 3 },
-                              { label: '1 Week',   days: 7 },
-                            ].map(({ label, days }) => (
-                              <button
-                                key={label}
-                                onClick={() => {
-                                  const from = new Date();
-                                  from.setDate(from.getDate() + (label === 'Tomorrow' ? 1 : 0));
-                                  const to = new Date(from);
-                                  to.setDate(from.getDate() + days - 1);
-                                  setLeaveFrom(from);
-                                  setLeaveTo(to);
-                                  setShowLeaveForm(true);
-                                }}
-                                className="text-xs font-semibold px-3 py-2.5 rounded-xl border transition-all hover:shadow-sm active:scale-95 text-center"
-                                style={{
-                                  borderColor: isDark ? D.border : '#e2e8f0',
-                                  color: isDark ? D.muted : '#64748b',
-                                  backgroundColor: isDark ? D.raised : '#f8fafc',
-                                }}
-                              >
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </SectionCard>
-                    </div>
-                  )}
+                        ) : null}
+                      </div>
+                    )}
 
-                  {/* ── RIGHT: Recent Attendance (height = Calendar + Detail + Leave) ── */}
-                  <div className={isEveryoneView ? 'flex flex-col' : 'xl:col-span-7 flex flex-col'}>
-                    <SectionCard className="flex flex-col flex-1 min-h-0">
-                      <CardHeaderRow
-                        iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
-                        icon={<Clock className="h-4 w-4 text-blue-500" />}
-                        title={isEveryoneView ? 'All Employees — Attendance' : 'Recent Attendance'}
-                        subtitle={isEveryoneView ? 'Latest 25 records' : 'Last 15 records'}
-                      />
-                      <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5 min-h-0" style={slimScroll}>
-                        {loading && attendanceHistory.length === 0 ? (
-                          <div className="flex items-center justify-center h-24">
-                            <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                          </div>
-                        ) : recentAttendance.length === 0 ? (
-                          <div className="flex items-center justify-center h-24">
-                            <p className="text-sm font-medium text-slate-400">No records yet</p>
-                          </div>
-                        ) : recentAttendance.map((record, idx) => {
-                          const inLocLabel     = getLocationLabel(record, 'in');
-                          const outLocLabel    = getLocationLabel(record, 'out');
-                          const recordUserName = userMap[record.user_id]
-                            || (record.user_id === user?.id ? (user?.full_name || 'Me') : null)
-                            || (isEveryoneView ? (record.user_id || 'Unknown') : (user?.full_name || null));
-                          const isAbsent  = record.status === 'absent';
-                          const isLeave   = record.status === 'leave';
-                          const isPresent = record.punch_in && record.status === 'present';
-                          const isOngoing = isPresent && !record.punch_out;
-                          const recordDate = safeParseISO(record.date);
+                    {/* FEATURE ENHANCEMENT: Weekly mini-bar chart */}
+                    <div className="pt-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">This Week</p>
+                      <div className="flex items-end gap-1.5 h-12">
+                        {weekSummary.map((d) => {
+                          const barHeight = d.hours ? Math.min(100, (parseFloat(d.hours) / 10) * 100) : 0;
+                          const barColor = d.status === 'present' ? COLORS.emeraldGreen
+                            : d.status === 'absent' ? COLORS.red
+                            : d.status === 'leave' ? COLORS.orange
+                            : d.status === 'holiday' ? COLORS.amber
+                            : isDark ? D.border : '#e2e8f0';
+
                           return (
-                            <motion.div
-                              key={`${record.date}-${record.user_id || idx}`}
-                              variants={itemVariants}
-                              whileHover={{ x: 2, transition: springPhysics.lift }}
-                              className="relative p-2.5 rounded-xl border transition-all overflow-hidden"
-                              style={{
-                                backgroundColor: isOngoing
-                                  ? isDark ? 'rgba(245,158,11,0.10)' : '#fffbeb'
-                                  : isDark
-                                    ? isAbsent ? 'rgba(239,68,68,0.07)' : isLeave ? 'rgba(249,115,22,0.06)' : isPresent ? 'rgba(31,175,90,0.06)' : D.raised
-                                    : isAbsent ? '#fff1f2' : isLeave ? '#fff7ed' : isPresent ? '#f0fdf4' : '#f8fafc',
-                                borderColor: isOngoing
-                                  ? isDark ? '#92400e' : '#fde68a'
-                                  : isDark
-                                    ? isAbsent ? '#7f1d1d' : isLeave ? '#7c2d12' : isPresent ? '#14532d' : D.border
-                                    : isAbsent ? '#fecaca' : isLeave ? '#fed7aa' : isPresent ? '#bbf7d0' : '#e2e8f0',
-                                flexShrink: 0,
-                              }}
-                            >
-                              <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: isOngoing ? COLORS.amber : isAbsent ? COLORS.red : isLeave ? COLORS.orange : isPresent ? COLORS.emeraldGreen : isDark ? D.border : COLORS.slate200 }} />
-                              <div className="flex justify-between items-center gap-2">
-                                <div className="flex-1 min-w-0">
-                                  {recordUserName && (
-                                    <p className="text-[10px] font-semibold text-blue-400 flex items-center gap-1 mb-0.5">
-                                      <Users className="w-2.5 h-2.5" />{recordUserName}
-                                    </p>
-                                  )}
-                                  <p className="font-semibold text-xs leading-tight" style={{ color: isDark ? D.text : '#1e293b' }}>
-                                    {recordDate ? format(recordDate, 'EEE, MMM d, yyyy') : (record.date || '—')}
-                                  </p>
-                                  <p className="text-[11px] font-mono mt-0.5" style={{ color: isDark ? D.muted : '#64748b' }}>
-                                    {isAbsent ? `Absent${record.auto_marked ? ' (auto)' : ''}`
-                                      : isLeave ? 'On Leave'
-                                      : record.punch_in ? `${formatAttendanceTime(record.punch_in)} → ${record.punch_out ? formatAttendanceTime(record.punch_out) : '⏳ Ongoing'}`
-                                      : '—'}
-                                  </p>
-                                  {(inLocLabel || outLocLabel) && !isAbsent && (
-                                    <p className="text-[10px] mt-0.5 truncate" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
-                                      {inLocLabel && <span><span className="text-emerald-500 font-semibold">▲ </span>{inLocLabel}</span>}
-                                      {inLocLabel && outLocLabel && <span className="mx-1 text-slate-300">·</span>}
-                                      {outLocLabel && <span><span className="text-orange-400 font-semibold">▼ </span>{outLocLabel}</span>}
-                                    </p>
-                                  )}
+                            <Tooltip key={d.dateStr}>
+                              <TooltipTrigger asChild>
+                                <div className="flex-1 flex flex-col items-center gap-0.5">
+                                  <motion.div
+                                    className="w-full rounded-t-md"
+                                    style={{
+                                      backgroundColor: barColor,
+                                      opacity: d.status === 'future' ? 0.25 : d.status === 'none' ? 0.3 : 0.85,
+                                      minHeight: 3,
+                                    }}
+                                    initial={{ height: 0 }}
+                                    animate={{ height: `${Math.max(6, barHeight)}%` }}
+                                    transition={{ duration: 0.6, delay: 0.1 }}
+                                  />
+                                  <span className={`text-[9px] font-bold ${d.isToday ? 'text-blue-500' : 'text-slate-400 dark:text-slate-500'}`}>
+                                    {d.day}
+                                  </span>
                                 </div>
-                                <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                                  {isOngoing ? (
-                                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full animate-pulse"
-                                      style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.25)' : '#fef3c7', color: COLORS.amber }}>
-                                      ONGOING
-                                    </span>
-                                  ) : isAbsent ? (
-                                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded text-red-500"
-                                      style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>Absent</span>
-                                  ) : isLeave ? (
-                                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded"
-                                      style={{ color: COLORS.orange, backgroundColor: isDark ? 'rgba(249,115,22,0.15)' : `${COLORS.orange}18` }}>Leave</span>
-                                  ) : (
-                                    <span className="text-[11px] font-bold px-1.5 py-0.5 rounded font-mono"
-                                      style={{
-                                        backgroundColor: record.duration_minutes > 0 ? isDark ? 'rgba(31,175,90,0.18)' : `${COLORS.emeraldGreen}15` : isDark ? D.raised : '#f1f5f9',
-                                        color: record.duration_minutes > 0 ? COLORS.emeraldGreen : isDark ? D.muted : COLORS.deepBlue,
-                                      }}>
-                                      {formatDuration(record.duration_minutes)}
-                                    </span>
-                                  )}
-                                  {record.is_late && !isAbsent && (
-                                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded text-red-500"
-                                      style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>Late</span>
-                                  )}
-                                </div>
-                              </div>
-                            </motion.div>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-xs">
+                                <p className="font-bold">{d.day}</p>
+                                <p>{d.status === 'present' ? `${d.hours}h` : d.status === 'future' ? 'Upcoming' : d.status.charAt(0).toUpperCase() + d.status.slice(1)}</p>
+                              </TooltipContent>
+                            </Tooltip>
                           );
                         })}
                       </div>
-                    </SectionCard>
+                    </div>
                   </div>
                 </div>
-              </motion.div>
-            </React.Fragment>
-            );
-
-            return null;
-          })}
-        </div>
-      </motion.div>>
-
-      {/* ══ MODALS ════════════════════════════════════════════════════════════ */}
-
-      {/* Punch-In Modal */}
-      <AnimatePresence>
-        {showPunchInModal && !isViewingOther && !isEveryoneView && (
-          <motion.div
-            className="fixed inset-0 z-[99999] flex items-center justify-center p-4"
-            style={{ background: isDark ? 'rgba(0,0,0,0.92)' : 'rgba(15,23,42,0.88)', backdropFilter: 'blur(12px)', pointerEvents: 'all' }}
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-          >
-            <motion.div
-              className="w-full max-w-sm overflow-hidden rounded-3xl shadow-2xl"
-              style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
-              initial={{ scale: 0.88, y: 32 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.88, y: 32 }}
-              transition={{ type: 'spring', stiffness: 240, damping: 22 }}
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="relative overflow-hidden px-8 pt-8 pb-6 text-center"
-                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}>
-                <div className="absolute inset-0 opacity-10"
-                  style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 0%, transparent 60%)' }} />
-                <motion.div
-                  className="relative mx-auto w-20 h-20 rounded-2xl flex items-center justify-center mb-4"
-                  style={{ background: 'rgba(255,255,255,0.2)' }}
-                  animate={{ boxShadow: ['0 0 0 0 rgba(255,255,255,0.4)', '0 0 0 16px rgba(255,255,255,0)', '0 0 0 0 rgba(255,255,255,0)'] }}
-                  transition={{ duration: 2, repeat: Infinity, ease: 'easeOut' }}>
-                  <LogIn className="w-10 h-10 text-white" />
-                </motion.div>
-                <p className="text-white/70 text-xs font-semibold uppercase tracking-widest mb-1">
-                  {new Date().toLocaleString('en-IN', { weekday: 'long', timeZone: 'Asia/Kolkata' })}
-                </p>
-                <h2 className="text-2xl font-black text-white">Good Morning!</h2>
-                <p className="text-white/70 text-sm mt-1">Please punch in to start your workday</p>
               </div>
-
-              <div className="px-7 py-6 space-y-4">
-                <div className="flex items-center justify-center gap-3 py-3 rounded-2xl border"
-                  style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}>
-                  <Clock className="w-5 h-5" style={{ color: COLORS.deepBlue }} />
-                  <span className="text-xl font-black font-mono tracking-wider" style={{ color: isDark ? D.text : COLORS.deepBlue }}>
-                    {new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' })}
-                  </span>
-                  <span className="text-xs font-bold text-slate-400">IST</span>
-                </div>
-
-                {geoChecking && (
-                  <div className="flex items-center gap-3 px-4 py-3 rounded-xl border"
-                    style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff', borderColor: isDark ? '#1d4ed8' : '#bfdbfe' }}>
-                    <Loader2 className="w-4 h-4 text-blue-500 animate-spin flex-shrink-0" />
-                    <p className="text-xs font-semibold text-blue-500">Verifying your location…</p>
-                  </div>
-                )}
-                {geoError && !geoChecking && (
-                  <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
-                    className="px-4 py-3 rounded-xl border"
-                    style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2', borderColor: isDark ? '#7f1d1d' : '#fecaca' }}>
-                    <div className="flex items-start gap-2.5">
-                      <MapPin className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-xs font-bold text-red-500 mb-0.5">Location check failed</p>
-                        <p className="text-[11px] leading-relaxed" style={{ color: isDark ? '#fca5a5' : '#dc2626' }}>{geoError}</p>
-                        {userLocation && (
-                          <p className="text-[10px] mt-1 font-mono" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
-                            Your position: {userLocation.latitude.toFixed(5)}, {userLocation.longitude.toFixed(5)}
-                            {userLocation.distance !== undefined && <> · {userLocation.distance}m from office</>}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-                {isWithinGeofence === true && userLocation && !geoChecking && (
-                  <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
-                    className="flex items-center gap-2.5 px-4 py-3 rounded-xl border"
-                    style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0' }}>
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-                    <div>
-                      <p className="text-xs font-bold text-emerald-500">Location verified ✓</p>
-                      <p className="text-[10px] font-mono" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
-                        {userLocation.latitude.toFixed(5)}, {userLocation.longitude.toFixed(5)}
-                        {userLocation.distance !== undefined && <> · {userLocation.distance}m from office</>}
-                      </p>
-                    </div>
-                  </motion.div>
-                )}
-
-                <motion.button
-                  whileHover={!loading && !geoChecking ? { scale: 1.02 } : {}}
-                  whileTap={!loading && !geoChecking ? { scale: 0.97 } : {}}
-                  onClick={() => handlePunchAction('punch_in')}
-                  disabled={loading || geoChecking}
-                  className="w-full py-3.5 rounded-2xl text-sm font-black text-white transition-all disabled:opacity-60"
-                  style={{
-                    background: (loading || geoChecking) ? '#9CA3AF' : `linear-gradient(135deg, ${COLORS.emeraldGreen}, #16a34a)`,
-                    boxShadow: (loading || geoChecking) ? 'none' : '0 4px 16px rgba(31,175,90,0.35)',
-                  }}>
-                  {loading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />Punching In…</span>
-                    : geoChecking ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />Checking Location…</span>
-                    : <span className="flex items-center justify-center gap-2"><LogIn className="w-4 h-4" />Punch In Now</span>}
-                </motion.button>
-
-                {geoError && !geoChecking && (
-                  <button onClick={checkGeofence}
-                    className="w-full py-2.5 rounded-2xl text-xs font-bold border-2 transition-all active:scale-95"
-                    style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.muted : '#64748b', backgroundColor: 'transparent' }}>
-                    <span className="flex items-center justify-center gap-2"><MapPin className="w-3.5 h-3.5" />Retry Location Check</span>
-                  </button>
-                )}
-
-                <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
-                  style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb' }}>
-                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: COLORS.amber }} />
-                  <p className="text-[11px] font-medium" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
-                    Access restricted — punch in required · Auto-absent at 7:00 PM IST
-                  </p>
-                </div>
-
-                <div className="text-center">
-                  <button onClick={() => { setShowPunchInModal(false); setTimeout(() => setShowLeaveForm(true), 200); }}
-                    className="text-xs font-semibold underline decoration-dotted transition-all"
-                    style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
-                    On leave today? Apply here
-                  </button>
-                </div>
-              </div>
-            </motion.div>
+            </SectionCard>
           </motion.div>
         )}
-      </AnimatePresence>
 
-      {/* Leave Form Modal */}
-      <AnimatePresence>
-        {showLeaveForm && (
-          <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            onClick={(e) => { if (e.target === e.currentTarget) setShowLeaveForm(false); }}>
-            <motion.div
-              className="w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto slim-scroll"
-              style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
-              initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
-              transition={{ type: 'spring', stiffness: 220, damping: 20 }}
-            >
-              <div className="px-7 py-5 flex items-center justify-between"
-                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-                <div>
-                  <h2 className="text-xl font-black text-white">Apply Leave</h2>
-                  <p className="text-blue-200 text-sm mt-0.5">Select type and dates below</p>
-                </div>
-                <button onClick={() => setShowLeaveForm(false)}
-                  className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
-                  <X className="w-4 h-4 text-white" />
-                </button>
+        {/* ══ PENDING HOLIDAY REVIEW ═══════════════════════════════════════════ */}
+        {isAdmin && Array.isArray(pendingHolidays) && pendingHolidays.length > 0 && (
+          <motion.div variants={itemVariants}>
+            <SectionCard>
+              <CardHeaderRow
+                iconBg={isDark ? 'bg-amber-900/40' : 'bg-amber-50'}
+                icon={<AlertTriangle className="h-4 w-4 text-amber-500" />}
+                title={`Holiday Review (${pendingHolidays.length})`}
+                subtitle="Confirm or reject suggested holidays"
+                badge={pendingHolidays.length}
+              />
+              <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {pendingHolidays.map(holiday => (
+                  <div key={holiday.date}
+                    className="p-4 rounded-xl border"
+                    style={{ backgroundColor: isDark ? D.raised : '#fffbeb', borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#fde68a' }}>
+                    <p className="font-semibold text-sm mb-1" style={{ color: isDark ? D.text : '#1e293b' }}>{holiday.name}</p>
+                    <p className="text-xs mb-3" style={{ color: isDark ? D.muted : '#78716c' }}>
+                      {safeFormatDate(holiday.date, 'EEEE, MMMM d, yyyy', holiday.date || '—')}
+                    </p>
+                    <div className="flex gap-2">
+                      <Button size="sm" className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg h-8 text-xs"
+                        onClick={() => handleHolidayDecision(holiday.date, 'confirmed')}>Confirm</Button>
+                      <Button size="sm" variant="outline" className="flex-1 font-semibold rounded-lg h-8 text-xs"
+                        style={{ borderColor: isDark ? '#7f1d1d' : '#fca5a5', color: isDark ? '#f87171' : '#dc2626', backgroundColor: isDark ? 'rgba(239,68,68,0.06)' : undefined }}
+                        onClick={() => handleHolidayDecision(holiday.date, 'rejected')}>Reject</Button>
+                    </div>
+                  </div>
+                ))}
               </div>
+            </SectionCard>
+          </motion.div>
+        )}
 
-              <div className="p-6 space-y-5">
-                {/* Leave Type Picker */}
-                <div>
-                  <p className="text-sm font-semibold mb-2.5" style={{ color: isDark ? D.muted : '#374151' }}>Leave Type</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    {LEAVE_TYPES.map(lt => (
-                      <motion.button
-                        key={lt.value}
-                        whileTap={{ scale: 0.97 }}
-                        onClick={() => setLeaveType(lt.value)}
-                        className="flex items-center gap-3 px-4 py-3 rounded-xl border-2 text-left transition-all"
+        {/* ══ ABSENT SUMMARY ═══════════════════════════════════════════════════ */}
+        {isAdmin && Array.isArray(absentSummary) && absentSummary.length > 0 && (
+          <motion.div variants={itemVariants}>
+            <SectionCard>
+              <CardHeaderRow
+                iconBg={isDark ? 'bg-red-900/40' : 'bg-red-50'}
+                icon={<UserX className="h-4 w-4 text-red-500" />}
+                title={`Absent This Month — ${absentSummary.length} Staff`}
+                subtitle="Auto-marked at 7:00 PM IST"
+                badge={absentSummary.length}
+              />
+              <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                {absentSummary.map(item => (
+                  <motion.div key={item.user_id} whileHover={{ scale: 1.02 }}
+                    className="flex items-center gap-2.5 p-3 rounded-xl border"
+                    style={{
+                      backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2',
+                      borderColor: isDark ? '#7f1d1d' : '#fecaca',
+                    }}>
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+                      style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.20)' : '#fecaca' }}>
+                      <span className="font-bold text-sm text-red-500">{(item.user_name || '?')[0]}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate" style={{ color: isDark ? D.text : '#1e293b' }}>{item.user_name || 'Unknown'}</p>
+                      <p className="text-xs font-semibold text-red-500">{item.absent_days} day{item.absent_days !== 1 ? 's' : ''} absent</p>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </SectionCard>
+          </motion.div>
+        )}
+
+            </React.Fragment>
+          );
+
+          /* ══ STAT CARDS ══════════════════════════════════════════════════ */
+          if (sectionId === 'stat_cards') return (
+            <React.Fragment key="stat_cards">
+              <motion.div
+          className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
+          variants={itemVariants}
+        >
+          <StatCard isDark={isDark} icon={Timer}
+            label={isEveryoneView ? 'Total (All Staff)' : 'This Month'}
+            value={Math.floor(monthTotalMinutes / 60)} unit="hours worked" color={COLORS.deepBlue}
+            trend={`${monthDaysPresent} days present`} />
+          <StatCard isDark={isDark} icon={CheckCircle2}
+            label="Tasks Done" value={tasksCompleted} unit="completed" color={COLORS.emeraldGreen}
+            trend=" " />
+          <StatCard isDark={isDark} icon={CalendarX}
+            label="Days Late" value={totalDaysLateThisMonth} unit="this month" color={COLORS.orange}
+            trend=" " />
+          <StatCard isDark={isDark} icon={UserX}
+            label="Days Absent" value={monthDaysAbsent} unit="this month" color={COLORS.red}
+            trend={monthDaysAbsent > 0 ? 'Auto-marked at 7 PM' : 'Perfect attendance'} />
+          {/* FEATURE ENHANCEMENT: Streak + Avg Hours cards */}
+          <StatCard isDark={isDark} icon={Flame}
+            label="Streak" value={attendanceStreak} unit="consecutive days" color="#f59e0b"
+            trend={attendanceStreak >= 5 ? 'Keep it up!' : 'Build momentum'} />
+          {!isEveryoneView && (
+            <StatCard isDark={isDark} icon={TrendingUp}
+              label={isViewingOther ? 'Their Rank' : 'Your Rank'}
+              value={myRank} unit="overall" color={COLORS.mediumBlue}
+              trend={`Avg ${avgDailyHours}h/day`} />
+          )}
+        </motion.div>
+
+            </React.Fragment>
+          );
+
+          /* ══ HOLIDAYS + MONTHLY INSIGHTS (side by side) ═══════════════ */
+          if (sectionId === 'holidays_reminders') return (
+            <React.Fragment key="holidays_reminders">
+              {!isEveryoneView && (
+          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            {/* HOLIDAYS CARD */}
+            <SectionCard className="flex flex-col h-[420px]">
+              <CardHeaderRow
+                iconBg={isDark ? 'bg-amber-900/40' : 'bg-amber-50'}
+                icon={<CalendarIcon className="h-4 w-4 text-amber-500" />}
+                title={`Holidays — ${format(selectedDate, 'MMM yyyy')}`}
+                subtitle={`${monthHolidaysGrid.length} holiday${monthHolidaysGrid.length !== 1 ? 's' : ''} this month`}
+                badge={monthHolidaysGrid.length}
+                action={isAdmin && (
+                  <div className="flex items-center gap-1.5">
+                    <Button size="sm" onClick={() => {
+                      setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
+                      setCalendarOpenIdx(null);
+                      setShowHolidayModal(true);
+                    }}
+                      className="h-8 px-3 text-xs font-semibold text-white rounded-lg"
+                      style={{ backgroundColor: COLORS.deepBlue }}>
+                      <Plus className="w-3 h-3 mr-1" /> Add Holiday
+                    </Button>
+                    <Button size="sm" onClick={async () => {
+                      try {
+                        const r = await api.post('/holidays/auto-sync');
+                        const { added = 0, upgraded = 0 } = r.data || {};
+                        const msg = added + upgraded > 0
+                          ? `${added} new · ${upgraded} confirmed`
+                          : 'Already up to date';
+                        toast.success(`Holidays synced — ${msg}`);
+                        await fetchData();
+                      } catch { toast.error('Sync failed'); }
+                    }}
+                      className="h-8 px-3 text-xs font-semibold text-white rounded-lg"
+                      style={{ backgroundColor: COLORS.amber }}>
+                      <Zap className="w-3 h-3 mr-1" /> Auto Sync
+                    </Button>
+                  </div>
+                )}
+              />
+              <div className="flex-1 overflow-y-auto slim-scroll p-2.5 space-y-1 min-h-0" style={slimScroll}>
+                {monthHolidaysGrid.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full py-8">
+                    <CalendarIcon className="w-8 h-8 mb-2 text-slate-300 dark:text-slate-600" />
+                    <p className="text-sm font-medium text-slate-400 dark:text-slate-500">No holidays this month</p>
+                  </div>
+                ) : monthHolidaysGrid.map(h => (
+                  <motion.div key={h.date}
+                    className="relative flex items-center gap-2.5 px-2.5 py-2 rounded-xl border cursor-pointer group transition-all hover:shadow-sm"
+                    style={{
+                      borderColor: isDark ? 'rgba(245,158,11,0.22)' : `${COLORS.amber}35`,
+                      backgroundColor: isDark ? 'rgba(245,158,11,0.06)' : `${COLORS.amber}05`,
+                    }}
+                    whileHover={{ backgroundColor: isDark ? 'rgba(245,158,11,0.12)' : `${COLORS.amber}10`, y: -1 }}
+                    onClick={() => setSelectedHolidayDetail(h)}
+                  >
+                    <div className="w-9 h-9 rounded-lg flex flex-col items-center justify-center flex-shrink-0 text-white shadow-sm"
+                      style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
+                      <span className="text-[7px] leading-none uppercase">{safeFormatDate(h.date, 'MMM', '')}</span>
+                      <span className="text-xs leading-none font-black">{safeFormatDate(h.date, 'd', '?')}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold truncate" style={{ color: isDark ? D.text : '#1e293b' }}>{h.name}</p>
+                      <p className="text-[11px]" style={{ color: isDark ? D.muted : '#64748b' }}>
+                        {safeFormatDate(h.date, 'EEEE', '—')}
+                      </p>
+                    </div>
+                    <ChevronRight className="w-3.5 h-3.5 flex-shrink-0 text-slate-300 dark:text-slate-600" />
+                    {isAdmin && (
+                      <div className="absolute right-8 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => { setEditingHoliday(h); setEditName(h.name); setEditDate(h.date); }}
+                          className="w-6 h-6 flex items-center justify-center rounded text-blue-400 hover:bg-blue-500/20">
+                          <Edit2 className="w-3 h-3" />
+                        </button>
+                        <button onClick={() => handleDeleteHoliday(h.date, h.name)}
+                          className="w-6 h-6 flex items-center justify-center rounded text-red-400 hover:bg-red-500/20">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                  </motion.div>
+                ))}
+              </div>
+            </SectionCard>
+
+            {/* MONTHLY INSIGHTS CARD (side by side with holidays) */}
+            {(() => {
+              const onTimeCount = monthDaysPresent - totalDaysLateThisMonth;
+              const onTimePct   = monthDaysPresent > 0 ? Math.round((onTimeCount / monthDaysPresent) * 100) : 0;
+              return (
+              <SectionCard className="flex flex-col h-[420px]">
+                <CardHeaderRow
+                  iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
+                  icon={<BarChart3 className="h-4 w-4 text-emerald-500" />}
+                  title="Monthly Insights"
+                  subtitle={format(selectedDate, 'MMMM yyyy')}
+                  action={
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                      style={{
+                        backgroundColor: totalDaysLateThisMonth === 0
+                          ? (isDark ? 'rgba(31,175,90,0.18)' : '#dcfce7')
+                          : (isDark ? 'rgba(239,68,68,0.15)' : '#fee2e2'),
+                        color: totalDaysLateThisMonth === 0 ? COLORS.emeraldGreen : COLORS.red,
+                      }}>
+                      {totalDaysLateThisMonth === 0 ? '✓ Perfect Punctuality' : `${totalDaysLateThisMonth} Late Arrival${totalDaysLateThisMonth !== 1 ? 's' : ''}`}
+                    </span>
+                  }
+                />
+                <div className="flex-1 overflow-y-auto slim-scroll p-4" style={slimScroll}>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
+                      style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0' }}>
+                      <CheckCircle2 className="w-4 h-4 mb-1 text-emerald-500" />
+                      <p className="text-xl font-black tabular-nums" style={{ color: COLORS.emeraldGreen }}>{monthDaysPresent}</p>
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Present</p>
+                    </div>
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
+                      style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2', borderColor: isDark ? '#7f1d1d' : '#fecaca' }}>
+                      <UserX className="w-4 h-4 mb-1 text-red-500" />
+                      <p className="text-xl font-black tabular-nums text-red-500">{monthDaysAbsent}</p>
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Absent</p>
+                    </div>
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
+                      style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? '#92400e' : '#fde68a' }}>
+                      <AlarmClock className="w-4 h-4 mb-1 text-amber-500" />
+                      <p className="text-xl font-black tabular-nums" style={{ color: COLORS.amber }}>{totalDaysLateThisMonth}</p>
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Late</p>
+                    </div>
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
+                      style={{ backgroundColor: isDark ? `${COLORS.deepBlue}18` : `${COLORS.deepBlue}08`, borderColor: isDark ? '#1d4ed8' : '#bfdbfe' }}>
+                      <Clock className="w-4 h-4 mb-1" style={{ color: COLORS.deepBlue }} />
+                      <p className="text-xl font-black tabular-nums font-mono" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
+                        {Math.floor(monthTotalMinutes / 60)}h
+                      </p>
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">{monthTotalMinutes % 60}m total</p>
+                    </div>
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
+                      style={{ backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : '#f5f3ff', borderColor: isDark ? '#4c1d95' : '#ddd6fe' }}>
+                      <BarChart3 className="w-4 h-4 mb-1 text-purple-500" />
+                      <p className="text-xl font-black tabular-nums" style={{ color: COLORS.purple }}>{avgDailyHours}h</p>
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Avg/Day</p>
+                    </div>
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
+                      style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? '#92400e' : '#fde68a' }}>
+                      <Flame className="w-4 h-4 mb-1 text-amber-400" />
+                      <p className="text-xl font-black tabular-nums" style={{ color: COLORS.amber }}>{attendanceStreak}</p>
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">
+                        {attendanceStreak >= 10 ? '🔥 Streak' : '⚡ Streak'}
+                      </p>
+                    </div>
+                  </div>
+                  {/* Punctuality bar */}
+                  <div className="flex flex-col justify-center gap-2 px-3 py-3 rounded-2xl border mt-3"
+                    style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Punctuality</span>
+                      <span className="text-lg font-black tabular-nums"
+                        style={{ color: onTimePct >= 80 ? COLORS.emeraldGreen : onTimePct >= 60 ? COLORS.amber : COLORS.red }}>
+                        {onTimePct}%
+                      </span>
+                    </div>
+                    <div className="h-3 rounded-full overflow-hidden"
+                      style={{ backgroundColor: isDark ? D.border : '#e2e8f0' }}>
+                      <motion.div className="h-full rounded-full"
                         style={{
-                          borderColor: leaveType === lt.value ? COLORS.deepBlue : isDark ? D.border : '#e2e8f0',
-                          backgroundColor: leaveType === lt.value
-                            ? isDark ? `${COLORS.deepBlue}20` : `${COLORS.deepBlue}06`
-                            : isDark ? D.raised : '#f8fafc',
+                          background: onTimePct >= 80
+                            ? `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`
+                            : onTimePct >= 60
+                              ? `linear-gradient(90deg, ${COLORS.amber}, #fbbf24)`
+                              : `linear-gradient(90deg, ${COLORS.red}, #f87171)`,
                         }}
-                      >
-                        <span style={{ fontSize: 20, lineHeight: 1 }}>{lt.icon}</span>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold leading-snug"
-                            style={{ color: leaveType === lt.value ? (isDark ? '#60a5fa' : COLORS.deepBlue) : isDark ? D.text : '#1e293b' }}>
-                            {lt.label}
-                          </p>
-                          <p className="text-[11px] leading-snug mt-0.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
-                            {lt.desc}
-                          </p>
-                        </div>
-                        {leaveType === lt.value && (
-                          <div className="flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center"
-                            style={{ backgroundColor: COLORS.deepBlue }}>
-                            <div className="w-1.5 h-1.5 rounded-full bg-white" />
-                          </div>
-                        )}
-                      </motion.button>
+                        initial={{ width: 0 }}
+                        animate={{ width: `${onTimePct}%` }}
+                        transition={{ duration: 0.9, ease: 'easeOut', delay: 0.2 }}
+                      />
+                    </div>
+                    <p className="text-[11px] font-medium text-center" style={{ color: isDark ? D.muted : '#64748b' }}>
+                      {onTimeCount} on-time · {totalDaysLateThisMonth} late
+                    </p>
+                  </div>
+                </div>
+              </SectionCard>
+              );
+            })()}
+          </motion.div>
+        )}
+
+            </React.Fragment>
+          );
+
+          /* ══ CALENDAR + APPLY LEAVE + RECENT ATTENDANCE ══════════════════ */
+          if (sectionId === 'calendar_area') return (
+            <React.Fragment key="calendar_area">
+              <motion.div
+          className={`grid gap-6 items-stretch ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-12'}`}
+          variants={itemVariants}
+        >
+          {/* ── LEFT COLUMN: Calendar + Date Detail + Apply Leave ── */}
+          {!isEveryoneView && (
+            <div className="xl:col-span-5 flex flex-col gap-4">
+              <SectionCard className="flex flex-col flex-1 min-h-0">
+                <CardHeaderRow
+                  iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
+                  icon={<CalendarIcon className="h-4 w-4 text-blue-500" />}
+                  title="Attendance Calendar"
+                  subtitle="Click a date for details"
+                  action={
+                    <Button variant="ghost" size="sm" onClick={() => setSelectedDate(new Date())}
+                      className="text-xs h-7 px-3 font-semibold text-blue-500">
+                      Today
+                    </Button>
+                  }
+                />
+                <div className="p-3">
+                  <Calendar
+                    mode="single" selected={selectedDate}
+                    onSelect={date => date && setSelectedDate(date)}
+                    disabled={date => isAfter(date, new Date())}
+                    className="rounded-xl border-0 w-full"
+                    classNames={{
+                      months: 'w-full', month: 'w-full space-y-3', table: 'w-full border-collapse',
+                      head_row: 'flex w-full justify-between mb-2',
+                      head_cell: 'rounded-lg w-9 font-bold text-[0.7rem] text-center text-slate-400',
+                      row: 'flex w-full mt-2 justify-between',
+                      cell: 'relative p-0 text-center text-sm focus-within:relative focus-within:z-20',
+                      day: 'h-10 w-10 p-0 font-semibold rounded-full transition-all',
+                      day_today: 'font-black',
+                    }}
+                    components={{ Day: props => <CustomDay {...props} attendance={attendanceMap} holidays={holidays} /> }}
+                  />
+                  {/* Legend */}
+                  <div className="flex flex-wrap gap-x-2 gap-y-1 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 text-xs justify-center">
+                    {[
+                      { color: COLORS.emeraldGreen, label: 'Present'     },
+                      { color: COLORS.red,          label: 'Late/Absent' },
+                      { color: COLORS.amber,        label: 'Holiday'     },
+                      { color: COLORS.orange,       label: 'Leave'       },
+                    ].map(({ color, label }) => (
+                      <div key={label} className="flex items-center gap-1.5">
+                        <span className="w-3.5 h-3.5 rounded-full border-2 flex-shrink-0" style={{ borderColor: color, backgroundColor: `${color}20` }} />
+                        <span className="text-slate-400 dark:text-slate-500">{label}</span>
+                      </div>
                     ))}
                   </div>
                 </div>
+              </SectionCard>
 
-                {/* Early leave time */}
-                {leaveType === 'early_leave' && (
-                  <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}>
-                    <label className="text-sm font-semibold mb-2.5 block" style={{ color: isDark ? D.muted : '#374151' }}>
-                      Departure Time
-                    </label>
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1">
-                        <p className="text-[11px] font-medium mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Hour</p>
-                        <div className="grid grid-cols-6 gap-1">
-                          {Array.from({ length: 12 }, (_, i) => i + 1).map(h => {
-                            const hStr = String(h).padStart(2, '0');
-                            const currentH = earlyLeaveTime ? earlyLeaveTime.split(':')[0] : '';
-                            const is12 = currentH === '00' && h === 12;
-                            const isSelected = currentH === hStr || is12;
-                            return (
-                              <button key={h} type="button"
-                                onClick={() => {
-                                  const mins = earlyLeaveTime ? earlyLeaveTime.split(':')[1] || '00' : '00';
-                                  const isPM = earlyLeaveTime ? parseInt(earlyLeaveTime.split(':')[0]) >= 12 : true;
-                                  let h24 = h;
-                                  if (isPM && h !== 12) h24 = h + 12;
-                                  if (!isPM && h === 12) h24 = 0;
-                                  setEarlyLeaveTime(`${String(h24).padStart(2, '0')}:${mins}`);
-                                }}
-                                className="py-1.5 rounded-lg text-xs font-semibold transition-all"
-                                style={{
-                                  backgroundColor: isSelected ? COLORS.deepBlue : isDark ? D.raised : '#f1f5f9',
-                                  color: isSelected ? '#ffffff' : isDark ? D.text : '#374151',
-                                  border: `1px solid ${isSelected ? COLORS.deepBlue : isDark ? D.border : '#e2e8f0'}`,
-                                }}>
-                                {h}
-                              </button>
-                            );
-                          })}
+              {/* Selected date detail */}
+              <SectionCard className="flex flex-col flex-1 min-h-0">
+                <div className="p-0">
+                  {selectedAttendance?.status === 'absent' ? (
+                    <div className="relative p-4 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2' }}>
+                      <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.red }} />
+                      <p className="font-bold text-sm mb-0.5 text-red-500">Absent</p>
+                      <p className="text-xs text-slate-400">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
+                    </div>
+                  ) : selectedAttendance?.punch_in ? (
+                    <div className="relative p-4 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.06)' : '#f0fdf4' }}>
+                      <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.emeraldGreen }} />
+                      <p className="font-bold text-sm mb-2.5" style={{ color: isDark ? D.text : '#1e293b' }}>{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
+                      <div className="space-y-1.5 text-xs">
+                        <div className="flex justify-between items-center">
+                          <span className="font-medium text-slate-400">Punch In</span>
+                          <span className="font-bold font-mono" style={{ color: isDark ? D.text : '#1e293b' }}>{formatAttendanceTime(selectedAttendance.punch_in)}</span>
                         </div>
-                      </div>
-                      <div className="w-24">
-                        <p className="text-[11px] font-medium mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Minute</p>
-                        <div className="grid grid-cols-2 gap-1">
-                          {[0, 15, 30, 45].map(m => {
-                            const mStr = String(m).padStart(2, '0');
-                            const currentM = earlyLeaveTime ? earlyLeaveTime.split(':')[1] : '';
-                            const isSelected = currentM === mStr;
-                            return (
-                              <button key={m} type="button"
-                                onClick={() => {
-                                  const hrs = earlyLeaveTime ? earlyLeaveTime.split(':')[0] : '13';
-                                  setEarlyLeaveTime(`${hrs}:${mStr}`);
-                                }}
-                                className="py-1.5 rounded-lg text-xs font-semibold transition-all"
-                                style={{
-                                  backgroundColor: isSelected ? COLORS.mediumBlue : isDark ? D.raised : '#f1f5f9',
-                                  color: isSelected ? '#ffffff' : isDark ? D.text : '#374151',
-                                  border: `1px solid ${isSelected ? COLORS.mediumBlue : isDark ? D.border : '#e2e8f0'}`,
-                                }}>
-                                :{mStr}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                      <div className="w-14">
-                        <p className="text-[11px] font-medium mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Period</p>
-                        <div className="flex flex-col gap-1">
-                          {['AM', 'PM'].map(period => {
-                            const currentH = earlyLeaveTime ? parseInt(earlyLeaveTime.split(':')[0]) : 13;
-                            const isPM = currentH >= 12;
-                            const isSelected = (period === 'PM' && isPM) || (period === 'AM' && !isPM);
-                            return (
-                              <button key={period} type="button"
-                                onClick={() => {
-                                  if (!earlyLeaveTime) { setEarlyLeaveTime(period === 'AM' ? '09:00' : '13:00'); return; }
-                                  let h = parseInt(earlyLeaveTime.split(':')[0]);
-                                  const mins = earlyLeaveTime.split(':')[1];
-                                  if (period === 'PM' && h < 12) h += 12;
-                                  if (period === 'AM' && h >= 12) h -= 12;
-                                  setEarlyLeaveTime(`${String(h).padStart(2, '0')}:${mins}`);
-                                }}
-                                className="py-1.5 rounded-lg text-xs font-bold transition-all"
-                                style={{
-                                  backgroundColor: isSelected ? COLORS.deepBlue : isDark ? D.raised : '#f1f5f9',
-                                  color: isSelected ? '#ffffff' : isDark ? D.text : '#374151',
-                                  border: `1px solid ${isSelected ? COLORS.deepBlue : isDark ? D.border : '#e2e8f0'}`,
-                                }}>
-                                {period}
-                              </button>
-                            );
-                          })}
+                        {selectedAttendance.punch_out && (
+                          <div className="flex justify-between items-center">
+                            <span className="font-medium text-slate-400">Punch Out</span>
+                            <span className="font-bold font-mono" style={{ color: isDark ? D.text : '#1e293b' }}>{formatAttendanceTime(selectedAttendance.punch_out)}</span>
+                          </div>
+                        )}
+                        {selectedAttendance.is_late && (
+                          <div className="flex justify-between items-center">
+                            <span className="font-medium text-slate-400">Status</span>
+                            <span className="text-[10px] font-bold text-red-500 px-2 py-0.5 rounded"
+                              style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>Late</span>
+                          </div>
+                        )}
+                        <div className="pt-1.5 flex justify-between items-center border-t border-slate-100 dark:border-slate-700">
+                          <span className="font-semibold text-xs" style={{ color: isDark ? D.text : '#1e293b' }}>Duration</span>
+                          <span className="font-bold font-mono text-sm" style={{ color: COLORS.emeraldGreen }}>
+                            {formatDuration(selectedAttendance.duration_minutes)}
+                          </span>
                         </div>
                       </div>
                     </div>
-                    {earlyLeaveTime && (
-                      <div className="flex items-center gap-2 mt-2.5 px-3 py-2 rounded-xl"
-                        style={{ backgroundColor: isDark ? `${COLORS.deepBlue}15` : `${COLORS.deepBlue}08` }}>
-                        <Clock className="w-4 h-4" style={{ color: COLORS.mediumBlue }} />
-                        <p className="text-sm font-semibold" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
-                          Leaving at {(() => {
-                            const [h, m] = earlyLeaveTime.split(':').map(Number);
-                            const ampm = h >= 12 ? 'PM' : 'AM';
-                            const h12 = h % 12 || 12;
-                            return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
-                          })()}
-                        </p>
-                      </div>
-                    )}
-                  </motion.div>
-                )}
+                  ) : selectedAttendance?.status === 'leave' ? (
+                    <div className="relative p-4 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed' }}>
+                      <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.orange }} />
+                      <p className="font-bold text-sm mb-0.5" style={{ color: COLORS.orange }}>On Leave</p>
+                      <p className="text-xs text-slate-400">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
+                    </div>
+                  ) : selectedHoliday ? (
+                    <div className="relative p-4 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.06)' : '#fffbeb' }}>
+                      <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.amber }} />
+                      <p className="font-bold text-sm mb-0.5" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>Public Holiday</p>
+                      <p className="text-xs font-medium" style={{ color: isDark ? D.muted : '#78716c' }}>{selectedHoliday.name}</p>
+                    </div>
+                  ) : (
+                    <div className="relative p-4 pl-5 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? D.raised : '#f8fafc' }}>
+                      <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: isDark ? D.border : '#e2e8f0' }} />
+                      <p className="text-xs font-medium" style={{ color: isDark ? D.muted : '#64748b' }}>
+                        No record for {format(selectedDate, 'MMM d, yyyy')}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </SectionCard>
 
-                {/* Date pickers */}
-                {leaveType === 'full_day' ? (
-                  <>
-                    <div className="flex flex-wrap gap-2">
-                      {[1, 3, 7, 15, 30].map(days => (
-                        <Button key={days} variant="outline" size="sm"
-                          onClick={() => {
-                            const from = new Date(), to = new Date();
-                            to.setDate(from.getDate() + days - 1);
-                            setLeaveFrom(from); setLeaveTo(to);
-                          }}
-                          className="rounded-lg font-semibold text-xs"
-                          style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#374151', backgroundColor: isDark ? D.raised : undefined }}>
-                          {days === 1 ? '1 Day' : `${days} Days`}
-                        </Button>
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>From Date</label>
-                        <Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom}
-                          disabled={date => isBefore(date, startOfDay(new Date()))}
-                          className="rounded-xl border w-full"
-                          style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
-                      </div>
-                      <div>
-                        <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>To Date</label>
-                        <Calendar mode="single" selected={leaveTo} onSelect={setLeaveTo}
-                          disabled={date => leaveFrom ? isBefore(date, leaveFrom) : true}
-                          className="rounded-xl border w-full"
-                          style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
-                      </div>
-                    </div>
-                    {leaveFrom && (
-                      <div className="relative px-4 py-3 pl-5 rounded-xl overflow-hidden"
-                        style={{ backgroundColor: isDark ? `${COLORS.deepBlue}18` : `${COLORS.deepBlue}08` }}>
-                        <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.deepBlue }} />
-                        <p className="text-xs text-slate-400 mb-0.5">Total Duration</p>
-                        <p className="text-2xl font-black" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
-                          {Math.max(1, leaveTo
-                            ? Math.ceil((leaveTo.getTime() - leaveFrom.getTime()) / 86400000) + 1
-                            : 1)} day{Math.max(1, leaveTo ? Math.ceil((leaveTo.getTime() - leaveFrom.getTime()) / 86400000) + 1 : 1) !== 1 ? 's' : ''}
-                        </p>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div>
-                    <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Select Date</label>
-                    <Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom}
-                      numberOfMonths={2}
-                      disabled={date => isBefore(date, startOfDay(new Date()))}
-                      className="rounded-xl border w-full"
-                      style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
-                    {leaveFrom && (
-                      <div className="flex items-center gap-2 mt-3 px-3 py-2.5 rounded-xl border text-sm font-semibold"
-                        style={{
-                          backgroundColor: isDark ? `${COLORS.deepBlue}12` : `${COLORS.deepBlue}06`,
-                          borderColor: isDark ? 'rgba(31,111,178,0.3)' : `${COLORS.deepBlue}25`,
-                          color: isDark ? '#60a5fa' : COLORS.deepBlue,
-                        }}>
-                        <CalendarIcon className="w-4 h-4 flex-shrink-0" />
-                        {format(leaveFrom, 'EEEE, MMMM d, yyyy')}
-                      </div>
+
+              {/* Apply for Leave */}
+              <SectionCard className="flex flex-col flex-1 min-h-0">
+              <CardHeaderRow
+                iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
+                icon={<CalendarX className="h-4 w-4" style={{ color: COLORS.orange }} />}
+                title="Apply for Leave"
+                subtitle={upcomingLeaves.length > 0 ? `${upcomingLeaves.length} upcoming leave${upcomingLeaves.length !== 1 ? 's' : ''}` : 'Request time off'}
+              />
+              <div className="p-4 flex-1 overflow-y-auto slim-scroll flex flex-col gap-3" style={slimScroll}>
+                {upcomingLeaves.length > 0 && (
+                  <div className="space-y-1.5">
+                    {upcomingLeaves.slice(0, 3).map(leave => {
+                      const leaveDate = safeParseISO(leave.date);
+                      return (
+                        <div key={leave.date}
+                          className="flex items-center justify-between px-3 py-2 rounded-lg border text-xs"
+                          style={{
+                            backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed',
+                            borderColor: isDark ? '#7c2d12' : '#fed7aa',
+                          }}>
+                          <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: COLORS.orange }} />
+                            <span className="font-semibold" style={{ color: isDark ? D.text : '#1e293b' }}>
+                              {leaveDate ? format(leaveDate, 'EEE, MMM d') : leave.date}
+                            </span>
+                          </div>
+                          {leave.leave_reason && (
+                            <span className="text-[10px] truncate max-w-[100px]" style={{ color: isDark ? D.muted : '#78716c' }}>
+                              {leave.leave_reason}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {upcomingLeaves.length > 3 && (
+                      <p className="text-[11px] font-medium text-center" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                        +{upcomingLeaves.length - 3} more upcoming
+                      </p>
                     )}
                   </div>
                 )}
+                <motion.button
+                  whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                  onClick={() => setShowLeaveForm(true)}
+                  className="flex items-center justify-center gap-2.5 w-full py-3.5 rounded-xl text-sm font-bold transition-all border-2"
+                  style={{
+                    borderColor: isDark ? 'rgba(249,115,22,0.4)' : `${COLORS.orange}40`,
+                    color: isDark ? '#fb923c' : COLORS.orange,
+                    backgroundColor: isDark ? 'rgba(249,115,22,0.08)' : `${COLORS.orange}06`,
+                  }}
+                >
+                  <Send className="w-4 h-4" />
+                  Apply Leave
+                </motion.button>
+                <div className="grid grid-cols-2 gap-2">
+                  <motion.button
+                    whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
+                    onClick={() => { setLeaveType('half_day'); setShowLeaveForm(true); }}
+                    className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all border"
+                    style={{
+                      borderColor: isDark ? 'rgba(139,92,246,0.3)' : '#ddd6fe',
+                      color: isDark ? '#c4b5fd' : '#7c3aed',
+                      backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : '#f5f3ff',
+                    }}
+                  >
+                    <span>🌗</span> Half Day
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
+                    onClick={() => { setLeaveType('early_leave'); setShowLeaveForm(true); }}
+                    className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all border"
+                    style={{
+                      borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#fde68a',
+                      color: isDark ? '#fbbf24' : '#d97706',
+                      backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb',
+                    }}
+                  >
+                    <span>🚪</span> Early Leave
+                  </motion.button>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: 'Tomorrow', days: 1 },
+                    { label: '3 Days',   days: 3 },
+                    { label: '1 Week',   days: 7 },
+                  ].map(({ label, days }) => (
+                    <button
+                      key={label}
+                      onClick={() => {
+                        const from = new Date();
+                        from.setDate(from.getDate() + (label === 'Tomorrow' ? 1 : 0));
+                        const to = new Date(from);
+                        to.setDate(from.getDate() + days - 1);
+                        setLeaveFrom(from);
+                        setLeaveTo(to);
+                        setShowLeaveForm(true);
+                      }}
+                      className="text-xs font-semibold px-3 py-2.5 rounded-xl border transition-all hover:shadow-sm active:scale-95 text-center"
+                      style={{
+                        borderColor: isDark ? D.border : '#e2e8f0',
+                        color: isDark ? D.muted : '#64748b',
+                        backgroundColor: isDark ? D.raised : '#f8fafc',
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </SectionCard>
 
-                {/* Reason */}
-                <div>
-                  <label className="text-sm font-semibold mb-1.5 block" style={{ color: isDark ? D.muted : '#374151' }}>Reason</label>
-                  <textarea
-                    value={leaveReason} onChange={e => setLeaveReason(e.target.value)}
-                    placeholder="Brief reason for leave…"
-                    rows={3}
-                    className={inputCls + ' resize-none'}
-                    style={inputStyle}
+            </div>
+          )}
+
+          {/* ── RIGHT COLUMN: Location History + Recent Attendance ── */}
+          <div className={isEveryoneView ? 'flex flex-col gap-4' : 'xl:col-span-7 flex flex-col gap-4'}>
+
+            {/* Location History */}
+            {(() => {
+              const locRecords = (Array.isArray(attendanceHistory) ? attendanceHistory : [])
+                .filter(r => r.punch_in && r.status === 'present'
+                  && (!isViewingOther ? (!r.user_id || r.user_id === user?.id) : true))
+                .slice(0, 5);
+              return (
+                <SectionCard className="flex flex-col flex-shrink-0">
+                  <CardHeaderRow
+                    iconBg={isDark ? 'bg-teal-900/40' : 'bg-teal-50'}
+                    icon={<MapPin className="h-4 w-4 text-teal-500" />}
+                    title="Location History"
+                    subtitle="Punch in/out locations — last 5"
+                    action={
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md uppercase tracking-widest"
+                        style={{ backgroundColor: isDark ? 'rgba(13,148,136,0.18)' : '#ccfbf1', color: isDark ? '#2dd4bf' : '#0f766e' }}>
+                        GPS
+                      </span>
+                    }
                   />
+                  <div className="overflow-x-auto slim-scroll p-3" style={{ scrollbarWidth: 'thin' }}>
+                  <div className="flex gap-3" style={{ minWidth: 'max-content' }}>
+                    {locRecords.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-6 px-10 gap-2">
+                        <MapPin className="w-8 h-8 text-slate-300 dark:text-slate-600" />
+                        <p className="text-sm font-medium text-slate-400">No location data yet</p>
+                        <p className="text-xs text-slate-400 text-center max-w-[180px]">Enable GPS when clocking in/out</p>
+                      </div>
+                    ) : locRecords.map((record, idx) => {
+                      const recordDate   = safeParseISO(record.date);
+                      const inLoc        = record.location;
+                      const outLoc       = record.punch_out_location;
+                      const inLabel      = getLocationLabel(record, 'in');
+                      const outLabel     = getLocationLabel(record, 'out');
+                      const hasInCoords  = inLoc?.latitude && inLoc?.longitude;
+                      const hasOutCoords = outLoc?.latitude && outLoc?.longitude;
+                      const isOngoing    = !record.punch_out;
+                      const inMapsUrl    = hasInCoords ? `https://www.google.com/maps?q=${inLoc.latitude},${inLoc.longitude}` : null;
+                      const outMapsUrl   = hasOutCoords ? `https://www.google.com/maps?q=${outLoc.latitude},${outLoc.longitude}` : null;
+                      return (
+                        <motion.div
+                          key={record.date}
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: idx * 0.05, duration: 0.25 }}
+                          className="relative rounded-xl border overflow-hidden flex-shrink-0"
+                          style={{
+                            width: 220,
+                            borderColor: isOngoing ? isDark ? '#92400e' : '#fde68a' : isDark ? D.border : '#e2e8f0',
+                            backgroundColor: isOngoing ? isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb' : isDark ? D.raised : '#fafafa',
+                          }}
+                        >
+                          <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: isOngoing ? COLORS.amber : '#0d9488' }} />
+                          <div className="flex items-center justify-between px-2.5 py-1.5 border-b"
+                            style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#f8fafc' }}>
+                            <div className="flex items-center gap-1.5">
+                              <div className="w-5 h-5 rounded flex items-center justify-center text-white text-[9px] font-black"
+                                style={{ background: isOngoing ? `linear-gradient(135deg,${COLORS.amber},#d97706)` : `linear-gradient(135deg,${COLORS.deepBlue},${COLORS.mediumBlue})` }}>
+                                {idx + 1}
+                              </div>
+                              <span className="text-xs font-bold" style={{ color: isDark ? D.text : '#1e293b' }}>
+                                {recordDate ? format(recordDate, 'EEE, MMM d') : record.date}
+                              </span>
+                              {isOngoing && (
+                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full animate-pulse"
+                                  style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.25)' : '#fef3c7', color: COLORS.amber }}>
+                                  ONGOING
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] font-mono font-semibold" style={{ color: COLORS.emeraldGreen }}>
+                                {formatDuration(record.duration_minutes)}
+                              </span>
+                              {record.is_late && (
+                                <span className="text-[9px] font-bold px-1 py-0.5 rounded text-red-500"
+                                  style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.15)' : '#fee2e2' }}>LATE</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="px-2.5 py-1.5 flex items-center gap-2 border-b"
+                            style={{ borderColor: isDark ? 'rgba(255,255,255,0.04)' : '#f1f5f9' }}>
+                            <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0"
+                              style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.20)' : '#dcfce7' }}>
+                              <LogIn className="w-3 h-3 text-emerald-500" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[9px] font-black uppercase text-emerald-500">IN</span>
+                                <span className="text-[10px] font-mono font-semibold" style={{ color: isDark ? D.muted : '#64748b' }}>
+                                  {formatAttendanceTime(record.punch_in)}
+                                </span>
+                                {hasInCoords && (
+                                  <a href={inMapsUrl} target="_blank" rel="noopener noreferrer"
+                                    className="text-[9px] font-semibold flex items-center gap-0.5 hover:underline"
+                                    style={{ color: COLORS.mediumBlue }}>
+                                    <ExternalLink className="w-2 h-2" />Maps
+                                  </a>
+                                )}
+                              </div>
+                              <p className="text-[10px] leading-tight truncate" style={{ color: isDark ? D.dimmer : '#64748b' }}>
+                                {hasInCoords ? inLabel : <span className="italic text-slate-400">Location not recorded</span>}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="px-2.5 py-1.5 flex items-center gap-2">
+                            <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0"
+                              style={{ backgroundColor: isOngoing ? isDark ? 'rgba(245,158,11,0.20)' : '#fef3c7' : isDark ? 'rgba(249,115,22,0.15)' : '#ffedd5' }}>
+                              <LogOut className={`w-3 h-3 ${isOngoing ? 'text-amber-500' : 'text-orange-400'}`} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`text-[9px] font-black uppercase ${isOngoing ? 'text-amber-500' : 'text-orange-400'}`}>OUT</span>
+                                <span className="text-[10px] font-mono font-semibold" style={{ color: isDark ? D.muted : '#64748b' }}>
+                                  {record.punch_out ? formatAttendanceTime(record.punch_out) : '—'}
+                                </span>
+                                {hasOutCoords && (
+                                  <a href={outMapsUrl} target="_blank" rel="noopener noreferrer"
+                                    className="text-[9px] font-semibold flex items-center gap-0.5 hover:underline"
+                                    style={{ color: COLORS.mediumBlue }}>
+                                    <ExternalLink className="w-2 h-2" />Maps
+                                  </a>
+                                )}
+                              </div>
+                              <p className="text-[10px] leading-tight" style={{ color: isOngoing ? COLORS.amber : isDark ? D.dimmer : '#64748b' }}>
+                                {hasOutCoords ? <span className="truncate">{outLabel}</span>
+                                  : record.punch_out ? <span className="italic text-slate-400">Location not recorded</span>
+                                  : <span className="italic">⏳ Still clocked in</span>}
+                              </p>
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>{/* end flex gap-3 */}
+                  </div>{/* end overflow-x-auto */}
+                </SectionCard>
+              );
+            })()}
+
+            {/* Recent Attendance — fixed height aligned with left column bottom */}
+            <SectionCard className="flex flex-col" style={{ height: 420 }}>
+              <CardHeaderRow
+                iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
+                icon={<Clock className="h-4 w-4 text-blue-500" />}
+                title={isEveryoneView ? 'All Employees — Attendance' : 'Recent Attendance'}
+                subtitle={isEveryoneView ? 'Latest 25 records' : 'Last 15 records'}
+              />
+              <div className="overflow-y-auto slim-scroll p-3 space-y-1.5" style={{ ...slimScroll, height: 360 }}>
+                {loading && attendanceHistory.length === 0 ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                    
+                  </div>
+                ) : recentAttendance.length === 0 ? (
+                  <div className="flex items-center justify-center h-full">
+                    <p className="text-sm font-medium text-slate-400">No records yet</p>
+                  </div>
+                ) : recentAttendance.map((record, idx) => {
+                  const inLocLabel     = getLocationLabel(record, 'in');
+                  const outLocLabel    = getLocationLabel(record, 'out');
+                  const recordUserName = userMap[record.user_id]
+                    || (record.user_id === user?.id ? (user?.full_name || 'Me') : null)
+                    || (isEveryoneView ? (record.user_id || 'Unknown') : (user?.full_name || null));
+                  const isAbsent  = record.status === 'absent';
+                  const isLeave   = record.status === 'leave';
+                  const isPresent = record.punch_in && record.status === 'present';
+                  const isOngoing = isPresent && !record.punch_out;
+                  const recordDate = safeParseISO(record.date);
+                  return (
+                    <motion.div
+                      key={`${record.date}-${record.user_id || idx}`}
+                      variants={itemVariants}
+                      whileHover={{ x: 2, transition: springPhysics.lift }}
+                      className="relative p-2.5 rounded-xl border transition-all overflow-hidden"
+                      style={{
+                        backgroundColor: isOngoing
+                          ? isDark ? 'rgba(245,158,11,0.10)' : '#fffbeb'
+                          : isDark
+                            ? isAbsent ? 'rgba(239,68,68,0.07)' : isLeave ? 'rgba(249,115,22,0.06)' : isPresent ? 'rgba(31,175,90,0.06)' : D.raised
+                            : isAbsent ? '#fff1f2' : isLeave ? '#fff7ed' : isPresent ? '#f0fdf4' : '#f8fafc',
+                        borderColor: isOngoing
+                          ? isDark ? '#92400e' : '#fde68a'
+                          : isDark
+                            ? isAbsent ? '#7f1d1d' : isLeave ? '#7c2d12' : isPresent ? '#14532d' : D.border
+                            : isAbsent ? '#fecaca' : isLeave ? '#fed7aa' : isPresent ? '#bbf7d0' : '#e2e8f0',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: isOngoing ? COLORS.amber : isAbsent ? COLORS.red : isLeave ? COLORS.orange : isPresent ? COLORS.emeraldGreen : isDark ? D.border : COLORS.slate200 }} />
+                      <div className="flex justify-between items-center gap-2">
+                        <div className="flex-1 min-w-0">
+                          {recordUserName && (
+                            <p className="text-[10px] font-semibold text-blue-400 flex items-center gap-1 mb-0.5">
+                              <Users className="w-2.5 h-2.5" />{recordUserName}
+                            </p>
+                          )}
+                          <p className="font-semibold text-xs leading-tight" style={{ color: isDark ? D.text : '#1e293b' }}>
+                            {recordDate ? format(recordDate, 'EEE, MMM d, yyyy') : (record.date || '—')}
+                          </p>
+                          <p className="text-[11px] font-mono mt-0.5" style={{ color: isDark ? D.muted : '#64748b' }}>
+                            {isAbsent ? `Absent${record.auto_marked ? ' (auto)' : ''}`
+                              : isLeave ? 'On Leave'
+                              : record.punch_in ? `${formatAttendanceTime(record.punch_in)} → ${record.punch_out ? formatAttendanceTime(record.punch_out) : '⏳ Ongoing'}`
+                              : '—'}
+                          </p>
+                          {(inLocLabel || outLocLabel) && !isAbsent && (
+                            <p className="text-[10px] mt-0.5 truncate" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                              {inLocLabel && <span><span className="text-emerald-500 font-semibold">▲ </span>{inLocLabel}</span>}
+                              {inLocLabel && outLocLabel && <span className="mx-1 text-slate-300">·</span>}
+                              {outLocLabel && <span><span className="text-orange-400 font-semibold">▼ </span>{outLocLabel}</span>}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                          {isOngoing ? (
+                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full animate-pulse"
+                              style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.25)' : '#fef3c7', color: COLORS.amber }}>
+                              ONGOING
+                            </span>
+                          ) : isAbsent ? (
+                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded text-red-500"
+                              style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>Absent</span>
+                          ) : isLeave ? (
+                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded"
+                              style={{ color: COLORS.orange, backgroundColor: isDark ? 'rgba(249,115,22,0.15)' : `${COLORS.orange}18` }}>Leave</span>
+                          ) : (
+                            <span className="text-[11px] font-bold px-1.5 py-0.5 rounded font-mono"
+                              style={{
+                                backgroundColor: record.duration_minutes > 0 ? isDark ? 'rgba(31,175,90,0.18)' : `${COLORS.emeraldGreen}15` : isDark ? D.raised : '#f1f5f9',
+                                color: record.duration_minutes > 0 ? COLORS.emeraldGreen : isDark ? D.muted : COLORS.deepBlue,
+                              }}>
+                              {formatDuration(record.duration_minutes)}
+                            </span>
+                          )}
+                          {record.is_late && !isAbsent && (
+                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded text-red-500"
+                              style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>Late</span>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </SectionCard>
+
+          </div> {/* ── END RIGHT COLUMN ── */}
+        </motion.div> {/* ── END CALENDAR + ATTENDANCE GRID ── */}
+
+
+        {/* ══ MODALS ════════════════════════════════════════════════════════════ */}
+
+        {/* Punch-In Modal */}
+        <AnimatePresence>
+          {showPunchInModal && !isViewingOther && !isEveryoneView && (
+            <motion.div
+              className="fixed inset-0 z-[99999] flex items-center justify-center p-4"
+              style={{ background: isDark ? 'rgba(0,0,0,0.92)' : 'rgba(15,23,42,0.88)', backdropFilter: 'blur(12px)' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            >
+              {/* NO onClick dismiss — user MUST punch in to use the app */}
+              <motion.div
+                className="w-full max-w-sm overflow-hidden rounded-3xl shadow-2xl"
+                style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
+                initial={{ scale: 0.88, y: 32 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.88, y: 32 }}
+                transition={{ type: 'spring', stiffness: 240, damping: 22 }}
+                onClick={e => e.stopPropagation()}
+              >
+                {/* Gradient header */}
+                <div className="relative overflow-hidden px-8 pt-8 pb-6 text-center"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}>
+                  <div className="absolute inset-0 opacity-10"
+                    style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 0%, transparent 60%)' }} />
+                  {/* Pulsing icon */}
+                  <motion.div
+                    className="relative mx-auto w-20 h-20 rounded-2xl flex items-center justify-center mb-4"
+                    style={{ background: 'rgba(255,255,255,0.2)', boxShadow: '0 0 0 0 rgba(255,255,255,0.4)' }}
+                    animate={{ boxShadow: ['0 0 0 0 rgba(255,255,255,0.4)', '0 0 0 16px rgba(255,255,255,0)', '0 0 0 0 rgba(255,255,255,0)'] }}
+                    transition={{ duration: 2, repeat: Infinity, ease: 'easeOut' }}>
+                    <LogIn className="w-10 h-10 text-white" />
+                  </motion.div>
+                  <p className="text-white/70 text-xs font-semibold uppercase tracking-widest mb-1">
+                    {new Date().toLocaleString('en-IN', { weekday: 'long', timeZone: 'Asia/Kolkata' })}
+                  </p>
+                  <h2 className="text-2xl font-black text-white">Good Morning!</h2>
+                  <p className="text-white/70 text-sm mt-1">Please punch in to start your workday</p>
                 </div>
 
-                {/* Actions */}
-                <div className="flex justify-end gap-2 pt-2 border-t" style={{ borderColor: isDark ? D.border : '#e2e8f0' }}>
-                  <Button variant="ghost" onClick={() => { setShowLeaveForm(false); setLeaveType('full_day'); setEarlyLeaveTime(''); }}
-                    className="font-semibold rounded-xl text-sm h-10" style={{ color: isDark ? D.muted : undefined }}>
+                <div className="px-7 py-6 space-y-4">
+                  {/* Time display */}
+                  <div className="flex items-center justify-center gap-3 py-3 rounded-2xl border"
+                    style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}>
+                    <Clock className="w-5 h-5" style={{ color: COLORS.deepBlue }} />
+                    <span className="text-xl font-black font-mono tracking-wider" style={{ color: isDark ? D.text : COLORS.deepBlue }}>
+                      {new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' })}
+                    </span>
+                    <span className="text-xs font-bold text-slate-400">IST</span>
+                  </div>
+
+                  {/* Geo-fence status */}
+                  {geoChecking && (
+                    <div className="flex items-center gap-3 px-4 py-3 rounded-xl border"
+                      style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff', borderColor: isDark ? '#1d4ed8' : '#bfdbfe' }}>
+                      <Loader2 className="w-4 h-4 text-blue-500 animate-spin flex-shrink-0" />
+                      <p className="text-xs font-semibold text-blue-500">Verifying your location…</p>
+                    </div>
+                  )}
+                  {geoError && !geoChecking && (
+                    <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                      className="px-4 py-3 rounded-xl border"
+                      style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2', borderColor: isDark ? '#7f1d1d' : '#fecaca' }}>
+                      <div className="flex items-start gap-2.5">
+                        <MapPin className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-bold text-red-500 mb-0.5">Location check failed</p>
+                          <p className="text-[11px] leading-relaxed" style={{ color: isDark ? '#fca5a5' : '#dc2626' }}>{geoError}</p>
+                          {userLocation && (
+                            <p className="text-[10px] mt-1 font-mono" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                              Your position: {userLocation.latitude.toFixed(5)}, {userLocation.longitude.toFixed(5)}
+                              {userLocation.distance !== undefined && <> · {userLocation.distance}m from office</>}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                  {isWithinGeofence === true && userLocation && !geoChecking && (
+                    <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                      className="flex items-center gap-2.5 px-4 py-3 rounded-xl border"
+                      style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0' }}>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                      <div>
+                        <p className="text-xs font-bold text-emerald-500">Location verified ✓</p>
+                        <p className="text-[10px] font-mono" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                          {userLocation.latitude.toFixed(5)}, {userLocation.longitude.toFixed(5)}
+                          {userLocation.distance !== undefined && <> · {userLocation.distance}m from office</>}
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* Punch In button */}
+                  <motion.button
+                    whileHover={!loading && !geoChecking ? { scale: 1.02 } : {}}
+                    whileTap={!loading && !geoChecking ? { scale: 0.97 } : {}}
+                    onClick={() => handlePunchAction('punch_in')}
+                    disabled={loading || geoChecking}
+                    className="w-full py-3.5 rounded-2xl text-sm font-black text-white transition-all disabled:opacity-60"
+                    style={{
+                      background: (loading || geoChecking) ? '#9CA3AF' : `linear-gradient(135deg, ${COLORS.emeraldGreen}, #16a34a)`,
+                      boxShadow: (loading || geoChecking) ? 'none' : '0 4px 16px rgba(31,175,90,0.35)',
+                    }}>
+                    {loading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />Punching In…</span>
+                      : geoChecking ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />Checking Location…</span>
+                      : <span className="flex items-center justify-center gap-2"><LogIn className="w-4 h-4" />Punch In Now</span>}
+                  </motion.button>
+
+                  {/* Retry location + warning */}
+                  {geoError && !geoChecking && (
+                    <button onClick={checkGeofence}
+                      className="w-full py-2.5 rounded-2xl text-xs font-bold border-2 transition-all active:scale-95"
+                      style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.muted : '#64748b', backgroundColor: 'transparent' }}>
+                      <span className="flex items-center justify-center gap-2"><MapPin className="w-3.5 h-3.5" />Retry Location Check</span>
+                    </button>
+                  )}
+
+                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
+                    style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb' }}>
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: COLORS.amber }} />
+                    <p className="text-[11px] font-medium" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
+                      Access restricted — punch in required · Auto-absent at 7:00 PM IST
+                    </p>
+                  </div>
+
+                  {/* Apply leave link */}
+                  <div className="text-center">
+                    <button onClick={() => { setShowPunchInModal(false); setTimeout(() => setShowLeaveForm(true), 200); }}
+                      className="text-xs font-semibold underline decoration-dotted transition-all"
+                      style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                      On leave today? Apply here
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Leave Form Modal */}
+        <AnimatePresence>
+          {showLeaveForm && (
+             <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+              style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={(e) => { if (e.target === e.currentTarget) setShowLeaveForm(false); }}>
+              <motion.div
+                className="w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto"
+                style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
+                initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
+                transition={{ type: 'spring', stiffness: 220, damping: 20 }}
+              >
+                {/* Header */}
+                <div className="px-7 py-5 flex items-center justify-between"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                  <div>
+                    <h2 className="text-xl font-black text-white">Apply Leave</h2>
+                    <p className="text-blue-200 text-sm mt-0.5">Select type and dates below</p>
+                  </div>
+                  <button onClick={() => setShowLeaveForm(false)}
+                    className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
+                    <X className="w-4 h-4 text-white" />
+                  </button>
+                </div>
+          
+                <div className="p-6 space-y-5">
+          
+                  {/* ── Leave Type Picker ── */}
+                  <div>
+                    <p className="text-sm font-semibold mb-2.5" style={{ color: isDark ? D.muted : '#374151' }}>Leave Type</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {LEAVE_TYPES.map(lt => (
+                        <motion.button
+                          key={lt.value}
+                          whileTap={{ scale: 0.97 }}
+                          onClick={() => setLeaveType(lt.value)}
+                        >
+                          <span style={{ fontSize: 18, lineHeight: 1 }}>{lt.icon}</span>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold leading-snug truncate"
+                              style={{ color: leaveType === lt.value ? (isDark ? '#60a5fa' : COLORS.deepBlue) : isDark ? D.text : '#1e293b' }}>
+                              {lt.label}
+                            </p>
+                            <p className="text-[11px] leading-snug mt-0.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                              {lt.desc}
+                            </p>
+                          </div>
+                          {leaveType === lt.value && (
+                            <div className="ml-auto flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center"
+                              style={{ backgroundColor: COLORS.deepBlue }}>
+                              <div className="w-1.5 h-1.5 rounded-full bg-white" />
+                            </div>
+                          )}
+                        </motion.button>
+                      ))}
+                    </div>
+                  </div>
+          
+                  {/* ── Early leave time picker ── */}
+                  {leaveType === 'early_leave' && (
+                    <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}>
+                      <label className="text-sm font-semibold mb-2.5 block" style={{ color: isDark ? D.muted : '#374151' }}>
+                        Departure Time
+                      </label>
+                      <div className="flex items-center gap-3">
+                        {/* Hour selector */}
+                        <div className="flex-1">
+                          <p className="text-[11px] font-medium mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Hour</p>
+                          <div className="grid grid-cols-6 gap-1">
+                            {Array.from({ length: 12 }, (_, i) => i + 1).map(h => {
+                              const hStr = String(h).padStart(2, '0');
+                              const currentH = earlyLeaveTime ? earlyLeaveTime.split(':')[0] : '';
+                              const is12 = currentH === '00' && h === 12;
+                              const isSelected = currentH === hStr || is12;
+                              return (
+                                <button key={h} type="button"
+                                  onClick={() => {
+                                    const mins = earlyLeaveTime ? earlyLeaveTime.split(':')[1] || '00' : '00';
+                                    const isPM = earlyLeaveTime ? parseInt(earlyLeaveTime.split(':')[0]) >= 12 : true;
+                                    let h24 = h;
+                                    if (isPM && h !== 12) h24 = h + 12;
+                                    if (!isPM && h === 12) h24 = 0;
+                                    setEarlyLeaveTime(`${String(h24).padStart(2, '0')}:${mins}`);
+                                  }}
+                                  className="py-1.5 rounded-lg text-xs font-semibold transition-all"
+                                  style={{
+                                    backgroundColor: isSelected ? COLORS.deepBlue : isDark ? D.raised : '#f1f5f9',
+                                    color: isSelected ? '#ffffff' : isDark ? D.text : '#374151',
+                                    border: `1px solid ${isSelected ? COLORS.deepBlue : isDark ? D.border : '#e2e8f0'}`,
+                                  }}>
+                                  {h}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        {/* Minute selector */}
+                        <div className="w-24">
+                          <p className="text-[11px] font-medium mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Minute</p>
+                          <div className="grid grid-cols-2 gap-1">
+                            {[0, 15, 30, 45].map(m => {
+                              const mStr = String(m).padStart(2, '0');
+                              const currentM = earlyLeaveTime ? earlyLeaveTime.split(':')[1] : '';
+                              const isSelected = currentM === mStr;
+                              return (
+                                <button key={m} type="button"
+                                  onClick={() => {
+                                    const hrs = earlyLeaveTime ? earlyLeaveTime.split(':')[0] : '13';
+                                    setEarlyLeaveTime(`${hrs}:${mStr}`);
+                                  }}
+                                  className="py-1.5 rounded-lg text-xs font-semibold transition-all"
+                                  style={{
+                                    backgroundColor: isSelected ? COLORS.mediumBlue : isDark ? D.raised : '#f1f5f9',
+                                    color: isSelected ? '#ffffff' : isDark ? D.text : '#374151',
+                                    border: `1px solid ${isSelected ? COLORS.mediumBlue : isDark ? D.border : '#e2e8f0'}`,
+                                  }}>
+                                  :{mStr}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        {/* AM/PM toggle */}
+                        <div className="w-14">
+                          <p className="text-[11px] font-medium mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Period</p>
+                          <div className="flex flex-col gap-1">
+                            {['AM', 'PM'].map(period => {
+                              const currentH = earlyLeaveTime ? parseInt(earlyLeaveTime.split(':')[0]) : 13;
+                              const isPM = currentH >= 12;
+                              const isSelected = (period === 'PM' && isPM) || (period === 'AM' && !isPM);
+                              return (
+                                <button key={period} type="button"
+                                  onClick={() => {
+                                    if (!earlyLeaveTime) {
+                                      setEarlyLeaveTime(period === 'AM' ? '09:00' : '13:00');
+                                      return;
+                                    }
+                                    let h = parseInt(earlyLeaveTime.split(':')[0]);
+                                    const mins = earlyLeaveTime.split(':')[1];
+                                    if (period === 'PM' && h < 12) h += 12;
+                                    if (period === 'AM' && h >= 12) h -= 12;
+                                    setEarlyLeaveTime(`${String(h).padStart(2, '0')}:${mins}`);
+                                  }}
+                                  className="py-1.5 rounded-lg text-xs font-bold transition-all"
+                                  style={{
+                                    backgroundColor: isSelected ? COLORS.deepBlue : isDark ? D.raised : '#f1f5f9',
+                                    color: isSelected ? '#ffffff' : isDark ? D.text : '#374151',
+                                    border: `1px solid ${isSelected ? COLORS.deepBlue : isDark ? D.border : '#e2e8f0'}`,
+                                  }}>
+                                  {period}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                      {earlyLeaveTime && (
+                        <div className="flex items-center gap-2 mt-2.5 px-3 py-2 rounded-xl"
+                          style={{ backgroundColor: isDark ? `${COLORS.deepBlue}15` : `${COLORS.deepBlue}08` }}>
+                          <Clock className="w-4 h-4" style={{ color: COLORS.mediumBlue }} />
+                          <p className="text-sm font-semibold" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
+                            Leaving at {(() => {
+                              const [h, m] = earlyLeaveTime.split(':').map(Number);
+                              const ampm = h >= 12 ? 'PM' : 'AM';
+                              const h12 = h % 12 || 12;
+                              return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+                            })()}
+                          </p>
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+          
+                  {/* ── Date pickers — full day only shows range; partial shows 2-month calendar ── */}
+                  {leaveType === 'full_day' ? (
+                    <>
+                      <div className="flex flex-wrap gap-2">
+                        {[1, 3, 7, 15, 30].map(days => (
+                          <Button key={days} variant="outline" size="sm"
+                            onClick={() => {
+                              const from = new Date(), to = new Date();
+                              to.setDate(from.getDate() + days - 1);
+                              setLeaveFrom(from); setLeaveTo(to);
+                            }}
+                            className="rounded-lg font-semibold text-xs"
+                            style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#374151', backgroundColor: isDark ? D.raised : undefined }}>
+                            {days === 1 ? '1 Day' : `${days} Days`}
+                          </Button>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                          <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>From Date</label>
+                          <Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom}
+                            disabled={date => isBefore(date, startOfDay(new Date()))}
+                            className="rounded-xl border w-full pointer-events-auto [&_.rdp-months]:w-full [&_.rdp-month]:w-full [&_.rdp-table]:w-full [&_.rdp-head_row]:flex [&_.rdp-head_row]:justify-between [&_.rdp-row]:flex [&_.rdp-row]:justify-between"
+                            style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
+                        </div>
+                        <div>
+                          <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>To Date</label>
+                          <Calendar mode="single" selected={leaveTo} onSelect={setLeaveTo}
+                            disabled={date => leaveFrom ? isBefore(date, leaveFrom) : true}
+                            className="rounded-xl border w-full pointer-events-auto [&_.rdp-months]:w-full [&_.rdp-month]:w-full [&_.rdp-table]:w-full [&_.rdp-head_row]:flex [&_.rdp-head_row]:justify-between [&_.rdp-row]:flex [&_.rdp-row]:justify-between"
+                            style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
+                        </div>
+                      </div>
+                      {leaveFrom && (
+                        <div className="relative px-4 py-3 pl-5 rounded-xl overflow-hidden"
+                          style={{ backgroundColor: isDark ? `${COLORS.deepBlue}18` : `${COLORS.deepBlue}08` }}>
+                          <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.deepBlue }} />
+                          <p className="text-xs text-slate-400 mb-0.5">Total Duration</p>
+                          <p className="text-2xl font-black" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
+                            {Math.max(1, leaveTo
+                              ? Math.ceil((leaveTo.getTime() - leaveFrom.getTime()) / 86400000) + 1
+                              : 1)} days
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    /* 2-month calendar for half-day / early leave */
+                    <div>
+                      <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Select Date</label>
+                      <Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom}
+                        numberOfMonths={2}
+                        disabled={date => isBefore(date, startOfDay(new Date()))}
+                        className="rounded-xl border w-full pointer-events-auto [&_.rdp-months]:w-full [&_.rdp-months]:flex [&_.rdp-months]:gap-4 [&_.rdp-month]:flex-1 [&_.rdp-table]:w-full [&_.rdp-head_row]:flex [&_.rdp-head_row]:justify-between [&_.rdp-row]:flex [&_.rdp-row]:justify-between"
+                        style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
+                      {leaveFrom && (
+                        <div className="flex items-center gap-2 mt-3 px-3 py-2.5 rounded-xl border text-sm font-semibold"
+                          style={{
+                            backgroundColor: isDark ? `${COLORS.deepBlue}12` : `${COLORS.deepBlue}06`,
+                            borderColor: isDark ? 'rgba(31,111,178,0.3)' : `${COLORS.deepBlue}25`,
+                            color: isDark ? '#60a5fa' : COLORS.deepBlue,
+                          }}>
+                          <CalendarIcon className="w-4 h-4 flex-shrink-0" />
+                          {format(leaveFrom, 'EEEE, MMMM d, yyyy')}
+                        </div>
+                      )}
+                    </div>
+                  )}
+          
+                  {/* Reason */}
+                  <div>
+                    <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Reason</label>
+                    <textarea value={leaveReason} onChange={e => setLeaveReason(e.target.value)}
+                      placeholder="Reason for leave…" className={`${inputCls} min-h-[80px] resize-none`} style={inputStyle} />
+                  </div>
+                </div>
+          
+                {/* Footer */}
+                <div className="px-6 py-4 flex justify-end gap-2 border-t"
+                  style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
+                  <Button variant="ghost" onClick={() => {
+                    setShowLeaveForm(false);
+                    setLeaveType('full_day'); setEarlyLeaveTime('');
+                  }} className="font-semibold rounded-xl" style={{ color: isDark ? D.muted : undefined }}>
                     Cancel
                   </Button>
                   <Button
                     disabled={!leaveFrom || (leaveType === 'early_leave' && !earlyLeaveTime)}
                     onClick={handleApplyLeave}
-                    className="font-bold text-white rounded-xl text-sm h-10 px-6"
+                    className="font-semibold text-white rounded-xl"
                     style={{ backgroundColor: COLORS.deepBlue }}>
-                    <Send className="w-4 h-4 mr-1.5" /> Submit Request
+                    Submit Request
                   </Button>
                 </div>
-              </div>
+              </motion.div>
             </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          )}
+        </AnimatePresence>
 
-      {/* Add Holiday Modal */}
-      <AnimatePresence>
-        {showHolidayModal && (
-          <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-            style={{ background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            onClick={() => setShowHolidayModal(false)}>
-            <motion.div
-              className="w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden max-h-[90vh]"
-              style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
-              initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
-              transition={{ type: 'spring', stiffness: 220, damping: 20 }}
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="px-6 py-5 flex items-center justify-between"
-                style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
-                    <CalendarIcon className="w-5 h-5 text-white" />
+        {/* Edit Holiday Modal */}
+        <AnimatePresence>
+          {editingHoliday && (
+            <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+              style={{ background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <motion.div
+                className="w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
+                style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
+                initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
+                transition={{ type: 'spring', stiffness: 220, damping: 20 }}
+              >
+                <div className="px-6 py-5 text-white flex items-center justify-between" style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
+                  <h2 className="text-lg font-black">Edit Holiday</h2>
+                  <button onClick={() => setEditingHoliday(null)} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
+                    <X className="w-4 h-4 text-white" />
+                  </button>
+                </div>
+                <div className="p-6 space-y-4">
+                  <div>
+                    <label className="text-sm font-semibold mb-1.5 block text-slate-500 dark:text-slate-400">Holiday Name</label>
+                    <input type="text" value={editName} onChange={e => setEditName(e.target.value)} className={inputCls} style={inputStyle} />
                   </div>
                   <div>
-                    <h2 className="text-lg font-black text-white">Add Holidays</h2>
-                    <p className="text-amber-100 text-sm">Manually add holidays or import from PDF</p>
+                    <label className="text-sm font-semibold mb-1.5 block text-slate-500 dark:text-slate-400">Date</label>
+                    <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className={inputCls} style={inputStyle} />
                   </div>
                 </div>
-                <button onClick={() => setShowHolidayModal(false)}
-                  className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
-                  <X className="w-4 h-4 text-white" />
-                </button>
-              </div>
-
-              <div className="p-6 space-y-4 overflow-y-auto slim-scroll max-h-[70vh]" style={slimScroll}>
-                {/* PDF Import */}
-                <div className="flex items-center gap-3 px-4 py-3 rounded-xl border"
-                  style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}>
-                  <FileUp className="w-4 h-4 flex-shrink-0" style={{ color: isDark ? D.muted : '#64748b' }} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold" style={{ color: isDark ? D.muted : '#64748b' }}>Import from PDF</p>
-                    <p className="text-[11px] mt-0.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Holiday list PDF will be auto-extracted</p>
-                  </div>
-                  <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white cursor-pointer transition-all active:scale-95"
-                    style={{ backgroundColor: COLORS.amber }}>
-                    {pdfImporting ? <><Loader2 className="w-3 h-3 animate-spin" />Importing…</> : <><FileUp className="w-3 h-3" />Import</>}
-                    <input ref={pdfInputRef} type="file" accept="application/pdf" className="hidden" onChange={handlePdfImport} disabled={pdfImporting} />
-                  </label>
+                <div className="px-6 py-4 flex justify-end gap-2 border-t"
+                  style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
+                  <Button variant="ghost" onClick={() => setEditingHoliday(null)} className="font-semibold rounded-xl" style={{ color: isDark ? D.muted : undefined }}>Cancel</Button>
+                  <Button disabled={!editName.trim() || !editDate || editLoading} onClick={handleEditHolidaySave}
+                    className="font-semibold text-white rounded-xl" style={{ backgroundColor: COLORS.amber }}>
+                    {editLoading ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />Saving…</> : <><CheckCircle2 className="w-4 h-4 mr-1.5" />Save Changes</>}
+                  </Button>
                 </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-                {/* Holiday rows */}
-                <div className="space-y-3">
-                  {holidayRows.map((row, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <input
-                        type="text" placeholder="Holiday name" value={row.name}
-                        onChange={e => { const copy = [...holidayRows]; copy[i] = { ...copy[i], name: e.target.value }; setHolidayRows(copy); }}
-                        className={inputCls + ' flex-1'}
-                        style={inputStyle}
-                      />
-                      <input
-                        type="date" value={row.date}
-                        onChange={e => { const copy = [...holidayRows]; copy[i] = { ...copy[i], date: e.target.value }; setHolidayRows(copy); }}
-                        className={inputCls + ' w-36'}
-                        style={inputStyle}
-                      />
-                      {holidayRows.length > 1 && (
-                        <button onClick={() => setHolidayRows(r => r.filter((_, j) => j !== i))}
-                          className="w-8 h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-500/10 transition-all">
-                          <X className="w-4 h-4" />
-                        </button>
-                      )}
+        {/* New Reminder Modal */}
+        <AnimatePresence>
+          {showReminderForm && (
+            <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+              style={{ background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <motion.div
+                className="w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
+                style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
+                initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
+                transition={{ type: 'spring', stiffness: 220, damping: 20 }}
+              >
+                <div className="px-7 py-5 text-white flex-shrink-0" style={{ background: `linear-gradient(135deg, ${COLORS.purple}, #6D28D9)` }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><AlarmClock className="w-5 h-5 text-white" /></div>
+                      <div>
+                        <h2 className="text-xl font-black">New Reminder</h2>
+                        <p className="text-purple-200 text-sm">Manual entry or auto-fill from PDF</p>
+                      </div>
                     </div>
-                  ))}
-                </div>
-
-                <button onClick={() => setHolidayRows(r => [...r, { name: '', date: format(new Date(), 'yyyy-MM-dd') }])}
-                  className="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl border-2 border-dashed transition-all w-full justify-center"
-                  style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.muted : '#64748b' }}>
-                  <Plus className="w-4 h-4" /> Add Another Row
-                </button>
-
-                <div className="flex justify-end gap-2 pt-2">
-                  <Button variant="ghost" onClick={() => setShowHolidayModal(false)}
-                    className="font-semibold rounded-xl text-sm h-10" style={{ color: isDark ? D.muted : undefined }}>
-                    Cancel
-                  </Button>
-                  <Button onClick={handleAddHolidays}
-                    className="font-bold text-white rounded-xl text-sm h-10 px-6"
-                    style={{ backgroundColor: COLORS.amber }}>
-                    Save Holidays
-                  </Button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Edit Holiday Modal */}
-      <AnimatePresence>
-        {editingHoliday && (
-          <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-            style={{ background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            onClick={() => { if (!editLoading) setEditingHoliday(null); }}>
-            <motion.div
-              className="w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
-              style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
-              initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
-              transition={{ type: 'spring', stiffness: 220, damping: 20 }}
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="px-6 py-5 flex items-center justify-between"
-                style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
-                    <Edit2 className="w-5 h-5 text-white" />
-                  </div>
-                  <h2 className="text-lg font-black text-white">Edit Holiday</h2>
-                </div>
-                <button onClick={() => setEditingHoliday(null)} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
-                  <X className="w-4 h-4 text-white" />
-                </button>
-              </div>
-              <div className="p-6 space-y-4">
-                <div>
-                  <label className="text-sm font-semibold mb-1.5 block" style={{ color: isDark ? D.muted : '#374151' }}>Holiday Name</label>
-                  <input type="text" value={editName} onChange={e => setEditName(e.target.value)} className={inputCls} style={inputStyle} />
-                </div>
-                <div>
-                  <label className="text-sm font-semibold mb-1.5 block" style={{ color: isDark ? D.muted : '#374151' }}>Date</label>
-                  <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className={inputCls} style={inputStyle} />
-                </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <Button variant="ghost" onClick={() => setEditingHoliday(null)}
-                    className="font-semibold rounded-xl text-sm h-10" style={{ color: isDark ? D.muted : undefined }}>
-                    Cancel
-                  </Button>
-                  <Button onClick={handleEditHolidaySave} disabled={editLoading}
-                    className="font-bold text-white rounded-xl text-sm h-10 px-6"
-                    style={{ backgroundColor: COLORS.amber }}>
-                    {editLoading ? <><Loader2 className="w-4 h-4 animate-spin mr-1.5" />Saving…</> : 'Save Changes'}
-                  </Button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Reminder Form Modal */}
-      <AnimatePresence>
-        {showReminderForm && (
-          <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-            style={{ background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            onClick={() => setShowReminderForm(false)}>
-            <motion.div
-              className="w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden max-h-[90vh]"
-              style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
-              initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
-              transition={{ type: 'spring', stiffness: 220, damping: 20 }}
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="px-6 py-5 flex items-center justify-between"
-                style={{ background: `linear-gradient(135deg, ${COLORS.purple}, #6D28D9)` }}>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
-                    <AlarmClock className="w-5 h-5 text-white" />
+                    <button onClick={() => { setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null); }}
+                      className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
+                      <X className="w-4 h-4 text-white" />
+                    </button>
                   </div>
                   <div>
-                    <h2 className="text-lg font-black text-white">New Reminder</h2>
-                    <p className="text-purple-200 text-sm">Set a time-based alert</p>
+                    <input ref={trademarkPdfRef} type="file" accept=".pdf" onChange={handleTrademarkPdfUpload} className="hidden" />
+                    <button onClick={() => trademarkPdfRef.current?.click()} disabled={trademarkLoading}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold border-2 border-white/30 text-white hover:bg-white/15 disabled:opacity-60">
+                      {trademarkLoading ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Reading PDF…</> : <><FileUp className="w-3.5 h-3.5" />Upload Notice PDF</>}
+                    </button>
                   </div>
                 </div>
-                <button onClick={() => setShowReminderForm(false)} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
-                  <X className="w-4 h-4 text-white" />
-                </button>
-              </div>
-
-              <div className="p-6 space-y-4 overflow-y-auto slim-scroll max-h-[70vh]" style={slimScroll}>
-                {/* Email importer */}
-                {showEmailImporter && (
-                  <EmailEventImporter onSelectEvent={handleEmailEventForReminder} isDark={isDark} />
-                )}
-
-                {/* Trademark PDF */}
-                <div className="flex items-center gap-3 px-4 py-3 rounded-xl border"
-                  style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}>
-                  <FileUp className="w-4 h-4 flex-shrink-0" style={{ color: isDark ? D.muted : '#64748b' }} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold" style={{ color: isDark ? D.muted : '#64748b' }}>Import from Trademark PDF</p>
-                    <p className="text-[11px] mt-0.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Auto-fills from trademark hearing notice</p>
+                <div className="p-6 space-y-4 overflow-y-auto slim-scroll flex-1" style={slimScroll}>
+                  {trademarkData && (
+                    <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+                      className="rounded-xl overflow-hidden border"
+                      style={{ borderColor: isDark ? 'rgba(139,92,246,0.35)' : '#ddd6fe' }}>
+                      <div className="px-4 py-2 flex items-center gap-2"
+                        style={{ background: isDark ? 'rgba(139,92,246,0.12)' : `${COLORS.purple}10` }}>
+                        <CheckCircle2 className="w-3.5 h-3.5" style={{ color: COLORS.purple }} />
+                        <span className="text-xs font-bold uppercase tracking-widest" style={{ color: COLORS.purple }}>Extracted from PDF</span>
+                      </div>
+                      <div className="p-4 grid grid-cols-2 gap-3 text-xs">
+                        {[
+                          { label: 'Application No', value: trademarkData.application_no, bold: true },
+                          { label: 'Class',           value: trademarkData.class                     },
+                          { label: 'Applicant',       value: trademarkData.applicant_name,  bold: true },
+                          { label: 'Hearing Date',    value: trademarkData.hearing_date               },
+                        ].filter(f => f.value).map(({ label, value, bold }) => (
+                          <div key={label}>
+                            <p className="text-[10px] uppercase font-bold text-slate-400 mb-0.5">{label}</p>
+                            <p className={`${bold ? 'font-bold' : 'font-medium'}`} style={{ color: isDark ? D.text : '#1e293b' }}>{value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                  <div>
+                    <label className="text-sm font-semibold mb-1.5 block text-slate-500 dark:text-slate-400">Title *</label>
+                    <input type="text" value={reminderTitle} onChange={e => setReminderTitle(e.target.value)}
+                      placeholder="e.g., Trademark Hearing, GST filing…" className={inputCls} style={inputStyle} />
                   </div>
-                  <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white cursor-pointer"
-                    style={{ backgroundColor: COLORS.purple }}>
-                    {trademarkLoading ? <><Loader2 className="w-3 h-3 animate-spin" />Reading…</> : <><FileUp className="w-3 h-3" />Import</>}
-                    <input ref={trademarkPdfRef} type="file" accept="application/pdf" className="hidden" onChange={handleTrademarkPdfUpload} disabled={trademarkLoading} />
-                  </label>
-                </div>
-
-                {/* Email importer toggle */}
-                <button onClick={() => setShowEmailImporter(v => !v)}
-                  className="flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-lg border transition-all w-full"
-                  style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.muted : '#64748b', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
-                  <Mail className="w-3.5 h-3.5" />
-                  {showEmailImporter ? 'Hide Email Importer' : 'Import from Email'}
-                </button>
-
-                {[
-                  { label: 'Title', type: 'text', val: reminderTitle, set: setReminderTitle, placeholder: 'e.g. Trademark Hearing' },
-                  { label: 'Remind At', type: 'datetime-local', val: reminderDatetime, set: setReminderDatetime, placeholder: '' },
-                ].map(({ label, type, val, set, placeholder }) => (
-                  <div key={label}>
-                    <label className="text-sm font-semibold mb-1.5 block" style={{ color: isDark ? D.muted : '#374151' }}>{label}</label>
-                    <input type={type} value={val} onChange={e => set(e.target.value)} placeholder={placeholder}
-                      className={inputCls} style={inputStyle} />
+                  <div>
+                    <label className="text-sm font-semibold mb-1.5 block text-slate-500 dark:text-slate-400">Date &amp; Time *</label>
+                    <input type="datetime-local" value={reminderDatetime} onChange={e => setReminderDatetime(e.target.value)}
+                      min={format(new Date(), "yyyy-MM-dd'T'HH:mm")} className={inputCls} style={inputStyle} />
                   </div>
-                ))}
-
-                <div>
-                  <label className="text-sm font-semibold mb-1.5 block" style={{ color: isDark ? D.muted : '#374151' }}>Description (optional)</label>
-                  <textarea value={reminderDesc} onChange={e => setReminderDesc(e.target.value)} rows={4}
-                    className={inputCls + ' resize-none'} style={inputStyle} />
+                  <div>
+                    <label className="text-sm font-semibold mb-1.5 block text-slate-500 dark:text-slate-400">Description</label>
+                    <textarea value={reminderDesc} onChange={e => setReminderDesc(e.target.value)}
+                      placeholder="Notes, agenda, details…" rows={4}
+                      className={`${inputCls} resize-none font-mono`} style={inputStyle} />
+                  </div>
                 </div>
-
-                <div className="flex justify-end gap-2 pt-2">
-                  <Button variant="ghost" onClick={() => setShowReminderForm(false)}
-                    className="font-semibold rounded-xl text-sm h-10" style={{ color: isDark ? D.muted : undefined }}>
+                <div className="px-6 py-4 flex justify-end gap-2 flex-shrink-0 border-t"
+                  style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
+                  <Button variant="ghost" onClick={() => { setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null); }}
+                    className="font-semibold rounded-xl" style={{ color: isDark ? D.muted : undefined }}>
                     Cancel
                   </Button>
-                  <Button onClick={handleCreateReminder}
-                    className="font-bold text-white rounded-xl text-sm h-10 px-6"
-                    style={{ backgroundColor: COLORS.purple }}>
-                    <Bell className="w-4 h-4 mr-1.5" /> Set Reminder
+                  <Button disabled={!reminderTitle.trim() || !reminderDatetime} onClick={handleCreateReminder}
+                    className="font-semibold text-white rounded-xl px-5" style={{ backgroundColor: COLORS.purple }}>
+                    <Bell className="w-3.5 h-3.5 mr-1.5" /> Set Reminder
                   </Button>
                 </div>
-              </div>
+              </motion.div>
             </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          )}
+        </AnimatePresence>
+
+        {/* Email Importer */}
+        <AnimatePresence>
+          {showEmailImporter && (
+            <EmailEventImporter
+              mode="reminder"
+              onSelectEvent={handleEmailEventForReminder}
+              onClose={() => setShowEmailImporter(false)}
+            />
+          )}
+        </AnimatePresence>
+
+            </React.Fragment>
+          );
+
+          return null;
+        })}
+
+        </div>{/* end max-w wrapper */}
+      </motion.div>
     </TooltipProvider>
   );
 }
