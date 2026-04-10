@@ -2688,13 +2688,13 @@ export default function Attendance() {
           if (sectionId === 'calendar_area') return (
             <React.Fragment key="calendar_area">
               <motion.div
-          className={`grid gap-6 ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-12'}`}
+          className={`grid gap-6 items-stretch ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-12'}`}
           variants={itemVariants}
         >
           {/* ── LEFT COLUMN: Calendar + Date Detail + Apply Leave ── */}
           {!isEveryoneView && (
-            <div className="xl:col-span-4 flex flex-col gap-4">
-              <SectionCard>
+            <div className="xl:col-span-5 flex flex-col gap-4">
+              <SectionCard className="flex flex-col flex-1 min-h-0">
                 <CardHeaderRow
                   iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
                   icon={<CalendarIcon className="h-4 w-4 text-blue-500" />}
@@ -2742,7 +2742,7 @@ export default function Attendance() {
               </SectionCard>
 
               {/* Selected date detail */}
-              <SectionCard>
+              <SectionCard className="flex flex-col flex-1 min-h-0">
                 <div className="p-0">
                   {selectedAttendance?.status === 'absent' ? (
                     <div className="relative p-5 pl-6 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2' }}><div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.red }} />
@@ -2798,127 +2798,9 @@ export default function Attendance() {
                 </div>
               </SectionCard>
 
-            </div>
-          )}
 
-          {/* ── RIGHT COLUMN: Recent Attendance only ── */}
-          <div className={isEveryoneView ? 'flex flex-col gap-4' : 'xl:col-span-8 flex flex-col gap-4'}>
-
-            {/* Recent Attendance */}
-            <SectionCard className="flex flex-col h-[480px]">
-              <CardHeaderRow
-                iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
-                icon={<Clock className="h-4 w-4 text-blue-500" />}
-                title={isEveryoneView ? 'All Employees — Attendance' : 'Recent Attendance'}
-                subtitle={isEveryoneView ? 'Latest 25 records' : 'Last 15 records'}
-              />
-              <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5 min-h-0" style={slimScroll}>
-                {loading && attendanceHistory.length === 0 ? (
-                  <div className="flex items-center justify-center h-full">
-                    <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                    
-                  </div>
-                ) : recentAttendance.length === 0 ? (
-                  <div className="flex items-center justify-center h-full">
-                    <p className="text-sm font-medium text-slate-400">No records yet</p>
-                  </div>
-                ) : recentAttendance.map((record, idx) => {
-                  const inLocLabel     = getLocationLabel(record, 'in');
-                  const outLocLabel    = getLocationLabel(record, 'out');
-                  const recordUserName = userMap[record.user_id]
-                    || (record.user_id === user?.id ? (user?.full_name || 'Me') : null)
-                    || (isEveryoneView ? (record.user_id || 'Unknown') : (user?.full_name || null));
-                  const isAbsent  = record.status === 'absent';
-                  const isLeave   = record.status === 'leave';
-                  const isPresent = record.punch_in && record.status === 'present';
-                  const isOngoing = isPresent && !record.punch_out;
-                  const recordDate = safeParseISO(record.date);
-                  return (
-                    <motion.div
-                      key={`${record.date}-${record.user_id || idx}`}
-                      variants={itemVariants}
-                      whileHover={{ x: 2, transition: springPhysics.lift }}
-                      className="relative p-2.5 rounded-xl border transition-all overflow-hidden"
-                      style={{
-                        backgroundColor: isOngoing
-                          ? isDark ? 'rgba(245,158,11,0.10)' : '#fffbeb'
-                          : isDark
-                            ? isAbsent ? 'rgba(239,68,68,0.07)' : isLeave ? 'rgba(249,115,22,0.06)' : isPresent ? 'rgba(31,175,90,0.06)' : D.raised
-                            : isAbsent ? '#fff1f2' : isLeave ? '#fff7ed' : isPresent ? '#f0fdf4' : '#f8fafc',
-                        borderColor: isOngoing
-                          ? isDark ? '#92400e' : '#fde68a'
-                          : isDark
-                            ? isAbsent ? '#7f1d1d' : isLeave ? '#7c2d12' : isPresent ? '#14532d' : D.border
-                            : isAbsent ? '#fecaca' : isLeave ? '#fed7aa' : isPresent ? '#bbf7d0' : '#e2e8f0',
-                        flexShrink: 0,
-                      }}
-                    >
-                      <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: isOngoing ? COLORS.amber : isAbsent ? COLORS.red : isLeave ? COLORS.orange : isPresent ? COLORS.emeraldGreen : isDark ? D.border : COLORS.slate200 }} />
-                      <div className="flex justify-between items-center gap-2">
-                        <div className="flex-1 min-w-0">
-                          {recordUserName && (
-                            <p className="text-[10px] font-semibold text-blue-400 flex items-center gap-1 mb-0.5">
-                              <Users className="w-2.5 h-2.5" />{recordUserName}
-                            </p>
-                          )}
-                          <p className="font-semibold text-xs leading-tight" style={{ color: isDark ? D.text : '#1e293b' }}>
-                            {recordDate ? format(recordDate, 'EEE, MMM d, yyyy') : (record.date || '—')}
-                          </p>
-                          <p className="text-[11px] font-mono mt-0.5" style={{ color: isDark ? D.muted : '#64748b' }}>
-                            {isAbsent ? `Absent${record.auto_marked ? ' (auto)' : ''}`
-                              : isLeave ? 'On Leave'
-                              : record.punch_in ? `${formatAttendanceTime(record.punch_in)} → ${record.punch_out ? formatAttendanceTime(record.punch_out) : '⏳ Ongoing'}`
-                              : '—'}
-                          </p>
-                          {(inLocLabel || outLocLabel) && !isAbsent && (
-                            <p className="text-[10px] mt-0.5 truncate" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
-                              {inLocLabel && <span><span className="text-emerald-500 font-semibold">▲ </span>{inLocLabel}</span>}
-                              {inLocLabel && outLocLabel && <span className="mx-1 text-slate-300">·</span>}
-                              {outLocLabel && <span><span className="text-orange-400 font-semibold">▼ </span>{outLocLabel}</span>}
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                          {isOngoing ? (
-                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full animate-pulse"
-                              style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.25)' : '#fef3c7', color: COLORS.amber }}>
-                              ONGOING
-                            </span>
-                          ) : isAbsent ? (
-                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded text-red-500"
-                              style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>Absent</span>
-                          ) : isLeave ? (
-                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded"
-                              style={{ color: COLORS.orange, backgroundColor: isDark ? 'rgba(249,115,22,0.15)' : `${COLORS.orange}18` }}>Leave</span>
-                          ) : (
-                            <span className="text-[11px] font-bold px-1.5 py-0.5 rounded font-mono"
-                              style={{
-                                backgroundColor: record.duration_minutes > 0 ? isDark ? 'rgba(31,175,90,0.18)' : `${COLORS.emeraldGreen}15` : isDark ? D.raised : '#f1f5f9',
-                                color: record.duration_minutes > 0 ? COLORS.emeraldGreen : isDark ? D.muted : COLORS.deepBlue,
-                              }}>
-                              {formatDuration(record.duration_minutes)}
-                            </span>
-                          )}
-                          {record.is_late && !isAbsent && (
-                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded text-red-500"
-                              style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>Late</span>
-                          )}
-                        </div>
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-            </SectionCard>
-
-          </div> {/* ── END RIGHT COLUMN ── */}
-        </motion.div> {/* ── END CALENDAR + ATTENDANCE GRID ── */}
-
-        {/* ══ APPLY LEAVE + LOCATION HISTORY (same row, aligned bottoms) ══ */}
-        {!isEveryoneView && !isViewingOther && (
-          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-stretch">
-            {/* APPLY FOR LEAVE CARD */}
-            <SectionCard className="flex flex-col h-[380px]">
+              {/* Apply for Leave */}
+              <SectionCard className="flex flex-col flex-1 min-h-0">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
                 icon={<CalendarX className="h-4 w-4" style={{ color: COLORS.orange }} />}
@@ -3028,14 +2910,20 @@ export default function Attendance() {
               </div>
             </SectionCard>
 
-            {/* LOCATION HISTORY CARD */}
+            </div>
+          )}
+
+          {/* ── RIGHT COLUMN: Location History + Recent Attendance ── */}
+          <div className={isEveryoneView ? 'flex flex-col gap-4' : 'xl:col-span-7 flex flex-col gap-4'}>
+
+            {/* Location History */}
             {(() => {
               const locRecords = (Array.isArray(attendanceHistory) ? attendanceHistory : [])
                 .filter(r => r.punch_in && r.status === 'present'
                   && (!isViewingOther ? (!r.user_id || r.user_id === user?.id) : true))
                 .slice(0, 5);
               return (
-                <SectionCard className="flex flex-col h-[380px]">
+                <SectionCard className="flex flex-col flex-1 min-h-0">
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-teal-900/40' : 'bg-teal-50'}
                     icon={<MapPin className="h-4 w-4 text-teal-500" />}
@@ -3164,8 +3052,117 @@ export default function Attendance() {
                 </SectionCard>
               );
             })()}
-          </motion.div>
-        )}
+
+            {/* Recent Attendance */}
+            <SectionCard className="flex flex-col flex-1 min-h-0">
+              <CardHeaderRow
+                iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
+                icon={<Clock className="h-4 w-4 text-blue-500" />}
+                title={isEveryoneView ? 'All Employees — Attendance' : 'Recent Attendance'}
+                subtitle={isEveryoneView ? 'Latest 25 records' : 'Last 15 records'}
+              />
+              <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5 min-h-0" style={slimScroll}>
+                {loading && attendanceHistory.length === 0 ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                    
+                  </div>
+                ) : recentAttendance.length === 0 ? (
+                  <div className="flex items-center justify-center h-full">
+                    <p className="text-sm font-medium text-slate-400">No records yet</p>
+                  </div>
+                ) : recentAttendance.map((record, idx) => {
+                  const inLocLabel     = getLocationLabel(record, 'in');
+                  const outLocLabel    = getLocationLabel(record, 'out');
+                  const recordUserName = userMap[record.user_id]
+                    || (record.user_id === user?.id ? (user?.full_name || 'Me') : null)
+                    || (isEveryoneView ? (record.user_id || 'Unknown') : (user?.full_name || null));
+                  const isAbsent  = record.status === 'absent';
+                  const isLeave   = record.status === 'leave';
+                  const isPresent = record.punch_in && record.status === 'present';
+                  const isOngoing = isPresent && !record.punch_out;
+                  const recordDate = safeParseISO(record.date);
+                  return (
+                    <motion.div
+                      key={`${record.date}-${record.user_id || idx}`}
+                      variants={itemVariants}
+                      whileHover={{ x: 2, transition: springPhysics.lift }}
+                      className="relative p-2.5 rounded-xl border transition-all overflow-hidden"
+                      style={{
+                        backgroundColor: isOngoing
+                          ? isDark ? 'rgba(245,158,11,0.10)' : '#fffbeb'
+                          : isDark
+                            ? isAbsent ? 'rgba(239,68,68,0.07)' : isLeave ? 'rgba(249,115,22,0.06)' : isPresent ? 'rgba(31,175,90,0.06)' : D.raised
+                            : isAbsent ? '#fff1f2' : isLeave ? '#fff7ed' : isPresent ? '#f0fdf4' : '#f8fafc',
+                        borderColor: isOngoing
+                          ? isDark ? '#92400e' : '#fde68a'
+                          : isDark
+                            ? isAbsent ? '#7f1d1d' : isLeave ? '#7c2d12' : isPresent ? '#14532d' : D.border
+                            : isAbsent ? '#fecaca' : isLeave ? '#fed7aa' : isPresent ? '#bbf7d0' : '#e2e8f0',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: isOngoing ? COLORS.amber : isAbsent ? COLORS.red : isLeave ? COLORS.orange : isPresent ? COLORS.emeraldGreen : isDark ? D.border : COLORS.slate200 }} />
+                      <div className="flex justify-between items-center gap-2">
+                        <div className="flex-1 min-w-0">
+                          {recordUserName && (
+                            <p className="text-[10px] font-semibold text-blue-400 flex items-center gap-1 mb-0.5">
+                              <Users className="w-2.5 h-2.5" />{recordUserName}
+                            </p>
+                          )}
+                          <p className="font-semibold text-xs leading-tight" style={{ color: isDark ? D.text : '#1e293b' }}>
+                            {recordDate ? format(recordDate, 'EEE, MMM d, yyyy') : (record.date || '—')}
+                          </p>
+                          <p className="text-[11px] font-mono mt-0.5" style={{ color: isDark ? D.muted : '#64748b' }}>
+                            {isAbsent ? `Absent${record.auto_marked ? ' (auto)' : ''}`
+                              : isLeave ? 'On Leave'
+                              : record.punch_in ? `${formatAttendanceTime(record.punch_in)} → ${record.punch_out ? formatAttendanceTime(record.punch_out) : '⏳ Ongoing'}`
+                              : '—'}
+                          </p>
+                          {(inLocLabel || outLocLabel) && !isAbsent && (
+                            <p className="text-[10px] mt-0.5 truncate" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                              {inLocLabel && <span><span className="text-emerald-500 font-semibold">▲ </span>{inLocLabel}</span>}
+                              {inLocLabel && outLocLabel && <span className="mx-1 text-slate-300">·</span>}
+                              {outLocLabel && <span><span className="text-orange-400 font-semibold">▼ </span>{outLocLabel}</span>}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                          {isOngoing ? (
+                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full animate-pulse"
+                              style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.25)' : '#fef3c7', color: COLORS.amber }}>
+                              ONGOING
+                            </span>
+                          ) : isAbsent ? (
+                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded text-red-500"
+                              style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>Absent</span>
+                          ) : isLeave ? (
+                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded"
+                              style={{ color: COLORS.orange, backgroundColor: isDark ? 'rgba(249,115,22,0.15)' : `${COLORS.orange}18` }}>Leave</span>
+                          ) : (
+                            <span className="text-[11px] font-bold px-1.5 py-0.5 rounded font-mono"
+                              style={{
+                                backgroundColor: record.duration_minutes > 0 ? isDark ? 'rgba(31,175,90,0.18)' : `${COLORS.emeraldGreen}15` : isDark ? D.raised : '#f1f5f9',
+                                color: record.duration_minutes > 0 ? COLORS.emeraldGreen : isDark ? D.muted : COLORS.deepBlue,
+                              }}>
+                              {formatDuration(record.duration_minutes)}
+                            </span>
+                          )}
+                          {record.is_late && !isAbsent && (
+                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded text-red-500"
+                              style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>Late</span>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </SectionCard>
+
+          </div> {/* ── END RIGHT COLUMN ── */}
+        </motion.div> {/* ── END CALENDAR + ATTENDANCE GRID ── */}
+
 
         {/* ══ MODALS ════════════════════════════════════════════════════════════ */}
 
