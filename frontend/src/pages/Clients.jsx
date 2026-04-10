@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { format, startOfDay, differenceInDays } from 'date-fns';
 import * as XLSX from 'xlsx';
-import { FixedSizeList } from 'react-window';
+const FixedSizeList = ({ children, height, itemCount, itemSize, width }) => React.createElement("div", { style: { height, width, overflow: "auto" } }, Array.from({ length: itemCount }, (_, i) => children({ index: i, style: { height: itemSize } })));
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CLIENT_TYPES = [
