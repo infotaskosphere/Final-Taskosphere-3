@@ -177,7 +177,7 @@ if (typeof document !== 'undefined' && !document.getElementById('att-pulse-style
 function SectionCard({ children, className = '', style = {} }) {
   return (
     <div
-      className={`relative bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-[0_1px_3px_0_rgba(0,0,0,0.06),0_1px_2px_-1px_rgba(0,0,0,0.06)] ${className}`}
+      className={`relative bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm h-full flex flex-col ${className}`}
       style={style}
     >
       {children}
@@ -366,8 +366,8 @@ const extractHolidaysFromPDF = async (file) => {
 function StatCard({ icon: Icon, label, value, unit, color, trend, isDark }) {
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -3, transition: springPhysics.lift }} whileTap={{ scale: 0.985 }}>
-      <div className={`rounded-2xl shadow-sm border h-full bg-white dark:bg-slate-800 border-slate-200/80 dark:border-slate-700 hover:shadow-md transition-all`}>
-        <div className="p-4">
+      <div className="rounded-2xl shadow-sm border h-full bg-white dark:bg-slate-800 border-slate-200/80 dark:border-slate-700 hover:shadow-md transition-all flex flex-col">
+        <div className="p-5 flex-1">
           <div className="flex items-start justify-between mb-3">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">{label}</p>
@@ -1419,7 +1419,6 @@ export default function Attendance() {
         }
       }
       await fetchData();
-      await fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to record attendance');
     } finally { setLoading(false); }
@@ -1981,11 +1980,11 @@ export default function Attendance() {
       />
 
       <motion.div
-        className="min-h-screen p-3 sm:p-4 md:p-6 lg:p-8 overflow-x-hidden"
+        className="min-h-screen px-4 sm:px-6 lg:px-8 py-6 overflow-x-hidden"
         style={{ background: isDark ? D.bg : '#f8fafc' }}
         variants={containerVariants} initial="hidden" animate="visible"
       >
-        <div className="max-w-[1600px] mx-auto w-full space-y-6">
+        <div className="max-w-7xl mx-auto w-full space-y-6">
         {/* ══ PAGE HEADER ══════════════════════════════════════════════════════ */}
         <motion.div variants={itemVariants}>
           <div
@@ -2202,7 +2201,7 @@ export default function Attendance() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Duration / progress */}
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">Daily Progress</p>
@@ -2397,7 +2396,7 @@ export default function Attendance() {
                 subtitle="Confirm or reject suggested holidays"
                 badge={pendingHolidays.length}
               />
-              <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {pendingHolidays.map(holiday => (
                   <div key={holiday.date}
                     className="p-4 rounded-xl border"
@@ -2431,7 +2430,7 @@ export default function Attendance() {
                 subtitle="Auto-marked at 7:00 PM IST"
                 badge={absentSummary.length}
               />
-              <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+              <div className="p-5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-6">
                 {absentSummary.map(item => (
                   <motion.div key={item.user_id} whileHover={{ scale: 1.02 }}
                     className="flex items-center gap-2.5 p-3 rounded-xl border"
@@ -2461,7 +2460,7 @@ export default function Attendance() {
           if (sectionId === 'stat_cards') return (
             <React.Fragment key="stat_cards">
               <motion.div
-          className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
+          className="grid gap-6 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
           variants={itemVariants}
         >
           <StatCard isDark={isDark} icon={Timer}
@@ -2498,7 +2497,7 @@ export default function Attendance() {
               {!isEveryoneView && (
           <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             {/* HOLIDAYS CARD */}
-            <SectionCard className="flex flex-col h-[420px]">
+            <SectionCard className="flex flex-col">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-amber-900/40' : 'bg-amber-50'}
                 icon={<CalendarIcon className="h-4 w-4 text-amber-500" />}
@@ -2534,7 +2533,7 @@ export default function Attendance() {
                   </div>
                 )}
               />
-              <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5 min-h-0" style={slimScroll}>
+              <div className="flex-1 overflow-y-auto slim-scroll p-5 space-y-2 min-h-0" style={slimScroll}>
                 {monthHolidaysGrid.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full py-8">
                     <CalendarIcon className="w-8 h-8 mb-2 text-slate-300 dark:text-slate-600" />
@@ -2584,7 +2583,7 @@ export default function Attendance() {
               const onTimeCount = monthDaysPresent - totalDaysLateThisMonth;
               const onTimePct   = monthDaysPresent > 0 ? Math.round((onTimeCount / monthDaysPresent) * 100) : 0;
               return (
-              <SectionCard className="flex flex-col h-[420px]">
+              <SectionCard className="flex flex-col">
                 <CardHeaderRow
                   iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
                   icon={<BarChart3 className="h-4 w-4 text-emerald-500" />}
@@ -2602,8 +2601,8 @@ export default function Attendance() {
                     </span>
                   }
                 />
-                <div className="flex-1 overflow-y-auto slim-scroll p-4" style={slimScroll}>
-                  <div className="grid grid-cols-2 gap-3">
+                <div className="flex-1 overflow-y-auto slim-scroll p-5" style={slimScroll}>
+                  <div className="grid grid-cols-2 gap-4">
                     <div className="flex flex-col items-center justify-center px-3 py-3 rounded-2xl border text-center"
                       style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0' }}>
                       <CheckCircle2 className="w-5 h-5 mb-1.5 text-emerald-500" />
@@ -2688,12 +2687,12 @@ export default function Attendance() {
           if (sectionId === 'calendar_area') return (
             <React.Fragment key="calendar_area">
               <motion.div
-          className={`grid gap-6 items-stretch ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-12'}`}
+          className={`grid gap-6 ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-12'}`}
           variants={itemVariants}
         >
           {/* ── LEFT COLUMN: Calendar + Date Detail + Apply Leave ── */}
           {!isEveryoneView && (
-            <div className="xl:col-span-5 flex flex-col gap-4">
+            <div className="xl:col-span-5 flex flex-col gap-6">
               <SectionCard className="flex flex-col flex-1 min-h-0">
                 <CardHeaderRow
                   iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
@@ -2707,7 +2706,7 @@ export default function Attendance() {
                     </Button>
                   }
                 />
-                <div className="p-4">
+                <div className="p-5">
                   <Calendar
                     mode="single" selected={selectedDate}
                     onSelect={date => date && setSelectedDate(date)}
@@ -2807,7 +2806,7 @@ export default function Attendance() {
                 title="Apply for Leave"
                 subtitle={upcomingLeaves.length > 0 ? `${upcomingLeaves.length} upcoming leave${upcomingLeaves.length !== 1 ? 's' : ''}` : 'Request time off'}
               />
-              <div className="p-4 flex-1 overflow-y-auto slim-scroll flex flex-col gap-3" style={slimScroll}>
+              <div className="p-5 flex-1 overflow-y-auto slim-scroll flex flex-col gap-4" style={slimScroll}>
                 {upcomingLeaves.length > 0 && (
                   <div className="space-y-1.5">
                     {upcomingLeaves.slice(0, 3).map(leave => {
@@ -2914,7 +2913,7 @@ export default function Attendance() {
           )}
 
           {/* ── RIGHT COLUMN: Location History + Recent Attendance ── */}
-          <div className={isEveryoneView ? 'flex flex-col gap-4' : 'xl:col-span-7 flex flex-col gap-4'}>
+          <div className={isEveryoneView ? 'flex flex-col gap-6' : 'xl:col-span-7 flex flex-col gap-6'}>
 
             {/* Location History */}
             {(() => {
@@ -2936,7 +2935,7 @@ export default function Attendance() {
                       </span>
                     }
                   />
-                  <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-2" style={{ ...slimScroll, minHeight: 0 }}>
+                  <div className="flex-1 overflow-y-auto slim-scroll p-5 space-y-3" style={{ ...slimScroll, minHeight: 0 }}>
                     {locRecords.length === 0 ? (
                       <div className="flex flex-col items-center justify-center h-full gap-2">
                         <MapPin className="w-8 h-8 text-slate-300 dark:text-slate-600" />
@@ -3061,7 +3060,7 @@ export default function Attendance() {
                 title={isEveryoneView ? 'All Employees — Attendance' : 'Recent Attendance'}
                 subtitle={isEveryoneView ? 'Latest 25 records' : 'Last 15 records'}
               />
-              <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5 min-h-0" style={slimScroll}>
+              <div className="flex-1 overflow-y-auto slim-scroll p-5 space-y-2 min-h-0" style={slimScroll}>
                 {loading && attendanceHistory.length === 0 ? (
                   <div className="flex items-center justify-center h-full">
                     <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
