@@ -2882,6 +2882,7 @@ export default function Attendance() {
                         Early Leave
                       </motion.button>
                     </div>
+                    <div className="flex gap-2 flex-wrap">
                       {[
                         { label: 'Tomorrow', days: 1 },
                         { label: '3 Days',   days: 3 },
