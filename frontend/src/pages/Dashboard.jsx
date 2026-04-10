@@ -51,6 +51,8 @@ import {
   Sunset,
   GripVertical,
   Settings2,
+  Bell,
+  BellRing,
 } from 'lucide-react';
 
 const IST_TIMEZONE = 'Asia/Kolkata';
@@ -917,6 +919,7 @@ export default function Dashboard() {
   const [todayAttendance,  setTodayAttendance]  = useState(null);
   const [holidaysData,     setHolidaysData]     = useState([]);
   const [todosRaw,         setTodosRaw]         = useState([]);
+  const [reminders,        setReminders]        = useState([]);
   const [leadsData,        setLeadsData]        = useState([]);
   const [dataLoading,      setDataLoading]      = useState(true);
   const [deptMembers,      setDeptMembers]      = useState({ count: 0, departments: [], members: [] });
@@ -927,7 +930,7 @@ export default function Dashboard() {
 
     // ── Wave 1: critical path ──
     try {
-      const [tasksData, statsData, dueDatesData, attendanceData, todosData, visitsData, holidaysRes, deptMembersRes] =
+      const [tasksData, statsData, dueDatesData, attendanceData, todosData, visitsData, holidaysRes, deptMembersRes, remindersData] =
         await Promise.all([
           apiFetch('/tasks'),
           apiFetch('/dashboard/stats'),
@@ -937,6 +940,7 @@ export default function Dashboard() {
           apiFetch('/visits'),
           apiFetch('/holidays'),
           apiFetch('/dashboard/dept-members'),  // dept-scoped team count for all roles
+          apiFetch('/email/reminders'),
         ]);
         
       if (Array.isArray(tasksData)) setTasks(tasksData);
@@ -949,6 +953,7 @@ export default function Dashboard() {
       if (Array.isArray(dueDatesData)) setUpcomingDueDates(dueDatesData);
       if (attendanceData) setTodayAttendance(attendanceData);
       if (Array.isArray(todosData)) setTodosRaw(todosData);
+      if (Array.isArray(remindersData)) setReminders(remindersData);
       if (deptMembersRes && typeof deptMembersRes.count === 'number') {
         setDeptMembers(deptMembersRes);
       }
@@ -1282,6 +1287,15 @@ export default function Dashboard() {
   const showTaskSection =
     isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
   const isOverdue = (dueDate) => dueDate && new Date(dueDate) < new Date();
+
+  // Upcoming reminders for dashboard card
+  const upcomingReminders = useMemo(() =>
+    (Array.isArray(reminders) ? reminders : [])
+      .filter(r => !r.is_dismissed && r.remind_at)
+      .sort((a, b) => new Date(a.remind_at) - new Date(b.remind_at))
+      .slice(0, 8),
+    [reminders]
+  );
 
   const getStatusStyle = (status) => {
     const styles = {
@@ -2059,7 +2073,7 @@ export default function Dashboard() {
         <React.Fragment key="assigned_tasks">
         {/* ASSIGNED TASKS */}
         {showTaskSection && (
-          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-3 gap-3">
             <SectionCard className="hover:shadow-md transition">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
@@ -2113,6 +2127,105 @@ export default function Dashboard() {
                   )}
               </div>
             </SectionCard>
+
+            {/* My To-Do List — moved here as 3rd card */}
+            <SectionCard className="hover:shadow-md transition">
+              <CardHeaderRow
+                iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
+                icon={<CheckSquare className="h-4 w-4 text-blue-500" />}
+                title="My To-Do List"
+                subtitle="Click any item for details"
+                badge={pendingTodos.length || undefined}
+                action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400' : 'text-blue-500'}`} onClick={() => navigate('/todos')}>View All</Button>}
+              />
+              <div className="p-3">
+                <div className="flex gap-2 mb-3">
+                  <input
+                    type="text" value={newTodo} onChange={e => setNewTodo(e.target.value)}
+                    placeholder="Add new task..."
+                    onKeyDown={e => e.key === 'Enter' && addTodo()}
+                    className={`flex-1 px-3 py-2 text-sm border rounded-xl focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400 focus:ring-blue-900/40' : 'bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400'}`}
+                  />
+                  <Popover open={showDueDatePicker} onOpenChange={setShowDueDatePicker}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className={`h-9 w-9 rounded-xl flex-shrink-0 ${
+                          selectedDueDate
+                            ? 'border-amber-400 text-amber-500'
+                            : isDark
+                            ? 'border-slate-600 bg-slate-700 text-slate-400'
+                            : 'border-slate-200 text-slate-400'
+                        }`}
+                      >
+                        <CalendarIcon className="h-4 w-4" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="end">
+                      <CalendarComponent
+                        mode="single"
+                        selected={selectedDueDate}
+                        onSelect={(d) => { setSelectedDueDate(d); setShowDueDatePicker(false); }}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <Button onClick={addTodo} disabled={!newTodo.trim()} className="px-4 rounded-xl h-9 text-sm font-semibold flex-shrink-0"
+                    style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                    Add
+                  </Button>
+                </div>
+                {selectedDueDate && (
+                  <p className="text-xs text-amber-500 font-medium mb-2 -mt-1 ml-1">
+                    Due: {format(selectedDueDate, 'MMM d, yyyy')}
+                  </p>
+                )}
+                {pendingTodos.length === 0
+                  ? <div className={`text-center py-8 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No todos yet</div>
+                  : (
+                    <div className="slim-scroll space-y-1.5 max-h-[200px]" style={slimScroll}>
+                      <AnimatePresence>
+                        {pendingTodos.map(todo => (
+                          <motion.div key={todo._id || todo.id} variants={itemVariants} layout
+                            onClick={() => setSelectedTodo(todo)}
+                            className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border transition-all cursor-pointer ${
+                              todo.completed
+                                ? isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'
+                                : !todo.completed && isOverdue(todo.due_date)
+                                  ? isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50/70 border-red-200'
+                                : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'
+                            }`}>
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              <input type="checkbox" checked={todo.completed}
+                                onChange={e => { e.stopPropagation(); handleToggleTodo(todo._id || todo.id); }}
+                                onClick={e => e.stopPropagation()}
+                                className="h-4 w-4 accent-emerald-600 flex-shrink-0 rounded cursor-pointer" />
+                              <div className="flex-1 min-w-0">
+                                <span className={`block text-sm truncate ${todo.completed ? 'line-through text-slate-400 dark:text-slate-600' : isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                                  {todo.title}
+                                  {!todo.completed && isOverdue(todo.due_date) && (
+                                    <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-semibold bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400 rounded">Overdue</span>
+                                  )}
+                                </span>
+                                {todo.due_date && (
+                                  <p className={`text-[10px] mt-0.5 ${isOverdue(todo.due_date) ? 'text-red-500 font-medium' : isDark ? 'text-amber-400' : 'text-amber-500'}`}>
+                                    Due: {format(new Date(todo.due_date), 'MMM d, yyyy')}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                            <button onClick={e => { e.stopPropagation(); handleDeleteTodo(todo._id || todo.id); }}
+                              className={`text-xs font-medium transition-colors px-2 py-1 rounded-lg flex-shrink-0 ${isDark ? 'text-slate-500 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}>
+                              x
+                            </button>
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
+                    </div>
+                  )}
+              </div>
+            </SectionCard>
           </motion.div>
         )}
         </React.Fragment>
@@ -2155,99 +2268,50 @@ export default function Dashboard() {
             </div>
           </SectionCard>
 
-          {/* My To-Do List */}
+          {/* Reminders Card — replaces My Todo */}
           <SectionCard>
             <CardHeaderRow
-              iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
-              icon={<CheckSquare className="h-4 w-4 text-blue-500" />}
-              title="My To-Do List"
-              subtitle="Click any item for details"
-              badge={pendingTodos.length || undefined}
-              action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400' : 'text-blue-500'}`} onClick={() => navigate('/todos')}>View All</Button>}
+              iconBg={isDark ? 'bg-purple-900/40' : 'bg-purple-50'}
+              icon={<Bell className="h-4 w-4 text-purple-500" />}
+              title="Reminders"
+              subtitle="Upcoming reminders"
+              badge={upcomingReminders.length || undefined}
+              action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-purple-400' : 'text-purple-500'}`} onClick={() => navigate('/reminders')}>View All</Button>}
             />
             <div className="p-3">
-              <div className="flex gap-2 mb-3">
-                <input
-                  type="text" value={newTodo} onChange={e => setNewTodo(e.target.value)}
-                  placeholder="Add new task..."
-                  onKeyDown={e => e.key === 'Enter' && addTodo()}
-                  className={`flex-1 px-3 py-2 text-sm border rounded-xl focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400 focus:ring-blue-900/40' : 'bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400'}`}
-                />
-                <Popover open={showDueDatePicker} onOpenChange={setShowDueDatePicker}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className={`h-9 w-9 rounded-xl flex-shrink-0 ${
-                        selectedDueDate
-                          ? 'border-amber-400 text-amber-500'
-                          : isDark
-                          ? 'border-slate-600 bg-slate-700 text-slate-400'
-                          : 'border-slate-200 text-slate-400'
-                      }`}
-                    >
-                      <CalendarIcon className="h-4 w-4" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="end">
-                    <CalendarComponent
-                      mode="single"
-                      selected={selectedDueDate}
-                      onSelect={(d) => { setSelectedDueDate(d); setShowDueDatePicker(false); }}
-                      initialFocus
-                    />
-                  </PopoverContent>
-                </Popover>
-                <Button onClick={addTodo} disabled={!newTodo.trim()} className="px-4 rounded-xl h-9 text-sm font-semibold flex-shrink-0"
-                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-                  Add
-                </Button>
-              </div>
-              {selectedDueDate && (
-                <p className="text-xs text-amber-500 font-medium mb-2 -mt-1 ml-1">
-                  Due: {format(selectedDueDate, 'MMM d, yyyy')}
-                </p>
-              )}
-              {pendingTodos.length === 0
-                ? <div className={`text-center py-8 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No todos yet</div>
+              {upcomingReminders.length === 0
+                ? <div className={`text-center py-8 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No upcoming reminders</div>
                 : (
-                  <div className="slim-scroll space-y-1.5 max-h-[200px]" style={slimScroll}>
+                  <div className="slim-scroll space-y-1.5 max-h-[240px]" style={slimScroll}>
                     <AnimatePresence>
-                      {pendingTodos.map(todo => (
-                        <motion.div key={todo._id || todo.id} variants={itemVariants} layout
-                          onClick={() => setSelectedTodo(todo)}
-                          className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border transition-all cursor-pointer ${
-                            todo.completed
-                              ? isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'
-                              : !todo.completed && isOverdue(todo.due_date)
+                      {upcomingReminders.map(rem => {
+                        const remId = rem._id || rem.id;
+                        const isDue = rem.remind_at && new Date(rem.remind_at) < new Date();
+                        return (
+                          <motion.div key={remId} variants={itemVariants} layout whileHover={{ y: -1 }}
+                            onClick={() => navigate('/reminders')}
+                            className={`py-2.5 px-3 rounded-xl border cursor-pointer hover:shadow-sm transition-all ${
+                              isDue
                                 ? isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50/70 border-red-200'
-                              : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'
-                          }`}>
-                          <div className="flex items-center gap-3 flex-1 min-w-0">
-                            <input type="checkbox" checked={todo.completed}
-                              onChange={e => { e.stopPropagation(); handleToggleTodo(todo._id || todo.id); }}
-                              onClick={e => e.stopPropagation()}
-                              className="h-4 w-4 accent-emerald-600 flex-shrink-0 rounded cursor-pointer" />
-                            <div className="flex-1 min-w-0">
-                              <span className={`block text-sm truncate ${todo.completed ? 'line-through text-slate-400 dark:text-slate-600' : isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                                {todo.title}
-                                {!todo.completed && isOverdue(todo.due_date) && (
-                                  <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-semibold bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400 rounded">Overdue</span>
-                                )}
-                              </span>
-                              {todo.due_date && (
-                                <p className={`text-[10px] mt-0.5 ${isOverdue(todo.due_date) ? 'text-red-500 font-medium' : isDark ? 'text-amber-400' : 'text-amber-500'}`}>
-                                  Due: {format(new Date(todo.due_date), 'MMM d, yyyy')}
+                                : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'
+                            }`}>
+                            <div className="flex items-center gap-2.5">
+                              <BellRing className={`h-3.5 w-3.5 flex-shrink-0 ${isDue ? 'text-red-500' : 'text-purple-400'}`} />
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-sm font-medium truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                                  {rem.title || 'Untitled'}
                                 </p>
-                              )}
+                                {rem.remind_at && (
+                                  <p className={`text-[10px] mt-0.5 ${isDue ? 'text-red-500 font-medium' : isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                                    {isDue ? 'Overdue · ' : ''}{(() => { try { return format(new Date(rem.remind_at), 'MMM d, yyyy · h:mm a'); } catch { return '—'; } })()}
+                                  </p>
+                                )}
+                              </div>
+                              {isDue && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-red-500 text-white">DUE</span>}
                             </div>
-                          </div>
-                          <button onClick={e => { e.stopPropagation(); handleDeleteTodo(todo._id || todo.id); }}
-                            className={`text-xs font-medium transition-colors px-2 py-1 rounded-lg flex-shrink-0 ${isDark ? 'text-slate-500 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}>
-                            x
-                          </button>
-                        </motion.div>
-                      ))}
+                          </motion.div>
+                        );
+                      })}
                     </AnimatePresence>
                   </div>
                 )}
