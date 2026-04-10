@@ -24,14 +24,14 @@ import {
 import { format, startOfDay, differenceInDays } from 'date-fns';
 import * as XLSX from 'xlsx';
 
-const FixedSizeList = ({ children, height, itemCount, itemSize, width }) =>
+const FixedSizeList = ({ children, height, itemCount, itemSize, width, itemData }) =>
   React.createElement(
     "div",
     { style: { height, width, overflow: "auto" } },
     Array.from({ length: itemCount || 0 }, (_, i) => {
       if (!children) return null;
 
-      const result = children({ index: i, style: { height: itemSize } });
+      const result = children({ index: i, style: { height: itemSize }, data: itemData });
 
       if (result === undefined || result === null) return null;
 
