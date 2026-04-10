@@ -23,7 +23,6 @@ import {
 } from "lucide-react";
 
 // ADD THIS IMPORT AT TOP
-import { FixedSizeList as List } from "react-window";
 import LayoutCustomizer from "../components/layout/LayoutCustomizer";
 import { usePageLayout } from "../hooks/usePageLayout";
 
