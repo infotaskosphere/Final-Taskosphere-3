@@ -25,6 +25,7 @@ import {
 // ADD THIS IMPORT AT TOP
 import LayoutCustomizer from "../components/layout/LayoutCustomizer";
 import { usePageLayout } from "../hooks/usePageLayout";
+from fastapi import APIRouter
 
 // ── Brand Colors (matching Dashboard) ────────────────────────────────────────
 const COLORS = {
