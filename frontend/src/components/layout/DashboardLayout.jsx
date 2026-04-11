@@ -7,7 +7,7 @@ import {
   Users, LogOut, Menu, Calendar, Activity, ChevronDown,
   PanelLeftClose, PanelLeftOpen, Target, Sun, Moon, MapPin,
   Settings, Mail, Receipt, X, KeyRound,
-  CreditCard, Fingerprint, Bell,
+  CreditCard, Fingerprint, Bell, ShieldCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -41,8 +41,9 @@ const NAV_GROUPS = [
       { path: '/todos',      icon: CheckSquare,     label: 'To Do' },
       { path: '/attendance', icon: Clock,           label: 'Attendance' },
       { path: '/reminders', icon: Bell,            label: 'Reminders' },
-      { path: '/duedates',   icon: Calendar,        label: 'Compliance Calendar' },
-      { path: '/visits',     icon: MapPin,          label: 'Client Visits' },
+      { path: '/duedates',   icon: Calendar,      label: 'Compliance Calendar' },
+      { path: '/compliance', icon: ShieldCheck,   label: 'Compliance Tracker' },
+      { path: '/visits',     icon: MapPin,        label: 'Client Visits' },
     ],
   },
   {
