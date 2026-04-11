@@ -250,6 +250,7 @@ def mark_absent_users_task():
 async def startup_event():
     try:
         await db.tasks.create_index("assigned_to")
+        await create_compliance_indexes()  # import it too
         await db.tasks.create_index("created_by")
         await db.tasks.create_index("due_date")
         await db.users.create_index("email")
@@ -5938,6 +5939,7 @@ async def universal_exception_handler(request: Request, exc: Exception):
 
 # Api Router
 api_router.include_router(invoicing_router)
+api_router.include_router(compliance_router)
 api_router.include_router(identix_router, prefix="/identix")
 api_router.include_router(passwords_router)
 api_router.include_router(visits_router)
