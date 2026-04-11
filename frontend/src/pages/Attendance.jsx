@@ -1306,12 +1306,266 @@ function GoalStatusBadge({ status, isDark }) {
   };
   const c = cfg[status] || cfg.none;
   return (
-    <span
-      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border"
-      style={{ backgroundColor: c.bg, borderColor: c.border, color: c.color }}
-    >
+    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border"
+      style={{ backgroundColor: c.bg, borderColor: c.border, color: c.color }}>
       {c.emoji} {c.label}
     </span>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GOAL SETTINGS MODAL
+// Lets each user configure their own daily attendance goal:
+//   • Mode:       Hours only | Tasks only | Both (AND logic)
+//   • Hour goal:  0.5 – 12 h  (range slider, 0.5-step)
+//   • Task goal:  1 – 30       (stepper)
+//   • Label:      optional nickname for the goal (e.g. "Sprint Day")
+// Saved to localStorage keyed by user ID — fully per-user, zero backend needed.
+// ─────────────────────────────────────────────────────────────────────────────
+const GOAL_MODES = [
+  { value: 'hours', label: 'Hours',       icon: '⏱️', desc: 'Complete when hour target hit'  },
+  { value: 'tasks', label: 'Tasks',       icon: '✅', desc: 'Complete when task target hit'   },
+  { value: 'both',  label: 'Hours + Tasks', icon: '🎯', desc: 'Complete only when both are hit' },
+  { value: 'either',label: 'Hours or Tasks',icon: '⚡', desc: 'Complete when either is hit'    },
+];
+
+function GoalSettingsModal({ goal, onSave, onClose, isDark, hoursWorkedToday, tasksCompletedToday }) {
+  const [mode,    setMode]    = useState(goal.mode  || 'both');
+  const [hours,   setHours]   = useState(goal.hours || 6);
+  const [tasks,   setTasks]   = useState(goal.tasks || 5);
+  const [label,   setLabel]   = useState(goal.label || '');
+
+  const needsHours = mode === 'hours' || mode === 'both' || mode === 'either';
+  const needsTasks = mode === 'tasks' || mode === 'both' || mode === 'either';
+
+  // Live preview of what status would be with these settings
+  const previewStatus = (() => {
+    const hoursGoalMet = hoursWorkedToday >= hours;
+    const tasksGoalMet = tasksCompletedToday >= tasks;
+    if (mode === 'hours')  { if (hoursGoalMet) return 'achieved'; if (hoursWorkedToday >= hours * 0.5) return 'partial'; return 'not_met'; }
+    if (mode === 'tasks')  { if (tasksGoalMet) return 'achieved'; if (tasksCompletedToday >= tasks * 0.5) return 'partial'; return 'not_met'; }
+    if (mode === 'both')   { if (hoursGoalMet && tasksGoalMet) return 'achieved'; if (hoursGoalMet || tasksGoalMet) return 'partial'; return 'not_met'; }
+    if (mode === 'either') { if (hoursGoalMet || tasksGoalMet) return 'achieved'; if (hoursWorkedToday >= hours * 0.5 || tasksCompletedToday >= tasks * 0.5) return 'partial'; return 'not_met'; }
+    return 'none';
+  })();
+
+  const inputStyle = {
+    backgroundColor: isDark ? D.raised : '#fff',
+    borderColor:     isDark ? D.border : '#d1d5db',
+    color:           isDark ? D.text   : '#1e293b',
+  };
+
+  const presets = [
+    { name: 'Standard',   hours: 8,  tasks: 5,  mode: 'hours',  emoji: '🏢' },
+    { name: 'Half Day',   hours: 4,  tasks: 3,  mode: 'hours',  emoji: '🌗' },
+    { name: 'Sprint',     hours: 6,  tasks: 10, mode: 'both',   emoji: '🚀' },
+    { name: 'Focus',      hours: 6,  tasks: 3,  mode: 'both',   emoji: '🎯' },
+    { name: 'Light Day',  hours: 3,  tasks: 2,  mode: 'either', emoji: '☀️' },
+    { name: 'Custom',     hours,     tasks,     mode,           emoji: '✏️' },
+  ];
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+      style={{ background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
+        style={{ backgroundColor: isDark ? D.card : '#fff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
+        initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }}
+        transition={{ type: 'spring', stiffness: 220, damping: 22 }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-6 py-5 text-white flex-shrink-0"
+          style={{ background: `linear-gradient(135deg, #1e3a5f, ${COLORS.mediumBlue})` }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                <Target className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-lg font-black">Set Your Daily Goal</h2>
+                <p className="text-blue-200 text-xs">Personalised targets — saved just for you</p>
+              </div>
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition-all">
+              <X className="w-4 h-4 text-white" />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="p-6 space-y-6 overflow-y-auto slim-scroll flex-1" style={slimScroll}>
+
+          {/* Quick Presets */}
+          <div>
+            <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: isDark ? D.muted : '#64748b' }}>Quick Presets</p>
+            <div className="grid grid-cols-3 gap-2">
+              {presets.filter(p => p.name !== 'Custom').map(p => (
+                <motion.button key={p.name}
+                  whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}
+                  onClick={() => { setMode(p.mode); setHours(p.hours); setTasks(p.tasks); }}
+                  className="flex flex-col items-center gap-1 py-3 px-2 rounded-xl border text-center transition-all"
+                  style={{
+                    borderColor: mode === p.mode && hours === p.hours && tasks === p.tasks
+                      ? COLORS.mediumBlue
+                      : isDark ? D.border : '#e2e8f0',
+                    backgroundColor: mode === p.mode && hours === p.hours && tasks === p.tasks
+                      ? isDark ? 'rgba(31,111,178,0.18)' : '#eff6ff'
+                      : isDark ? D.raised : '#f8fafc',
+                  }}
+                >
+                  <span className="text-lg">{p.emoji}</span>
+                  <span className="text-xs font-bold" style={{ color: isDark ? D.text : '#1e293b' }}>{p.name}</span>
+                  <span className="text-[10px]" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                    {p.mode === 'hours' ? `${p.hours}h` : p.mode === 'tasks' ? `${p.tasks} tasks` : `${p.hours}h · ${p.tasks} tasks`}
+                  </span>
+                </motion.button>
+              ))}
+            </div>
+          </div>
+
+          {/* Mode selector */}
+          <div>
+            <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: isDark ? D.muted : '#64748b' }}>Goal Mode</p>
+            <div className="grid grid-cols-2 gap-2">
+              {GOAL_MODES.map(m => (
+                <motion.button key={m.value}
+                  whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                  onClick={() => setMode(m.value)}
+                  className="flex items-start gap-2.5 p-3 rounded-xl border text-left transition-all"
+                  style={{
+                    borderColor: mode === m.value ? COLORS.mediumBlue : isDark ? D.border : '#e2e8f0',
+                    backgroundColor: mode === m.value
+                      ? isDark ? 'rgba(31,111,178,0.15)' : '#eff6ff'
+                      : isDark ? D.raised : '#f8fafc',
+                    boxShadow: mode === m.value ? `0 0 0 1.5px ${COLORS.mediumBlue}` : 'none',
+                  }}
+                >
+                  <span className="text-base mt-0.5">{m.icon}</span>
+                  <div>
+                    <p className="text-xs font-bold" style={{ color: isDark ? D.text : '#1e293b' }}>{m.label}</p>
+                    <p className="text-[10px] leading-snug" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>{m.desc}</p>
+                  </div>
+                </motion.button>
+              ))}
+            </div>
+          </div>
+
+          {/* Hour goal slider */}
+          {needsHours && (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-bold uppercase tracking-widest" style={{ color: isDark ? D.muted : '#64748b' }}>
+                  Hour Target
+                </p>
+                <span className="text-2xl font-black tabular-nums" style={{ color: COLORS.mediumBlue }}>
+                  {hours}h
+                </span>
+              </div>
+              <input
+                type="range" min="0.5" max="12" step="0.5" value={hours}
+                onChange={e => setHours(parseFloat(e.target.value))}
+                className="w-full h-2 rounded-full appearance-none cursor-pointer"
+                style={{ accentColor: COLORS.mediumBlue, backgroundColor: isDark ? D.raised : '#e2e8f0' }}
+              />
+              <div className="flex justify-between text-[10px] mt-1.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                <span>0.5h</span><span>3h</span><span>6h</span><span>9h</span><span>12h</span>
+              </div>
+            </div>
+          )}
+
+          {/* Task goal stepper */}
+          {needsTasks && (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-bold uppercase tracking-widest" style={{ color: isDark ? D.muted : '#64748b' }}>
+                  Task Target
+                </p>
+                <span className="text-2xl font-black tabular-nums" style={{ color: COLORS.emeraldGreen }}>
+                  {tasks} <span className="text-sm font-semibold">tasks</span>
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setTasks(t => Math.max(1, t - 1))}
+                  className="w-10 h-10 rounded-xl border-2 flex items-center justify-center text-xl font-bold transition-all active:scale-90"
+                  style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.muted : '#64748b', backgroundColor: isDark ? D.raised : '#f8fafc' }}
+                >−</button>
+                <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ backgroundColor: isDark ? D.raised : '#e2e8f0' }}>
+                  <motion.div className="h-full rounded-full" style={{ backgroundColor: COLORS.emeraldGreen }}
+                    animate={{ width: `${Math.min(100, (tasks / 20) * 100)}%` }}
+                    transition={{ type: 'spring', stiffness: 300, damping: 25 }} />
+                </div>
+                <button
+                  onClick={() => setTasks(t => Math.min(30, t + 1))}
+                  className="w-10 h-10 rounded-xl border-2 flex items-center justify-center text-xl font-bold transition-all active:scale-90"
+                  style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.muted : '#64748b', backgroundColor: isDark ? D.raised : '#f8fafc' }}
+                >+</button>
+              </div>
+              <div className="flex justify-between text-[10px] mt-1.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                <span>1</span><span>5</span><span>10</span><span>15</span><span>20+</span>
+              </div>
+            </div>
+          )}
+
+          {/* Optional label */}
+          <div>
+            <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: isDark ? D.muted : '#64748b' }}>
+              Goal Label <span className="normal-case font-normal">(optional)</span>
+            </p>
+            <input
+              type="text" value={label} onChange={e => setLabel(e.target.value)}
+              placeholder='e.g. "Sprint Day", "Deep Work", "Standard"'
+              maxLength={40}
+              className="w-full px-3.5 py-2.5 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all"
+              style={inputStyle}
+            />
+          </div>
+
+          {/* Live Preview */}
+          <div className="rounded-xl border overflow-hidden"
+            style={{ borderColor: isDark ? D.border : '#e2e8f0' }}>
+            <div className="px-4 py-2 flex items-center gap-2" style={{ backgroundColor: isDark ? D.raised : '#f8fafc' }}>
+              <Activity className="w-3.5 h-3.5 text-slate-400" />
+              <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Live Preview</span>
+            </div>
+            <div className="px-4 py-3 flex items-center gap-3 flex-wrap">
+              <GoalStatusBadge status={previewStatus} isDark={isDark} />
+              <span className="text-xs" style={{ color: isDark ? D.muted : '#64748b' }}>
+                with {hoursWorkedToday.toFixed(1)}h worked & {tasksCompletedToday} tasks done today
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 flex items-center justify-between flex-shrink-0 border-t"
+          style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
+          <button
+            onClick={() => { setMode('both'); setHours(6); setTasks(5); setLabel(''); }}
+            className="text-xs font-semibold" style={{ color: isDark ? D.dimmer : '#94a3b8' }}
+          >
+            Reset to defaults
+          </button>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={onClose} className="font-semibold rounded-xl text-sm h-9" style={{ color: isDark ? D.muted : undefined }}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => { onSave({ mode, hours, tasks, label: label.trim() }); onClose(); }}
+              className="font-semibold text-white rounded-xl px-5 h-9"
+              style={{ backgroundColor: COLORS.mediumBlue }}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" /> Save Goal
+            </Button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -1420,10 +1674,35 @@ export default function Attendance() {
   const [showProofModal,       setShowProofModal]       = useState(false);
   const [attendanceProof,      setAttendanceProof]      = useState(null);   // { note, photos[], documents[] }
 
-  // ── NEW: Goal-Based Attendance ─────────────────────────────────────────────
-  // daily_goal: 6 hours OR 5 tasks
-  const GOAL_HOURS = 6;
-  const GOAL_TASKS = 5;
+  // ── NEW: Goal-Based Attendance — per-user, persisted in localStorage ────────
+  const GOAL_STORAGE_KEY = `att_goal_${user?.id || 'default'}`;
+  const DEFAULT_GOAL = { hours: 6, tasks: 5, mode: 'both', label: '' };
+
+  const [userGoal, setUserGoal] = useState(() => {
+    try {
+      const stored = localStorage.getItem(`att_goal_${user?.id || 'default'}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Validate shape — fall back to default if corrupted
+        if (typeof parsed.hours === 'number' && typeof parsed.tasks === 'number') return parsed;
+      }
+    } catch {}
+    return DEFAULT_GOAL;
+  });
+  const [showGoalModal, setShowGoalModal] = useState(false);
+
+  const GOAL_HOURS = userGoal.hours;
+  const GOAL_TASKS = userGoal.tasks;
+
+  const handleSaveGoal = (newGoal) => {
+    try { localStorage.setItem(GOAL_STORAGE_KEY, JSON.stringify(newGoal)); } catch {}
+    setUserGoal(newGoal);
+    toast.success(
+      newGoal.label
+        ? `Goal "${newGoal.label}" saved`
+        : `Goal updated — ${newGoal.mode === 'hours' ? `${newGoal.hours}h` : newGoal.mode === 'tasks' ? `${newGoal.tasks} tasks` : `${newGoal.hours}h + ${newGoal.tasks} tasks`}`
+    );
+  };
 
   // ── Derived flags ──────────────────────────────────────────────────────────
   const isEveryoneView = isAdmin && selectedUserId === 'everyone';
@@ -2359,15 +2638,34 @@ export default function Attendance() {
   // ── NEW: Goal-Based Attendance Status ────────────────────────────────────
   const goalStatus = useMemo(() => {
     if (!displayTodayAttendance?.punch_in) return 'none';
-    const hoursWorked = parseDurationToHours(displayLiveDuration);
-    const hoursGoalMet = hoursWorked >= GOAL_HOURS;
-    const tasksGoalMet = tasksCompleted >= GOAL_TASKS;
+    const hoursWorked   = parseDurationToHours(displayLiveDuration);
+    const hoursGoalMet  = hoursWorked   >= GOAL_HOURS;
+    const tasksGoalMet  = tasksCompleted >= GOAL_TASKS;
+    const hoursPartial  = hoursWorked   >= GOAL_HOURS * 0.5;
+    const tasksPartial  = tasksCompleted >= GOAL_TASKS * 0.5;
+    const mode = userGoal.mode || 'both';
+
+    if (mode === 'hours') {
+      if (hoursGoalMet) return 'achieved';
+      if (hoursPartial) return 'partial';
+      return 'not_met';
+    }
+    if (mode === 'tasks') {
+      if (tasksGoalMet) return 'achieved';
+      if (tasksPartial) return 'partial';
+      return 'not_met';
+    }
+    if (mode === 'either') {
+      if (hoursGoalMet || tasksGoalMet) return 'achieved';
+      if (hoursPartial || tasksPartial) return 'partial';
+      return 'not_met';
+    }
+    // 'both' — must hit BOTH
     if (hoursGoalMet && tasksGoalMet) return 'achieved';
-    if (hoursGoalMet || tasksGoalMet)  return 'partial';
-    // Partial threshold: at least 50% of either goal
-    if (hoursWorked >= GOAL_HOURS * 0.5 || tasksCompleted >= GOAL_TASKS * 0.5) return 'partial';
+    if (hoursGoalMet || tasksGoalMet) return 'partial';
+    if (hoursPartial || tasksPartial) return 'partial';
     return 'not_met';
-  }, [displayTodayAttendance, displayLiveDuration, tasksCompleted, GOAL_HOURS, GOAL_TASKS]);
+  }, [displayTodayAttendance, displayLiveDuration, tasksCompleted, GOAL_HOURS, GOAL_TASKS, userGoal.mode]);
   const inputStyle = {
     backgroundColor: isDark ? D.raised : '#ffffff',
     borderColor: isDark ? D.border : '#d1d5db',
@@ -2447,6 +2745,20 @@ export default function Attendance() {
             existingProof={attendanceProof}
             onClose={() => setShowProofModal(false)}
             onSave={handleSaveProof}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── NEW: Goal Settings Modal ── */}
+      <AnimatePresence>
+        {showGoalModal && (
+          <GoalSettingsModal
+            isDark={isDark}
+            goal={userGoal}
+            hoursWorkedToday={parseDurationToHours(displayLiveDuration)}
+            tasksCompletedToday={tasksCompleted}
+            onClose={() => setShowGoalModal(false)}
+            onSave={(newGoal) => { handleSaveGoal(newGoal); setShowGoalModal(false); }}
           />
         )}
       </AnimatePresence>
@@ -2694,6 +3006,13 @@ export default function Attendance() {
                 {' '}· Target: {GOAL_HOURS}h or {GOAL_TASKS} tasks
               </span>
             </div>
+            <button
+              onClick={() => setShowGoalModal(true)}
+              className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg border transition-all hover:shadow-sm active:scale-95 flex-shrink-0"
+              style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.muted : '#64748b', backgroundColor: isDark ? D.raised : '#f8fafc' }}
+            >
+              <Target className="w-3 h-3" /> Edit Goal
+            </button>
           </motion.div>
         )}
 
@@ -2852,7 +3171,16 @@ export default function Attendance() {
                           <Target className="w-3.5 h-3.5 text-slate-400" />
                           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Goal Status</span>
                         </div>
-                        <GoalStatusBadge status={goalStatus} isDark={isDark} />
+                        <div className="flex items-center gap-1.5">
+                          <GoalStatusBadge status={goalStatus} isDark={isDark} />
+                          <button
+                            onClick={() => setShowGoalModal(true)}
+                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md border transition-all hover:opacity-80"
+                            style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.dimmer : '#94a3b8', backgroundColor: isDark ? D.raised : '#f8fafc' }}
+                          >
+                            Edit
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -3102,14 +3430,37 @@ export default function Attendance() {
               color={COLORS.mediumBlue}
               trend={overtimeMinutes > 0 ? `+${formatDuration(overtimeMinutes)} after shift` : 'Within shift hours'} />
           )}
-          {/* NEW: Goal Status StatCard */}
+          {/* NEW: Goal Status StatCard — click to edit goal */}
           {!isEveryoneView && !isViewingOther && (
-            <StatCard isDark={isDark} icon={Target}
-              label="Daily Goal"
-              value={goalStatus === 'achieved' ? '✅' : goalStatus === 'partial' ? '⚠️' : goalStatus === 'not_met' ? '❌' : '—'}
-              unit={goalStatus === 'achieved' ? 'Achieved' : goalStatus === 'partial' ? 'Partial' : goalStatus === 'not_met' ? 'Not Met' : 'No data'}
-              color={goalStatus === 'achieved' ? COLORS.emeraldGreen : goalStatus === 'partial' ? COLORS.amber : goalStatus === 'not_met' ? COLORS.red : '#94a3b8'}
-              trend={`${GOAL_HOURS}h or ${GOAL_TASKS} tasks`} />
+            <motion.div variants={itemVariants} whileHover={{ y: -3, transition: springPhysics.lift }} whileTap={{ scale: 0.985 }}>
+              <button
+                onClick={() => setShowGoalModal(true)}
+                className="w-full h-full text-left rounded-2xl shadow-sm border bg-white dark:bg-slate-800 border-slate-200/80 dark:border-slate-700 hover:shadow-md transition-all"
+              >
+                <div className="p-4">
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">Daily Goal</p>
+                      <p className="text-2xl font-bold tracking-tight"
+                        style={{ color: goalStatus === 'achieved' ? COLORS.emeraldGreen : goalStatus === 'partial' ? COLORS.amber : goalStatus === 'not_met' ? COLORS.red : '#94a3b8' }}>
+                        {goalStatus === 'achieved' ? '✅' : goalStatus === 'partial' ? '⚠️' : goalStatus === 'not_met' ? '❌' : '—'}
+                      </p>
+                      <p className="text-xs font-medium text-slate-400 dark:text-slate-500 mt-0.5">
+                        {goalStatus === 'achieved' ? 'Achieved' : goalStatus === 'partial' ? 'Partial' : goalStatus === 'not_met' ? 'Not Met' : 'No data'}
+                      </p>
+                    </div>
+                    <div className="p-2 rounded-xl"
+                      style={{ backgroundColor: `${goalStatus === 'achieved' ? COLORS.emeraldGreen : goalStatus === 'partial' ? COLORS.amber : goalStatus === 'not_met' ? COLORS.red : '#94a3b8'}15` }}>
+                      <Target className="w-4 h-4"
+                        style={{ color: goalStatus === 'achieved' ? COLORS.emeraldGreen : goalStatus === 'partial' ? COLORS.amber : goalStatus === 'not_met' ? COLORS.red : '#94a3b8' }} />
+                    </div>
+                  </div>
+                  <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500 truncate border-t border-slate-100 dark:border-slate-700 pt-2 mt-1">
+                    {userGoal.label ? `"${userGoal.label}"` : `${GOAL_HOURS}h or ${GOAL_TASKS} tasks`} · tap to edit
+                  </p>
+                </div>
+              </button>
+            </motion.div>
           )}
         </motion.div>
 
@@ -3313,12 +3664,12 @@ export default function Attendance() {
             <React.Fragment key="calendar_area">
 
               {/* ══════════════════════════════════════════════════════════════
-                  TWO-COLUMN GRID — same height both sides
+                  TWO-COLUMN GRID — left natural height, right fixed-scroll
                   LEFT : Calendar  +  Date Detail  +  Apply for Leave
-                  RIGHT: Recent Attendance  (scrolls to match left height)
+                  RIGHT: Recent Attendance  (fixed maxHeight, scrolls internally)
                   ══════════════════════════════════════════════════════════════ */}
               <motion.div
-                className={`grid gap-6 items-stretch ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-2'}`}
+                className={`grid gap-6 items-start ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-2'}`}
                 variants={itemVariants}
               >
 
@@ -3560,18 +3911,18 @@ export default function Attendance() {
                 )}
                 {/* ── END LEFT COLUMN ─────────────────────────────────────── */}
 
-                {/* ── RIGHT COLUMN: Recent Attendance — stretches to match left ── */}
-                <SectionCard className="flex flex-col" style={{ minHeight: 0 }}>
+                {/* ── RIGHT COLUMN: Recent Attendance — fixed height with inner scroll ── */}
+                <SectionCard>
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
                     icon={<Clock className="h-4 w-4 text-blue-500" />}
                     title={isEveryoneView ? 'All Employees — Attendance' : 'Recent Attendance'}
-                    subtitle={isEveryoneView ? 'Latest 25 records' : 'Last 15 records · scrolls to match'}
+                    subtitle={isEveryoneView ? 'Latest 25 records' : 'Last 15 records'}
                   />
-                  {/* flex-1 + overflow-y-auto makes the list fill the card height and scroll */}
+                  {/* Fixed maxHeight = approx left column height. Scrolls within card. */}
                   <div
-                    className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5"
-                    style={{ ...slimScroll, minHeight: 0 }}
+                    className="overflow-y-auto slim-scroll p-3 space-y-1.5"
+                    style={{ ...slimScroll, maxHeight: 640 }}
                   >
                     {loading && attendanceHistory.length === 0 ? (
                       <div className="flex items-center justify-center py-12">
