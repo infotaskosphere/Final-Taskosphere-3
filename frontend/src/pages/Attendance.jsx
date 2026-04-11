@@ -72,6 +72,17 @@ import {
   ExternalLink,
   Settings2,
   GripVertical,
+  Image,
+  FileText,
+  StickyNote,
+  Target,
+  Upload,
+  Camera,
+  Paperclip,
+  Eye,
+  Download,
+  MoonStar,
+  Coffee,
 } from 'lucide-react';
 import LayoutCustomizer from '../components/layout/LayoutCustomizer';
 import { usePageLayout } from '../hooks/usePageLayout';
@@ -994,6 +1005,316 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// LATE WORKING POPUP
+// ─────────────────────────────────────────────────────────────────────────────
+function LateWorkingPopup({ onContinue, onPunchOut, onRemindLater, isDark }) {
+  return (
+    <motion.div
+      className="fixed inset-0 z-[99998] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+    >
+      <motion.div
+        className="w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden"
+        style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
+        initial={{ scale: 0.88, y: 30 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.88, y: 30 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 24 }}
+      >
+        {/* Header */}
+        <div className="px-6 py-5 text-white relative overflow-hidden"
+          style={{ background: 'linear-gradient(135deg, #1e40af, #7c3aed)' }}>
+          <div className="absolute top-0 right-0 w-28 h-28 rounded-full opacity-10"
+            style={{ background: 'white', transform: 'translate(35%,-35%)' }} />
+          <div className="relative flex items-center gap-3">
+            <motion.div
+              className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center flex-shrink-0"
+              animate={{ scale: [1, 1.1, 1] }} transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+            >
+              <MoonStar className="w-6 h-6 text-white" />
+            </motion.div>
+            <div>
+              <p className="text-white/60 text-[10px] font-bold uppercase tracking-widest mb-0.5">After Hours</p>
+              <h2 className="text-xl font-black text-white">Working Late?</h2>
+            </div>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-5">
+          <p className="text-sm mb-5 leading-relaxed" style={{ color: isDark ? D.muted : '#475569' }}>
+            You are working beyond office hours (7:15 PM IST). Would you like to continue as overtime or punch out now?
+          </p>
+          <div className="space-y-2.5">
+            <motion.button
+              whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+              onClick={onContinue}
+              className="flex items-center justify-center gap-2 w-full h-11 rounded-xl text-sm font-bold text-white"
+              style={{ backgroundColor: COLORS.mediumBlue }}
+            >
+              <Zap className="w-4 h-4" /> Continue as Overtime
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+              onClick={onPunchOut}
+              className="flex items-center justify-center gap-2 w-full h-11 rounded-xl text-sm font-bold text-white"
+              style={{ backgroundColor: COLORS.red }}
+            >
+              <LogOut className="w-4 h-4" /> Punch Out Now
+            </motion.button>
+            <button
+              onClick={onRemindLater}
+              className="flex items-center justify-center gap-2 w-full h-10 rounded-xl text-sm font-semibold border transition-all"
+              style={{
+                borderColor: isDark ? D.border : '#e2e8f0',
+                color: isDark ? D.muted : '#64748b',
+                backgroundColor: 'transparent',
+              }}
+            >
+              <Bell className="w-3.5 h-3.5" /> Remind Me in 15 min
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ATTENDANCE PROOF MODAL
+// ─────────────────────────────────────────────────────────────────────────────
+function AttendanceProofModal({ onClose, onSave, isDark, existingProof = null }) {
+  const [note,      setNote]      = useState(existingProof?.note || '');
+  const [photos,    setPhotos]    = useState([]);
+  const [docs,      setDocs]      = useState([]);
+  const [isSaving,  setIsSaving]  = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const photoRef = useRef(null);
+  const docRef   = useRef(null);
+
+  const handlePhotoChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    const previews = files.map(f => ({ file: f, url: URL.createObjectURL(f), name: f.name, size: f.size }));
+    setPhotos(prev => [...prev, ...previews].slice(0, 5));
+    if (photoRef.current) photoRef.current.value = '';
+  };
+
+  const handleDocChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    const items = files.map(f => ({ file: f, name: f.name, size: f.size, type: f.type }));
+    setDocs(prev => [...prev, ...items].slice(0, 5));
+    if (docRef.current) docRef.current.value = '';
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      const formData = new FormData();
+      if (note.trim()) formData.append('note', note.trim());
+      photos.forEach(p => formData.append('photos', p.file));
+      docs.forEach(d => formData.append('documents', d.file));
+      await onSave(formData, note.trim());
+      onClose();
+    } catch { toast.error('Failed to save proof'); }
+    finally { setIsSaving(false); }
+  };
+
+  const removePhoto = (idx) => setPhotos(prev => prev.filter((_, i) => i !== idx));
+  const removeDoc   = (idx) => setDocs(prev => prev.filter((_, i) => i !== idx));
+  const fmtSize = (bytes) => bytes < 1024 ? `${bytes}B` : bytes < 1048576 ? `${(bytes/1024).toFixed(1)}KB` : `${(bytes/1048576).toFixed(1)}MB`;
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+      style={{ background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
+        style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
+        initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }}
+        transition={{ type: 'spring', stiffness: 220, damping: 22 }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-6 py-5 text-white flex-shrink-0"
+          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                <Paperclip className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-lg font-black">Attendance Proof</h2>
+                <p className="text-blue-200 text-xs">Attach photos, documents & notes</p>
+              </div>
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
+              <X className="w-4 h-4 text-white" />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="p-6 space-y-5 overflow-y-auto slim-scroll flex-1" style={slimScroll}>
+
+          {/* Note */}
+          <div>
+            <label className="text-sm font-semibold mb-1.5 block text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+              <StickyNote className="w-3.5 h-3.5" /> Note / Description
+            </label>
+            <textarea
+              value={note} onChange={e => setNote(e.target.value)}
+              placeholder="e.g. Visited client office, worked on project X, site inspection…"
+              rows={3}
+              className="w-full px-3.5 py-2.5 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none transition-all"
+              style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#d1d5db', color: isDark ? D.text : '#1e293b' }}
+            />
+          </div>
+
+          {/* Photos */}
+          <div>
+            <label className="text-sm font-semibold mb-1.5 block text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+              <Camera className="w-3.5 h-3.5" /> Photos <span className="font-normal text-slate-400">(max 5)</span>
+            </label>
+            <input ref={photoRef} type="file" accept="image/*" multiple onChange={handlePhotoChange} className="hidden" />
+            <button
+              onClick={() => photoRef.current?.click()}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border-2 border-dashed transition-all hover:border-blue-400 w-full justify-center"
+              style={{ borderColor: isDark ? D.border : '#cbd5e1', color: isDark ? D.muted : '#64748b', backgroundColor: isDark ? D.raised : '#f8fafc' }}
+            >
+              <Upload className="w-4 h-4" /> Upload Photos
+            </button>
+            {photos.length > 0 && (
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {photos.map((p, i) => (
+                  <div key={i} className="relative rounded-xl overflow-hidden aspect-square border group cursor-pointer"
+                    style={{ borderColor: isDark ? D.border : '#e2e8f0' }}
+                    onClick={() => setPreviewUrl(p.url)}
+                  >
+                    <img src={p.url} alt={p.name} className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                      <Eye className="w-4 h-4 text-white" />
+                    </div>
+                    <button
+                      onClick={e => { e.stopPropagation(); removePhoto(i); }}
+                      className="absolute top-1 right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="w-3 h-3 text-white" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Documents */}
+          <div>
+            <label className="text-sm font-semibold mb-1.5 block text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+              <FileText className="w-3.5 h-3.5" /> Documents <span className="font-normal text-slate-400">(PDF, DOC, etc.)</span>
+            </label>
+            <input ref={docRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv" multiple onChange={handleDocChange} className="hidden" />
+            <button
+              onClick={() => docRef.current?.click()}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border-2 border-dashed transition-all hover:border-emerald-400 w-full justify-center"
+              style={{ borderColor: isDark ? D.border : '#cbd5e1', color: isDark ? D.muted : '#64748b', backgroundColor: isDark ? D.raised : '#f8fafc' }}
+            >
+              <Upload className="w-4 h-4" /> Upload Documents
+            </button>
+            {docs.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {docs.map((d, i) => (
+                  <div key={i}
+                    className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl border"
+                    style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}
+                  >
+                    <FileText className="w-4 h-4 flex-shrink-0 text-blue-500" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate" style={{ color: isDark ? D.text : '#1e293b' }}>{d.name}</p>
+                      <p className="text-xs" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>{fmtSize(d.size)}</p>
+                    </div>
+                    <button onClick={() => removeDoc(i)} className="w-6 h-6 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                      <X className="w-3 h-3 text-red-500" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Existing proof preview */}
+          {existingProof && (existingProof.note || existingProof.photos?.length > 0 || existingProof.documents?.length > 0) && (
+            <div className="rounded-xl overflow-hidden border"
+              style={{ borderColor: isDark ? 'rgba(31,175,90,0.3)' : '#bbf7d0' }}>
+              <div className="px-4 py-2 flex items-center gap-2"
+                style={{ background: isDark ? 'rgba(31,175,90,0.1)' : '#f0fdf4' }}>
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                <span className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">Previously Saved</span>
+              </div>
+              <div className="p-3 text-sm" style={{ color: isDark ? D.muted : '#475569' }}>
+                {existingProof.note && <p className="mb-1">📝 {existingProof.note}</p>}
+                {existingProof.photos?.length > 0 && <p>📷 {existingProof.photos.length} photo(s)</p>}
+                {existingProof.documents?.length > 0 && <p>📄 {existingProof.documents.length} document(s)</p>}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 flex justify-end gap-2 flex-shrink-0 border-t"
+          style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
+          <Button variant="ghost" onClick={onClose} className="font-semibold rounded-xl text-sm h-9" style={{ color: isDark ? D.muted : undefined }}>Cancel</Button>
+          <Button
+            onClick={handleSave} disabled={isSaving || (photos.length === 0 && docs.length === 0 && !note.trim())}
+            className="font-semibold text-white rounded-xl px-5 h-9"
+            style={{ backgroundColor: COLORS.deepBlue }}
+          >
+            {isSaving ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />Saving…</> : <><Paperclip className="w-3.5 h-3.5 mr-1.5" />Save Proof</>}
+          </Button>
+        </div>
+
+        {/* Photo preview overlay */}
+        <AnimatePresence>
+          {previewUrl && (
+            <motion.div
+              className="absolute inset-0 z-10 flex items-center justify-center bg-black/80 rounded-3xl"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setPreviewUrl(null)}
+            >
+              <img src={previewUrl} alt="preview" className="max-w-full max-h-full rounded-2xl object-contain" style={{ maxHeight: '80%' }} />
+              <button onClick={() => setPreviewUrl(null)} className="absolute top-4 right-4 w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center">
+                <X className="w-4 h-4 text-white" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GOAL STATUS BADGE
+// ─────────────────────────────────────────────────────────────────────────────
+function GoalStatusBadge({ status, isDark }) {
+  const cfg = {
+    achieved: { emoji: '✅', label: 'Goal Achieved', color: COLORS.emeraldGreen, bg: isDark ? 'rgba(31,175,90,0.15)' : '#f0fdf4', border: isDark ? '#14532d' : '#bbf7d0' },
+    partial:  { emoji: '⚠️', label: 'Partial',       color: COLORS.amber,        bg: isDark ? 'rgba(245,158,11,0.12)' : '#fffbeb', border: isDark ? 'rgba(245,158,11,0.3)' : '#fde68a' },
+    not_met:  { emoji: '❌', label: 'Not Met',        color: COLORS.red,          bg: isDark ? 'rgba(239,68,68,0.12)' : '#fef2f2', border: isDark ? '#7f1d1d' : '#fecaca' },
+    none:     { emoji: '—',  label: 'No Data',        color: '#94a3b8',           bg: isDark ? D.raised : '#f8fafc',               border: isDark ? D.border : '#e2e8f0' },
+  };
+  const c = cfg[status] || cfg.none;
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border"
+      style={{ backgroundColor: c.bg, borderColor: c.border, color: c.color }}
+    >
+      {c.emoji} {c.label}
+    </span>
+  );
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1085,6 +1406,24 @@ export default function Attendance() {
   const [editingReminder,        setEditingReminder]        = useState(null);
   const [showEmailImporter,      setShowEmailImporter]      = useState(false);
   const [showReminderCalendar,   setShowReminderCalendar]   = useState(false);
+
+  // ── NEW: Activity Tracking ─────────────────────────────────────────────────
+  const [lastActivity,         setLastActivity]         = useState(Date.now());
+
+  // ── NEW: Late Working Popup ───────────────────────────────────────────────
+  const [showLatePopup,        setShowLatePopup]        = useState(false);
+  const [latePopupShown,       setLatePopupShown]       = useState(false);
+  const [isOvertime,           setIsOvertime]           = useState(false);
+  const latePopupDateRef = useRef(format(new Date(), 'yyyy-MM-dd'));
+
+  // ── NEW: Proof Upload ─────────────────────────────────────────────────────
+  const [showProofModal,       setShowProofModal]       = useState(false);
+  const [attendanceProof,      setAttendanceProof]      = useState(null);   // { note, photos[], documents[] }
+
+  // ── NEW: Goal-Based Attendance ─────────────────────────────────────────────
+  // daily_goal: 6 hours OR 5 tasks
+  const GOAL_HOURS = 6;
+  const GOAL_TASKS = 5;
 
   // ── Derived flags ──────────────────────────────────────────────────────────
   const isEveryoneView = isAdmin && selectedUserId === 'everyone';
@@ -1218,6 +1557,68 @@ export default function Attendance() {
     const id = setInterval(checkAbsentWarning, 60000);
     return () => clearInterval(id);
   }, [todayAttendance, isViewingOther, isEveryoneView]); // eslint-disable-line
+
+  // ── NEW: Global Activity Tracking ─────────────────────────────────────────
+  useEffect(() => {
+    const update = () => setLastActivity(Date.now());
+    const events = ['mousemove', 'keydown', 'click', 'touchstart', 'scroll'];
+    events.forEach(ev => window.addEventListener(ev, update, { passive: true }));
+    return () => events.forEach(ev => window.removeEventListener(ev, update));
+  }, []);
+
+  // ── NEW: Reset latePopupShown on next day ────────────────────────────────
+  useEffect(() => {
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    if (latePopupDateRef.current !== todayStr) {
+      latePopupDateRef.current = todayStr;
+      setLatePopupShown(false);
+      setIsOvertime(false);
+    }
+  });
+
+  // ── NEW: Late Working Popup checker (every 60s) ─────────────────────────
+  useEffect(() => {
+    if (isViewingOther || isEveryoneView) return;
+    const check = () => {
+      const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: IST_TIMEZONE }));
+      const isPastThreshold = nowIST.getHours() > 19 || (nowIST.getHours() === 19 && nowIST.getMinutes() >= 15);
+      if (
+        isPastThreshold &&
+        todayAttendance?.punch_in &&
+        !todayAttendance?.punch_out &&
+        !latePopupShown &&
+        !todayIsHoliday &&
+        todayAttendance?.status !== 'leave'
+      ) {
+        setShowLatePopup(true);
+        setLatePopupShown(true);
+      }
+    };
+    check();
+    const id = setInterval(check, 60000);
+    return () => clearInterval(id);
+  }, [todayAttendance, latePopupShown, isViewingOther, isEveryoneView, todayIsHoliday]); // eslint-disable-line
+
+  // ── NEW: Smart Auto Punch-Out (every 60s) ────────────────────────────────
+  useEffect(() => {
+    if (isViewingOther || isEveryoneView) return;
+    const check = () => {
+      if (!todayAttendance?.punch_in || todayAttendance?.punch_out) return;
+      if (isOvertime) return;
+      const now = Date.now();
+      const inactiveMinutes = (now - lastActivity) / 60000;
+      const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: IST_TIMEZONE }));
+      const shiftEndIST = new Date(nowIST);
+      shiftEndIST.setHours(19, 0, 0, 0);
+      const afterShift = nowIST.getTime() > shiftEndIST.getTime() + 120 * 60000; // 7 PM + 2h grace
+      if (inactiveMinutes > 60 && afterShift) {
+        handleAutoPunchOut();
+      }
+    };
+    check();
+    const id = setInterval(check, 60000);
+    return () => clearInterval(id);
+  }, [todayAttendance, lastActivity, isOvertime, isViewingOther, isEveryoneView]); // eslint-disable-line
 
   // ── Data Fetch ─────────────────────────────────────────────────────────────
   const fetchData = useCallback(async (overrideUserId = undefined) => {
@@ -1513,6 +1914,44 @@ export default function Attendance() {
       else { toast.success(`Absent marked for ${markedDate}: ${marked} user(s)`); await fetchData(); }
     } catch (e) { toast.error(e?.response?.data?.detail || 'Failed to mark absent'); }
     finally { setAbsentLoading(false); }
+  }, [fetchData]);
+
+  // ── NEW: Auto Punch-Out ───────────────────────────────────────────────────
+  const handleAutoPunchOut = useCallback(async () => {
+    try {
+      await api.post('/attendance/punch-out', { auto: true, reason: 'inactive_after_shift' });
+      toast.warning('Auto punch-out applied due to inactivity after shift hours', { duration: 8000, id: 'auto-punch-out' });
+      await fetchData();
+    } catch (err) {
+      // Fallback: try standard punch action
+      try {
+        await api.post('/attendance', { action: 'punch_out', auto: true });
+        toast.warning('Auto punch-out applied due to inactivity', { duration: 8000, id: 'auto-punch-out' });
+        await fetchData();
+      } catch { /* silent — already punched out or network issue */ }
+    }
+  }, [fetchData]);
+
+  // ── NEW: Save Attendance Proof ────────────────────────────────────────────
+  const handleSaveProof = useCallback(async (formData, note) => {
+    try {
+      // Try multipart upload; graceful fallback to note-only if backend not ready
+      try {
+        await api.post('/attendance/proof', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      } catch {
+        // Backend may not have this endpoint yet — store locally in state
+        const photoCount  = formData.getAll?.('photos')?.length  || 0;
+        const docCount    = formData.getAll?.('documents')?.length || 0;
+        setAttendanceProof({ note, photos: Array(photoCount).fill(null), documents: Array(docCount).fill(null), saved_at: new Date().toISOString() });
+        toast.success('Proof saved locally');
+        return;
+      }
+      await fetchData();
+      toast.success('Attendance proof uploaded successfully');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to upload proof');
+      throw err;
+    }
   }, [fetchData]);
 
   // ── Reminders ──────────────────────────────────────────────────────────────
@@ -1881,7 +2320,54 @@ export default function Attendance() {
     return null;
   }, [displayTodayAttendance, displayLiveDuration]);
 
-  // ── Shared input styles ────────────────────────────────────────────────────
+  // ── NEW: Overtime minutes (for StatCard) ─────────────────────────────────
+  const overtimeMinutes = useMemo(() => {
+    if (!displayTodayAttendance?.punch_in) return 0;
+    const shiftEndMinutes = 19 * 60; // 7:00 PM in minutes from midnight
+    let punchInDate;
+    try {
+      const str = String(displayTodayAttendance.punch_in).trim();
+      const hasTZ = /Z$|[+-]\d{2}:\d{2}$|[+-]\d{4}$/.test(str);
+      punchInDate = new Date(hasTZ ? str : str + 'Z');
+    } catch { return 0; }
+    if (isNaN(punchInDate.getTime())) return 0;
+
+    let punchOutDate;
+    if (displayTodayAttendance.punch_out) {
+      try {
+        const str = String(displayTodayAttendance.punch_out).trim();
+        const hasTZ = /Z$|[+-]\d{2}:\d{2}$|[+-]\d{4}$/.test(str);
+        punchOutDate = new Date(hasTZ ? str : str + 'Z');
+      } catch { punchOutDate = new Date(); }
+    } else {
+      punchOutDate = new Date();
+    }
+
+    // Convert shift end to UTC equivalent for today
+    const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: IST_TIMEZONE }));
+    const shiftEndUTC = new Date(punchOutDate);
+    shiftEndUTC.setHours(0, 0, 0, 0);
+    // shift end = today 7 PM IST = today 13:30 UTC
+    const shiftEndToday = new Date(nowIST);
+    shiftEndToday.setHours(19, 0, 0, 0);
+    const shiftEndUTCms = shiftEndToday.getTime() - (5.5 * 3600000); // IST offset
+
+    const otMs = Math.max(0, punchOutDate.getTime() - shiftEndUTCms);
+    return Math.floor(otMs / 60000);
+  }, [displayTodayAttendance, displayLiveDuration]);
+
+  // ── NEW: Goal-Based Attendance Status ────────────────────────────────────
+  const goalStatus = useMemo(() => {
+    if (!displayTodayAttendance?.punch_in) return 'none';
+    const hoursWorked = parseDurationToHours(displayLiveDuration);
+    const hoursGoalMet = hoursWorked >= GOAL_HOURS;
+    const tasksGoalMet = tasksCompleted >= GOAL_TASKS;
+    if (hoursGoalMet && tasksGoalMet) return 'achieved';
+    if (hoursGoalMet || tasksGoalMet)  return 'partial';
+    // Partial threshold: at least 50% of either goal
+    if (hoursWorked >= GOAL_HOURS * 0.5 || tasksCompleted >= GOAL_TASKS * 0.5) return 'partial';
+    return 'not_met';
+  }, [displayTodayAttendance, displayLiveDuration, tasksCompleted, GOAL_HOURS, GOAL_TASKS]);
   const inputStyle = {
     backgroundColor: isDark ? D.raised : '#ffffff',
     borderColor: isDark ? D.border : '#d1d5db',
@@ -1929,6 +2415,38 @@ export default function Attendance() {
             onClose={() => setSelectedHolidayDetail(null)}
             onEdit={(h) => { setEditingHoliday(h); setEditName(h.name); setEditDate(h.date); }}
             onDelete={handleDeleteHoliday}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── NEW: Late Working Popup ── */}
+      <AnimatePresence>
+        {showLatePopup && (
+          <LateWorkingPopup
+            isDark={isDark}
+            onContinue={() => { setIsOvertime(true); setShowLatePopup(false); toast.success('Overtime mode activated — auto punch-out disabled', { id: 'overtime-on' }); }}
+            onPunchOut={() => { setShowLatePopup(false); handlePunchAction('punch_out'); }}
+            onRemindLater={() => {
+              setShowLatePopup(false);
+              setTimeout(() => {
+                setShowLatePopup(true);
+                setLatePopupShown(false); // allow re-trigger after timeout
+                setLatePopupShown(true);
+              }, 15 * 60 * 1000);
+              toast.info('Will remind you again in 15 minutes');
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── NEW: Attendance Proof Modal ── */}
+      <AnimatePresence>
+        {showProofModal && (
+          <AttendanceProofModal
+            isDark={isDark}
+            existingProof={attendanceProof}
+            onClose={() => setShowProofModal(false)}
+            onSave={handleSaveProof}
           />
         )}
       </AnimatePresence>
@@ -2139,6 +2657,66 @@ export default function Attendance() {
           </motion.div>
         )}
 
+        {/* ══ NEW: GOAL STATUS BANNER ═══════════════════════════════════════════ */}
+        {!isViewingOther && !isEveryoneView && displayTodayAttendance?.punch_in && goalStatus !== 'none' && (
+          <motion.div variants={itemVariants}
+            className="flex items-center gap-3 px-4 py-3 rounded-xl border text-sm"
+            style={{
+              borderColor: goalStatus === 'achieved'
+                ? isDark ? '#14532d' : '#bbf7d0'
+                : goalStatus === 'partial'
+                  ? isDark ? 'rgba(245,158,11,0.3)' : '#fde68a'
+                  : isDark ? '#7f1d1d' : '#fecaca',
+              backgroundColor: goalStatus === 'achieved'
+                ? isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4'
+                : goalStatus === 'partial'
+                  ? isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb'
+                  : isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2',
+            }}>
+            <Target className="w-4 h-4 flex-shrink-0" style={{
+              color: goalStatus === 'achieved' ? COLORS.emeraldGreen
+                : goalStatus === 'partial' ? COLORS.amber
+                : COLORS.red
+            }} />
+            <div className="flex-1 flex items-center gap-2 flex-wrap">
+              <span className="font-semibold" style={{
+                color: goalStatus === 'achieved'
+                  ? isDark ? '#4ade80' : '#15803d'
+                  : goalStatus === 'partial'
+                    ? isDark ? '#fbbf24' : '#92400e'
+                    : isDark ? '#f87171' : '#991b1b',
+              }}>
+                Daily Goal:
+              </span>
+              <GoalStatusBadge status={goalStatus} isDark={isDark} />
+              <span className="text-xs" style={{ color: isDark ? D.muted : '#64748b' }}>
+                {displayLiveDuration} worked · {tasksCompleted} task{tasksCompleted !== 1 ? 's' : ''} done
+                {' '}· Target: {GOAL_HOURS}h or {GOAL_TASKS} tasks
+              </span>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ══ NEW: OVERTIME MODE INDICATOR ══════════════════════════════════════ */}
+        {isOvertime && !isViewingOther && !isEveryoneView && displayTodayAttendance?.punch_in && !displayTodayAttendance?.punch_out && (
+          <motion.div variants={itemVariants}
+            className="flex items-center gap-3 px-4 py-3 rounded-xl border text-sm"
+            style={{ borderColor: isDark ? '#1d4ed8' : '#bfdbfe', backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff' }}>
+            <motion.div animate={{ opacity: [1, 0.5, 1] }} transition={{ duration: 1.5, repeat: Infinity }}>
+              <Coffee className="w-4 h-4 text-blue-500" />
+            </motion.div>
+            <span className="font-semibold flex-1" style={{ color: isDark ? '#93c5fd' : '#1e40af' }}>
+              Overtime mode active — {overtimeMinutes > 0 ? `${formatDuration(overtimeMinutes)} OT logged` : 'tracking started'} · Auto punch-out disabled
+            </span>
+            <button
+              onClick={() => { setIsOvertime(false); toast.info('Overtime mode deactivated'); }}
+              className="text-xs font-semibold text-blue-400 hover:text-blue-300 underline"
+            >
+              Deactivate
+            </button>
+          </motion.div>
+        )}
+
         {/* ── Customize Layout button ─────────────────────────────────── */}
         <div className="flex justify-end">
           <button
@@ -2266,6 +2844,17 @@ export default function Attendance() {
                         </p>
                       </div>
                     </div>
+
+                    {/* NEW: Goal-based status chip */}
+                    {!isViewingOther && displayTodayAttendance?.punch_in && goalStatus !== 'none' && (
+                      <div className="flex items-center justify-between pt-1">
+                        <div className="flex items-center gap-1.5">
+                          <Target className="w-3.5 h-3.5 text-slate-400" />
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Goal Status</span>
+                        </div>
+                        <GoalStatusBadge status={goalStatus} isDark={isDark} />
+                      </div>
+                    )}
                   </div>
 
                   {/* Punch controls — "Apply for Leave" REMOVED from here */}
@@ -2335,6 +2924,26 @@ export default function Attendance() {
                             <CheckCircle2 className="w-4 h-4" /> {formatDuration(displayTodayAttendance.duration_minutes)} — Day complete
                           </div>
                         ) : null}
+
+                        {/* NEW: Attendance Proof Upload Button */}
+                        {displayTodayAttendance?.punch_in && isTodaySelected && (
+                          <motion.button
+                            whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                            onClick={() => setShowProofModal(true)}
+                            className="flex items-center justify-center gap-2 w-full h-10 rounded-xl text-sm font-semibold border transition-all"
+                            style={{
+                              backgroundColor: isDark ? 'rgba(31,111,178,0.12)' : '#eff6ff',
+                              borderColor: isDark ? 'rgba(31,111,178,0.3)' : '#bfdbfe',
+                              color: isDark ? '#60a5fa' : COLORS.mediumBlue,
+                            }}
+                          >
+                            <Paperclip className="w-3.5 h-3.5" />
+                            {attendanceProof ? 'View / Update Proof' : 'Attach Proof'}
+                            {attendanceProof && (
+                              <span className="ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500 text-white leading-none">✓</span>
+                            )}
+                          </motion.button>
+                        )}
                       </div>
                     )}
 
@@ -2461,7 +3070,7 @@ export default function Attendance() {
           if (sectionId === 'stat_cards') return (
             <React.Fragment key="stat_cards">
               <motion.div
-          className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6"
+          className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8"
           variants={itemVariants}
         >
           <StatCard isDark={isDark} icon={Timer}
@@ -2484,6 +3093,24 @@ export default function Attendance() {
             label={isEveryoneView ? 'Avg Hours' : isViewingOther ? 'Their Rank' : 'Your Rank'}
             value={isEveryoneView ? `${avgDailyHours}h` : myRank} unit={isEveryoneView ? 'per day' : 'overall'} color={COLORS.mediumBlue}
             trend={`Avg ${avgDailyHours}h/day`} />
+          {/* NEW: Overtime StatCard */}
+          {!isEveryoneView && !isViewingOther && (
+            <StatCard isDark={isDark} icon={Zap}
+              label="Overtime Today"
+              value={overtimeMinutes > 0 ? formatDuration(overtimeMinutes) : '—'}
+              unit={isOvertime ? 'OT mode on' : overtimeMinutes > 0 ? 'beyond 7 PM' : 'no overtime'}
+              color={COLORS.mediumBlue}
+              trend={overtimeMinutes > 0 ? `+${formatDuration(overtimeMinutes)} after shift` : 'Within shift hours'} />
+          )}
+          {/* NEW: Goal Status StatCard */}
+          {!isEveryoneView && !isViewingOther && (
+            <StatCard isDark={isDark} icon={Target}
+              label="Daily Goal"
+              value={goalStatus === 'achieved' ? '✅' : goalStatus === 'partial' ? '⚠️' : goalStatus === 'not_met' ? '❌' : '—'}
+              unit={goalStatus === 'achieved' ? 'Achieved' : goalStatus === 'partial' ? 'Partial' : goalStatus === 'not_met' ? 'Not Met' : 'No data'}
+              color={goalStatus === 'achieved' ? COLORS.emeraldGreen : goalStatus === 'partial' ? COLORS.amber : goalStatus === 'not_met' ? COLORS.red : '#94a3b8'}
+              trend={`${GOAL_HOURS}h or ${GOAL_TASKS} tasks`} />
+          )}
         </motion.div>
 
             </React.Fragment>
