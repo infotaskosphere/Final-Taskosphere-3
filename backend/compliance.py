@@ -1,0 +1,660 @@
+"""
+compliance.py — Universal Compliance Tracker  v1.0
+
+Handles:
+  • Compliance masters  (ROC / GST / ITR / TDS / Audit / PF-ESIC / PT / Other)
+  • Per-client assignments with status tracking
+  • Bulk status updates
+  • Excel / CSV import with column mapping
+  • Dashboard summary stats
+
+Collections used:
+  db.compliance_masters      — one doc per compliance definition
+  db.compliance_assignments  — one doc per (client × compliance) pair
+
+Router prefix:  /compliance
+Register in server.py with:
+    from backend.compliance import router as compliance_router
+    api_router.include_router(compliance_router)
+"""
+
+import io
+import uuid
+import logging
+from datetime import datetime, timezone
+from typing import Optional, List, Any, Dict
+from zoneinfo import ZoneInfo
+
+import pandas as pd
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from pydantic import BaseModel, Field, ConfigDict
+
+from backend.dependencies import db, get_current_user
+from backend.models import User
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/compliance", tags=["compliance"])
+
+IST = ZoneInfo("Asia/Kolkata")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONSTANTS
+# ─────────────────────────────────────────────────────────────────────────────
+CATEGORIES  = ["ROC", "GST", "ITR", "TDS", "AUDIT", "PF_ESIC", "PT", "OTHER"]
+STATUSES    = ["not_started", "in_progress", "completed", "filed", "na"]
+FREQUENCIES = ["monthly", "quarterly", "half_yearly", "annual", "one_time"]
+
+CATEGORY_LABELS = {
+    "ROC":     "ROC / MCA",
+    "GST":     "GST",
+    "ITR":     "Income Tax",
+    "TDS":     "TDS / TCS",
+    "AUDIT":   "Audit",
+    "PF_ESIC": "PF / ESIC",
+    "PT":      "Prof. Tax",
+    "OTHER":   "Other",
+}
+
+COMMON_COMPLIANCE = [
+    # ROC
+    {"name": "AOC-4 Filing",         "category": "ROC", "frequency": "annual"},
+    {"name": "MGT-7 / MGT-7A Filing","category": "ROC", "frequency": "annual"},
+    {"name": "DIR-3 KYC",            "category": "ROC", "frequency": "annual"},
+    {"name": "INC-20A",              "category": "ROC", "frequency": "one_time"},
+    # GST
+    {"name": "GSTR-1 Monthly",       "category": "GST", "frequency": "monthly"},
+    {"name": "GSTR-3B Monthly",      "category": "GST", "frequency": "monthly"},
+    {"name": "GSTR-1 Quarterly",     "category": "GST", "frequency": "quarterly"},
+    {"name": "GSTR-9 Annual",        "category": "GST", "frequency": "annual"},
+    {"name": "GSTR-9C Annual",       "category": "GST", "frequency": "annual"},
+    # ITR
+    {"name": "ITR Filing",           "category": "ITR", "frequency": "annual"},
+    {"name": "Tax Audit (3CD)",      "category": "ITR", "frequency": "annual"},
+    {"name": "Advance Tax",          "category": "ITR", "frequency": "quarterly"},
+    # TDS
+    {"name": "TDS Return 24Q",       "category": "TDS", "frequency": "quarterly"},
+    {"name": "TDS Return 26Q",       "category": "TDS", "frequency": "quarterly"},
+    {"name": "TDS Certificate 16A",  "category": "TDS", "frequency": "quarterly"},
+    # PF/ESIC
+    {"name": "PF Monthly Return",    "category": "PF_ESIC", "frequency": "monthly"},
+    {"name": "ESIC Monthly Return",  "category": "PF_ESIC", "frequency": "monthly"},
+    {"name": "PF Annual Return",     "category": "PF_ESIC", "frequency": "annual"},
+]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PYDANTIC MODELS
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ComplianceMasterCreate(BaseModel):
+    name:          str
+    category:      str                        = "OTHER"
+    frequency:     str                        = "annual"
+    fy_year:       Optional[str]              = None    # "2025-26"
+    period_label:  Optional[str]              = None    # "April 2025", "Q1 FY25-26"
+    due_date:      Optional[str]              = None    # "YYYY-MM-DD"
+    description:   Optional[str]             = None
+    applicable_entity_types: List[str]        = Field(default_factory=list)
+
+
+class ComplianceMasterUpdate(BaseModel):
+    name:          Optional[str]             = None
+    category:      Optional[str]             = None
+    frequency:     Optional[str]             = None
+    fy_year:       Optional[str]             = None
+    period_label:  Optional[str]             = None
+    due_date:      Optional[str]             = None
+    description:   Optional[str]            = None
+    applicable_entity_types: Optional[List[str]] = None
+
+
+class AssignmentCreate(BaseModel):
+    client_id:   str
+    status:      str           = "not_started"
+    assigned_to: Optional[str] = None
+    notes:       Optional[str] = None
+
+
+class BulkAssignRequest(BaseModel):
+    client_ids:     List[str]
+    default_status: str           = "not_started"
+    assigned_to:    Optional[str] = None
+
+
+class AssignmentUpdate(BaseModel):
+    status:      str
+    notes:       Optional[str] = None
+    assigned_to: Optional[str] = None
+
+
+class BulkStatusUpdate(BaseModel):
+    assignment_ids: List[str]
+    status:         str
+    notes:          Optional[str] = None
+    assigned_to:    Optional[str] = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def _enrich(item: dict) -> dict:
+    """Attach live assignment stats to a compliance master doc."""
+    cid = item["id"]
+    pipeline = [
+        {"$match": {"compliance_id": cid}},
+        {"$group": {"_id": "$status", "n": {"$sum": 1}}},
+    ]
+    rows = await db.compliance_assignments.aggregate(pipeline).to_list(10)
+    counts: Dict[str, int] = {r["_id"]: r["n"] for r in rows}
+    total  = sum(counts.values())
+    done   = counts.get("completed", 0) + counts.get("filed", 0)
+    item["_stats"] = {
+        "total":       total,
+        "not_started": counts.get("not_started", 0),
+        "in_progress": counts.get("in_progress", 0),
+        "completed":   counts.get("completed", 0),
+        "filed":       counts.get("filed", 0),
+        "na":          counts.get("na", 0),
+        "done":        done,
+        "pct":         round(done / total * 100, 1) if total else 0.0,
+    }
+    return item
+
+
+async def _resolve_client_name(client_id: str) -> str:
+    doc = await db.clients.find_one({"id": client_id}, {"_id": 0, "company_name": 1})
+    return (doc or {}).get("company_name", "Unknown")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPLIANCE MASTERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/common-templates")
+async def get_common_templates(current_user: User = Depends(get_current_user)):
+    """Return pre-built compliance template list for quick creation."""
+    return COMMON_COMPLIANCE
+
+
+@router.get("/")
+async def list_compliance_masters(
+    category: Optional[str] = Query(None),
+    fy_year:  Optional[str] = Query(None),
+    current_user: User      = Depends(get_current_user),
+):
+    query: dict = {}
+    if category and category != "all": query["category"] = category
+    if fy_year  and fy_year  != "all": query["fy_year"]  = fy_year
+
+    items = await db.compliance_masters.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return [await _enrich(item) for item in items]
+
+
+@router.post("/")
+async def create_compliance_master(
+    data: ComplianceMasterCreate,
+    current_user: User = Depends(get_current_user),
+):
+    if data.category not in CATEGORIES:
+        raise HTTPException(400, f"Invalid category. Choose from: {CATEGORIES}")
+    if data.frequency not in FREQUENCIES:
+        raise HTTPException(400, f"Invalid frequency. Choose from: {FREQUENCIES}")
+
+    doc = {
+        "id":                      str(uuid.uuid4()),
+        "name":                    data.name.strip(),
+        "category":                data.category,
+        "frequency":               data.frequency,
+        "fy_year":                 data.fy_year,
+        "period_label":            data.period_label,
+        "due_date":                data.due_date,
+        "description":             data.description,
+        "applicable_entity_types": data.applicable_entity_types,
+        "created_by":              current_user.id,
+        "created_by_name":         getattr(current_user, "full_name", ""),
+        "created_at":              _now(),
+        "updated_at":              _now(),
+    }
+    await db.compliance_masters.insert_one({**doc, "_id": doc["id"]})
+    return await _enrich(doc)
+
+
+@router.patch("/{compliance_id}")
+async def update_compliance_master(
+    compliance_id: str,
+    data: ComplianceMasterUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    upd = {k: v for k, v in data.dict().items() if v is not None}
+    if not upd:
+        raise HTTPException(400, "Nothing to update")
+    upd["updated_at"] = _now()
+    res = await db.compliance_masters.update_one({"id": compliance_id}, {"$set": upd})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Compliance not found")
+    doc = await db.compliance_masters.find_one({"id": compliance_id}, {"_id": 0})
+    return await _enrich(doc)
+
+
+@router.delete("/{compliance_id}")
+async def delete_compliance_master(
+    compliance_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    await db.compliance_masters.delete_one({"id": compliance_id})
+    deleted_asgn = await db.compliance_assignments.delete_many({"compliance_id": compliance_id})
+    return {"deleted": True, "assignments_removed": deleted_asgn.deleted_count}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ASSIGNMENTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/{compliance_id}/assignments")
+async def list_assignments(
+    compliance_id: str,
+    status:  Optional[str] = Query(None),
+    search:  Optional[str] = Query(None),
+    page:    int           = Query(1, ge=1),
+    limit:   int           = Query(200, le=1000),
+    current_user: User     = Depends(get_current_user),
+):
+    query: dict = {"compliance_id": compliance_id}
+    if status and status != "all":
+        query["status"] = status
+    if search:
+        query["client_name"] = {"$regex": search.strip(), "$options": "i"}
+
+    total = await db.compliance_assignments.count_documents(query)
+    skip  = (page - 1) * limit
+    items = await db.compliance_assignments.find(query, {"_id": 0}).sort("client_name", 1).skip(skip).limit(limit).to_list(limit)
+
+    # Resolve assigned_to names
+    user_ids = list({a["assigned_to"] for a in items if a.get("assigned_to")})
+    user_map: dict = {}
+    if user_ids:
+        users = await db.users.find({"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "full_name": 1}).to_list(500)
+        user_map = {u["id"]: u["full_name"] for u in users}
+    for a in items:
+        a["assigned_to_name"] = user_map.get(a.get("assigned_to", ""), "")
+
+    return {"total": total, "page": page, "limit": limit, "items": items}
+
+
+@router.post("/{compliance_id}/assignments")
+async def create_single_assignment(
+    compliance_id: str,
+    data: AssignmentCreate,
+    current_user: User = Depends(get_current_user),
+):
+    cm = await db.compliance_masters.find_one({"id": compliance_id})
+    if not cm:
+        raise HTTPException(404, "Compliance not found")
+
+    existing = await db.compliance_assignments.find_one(
+        {"compliance_id": compliance_id, "client_id": data.client_id}
+    )
+    if existing:
+        raise HTTPException(400, "Client already assigned to this compliance")
+
+    client_name = await _resolve_client_name(data.client_id)
+    doc = {
+        "id":            str(uuid.uuid4()),
+        "compliance_id": compliance_id,
+        "client_id":     data.client_id,
+        "client_name":   client_name,
+        "status":        data.status,
+        "assigned_to":   data.assigned_to,
+        "notes":         data.notes,
+        "created_at":    _now(),
+        "updated_at":    _now(),
+        "completed_at":  _now() if data.status in ("completed", "filed") else None,
+        "filed_at":      _now() if data.status == "filed" else None,
+    }
+    await db.compliance_assignments.insert_one({**doc, "_id": doc["id"]})
+    return doc
+
+
+@router.post("/{compliance_id}/assignments/bulk-assign")
+async def bulk_assign_clients(
+    compliance_id: str,
+    data: BulkAssignRequest,
+    current_user: User = Depends(get_current_user),
+):
+    cm = await db.compliance_masters.find_one({"id": compliance_id})
+    if not cm:
+        raise HTTPException(404, "Compliance not found")
+
+    # Already-assigned client IDs
+    existing_ids: set = set()
+    async for a in db.compliance_assignments.find(
+        {"compliance_id": compliance_id}, {"_id": 0, "client_id": 1}
+    ):
+        existing_ids.add(a["client_id"])
+
+    # Fetch client info in bulk
+    clients = await db.clients.find(
+        {"id": {"$in": data.client_ids}},
+        {"_id": 0, "id": 1, "company_name": 1},
+    ).to_list(5000)
+    client_map = {c["id"]: c.get("company_name", "Unknown") for c in clients}
+
+    docs = []
+    skipped = 0
+    for cid in data.client_ids:
+        if cid in existing_ids:
+            skipped += 1
+            continue
+        doc = {
+            "id":            str(uuid.uuid4()),
+            "compliance_id": compliance_id,
+            "client_id":     cid,
+            "client_name":   client_map.get(cid, "Unknown"),
+            "status":        data.default_status,
+            "assigned_to":   data.assigned_to,
+            "notes":         None,
+            "created_at":    _now(),
+            "updated_at":    _now(),
+            "completed_at":  _now() if data.default_status in ("completed", "filed") else None,
+            "filed_at":      _now() if data.default_status == "filed" else None,
+        }
+        docs.append({**doc, "_id": doc["id"]})
+
+    if docs:
+        await db.compliance_assignments.insert_many(docs)
+
+    return {"added": len(docs), "skipped": skipped, "total_requested": len(data.client_ids)}
+
+
+@router.patch("/{compliance_id}/assignments/bulk-update")
+async def bulk_update_status(
+    compliance_id: str,
+    data: BulkStatusUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    if data.status not in STATUSES:
+        raise HTTPException(400, f"Invalid status. Use: {STATUSES}")
+
+    upd: dict = {
+        "status":     data.status,
+        "updated_at": _now(),
+        "updated_by": current_user.id,
+    }
+    if data.notes      is not None: upd["notes"]       = data.notes
+    if data.assigned_to is not None: upd["assigned_to"] = data.assigned_to
+    if data.status == "completed":   upd["completed_at"] = _now()
+    if data.status == "filed":       upd["filed_at"]     = _now()
+
+    result = await db.compliance_assignments.update_many(
+        {"id": {"$in": data.assignment_ids}, "compliance_id": compliance_id},
+        {"$set": upd},
+    )
+    return {"updated": result.modified_count}
+
+
+@router.patch("/{compliance_id}/assignments/{assignment_id}")
+async def update_single_assignment(
+    compliance_id:  str,
+    assignment_id:  str,
+    data: AssignmentUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    if data.status not in STATUSES:
+        raise HTTPException(400, f"Invalid status. Use: {STATUSES}")
+
+    upd: dict = {
+        "status":     data.status,
+        "updated_at": _now(),
+        "updated_by": current_user.id,
+    }
+    if data.notes       is not None: upd["notes"]       = data.notes
+    if data.assigned_to is not None: upd["assigned_to"] = data.assigned_to
+    if data.status == "completed":   upd["completed_at"] = _now()
+    if data.status == "filed":       upd["filed_at"]     = _now()
+
+    res = await db.compliance_assignments.update_one(
+        {"id": assignment_id, "compliance_id": compliance_id},
+        {"$set": upd},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Assignment not found")
+
+    doc = await db.compliance_assignments.find_one({"id": assignment_id}, {"_id": 0})
+    return doc
+
+
+@router.delete("/{compliance_id}/assignments/{assignment_id}")
+async def delete_assignment(
+    compliance_id: str,
+    assignment_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    await db.compliance_assignments.delete_one(
+        {"id": assignment_id, "compliance_id": compliance_id}
+    )
+    return {"deleted": True}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXCEL / CSV IMPORT
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _read_file(contents: bytes, filename: str) -> pd.DataFrame:
+    try:
+        if filename.lower().endswith(".csv"):
+            return pd.read_csv(io.BytesIO(contents))
+        return pd.read_excel(io.BytesIO(contents))
+    except Exception as exc:
+        raise HTTPException(400, f"Could not parse file: {exc}")
+
+
+@router.post("/{compliance_id}/preview-excel")
+async def preview_excel(
+    compliance_id: str,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Return columns + first 10 rows so the frontend can map columns before import."""
+    contents = await file.read()
+    df = _read_file(contents, file.filename or "upload.xlsx")
+    df.columns = [str(c).strip() for c in df.columns]
+    df = df.where(pd.notnull(df), None)          # NaN → None
+    preview = df.head(10).to_dict(orient="records")
+    return {
+        "columns":    list(df.columns),
+        "rows":       preview,
+        "total_rows": len(df),
+    }
+
+
+@router.post("/{compliance_id}/import-excel")
+async def import_from_excel(
+    compliance_id: str,
+    file:          UploadFile   = File(...),
+    client_col:    str          = Form(default="Client Name"),
+    status_col:    str          = Form(default=""),
+    notes_col:     str          = Form(default=""),
+    assigned_col:  str          = Form(default=""),
+    current_user:  User         = Depends(get_current_user),
+):
+    """
+    Import client assignments from Excel / CSV.
+
+    Expected columns (at minimum):
+      • client_col   → client company name (matched against db.clients.company_name)
+      • status_col   → optional: not_started | in_progress | completed | filed | na
+      • notes_col    → optional: notes text
+      • assigned_col → optional: assigned user full name
+    """
+    cm = await db.compliance_masters.find_one({"id": compliance_id})
+    if not cm:
+        raise HTTPException(404, "Compliance not found")
+
+    contents = await file.read()
+    df = _read_file(contents, file.filename or "upload.xlsx")
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # Auto-detect client column if not found
+    if client_col not in df.columns:
+        candidates = [c for c in df.columns if "client" in c.lower() or "company" in c.lower() or "name" in c.lower()]
+        if candidates:
+            client_col = candidates[0]
+        else:
+            raise HTTPException(400, f"Column '{client_col}' not found. Available: {list(df.columns)}")
+
+    # Build lookup maps
+    all_clients = await db.clients.find(
+        {}, {"_id": 0, "id": 1, "company_name": 1}
+    ).to_list(50000)
+    client_name_map = {c["company_name"].strip().lower(): c for c in all_clients if c.get("company_name")}
+
+    all_users = await db.users.find({}, {"_id": 0, "id": 1, "full_name": 1}).to_list(500)
+    user_name_map = {u["full_name"].strip().lower(): u["id"] for u in all_users if u.get("full_name")}
+
+    # Existing assignments for this compliance (by client name, lower)
+    existing_map: dict = {}
+    async for a in db.compliance_assignments.find(
+        {"compliance_id": compliance_id}, {"_id": 0, "id": 1, "client_name": 1}
+    ):
+        existing_map[a["client_name"].strip().lower()] = a["id"]
+
+    to_insert = []
+    to_update = []
+    not_found_clients = []
+
+    for _, row in df.iterrows():
+        raw_name = str(row.get(client_col, "") or "").strip()
+        if not raw_name or raw_name.lower() == "nan":
+            continue
+
+        name_key    = raw_name.lower()
+        client_doc  = client_name_map.get(name_key)
+        client_id   = client_doc["id"] if client_doc else ""
+        client_name = client_doc["company_name"] if client_doc else raw_name
+        if not client_doc:
+            not_found_clients.append(raw_name)
+
+        # Status
+        status_val = "not_started"
+        if status_col and status_col in df.columns:
+            raw_s = str(row.get(status_col, "") or "").strip().lower().replace(" ", "_")
+            if raw_s in STATUSES:
+                status_val = raw_s
+
+        # Notes
+        notes_val = None
+        if notes_col and notes_col in df.columns:
+            nv = str(row.get(notes_col, "") or "").strip()
+            if nv and nv.lower() != "nan":
+                notes_val = nv
+
+        # Assigned to
+        assigned_id = None
+        if assigned_col and assigned_col in df.columns:
+            av = str(row.get(assigned_col, "") or "").strip().lower()
+            assigned_id = user_name_map.get(av)
+
+        if name_key in existing_map:
+            to_update.append((existing_map[name_key], {
+                "status":     status_val,
+                "notes":      notes_val,
+                "updated_at": _now(),
+                **({"assigned_to": assigned_id} if assigned_id else {}),
+                **({"completed_at": _now()} if status_val in ("completed", "filed") else {}),
+                **({"filed_at":     _now()} if status_val == "filed" else {}),
+            }))
+        else:
+            doc = {
+                "id":            str(uuid.uuid4()),
+                "compliance_id": compliance_id,
+                "client_id":     client_id,
+                "client_name":   client_name,
+                "status":        status_val,
+                "assigned_to":   assigned_id,
+                "notes":         notes_val,
+                "created_at":    _now(),
+                "updated_at":    _now(),
+                "completed_at":  _now() if status_val in ("completed", "filed") else None,
+                "filed_at":      _now() if status_val == "filed" else None,
+            }
+            to_insert.append({**doc, "_id": doc["id"]})
+            existing_map[name_key] = doc["id"]
+
+    if to_insert:
+        await db.compliance_assignments.insert_many(to_insert)
+    for aid, upd in to_update:
+        await db.compliance_assignments.update_one({"id": aid}, {"$set": upd})
+
+    return {
+        "added":               len(to_insert),
+        "updated":             len(to_update),
+        "total_rows_in_file":  len(df),
+        "clients_not_in_db":   not_found_clients[:20],  # show max 20
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DASHBOARD SUMMARY
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/dashboard/summary")
+async def compliance_dashboard(current_user: User = Depends(get_current_user)):
+    total_types = await db.compliance_masters.count_documents({})
+    total_asgn  = await db.compliance_assignments.count_documents({})
+    done        = await db.compliance_assignments.count_documents({"status": {"$in": ["completed", "filed"]}})
+    pending     = await db.compliance_assignments.count_documents({"status": {"$in": ["not_started", "in_progress"]}})
+
+    cat_pipeline = [{"$group": {"_id": "$category", "count": {"$sum": 1}}}]
+    by_cat = await db.compliance_masters.aggregate(cat_pipeline).to_list(20)
+
+    # Overdue: has due_date and it's in the past and not done
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    overdue = await db.compliance_masters.count_documents({
+        "due_date": {"$lt": now_str, "$ne": None},
+    })
+
+    # Due this month
+    import calendar as cal
+    now = datetime.now(IST)
+    month_end = f"{now.year}-{now.month:02d}-{cal.monthrange(now.year, now.month)[1]:02d}"
+    month_start = f"{now.year}-{now.month:02d}-01"
+    due_this_month = await db.compliance_masters.count_documents({
+        "due_date": {"$gte": month_start, "$lte": month_end},
+    })
+
+    return {
+        "total_compliance_types":  total_types,
+        "total_assignments":       total_asgn,
+        "completed_or_filed":      done,
+        "pending":                 pending,
+        "overall_pct":             round(done / total_asgn * 100, 1) if total_asgn else 0.0,
+        "overdue":                 overdue,
+        "due_this_month":          due_this_month,
+        "by_category":             {r["_id"]: r["count"] for r in by_cat},
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INDEXES  (call once at startup, idempotent)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def create_compliance_indexes():
+    try:
+        await db.compliance_masters.create_index("id",       unique=True, background=True)
+        await db.compliance_masters.create_index("category", background=True)
+        await db.compliance_masters.create_index("fy_year",  background=True)
+        await db.compliance_assignments.create_index("id",            unique=True, background=True)
+        await db.compliance_assignments.create_index("compliance_id", background=True)
+        await db.compliance_assignments.create_index("client_id",     background=True)
+        await db.compliance_assignments.create_index("status",        background=True)
+        await db.compliance_assignments.create_index(
+            [("compliance_id", 1), ("client_id", 1)], unique=True, background=True
+        )
+        logger.info("Compliance indexes ensured")
+    except Exception as exc:
+        logger.warning("Compliance index creation: %s", exc)
