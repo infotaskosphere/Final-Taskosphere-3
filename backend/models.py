@@ -381,6 +381,22 @@ class Task(TaskBase):
 # ATTENDANCE
 # FIX: status is a plain str with no enum constraint.
 # ======================
+# ======================
+# ATTENDANCE PROOF
+# ======================
+class AttendanceProof(BaseModel):
+    """
+    Embedded proof document stored inside an attendance record.
+    All fields are optional — any combination of note / photos / documents is valid.
+    """
+    model_config = ConfigDict(extra="ignore")
+    note: Optional[str] = None                    # free-text note from user
+    photos: List[str] = Field(default_factory=list)      # saved filename list
+    documents: List[str] = Field(default_factory=list)   # saved filename list
+    uploaded_at: Optional[str] = None             # ISO timestamp of last upload
+    updated_at: Optional[str] = None              # ISO timestamp of last update
+
+
 class Attendance(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -394,6 +410,19 @@ class Attendance(BaseModel):
     is_late: bool = False
     punched_out_early: bool = False
 
+    # ── Existing flag (used in server.py but was missing from model) ──────────
+    auto_marked: Optional[bool] = False           # True when absent was auto-marked at 7 PM
+
+    # ── NEW: Auto punch-out metadata ─────────────────────────────────────────
+    auto_punch_out: Optional[bool] = False        # True when punched out automatically
+    auto_punch_reason: Optional[str] = None       # e.g. "inactive_after_shift"
+
+    # ── NEW: Proof attachment ─────────────────────────────────────────────────
+    proof: Optional[AttendanceProof] = None       # photos / documents / note
+
+    # ── NEW: Overtime tracking ────────────────────────────────────────────────
+    overtime_minutes: Optional[int] = 0          # minutes worked beyond shift end (7 PM IST)
+
     @field_validator("status", mode="before")
     @classmethod
     def normalise_status(cls, v: Any) -> str:
@@ -401,7 +430,7 @@ class Attendance(BaseModel):
             return "absent"
         return str(v)
 
-    @field_validator("duration_minutes", mode="before")
+    @field_validator("duration_minutes", "overtime_minutes", mode="before")
     @classmethod
     def coerce_duration(cls, v: Any) -> int:
         if v is None:
@@ -411,7 +440,7 @@ class Attendance(BaseModel):
         except (TypeError, ValueError):
             return 0
 
-    @field_validator("is_late", "punched_out_early", mode="before")
+    @field_validator("is_late", "punched_out_early", "auto_marked", "auto_punch_out", mode="before")
     @classmethod
     def coerce_bool(cls, v: Any) -> bool:
         if v is None:
