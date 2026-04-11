@@ -1691,6 +1691,21 @@ export default function Attendance() {
   });
   const [showGoalModal, setShowGoalModal] = useState(false);
 
+  // ── Column height sync: measures left column and applies exact height to right ──
+  const leftColRef     = useRef(null);
+  const [leftColHeight, setLeftColHeight] = useState(null);
+  useEffect(() => {
+    const el = leftColRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setLeftColHeight(Math.round(entry.contentRect.height));
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const GOAL_HOURS = userGoal.hours;
   const GOAL_TASKS = userGoal.tasks;
 
@@ -3665,17 +3680,17 @@ export default function Attendance() {
 
               {/* ══════════════════════════════════════════════════════════════
                   TWO-COLUMN GRID
-                  LEFT : Calendar + Date Detail + Apply for Leave  (natural height)
-                  RIGHT: Recent Attendance  (h-full, scrolls to fill left column height)
+                  LEFT : Calendar + Date Detail + Apply for Leave  (natural height, measured)
+                  RIGHT: Recent Attendance  (height = left column height exactly, scrolls inside)
                   ══════════════════════════════════════════════════════════════ */}
               <motion.div
-                className={`grid gap-6 items-stretch ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-2'}`}
+                className={`grid gap-6 items-start ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-2'}`}
                 variants={itemVariants}
               >
 
                 {/* ── LEFT COLUMN ─────────────────────────────────────────── */}
                 {!isEveryoneView && (
-                  <div className="flex flex-col gap-4">
+                  <div ref={leftColRef} className="flex flex-col gap-4">
 
                     {/* Calendar card */}
                     <SectionCard className="flex flex-col">
@@ -3911,15 +3926,18 @@ export default function Attendance() {
                 )}
                 {/* ── END LEFT COLUMN ─────────────────────────────────────── */}
 
-                {/* ── RIGHT COLUMN: Recent Attendance — fills left column height exactly ── */}
-                <SectionCard className="h-full flex flex-col">
+                {/* ── RIGHT COLUMN: height = left column exactly (ResizeObserver) ── */}
+                <SectionCard
+                  className="flex flex-col overflow-hidden"
+                  style={leftColHeight ? { height: leftColHeight } : { maxHeight: 720 }}
+                >
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
                     icon={<Clock className="h-4 w-4 text-blue-500" />}
                     title={isEveryoneView ? 'All Employees — Attendance' : 'Recent Attendance'}
                     subtitle={isEveryoneView ? 'Latest 25 records' : 'Last 15 records'}
                   />
-                  {/* flex-1 min-h-0: fills whatever height the grid row is, then scrolls */}
+                  {/* flex-1 min-h-0: fills card height after header, scrolls when content overflows */}
                   <div
                     className="flex-1 min-h-0 overflow-y-auto slim-scroll p-3 space-y-1.5"
                     style={slimScroll}
