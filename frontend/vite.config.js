@@ -5,16 +5,13 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
   },
-
   server: {
     port: 3000,
     proxy: {
@@ -28,20 +25,20 @@ export default defineConfig({
       },
     },
   },
-
   build: {
-    outDir:          'dist',
-    sourcemap:       false,
+    outDir: 'dist',
+    sourcemap: false,
+    assetsInlineLimit: 0,
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
       output: {
-        // Split large vendor bundles for faster loads
         manualChunks: {
-          'react-core':   ['react', 'react-dom', 'react-router-dom'],
-          'framer':       ['framer-motion'],
-          'charts':       ['recharts', 'chart.js'],
-          'dnd':          ['@hello-pangea/dnd'],
-          'radix':        [
+          'react-core': ['react', 'react-dom', 'react-router-dom'],
+          'framer':     ['framer-motion'],
+          'charts':     ['recharts', 'chart.js'],
+          'dnd':        ['@hello-pangea/dnd'],
+          'icons':      ['lucide-react'],        // ← ADDED
+          'radix':      [
             '@radix-ui/react-dialog',
             '@radix-ui/react-dropdown-menu',
             '@radix-ui/react-select',
@@ -53,8 +50,6 @@ export default defineConfig({
       },
     },
   },
-
-  // Suppress known dev-mode warnings
   optimizeDeps: {
     include: ['@hello-pangea/dnd'],
   },
