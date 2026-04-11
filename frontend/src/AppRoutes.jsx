@@ -29,6 +29,7 @@ const GeneralSettings   = lazy(() => import("@/pages/GeneralSettings.jsx"));
 const Passvault         = lazy(() => import("@/pages/Passvault.jsx"));
 const Invoicing         = lazy(() => import("@/pages/Invoicing.jsx"));
 const Reminders         = lazy(() => import("@/pages/Reminders.jsx"));
+const CompliancePage    = lazy(() => import("@/pages/CompliancePage.jsx")); // ← NEW
 
 /* ── Route Guards ───────────────────────────────────────────────────────── */
 
@@ -121,6 +122,9 @@ function AppRoutes() {
       <Route path="/visits"     element={<Protected><PageLoader><VisitsPage /></PageLoader></Protected>} />
       <Route path="/duedates"   element={<Protected><PageLoader><DueDates /></PageLoader></Protected>} />
       <Route path="/reports"    element={<Protected><PageLoader><Reports /></PageLoader></Protected>} />
+
+      {/* Compliance Tracker — all roles */}
+      <Route path="/compliance" element={<Protected><PageLoader><CompliancePage /></PageLoader></Protected>} />
 
       {/* Settings — all roles */}
       <Route path="/settings/general" element={<Protected><PageLoader><GeneralSettings /></PageLoader></Protected>} />
