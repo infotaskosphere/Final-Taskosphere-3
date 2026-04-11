@@ -11,6 +11,7 @@ import asyncio
 import calendar
 import requests
 import httpx
+import shutil
 import pandas as pd
 from datetime import datetime, date, timezone, timedelta
 
@@ -46,7 +47,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 # FastAPI
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Form, Query, Request
 from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -101,6 +102,10 @@ india_tz = ZoneInfo("Asia/Kolkata")
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+
+# ── Attendance proof upload directory ─────────────────────────────────────────
+PROOF_UPLOAD_DIR = ROOT_DIR / "uploads" / "attendance_proof"
+PROOF_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # ====================== SECURITY CONFIG ===========================
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -1810,6 +1815,16 @@ async def handle_attendance(
         if data.get("location"):
             update_fields["punch_out_location"] = data.get("location")
 
+        # ── NEW: record overtime minutes if punched out after 7 PM IST ───────
+        shift_end_ist = punch_out_ist.replace(hour=19, minute=0, second=0, microsecond=0)
+        if punch_out_ist > shift_end_ist:
+            update_fields["overtime_minutes"] = max(
+                0, int((punch_out_ist - shift_end_ist).total_seconds() / 60)
+            )
+        else:
+            update_fields["overtime_minutes"] = 0
+        # ─────────────────────────────────────────────────────────────────────
+
         await db.attendance.update_one(
             {"user_id": current_user.id, "date": today_str},
             {"$set": update_fields}
@@ -2314,7 +2329,229 @@ async def get_absent_summary(
     return {"month": target_month, "data": list(summary.values())}
 
 
-# ====================== SHARED TOP / STAR PERFORMERS HELPER ======================
+# =============================================================
+# NEW: POST /attendance/punch-out
+# Dedicated auto punch-out endpoint.
+# Called by the frontend Smart Auto Punch-Out feature when the
+# user is inactive for >60 minutes after the shift grace period.
+# Falls back gracefully if the user is already punched out.
+# =============================================================
+@api_router.post("/attendance/punch-out")
+async def auto_punch_out(
+    data: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Auto punch-out triggered by the frontend inactivity detector.
+    Accepts { auto: true, reason: "inactive_after_shift" }.
+    Records overtime_minutes (minutes worked past 7 PM IST).
+    """
+    today_str = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+
+    attendance = await db.attendance.find_one(
+        {"user_id": current_user.id, "date": today_str},
+        {"_id": 0}
+    )
+    if not attendance or not attendance.get("punch_in"):
+        raise HTTPException(status_code=400, detail="Not punched in yet")
+    if attendance.get("punch_out"):
+        # Already punched out — return silently (idempotent)
+        return {"message": "Already punched out", "duration": attendance.get("duration_minutes", 0)}
+
+    punch_in_dt = attendance.get("punch_in")
+    punch_out_utc = datetime.now(timezone.utc)
+    punch_out_ist = punch_out_utc.astimezone(ZoneInfo("Asia/Kolkata"))
+
+    # Normalise punch_in to aware datetime
+    if isinstance(punch_in_dt, datetime):
+        if punch_in_dt.tzinfo is None:
+            punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
+    else:
+        try:
+            punch_in_dt = datetime.fromisoformat(str(punch_in_dt))
+            if punch_in_dt.tzinfo is None:
+                punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            punch_in_dt = punch_out_utc
+
+    delta = punch_out_utc - punch_in_dt.astimezone(timezone.utc)
+    duration_minutes = max(0, int(delta.total_seconds() / 60))
+
+    # Calculate overtime minutes (minutes worked past 7:00 PM IST)
+    shift_end_ist = punch_out_ist.replace(hour=19, minute=0, second=0, microsecond=0)
+    overtime_minutes = 0
+    if punch_out_ist > shift_end_ist:
+        overtime_minutes = max(0, int((punch_out_ist - shift_end_ist).total_seconds() / 60))
+
+    user_doc = await db.users.find_one({"id": current_user.id}, {"_id": 0})
+    punched_out_early = check_punched_out_early(user_doc or {}, punch_out_ist)
+
+    update_fields = {
+        "punch_out":         punch_out_utc,
+        "punched_out_early": punched_out_early,
+        "duration_minutes":  duration_minutes,
+        "auto_punch_out":    True,
+        "auto_punch_reason": data.get("reason", "inactive_after_shift"),
+        "overtime_minutes":  overtime_minutes,
+    }
+
+    await db.attendance.update_one(
+        {"user_id": current_user.id, "date": today_str},
+        {"$set": update_fields}
+    )
+
+    logger.info(
+        "Auto punch-out: user=%s date=%s duration=%dm overtime=%dm reason=%s",
+        current_user.id, today_str, duration_minutes, overtime_minutes,
+        data.get("reason", "inactive_after_shift")
+    )
+
+    return {
+        "message":          "Auto punch-out recorded",
+        "duration":         duration_minutes,
+        "overtime_minutes": overtime_minutes,
+        "auto":             True,
+    }
+
+
+# =============================================================
+# NEW: POST /attendance/proof
+# Upload photos, documents, and a note as attendance proof.
+# Example: "Visited client → upload photo".
+# Files are saved to uploads/attendance_proof/ on the server.
+# The proof dict is embedded inside the attendance document.
+# =============================================================
+ALLOWED_PHOTO_TYPES  = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/heic"}
+ALLOWED_DOC_TYPES    = {
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/plain",
+    "text/csv",
+}
+MAX_FILE_SIZE_MB     = 10
+MAX_FILES_PER_UPLOAD = 5
+
+
+@api_router.post("/attendance/proof")
+async def upload_attendance_proof(
+    note:      str              = Form(default=""),
+    photos:    List[UploadFile] = File(default=[]),
+    documents: List[UploadFile] = File(default=[]),
+    current_user: User          = Depends(get_current_user)
+):
+    """
+    Attach proof to today's attendance record.
+    - note:      free-text description (e.g. "Visited ABC client office")
+    - photos:    up to 5 image files (JPEG, PNG, WebP, GIF, HEIC)
+    - documents: up to 5 document files (PDF, DOC, DOCX, XLS, XLSX, TXT, CSV)
+
+    Each call REPLACES the existing proof for today (idempotent upsert).
+    """
+    today_str = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    now_iso   = datetime.now(timezone.utc).isoformat()
+
+    # Validate counts
+    if len(photos) > MAX_FILES_PER_UPLOAD:
+        raise HTTPException(status_code=400, detail=f"Maximum {MAX_FILES_PER_UPLOAD} photos allowed")
+    if len(documents) > MAX_FILES_PER_UPLOAD:
+        raise HTTPException(status_code=400, detail=f"Maximum {MAX_FILES_PER_UPLOAD} documents allowed")
+
+    saved_photos: List[str] = []
+    saved_docs:   List[str] = []
+
+    # ── Save photos ────────────────────────────────────────────────────────────
+    for photo in photos:
+        if not photo.filename:
+            continue
+        content_type = photo.content_type or ""
+        if content_type not in ALLOWED_PHOTO_TYPES and not content_type.startswith("image/"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"File '{photo.filename}' is not an allowed image type"
+            )
+        contents = await photo.read()
+        if len(contents) > MAX_FILE_SIZE_MB * 1024 * 1024:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Photo '{photo.filename}' exceeds {MAX_FILE_SIZE_MB} MB limit"
+            )
+        safe_name = re.sub(r"[^\w.\-]", "_", photo.filename)
+        filename  = f"{current_user.id}_{today_str}_photo_{uuid.uuid4().hex[:8]}_{safe_name}"
+        file_path = PROOF_UPLOAD_DIR / filename
+        with open(file_path, "wb") as f:
+            f.write(contents)
+        saved_photos.append(filename)
+        await photo.seek(0)   # reset for any downstream use
+
+    # ── Save documents ─────────────────────────────────────────────────────────
+    for doc in documents:
+        if not doc.filename:
+            continue
+        content_type = doc.content_type or ""
+        if content_type not in ALLOWED_DOC_TYPES and not doc.filename.lower().endswith(
+            (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".txt", ".csv")
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=f"File '{doc.filename}' is not an allowed document type"
+            )
+        contents = await doc.read()
+        if len(contents) > MAX_FILE_SIZE_MB * 1024 * 1024:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Document '{doc.filename}' exceeds {MAX_FILE_SIZE_MB} MB limit"
+            )
+        safe_name = re.sub(r"[^\w.\-]", "_", doc.filename)
+        filename  = f"{current_user.id}_{today_str}_doc_{uuid.uuid4().hex[:8]}_{safe_name}"
+        file_path = PROOF_UPLOAD_DIR / filename
+        with open(file_path, "wb") as f:
+            f.write(contents)
+        saved_docs.append(filename)
+        await doc.seek(0)
+
+    # ── Build proof dict ───────────────────────────────────────────────────────
+    # Check if a previous proof exists so we can merge (not replace) file lists
+    existing = await db.attendance.find_one(
+        {"user_id": current_user.id, "date": today_str},
+        {"_id": 0, "proof": 1}
+    )
+    existing_proof = existing.get("proof", {}) if existing else {}
+
+    # Merge: keep old files, append new ones
+    merged_photos = (existing_proof.get("photos") or []) + saved_photos
+    merged_docs   = (existing_proof.get("documents") or []) + saved_docs
+
+    proof_payload = {
+        "note":        note.strip() if note.strip() else (existing_proof.get("note") or ""),
+        "photos":      merged_photos,
+        "documents":   merged_docs,
+        "uploaded_at": existing_proof.get("uploaded_at") or now_iso,  # first upload time
+        "updated_at":  now_iso,                                         # last update time
+    }
+
+    await db.attendance.update_one(
+        {"user_id": current_user.id, "date": today_str},
+        {"$set": {"proof": proof_payload}},
+        upsert=True
+    )
+
+    logger.info(
+        "Proof uploaded: user=%s date=%s photos=%d docs=%d note_len=%d",
+        current_user.id, today_str, len(saved_photos), len(saved_docs), len(note)
+    )
+
+    return {
+        "message":         "Proof saved successfully",
+        "photos_saved":    len(saved_photos),
+        "documents_saved": len(saved_docs),
+        "note_saved":      bool(note.strip()),
+        "total_photos":    len(merged_photos),
+        "total_documents": len(merged_docs),
+        "date":            today_str,
+    }
 async def get_top_performers_data(
     period: str = "monthly",
     limit: int = 5,
