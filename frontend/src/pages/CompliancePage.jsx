@@ -1148,7 +1148,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                 {periodConfig.label} Compliance Tracker
               </h2>
               <p className="text-xs mt-0.5" style={{color:isDark?D.muted:'#64748b'}}>
-                {monthlySummary.total_clients||0} clients · click any period cell to cycle status
+                {monthlySummary.total_clients||0} clients · status auto-synced from Clients tab
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -1228,7 +1228,9 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                     <p className="text-xs font-black uppercase tracking-wider" style={{color:isDark?D.muted:'#64748b'}}>
                       Per-Client {periodConfig.label} Status — {monthlyViewYear}
                     </p>
-                    <span className="text-xs" style={{color:isDark?D.dimmer:'#94a3b8'}}>Click cell to cycle status</span>
+                    <span className="text-xs flex items-center gap-1" style={{color:isDark?D.dimmer:'#94a3b8'}}>
+                      <Info className="w-3 h-3 flex-shrink-0"/>Status reflects Clients tab (update status there)
+                    </span>
                   </div>
                   <div className="overflow-x-auto" style={{scrollbarWidth:'thin'}}>
                     <table className="w-full text-xs border-collapse"
@@ -1255,19 +1257,17 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                             <td className="px-4 py-2 font-semibold sticky left-0 z-10 truncate max-w-[180px]"
                               style={{color:isDark?D.text:'#0f172a',backgroundColor:isDark?D.card:'#fff'}}>{a.client_name}</td>
                             {periodConfig.periods.map(p=>{
-                              const st=(a.monthly_statuses||{})[p.key]||'not_started';
+                              // For the current period, always reflect the main assignment status from Clients tab
+                              const st=p.isCurrent ? (a.status||'not_started') : ((a.monthly_statuses||{})[p.key]||'not_started');
                               const cfg=STATUS_CFG[st]||STATUS_CFG.not_started;
-                              const CYCLE=['not_started','in_progress','completed','filed','na'];
-                              const nextSt=CYCLE[(CYCLE.indexOf(st)+1)%CYCLE.length];
                               return(
                                 <td key={p.key} className="px-1 py-1 text-center">
-                                  <button
-                                    onClick={()=>updateMonthlyStatus(a.id,p.key,nextSt)}
-                                    className="w-full py-1 px-1 rounded-lg text-[10px] font-bold transition-all hover:opacity-80 active:scale-95"
+                                  <span
+                                    className="inline-block w-full py-1 px-1 rounded-lg text-[10px] font-bold cursor-default select-none"
                                     style={{backgroundColor:cfg.bg,color:cfg.color,border:`1px solid ${cfg.border}`}}
-                                    title={`${a.client_name} · ${p.label} · ${cfg.label} → click to change`}>
+                                    title={`${a.client_name} · ${p.label} · ${cfg.label}${p.isCurrent?' (update from Clients tab)':''}`}>
                                     {st==='not_started'?'—':st==='in_progress'?'WIP':st==='completed'?'✓':st==='filed'?'F':'N/A'}
-                                  </button>
+                                  </span>
                                 </td>
                               );
                             })}
