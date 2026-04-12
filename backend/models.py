@@ -1,7 +1,7 @@
 import uuid
 import re
 from datetime import datetime, date, timedelta, timezone
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, model_validator, Field, ConfigDict, EmailStr, field_validator
 from enum import Enum
 
@@ -317,6 +317,7 @@ class Token(BaseModel):
     access_token: str
     token_type: str
     user: User
+    consent_given: Optional[bool] = Noner
 
 
 # ======================
@@ -340,8 +341,9 @@ class TodoCreate(BaseModel):
     title: str
     description: Optional[str] = None
     due_date: Optional[Any] = None
-    is_completed: bool = False      
-    status: str = "pending"          
+    is_completed: bool = False
+    status: str = "pending"
+    completed_at: Optional[Any] = None          
 
 class TaskBase(BaseModel):
     title: str
@@ -554,11 +556,9 @@ class DSCMovementRequest(BaseModel):
 
 
 class MovementUpdateRequest(BaseModel):
-    movement_id: str
     movement_type: str
     person_name: Optional[str] = None
     notes: Optional[str] = None
-
 
 # ======================
 # REMINDER MODELS
@@ -567,6 +567,11 @@ class ReminderCreate(BaseModel):
     title: str
     description: Optional[str] = None
     remind_at: Any
+    event_id: Optional[str] = None
+    source: Optional[str] = "manual"
+    priority: Optional[str] = "medium"
+    reminder_type: Optional[str] = "reminder"
+    related_task_id: Optional[str] = None
 
 
 class Reminder(BaseModel):
@@ -576,8 +581,16 @@ class Reminder(BaseModel):
     title: str
     description: Optional[str] = None
     remind_at: Any
+    event_id: Optional[str] = None
+    source: Optional[str] = "manual"
+    priority: Optional[str] = "medium"
+    reminder_type: Optional[str] = "reminder"
+    related_task_id: Optional[str] = None
     is_dismissed: bool = False
+    is_fired: bool = False
+    status: Optional[str] = None
     created_at: Optional[Any] = None
+    updated_at: Optional[Any] = None
 
 
 # ======================
@@ -967,7 +980,7 @@ class HolidayCreate(BaseModel):
     name: str
     description: Optional[str] = None
     type: str = "manual"
-
+    status: Optional[str] = "confirmed"
 
 class HolidayResponse(BaseModel):
     date: Any
