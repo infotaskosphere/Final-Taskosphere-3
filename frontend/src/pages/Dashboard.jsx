@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import api from '../lib/api';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { useNavigate } from 'react-router-dom';
 import useDark from '../hooks/useDark';
@@ -832,51 +834,23 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit, visits = [
 export default function Dashboard() {
   const isDark = useDark();
 
-  // ── Auth & Navigation (replace with your real hooks) ──────────────────────
-  const storedUser = React.useMemo(() => {
-    try {
-      const u = localStorage.getItem('user');
-      return u ? JSON.parse(u) : null;
-    } catch { return null; }
-  }, []);
-
-  const user = storedUser || {
+  // ── Auth & Navigation ─────────────────────────────────────────────────────
+  const { user: authUser, hasPermission } = useAuth();
+  const user = authUser || {
     id: '', full_name: 'User', role: 'staff',
     permissions: { view_other_tasks: [], can_view_all_tasks: false }
   };
-
-  const hasPermission = () => true;
   const navigate = useNavigate();
-
-  // ── API Base ───────────────────────────────────────────────────────────────
-  const RAW_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL)
-    || 'https://final-taskosphere-backend.onrender.com';
-  const API_BASE = RAW_URL.replace(/\/api\/?$/, '') + '/api';
-
-  // Safety check — log the base URL once on mount
-  React.useEffect(() => {
-    console.log('API_BASE in use:', API_BASE);
-  }, []);
-  
-  const getAuthHeader = React.useCallback(() => {
-    const token =
-      localStorage.getItem('access_token') ||
-      localStorage.getItem('token') ||
-      sessionStorage.getItem('access_token') ||
-      sessionStorage.getItem('token') ||
-      '';
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  }, []);
 
   const apiFetch = React.useCallback(async (endpoint) => {
     try {
-      const res = await fetch(`${API_BASE}${endpoint}`, {
-        headers: { 'Content-Type': 'application/json', ...getAuthHeader() }
-      });
-      if (!res.ok) return null;
-      return await res.json();
-    } catch { return null; }
-  }, [API_BASE, getAuthHeader]);
+      const res = await api.get(endpoint);
+      return res.data;
+    } catch (err) {
+      console.error(`apiFetch ${endpoint} failed:`, err?.response?.status, err?.response?.data?.detail || err.message);
+      return null;
+    }
+  }, []);
 
   // ── Core State ─────────────────────────────────────────────────────────────
   const [tasks,             setTasks]             = useState([]);   // ✅ ADD THIS
