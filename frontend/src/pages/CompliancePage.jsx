@@ -547,17 +547,24 @@ function AssignClientsModal({compliance,onClose,onAssigned,isDark,allUsers=[]}){
         </div>
 
         {/* Default Assigned To picker */}
-        <div className="px-4 py-3 border-b flex-shrink-0 flex items-center gap-3"
+        <div className="px-4 py-3 border-b flex-shrink-0 flex items-start gap-3"
           style={{borderColor:isDark?D.border:'#f1f5f9',backgroundColor:isDark?D.raised:'#fafafa'}}>
-          <span className="text-xs font-bold flex-shrink-0" style={{color:isDark?D.muted:'#374151'}}>Assign to:</span>
-          <select value={assignedTo} onChange={e=>setAssignedTo(e.target.value)}
-            className="flex-1 px-3 py-1.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
-            style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#d1d5db',color:isDark?D.text:'#1e293b'}}>
-            <option value="">— Unassigned —</option>
-            {allUsers.map(u=>(
-              <option key={u.id} value={u.id}>{`${u.full_name}${(u.departments||[]).length?' ('+u.departments.join(', ')+')':''}`}</option>
-            ))}
-          </select>
+          <div className="flex-1 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold flex-shrink-0" style={{color:isDark?D.muted:'#374151'}}>Fallback assign to:</span>
+              <select value={assignedTo} onChange={e=>setAssignedTo(e.target.value)}
+                className="flex-1 px-3 py-1.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
+                style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#d1d5db',color:isDark?D.text:'#1e293b'}}>
+                <option value="">— Unassigned —</option>
+                {allUsers.map(u=>(
+                  <option key={u.id} value={u.id}>{`${u.full_name}${(u.departments||[]).length?' ('+u.departments.join(', ')+')':''}`}</option>
+                ))}
+              </select>
+            </div>
+            <p className="text-[10px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>
+              ℹ️ Each client's service-specific staff is auto-assigned first, then their default staff, then this fallback.
+            </p>
+          </div>
         </div>
 
         <div className="p-3 border-b flex-shrink-0 flex gap-2" style={{borderColor:isDark?D.border:'#f1f5f9'}}>
@@ -597,7 +604,34 @@ function AssignClientsModal({compliance,onClose,onAssigned,isDark,allUsers=[]}){
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold truncate" style={{color:isDark?D.text:'#0f172a'}}>{client.company_name}</p>
-                    <p className="text-[11px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>{client.client_type}</p>
+                    <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                      <span className="text-[11px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>{client.client_type}</span>
+                      {(()=>{
+                        // Show auto-detected staff: service-specific assignment first, then default
+                        const cat=(compliance.category||'').toLowerCase();
+                        const kwMap={roc:['roc','mca'],gst:['gst'],itr:['itr','income'],tds:['tds'],audit:['audit'],pf_esic:['pf','esic'],pt:['pt','professional']};
+                        const kws=kwMap[cat]||[];
+                        const svcAsgn=(client.assignments||[]).find(a=>(a.services||[]).some(s=>kws.some(k=>s.toLowerCase().includes(k))));
+                        const staffId=svcAsgn?.user_id||client.assigned_to;
+                        const staffName=allUsers.find(u=>u.id===staffId)?.full_name;
+                        if(staffName)return(
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-1"
+                            style={{backgroundColor:isDark?'rgba(139,92,246,0.12)':'#f5f3ff',color:'#8B5CF6'}}>
+                            👤 {staffName}{svcAsgn?' (service)':' (default)'}
+                          </span>
+                        );
+                        if(assignedTo){
+                          const fallbackName=allUsers.find(u=>u.id===assignedTo)?.full_name;
+                          if(fallbackName)return(
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                              style={{backgroundColor:isDark?'rgba(100,116,139,0.12)':'#f8fafc',color:isDark?D.dimmer:'#94a3b8'}}>
+                              👤 {fallbackName} (modal)
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
                   </div>
                 </button>
               );
