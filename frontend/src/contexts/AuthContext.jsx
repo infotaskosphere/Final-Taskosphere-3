@@ -200,9 +200,11 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     try {
       window.__STOP_ACTIVITY__ = true;
+      clearStorage();
+      setUser(null);
     } catch (e) {
       console.error("Logout error", e);
-    } finally {
+      // Ensure storage is always cleared even if something above throws
       clearStorage();
       setUser(null);
     }
