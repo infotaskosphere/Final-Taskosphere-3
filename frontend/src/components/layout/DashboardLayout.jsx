@@ -441,7 +441,7 @@ const DashboardLayout = ({ children }) => {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
                 transition={{ type: 'spring', stiffness: 400, damping: 26 }}
-                style={{ maxWidth: 'clamp(80px, 30vw, 260px)' }}
+                style={{ maxWidth: 'clamp(100px, 40vw, 260px)' }}
               >
                 {activeLabel}
               </motion.h1>
