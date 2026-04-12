@@ -123,8 +123,8 @@ function AppRoutes() {
       <Route path="/duedates"   element={<Protected><PageLoader><DueDates /></PageLoader></Protected>} />
       <Route path="/reports"    element={<Protected><PageLoader><Reports /></PageLoader></Protected>} />
 
-      {/* Compliance Tracker — all roles */}
-      <Route path="/compliance" element={<Protected><PageLoader><CompliancePage /></PageLoader></Protected>} />
+      {/* Compliance Tracker — permission-gated, dept-scoped server-side */}
+      <Route path="/compliance" element={<Permission permission="can_view_compliance"><PageLoader><CompliancePage /></PageLoader></Permission>} />
 
       {/* Settings — all roles */}
       <Route path="/settings/general" element={<Protected><PageLoader><GeneralSettings /></PageLoader></Protected>} />
