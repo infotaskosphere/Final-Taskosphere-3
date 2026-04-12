@@ -507,7 +507,7 @@ function AssignClientsModal({compliance,onClose,onAssigned,isDark,allUsers=[]}){
     }
   },[allUsers,compliance.category]);
 
-  useEffect(()=>{api.get('/clients').then(r=>setClients(Array.isArray(r.data)?r.data:(r.data?.clients||[]))).catch(()=>{}).finally(()=>setLoading(false));},[]);
+  useEffect(()=>{api.get('/clients').then(r=>{const all=Array.isArray(r.data)?r.data:(r.data?.clients||[]);setClients(all.filter(c=>!c.status||c.status==='active'));}).catch(()=>{}).finally(()=>setLoading(false));},[]);
   const clientTypes=useMemo(()=>[...new Set(clients.map(c=>c.client_type).filter(Boolean))],[clients]);
   const filtered=useMemo(()=>{
     let list=typeFilter!=='all'?clients.filter(c=>c.client_type===typeFilter):clients;
@@ -688,7 +688,13 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
         api.get(`/compliance/${compliance.id}/assignments?${params}`),
         api.get('/compliance/').then(r=>(r.data||[]).find(c=>c.id===compliance.id)||compliance),
       ]);
-      setItems(asgn.data.items||[]);setTotal(asgn.data.total||0);setCompliance(cm);
+      // Enrich assigned_to_name from allUsers if backend didn't resolve it
+      const uMap={}; (allUsers||[]).forEach(u=>{uMap[u.id]=u.full_name;});
+      const enriched=(asgn.data.items||[]).map(a=>({
+        ...a,
+        assigned_to_name: a.assigned_to_name || uMap[a.assigned_to] || '',
+      }));
+      setItems(enriched);setTotal(asgn.data.total||0);setCompliance(cm);
     }catch{toast.error('Failed to load');}
     finally{setLoading(false);}
   },[compliance.id,statusFilter,search,refreshKey]);
@@ -897,7 +903,6 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
         {[
           {key:'clients', label:'Clients', icon:Users,    count:stats.total||0},
           {key:'monthly', label:`${periodConfig?.label||'Period'} Tracker`, icon:BarChart3, count:null},
-          {key:'comments',label:'Comments', icon:MessageSquare, count:comments.length||null},
         ].map(({key,label,icon:Icon,count})=>(
           <button key={key} onClick={()=>setActiveTab(key)}
             className="flex-shrink-0 px-5 py-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap flex items-center gap-2"
@@ -968,7 +973,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
         {/* Table */}
         <div className="flex-1 overflow-auto" style={{scrollbarWidth:'thin'}}>
           <div className="sticky top-0 z-10 grid px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b"
-            style={{gridTemplateColumns:'36px 48px 1fr 148px 160px 180px 100px 40px',backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
+            style={{gridTemplateColumns:'36px 48px 1fr 148px 160px 180px 44px 100px 40px',backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
             <div className="flex items-center justify-center">
               <button onClick={()=>allSelected?setSelectedIds(new Set()):setSelectedIds(new Set(items.map(a=>a.id)))}
                 className="w-4 h-4 rounded border-2 flex items-center justify-center"
@@ -981,6 +986,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
             <div>Status</div>
             <div>Assigned To</div>
             <div>Notes</div>
+            <div className="text-center">Cmts</div>
             <div>Updated</div>
             <div/>
           </div>
@@ -1005,7 +1011,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                 return(
                   <motion.div key={a.id}
                     className="group grid px-4 py-2.5 items-center gap-2 transition-colors"
-                    style={{gridTemplateColumns:'36px 48px 1fr 148px 160px 180px 100px 40px',backgroundColor:isSel?(isDark?'rgba(59,130,246,0.06)':'#eff6ff'):'transparent'}}
+                    style={{gridTemplateColumns:'36px 48px 1fr 148px 160px 180px 44px 100px 40px',backgroundColor:isSel?(isDark?'rgba(59,130,246,0.06)':'#eff6ff'):'transparent'}}
                     whileHover={{backgroundColor:isDark?'rgba(255,255,255,0.03)':'#fafafa'}}>
                     <div className="flex items-center justify-center">
                       <button onClick={()=>setSelectedIds(prev=>{const s=new Set(prev);isSel?s.delete(a.id):s.add(a.id);return s;})}
@@ -1052,6 +1058,15 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                           {a.notes||<span className="italic">add note</span>}
                         </button>
                       )}
+                    </div>
+                    <div className="flex-shrink-0 flex items-center justify-center">
+                      <button
+                        onClick={()=>{setActiveTab('comments');setCommentClient(a.client_id||'all');}}
+                        title="View / add comments"
+                        className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:opacity-80"
+                        style={{backgroundColor:isDark?'rgba(59,130,246,0.12)':'rgba(59,130,246,0.08)',color:'#3B82F6'}}>
+                        <MessageSquare className="w-3.5 h-3.5"/>
+                      </button>
                     </div>
                     <div className="flex-shrink-0">
                       <p className="text-[11px] tabular-nums" style={{color:isDark?D.dimmer:'#94a3b8'}}>{timeAgo(a.updated_at)}</p>
