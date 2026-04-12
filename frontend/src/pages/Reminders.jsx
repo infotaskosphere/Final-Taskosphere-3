@@ -420,7 +420,7 @@ export default function Reminders() {
               <div className="flex items-center gap-2 flex-wrap">
                 {isAdmin && (
                   <Select value={selectedUserId || 'all'} onValueChange={(v) => setSelectedUserId(v === 'all' ? '' : v)}>
-                    <SelectTrigger className="w-[180px] h-9 text-sm rounded-xl bg-white/15 border-white/20 text-white placeholder:text-white/50">
+                    <SelectTrigger className="w-full sm:w-[180px] h-9 text-sm rounded-xl bg-white/15 border-white/20 text-white placeholder:text-white/50">
                       <SelectValue placeholder="All Users" />
                     </SelectTrigger>
                     <SelectContent>
