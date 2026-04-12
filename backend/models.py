@@ -317,7 +317,7 @@ class Token(BaseModel):
     access_token: str
     token_type: str
     user: User
-    consent_given: Optional[bool] = Noner
+    consent_given: Optional[bool] = None  # Fixed: was 'Noner'
 
 
 # ======================
@@ -330,10 +330,10 @@ class Todo(BaseModel):
     title: str
     description: Optional[str] = None
     is_completed: bool = False
-    status: str = "pending"          # ADD THIS
+    status: str = "pending"
     due_date: Optional[Any] = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))  # FIX
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))  # FIX
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: Optional[Any] = None
 
 
@@ -343,7 +343,8 @@ class TodoCreate(BaseModel):
     due_date: Optional[Any] = None
     is_completed: bool = False
     status: str = "pending"
-    completed_at: Optional[Any] = None          
+    completed_at: Optional[Any] = None
+
 
 class TaskBase(BaseModel):
     title: str
@@ -381,10 +382,6 @@ class Task(TaskBase):
 
 # ======================
 # ATTENDANCE
-# FIX: status is a plain str with no enum constraint.
-# ======================
-# ======================
-# ATTENDANCE PROOF
 # ======================
 class AttendanceProof(BaseModel):
     """
@@ -392,11 +389,11 @@ class AttendanceProof(BaseModel):
     All fields are optional — any combination of note / photos / documents is valid.
     """
     model_config = ConfigDict(extra="ignore")
-    note: Optional[str] = None                    # free-text note from user
-    photos: List[str] = Field(default_factory=list)      # saved filename list
-    documents: List[str] = Field(default_factory=list)   # saved filename list
-    uploaded_at: Optional[str] = None             # ISO timestamp of last upload
-    updated_at: Optional[str] = None              # ISO timestamp of last update
+    note: Optional[str] = None
+    photos: List[str] = Field(default_factory=list)
+    documents: List[str] = Field(default_factory=list)
+    uploaded_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 class Attendance(BaseModel):
@@ -411,19 +408,11 @@ class Attendance(BaseModel):
     leave_reason: Optional[str] = None
     is_late: bool = False
     punched_out_early: bool = False
-
-    # ── Existing flag (used in server.py but was missing from model) ──────────
-    auto_marked: Optional[bool] = False           # True when absent was auto-marked at 7 PM
-
-    # ── NEW: Auto punch-out metadata ─────────────────────────────────────────
-    auto_punch_out: Optional[bool] = False        # True when punched out automatically
-    auto_punch_reason: Optional[str] = None       # e.g. "inactive_after_shift"
-
-    # ── NEW: Proof attachment ─────────────────────────────────────────────────
-    proof: Optional[AttendanceProof] = None       # photos / documents / note
-
-    # ── NEW: Overtime tracking ────────────────────────────────────────────────
-    overtime_minutes: Optional[int] = 0          # minutes worked beyond shift end (7 PM IST)
+    auto_marked: Optional[bool] = False
+    auto_punch_out: Optional[bool] = False
+    auto_punch_reason: Optional[str] = None
+    proof: Optional[AttendanceProof] = None
+    overtime_minutes: Optional[int] = 0
 
     @field_validator("status", mode="before")
     @classmethod
@@ -559,6 +548,7 @@ class MovementUpdateRequest(BaseModel):
     movement_type: str
     person_name: Optional[str] = None
     notes: Optional[str] = None
+
 
 # ======================
 # REMINDER MODELS
@@ -981,6 +971,7 @@ class HolidayCreate(BaseModel):
     description: Optional[str] = None
     type: str = "manual"
     status: Optional[str] = "confirmed"
+
 
 class HolidayResponse(BaseModel):
     date: Any
