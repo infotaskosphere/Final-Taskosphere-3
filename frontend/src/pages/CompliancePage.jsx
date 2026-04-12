@@ -53,9 +53,7 @@ const FREQUENCIES = [
 const FY_OPTIONS = Array.from({length:26},(_,i)=>{const y=2010+i; return `${y}-${String(y+1).slice(2)}`;}).reverse();
 
 const RECURRING_DAYS = [
-  {value:'1',label:'1st'},{value:'5',label:'5th'},{value:'7',label:'7th'},
-  {value:'10',label:'10th'},{value:'11',label:'11th'},{value:'15',label:'15th'},
-  {value:'20',label:'20th'},{value:'25',label:'25th'},{value:'28',label:'28th'},
+  ...Array.from({length:31},(_,i)=>({value:String(i+1),label:String(i+1)})),
   {value:'last',label:'Last day'},
 ];
 const QUARTER_MONTHS = [
@@ -147,10 +145,10 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
   const inputCls='w-full px-3.5 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all';
 
   const recurringLabel=()=>{
-    const day=RECURRING_DAYS.find(d=>d.value===recurDay)?.label||recurDay;
-    if(frequency==='monthly')return`Due on ${day} of every month`;
-    if(frequency==='quarterly'){const mo=QUARTER_MONTHS.find(m=>m.value===recurMonth)?.label||'';return`Due on ${day} · ${mo}`;}
-    if(frequency==='half_yearly')return`Due on ${day} of every 6th month`;
+    const day=recurDay==='last'?'Last day':`${recurDay}`;
+    if(frequency==='monthly')return`Due on day ${day} of every month`;
+    if(frequency==='quarterly'){const mo=QUARTER_MONTHS.find(m=>m.value===recurMonth)?.label||'';return`Due on day ${day} · ${mo}`;}
+    if(frequency==='half_yearly')return`Due on day ${day} of every 6th month`;
     return'';
   };
 
