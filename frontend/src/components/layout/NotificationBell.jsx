@@ -159,7 +159,7 @@ export const NotificationBell = () => {
 
       {/* ── Popover panel ── */}
       <PopoverContent
-        className="w-96 p-0 shadow-xl border border-slate-200 rounded-xl overflow-hidden"
+        className="w-[min(384px,calc(100vw-1.5rem))] p-0 shadow-xl border border-slate-200 rounded-xl overflow-hidden"
         align="end"
       >
         {/* Header */}
