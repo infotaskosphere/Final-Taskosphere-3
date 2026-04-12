@@ -26,7 +26,9 @@ if (!_raw.endsWith("/api")) {
 const BASE_URL = _raw;
 
 // ─── Token Helpers ───────────────────────────────────────────
-const TOKEN_KEY = "taskosphere_token";
+// NOTE: Must match the key used by AuthContext ("token") so that
+// clearToken() in the 401 interceptor actually removes the session.
+const TOKEN_KEY = "token";
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY);
 export const setToken = (tok) => localStorage.setItem(TOKEN_KEY, tok);
