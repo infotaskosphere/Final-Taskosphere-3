@@ -308,12 +308,6 @@ async def startup_event():
             background=True
         )
         await db.holidays.create_index("date", unique=True, background=True)
-        # ── NEW: email connections index ──────────────────────────────────────
-        await db.email_connections.create_index(
-            [("user_id", 1), ("email_address", 1)],
-            unique=True,
-            background=True
-        )
     except Exception as e:
         # Log index creation errors but do NOT crash the server
         logger.warning(f"Index creation warning (non-fatal): {e}")
@@ -512,7 +506,7 @@ async def calculate_expected_hours(start_date_str: str, end_date_str: str, shift
         hrs_per_day = (t2 - t1).total_seconds() / 3600
     except Exception:
         hrs_per_day = 8.5
-    holidays_cursor = db.holidays.find({})
+    holidays_cursor = db.holidays.find({"status": "confirmed"})
     holidays = [h["date"] for h in await holidays_cursor.to_list(length=None)]
     total_hours = 0
     current_date = start
@@ -813,11 +807,6 @@ async def detect_duplicate_tasks(
         raise HTTPException(status_code=500, detail=f"AI error: {err_str[:200]}")
 
     return {"groups": groups, "total_tasks_scanned": len(tasks)}
-
-
-def import_json_dumps(obj):
-    import json
-    return json.dumps(obj, ensure_ascii=False)
 
 
 # Helper functions
@@ -1323,7 +1312,7 @@ async def reset_password(data: ResetPasswordRequest):
     record = await db.password_reset_tokens.find_one({"email": email, "token": data.token.strip()})
     if not record:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token.")
-    expires_at = datetime.fromisoformat(record["expires_at"])
+    expires_at = parser.isoparse(record["expires_at"])
     if datetime.now(timezone.utc) > expires_at:
         await db.password_reset_tokens.delete_many({"email": email})
         raise HTTPException(status_code=400, detail="Reset token has expired. Please request a new one.")
@@ -2125,10 +2114,6 @@ async def get_staff_attendance_report(
     now = datetime.now(IST)
     target_month = month or now.strftime("%Y-%m")
     users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
-
-    now = datetime.now(IST)
-    target_month = month or now.strftime("%Y-%m")
-    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
     user_map = {u["id"]: u for u in users}
 
     # SCOPE enforcement
@@ -2670,7 +2655,7 @@ async def create_tasks_bulk(
 ):
     created_tasks = []
     for task_data in payload.tasks:
-        task_dict = task_data.dict()
+        task_dict = task_data.model_dump()
         task_dict["id"] = str(uuid.uuid4())
         task_dict["created_by"] = current_user.id
         task_dict["created_at"] = datetime.now(IST).isoformat()
@@ -2775,25 +2760,28 @@ async def get_task_detail(task_id: str, current_user: User = Depends(get_current
                 allowed_users = list(set(allowed_users + team_ids))
             if task.get("assigned_to") not in allowed_users:
                 raise HTTPException(status_code=403, detail="Not authorized")
-    assigned_user = None
-    created_user = None
-    sub_assignee_names = []
-    if task.get("assigned_to"):
-        assigned_user = await db.users.find_one(
-            {"id": task["assigned_to"]},
-            {"_id": 0, "full_name": 1, "profile_picture": 1, "email": 1}
-        )
-    if task.get("created_by"):
-        created_user = await db.users.find_one(
-            {"id": task["created_by"]},
-            {"_id": 0, "full_name": 1}
-        )
-    if task.get("sub_assignees"):
-        sub_users = await db.users.find(
-            {"id": {"$in": task["sub_assignees"]}},
-            {"_id": 0, "full_name": 1, "id": 1}
-        ).to_list(50)
-        sub_assignee_names = [u["full_name"] for u in sub_users]
+    # Batch all user lookups in one query instead of 3 separate find_one calls
+    user_ids_to_fetch = list(filter(None, [
+        task.get("assigned_to"),
+        task.get("created_by"),
+        *( task.get("sub_assignees") or [] ),
+    ]))
+    users_batch = {}
+    if user_ids_to_fetch:
+        fetched = await db.users.find(
+            {"id": {"$in": user_ids_to_fetch}},
+            {"_id": 0, "id": 1, "full_name": 1, "profile_picture": 1, "email": 1}
+        ).to_list(100)
+        users_batch = {u["id"]: u for u in fetched}
+
+    assigned_user = users_batch.get(task.get("assigned_to"))
+    created_user  = users_batch.get(task.get("created_by"))
+    sub_assignee_names = [
+        users_batch[uid]["full_name"]
+        for uid in (task.get("sub_assignees") or [])
+        if uid in users_batch
+    ]
+
     client_name = None
     if task.get("client_id"):
         client_doc = await db.clients.find_one(
@@ -2850,6 +2838,10 @@ async def patch_task(
     if not is_authorized:
         raise HTTPException(status_code=403, detail="Unauthorized to modify this task")
     old_data = existing_task.copy()
+    # Whitelist: prevent patching of immutable/sensitive fields
+    IMMUTABLE_FIELDS = {"id", "created_by", "created_at", "_id"}
+    for field in IMMUTABLE_FIELDS:
+        updates.pop(field, None)
     updates["updated_at"] = datetime.now(IST).isoformat()
     if updates.get("status") == "completed":
         updates["completed_at"] = datetime.now(IST).isoformat()
@@ -3712,7 +3704,7 @@ async def _sync_due_date_to_compliance(dd: dict, current_user) -> None:
     if existing:
         await db.compliance_masters.update_one(
             {'id': existing['id']},
-            {'': {'due_date': due_date, 'name': title, 'updated_at': now_str}}
+            {'$set': {'due_date': due_date, 'name': title, 'updated_at': now_str}}
         )
     else:
         import uuid as _uuid
@@ -3830,6 +3822,9 @@ async def get_upcoming_due_dates(
             if isinstance(dd["due_date"], str)
             else dd["due_date"]
         )
+        # Ensure dd_date is timezone-aware for safe comparison with IST-aware `now`
+        if dd_date.tzinfo is None:
+            dd_date = dd_date.replace(tzinfo=IST)
 
         # ── FIX: include overdue items (dd_date < now) AND upcoming items ──
         # Old code: if now <= dd_date <= future_date   ← excluded overdue
@@ -3934,7 +3929,9 @@ async def delete_due_date(
 reminders_col = db["reminders"]
 
 
-class ReminderCreate(BaseModel):
+# These inline reminder schemas extend the imported ReminderCreate model
+# with email-specific fields (event_id, source, reminder_type).
+class InlineReminderCreate(BaseModel):
     title: str
     description: Optional[str] = ""
     remind_at: str          # ISO datetime string
@@ -3945,7 +3942,7 @@ class ReminderCreate(BaseModel):
     related_task_id: Optional[str] = None
 
 
-class ReminderUpdate(BaseModel):
+class InlineReminderUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     remind_at: Optional[str] = None
@@ -3989,7 +3986,7 @@ async def get_reminders(
 
 @api_router.post("/email/save-as-reminder")
 async def create_reminder(
-    body: ReminderCreate,
+    body: InlineReminderCreate,
     current_user: User = Depends(get_current_user),
 ):
     """Create a new reminder."""
@@ -4018,7 +4015,7 @@ async def create_reminder(
 @api_router.patch("/email/reminders/{reminder_id}")
 async def update_reminder(
     reminder_id: str,
-    body: ReminderUpdate,
+    body: InlineReminderUpdate,
     current_user: User = Depends(get_current_user),
 ):
     """Update a reminder — title, description, remind_at, is_dismissed, etc."""
@@ -4027,7 +4024,7 @@ async def update_reminder(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid reminder ID")
 
-    update_fields = {k: v for k, v in body.dict(exclude_unset=True).items() if v is not None}
+    update_fields = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
     if not update_fields:
         raise HTTPException(status_code=400, detail="No fields to update")
 
@@ -4667,6 +4664,99 @@ async def parse_mds_excel_for_client_form(
         "sheets_parsed": excel.sheet_names,
     }
 
+@api_router.post("/clients/import")
+async def import_clients_from_csv(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Bulk-import clients from a CSV file.
+    Expected CSV columns (all optional except company_name):
+      company_name, client_type, email, phone, birthday, address,
+      city, state, services, notes, assigned_to, status
+    Returns: { message, clients_created, clients_skipped, errors }
+    """
+    if current_user.role not in ("admin", "manager"):
+        perms = get_user_permissions(current_user)
+        if not perms.get("can_edit_clients", False):
+            raise HTTPException(status_code=403, detail="Permission denied")
+
+    filename = (file.filename or "").lower()
+    if not filename.endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only CSV files are supported (.csv)")
+
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")  # handle BOM
+    except UnicodeDecodeError:
+        text = content.decode("latin-1")
+
+    reader = csv.DictReader(StringIO(text))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=422, detail="CSV file is empty or has no header row")
+
+    created_count = 0
+    skipped_count = 0
+    errors: list = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    for i, row in enumerate(reader, start=2):  # row 1 = header
+        company_name = str(row.get("company_name") or row.get("Company Name") or "").strip()
+        if not company_name:
+            skipped_count += 1
+            continue
+
+        # Skip duplicate (same created_by + company_name)
+        existing = await db.clients.find_one(
+            {"created_by": current_user.id, "company_name": {"$regex": f"^{re.escape(company_name)}$", "$options": "i"}},
+            {"_id": 0, "id": 1}
+        )
+        if existing:
+            skipped_count += 1
+            continue
+
+        # Parse services column (comma-separated string → list)
+        raw_services = str(row.get("services") or row.get("Services") or "").strip()
+        services = [s.strip() for s in raw_services.split(",") if s.strip()] if raw_services else []
+
+        # Normalise client_type
+        raw_type = str(row.get("client_type") or row.get("Client Type") or "proprietor").strip().lower()
+        valid_types = {"proprietor", "pvt_ltd", "llp", "partnership", "huf", "trust", "other"}
+        client_type = raw_type if raw_type in valid_types else "proprietor"
+
+        doc = {
+            "id":           str(uuid.uuid4()),
+            "company_name": company_name,
+            "client_type":  client_type,
+            "email":        str(row.get("email") or row.get("Email") or "").strip() or None,
+            "phone":        str(row.get("phone") or row.get("Phone") or "").strip() or None,
+            "birthday":     str(row.get("birthday") or row.get("Birthday") or "").strip() or None,
+            "address":      str(row.get("address") or row.get("Address") or "").strip() or None,
+            "city":         str(row.get("city") or row.get("City") or "").strip() or None,
+            "state":        str(row.get("state") or row.get("State") or "").strip() or None,
+            "services":     services,
+            "notes":        str(row.get("notes") or row.get("Notes") or "").strip() or None,
+            "assigned_to":  str(row.get("assigned_to") or row.get("Assigned To") or "").strip() or None,
+            "status":       str(row.get("status") or row.get("Status") or "active").strip().lower(),
+            "created_by":   current_user.id,
+            "created_at":   now_iso,
+        }
+
+        try:
+            await db.clients.insert_one(doc)
+            created_count += 1
+        except Exception as e:
+            errors.append({"row": i, "company": company_name, "error": str(e)[:80]})
+            skipped_count += 1
+
+    return {
+        "message":         f"{created_count} client(s) imported successfully",
+        "clients_created": created_count,
+        "clients_skipped": skipped_count,
+        "errors":          errors[:10],  # cap error list to avoid huge response
+    }
+
+
 @api_router.post("/clients", response_model=Client)
 async def create_client(payload: dict, current_user: User = Depends(get_current_user)):
     try:
@@ -4963,7 +5053,7 @@ async def get_dept_member_count(current_user: User = Depends(get_current_user)):
     """
     if current_user.role == "admin":
         all_users = await db.users.find(
-            {"is_active": True, "status": "approved"},
+            {"is_active": True, "status": "active"},
             {"_id": 0, "id": 1, "full_name": 1, "departments": 1, "role": 1}
         ).to_list(1000)
         return {
@@ -4981,7 +5071,7 @@ async def get_dept_member_count(current_user: User = Depends(get_current_user)):
             "departments": {"$in": user_depts},
             "id": {"$ne": current_user.id},
             "is_active": True,
-            "status": "approved",
+            "status": "active",
         },
         {"_id": 0, "id": 1, "full_name": 1, "departments": 1, "role": 1}
     ).to_list(500)
@@ -5363,7 +5453,6 @@ def build_reminder_email(user_name: str, task_list: list) -> tuple[str, str]:
     return subject, body
 
 @api_router.post("/send-pending-task-reminders")
-
 async def send_pending_task_reminders(current_user: User = Depends(get_current_user)):
     perms = get_user_permissions(current_user)
     if current_user.role != "admin" and not perms.get("can_send_reminders", False):
@@ -5371,22 +5460,31 @@ async def send_pending_task_reminders(current_user: User = Depends(get_current_u
     tasks = await db.tasks.find({"status": {"$ne": "completed"}}, {"_id": 0}).to_list(1000)
     if not tasks:
         return {"message": "No pending tasks found", "emails_sent": 0, "emails_failed": []}
+
+    # Batch lookup: collect all unique assigned_to IDs, fetch users in one query
+    assigned_ids = list({t["assigned_to"] for t in tasks if t.get("assigned_to")})
+    users_list = await db.users.find({"id": {"$in": assigned_ids}}, {"_id": 0}).to_list(1000)
+    user_by_id = {u["id"]: u for u in users_list}
+
     user_task_map = {}
     for task in tasks:
         assigned_to = task.get("assigned_to")
         if not assigned_to:
             continue
-        user = await db.users.find_one({"id": assigned_to}, {"_id": 0})
+        user = user_by_id.get(assigned_to)
         if not user:
             continue
-        user_task_map.setdefault(user["email"], []).append(task)
+        email = user.get("email")
+        if not email:
+            continue
+        user_task_map.setdefault(email, {"user": user, "tasks": []})["tasks"].append(task)
+
     success_count = 0
     failed_emails = []
-    for email, task_list in user_task_map.items():
+    for email, data in user_task_map.items():
         try:
-            user_doc = await db.users.find_one({"email": email}, {"_id": 0})
-            user_name = user_doc.get("full_name", "") if user_doc else ""
-            subject, body = build_reminder_email(user_name, task_list)
+            user_name = data["user"].get("full_name", "")
+            subject, body = build_reminder_email(user_name, data["tasks"])
             sent = send_email(email, subject, body)
             if sent:
                 success_count += 1
@@ -5432,20 +5530,26 @@ async def send_pending_task_reminders_internal():
     tasks = await db.tasks.find({"status": {"$ne": "completed"}}, {"_id": 0}).to_list(1000)
     if not tasks:
         return
+    # Batch user lookup - single query for all assigned users
+    assigned_ids = list({t["assigned_to"] for t in tasks if t.get("assigned_to")})
+    users_list = await db.users.find({"id": {"$in": assigned_ids}}, {"_id": 0}).to_list(1000)
+    user_by_id = {u["id"]: u for u in users_list}
+
     user_task_map = {}
     for task in tasks:
         assigned_to = task.get("assigned_to")
         if not assigned_to:
             continue
-        user = await db.users.find_one({"id": assigned_to}, {"_id": 0})
-        if not user:
+        user = user_by_id.get(assigned_to)
+        if not user or not user.get("email"):
             continue
-        user_task_map.setdefault(user["email"], []).append(task)
-    for email, task_list in user_task_map.items():
+        email = user["email"]
+        user_task_map.setdefault(email, {"user": user, "tasks": []})["tasks"].append(task)
+
+    for email, data in user_task_map.items():
         try:
-            user_doc = await db.users.find_one({"email": email}, {"_id": 0})
-            user_name = user_doc.get("full_name", "") if user_doc else ""
-            subject, body = build_reminder_email(user_name, task_list)
+            user_name = data["user"].get("full_name", "")
+            subject, body = build_reminder_email(user_name, data["tasks"])
             send_email(email, subject, body)
         except Exception as e:
             logger.error(f"Auto reminder failed for {email}: {str(e)}")
@@ -5478,8 +5582,14 @@ async def auto_daily_reminder(request: Request, call_next):
     try:
         india_time = datetime.now(pytz.timezone("Asia/Kolkata"))
         today_str = india_time.date().isoformat()
+        # Only fire after 10 AM and if the in-memory cache hasn't already
+        # been set for today. The cache acts as a fast pre-check; the actual
+        # DB-level atomic upsert inside _run_daily_reminder_job prevents
+        # duplicate sends even if multiple workers race past here.
         if india_time.hour >= 10 and _last_reminder_date_cache != today_str:
-            _last_reminder_date_cache = today_str  # optimistic lock
+            # Set cache immediately to prevent other concurrent requests from
+            # spawning duplicate background tasks in the same process.
+            _last_reminder_date_cache = today_str
             asyncio.ensure_future(_run_daily_reminder_job(today_str))  # fire-and-forget
     except Exception as e:
         logger.error(f"Auto reminder middleware error: {e}")
@@ -6109,13 +6219,6 @@ async def extract_trademark_notice(
 # exception handlers that run outside the middleware stack, so we add them
 # manually here.
 # ─────────────────────────────────────────────────────────────────────────────
-CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "https://final-taskosphere-frontend.onrender.com",
-    "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, X-Requested-With",
-}
-
 @app.exception_handler(Exception)
 async def universal_exception_handler(request: Request, exc: Exception):
     logger.error(f"Critical Error on {request.url.path}: {str(exc)}")
