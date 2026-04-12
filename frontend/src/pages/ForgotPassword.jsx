@@ -73,7 +73,7 @@ export default function ForgotPassword() {
       transition={spring}
     >
       <motion.div
-        className="w-full max-w-md p-8 rounded-2xl shadow-xl"
+        className="w-full max-w-md p-6 sm:p-8 rounded-2xl shadow-xl"
         style={{ background: cardBg }}
         initial={{ opacity: 0, y: 28, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
