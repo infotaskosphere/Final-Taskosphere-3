@@ -494,6 +494,8 @@ async def import_from_excel(
     status_col:    str          = Form(default=""),
     notes_col:     str          = Form(default=""),
     assigned_col:  str          = Form(default=""),
+    assigned_to_col: str        = Form(default=""),   # alias from frontend
+    default_assigned_to: str    = Form(default=""),   # fallback user id
     current_user:  User         = Depends(get_current_user),
 ):
     """
@@ -520,6 +522,17 @@ async def import_from_excel(
             client_col = candidates[0]
         else:
             raise HTTPException(400, f"Column '{client_col}' not found. Available: {list(df.columns)}")
+
+    # Resolve assigned_col: frontend may send as assigned_to_col
+    if not assigned_col and assigned_to_col:
+        assigned_col = assigned_to_col
+
+    # Resolve default_assigned_to: verify it's a real user id
+    fallback_assigned: Optional[str] = None
+    if default_assigned_to:
+        ua = await db.users.find_one({"id": default_assigned_to}, {"_id": 0, "id": 1})
+        if ua:
+            fallback_assigned = ua["id"]
 
     # Build lookup maps
     all_clients = await db.clients.find(
@@ -572,6 +585,9 @@ async def import_from_excel(
         if assigned_col and assigned_col in df.columns:
             av = str(row.get(assigned_col, "") or "").strip().lower()
             assigned_id = user_name_map.get(av)
+        # Fall back to default if no per-row value
+        if not assigned_id and fallback_assigned:
+            assigned_id = fallback_assigned
 
         if name_key in existing_map:
             to_update.append((existing_map[name_key], {
