@@ -723,17 +723,19 @@ export default function Tasks() {
   const API_BASE = RAW_URL.replace(/\/api\/?$/, '') + '/api';
 
   const getAuthHeader = React.useCallback(() => {
-    const token = localStorage.getItem('taskosphere_token') || '';
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
 
   const apiFetch = React.useCallback(async (endpoint) => {
     try {
-      const res = await fetch(`${API_BASE}${endpoint}`, { headers: { 'Content-Type': 'application/json', ...getAuthHeader() } });
-      if (!res.ok) return null;
-      return await res.json();
-    } catch { return null; }
-  }, [API_BASE, getAuthHeader]);
+      const res = await api.get(endpoint);
+      return res.data;
+    } catch (err) {
+      console.error(`apiFetch ${endpoint} failed:`, err?.response?.status, err?.response?.data?.detail || err.message);
+      return null;
+    }
+  }, []);
 
   const isAdmin = user?.role === 'admin';
   const isDark  = useDark();
