@@ -109,13 +109,14 @@ svg {
   display: block;
 }
 
-/* Tables: prevent horizontal overflow */
-table {
+/* Tables: prevent horizontal overflow — applied per-wrapper, not globally */
+.table-scroll-wrapper table {
   width: 100%;
-  table-layout: fixed;
 }
 
-td, th {
+/* Responsive table cells: truncate long text in data tables */
+.responsive-table td,
+.responsive-table th {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
