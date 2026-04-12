@@ -707,18 +707,58 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
     {key:'na',          label:'N/A',          count:stats.na          ||0},
   ];
 
-  // Month names for monthly view
+  // ── Period config based on compliance frequency ─────────────────────────
   const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  const periodConfig=useMemo(()=>{
+    const freq=compliance.frequency;
+    const now=new Date();
+    const curMonthKey=format(now,'yyyy-MM');
+    const curQuarter=Math.floor((now.getMonth())/3)+1;
+    const curHalf=now.getMonth()<6?1:2;
+
+    if(freq==='monthly'||!freq){
+      // 12 columns: Jan–Dec
+      const periods=Array.from({length:12},(_,i)=>{
+        const mk=`${monthlyViewYear}-${String(i+1).padStart(2,'0')}`;
+        return{key:mk,label:MONTHS[i],isCurrent:mk===curMonthKey};
+      });
+      return{type:'monthly',label:'Monthly',periods,colLabel:'Month'};
+    }
+    if(freq==='quarterly'){
+      // 4 columns: Q1–Q4
+      const QUARTER_RANGES=[[1,2,3],[4,5,6],[7,8,9],[10,11,12]];
+      const periods=QUARTER_RANGES.map((months,qi)=>{
+        const mk=`${monthlyViewYear}-Q${qi+1}`;
+        return{key:mk,label:`Q${qi+1}`,sublabel:`${MONTHS[months[0]-1]}–${MONTHS[months[2]-1]}`,isCurrent:monthlyViewYear===now.getFullYear()&&curQuarter===qi+1};
+      });
+      return{type:'quarterly',label:'Quarterly',periods,colLabel:'Quarter'};
+    }
+    if(freq==='half_yearly'){
+      // 2 columns: H1, H2
+      const periods=[
+        {key:`${monthlyViewYear}-H1`,label:'H1',sublabel:'Apr – Sep',isCurrent:monthlyViewYear===now.getFullYear()&&curHalf===1},
+        {key:`${monthlyViewYear}-H2`,label:'H2',sublabel:'Oct – Mar',isCurrent:monthlyViewYear===now.getFullYear()&&curHalf===2},
+      ];
+      return{type:'half_yearly',label:'Half-Yearly',periods,colLabel:'Half Year'};
+    }
+    if(freq==='annual'){
+      // 1 column: the year itself
+      const periods=[
+        {key:`${monthlyViewYear}`,label:`FY ${monthlyViewYear}`,sublabel:'Full Year',isCurrent:monthlyViewYear===now.getFullYear()},
+      ];
+      return{type:'annual',label:'Annual',periods,colLabel:'Year'};
+    }
+    // one_time — single row
+    const periods=[{key:`${monthlyViewYear}`,label:'One-Time',sublabel:'',isCurrent:monthlyViewYear===now.getFullYear()}];
+    return{type:'one_time',label:'One-Time',periods,colLabel:'Period'};
+  },[compliance.frequency,monthlyViewYear]);
+
   const monthlyRows=useMemo(()=>{
-    // Build a map of month → stats
     const map={};
     (monthlySummary.months||[]).forEach(m=>{map[m.month]=m;});
-    // Generate 12 months for selected year
-    return Array.from({length:12},(_,i)=>{
-      const monthKey=`${monthlyViewYear}-${String(i+1).padStart(2,'0')}`;
-      return{monthKey,label:MONTHS[i],data:map[monthKey]||null};
-    });
-  },[monthlySummary,monthlyViewYear,MONTHS]);
+    return periodConfig.periods.map(p=>({...p,data:map[p.key]||null}));
+  },[monthlySummary,periodConfig]);
 
   return(
     <motion.div className="min-h-screen flex flex-col" style={{background:isDark?D.bg:'#f8fafc'}}
@@ -964,11 +1004,15 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
       {/* ─── MONTHLY TRACKER TAB ─────────────────────────────────────────── */}
       {activeTab==='monthly'&&(
         <div className="flex-1 overflow-auto p-4 sm:p-6 space-y-4" style={{scrollbarWidth:'thin'}}>
-          {/* Year selector */}
+          {/* Header */}
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div>
-              <h2 className="text-base font-black" style={{color:isDark?D.text:'#0f172a'}}>Monthly Compliance Tracker</h2>
-              <p className="text-xs mt-0.5" style={{color:isDark?D.muted:'#64748b'}}>{monthlySummary.total_clients||0} clients · click any month cell to update status</p>
+              <h2 className="text-base font-black" style={{color:isDark?D.text:'#0f172a'}}>
+                {periodConfig.label} Compliance Tracker
+              </h2>
+              <p className="text-xs mt-0.5" style={{color:isDark?D.muted:'#64748b'}}>
+                {monthlySummary.total_clients||0} clients · click any period cell to cycle status
+              </p>
             </div>
             <div className="flex items-center gap-2">
               <button onClick={()=>setMonthlyViewYear(y=>y-1)} className="w-8 h-8 rounded-xl border flex items-center justify-center hover:opacity-70"
@@ -992,27 +1036,30 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
             <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 text-blue-500 animate-spin"/></div>
           ):(
             <>
-              {/* Annual summary grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                {monthlyRows.map(({monthKey,label,data})=>{
+              {/* Period summary cards — grid adapts to frequency */}
+              <div className={`grid gap-3 ${
+                periodConfig.type==='annual'||periodConfig.type==='one_time'?'grid-cols-1 max-w-xs':
+                periodConfig.type==='half_yearly'?'grid-cols-2 max-w-md':
+                periodConfig.type==='quarterly'?'grid-cols-2 sm:grid-cols-4':
+                'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6'
+              }`}>
+                {monthlyRows.map(({key,label,sublabel,isCurrent,data})=>{
                   const total=data?.total||0;
                   const done=(data?.completed||0)+(data?.filed||0);
                   const pct=total?Math.round(done/total*100):0;
-                  const hasData=total>0;
-                  const isCurrentMonth=monthKey===format(new Date(),'yyyy-MM');
                   return(
-                    <div key={monthKey}
-                      className="rounded-2xl border p-3 transition-all hover:shadow-md cursor-default"
+                    <div key={key} className="rounded-2xl border p-4 transition-all hover:shadow-md"
                       style={{
                         backgroundColor:isDark?D.card:'#fff',
-                        borderColor:isCurrentMonth?catCfg.color:(isDark?D.border:'#e2e8f0'),
-                        borderWidth:isCurrentMonth?2:1,
+                        borderColor:isCurrent?catCfg.color:(isDark?D.border:'#e2e8f0'),
+                        borderWidth:isCurrent?2:1,
                       }}>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-black" style={{color:isDark?D.text:'#0f172a'}}>{label}</span>
-                        {isCurrentMonth&&<span className="text-[9px] font-black px-1.5 py-0.5 rounded-full" style={{backgroundColor:catCfg.bg,color:catCfg.color}}>NOW</span>}
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-black" style={{color:isDark?D.text:'#0f172a'}}>{label}</span>
+                        {isCurrent&&<span className="text-[9px] font-black px-1.5 py-0.5 rounded-full" style={{backgroundColor:catCfg.bg,color:catCfg.color}}>NOW</span>}
                       </div>
-                      {hasData?(
+                      {sublabel&&<p className="text-[10px] mb-2" style={{color:isDark?D.dimmer:'#94a3b8'}}>{sublabel}</p>}
+                      {total>0?(
                         <>
                           <ProgressBar pct={pct} color={catCfg.color} isDark={isDark}/>
                           <div className="flex justify-between items-center mt-1.5">
@@ -1027,8 +1074,8 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                           </div>
                         </>
                       ):(
-                        <div className="text-center py-2">
-                          <span className="text-[10px]" style={{color:isDark?D.border:'#e2e8f0'}}>No data</span>
+                        <div className="text-center py-3">
+                          <span className="text-[10px]" style={{color:isDark?D.border:'#c8d3e0'}}>No data yet</span>
                         </div>
                       )}
                     </div>
@@ -1036,29 +1083,32 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                 })}
               </div>
 
-              {/* Per-client monthly table */}
+              {/* Per-client period table */}
               {items.length>0&&(
                 <div className="rounded-2xl border overflow-hidden" style={{borderColor:isDark?D.border:'#e2e8f0'}}>
                   <div className="px-4 py-3 border-b flex items-center justify-between"
                     style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0'}}>
-                    <p className="text-xs font-black uppercase tracking-wider" style={{color:isDark?D.muted:'#64748b'}}>Per-Client Monthly Status — {monthlyViewYear}</p>
+                    <p className="text-xs font-black uppercase tracking-wider" style={{color:isDark?D.muted:'#64748b'}}>
+                      Per-Client {periodConfig.label} Status — {monthlyViewYear}
+                    </p>
                     <span className="text-xs" style={{color:isDark?D.dimmer:'#94a3b8'}}>Click cell to cycle status</span>
                   </div>
                   <div className="overflow-x-auto" style={{scrollbarWidth:'thin'}}>
-                    <table className="w-full text-xs border-collapse" style={{minWidth:900}}>
+                    <table className="w-full text-xs border-collapse"
+                      style={{minWidth:periodConfig.type==='monthly'?900:periodConfig.type==='quarterly'?500:periodConfig.type==='half_yearly'?400:300}}>
                       <thead>
                         <tr style={{backgroundColor:isDark?D.raised:'#f8fafc',borderBottom:`1px solid ${isDark?D.border:'#e2e8f0'}`}}>
                           <th className="px-4 py-2 text-left font-bold sticky left-0 z-10"
                             style={{color:isDark?D.dimmer:'#94a3b8',backgroundColor:isDark?D.raised:'#f8fafc',minWidth:180}}>Client</th>
-                          {MONTHS.map((m,i)=>{
-                            const mk=`${monthlyViewYear}-${String(i+1).padStart(2,'0')}`;
-                            const isCur=mk===format(new Date(),'yyyy-MM');
-                            return(
-                              <th key={m} className="px-2 py-2 text-center font-bold" style={{color:isCur?catCfg.color:(isDark?D.dimmer:'#94a3b8'),minWidth:60}}>
-                                {m}{isCur&&<span className="ml-0.5 text-[8px]">●</span>}
-                              </th>
-                            );
-                          })}
+                          {periodConfig.periods.map(p=>(
+                            <th key={p.key} className="px-2 py-2 text-center font-bold"
+                              style={{color:p.isCurrent?catCfg.color:(isDark?D.dimmer:'#94a3b8'),
+                                minWidth:periodConfig.type==='monthly'?56:80}}>
+                              {p.label}
+                              {p.sublabel&&<div className="text-[9px] font-normal opacity-70">{p.sublabel}</div>}
+                              {p.isCurrent&&<span className="ml-0.5 text-[8px]" style={{color:catCfg.color}}>●</span>}
+                            </th>
+                          ))}
                         </tr>
                       </thead>
                       <tbody>
@@ -1067,19 +1117,18 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                             backgroundColor:ri%2===0?'transparent':(isDark?'rgba(255,255,255,0.01)':'rgba(0,0,0,0.01)')}}>
                             <td className="px-4 py-2 font-semibold sticky left-0 z-10 truncate max-w-[180px]"
                               style={{color:isDark?D.text:'#0f172a',backgroundColor:isDark?D.card:'#fff'}}>{a.client_name}</td>
-                            {MONTHS.map((m,i)=>{
-                              const mk=`${monthlyViewYear}-${String(i+1).padStart(2,'0')}`;
-                              const st=(a.monthly_statuses||{})[mk]||'not_started';
+                            {periodConfig.periods.map(p=>{
+                              const st=(a.monthly_statuses||{})[p.key]||'not_started';
                               const cfg=STATUS_CFG[st]||STATUS_CFG.not_started;
                               const CYCLE=['not_started','in_progress','completed','filed','na'];
                               const nextSt=CYCLE[(CYCLE.indexOf(st)+1)%CYCLE.length];
                               return(
-                                <td key={m} className="px-1 py-1 text-center">
+                                <td key={p.key} className="px-1 py-1 text-center">
                                   <button
-                                    onClick={()=>updateMonthlyStatus(a.id,mk,nextSt)}
+                                    onClick={()=>updateMonthlyStatus(a.id,p.key,nextSt)}
                                     className="w-full py-1 px-1 rounded-lg text-[10px] font-bold transition-all hover:opacity-80 active:scale-95"
                                     style={{backgroundColor:cfg.bg,color:cfg.color,border:`1px solid ${cfg.border}`}}
-                                    title={`${a.client_name} · ${m} · ${cfg.label} → click to change`}>
+                                    title={`${a.client_name} · ${p.label} · ${cfg.label} → click to change`}>
                                     {st==='not_started'?'—':st==='in_progress'?'WIP':st==='completed'?'✓':st==='filed'?'F':'N/A'}
                                   </button>
                                 </td>
@@ -1097,7 +1146,6 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
           )}
         </div>
       )}
-
       {/* ─── COMMENTS TAB ────────────────────────────────────────────────── */}
       {activeTab==='comments'&&(
         <div className="flex-1 overflow-auto flex flex-col" style={{scrollbarWidth:'thin'}}>
