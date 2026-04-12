@@ -651,6 +651,9 @@ export default function DueDates() {
       if (editingDueDate) { await api.put(`/duedates/${editingDueDate.id}`, payload); toast.success('Updated!'); }
       else                { await api.post('/duedates', payload); toast.success('Created!'); }
       setDialogOpen(false); resetForm(); fetchDueDates();
+      // Auto-sync to Compliance Tracker
+      try { await api.post('/compliance/sync-from-calendar'); }
+      catch(syncErr) { console.warn('Compliance sync skipped:', syncErr?.message); }
     } catch { toast.error('Failed to save'); } finally { setLoading(false); }
   };
 
