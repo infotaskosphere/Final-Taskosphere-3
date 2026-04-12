@@ -123,7 +123,7 @@ export default function TaskAudit() {
             <div className="flex flex-wrap items-center gap-2 sm:flex-shrink-0">
               <Select value={filter} onValueChange={setFilter}>
                 <SelectTrigger
-                  className="w-[190px] rounded-xl h-9 text-xs font-semibold bg-white/15 border-white/25 text-white focus:ring-0"
+                  className="w-full sm:w-[190px] rounded-xl h-9 text-xs font-semibold bg-white/15 border-white/25 text-white focus:ring-0"
                 >
                   <SelectValue placeholder="Action Type" />
                 </SelectTrigger>
