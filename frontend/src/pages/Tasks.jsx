@@ -723,7 +723,7 @@ export default function Tasks() {
   const API_BASE = RAW_URL.replace(/\/api\/?$/, '') + '/api';
 
   const getAuthHeader = React.useCallback(() => {
-    const token = localStorage.getItem('access_token') || localStorage.getItem('token') || sessionStorage.getItem('access_token') || sessionStorage.getItem('token') || '';
+    const token = localStorage.getItem('taskosphere_token') || '';
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
 
