@@ -76,7 +76,7 @@ async def get_reminders(
     query_uid = current_user.id
 
     # If admin requests another user's reminders
-    if user_id and current_user.get("role") == "admin":
+    if user_id and current_user.role == "admin":
         query_uid = user_id
 
     cursor = reminders_col.find({
@@ -152,7 +152,7 @@ async def update_reminder(
 
     # Verify ownership (admin can update any)
     query = {"_id": obj_id}
-    if current_user.get("role") != "admin":
+    if current_user.role != "admin":
         query["user_id"] = str(current_user.id)
 
     result = await reminders_col.update_one(query, {"$set": update_fields})
@@ -178,7 +178,7 @@ async def delete_reminder(
 
     # Verify ownership (admin can delete any)
     query = {"_id": obj_id}
-    if current_user.get("role") != "admin":
+    if current_user.role != "admin":
         query["user_id"] = str(current_user.id)
 
     result = await reminders_col.delete_one(query)
