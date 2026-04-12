@@ -58,6 +58,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_passwords": True,
           "can_edit_passwords": True,
           "view_password_departments": [],   # empty = all (admin sees everything)
+          "can_view_compliance": True,       # Compliance Tracker — view all categories
+          "can_manage_compliance": True,     # Create / edit / delete compliance masters
           "can_view_all_visits": True,
           "can_edit_visits": True,
           "can_delete_visits": True,
@@ -113,6 +115,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_passwords": True,       # DEFAULT_MODULE (Permission-based)
           "can_edit_passwords": True,       # DEFAULT_MODULE (Permission-based)
           "view_password_departments": [],  # defaults to own departments
+          "can_view_compliance": True,      # Compliance Tracker — dept-scoped view
+          "can_manage_compliance": True,    # Create/edit/delete masters in own dept
           "can_view_all_visits": False,     # SCOPE handled server-side by department query
           "can_edit_visits": True,          # DEFAULT_MODULE (client_visit)
           "can_delete_visits": False,       # ADMIN_GRANTED_ONLY
@@ -166,6 +170,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_passwords": True,       # DEFAULT_MODULE (Permission-based)
           "can_edit_passwords": True,       # DEFAULT_MODULE (Permission-based)
           "view_password_departments": [],
+          "can_view_compliance": True,      # Compliance Tracker — dept-scoped view (own dept only)
+          "can_manage_compliance": False,   # ADMIN_GRANTED_ONLY — staff can only update assignments
           "can_view_all_visits": False,     # SCOPE: own visits only
           "can_edit_visits": True,          # DEFAULT_MODULE (own visits)
           "can_delete_visits": False,       # ADMIN_GRANTED_ONLY
@@ -225,6 +231,13 @@ class UserPermissions(BaseModel):
     can_view_passwords: bool = False
     can_edit_passwords: bool = False
     view_password_departments: List[str] = Field(default_factory=list)
+    # ── Compliance Tracker ───────────────────────────────────────────────────
+    # can_view_compliance  → access the Compliance Tracker page
+    #   admin:   all categories; manager/staff: own department categories only
+    # can_manage_compliance → create / edit / delete compliance masters
+    #   admin/manager: True by default; staff: False (update assignments only)
+    can_view_compliance: bool = False
+    can_manage_compliance: bool = False
     # ── Visit-specific permissions ───────────────────────────────────────────
     can_view_all_visits: bool = False
     can_edit_visits: bool = False
