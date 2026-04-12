@@ -18,6 +18,12 @@ from datetime import datetime, date, timezone, timedelta
 # --- FIXED ROUTER IMPORTS ---
 # Added 'backend.' to invoicing to match the others
 from backend.compliance import router as compliance_router
+try:
+    from backend.compliance import create_compliance_indexes
+except ImportError:
+    async def create_compliance_indexes():
+        pass
+
 # reminders routes are inlined directly below (no separate router file needed)
 from backend.quotations import router as quotation_router
 from backend.attendance_identix import identix_router
@@ -289,12 +295,6 @@ async def startup_event():
         except Exception:
             pass 
 
-        # Create new rule (Unique User + Email Address)
-        await db.email_connections.create_index(
-            [("user_id", 1), ("email_address", 1)],
-            unique=True,
-            background=True
-        )
         
         # Unique indexes — use background=True so they don't block startup if they already exist
         await db.attendance.create_index(
@@ -397,10 +397,10 @@ async def startup_event():
 
     asyncio.create_task(_boot_holiday_sync())
 
-        # 🔥 AUTO MIGRATION: Add consent_given for old users
+    # AUTO MIGRATION: Add consent_given for old users
     try:
         result = await db.users.update_many(
-            {},  # all users
+            {},
             {"$set": {"consent_given": True}}
         )
         logger.info(f"Consent cleanup: Updated {result.modified_count} users")
@@ -2277,12 +2277,12 @@ async def mark_absent_bulk(
     """
     target_date_str = (data or {}).get("date") or datetime.now(IST).date().isoformat()
     try:
-        datetime.strptime(target_date_str, "%Y-%m-%d")
+        parsed_target = datetime.strptime(target_date_str, "%Y-%m-%d").date()
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+    if parsed_target > datetime.now(IST).date():
+        raise HTTPException(status_code=400, detail="Cannot mark absent for a future date.")
     result = await _mark_absent_for_date(target_date_str)
-    return result
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ABSENT SUMMARY ENDPOINT
@@ -3712,7 +3712,7 @@ async def _sync_due_date_to_compliance(dd: dict, current_user) -> None:
     if existing:
         await db.compliance_masters.update_one(
             {'id': existing['id']},
-            {'': {'due_date': due_date, 'name': title, 'updated_at': now_str}}
+            {'$set': {'due_date': due_date, 'name': title, 'updated_at': now_str}}
         )
     else:
         import uuid as _uuid
@@ -3732,7 +3732,8 @@ async def _sync_due_date_to_compliance(dd: dict, current_user) -> None:
             'created_at':              now_str,
             'updated_at':              now_str,
         }
-        await db.compliance_masters.insert_one({**doc, '_id': doc['id']})
+        await db.compliance_masters.insert_one(doc)
+        doc.pop('_id', None)
 
 
 @api_router.post("/duedates", response_model=DueDate)
@@ -3834,9 +3835,10 @@ async def get_upcoming_due_dates(
         # ── FIX: include overdue items (dd_date < now) AND upcoming items ──
         # Old code: if now <= dd_date <= future_date   ← excluded overdue
         # New code: if dd_date <= future_date           ← includes overdue
-        if dd_date <= future_date:
+        past_bound = now - timedelta(days=90)
+        if past_bound <= dd_date <= future_date:
             dd["due_date"] = dd_date
-            dd["days_remaining"] = (dd_date - now).days   # negative = overdue
+            dd["days_remaining"] = (dd_date - now).days
             results.append(dd)
 
     # Sort: overdue first (most-negative days_remaining), then by closest due date
@@ -3934,14 +3936,14 @@ async def delete_due_date(
 reminders_col = db["reminders"]
 
 
-class ReminderCreate(BaseModel):
+class ReminderCreateFull(BaseModel):
     title: str
     description: Optional[str] = ""
-    remind_at: str          # ISO datetime string
+    remind_at: str
     event_id: Optional[str] = None
     source: Optional[str] = "manual"
-    priority: Optional[str] = "medium"    # low | medium | high
-    reminder_type: Optional[str] = "reminder"  # reminder | meeting
+    priority: Optional[str] = "medium"
+    reminder_type: Optional[str] = "reminder"
     related_task_id: Optional[str] = None
 
 
@@ -3989,7 +3991,7 @@ async def get_reminders(
 
 @api_router.post("/email/save-as-reminder")
 async def create_reminder(
-    body: ReminderCreate,
+    body: ReminderCreateFull,
     current_user: User = Depends(get_current_user),
 ):
     """Create a new reminder."""
