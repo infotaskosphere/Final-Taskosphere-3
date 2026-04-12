@@ -1815,7 +1815,12 @@ function ComplianceCard({item,onClick,onEdit,onDelete,isDark,viewMode='board'}){
 // ── Main Page ──────────────────────────────────────────────────────────────
 export default function CompliancePage(){
   const isDark=useDark();
-  const{user}=useAuth();
+  const{user,hasPermission}=useAuth();
+  const isAdmin = user?.role === 'admin';
+  const canManage = isAdmin || hasPermission('can_manage_compliance');
+  // Categories this user is allowed to see (null = all, for admin)
+  const [allowedCategories, setAllowedCategories] = useState(null); // populated from dashboard response
+
   const[compliance,setCompliance]=useState([]);
   const[dashboard,setDashboard]=useState(null);
   const[loading,setLoading]=useState(true);
@@ -1841,7 +1846,14 @@ export default function CompliancePage(){
         api.get('/users').catch(()=>({data:[]})),
       ]);
       setCompliance(Array.isArray(listRes.data)?listRes.data:[]);
-      setDashboard(dashRes.data||null);
+      const dash=dashRes.data||null;
+      setDashboard(dash);
+      // Store allowed_categories returned by the backend (null = admin sees all)
+      if(dash&&Array.isArray(dash.allowed_categories)){
+        setAllowedCategories(dash.allowed_categories);
+      } else if(isAdmin){
+        setAllowedCategories(null);
+      }
       setAllUsers(Array.isArray(usersRes.data)?usersRes.data:[]);
     }catch{toast.error('Failed to load compliance data');}
     finally{setLoading(false);}
@@ -1852,8 +1864,14 @@ export default function CompliancePage(){
   const handleDelete=async(id,name)=>{
     if(!confirm(`Delete "${name}" and all assignments?`))return;
     try{await api.delete(`/compliance/${id}`);toast.success('Deleted');setRefreshKey(k=>k+1);}
-    catch{toast.error('Delete failed');}
+    catch(e){toast.error(e?.response?.data?.detail||'Delete failed');}
   };
+
+  // Only show category tabs the user can access
+  const visibleCategories = useMemo(()=>{
+    if(!allowedCategories) return CATEGORIES; // admin sees all
+    return CATEGORIES.filter(c=>allowedCategories.includes(c));
+  },[allowedCategories]);
 
   const filtered=useMemo(()=>{
     if(!searchQ.trim())return compliance;
@@ -1868,6 +1886,7 @@ export default function CompliancePage(){
     return(
       <AnimatePresence mode="wait">
         <ComplianceDetailPage key={detailItem.id} compliance={detailItem} isDark={isDark} allUsers={allUsers}
+          canManage={canManage}
           onBack={()=>{setDetailItem(null);setRefreshKey(k=>k+1);}}/>
       </AnimatePresence>
     );
@@ -1885,15 +1904,37 @@ export default function CompliancePage(){
               <div>
                 <p className="text-white/60 text-xs font-semibold uppercase tracking-widest mb-1">Compliance Management</p>
                 <h1 className="text-2xl font-bold text-white tracking-tight">Universal Compliance Tracker</h1>
-                <p className="text-white/60 text-sm mt-1">Track ROC, GST, ITR, TDS filings across all clients in real time</p>
+                <p className="text-white/60 text-sm mt-1">
+                  {isAdmin
+                    ? 'Track ROC, GST, ITR, TDS filings across all clients in real time'
+                    : `Viewing compliance for: ${(user?.departments||[]).join(', ')||'your department'}`
+                  }
+                </p>
               </div>
-              <button onClick={()=>setShowAddModal(true)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white border border-white/30 hover:bg-white/15 transition-all self-start md:self-auto">
-                <Plus className="w-4 h-4"/>Add Compliance
-              </button>
+              {/* Only admin and managers with can_manage_compliance see Add button */}
+              {canManage&&(
+                <button onClick={()=>setShowAddModal(true)}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white border border-white/30 hover:bg-white/15 transition-all self-start md:self-auto">
+                  <Plus className="w-4 h-4"/>Add Compliance
+                </button>
+              )}
             </div>
           </div>
         </motion.div>
+
+        {/* Dept-scope info banner for non-admins */}
+        {!isAdmin&&allowedCategories&&allowedCategories.length>0&&(
+          <motion.div variants={itemVariants}
+            className="flex items-center gap-2.5 px-4 py-3 rounded-xl border text-sm font-medium"
+            style={{backgroundColor:isDark?'rgba(31,111,178,0.12)':'#eff6ff',borderColor:isDark?'rgba(31,111,178,0.3)':'#bfdbfe',color:isDark?'#93c5fd':'#1d4ed8'}}>
+            <ShieldCheck className="w-4 h-4 flex-shrink-0"/>
+            <span>
+              You are viewing compliance items for your department
+              {' '}({allowedCategories.map(c=>CATEGORY_CFG[c]?.label||c).join(', ')}).
+              {!canManage&&' Contact your admin to create or delete compliance types.'}
+            </span>
+          </motion.div>
+        )}
 
         {dashboard&&(
           <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1926,12 +1967,22 @@ export default function CompliancePage(){
               style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
-            {['all',...CATEGORIES].map(cat=>{
-              const cfg=cat==='all'?null:CATEGORY_CFG[cat];const active=catFilter===cat;
+            {/* Show 'All' tab only if user has access to more than one category */}
+            {(visibleCategories.length>1||isAdmin)&&(
+              <button key="all" onClick={()=>setCatFilter('all')}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all"
+                style={{backgroundColor:catFilter==='all'?(isDark?D.raised:'#f1f5f9'):(isDark?D.card:'#fff'),
+                  borderColor:catFilter==='all'?'#1F6FB2':(isDark?D.border:'#e2e8f0'),
+                  color:catFilter==='all'?'#1F6FB2':(isDark?D.muted:'#64748b')}}>
+                All
+              </button>
+            )}
+            {visibleCategories.map(cat=>{
+              const cfg=CATEGORY_CFG[cat];const active=catFilter===cat;
               return(<button key={cat} onClick={()=>setCatFilter(cat)}
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all"
                 style={{backgroundColor:active?(cfg?.bg||(isDark?D.raised:'#f1f5f9')):(isDark?D.card:'#fff'),borderColor:active?(cfg?.color||'#1F6FB2'):(isDark?D.border:'#e2e8f0'),color:active?(cfg?.color||'#1F6FB2'):(isDark?D.muted:'#64748b')}}>
-                {cat==='all'?'All':(cfg?.label||cat)}
+                {cfg?.label||cat}
               </button>);
             })}
           </div>
@@ -1976,9 +2027,9 @@ export default function CompliancePage(){
             </div>
             <div className="text-center">
               <p className="text-lg font-bold" style={{color:isDark?D.text:'#0f172a'}}>{searchQ||catFilter!=='all'?'No matching compliance':'No compliance defined yet'}</p>
-              <p className="text-sm mt-1" style={{color:isDark?D.muted:'#64748b'}}>{searchQ||catFilter!=='all'?'Adjust filters':'Add a compliance type to start tracking'}</p>
+              <p className="text-sm mt-1" style={{color:isDark?D.muted:'#64748b'}}>{searchQ||catFilter!=='all'?'Adjust filters':canManage?'Add a compliance type to start tracking':'No compliance items found for your department'}</p>
             </div>
-            {!searchQ&&catFilter==='all'&&(
+            {!searchQ&&catFilter==='all'&&canManage&&(
               <button onClick={()=>setShowAddModal(true)} className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white" style={{backgroundColor:'#1F6FB2'}}>
                 <Plus className="w-4 h-4"/>Add First Compliance
               </button>
@@ -1992,29 +2043,32 @@ export default function CompliancePage(){
               style={{gridTemplateColumns:'4px 1fr 110px 100px 130px 100px 80px 72px',
                 backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
               <div/><div>Compliance Name</div><div>FY Year</div><div>Due Date</div>
-              <div>Progress</div><div>% Done</div><div>Clients</div><div>Actions</div>
+              <div>Progress</div><div>% Done</div><div>Clients</div>
+              {canManage&&<div>Actions</div>}
             </div>
             {filtered.map(item=>(
               <ComplianceCard key={item.id} item={item} isDark={isDark} viewMode="list"
+                canManage={canManage}
                 onClick={()=>setDetailItem(item)}
-                onEdit={e=>{e&&e.stopPropagation();setEditingItem(item);}}
-                onDelete={e=>{e&&e.stopPropagation();handleDelete(item.id,item.name);}}/>
+                onEdit={canManage?(e=>{e&&e.stopPropagation();setEditingItem(item);}):undefined}
+                onDelete={canManage?(e=>{e&&e.stopPropagation();handleDelete(item.id,item.name);}):undefined}/>
             ))}
           </motion.div>
         ):(
           <motion.div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 items-stretch" variants={containerVariants}>
             {filtered.map(item=>(
               <ComplianceCard key={item.id} item={item} isDark={isDark} viewMode="board"
+                canManage={canManage}
                 onClick={()=>setDetailItem(item)}
-                onEdit={e=>{e&&e.stopPropagation();setEditingItem(item);}}
-                onDelete={e=>{e&&e.stopPropagation();handleDelete(item.id,item.name);}}/>
+                onEdit={canManage?(e=>{e&&e.stopPropagation();setEditingItem(item);}):undefined}
+                onDelete={canManage?(e=>{e&&e.stopPropagation();handleDelete(item.id,item.name);}):undefined}/>
             ))}
           </motion.div>
         )}
       </motion.div>
 
       <AnimatePresence>
-        {(showAddModal||editingItem)&&(
+        {(showAddModal||editingItem)&&canManage&&(
           <ComplianceFormModal isDark={isDark} existing={editingItem||undefined}
             onClose={()=>{setShowAddModal(false);setEditingItem(null);}}
             onSave={()=>{setShowAddModal(false);setEditingItem(null);setRefreshKey(k=>k+1);}}/>
