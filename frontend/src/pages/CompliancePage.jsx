@@ -675,8 +675,43 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
   const[monthlyLoading,setMonthlyLoading]=useState(false);
   const[monthlyViewYear,setMonthlyViewYear]=useState(()=>new Date().getFullYear());
   const[monthlyAssignment,setMonthlyAssignment]=useState(null); // for per-client month editing
+  // Inline comment popover
+  const[commentPopup,setCommentPopup]=useState(null); // {assignmentId, clientId, clientName}
+  const[popupComments,setPopupComments]=useState([]);
+  const[popupCommentsLoading,setPopupCommentsLoading]=useState(false);
+  const[popupCommentText,setPopupCommentText]=useState('');
+  const[popupSending,setPopupSending]=useState(false);
+  // Row detail modal
+  const[detailRow,setDetailRow]=useState(null); // assignment object
 
   const userMap=useMemo(()=>{const m={};(allUsers||[]).forEach(u=>{m[u.id]=u.full_name;});return m;},[allUsers]);
+
+  const openCommentPopup=useCallback(async(a)=>{
+    setCommentPopup({assignmentId:a.id,clientId:a.client_id,clientName:a.client_name});
+    setPopupCommentText('');
+    setPopupComments([]);
+    setPopupCommentsLoading(true);
+    try{
+      const res=await api.get(`/compliance/${compliance.id}/comments?client_id=${a.client_id}`);
+      setPopupComments(Array.isArray(res.data)?res.data:[]);
+    }catch{}
+    finally{setPopupCommentsLoading(false);}
+  },[compliance.id]);
+
+  const submitPopupComment=useCallback(async()=>{
+    if(!popupCommentText.trim()||!commentPopup)return;
+    setPopupSending(true);
+    try{
+      const res=await api.post(`/compliance/${compliance.id}/comments`,{
+        text:popupCommentText.trim(),
+        client_id:commentPopup.clientId,
+      });
+      setPopupComments(prev=>[res.data,...prev]);
+      setPopupCommentText('');
+      toast.success('Comment added');
+    }catch{toast.error('Failed to add comment');}
+    finally{setPopupSending(false);}
+  },[compliance.id,commentPopup,popupCommentText]);
 
   const fetchItems=useCallback(async()=>{
     setLoading(true);
@@ -1024,7 +1059,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                       <span className="text-[11px] font-bold tabular-nums" style={{color:isDark?D.dimmer:'#94a3b8'}}>{idx+1}</span>
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold truncate" style={{color:isDark?D.text:'#0f172a'}}>{a.client_name}</p>
+                      <button onClick={()=>setDetailRow(a)} className="text-sm font-semibold truncate text-left w-full hover:underline transition-all" style={{color:isDark?D.text:'#0f172a'}}>{a.client_name}</button>
                     </div>
                     <div className="relative flex-shrink-0" onClick={e=>e.stopPropagation()}>
                       <StatusPill status={a.status} size="xs" onClick={()=>setOpenDropdown(d=>d===a.id?null:a.id)}/>
@@ -1059,11 +1094,11 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                         </button>
                       )}
                     </div>
-                    <div className="flex-shrink-0 flex items-center justify-center">
+                    <div className="flex-shrink-0 flex items-center justify-center" onClick={e=>e.stopPropagation()}>
                       <button
-                        onClick={()=>{setActiveTab('comments');setCommentClient(a.client_id||'all');}}
-                        title="View / add comments"
-                        className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:opacity-80"
+                        onClick={e=>{e.stopPropagation();openCommentPopup(a);}}
+                        title="Add / view comments"
+                        className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:opacity-80 relative"
                         style={{backgroundColor:isDark?'rgba(59,130,246,0.12)':'rgba(59,130,246,0.08)',color:'#3B82F6'}}>
                         <MessageSquare className="w-3.5 h-3.5"/>
                       </button>
@@ -1248,112 +1283,146 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
           )}
         </div>
       )}
-      {/* ─── COMMENTS TAB ────────────────────────────────────────────────── */}
-      {activeTab==='comments'&&(
-        <div className="flex-1 overflow-auto flex flex-col" style={{scrollbarWidth:'thin'}}>
-          {/* Add comment bar */}
-          <div className="px-5 py-4 border-b flex-shrink-0" style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0'}}>
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-black"
-                style={{backgroundColor:catCfg.color}}>
-                {(user?.full_name||'U')[0].toUpperCase()}
-              </div>
-              <div className="flex-1 space-y-2">
-                {/* Client filter for comment */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs font-semibold" style={{color:isDark?D.muted:'#64748b'}}>Comment for:</span>
-                  <select value={commentClient} onChange={e=>setCommentClient(e.target.value)}
-                    className="text-xs px-2 py-1 border rounded-lg focus:outline-none"
-                    style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}>
-                    <option value="all">All clients (general)</option>
-                    {items.map(a=><option key={a.id} value={a.client_id}>{a.client_name}</option>)}
-                  </select>
+
+
+      <AnimatePresence>
+        {/* ─── INLINE COMMENT POPUP ───────────────────────────────────────── */}
+        <AnimatePresence>
+        {commentPopup&&(
+          <motion.div className="fixed inset-0 z-[9998] flex items-end sm:items-center justify-center p-4"
+            style={{background:'rgba(0,0,0,0.55)',backdropFilter:'blur(6px)'}}
+            initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
+            onClick={()=>setCommentPopup(null)}>
+            <motion.div className="w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+              style={{backgroundColor:isDark?D.card:'#fff',border:isDark?`1px solid ${D.border}`:'1px solid #e2e8f0',maxHeight:'75vh'}}
+              initial={{scale:0.94,y:20}} animate={{scale:1,y:0}} exit={{scale:0.94,y:20}}
+              transition={{type:'spring',stiffness:260,damping:24}}
+              onClick={e=>e.stopPropagation()}>
+              {/* Header */}
+              <div className="px-4 py-3 flex items-center justify-between flex-shrink-0 border-b"
+                style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0'}}>
+                <div className="min-w-0">
+                  <p className="text-xs font-black truncate" style={{color:isDark?D.text:'#0f172a'}}>{commentPopup.clientName}</p>
+                  <p className="text-[10px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>Comments</p>
                 </div>
+                <button onClick={()=>setCommentPopup(null)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:opacity-70" style={{color:isDark?D.muted:'#64748b'}}><X className="w-4 h-4"/></button>
+              </div>
+              {/* Comments list */}
+              <div className="flex-1 overflow-auto p-4 space-y-3" style={{scrollbarWidth:'thin'}}>
+                {popupCommentsLoading?(<div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-blue-500"/></div>
+                ):popupComments.length===0?(<p className="text-center text-sm py-8" style={{color:isDark?D.dimmer:'#94a3b8'}}>No comments yet</p>
+                ):popupComments.map(c=>(
+                  <div key={c.id} className="flex items-start gap-2.5">
+                    <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-white text-[10px] font-black" style={{backgroundColor:catCfg.color}}>{(c.author_name||'U')[0].toUpperCase()}</div>
+                    <div className="flex-1 rounded-xl p-2.5 border" style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0'}}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-bold" style={{color:isDark?D.text:'#0f172a'}}>{c.author_name}</span>
+                        <span className="text-[10px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>{timeAgo(c.created_at)}</span>
+                      </div>
+                      <p className="text-xs leading-relaxed whitespace-pre-wrap" style={{color:isDark?D.muted:'#374151'}}>{c.text}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Add comment input */}
+              <div className="px-4 py-3 border-t flex-shrink-0" style={{borderColor:isDark?D.border:'#e2e8f0',backgroundColor:isDark?D.card:'#fff'}}>
                 <div className="flex items-end gap-2">
-                  <textarea value={commentText} onChange={e=>setCommentText(e.target.value)}
-                    onKeyDown={e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey))addComment();}}
-                    placeholder="Add a comment, note, or reason for delay… (Ctrl+Enter to submit)"
+                  <textarea value={popupCommentText} onChange={e=>setPopupCommentText(e.target.value)}
+                    onKeyDown={e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey))submitPopupComment();}}
+                    placeholder="Write a comment… (Ctrl+Enter to post)"
                     rows={2}
-                    className="flex-1 px-3 py-2 border rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="flex-1 px-3 py-2 border rounded-xl text-xs resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
                     style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
-                  <button onClick={addComment} disabled={sendingComment||!commentText.trim()}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-50 flex-shrink-0"
+                  <button onClick={submitPopupComment} disabled={popupSending||!popupCommentText.trim()}
+                    className="flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90 disabled:opacity-50 flex-shrink-0"
                     style={{backgroundColor:catCfg.color}}>
-                    {sendingComment?<Loader2 className="w-4 h-4 animate-spin"/>:<Send className="w-4 h-4"/>}
+                    {popupSending?<Loader2 className="w-3.5 h-3.5 animate-spin"/>:<Send className="w-3.5 h-3.5"/>}
                     Post
                   </button>
                 </div>
               </div>
-            </div>
-          </div>
+            </motion.div>
+          </motion.div>
+        )}
+        </AnimatePresence>
 
-          {/* Client filter for viewing comments */}
-          <div className="px-5 py-2 border-b flex items-center gap-2 flex-shrink-0"
-            style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0'}}>
-            <span className="text-xs font-semibold" style={{color:isDark?D.muted:'#64748b'}}>Filter:</span>
-            <div className="flex flex-wrap gap-1.5">
-              <button onClick={()=>setCommentClient('all')}
-                className="text-xs px-2.5 py-1 rounded-lg font-semibold border transition-all"
-                style={{backgroundColor:commentClient==='all'?catCfg.bg:(isDark?D.card:'#fff'),borderColor:commentClient==='all'?catCfg.color:(isDark?D.border:'#e2e8f0'),color:commentClient==='all'?catCfg.color:(isDark?D.dimmer:'#94a3b8')}}>
-                All
-              </button>
-              {items.slice(0,12).map(a=>(
-                <button key={a.id} onClick={()=>setCommentClient(a.client_id)}
-                  className="text-xs px-2.5 py-1 rounded-lg font-semibold border transition-all"
-                  style={{backgroundColor:commentClient===a.client_id?catCfg.bg:(isDark?D.card:'#fff'),borderColor:commentClient===a.client_id?catCfg.color:(isDark?D.border:'#e2e8f0'),color:commentClient===a.client_id?catCfg.color:(isDark?D.dimmer:'#64748b')}}>
-                  {a.client_name}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Comments list */}
-          <div className="flex-1 overflow-auto p-5 space-y-3" style={{scrollbarWidth:'thin'}}>
-            {commentsLoading?(
-              <div className="flex items-center justify-center py-16"><Loader2 className="w-6 h-6 text-blue-500 animate-spin"/></div>
-            ):comments.length===0?(
-              <div className="flex flex-col items-center justify-center py-16 gap-3">
-                <MessageSquare className="w-10 h-10" style={{color:isDark?D.border:'#d1d5db'}}/>
-                <p className="text-sm font-semibold" style={{color:isDark?D.muted:'#64748b'}}>No comments yet</p>
-                <p className="text-xs" style={{color:isDark?D.dimmer:'#94a3b8'}}>Add the first comment or reason for delay above</p>
+        {/* ─── ROW DETAIL MODAL ─────────────────────────────────────────────── */}
+        <AnimatePresence>
+        {detailRow&&(
+          <motion.div className="fixed inset-0 z-[9997] flex items-center justify-center p-4"
+            style={{background:'rgba(0,0,0,0.6)',backdropFilter:'blur(8px)'}}
+            initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
+            onClick={()=>setDetailRow(null)}>
+            <motion.div className="w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden"
+              style={{backgroundColor:isDark?D.card:'#fff',border:isDark?`1px solid ${D.border}`:'1px solid #e2e8f0',maxHeight:'85vh'}}
+              initial={{scale:0.93,y:20}} animate={{scale:1,y:0}} exit={{scale:0.93,y:20}}
+              transition={{type:'spring',stiffness:240,damping:24}}
+              onClick={e=>e.stopPropagation()}>
+              {/* Header */}
+              <div className="px-5 py-4 flex items-center justify-between text-white flex-shrink-0"
+                style={{background:`linear-gradient(135deg,${catCfg.color}dd,${catCfg.color}99)`}}>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-0.5">{compliance.name}</p>
+                  <h3 className="text-base font-black truncate">{detailRow.client_name}</h3>
+                </div>
+                <button onClick={()=>setDetailRow(null)} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center flex-shrink-0 ml-3"><X className="w-4 h-4 text-white"/></button>
               </div>
-            ):(
-              comments.map(c=>(
-                <motion.div key={c.id} layout initial={{opacity:0,y:8}} animate={{opacity:1,y:0}}
-                  className="flex items-start gap-3 group">
-                  <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-black"
-                    style={{backgroundColor:catCfg.color}}>
-                    {(c.author_name||'U')[0].toUpperCase()}
+              {/* Content */}
+              <div className="overflow-auto p-5 space-y-4" style={{maxHeight:'calc(85vh - 80px)',scrollbarWidth:'thin'}}>
+                {/* Status + Priority row */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl p-3 border" style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0'}}>
+                    <p className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{color:isDark?D.dimmer:'#94a3b8'}}>Status</p>
+                    <StatusPill status={detailRow.status}/>
                   </div>
-                  <div className="flex-1 rounded-2xl p-3 border"
-                    style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0'}}>
-                    <div className="flex items-start justify-between gap-2 mb-1.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-black" style={{color:isDark?D.text:'#0f172a'}}>{c.author_name}</span>
-                        {c.client_name&&(
-                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
-                            style={{backgroundColor:catCfg.bg,color:catCfg.color}}>
-                            {c.client_name}
-                          </span>
-                        )}
-                        <span className="text-[10px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>{timeAgo(c.created_at)}</span>
-                      </div>
-                      <button onClick={()=>deleteComment(c.id)}
-                        className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded-lg flex items-center justify-center transition-all hover:bg-red-100 flex-shrink-0"
-                        style={{color:'#ef4444'}}>
-                        <X className="w-3 h-3"/>
-                      </button>
+                  <div className="rounded-xl p-3 border" style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0'}}>
+                    <p className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{color:isDark?D.dimmer:'#94a3b8'}}>Assigned To</p>
+                    <p className="text-sm font-semibold" style={{color:isDark?D.text:'#0f172a'}}>{detailRow.assigned_to_name||userMap[detailRow.assigned_to]||'—'}</p>
+                  </div>
+                </div>
+                {/* Dates */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl p-3 border" style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0'}}>
+                    <p className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{color:isDark?D.dimmer:'#94a3b8'}}>Last Updated</p>
+                    <p className="text-sm font-semibold" style={{color:isDark?D.text:'#0f172a'}}>{fmtDate(detailRow.updated_at,'dd MMM yyyy · HH:mm')}</p>
+                  </div>
+                  {detailRow.completed_at&&(
+                    <div className="rounded-xl p-3 border" style={{backgroundColor:isDark?'rgba(31,175,90,0.08)':'#f0fdf4',borderColor:isDark?'rgba(31,175,90,0.3)':'#bbf7d0'}}>
+                      <p className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{color:'#1FAF5A'}}>Completed</p>
+                      <p className="text-sm font-semibold" style={{color:isDark?D.text:'#0f172a'}}>{fmtDate(detailRow.completed_at,'dd MMM yyyy')}</p>
                     </div>
-                    <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{color:isDark?D.muted:'#374151'}}>{c.text}</p>
-                  </div>
-                </motion.div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
+                  )}
+                  {detailRow.filed_at&&(
+                    <div className="rounded-xl p-3 border" style={{backgroundColor:isDark?'rgba(139,92,246,0.08)':'#faf5ff',borderColor:isDark?'rgba(139,92,246,0.3)':'#e9d5ff'}}>
+                      <p className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{color:'#8B5CF6'}}>Filed</p>
+                      <p className="text-sm font-semibold" style={{color:isDark?D.text:'#0f172a'}}>{fmtDate(detailRow.filed_at,'dd MMM yyyy')}</p>
+                    </div>
+                  )}
+                </div>
+                {/* Notes */}
+                <div className="rounded-xl p-3.5 border" style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0'}}>
+                  <p className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{color:isDark?D.dimmer:'#94a3b8'}}>Notes</p>
+                  <p className="text-sm leading-relaxed" style={{color:detailRow.notes?(isDark?D.muted:'#374151'):(isDark?D.dimmer:'#cbd5e1'),fontStyle:detailRow.notes?'normal':'italic'}}>{detailRow.notes||'No notes added'}</p>
+                </div>
+                {/* Actions */}
+                <div className="flex gap-2 pt-1">
+                  <button onClick={()=>{setDetailRow(null);openCommentPopup(detailRow);}}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold border transition-all hover:opacity-80"
+                    style={{backgroundColor:isDark?'rgba(59,130,246,0.1)':'rgba(59,130,246,0.08)',borderColor:isDark?'rgba(59,130,246,0.3)':'rgba(59,130,246,0.3)',color:'#3B82F6'}}>
+                    <MessageSquare className="w-4 h-4"/> View Comments
+                  </button>
+                  <button onClick={()=>{setDetailRow(null);setEditingNote({id:detailRow.id,value:detailRow.notes||''}); }}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold border transition-all hover:opacity-80"
+                    style={{backgroundColor:isDark?'rgba(31,175,90,0.1)':'rgba(31,175,90,0.08)',borderColor:isDark?'rgba(31,175,90,0.3)':'rgba(31,175,90,0.3)',color:'#1FAF5A'}}>
+                    <StickyNote className="w-4 h-4"/> Edit Note
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+        </AnimatePresence>
 
-      <AnimatePresence>
         {showImport&&<ImportExcelModal complianceId={compliance.id} complianceName={compliance.name} compliance={compliance} allUsers={allUsers} isDark={isDark} onClose={()=>setShowImport(false)} onImported={()=>{setRefreshKey(k=>k+1);setShowImport(false);}}/>}
       </AnimatePresence>
       <AnimatePresence>
