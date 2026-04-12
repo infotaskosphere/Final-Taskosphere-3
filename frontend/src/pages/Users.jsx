@@ -116,6 +116,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_view_staff_rankings: true, can_delete_data: true, can_delete_tasks: true,
       can_connect_email: true, can_view_own_data: true, can_create_quotations: true,
       can_manage_invoices: true, can_view_passwords: true, can_edit_passwords: true,
+      can_view_compliance: true, can_manage_compliance: true,
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [],
       view_other_activity: [], view_other_visits: [],
@@ -2656,6 +2657,36 @@ export default function Users() {
                           </p>
                         )}
                       </div>
+                    </div>
+                  )}
+
+                  {/* ── Compliance Tracker ─────────────────────────────── */}
+                  <ModuleAccessCard
+                    icon={ShieldCheck}
+                    title="Compliance Tracker"
+                    desc="View the Compliance Tracker page. Non-admins see only their department's categories (GST, ROC, TDS, etc.)"
+                    permKey="can_view_compliance"
+                    permissions={permissions}
+                    setPermissions={setPermissions}
+                    accentColor="#1F6FB2"
+                    badge={
+                      permissions.can_manage_compliance
+                        ? 'View + Manage'
+                        : permissions.can_view_compliance
+                        ? 'View Only'
+                        : undefined
+                    }
+                  />
+                  {permissions.can_view_compliance && (
+                    <div className="ml-5">
+                      <PermToggleRow
+                        permKey="can_manage_compliance"
+                        label="Manage Compliance Items"
+                        desc="Allow creating and editing compliance masters in their department. Delete is admin-only."
+                        icon={Pencil}
+                        permissions={permissions}
+                        setPermissions={setPermissions}
+                      />
                     </div>
                   )}
                 </div>
