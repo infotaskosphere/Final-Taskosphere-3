@@ -774,7 +774,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
         ].map(({key,label,icon:Icon,count})=>(
           <button key={key} onClick={()=>setActiveTab(key)}
             className="flex-shrink-0 px-5 py-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap flex items-center gap-2"
-            style={{borderColor:activeTab===key?catCfg.color:'transparent',color:activeTab===key?catCfg.color:isDark?D.dimmer:'#64748b',backgroundColor:activeTab===key?(isDark?'rgba(255,255,255,0.03)'):'transparent'}}>
+            style={{borderColor:activeTab===key?catCfg.color:'transparent',color:activeTab===key?catCfg.color:isDark?D.dimmer:'#64748b',backgroundColor:activeTab===key?(isDark?'rgba(255,255,255,0.03)':'rgba(0,0,0,0.01)'):'transparent'}}>
             <Icon className="w-3.5 h-3.5"/>
             {label}
             {count!=null&&count>0&&<span className="text-[10px] font-black px-1.5 py-0.5 rounded-full"
