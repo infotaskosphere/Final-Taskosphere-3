@@ -344,6 +344,40 @@ async def bulk_assign_clients(
     if not cm:
         raise HTTPException(404, "Compliance not found")
 
+    compliance_category = (cm.get("category") or "").upper()
+
+    # Category → service keyword mapping for matching client.assignments[].services
+    CATEGORY_SERVICE_KEYWORDS = {
+        "ROC":     ["roc", "mca", "company"],
+        "GST":     ["gst"],
+        "ITR":     ["itr", "income tax", "it"],
+        "TDS":     ["tds", "tcs"],
+        "AUDIT":   ["audit"],
+        "PF_ESIC": ["pf", "esic", "provident"],
+        "PT":      ["pt", "professional tax"],
+    }
+    keywords = CATEGORY_SERVICE_KEYWORDS.get(compliance_category, [])
+
+    def _pick_assigned(client_doc: dict) -> Optional[str]:
+        """
+        Priority:
+        1. Client's per-service assignment matching this compliance category
+        2. Client's default assigned_to
+        3. Caller-supplied data.assigned_to (modal dropdown)
+        """
+        # 1. Service-specific assignment
+        for asgn in (client_doc.get("assignments") or []):
+            svc_list = [s.lower() for s in (asgn.get("services") or [])]
+            if any(kw in " ".join(svc_list) for kw in keywords):
+                uid = asgn.get("user_id")
+                if uid:
+                    return uid
+        # 2. Client default
+        if client_doc.get("assigned_to"):
+            return client_doc["assigned_to"]
+        # 3. Modal-level fallback
+        return data.assigned_to or None
+
     # Already-assigned client IDs
     existing_ids: set = set()
     async for a in db.compliance_assignments.find(
@@ -351,12 +385,12 @@ async def bulk_assign_clients(
     ):
         existing_ids.add(a["client_id"])
 
-    # Fetch client info in bulk
+    # Fetch client info in bulk — include assigned_to and assignments fields
     clients = await db.clients.find(
         {"id": {"$in": data.client_ids}},
-        {"_id": 0, "id": 1, "company_name": 1},
+        {"_id": 0, "id": 1, "company_name": 1, "assigned_to": 1, "assignments": 1},
     ).to_list(5000)
-    client_map = {c["id"]: c.get("company_name", "Unknown") for c in clients}
+    client_map = {c["id"]: c for c in clients}
 
     docs = []
     skipped = 0
@@ -364,13 +398,15 @@ async def bulk_assign_clients(
         if cid in existing_ids:
             skipped += 1
             continue
+        client_doc  = client_map.get(cid, {})
+        assigned_id = _pick_assigned(client_doc)
         doc = {
             "id":            str(uuid.uuid4()),
             "compliance_id": compliance_id,
             "client_id":     cid,
-            "client_name":   client_map.get(cid, "Unknown"),
+            "client_name":   client_doc.get("company_name", "Unknown"),
             "status":        data.default_status,
-            "assigned_to":   data.assigned_to,
+            "assigned_to":   assigned_id,
             "notes":         None,
             "created_at":    _now(),
             "updated_at":    _now(),
