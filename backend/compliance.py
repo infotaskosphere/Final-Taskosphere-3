@@ -133,6 +133,20 @@ class BulkStatusUpdate(BaseModel):
     notes:          Optional[str] = None
     assigned_to:    Optional[str] = None
 
+class CommentCreate(BaseModel):
+    text:          str
+    client_id:     Optional[str] = None   # None = comment on whole compliance
+    assignment_id: Optional[str] = None
+
+
+class MonthlyStatusUpdate(BaseModel):
+    month:       str   # "YYYY-MM"
+    status:      str
+    notes:       Optional[str] = None
+    assigned_to: Optional[str] = None
+
+
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
@@ -658,3 +672,211 @@ async def create_compliance_indexes():
         logger.info("Compliance indexes ensured")
     except Exception as exc:
         logger.warning("Compliance index creation: %s", exc)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMMENTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/{compliance_id}/comments")
+async def list_comments(
+    compliance_id: str,
+    client_id:     Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+):
+    """Get all comments for a compliance, optionally filtered by client."""
+    query: dict = {"compliance_id": compliance_id}
+    if client_id:
+        query["client_id"] = client_id
+
+    comments = await db.compliance_comments.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+    # Enrich with author name
+    user_ids = list({c["author_id"] for c in comments if c.get("author_id")})
+    user_map: dict = {}
+    if user_ids:
+        users = await db.users.find({"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "full_name": 1}).to_list(200)
+        user_map = {u["id"]: u["full_name"] for u in users}
+    for c in comments:
+        c["author_name"] = user_map.get(c.get("author_id", ""), "Unknown")
+
+    return comments
+
+
+@router.post("/{compliance_id}/comments")
+async def add_comment(
+    compliance_id: str,
+    data: CommentCreate,
+    current_user: User = Depends(get_current_user),
+):
+    """Add a comment to a compliance (optionally scoped to a client assignment)."""
+    # Resolve client name if client_id provided
+    client_name = None
+    if data.client_id:
+        doc = await db.clients.find_one({"id": data.client_id}, {"_id": 0, "company_name": 1})
+        client_name = (doc or {}).get("company_name")
+
+    comment = {
+        "id":            str(uuid.uuid4()),
+        "compliance_id": compliance_id,
+        "client_id":     data.client_id,
+        "client_name":   client_name,
+        "assignment_id": data.assignment_id,
+        "text":          data.text.strip(),
+        "author_id":     current_user.id,
+        "author_name":   getattr(current_user, "full_name", ""),
+        "created_at":    _now(),
+        "updated_at":    _now(),
+    }
+    await db.compliance_comments.insert_one({**comment, "_id": comment["id"]})
+    return comment
+
+
+@router.delete("/{compliance_id}/comments/{comment_id}")
+async def delete_comment(
+    compliance_id: str,
+    comment_id:    str,
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a comment (author or admin only)."""
+    doc = await db.compliance_comments.find_one({"id": comment_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Comment not found")
+    if doc.get("author_id") != current_user.id and current_user.role != "admin":
+        raise HTTPException(403, "Not allowed")
+    await db.compliance_comments.delete_one({"id": comment_id})
+    return {"deleted": True}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MONTHLY TRACKING
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/{compliance_id}/monthly-summary")
+async def monthly_summary(
+    compliance_id: str,
+    fy_year:       Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+):
+    """Return per-month breakdown of assignment statuses for a compliance type."""
+    import calendar as cal
+    query: dict = {"compliance_id": compliance_id}
+    records = await db.compliance_assignments.find(query, {"_id": 0}).to_list(5000)
+
+    # Build monthly breakdown from monthly_statuses embedded field
+    # Each assignment may have: monthly_statuses = {"2025-04": "completed", ...}
+    all_months: dict = {}
+    for rec in records:
+        ms = rec.get("monthly_statuses") or {}
+        for month, status in ms.items():
+            if month not in all_months:
+                all_months[month] = {"month": month, "not_started": 0, "in_progress": 0,
+                                     "completed": 0, "filed": 0, "na": 0, "total": 0}
+            all_months[month][status] = all_months[month].get(status, 0) + 1
+            all_months[month]["total"] += 1
+
+    months_sorted = sorted(all_months.values(), key=lambda x: x["month"])
+    return {"months": months_sorted, "total_clients": len(records)}
+
+
+@router.patch("/{compliance_id}/assignments/{assignment_id}/monthly")
+async def update_monthly_status(
+    compliance_id:  str,
+    assignment_id:  str,
+    data: MonthlyStatusUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    """Set/update the status for a specific month on an assignment."""
+    if data.status not in STATUSES:
+        raise HTTPException(400, f"Invalid status. Use: {STATUSES}")
+
+    upd: dict = {
+        f"monthly_statuses.{data.month}": data.status,
+        "updated_at": _now(),
+        "updated_by": current_user.id,
+    }
+    if data.notes:
+        upd[f"monthly_notes.{data.month}"] = data.notes
+    if data.assigned_to:
+        upd[f"monthly_assigned.{data.month}"] = data.assigned_to
+
+    res = await db.compliance_assignments.update_one(
+        {"id": assignment_id, "compliance_id": compliance_id},
+        {"$set": upd},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Assignment not found")
+
+    doc = await db.compliance_assignments.find_one({"id": assignment_id}, {"_id": 0})
+    return doc
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CALENDAR → TRACKER SYNC
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/sync-from-calendar")
+async def sync_from_calendar(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Sync due_dates collection → compliance_masters.
+    Creates a compliance master for any due_date that doesn't already have one.
+    Called automatically after creating/updating a due date.
+    """
+    due_dates = await db.due_dates.find({}, {"_id": 0}).to_list(5000)
+    created = 0
+    updated = 0
+
+    CATEGORY_MAP = {
+        "GST": "GST", "ROC": "ROC", "MCA": "ROC", "ITR": "ITR",
+        "TDS": "TDS", "AUDIT": "AUDIT", "PF": "PF_ESIC", "ESIC": "PF_ESIC",
+        "PT": "PT", "INCOME TAX": "ITR",
+    }
+
+    for dd in due_dates:
+        title     = dd.get("title", "").strip()
+        due_date  = dd.get("due_date")
+        if isinstance(due_date, datetime):
+            due_date = due_date.strftime("%Y-%m-%d")
+        elif isinstance(due_date, str) and "T" in due_date:
+            due_date = due_date[:10]
+
+        category = dd.get("category", "OTHER").upper()
+        category = CATEGORY_MAP.get(category, "OTHER")
+
+        # Check if a compliance master already linked to this due_date entry
+        existing = await db.compliance_masters.find_one(
+            {"calendar_due_date_id": dd["id"]}, {"_id": 0}
+        )
+
+        if existing:
+            # Update due_date if changed
+            if existing.get("due_date") != due_date:
+                await db.compliance_masters.update_one(
+                    {"id": existing["id"]},
+                    {"$set": {"due_date": due_date, "updated_at": _now()}}
+                )
+                updated += 1
+        else:
+            # Create new compliance master
+            doc = {
+                "id":                      str(uuid.uuid4()),
+                "name":                    title,
+                "category":                category if category in CATEGORIES else "OTHER",
+                "frequency":               "one_time",
+                "fy_year":                 None,
+                "period_label":            None,
+                "due_date":                due_date,
+                "description":             dd.get("description", ""),
+                "applicable_entity_types": [],
+                "calendar_due_date_id":    dd["id"],
+                "created_by":              current_user.id,
+                "created_by_name":         getattr(current_user, "full_name", ""),
+                "created_at":              _now(),
+                "updated_at":              _now(),
+            }
+            await db.compliance_masters.insert_one({**doc, "_id": doc["id"]})
+            created += 1
+
+    return {"synced": True, "created": created, "updated": updated}
