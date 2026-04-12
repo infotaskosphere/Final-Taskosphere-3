@@ -14,7 +14,8 @@ import {
   Users, Trash2, Edit2, Loader2, RefreshCw, ChevronRight,
   FileUp, Zap, Target, Calendar, BookOpen, FolderOpen,
   ArrowLeft, StickyNote, ShieldCheck, AlertTriangle,
-  Info, Repeat,
+  Info, Repeat, LayoutGrid, List, MessageSquare, Send,
+  BarChart3, ChevronLeft, TrendingUp,
 } from 'lucide-react';
 
 const D = {
@@ -562,6 +563,7 @@ function AssignClientsModal({compliance,onClose,onAssigned,isDark}){
 
 // ── Full Page Detail View ──────────────────────────────────────────────────
 function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUsers}){
+  const{user}=useAuth();
   const[compliance,setCompliance]=useState(initialCompliance);
   const[items,setItems]=useState([]);
   const[total,setTotal]=useState(0);
@@ -575,6 +577,17 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
   const[showAssign,setShowAssign]=useState(false);
   const[editingNote,setEditingNote]=useState(null);
   const[refreshKey,setRefreshKey]=useState(0);
+  // New tabs
+  const[activeTab,setActiveTab]=useState('clients'); // 'clients' | 'monthly' | 'comments'
+  const[comments,setComments]=useState([]);
+  const[commentsLoading,setCommentsLoading]=useState(false);
+  const[commentText,setCommentText]=useState('');
+  const[commentClient,setCommentClient]=useState('all'); // 'all' or client_id
+  const[sendingComment,setSendingComment]=useState(false);
+  const[monthlySummary,setMonthlySummary]=useState({months:[],total_clients:0});
+  const[monthlyLoading,setMonthlyLoading]=useState(false);
+  const[monthlyViewYear,setMonthlyViewYear]=useState(()=>new Date().getFullYear());
+  const[monthlyAssignment,setMonthlyAssignment]=useState(null); // for per-client month editing
 
   const userMap=useMemo(()=>{const m={};(allUsers||[]).forEach(u=>{m[u.id]=u.full_name;});return m;},[allUsers]);
 
@@ -593,7 +606,28 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
     finally{setLoading(false);}
   },[compliance.id,statusFilter,search,refreshKey]);
 
+  const fetchComments=useCallback(async()=>{
+    setCommentsLoading(true);
+    try{
+      const params=commentClient!=='all'?`?client_id=${commentClient}`:'';
+      const res=await api.get(`/compliance/${compliance.id}/comments${params}`);
+      setComments(Array.isArray(res.data)?res.data:[]);
+    }catch{toast.error('Failed to load comments');}
+    finally{setCommentsLoading(false);}
+  },[compliance.id,commentClient]);
+
+  const fetchMonthlySummary=useCallback(async()=>{
+    setMonthlyLoading(true);
+    try{
+      const res=await api.get(`/compliance/${compliance.id}/monthly-summary`);
+      setMonthlySummary(res.data||{months:[],total_clients:0});
+    }catch{toast.error('Failed to load monthly data');}
+    finally{setMonthlyLoading(false);}
+  },[compliance.id]);
+
   useEffect(()=>{fetchItems();},[fetchItems]);
+  useEffect(()=>{if(activeTab==='comments')fetchComments();},[activeTab,fetchComments]);
+  useEffect(()=>{if(activeTab==='monthly')fetchMonthlySummary();},[activeTab,fetchMonthlySummary]);
   useEffect(()=>{
     if(!openDropdown&&!bulkOpen)return;
     const fn=()=>{setOpenDropdown(null);setBulkOpen(false);};
@@ -629,6 +663,35 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
     catch{fetchItems();}
   };
 
+  const addComment=async()=>{
+    if(!commentText.trim())return;
+    setSendingComment(true);
+    try{
+      const payload={text:commentText.trim()};
+      if(commentClient!=='all')payload.client_id=commentClient;
+      const res=await api.post(`/compliance/${compliance.id}/comments`,payload);
+      setComments(prev=>[res.data,...prev]);
+      setCommentText('');
+      toast.success('Comment added');
+    }catch{toast.error('Failed to add comment');}
+    finally{setSendingComment(false);}
+  };
+
+  const deleteComment=async(commentId)=>{
+    try{
+      await api.delete(`/compliance/${compliance.id}/comments/${commentId}`);
+      setComments(prev=>prev.filter(c=>c.id!==commentId));
+    }catch{toast.error('Failed to delete comment');}
+  };
+
+  const updateMonthlyStatus=async(assignmentId,month,status)=>{
+    try{
+      await api.patch(`/compliance/${compliance.id}/assignments/${assignmentId}/monthly`,{month,status});
+      fetchMonthlySummary();
+      toast.success(`${month} → ${STATUS_CFG[status]?.label}`);
+    }catch{toast.error('Update failed');}
+  };
+
   const catCfg=CATEGORY_CFG[compliance.category]||CATEGORY_CFG.OTHER;
   const stats=compliance._stats||{};
   const overdue=compliance.due_date&&isPast(safeDate(compliance.due_date))&&(stats.done||0)<(stats.total||0);
@@ -643,6 +706,19 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
     {key:'filed',       label:'Filed',        count:stats.filed       ||0},
     {key:'na',          label:'N/A',          count:stats.na          ||0},
   ];
+
+  // Month names for monthly view
+  const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const monthlyRows=useMemo(()=>{
+    // Build a map of month → stats
+    const map={};
+    (monthlySummary.months||[]).forEach(m=>{map[m.month]=m;});
+    // Generate 12 months for selected year
+    return Array.from({length:12},(_,i)=>{
+      const monthKey=`${monthlyViewYear}-${String(i+1).padStart(2,'0')}`;
+      return{monthKey,label:MONTHS[i],data:map[monthKey]||null};
+    });
+  },[monthlySummary,monthlyViewYear,MONTHS]);
 
   return(
     <motion.div className="min-h-screen flex flex-col" style={{background:isDark?D.bg:'#f8fafc'}}
@@ -689,189 +765,443 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
         </div>
       </div>
 
-      {/* Toolbar */}
-      <div className="px-5 py-3 border-b flex items-center gap-2 flex-wrap"
-        style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0'}}>
-        <div className="relative flex-1 min-w-[180px] max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{color:isDark?D.dimmer:'#94a3b8'}}/>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search client…"
-            className="w-full pl-8 pr-3 py-1.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
-        </div>
-        {selectedIds.size>0&&(
-          <div className="relative" onClick={e=>e.stopPropagation()}>
-            <button onClick={()=>setBulkOpen(b=>!b)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-bold text-white" style={{backgroundColor:catCfg.color}}>
-              <Zap className="w-3.5 h-3.5"/>Update {selectedIds.size}<ChevronDown className="w-3 h-3"/>
-            </button>
-            <AnimatePresence>
-              {bulkOpen&&(
-                <motion.div className="absolute left-0 top-full mt-1 z-50"
-                  initial={{opacity:0,y:-6}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-6}}>
-                  <StatusDropdown current={null} onSelect={bulkUpdate} isDark={isDark}/>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        )}
-        <button onClick={()=>setShowAssign(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold border hover:opacity-80"
-          style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#374151'}}>
-          <Plus className="w-3.5 h-3.5"/>Add Clients
-        </button>
-        <button onClick={()=>setShowImport(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold border hover:opacity-80"
-          style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#374151'}}>
-          <Upload className="w-3.5 h-3.5"/>Import Excel
-        </button>
-        <button onClick={()=>setRefreshKey(k=>k+1)} className="p-1.5 rounded-lg hover:opacity-70" style={{color:isDark?D.dimmer:'#94a3b8'}}>
-          <RefreshCw className={`w-3.5 h-3.5 ${loading?'animate-spin':''}`}/>
-        </button>
-        <span className="ml-auto text-xs font-semibold" style={{color:isDark?D.dimmer:'#94a3b8'}}>{items.length} of {total} records</span>
-      </div>
-
-      {/* Status tabs */}
-      <div className="flex border-b overflow-x-auto" style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',scrollbarWidth:'none'}}>
-        {STATUS_TABS.map(({key,label,count})=>(
-          <button key={key} onClick={()=>{setStatusFilter(key);setSelectedIds(new Set());}}
-            className="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap flex items-center gap-1.5"
-            style={{borderColor:statusFilter===key?catCfg.color:'transparent',color:statusFilter===key?catCfg.color:isDark?D.dimmer:'#64748b'}}>
+      {/* Main Tab Bar */}
+      <div className="flex border-b overflow-x-auto flex-shrink-0" style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',scrollbarWidth:'none'}}>
+        {[
+          {key:'clients', label:'Clients', icon:Users,    count:stats.total||0},
+          {key:'monthly', label:'Monthly Tracker', icon:BarChart3, count:null},
+          {key:'comments',label:'Comments', icon:MessageSquare, count:comments.length||null},
+        ].map(({key,label,icon:Icon,count})=>(
+          <button key={key} onClick={()=>setActiveTab(key)}
+            className="flex-shrink-0 px-5 py-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap flex items-center gap-2"
+            style={{borderColor:activeTab===key?catCfg.color:'transparent',color:activeTab===key?catCfg.color:isDark?D.dimmer:'#64748b',backgroundColor:activeTab===key?(isDark?'rgba(255,255,255,0.03)'):'transparent'}}>
+            <Icon className="w-3.5 h-3.5"/>
             {label}
-            <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full"
-              style={{backgroundColor:statusFilter===key?catCfg.bg:isDark?D.raised:'#f1f5f9',color:statusFilter===key?catCfg.color:isDark?D.dimmer:'#94a3b8'}}>
-              {count}
-            </span>
+            {count!=null&&count>0&&<span className="text-[10px] font-black px-1.5 py-0.5 rounded-full"
+              style={{backgroundColor:activeTab===key?catCfg.bg:isDark?D.raised:'#f1f5f9',color:activeTab===key?catCfg.color:isDark?D.dimmer:'#94a3b8'}}>{count}</span>}
           </button>
         ))}
       </div>
 
-      {/* Table */}
-      <div className="flex-1 overflow-auto" style={{scrollbarWidth:'thin'}}>
-        {/* Column headers */}
-        <div className="sticky top-0 z-10 grid px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b"
-          style={{gridTemplateColumns:'36px 48px 1fr 148px 160px 180px 100px 40px',backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
-          <div className="flex items-center justify-center">
-            <button onClick={()=>allSelected?setSelectedIds(new Set()):setSelectedIds(new Set(items.map(a=>a.id)))}
-              className="w-4 h-4 rounded border-2 flex items-center justify-center"
-              style={{borderColor:someSelected?'#3B82F6':isDark?D.border:'#d1d5db',backgroundColor:allSelected?'#3B82F6':'transparent'}}>
-              {allSelected?<span className="text-white text-[9px]">✓</span>:someSelected?<span style={{color:'#3B82F6',fontSize:8}}>—</span>:null}
-            </button>
+      {/* ─── CLIENTS TAB ─────────────────────────────────────────────────── */}
+      {activeTab==='clients'&&(<>
+        {/* Toolbar */}
+        <div className="px-5 py-3 border-b flex items-center gap-2 flex-wrap flex-shrink-0"
+          style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0'}}>
+          <div className="relative flex-1 min-w-[180px] max-w-xs">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{color:isDark?D.dimmer:'#94a3b8'}}/>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search client…"
+              className="w-full pl-8 pr-3 py-1.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
           </div>
-          <div className="text-center">#</div>
-          <div>Client Name</div>
-          <div>Status</div>
-          <div>Assigned To</div>
-          <div>Notes</div>
-          <div>Updated</div>
-          <div/>
+          {selectedIds.size>0&&(
+            <div className="relative" onClick={e=>e.stopPropagation()}>
+              <button onClick={()=>setBulkOpen(b=>!b)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-bold text-white" style={{backgroundColor:catCfg.color}}>
+                <Zap className="w-3.5 h-3.5"/>Update {selectedIds.size}<ChevronDown className="w-3 h-3"/>
+              </button>
+              <AnimatePresence>
+                {bulkOpen&&(
+                  <motion.div className="absolute left-0 top-full mt-1 z-50"
+                    initial={{opacity:0,y:-6}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-6}}>
+                    <StatusDropdown current={null} onSelect={bulkUpdate} isDark={isDark}/>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+          <button onClick={()=>setShowAssign(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold border hover:opacity-80"
+            style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#374151'}}>
+            <Plus className="w-3.5 h-3.5"/>Add Clients
+          </button>
+          <button onClick={()=>setShowImport(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold border hover:opacity-80"
+            style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#374151'}}>
+            <Upload className="w-3.5 h-3.5"/>Import Excel
+          </button>
+          <button onClick={()=>setRefreshKey(k=>k+1)} className="p-1.5 rounded-lg hover:opacity-70" style={{color:isDark?D.dimmer:'#94a3b8'}}>
+            <RefreshCw className={`w-3.5 h-3.5 ${loading?'animate-spin':''}`}/>
+          </button>
+          <span className="ml-auto text-xs font-semibold" style={{color:isDark?D.dimmer:'#94a3b8'}}>{items.length} of {total} records</span>
         </div>
 
-        {loading?(
-          <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 text-blue-500 animate-spin"/></div>
-        ):items.length===0?(
-          <div className="flex flex-col items-center justify-center py-20 gap-3">
-            <FolderOpen className="w-10 h-10" style={{color:isDark?D.border:'#d1d5db'}}/>
-            <p className="text-sm font-semibold" style={{color:isDark?D.muted:'#64748b'}}>
-              {search||statusFilter!=='all'?'No matching clients':'No clients assigned yet'}
-            </p>
-            {!search&&statusFilter==='all'&&(
-              <button onClick={()=>setShowAssign(true)} className="text-sm font-semibold text-blue-500 hover:text-blue-400">+ Assign clients now</button>
-            )}
-          </div>
-        ):(
-          <div className="divide-y" style={{borderColor:isDark?D.border:'#f1f5f9'}}>
-            {items.map((a,idx)=>{
-              const isSel=selectedIds.has(a.id);
-              const isEditNote=editingNote?.id===a.id;
-              return(
-                <motion.div key={a.id}
-                  className="group grid px-4 py-2.5 items-center gap-2 transition-colors"
-                  style={{gridTemplateColumns:'36px 48px 1fr 148px 160px 180px 100px 40px',backgroundColor:isSel?(isDark?'rgba(59,130,246,0.06)':'#eff6ff'):'transparent'}}
-                  whileHover={{backgroundColor:isDark?'rgba(255,255,255,0.03)':'#fafafa'}}>
-                  {/* Checkbox */}
-                  <div className="flex items-center justify-center">
-                    <button onClick={()=>setSelectedIds(prev=>{const s=new Set(prev);isSel?s.delete(a.id):s.add(a.id);return s;})}
-                      className="w-4 h-4 rounded border-2 flex items-center justify-center"
-                      style={{borderColor:isSel?'#3B82F6':isDark?D.border:'#d1d5db',backgroundColor:isSel?'#3B82F6':'transparent'}}>
-                      {isSel&&<span className="text-white text-[9px]">✓</span>}
-                    </button>
-                  </div>
-                  {/* Row number */}
-                  <div className="text-center">
-                    <span className="text-[11px] font-bold tabular-nums" style={{color:isDark?D.dimmer:'#94a3b8'}}>{idx+1}</span>
-                  </div>
-                  {/* Client */}
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold truncate" style={{color:isDark?D.text:'#0f172a'}}>{a.client_name}</p>
-                  </div>
-                  {/* Status */}
-                  <div className="relative flex-shrink-0" onClick={e=>e.stopPropagation()}>
-                    <StatusPill status={a.status} size="xs" onClick={()=>setOpenDropdown(d=>d===a.id?null:a.id)}/>
-                    <AnimatePresence>
-                      {openDropdown===a.id&&(
-                        <motion.div className="absolute left-0 top-full mt-1 z-50"
-                          initial={{opacity:0,y:-6}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-6}}>
-                          <StatusDropdown current={a.status} onSelect={s=>updateStatus(a.id,s)} isDark={isDark}/>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                  {/* Assigned to */}
-                  <div className="min-w-0 flex-shrink-0">
-                    <p className="text-xs truncate" style={{color:isDark?D.muted:'#64748b'}}>{a.assigned_to_name||userMap[a.assigned_to]||'—'}</p>
-                  </div>
-                  {/* Notes — inline editable */}
-                  <div className="min-w-0 flex-shrink-0" onClick={e=>e.stopPropagation()}>
-                    {isEditNote?(
-                      <div className="flex items-center gap-1">
-                        <input autoFocus value={editingNote.value} onChange={e=>setEditingNote(n=>({...n,value:e.target.value}))}
-                          onKeyDown={e=>{if(e.key==='Enter')saveNote(a.id,editingNote.value);if(e.key==='Escape')setEditingNote(null);}}
-                          className="flex-1 px-2 py-0.5 border rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          style={{backgroundColor:isDark?D.raised:'#fff',borderColor:isDark?D.border:'#d1d5db',color:isDark?D.text:'#1e293b'}} placeholder="Add note…"/>
-                        <button onClick={()=>saveNote(a.id,editingNote.value)} className="text-emerald-500"><CheckCircle2 className="w-3.5 h-3.5"/></button>
-                        <button onClick={()=>setEditingNote(null)} className="text-red-400"><X className="w-3 h-3"/></button>
-                      </div>
-                    ):(
-                      <button onClick={()=>setEditingNote({id:a.id,value:a.notes||''})}
-                        className="w-full text-left text-xs truncate hover:opacity-70 transition-opacity flex items-center gap-1 group/note"
-                        style={{color:a.notes?(isDark?D.muted:'#64748b'):(isDark?D.dimmer:'#cbd5e1')}}>
-                        <StickyNote className="w-3 h-3 opacity-0 group-hover/note:opacity-60 flex-shrink-0"/>
-                        {a.notes||<span className="italic">add note</span>}
-                      </button>
-                    )}
-                  </div>
-                  {/* Updated */}
-                  <div className="flex-shrink-0">
-                    <p className="text-[11px] tabular-nums" style={{color:isDark?D.dimmer:'#94a3b8'}}>{timeAgo(a.updated_at)}</p>
-                  </div>
-                  {/* Delete */}
-                  <div className="flex-shrink-0 flex items-center justify-end">
-                    <button onClick={()=>deleteAssignment(a.id)}
-                      className="opacity-0 group-hover:opacity-100 w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-red-100"
-                      style={{color:'#ef4444'}}>
-                      <X className="w-3.5 h-3.5"/>
-                    </button>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Footer */}
-      <div className="px-5 py-2.5 border-t flex items-center justify-between flex-wrap gap-2"
-        style={{borderColor:isDark?D.border:'#e2e8f0',backgroundColor:isDark?D.card:'#fff'}}>
-        <p className="text-xs font-semibold" style={{color:isDark?D.dimmer:'#94a3b8'}}>
-          {items.length} of {total} records{selectedIds.size>0?` · ${selectedIds.size} selected`:''}
-        </p>
-        <div className="flex items-center gap-4">
-          {['not_started','in_progress','completed','filed'].map(k=>(
-            <div key={k} className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full" style={{backgroundColor:STATUS_CFG[k]?.dot}}/>
-              <span className="text-[11px] font-bold tabular-nums" style={{color:STATUS_CFG[k]?.color}}>{stats[k]||0}</span>
-              <span className="text-[10px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>{STATUS_CFG[k]?.label}</span>
-            </div>
+        {/* Status sub-tabs */}
+        <div className="flex border-b overflow-x-auto flex-shrink-0" style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',scrollbarWidth:'none'}}>
+          {STATUS_TABS.map(({key,label,count})=>(
+            <button key={key} onClick={()=>{setStatusFilter(key);setSelectedIds(new Set());}}
+              className="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap flex items-center gap-1.5"
+              style={{borderColor:statusFilter===key?catCfg.color:'transparent',color:statusFilter===key?catCfg.color:isDark?D.dimmer:'#64748b'}}>
+              {label}
+              <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full"
+                style={{backgroundColor:statusFilter===key?catCfg.bg:isDark?D.raised:'#f1f5f9',color:statusFilter===key?catCfg.color:isDark?D.dimmer:'#94a3b8'}}>
+                {count}
+              </span>
+            </button>
           ))}
         </div>
-      </div>
+
+        {/* Table */}
+        <div className="flex-1 overflow-auto" style={{scrollbarWidth:'thin'}}>
+          <div className="sticky top-0 z-10 grid px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b"
+            style={{gridTemplateColumns:'36px 48px 1fr 148px 160px 180px 100px 40px',backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
+            <div className="flex items-center justify-center">
+              <button onClick={()=>allSelected?setSelectedIds(new Set()):setSelectedIds(new Set(items.map(a=>a.id)))}
+                className="w-4 h-4 rounded border-2 flex items-center justify-center"
+                style={{borderColor:someSelected?'#3B82F6':isDark?D.border:'#d1d5db',backgroundColor:allSelected?'#3B82F6':'transparent'}}>
+                {allSelected?<span className="text-white text-[9px]">✓</span>:someSelected?<span style={{color:'#3B82F6',fontSize:8}}>—</span>:null}
+              </button>
+            </div>
+            <div className="text-center">#</div>
+            <div>Client Name</div>
+            <div>Status</div>
+            <div>Assigned To</div>
+            <div>Notes</div>
+            <div>Updated</div>
+            <div/>
+          </div>
+
+          {loading?(
+            <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 text-blue-500 animate-spin"/></div>
+          ):items.length===0?(
+            <div className="flex flex-col items-center justify-center py-20 gap-3">
+              <FolderOpen className="w-10 h-10" style={{color:isDark?D.border:'#d1d5db'}}/>
+              <p className="text-sm font-semibold" style={{color:isDark?D.muted:'#64748b'}}>
+                {search||statusFilter!=='all'?'No matching clients':'No clients assigned yet'}
+              </p>
+              {!search&&statusFilter==='all'&&(
+                <button onClick={()=>setShowAssign(true)} className="text-sm font-semibold text-blue-500 hover:text-blue-400">+ Assign clients now</button>
+              )}
+            </div>
+          ):(
+            <div className="divide-y" style={{borderColor:isDark?D.border:'#f1f5f9'}}>
+              {items.map((a,idx)=>{
+                const isSel=selectedIds.has(a.id);
+                const isEditNote=editingNote?.id===a.id;
+                return(
+                  <motion.div key={a.id}
+                    className="group grid px-4 py-2.5 items-center gap-2 transition-colors"
+                    style={{gridTemplateColumns:'36px 48px 1fr 148px 160px 180px 100px 40px',backgroundColor:isSel?(isDark?'rgba(59,130,246,0.06)':'#eff6ff'):'transparent'}}
+                    whileHover={{backgroundColor:isDark?'rgba(255,255,255,0.03)':'#fafafa'}}>
+                    <div className="flex items-center justify-center">
+                      <button onClick={()=>setSelectedIds(prev=>{const s=new Set(prev);isSel?s.delete(a.id):s.add(a.id);return s;})}
+                        className="w-4 h-4 rounded border-2 flex items-center justify-center"
+                        style={{borderColor:isSel?'#3B82F6':isDark?D.border:'#d1d5db',backgroundColor:isSel?'#3B82F6':'transparent'}}>
+                        {isSel&&<span className="text-white text-[9px]">✓</span>}
+                      </button>
+                    </div>
+                    <div className="text-center">
+                      <span className="text-[11px] font-bold tabular-nums" style={{color:isDark?D.dimmer:'#94a3b8'}}>{idx+1}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate" style={{color:isDark?D.text:'#0f172a'}}>{a.client_name}</p>
+                    </div>
+                    <div className="relative flex-shrink-0" onClick={e=>e.stopPropagation()}>
+                      <StatusPill status={a.status} size="xs" onClick={()=>setOpenDropdown(d=>d===a.id?null:a.id)}/>
+                      <AnimatePresence>
+                        {openDropdown===a.id&&(
+                          <motion.div className="absolute left-0 top-full mt-1 z-50"
+                            initial={{opacity:0,y:-6}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-6}}>
+                            <StatusDropdown current={a.status} onSelect={s=>updateStatus(a.id,s)} isDark={isDark}/>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                    <div className="min-w-0 flex-shrink-0">
+                      <p className="text-xs truncate" style={{color:isDark?D.muted:'#64748b'}}>{a.assigned_to_name||userMap[a.assigned_to]||'—'}</p>
+                    </div>
+                    <div className="min-w-0 flex-shrink-0" onClick={e=>e.stopPropagation()}>
+                      {isEditNote?(
+                        <div className="flex items-center gap-1">
+                          <input autoFocus value={editingNote.value} onChange={e=>setEditingNote(n=>({...n,value:e.target.value}))}
+                            onKeyDown={e=>{if(e.key==='Enter')saveNote(a.id,editingNote.value);if(e.key==='Escape')setEditingNote(null);}}
+                            className="flex-1 px-2 py-0.5 border rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            style={{backgroundColor:isDark?D.raised:'#fff',borderColor:isDark?D.border:'#d1d5db',color:isDark?D.text:'#1e293b'}} placeholder="Add note…"/>
+                          <button onClick={()=>saveNote(a.id,editingNote.value)} className="text-emerald-500"><CheckCircle2 className="w-3.5 h-3.5"/></button>
+                          <button onClick={()=>setEditingNote(null)} className="text-red-400"><X className="w-3 h-3"/></button>
+                        </div>
+                      ):(
+                        <button onClick={()=>setEditingNote({id:a.id,value:a.notes||''})}
+                          className="w-full text-left text-xs truncate hover:opacity-70 transition-opacity flex items-center gap-1 group/note"
+                          style={{color:a.notes?(isDark?D.muted:'#64748b'):(isDark?D.dimmer:'#cbd5e1')}}>
+                          <StickyNote className="w-3 h-3 opacity-0 group-hover/note:opacity-60 flex-shrink-0"/>
+                          {a.notes||<span className="italic">add note</span>}
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex-shrink-0">
+                      <p className="text-[11px] tabular-nums" style={{color:isDark?D.dimmer:'#94a3b8'}}>{timeAgo(a.updated_at)}</p>
+                    </div>
+                    <div className="flex-shrink-0 flex items-center justify-end">
+                      <button onClick={()=>deleteAssignment(a.id)}
+                        className="opacity-0 group-hover:opacity-100 w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-red-100"
+                        style={{color:'#ef4444'}}>
+                        <X className="w-3.5 h-3.5"/>
+                      </button>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-2.5 border-t flex items-center justify-between flex-wrap gap-2 flex-shrink-0"
+          style={{borderColor:isDark?D.border:'#e2e8f0',backgroundColor:isDark?D.card:'#fff'}}>
+          <p className="text-xs font-semibold" style={{color:isDark?D.dimmer:'#94a3b8'}}>
+            {items.length} of {total} records{selectedIds.size>0?` · ${selectedIds.size} selected`:''}
+          </p>
+          <div className="flex items-center gap-4">
+            {['not_started','in_progress','completed','filed'].map(k=>(
+              <div key={k} className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full" style={{backgroundColor:STATUS_CFG[k]?.dot}}/>
+                <span className="text-[11px] font-bold tabular-nums" style={{color:STATUS_CFG[k]?.color}}>{stats[k]||0}</span>
+                <span className="text-[10px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>{STATUS_CFG[k]?.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </>)}
+
+      {/* ─── MONTHLY TRACKER TAB ─────────────────────────────────────────── */}
+      {activeTab==='monthly'&&(
+        <div className="flex-1 overflow-auto p-4 sm:p-6 space-y-4" style={{scrollbarWidth:'thin'}}>
+          {/* Year selector */}
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h2 className="text-base font-black" style={{color:isDark?D.text:'#0f172a'}}>Monthly Compliance Tracker</h2>
+              <p className="text-xs mt-0.5" style={{color:isDark?D.muted:'#64748b'}}>{monthlySummary.total_clients||0} clients · click any month cell to update status</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={()=>setMonthlyViewYear(y=>y-1)} className="w-8 h-8 rounded-xl border flex items-center justify-center hover:opacity-70"
+                style={{borderColor:isDark?D.border:'#e2e8f0',backgroundColor:isDark?D.card:'#fff',color:isDark?D.muted:'#64748b'}}>
+                <ChevronLeft className="w-4 h-4"/>
+              </button>
+              <span className="text-sm font-black px-3 py-1.5 rounded-xl border"
+                style={{borderColor:isDark?D.border:'#e2e8f0',backgroundColor:isDark?D.card:'#fff',color:isDark?D.text:'#0f172a'}}>{monthlyViewYear}</span>
+              <button onClick={()=>setMonthlyViewYear(y=>y+1)} className="w-8 h-8 rounded-xl border flex items-center justify-center hover:opacity-70"
+                style={{borderColor:isDark?D.border:'#e2e8f0',backgroundColor:isDark?D.card:'#fff',color:isDark?D.muted:'#64748b'}}>
+                <ChevronRight className="w-4 h-4"/>
+              </button>
+              <button onClick={fetchMonthlySummary} className="p-2 rounded-xl border hover:opacity-70"
+                style={{borderColor:isDark?D.border:'#e2e8f0',backgroundColor:isDark?D.card:'#fff',color:isDark?D.muted:'#64748b'}}>
+                <RefreshCw className={`w-3.5 h-3.5 ${monthlyLoading?'animate-spin':''}`}/>
+              </button>
+            </div>
+          </div>
+
+          {monthlyLoading?(
+            <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 text-blue-500 animate-spin"/></div>
+          ):(
+            <>
+              {/* Annual summary grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                {monthlyRows.map(({monthKey,label,data})=>{
+                  const total=data?.total||0;
+                  const done=(data?.completed||0)+(data?.filed||0);
+                  const pct=total?Math.round(done/total*100):0;
+                  const hasData=total>0;
+                  const isCurrentMonth=monthKey===format(new Date(),'yyyy-MM');
+                  return(
+                    <div key={monthKey}
+                      className="rounded-2xl border p-3 transition-all hover:shadow-md cursor-default"
+                      style={{
+                        backgroundColor:isDark?D.card:'#fff',
+                        borderColor:isCurrentMonth?catCfg.color:(isDark?D.border:'#e2e8f0'),
+                        borderWidth:isCurrentMonth?2:1,
+                      }}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-black" style={{color:isDark?D.text:'#0f172a'}}>{label}</span>
+                        {isCurrentMonth&&<span className="text-[9px] font-black px-1.5 py-0.5 rounded-full" style={{backgroundColor:catCfg.bg,color:catCfg.color}}>NOW</span>}
+                      </div>
+                      {hasData?(
+                        <>
+                          <ProgressBar pct={pct} color={catCfg.color} isDark={isDark}/>
+                          <div className="flex justify-between items-center mt-1.5">
+                            <span className="text-xs font-black" style={{color:catCfg.color}}>{pct}%</span>
+                            <span className="text-[10px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>{done}/{total}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {[['completed','C'],['filed','F'],['in_progress','WIP'],['not_started','NS']].map(([k,abbr])=>
+                              (data?.[k]||0)>0?<span key={k} className="text-[9px] font-bold px-1 py-0.5 rounded"
+                                style={{backgroundColor:STATUS_CFG[k]?.bg,color:STATUS_CFG[k]?.color}}>{data[k]} {abbr}</span>:null
+                            )}
+                          </div>
+                        </>
+                      ):(
+                        <div className="text-center py-2">
+                          <span className="text-[10px]" style={{color:isDark?D.border:'#e2e8f0'}}>No data</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Per-client monthly table */}
+              {items.length>0&&(
+                <div className="rounded-2xl border overflow-hidden" style={{borderColor:isDark?D.border:'#e2e8f0'}}>
+                  <div className="px-4 py-3 border-b flex items-center justify-between"
+                    style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0'}}>
+                    <p className="text-xs font-black uppercase tracking-wider" style={{color:isDark?D.muted:'#64748b'}}>Per-Client Monthly Status — {monthlyViewYear}</p>
+                    <span className="text-xs" style={{color:isDark?D.dimmer:'#94a3b8'}}>Click cell to cycle status</span>
+                  </div>
+                  <div className="overflow-x-auto" style={{scrollbarWidth:'thin'}}>
+                    <table className="w-full text-xs border-collapse" style={{minWidth:900}}>
+                      <thead>
+                        <tr style={{backgroundColor:isDark?D.raised:'#f8fafc',borderBottom:`1px solid ${isDark?D.border:'#e2e8f0'}`}}>
+                          <th className="px-4 py-2 text-left font-bold sticky left-0 z-10"
+                            style={{color:isDark?D.dimmer:'#94a3b8',backgroundColor:isDark?D.raised:'#f8fafc',minWidth:180}}>Client</th>
+                          {MONTHS.map((m,i)=>{
+                            const mk=`${monthlyViewYear}-${String(i+1).padStart(2,'0')}`;
+                            const isCur=mk===format(new Date(),'yyyy-MM');
+                            return(
+                              <th key={m} className="px-2 py-2 text-center font-bold" style={{color:isCur?catCfg.color:(isDark?D.dimmer:'#94a3b8'),minWidth:60}}>
+                                {m}{isCur&&<span className="ml-0.5 text-[8px]">●</span>}
+                              </th>
+                            );
+                          })}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {items.slice(0,50).map((a,ri)=>(
+                          <tr key={a.id} style={{borderBottom:`1px solid ${isDark?'rgba(255,255,255,0.04)':'#f1f5f9'}`,
+                            backgroundColor:ri%2===0?'transparent':(isDark?'rgba(255,255,255,0.01)':'rgba(0,0,0,0.01)')}}>
+                            <td className="px-4 py-2 font-semibold sticky left-0 z-10 truncate max-w-[180px]"
+                              style={{color:isDark?D.text:'#0f172a',backgroundColor:isDark?D.card:'#fff'}}>{a.client_name}</td>
+                            {MONTHS.map((m,i)=>{
+                              const mk=`${monthlyViewYear}-${String(i+1).padStart(2,'0')}`;
+                              const st=(a.monthly_statuses||{})[mk]||'not_started';
+                              const cfg=STATUS_CFG[st]||STATUS_CFG.not_started;
+                              const CYCLE=['not_started','in_progress','completed','filed','na'];
+                              const nextSt=CYCLE[(CYCLE.indexOf(st)+1)%CYCLE.length];
+                              return(
+                                <td key={m} className="px-1 py-1 text-center">
+                                  <button
+                                    onClick={()=>updateMonthlyStatus(a.id,mk,nextSt)}
+                                    className="w-full py-1 px-1 rounded-lg text-[10px] font-bold transition-all hover:opacity-80 active:scale-95"
+                                    style={{backgroundColor:cfg.bg,color:cfg.color,border:`1px solid ${cfg.border}`}}
+                                    title={`${a.client_name} · ${m} · ${cfg.label} → click to change`}>
+                                    {st==='not_started'?'—':st==='in_progress'?'WIP':st==='completed'?'✓':st==='filed'?'F':'N/A'}
+                                  </button>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {items.length>50&&<p className="text-center text-xs py-2" style={{color:isDark?D.dimmer:'#94a3b8'}}>Showing first 50 clients</p>}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ─── COMMENTS TAB ────────────────────────────────────────────────── */}
+      {activeTab==='comments'&&(
+        <div className="flex-1 overflow-auto flex flex-col" style={{scrollbarWidth:'thin'}}>
+          {/* Add comment bar */}
+          <div className="px-5 py-4 border-b flex-shrink-0" style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0'}}>
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-black"
+                style={{backgroundColor:catCfg.color}}>
+                {(user?.full_name||'U')[0].toUpperCase()}
+              </div>
+              <div className="flex-1 space-y-2">
+                {/* Client filter for comment */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-semibold" style={{color:isDark?D.muted:'#64748b'}}>Comment for:</span>
+                  <select value={commentClient} onChange={e=>setCommentClient(e.target.value)}
+                    className="text-xs px-2 py-1 border rounded-lg focus:outline-none"
+                    style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}>
+                    <option value="all">All clients (general)</option>
+                    {items.map(a=><option key={a.id} value={a.client_id}>{a.client_name}</option>)}
+                  </select>
+                </div>
+                <div className="flex items-end gap-2">
+                  <textarea value={commentText} onChange={e=>setCommentText(e.target.value)}
+                    onKeyDown={e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey))addComment();}}
+                    placeholder="Add a comment, note, or reason for delay… (Ctrl+Enter to submit)"
+                    rows={2}
+                    className="flex-1 px-3 py-2 border rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
+                  <button onClick={addComment} disabled={sendingComment||!commentText.trim()}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-50 flex-shrink-0"
+                    style={{backgroundColor:catCfg.color}}>
+                    {sendingComment?<Loader2 className="w-4 h-4 animate-spin"/>:<Send className="w-4 h-4"/>}
+                    Post
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Client filter for viewing comments */}
+          <div className="px-5 py-2 border-b flex items-center gap-2 flex-shrink-0"
+            style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0'}}>
+            <span className="text-xs font-semibold" style={{color:isDark?D.muted:'#64748b'}}>Filter:</span>
+            <div className="flex flex-wrap gap-1.5">
+              <button onClick={()=>setCommentClient('all')}
+                className="text-xs px-2.5 py-1 rounded-lg font-semibold border transition-all"
+                style={{backgroundColor:commentClient==='all'?catCfg.bg:(isDark?D.card:'#fff'),borderColor:commentClient==='all'?catCfg.color:(isDark?D.border:'#e2e8f0'),color:commentClient==='all'?catCfg.color:(isDark?D.dimmer:'#94a3b8')}}>
+                All
+              </button>
+              {items.slice(0,12).map(a=>(
+                <button key={a.id} onClick={()=>setCommentClient(a.client_id)}
+                  className="text-xs px-2.5 py-1 rounded-lg font-semibold border transition-all"
+                  style={{backgroundColor:commentClient===a.client_id?catCfg.bg:(isDark?D.card:'#fff'),borderColor:commentClient===a.client_id?catCfg.color:(isDark?D.border:'#e2e8f0'),color:commentClient===a.client_id?catCfg.color:(isDark?D.dimmer:'#64748b')}}>
+                  {a.client_name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Comments list */}
+          <div className="flex-1 overflow-auto p-5 space-y-3" style={{scrollbarWidth:'thin'}}>
+            {commentsLoading?(
+              <div className="flex items-center justify-center py-16"><Loader2 className="w-6 h-6 text-blue-500 animate-spin"/></div>
+            ):comments.length===0?(
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <MessageSquare className="w-10 h-10" style={{color:isDark?D.border:'#d1d5db'}}/>
+                <p className="text-sm font-semibold" style={{color:isDark?D.muted:'#64748b'}}>No comments yet</p>
+                <p className="text-xs" style={{color:isDark?D.dimmer:'#94a3b8'}}>Add the first comment or reason for delay above</p>
+              </div>
+            ):(
+              comments.map(c=>(
+                <motion.div key={c.id} layout initial={{opacity:0,y:8}} animate={{opacity:1,y:0}}
+                  className="flex items-start gap-3 group">
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-black"
+                    style={{backgroundColor:catCfg.color}}>
+                    {(c.author_name||'U')[0].toUpperCase()}
+                  </div>
+                  <div className="flex-1 rounded-2xl p-3 border"
+                    style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0'}}>
+                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-black" style={{color:isDark?D.text:'#0f172a'}}>{c.author_name}</span>
+                        {c.client_name&&(
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                            style={{backgroundColor:catCfg.bg,color:catCfg.color}}>
+                            {c.client_name}
+                          </span>
+                        )}
+                        <span className="text-[10px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>{timeAgo(c.created_at)}</span>
+                      </div>
+                      <button onClick={()=>deleteComment(c.id)}
+                        className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded-lg flex items-center justify-center transition-all hover:bg-red-100 flex-shrink-0"
+                        style={{color:'#ef4444'}}>
+                        <X className="w-3 h-3"/>
+                      </button>
+                    </div>
+                    <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{color:isDark?D.muted:'#374151'}}>{c.text}</p>
+                  </div>
+                </motion.div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
       <AnimatePresence>
         {showImport&&<ImportExcelModal complianceId={compliance.id} complianceName={compliance.name} isDark={isDark} onClose={()=>setShowImport(false)} onImported={()=>{setRefreshKey(k=>k+1);setShowImport(false);}}/>}
@@ -883,60 +1213,130 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
   );
 }
 
-// ── Compliance Card ────────────────────────────────────────────────────────
-function ComplianceCard({item,onClick,onEdit,onDelete,isDark}){
+function ComplianceCard({item,onClick,onEdit,onDelete,isDark,viewMode='board'}){
   const cfg=CATEGORY_CFG[item.category]||CATEGORY_CFG.OTHER;
   const stats=item._stats||{};
   const freqLabel=FREQUENCIES.find(f=>f.value===item.frequency)?.label||item.frequency;
-  const overdue=item.due_date&&isPast(safeDate(item.due_date))&&stats.done<stats.total;
+  const overdue=item.due_date&&isPast(safeDate(item.due_date))&&(stats.done||0)<(stats.total||0);
   const dueLabel=item.period_label||(item.due_date?`Due ${fmtDate(item.due_date)}`:null);
 
+  // ── LIST ROW ──────────────────────────────────────────────────────────────
+  if(viewMode==='list'){
+    return(
+      <motion.div variants={itemVariants}
+        className="grid items-center px-4 py-3 gap-3 cursor-pointer border-b group transition-colors"
+        style={{
+          gridTemplateColumns:'4px 1fr 110px 100px 130px 100px 80px 72px',
+          backgroundColor:'transparent',
+          borderColor:isDark?D.border:'#f1f5f9',
+        }}
+        whileHover={{backgroundColor:isDark?'rgba(255,255,255,0.025)':'#f8fafc'}}
+        onClick={onClick}>
+        {/* category stripe */}
+        <div className="h-8 rounded-full" style={{backgroundColor:cfg.color,width:4,minWidth:4}}/>
+        {/* Name */}
+        <div className="min-w-0">
+          <p className="text-sm font-bold truncate" style={{color:isDark?D.text:'#0f172a'}}>{item.name}</p>
+          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+            <span className="text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest"
+              style={{backgroundColor:cfg.bg,color:cfg.color,border:`1px solid ${cfg.border}`}}>{cfg.label}</span>
+            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded"
+              style={{backgroundColor:isDark?D.raised:'#f1f5f9',color:isDark?D.dimmer:'#64748b'}}>{freqLabel}</span>
+          </div>
+        </div>
+        {/* FY */}
+        <div className="flex-shrink-0">
+          {item.fy_year?<span className="text-xs font-semibold" style={{color:'#1F6FB2'}}>FY {item.fy_year}</span>:<span style={{color:isDark?D.border:'#e2e8f0'}}>—</span>}
+        </div>
+        {/* Due date */}
+        <div className="flex-shrink-0">
+          {dueLabel
+            ?<span className={`text-xs font-semibold ${overdue?'text-red-500':''}`}
+               style={{color:overdue?'#ef4444':isDark?D.muted:'#64748b'}}>{dueLabel}</span>
+            :<span style={{color:isDark?D.border:'#e2e8f0'}}>—</span>}
+        </div>
+        {/* Progress */}
+        <div className="flex-shrink-0">
+          <ProgressBar pct={stats.pct||0} color={cfg.color} isDark={isDark}/>
+          <p className="text-[10px] mt-0.5 text-right font-semibold" style={{color:isDark?D.dimmer:'#94a3b8'}}>{stats.done||0}/{stats.total||0}</p>
+        </div>
+        {/* Pct */}
+        <div className="flex-shrink-0">
+          <span className="text-sm font-black tabular-nums" style={{color:cfg.color}}>{stats.pct||0}%</span>
+        </div>
+        {/* Clients */}
+        <div className="flex-shrink-0">
+          <span className="text-xs font-semibold" style={{color:isDark?D.muted:'#64748b'}}>{stats.total||0} clients</span>
+        </div>
+        {/* Actions */}
+        <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e=>e.stopPropagation()}>
+          <button onClick={onEdit} className="w-7 h-7 rounded-lg flex items-center justify-center hover:opacity-100 opacity-60"
+            style={{backgroundColor:isDark?D.raised:'#f1f5f9'}}><Edit2 className="w-3.5 h-3.5" style={{color:isDark?D.muted:'#64748b'}}/></button>
+          <button onClick={onDelete} className="w-7 h-7 rounded-lg flex items-center justify-center hover:opacity-100 opacity-60"
+            style={{backgroundColor:isDark?D.raised:'#f1f5f9'}}><Trash2 className="w-3.5 h-3.5 text-red-400"/></button>
+        </div>
+      </motion.div>
+    );
+  }
+
+  // ── BOARD CARD (uniform height via flex-col) ─────────────────────────────
   return(
-    <motion.div variants={itemVariants} whileHover={{y:-3,transition:{duration:0.18}}} whileTap={{scale:0.985}} className="group">
-      <div className="rounded-2xl border overflow-hidden cursor-pointer transition-all hover:shadow-lg"
+    <motion.div variants={itemVariants} whileHover={{y:-3,transition:{duration:0.18}}} whileTap={{scale:0.985}} className="group h-full">
+      <div className="rounded-2xl border overflow-hidden cursor-pointer transition-all hover:shadow-lg h-full flex flex-col"
         style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',borderLeft:`4px solid ${cfg.color}`}} onClick={onClick}>
-        <div className="p-4">
+        <div className="p-4 flex-1 flex flex-col">
+          {/* Tags row */}
           <div className="flex items-start justify-between gap-2 mb-3">
             <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
               <span className="text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest flex-shrink-0"
                 style={{backgroundColor:cfg.bg,color:cfg.color,border:`1px solid ${cfg.border}`}}>{cfg.label}</span>
-              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0" style={{backgroundColor:isDark?D.raised:'#f1f5f9',color:isDark?D.dimmer:'#64748b'}}>{freqLabel}</span>
-              {item.fy_year&&<span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0" style={{backgroundColor:isDark?'rgba(31,111,178,0.12)':'#eff6ff',color:'#1F6FB2'}}>FY {item.fy_year}</span>}
-              {overdue&&<span className="text-[9px] font-black px-1.5 py-0.5 rounded text-red-500 flex-shrink-0" style={{backgroundColor:'rgba(239,68,68,0.12)'}}>OVERDUE</span>}
+              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                style={{backgroundColor:isDark?D.raised:'#f1f5f9',color:isDark?D.dimmer:'#64748b'}}>{freqLabel}</span>
+              {item.fy_year&&<span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                style={{backgroundColor:isDark?'rgba(31,111,178,0.12)':'#eff6ff',color:'#1F6FB2'}}>FY {item.fy_year}</span>}
+              {overdue&&<span className="text-[9px] font-black px-1.5 py-0.5 rounded text-red-500 flex-shrink-0"
+                style={{backgroundColor:'rgba(239,68,68,0.12)'}}>OVERDUE</span>}
             </div>
             <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e=>e.stopPropagation()}>
-              <button onClick={onEdit} className="w-6 h-6 rounded-lg flex items-center justify-center hover:opacity-100 opacity-60" style={{backgroundColor:isDark?D.raised:'#f8fafc'}}><Edit2 className="w-3 h-3" style={{color:isDark?D.muted:'#64748b'}}/></button>
-              <button onClick={onDelete} className="w-6 h-6 rounded-lg flex items-center justify-center hover:opacity-100 opacity-60" style={{backgroundColor:isDark?D.raised:'#f8fafc'}}><Trash2 className="w-3 h-3 text-red-400"/></button>
+              <button onClick={onEdit} className="w-6 h-6 rounded-lg flex items-center justify-center hover:opacity-100 opacity-60"
+                style={{backgroundColor:isDark?D.raised:'#f8fafc'}}><Edit2 className="w-3 h-3" style={{color:isDark?D.muted:'#64748b'}}/></button>
+              <button onClick={onDelete} className="w-6 h-6 rounded-lg flex items-center justify-center hover:opacity-100 opacity-60"
+                style={{backgroundColor:isDark?D.raised:'#f8fafc'}}><Trash2 className="w-3 h-3 text-red-400"/></button>
             </div>
           </div>
 
           <h3 className="text-sm font-bold leading-snug mb-0.5" style={{color:isDark?D.text:'#0f172a'}}>{item.name}</h3>
-          {dueLabel&&<p className="text-[11px] mb-3 flex items-center gap-1" style={{color:overdue?'#ef4444':isDark?D.dimmer:'#94a3b8'}}>
-            <Calendar className="w-3 h-3 flex-shrink-0"/>{dueLabel}</p>}
-
-          <div className="mb-1.5"><ProgressBar pct={stats.pct||0} color={cfg.color} isDark={isDark}/></div>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-black" style={{color:cfg.color}}>{stats.pct||0}%</span>
-            <span className="text-[11px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>{stats.done||0} / {stats.total||0}</span>
+          {/* Fixed height due date line to keep all cards aligned */}
+          <div className="h-5 mb-3">
+            {dueLabel&&<p className="text-[11px] flex items-center gap-1" style={{color:overdue?'#ef4444':isDark?D.dimmer:'#94a3b8'}}>
+              <Calendar className="w-3 h-3 flex-shrink-0"/>{dueLabel}</p>}
           </div>
 
-          {stats.total>0&&(
+          {/* Push stats to bottom */}
+          <div className="mt-auto">
+            <div className="mb-1.5"><ProgressBar pct={stats.pct||0} color={cfg.color} isDark={isDark}/></div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-black" style={{color:cfg.color}}>{stats.pct||0}%</span>
+              <span className="text-[11px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>{stats.done||0} / {stats.total||0}</span>
+            </div>
+
+            {/* Status bar */}
             <div className="flex h-1 rounded-full overflow-hidden gap-px mb-3">
               {[['filed'],['completed'],['in_progress'],['not_started']].map(([k])=>
-                stats[k]>0?<div key={k} style={{width:`${stats[k]/stats.total*100}%`,backgroundColor:STATUS_CFG[k]?.dot,opacity:0.8}}/>:null
+                (stats[k]||0)>0?<div key={k} style={{width:`${(stats[k]||0)/(stats.total||1)*100}%`,backgroundColor:STATUS_CFG[k]?.dot,opacity:0.8}}/>:null
               )}
             </div>
-          )}
 
-          <div className="flex flex-wrap gap-1.5">
-            {[['not_started','pending'],['in_progress','WIP'],['completed','done'],['filed','filed']].map(([k,abbr])=>
-              stats[k]>0?<span key={k} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md"
-                style={{backgroundColor:STATUS_CFG[k]?.bg,color:STATUS_CFG[k]?.color}}>{stats[k]} {abbr}</span>:null
-            )}
+            <div className="flex flex-wrap gap-1.5">
+              {[['not_started','pending'],['in_progress','WIP'],['completed','done'],['filed','filed']].map(([k,abbr])=>
+                (stats[k]||0)>0?<span key={k} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md"
+                  style={{backgroundColor:STATUS_CFG[k]?.bg,color:STATUS_CFG[k]?.color}}>{stats[k]} {abbr}</span>:null
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="px-4 py-2 border-t flex items-center justify-between"
+        <div className="px-4 py-2 border-t flex items-center justify-between flex-shrink-0"
           style={{borderColor:isDark?D.border:'#f9fafb',backgroundColor:isDark?'rgba(255,255,255,0.02)':'#fafafa'}}>
           <span className="text-[10px] font-semibold" style={{color:isDark?D.dimmer:'#94a3b8'}}>{stats.total||0} clients</span>
           <div className="flex items-center gap-1 text-[10px] font-bold" style={{color:cfg.color}}>Open<ChevronRight className="w-3 h-3"/></div>
@@ -961,6 +1361,7 @@ export default function CompliancePage(){
   const[editingItem,setEditingItem]=useState(null);
   const[detailItem,setDetailItem]=useState(null);
   const[refreshKey,setRefreshKey]=useState(0);
+  const[viewMode,setViewMode]=useState('board'); // 'board' | 'list'
 
   const fetchAll=useCallback(async()=>{
     setLoading(true);
@@ -1080,7 +1481,23 @@ export default function CompliancePage(){
             style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#64748b'}}>
             <RefreshCw className={`w-4 h-4 ${loading?'animate-spin':''}`}/>
           </button>
-          {filtered.length>0&&<span className="ml-auto text-xs font-semibold" style={{color:isDark?D.dimmer:'#94a3b8'}}>{filtered.length} types</span>}
+          {/* View toggle */}
+          <div className="flex items-center border rounded-xl overflow-hidden flex-shrink-0"
+            style={{borderColor:isDark?D.border:'#e2e8f0',backgroundColor:isDark?D.card:'#fff'}}>
+            <button onClick={()=>setViewMode('board')} title="Board View"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold transition-all"
+              style={{backgroundColor:viewMode==='board'?(isDark?D.raised:'#f1f5f9'):'transparent',
+                color:viewMode==='board'?'#1F6FB2':(isDark?D.dimmer:'#94a3b8')}}>
+              <LayoutGrid className="w-3.5 h-3.5"/><span className="hidden sm:inline">Board</span>
+            </button>
+            <button onClick={()=>setViewMode('list')} title="List View"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold transition-all"
+              style={{backgroundColor:viewMode==='list'?(isDark?D.raised:'#f1f5f9'):'transparent',
+                color:viewMode==='list'?'#1F6FB2':(isDark?D.dimmer:'#94a3b8')}}>
+              <List className="w-3.5 h-3.5"/><span className="hidden sm:inline">List</span>
+            </button>
+          </div>
+          {filtered.length>0&&<span className="text-xs font-semibold" style={{color:isDark?D.dimmer:'#94a3b8'}}>{filtered.length} types</span>}
         </motion.div>
 
         {loading?(
@@ -1101,10 +1518,27 @@ export default function CompliancePage(){
               </button>
             )}
           </motion.div>
-        ):(
-          <motion.div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" variants={containerVariants}>
+        ):viewMode==='list'?(
+          <motion.div className="rounded-2xl border overflow-hidden" variants={containerVariants}
+            style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0'}}>
+            {/* List header */}
+            <div className="grid px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b"
+              style={{gridTemplateColumns:'4px 1fr 110px 100px 130px 100px 80px 72px',
+                backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
+              <div/><div>Compliance Name</div><div>FY Year</div><div>Due Date</div>
+              <div>Progress</div><div>% Done</div><div>Clients</div><div>Actions</div>
+            </div>
             {filtered.map(item=>(
-              <ComplianceCard key={item.id} item={item} isDark={isDark}
+              <ComplianceCard key={item.id} item={item} isDark={isDark} viewMode="list"
+                onClick={()=>setDetailItem(item)}
+                onEdit={e=>{e&&e.stopPropagation();setEditingItem(item);}}
+                onDelete={e=>{e&&e.stopPropagation();handleDelete(item.id,item.name);}}/>
+            ))}
+          </motion.div>
+        ):(
+          <motion.div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 items-stretch" variants={containerVariants}>
+            {filtered.map(item=>(
+              <ComplianceCard key={item.id} item={item} isDark={isDark} viewMode="board"
                 onClick={()=>setDetailItem(item)}
                 onEdit={e=>{e&&e.stopPropagation();setEditingItem(item);}}
                 onDelete={e=>{e&&e.stopPropagation();handleDelete(item.id,item.name);}}/>
