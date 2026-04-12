@@ -1,4 +1,3 @@
-
 import os
 import re
 import csv
@@ -19,7 +18,7 @@ from datetime import datetime, date, timezone, timedelta
 # --- FIXED ROUTER IMPORTS ---
 # Added 'backend.' to invoicing to match the others
 from backend.compliance import router as compliance_router
-from backend.reminders_router import router as reminders_router
+# reminders routes are inlined directly below (no separate router file needed)
 from backend.quotations import router as quotation_router
 from backend.attendance_identix import identix_router
 from backend.google_auth import router as google_auth_router
@@ -3682,6 +3681,58 @@ async def extract_due_dates_from_file(
         raise HTTPException(status_code=404, detail="No compliance dates detected in this document.")
 
     return {"extracted": extracted, "count": len(extracted)}
+# ─── Calendar → Compliance Tracker sync helper ───────────────────────────────
+_CALENDAR_CATEGORY_MAP = {
+    'GST': 'GST', 'ROC': 'ROC', 'MCA': 'ROC', 'ITR': 'ITR',
+    'TDS': 'TDS', 'AUDIT': 'AUDIT', 'PF': 'PF_ESIC', 'ESIC': 'PF_ESIC',
+    'PT': 'PT', 'INCOME TAX': 'ITR',
+}
+_COMPLIANCE_CATEGORIES = ['ROC', 'GST', 'ITR', 'TDS', 'AUDIT', 'PF_ESIC', 'PT', 'OTHER']
+
+async def _sync_due_date_to_compliance(dd: dict, current_user) -> None:
+    """Upsert a compliance_master record linked to the given due_date doc."""
+    title    = (dd.get('title') or '').strip()
+    dd_id    = dd.get('id')
+    due_date = dd.get('due_date')
+    if isinstance(due_date, datetime):
+        due_date = due_date.strftime('%Y-%m-%d')
+    elif isinstance(due_date, str) and 'T' in due_date:
+        due_date = due_date[:10]
+
+    raw_cat  = (dd.get('category') or 'OTHER').upper()
+    category = _CALENDAR_CATEGORY_MAP.get(raw_cat, 'OTHER')
+    if category not in _COMPLIANCE_CATEGORIES:
+        category = 'OTHER'
+
+    existing = await db.compliance_masters.find_one(
+        {'calendar_due_date_id': dd_id}, {'_id': 0}
+    )
+    now_str = datetime.now(timezone.utc).isoformat()
+
+    if existing:
+        await db.compliance_masters.update_one(
+            {'id': existing['id']},
+            {'': {'due_date': due_date, 'name': title, 'updated_at': now_str}}
+        )
+    else:
+        import uuid as _uuid
+        doc = {
+            'id':                      str(_uuid.uuid4()),
+            'name':                    title,
+            'category':                category,
+            'frequency':               'one_time',
+            'fy_year':                 None,
+            'period_label':            None,
+            'due_date':                due_date,
+            'description':             dd.get('description', ''),
+            'applicable_entity_types': [],
+            'calendar_due_date_id':    dd_id,
+            'created_by':              str(getattr(current_user, 'id', '')),
+            'created_by_name':         getattr(current_user, 'full_name', ''),
+            'created_at':              now_str,
+            'updated_at':              now_str,
+        }
+        await db.compliance_masters.insert_one({**doc, '_id': doc['id']})
 
 
 @api_router.post("/duedates", response_model=DueDate)
@@ -3728,6 +3779,12 @@ async def create_due_date(
 
         # ✅ FIX 4: REMOVE ObjectId if added
         doc.pop("_id", None)
+
+        # ✅ Auto-sync to Compliance Tracker
+        try:
+            await _sync_due_date_to_compliance(doc, current_user)
+        except Exception as sync_err:
+            logger.warning(f"Compliance sync after create failed: {sync_err}")
 
         return doc
 
@@ -3835,6 +3892,17 @@ async def update_due_date(
         updated["created_at"] = datetime.fromisoformat(updated["created_at"])
     if isinstance(updated.get("due_date"), str):
         updated["due_date"] = datetime.fromisoformat(updated["due_date"])
+
+    # Auto-sync updated due_date to Compliance Tracker
+    try:
+        sync_doc = dict(updated)
+        if isinstance(sync_doc.get("due_date"), datetime):
+            sync_doc["due_date"] = sync_doc["due_date"].isoformat()
+        sync_doc["id"] = due_date_id
+        await _sync_due_date_to_compliance(sync_doc, current_user)
+    except Exception as sync_err:
+        logger.warning(f"Compliance sync after update failed: {sync_err}")
+
     return DueDate(**updated)
 
 
@@ -3857,6 +3925,146 @@ async def delete_due_date(
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Due date not found")
     return {"message": "Due date deleted successfully"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REMINDERS & MEETINGS  (inlined — no separate router file needed)
+# ─────────────────────────────────────────────────────────────────────────────
+
+reminders_col = db["reminders"]
+
+
+class ReminderCreate(BaseModel):
+    title: str
+    description: Optional[str] = ""
+    remind_at: str          # ISO datetime string
+    event_id: Optional[str] = None
+    source: Optional[str] = "manual"
+    priority: Optional[str] = "medium"    # low | medium | high
+    reminder_type: Optional[str] = "reminder"  # reminder | meeting
+    related_task_id: Optional[str] = None
+
+
+class ReminderUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    remind_at: Optional[str] = None
+    is_dismissed: Optional[bool] = None
+    priority: Optional[str] = None
+    reminder_type: Optional[str] = None
+    status: Optional[str] = None
+
+
+def _serialize_reminder(doc: dict) -> dict:
+    if not doc:
+        return doc
+    doc["_id"] = str(doc["_id"])
+    doc["id"]  = doc["_id"]
+    return doc
+
+
+@api_router.get("/email/reminders")
+async def get_reminders(
+    user_id: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+):
+    """Fetch reminders for the current user (admin can pass ?user_id=)."""
+    query_uid = current_user.id
+    if user_id and current_user.role == "admin":
+        query_uid = user_id
+
+    cursor = reminders_col.find({
+        "user_id": str(query_uid),
+        "$or": [
+            {"is_dismissed": {"$ne": True}},
+            {"is_dismissed": {"$exists": False}},
+        ],
+    }).sort("remind_at", 1)
+
+    results = []
+    async for doc in cursor:
+        results.append(_serialize_reminder(doc))
+    return results
+
+
+@api_router.post("/email/save-as-reminder")
+async def create_reminder(
+    body: ReminderCreate,
+    current_user: User = Depends(get_current_user),
+):
+    """Create a new reminder."""
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "user_id":       str(current_user.id),
+        "title":         body.title,
+        "description":   body.description or "",
+        "remind_at":     body.remind_at,
+        "event_id":      body.event_id or f"manual-{int(datetime.now().timestamp() * 1000)}",
+        "source":        body.source or "manual",
+        "priority":      body.priority or "medium",
+        "reminder_type": body.reminder_type or "reminder",
+        "related_task_id": body.related_task_id,
+        "is_dismissed":  False,
+        "is_fired":      False,
+        "created_at":    now,
+        "updated_at":    now,
+    }
+    result = await reminders_col.insert_one(doc)
+    doc["_id"] = str(result.inserted_id)
+    doc["id"]  = doc["_id"]
+    return doc
+
+
+@api_router.patch("/email/reminders/{reminder_id}")
+async def update_reminder(
+    reminder_id: str,
+    body: ReminderUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    """Update a reminder — title, description, remind_at, is_dismissed, etc."""
+    try:
+        obj_id = ObjectId(reminder_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid reminder ID")
+
+    update_fields = {k: v for k, v in body.dict(exclude_unset=True).items() if v is not None}
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    update_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    query = {"_id": obj_id}
+    if current_user.role != "admin":
+        query["user_id"] = str(current_user.id)
+
+    result = await reminders_col.update_one(query, {"$set": update_fields})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+
+    updated = await reminders_col.find_one({"_id": obj_id})
+    return _serialize_reminder(updated)
+
+
+@api_router.delete("/email/reminders/{reminder_id}")
+async def delete_reminder(
+    reminder_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a reminder permanently."""
+    try:
+        obj_id = ObjectId(reminder_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid reminder ID")
+
+    query = {"_id": obj_id}
+    if current_user.role != "admin":
+        query["user_id"] = str(current_user.id)
+
+    result = await reminders_col.delete_one(query)
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+
+    return {"message": "Reminder deleted", "id": reminder_id}
 
 
 # Registered before /clients/{client_id} to prevent route shadowing
@@ -5949,7 +6157,6 @@ api_router.include_router(quotation_router)
 api_router.include_router(telegram_router)
 api_router.include_router(leads_router)
 api_router.include_router(notification_router)
-app.include_router(reminders_router, prefix="/api")
 api_router.include_router(email_router)
 app.include_router(google_auth_router)
 app.include_router(api_router)
