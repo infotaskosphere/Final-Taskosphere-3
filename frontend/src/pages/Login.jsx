@@ -157,7 +157,7 @@ export default function Login() {
     >
       {/* Card */}
       <motion.div
-        className="w-full max-w-md p-8 rounded-2xl shadow-xl"
+        className="w-full max-w-md p-6 sm:p-8 rounded-2xl shadow-xl"
         style={{ background: cardBg }}
         variants={cardVariants}
         initial="initial"
