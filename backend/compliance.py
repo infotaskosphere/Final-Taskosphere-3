@@ -38,6 +38,45 @@ router = APIRouter(prefix="/compliance", tags=["compliance"])
 IST = ZoneInfo("Asia/Kolkata")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# DEPARTMENT → CATEGORY SCOPE MAP
+# Maps each user department to the compliance categories they can see/manage.
+# Admin always bypasses this and sees all categories.
+# ─────────────────────────────────────────────────────────────────────────────
+DEPT_CATEGORY_MAP: dict = {
+    "gst":          ["GST"],
+    "it":           ["ITR"],
+    "income_tax":   ["ITR"],
+    "tds":          ["TDS"],
+    "roc":          ["ROC"],
+    "acc":          ["AUDIT", "PF_ESIC", "PT"],
+    "accounts":     ["AUDIT", "PF_ESIC", "PT"],
+    "msme":         ["OTHER"],
+    "msme_smadhan": ["OTHER"],
+    "fema":         ["OTHER"],
+    "tm":           ["OTHER"],
+    "trademark":    ["OTHER"],
+    "dsc":          ["OTHER"],
+    "other":        ["OTHER"],
+}
+
+def get_allowed_categories(user: User) -> Optional[List[str]]:
+    """
+    Returns the list of compliance categories the user may access,
+    or None meaning 'all' (admin).
+    """
+    if user.role == "admin":
+        return None  # no restriction
+    depts = [d.lower() for d in (user.departments or [])]
+    if not depts:
+        return []  # no departments → no access
+    cats: set = set()
+    for dept in depts:
+        cats.update(DEPT_CATEGORY_MAP.get(dept, []))
+    return list(cats) if cats else []
+
+IST = ZoneInfo("Asia/Kolkata")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CONSTANTS
 # ─────────────────────────────────────────────────────────────────────────────
 CATEGORIES  = ["ROC", "GST", "ITR", "TDS", "AUDIT", "PF_ESIC", "PT", "OTHER"]
@@ -201,9 +240,33 @@ async def list_compliance_masters(
     fy_year:  Optional[str] = Query(None),
     current_user: User      = Depends(get_current_user),
 ):
+    # ── Permission gate ─────────────────────────────────────────────────────
+    perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
+            (current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else {})
+    if current_user.role != "admin" and not perms.get("can_view_compliance", False):
+        raise HTTPException(403, "You do not have permission to access the Compliance Tracker")
+
+    # ── Build query ─────────────────────────────────────────────────────────
     query: dict = {}
-    if category and category != "all": query["category"] = category
-    if fy_year  and fy_year  != "all": query["fy_year"]  = fy_year
+
+    # Department scope — restrict to user's allowed categories unless admin
+    allowed_cats = get_allowed_categories(current_user)
+    if allowed_cats is not None:          # None = admin (no restriction)
+        if not allowed_cats:
+            return []                     # no departments → empty result
+        if category and category != "all":
+            # Honour the category filter only if it's within allowed scope
+            if category not in allowed_cats:
+                return []
+            query["category"] = category
+        else:
+            query["category"] = {"$in": allowed_cats}
+    else:
+        if category and category != "all":
+            query["category"] = category
+
+    if fy_year and fy_year != "all":
+        query["fy_year"] = fy_year
 
     items = await db.compliance_masters.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     return [await _enrich(item) for item in items]
@@ -214,10 +277,21 @@ async def create_compliance_master(
     data: ComplianceMasterCreate,
     current_user: User = Depends(get_current_user),
 ):
+    # ── Permission gate ─────────────────────────────────────────────────────
+    perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
+            (current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else {})
+    if current_user.role != "admin" and not perms.get("can_manage_compliance", False):
+        raise HTTPException(403, "You do not have permission to create compliance items")
+
     if data.category not in CATEGORIES:
         raise HTTPException(400, f"Invalid category. Choose from: {CATEGORIES}")
     if data.frequency not in FREQUENCIES:
         raise HTTPException(400, f"Invalid frequency. Choose from: {FREQUENCIES}")
+
+    # Non-admins can only create in their department's categories
+    allowed_cats = get_allowed_categories(current_user)
+    if allowed_cats is not None and data.category not in allowed_cats:
+        raise HTTPException(403, f"Your department is not authorised to manage '{data.category}' compliance items")
 
     doc = {
         "id":                      str(uuid.uuid4()),
@@ -244,13 +318,26 @@ async def update_compliance_master(
     data: ComplianceMasterUpdate,
     current_user: User = Depends(get_current_user),
 ):
-    upd = {k: v for k, v in data.dict().items() if v is not None}
+    # ── Permission gate ─────────────────────────────────────────────────────
+    perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
+            (current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else {})
+    if current_user.role != "admin" and not perms.get("can_manage_compliance", False):
+        raise HTTPException(403, "You do not have permission to edit compliance items")
+
+    existing = await db.compliance_masters.find_one({"id": compliance_id}, {"_id": 0, "category": 1})
+    if not existing:
+        raise HTTPException(404, "Compliance not found")
+
+    # Non-admins can only edit items in their department's categories
+    allowed_cats = get_allowed_categories(current_user)
+    if allowed_cats is not None and existing.get("category") not in allowed_cats:
+        raise HTTPException(403, "You are not authorised to edit this compliance item")
+
+    upd = {k: v for k, v in data.model_dump().items() if v is not None}
     if not upd:
         raise HTTPException(400, "Nothing to update")
     upd["updated_at"] = _now()
-    res = await db.compliance_masters.update_one({"id": compliance_id}, {"$set": upd})
-    if res.matched_count == 0:
-        raise HTTPException(404, "Compliance not found")
+    await db.compliance_masters.update_one({"id": compliance_id}, {"$set": upd})
     doc = await db.compliance_masters.find_one({"id": compliance_id}, {"_id": 0})
     return await _enrich(doc)
 
@@ -260,6 +347,10 @@ async def delete_compliance_master(
     compliance_id: str,
     current_user: User = Depends(get_current_user),
 ):
+    # ── Permission gate — admin only ────────────────────────────────────────
+    if current_user.role != "admin":
+        raise HTTPException(403, "Only admins can delete compliance items")
+
     await db.compliance_masters.delete_one({"id": compliance_id})
     deleted_asgn = await db.compliance_assignments.delete_many({"compliance_id": compliance_id})
     return {"deleted": True, "assignments_removed": deleted_asgn.deleted_count}
@@ -278,6 +369,19 @@ async def list_assignments(
     limit:   int           = Query(200, le=1000),
     current_user: User     = Depends(get_current_user),
 ):
+    # ── Permission gate ─────────────────────────────────────────────────────
+    perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
+            (current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else {})
+    if current_user.role != "admin" and not perms.get("can_view_compliance", False):
+        raise HTTPException(403, "You do not have permission to view compliance assignments")
+
+    # Verify the compliance master is within the user's allowed categories
+    if current_user.role != "admin":
+        cm_doc = await db.compliance_masters.find_one({"id": compliance_id}, {"_id": 0, "category": 1})
+        if cm_doc:
+            allowed_cats = get_allowed_categories(current_user)
+            if allowed_cats is not None and cm_doc.get("category") not in allowed_cats:
+                raise HTTPException(403, "You are not authorised to view this compliance item")
     query: dict = {"compliance_id": compliance_id}
     if status and status != "all":
         query["status"] = status
@@ -340,9 +444,21 @@ async def bulk_assign_clients(
     data: BulkAssignRequest,
     current_user: User = Depends(get_current_user),
 ):
+    # ── Permission gate ─────────────────────────────────────────────────────
+    perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
+            (current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else {})
+    if current_user.role != "admin" and not perms.get("can_manage_compliance", False):
+        raise HTTPException(403, "You do not have permission to bulk-assign clients")
+
     cm = await db.compliance_masters.find_one({"id": compliance_id})
     if not cm:
         raise HTTPException(404, "Compliance not found")
+
+    # Dept scope check
+    if current_user.role != "admin":
+        allowed_cats = get_allowed_categories(current_user)
+        if allowed_cats is not None and (cm.get("category") or "") not in allowed_cats:
+            raise HTTPException(403, "You are not authorised to manage this compliance item")
 
     compliance_category = (cm.get("category") or "").upper()
 
@@ -427,6 +543,20 @@ async def bulk_update_status(
     data: BulkStatusUpdate,
     current_user: User = Depends(get_current_user),
 ):
+    # ── Permission gate ─────────────────────────────────────────────────────
+    perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
+            (current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else {})
+    if current_user.role != "admin" and not perms.get("can_view_compliance", False):
+        raise HTTPException(403, "You do not have permission to update compliance assignments")
+
+    # Dept scope check
+    if current_user.role != "admin":
+        cm_doc = await db.compliance_masters.find_one({"id": compliance_id}, {"_id": 0, "category": 1})
+        if cm_doc:
+            allowed_cats = get_allowed_categories(current_user)
+            if allowed_cats is not None and cm_doc.get("category") not in allowed_cats:
+                raise HTTPException(403, "You are not authorised to update this compliance item")
+
     if data.status not in STATUSES:
         raise HTTPException(400, f"Invalid status. Use: {STATUSES}")
 
@@ -454,6 +584,20 @@ async def update_single_assignment(
     data: AssignmentUpdate,
     current_user: User = Depends(get_current_user),
 ):
+    # ── Permission gate ─────────────────────────────────────────────────────
+    perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
+            (current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else {})
+    if current_user.role != "admin" and not perms.get("can_view_compliance", False):
+        raise HTTPException(403, "You do not have permission to update compliance assignments")
+
+    # Dept scope check
+    if current_user.role != "admin":
+        cm_doc = await db.compliance_masters.find_one({"id": compliance_id}, {"_id": 0, "category": 1})
+        if cm_doc:
+            allowed_cats = get_allowed_categories(current_user)
+            if allowed_cats is not None and cm_doc.get("category") not in allowed_cats:
+                raise HTTPException(403, "You are not authorised to update this compliance item")
+
     if data.status not in STATUSES:
         raise HTTPException(400, f"Invalid status. Use: {STATUSES}")
 
@@ -670,38 +814,65 @@ async def import_from_excel(
 
 @router.get("/dashboard/summary")
 async def compliance_dashboard(current_user: User = Depends(get_current_user)):
-    total_types = await db.compliance_masters.count_documents({})
-    total_asgn  = await db.compliance_assignments.count_documents({})
-    done        = await db.compliance_assignments.count_documents({"status": {"$in": ["completed", "filed"]}})
-    pending     = await db.compliance_assignments.count_documents({"status": {"$in": ["not_started", "in_progress"]}})
+    # ── Permission gate ─────────────────────────────────────────────────────
+    perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
+            (current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else {})
+    if current_user.role != "admin" and not perms.get("can_view_compliance", False):
+        raise HTTPException(403, "You do not have permission to view the Compliance Dashboard")
 
-    cat_pipeline = [{"$group": {"_id": "$category", "count": {"$sum": 1}}}]
+    # ── Dept scope for non-admins ────────────────────────────────────────────
+    allowed_cats = get_allowed_categories(current_user)
+    scope_filter: dict = {}
+    if allowed_cats is not None:
+        if not allowed_cats:
+            return {
+                "total_compliance_types": 0, "total_assignments": 0,
+                "completed_or_filed": 0, "pending": 0, "overall_pct": 0.0,
+                "overdue": 0, "due_this_month": 0, "by_category": {},
+            }
+        scope_filter = {"category": {"$in": allowed_cats}}
+
+    total_types = await db.compliance_masters.count_documents(scope_filter)
+
+    # For assignments, first gather scoped compliance IDs
+    if allowed_cats is not None:
+        scoped_ids = [
+            m["id"] async for m in db.compliance_masters.find(scope_filter, {"_id": 0, "id": 1})
+        ]
+        asgn_filter = {"compliance_id": {"$in": scoped_ids}} if scoped_ids else {"compliance_id": "NONE"}
+    else:
+        asgn_filter = {}
+
+    total_asgn = await db.compliance_assignments.count_documents(asgn_filter)
+    done       = await db.compliance_assignments.count_documents({**asgn_filter, "status": {"$in": ["completed", "filed"]}})
+    pending    = await db.compliance_assignments.count_documents({**asgn_filter, "status": {"$in": ["not_started", "in_progress"]}})
+
+    cat_pipeline = [{"$match": scope_filter}, {"$group": {"_id": "$category", "count": {"$sum": 1}}}]
     by_cat = await db.compliance_masters.aggregate(cat_pipeline).to_list(20)
 
-    # Overdue: has due_date and it's in the past and not done
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     overdue = await db.compliance_masters.count_documents({
-        "due_date": {"$lt": now_str, "$ne": None},
+        **scope_filter, "due_date": {"$lt": now_str, "$ne": None},
     })
 
-    # Due this month
     import calendar as cal
     now = datetime.now(IST)
-    month_end = f"{now.year}-{now.month:02d}-{cal.monthrange(now.year, now.month)[1]:02d}"
+    month_end   = f"{now.year}-{now.month:02d}-{cal.monthrange(now.year, now.month)[1]:02d}"
     month_start = f"{now.year}-{now.month:02d}-01"
     due_this_month = await db.compliance_masters.count_documents({
-        "due_date": {"$gte": month_start, "$lte": month_end},
+        **scope_filter, "due_date": {"$gte": month_start, "$lte": month_end},
     })
 
     return {
-        "total_compliance_types":  total_types,
-        "total_assignments":       total_asgn,
-        "completed_or_filed":      done,
-        "pending":                 pending,
-        "overall_pct":             round(done / total_asgn * 100, 1) if total_asgn else 0.0,
-        "overdue":                 overdue,
-        "due_this_month":          due_this_month,
-        "by_category":             {r["_id"]: r["count"] for r in by_cat},
+        "total_compliance_types": total_types,
+        "total_assignments":      total_asgn,
+        "completed_or_filed":     done,
+        "pending":                pending,
+        "overall_pct":            round(done / total_asgn * 100, 1) if total_asgn else 0.0,
+        "overdue":                overdue,
+        "due_this_month":         due_this_month,
+        "by_category":            {r["_id"]: r["count"] for r in by_cat},
+        "allowed_categories":     allowed_cats,   # frontend uses this to hide tabs
     }
 
 
@@ -839,6 +1010,20 @@ async def update_monthly_status(
     current_user: User = Depends(get_current_user),
 ):
     """Set/update the status for a specific month on an assignment."""
+    # ── Permission gate ─────────────────────────────────────────────────────
+    perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
+            (current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else {})
+    if current_user.role != "admin" and not perms.get("can_view_compliance", False):
+        raise HTTPException(403, "You do not have permission to update compliance assignments")
+
+    # Dept scope check
+    if current_user.role != "admin":
+        cm_doc = await db.compliance_masters.find_one({"id": compliance_id}, {"_id": 0, "category": 1})
+        if cm_doc:
+            allowed_cats = get_allowed_categories(current_user)
+            if allowed_cats is not None and cm_doc.get("category") not in allowed_cats:
+                raise HTTPException(403, "You are not authorised to update this compliance item")
+
     if data.status not in STATUSES:
         raise HTTPException(400, f"Invalid status. Use: {STATUSES}")
 
