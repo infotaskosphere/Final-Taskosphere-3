@@ -316,7 +316,7 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
 }
 
 // ── Import Excel Modal ─────────────────────────────────────────────────────
-function ImportExcelModal({complianceId,complianceName,onClose,onImported,isDark}){
+function ImportExcelModal({complianceId,complianceName,onClose,onImported,isDark,allUsers=[],compliance}){
   const[step,setStep]=useState(1);
   const[file,setFile]=useState(null);
   const[preview,setPreview]=useState(null);
@@ -324,9 +324,20 @@ function ImportExcelModal({complianceId,complianceName,onClose,onImported,isDark
   const[clientCol,setClientCol]=useState('Client Name');
   const[statusCol,setStatusCol]=useState('');
   const[notesCol,setNotesCol]=useState('');
+  const[assignedToCol,setAssignedToCol]=useState('');   // column in excel for assigned_to
+  const[defaultAssignedTo,setDefaultAssignedTo]=useState(''); // fallback user id
   const[result,setResult]=useState(null);
   const fileRef=useRef(null);
   const inputStyle={backgroundColor:isDark?D.raised:'#fff',borderColor:isDark?D.border:'#d1d5db',color:isDark?D.text:'#1e293b'};
+
+  // Auto-select a default user based on compliance category
+  useEffect(()=>{
+    if(allUsers.length&&compliance?.category){
+      const cat=(compliance.category||'').toLowerCase();
+      const match=allUsers.find(u=>(u.departments||[]).some(d=>d.toLowerCase().includes(cat)||cat.includes(d.toLowerCase())));
+      if(match)setDefaultAssignedTo(match.id);
+    }
+  },[allUsers,compliance?.category]);
 
   const handleFileChange=async e=>{
     const f=e.target.files?.[0]; if(!f)return;
@@ -350,6 +361,8 @@ function ImportExcelModal({complianceId,complianceName,onClose,onImported,isDark
       const fd=new FormData();
       fd.append('file',file);fd.append('client_col',clientCol);
       fd.append('status_col',statusCol);fd.append('notes_col',notesCol);
+      if(assignedToCol)fd.append('assigned_to_col',assignedToCol);
+      if(defaultAssignedTo)fd.append('default_assigned_to',defaultAssignedTo);
       const res=await api.post(`/compliance/${complianceId}/import-excel`,fd,{headers:{'Content-Type':'multipart/form-data'}});
       setResult(res.data);setStep(4);onImported();
       toast.success(`Import complete — ${res.data.added} added, ${res.data.updated} updated`);
@@ -408,7 +421,7 @@ function ImportExcelModal({complianceId,complianceName,onClose,onImported,isDark
                 <p className="text-sm font-semibold" style={{color:isDark?'#4ade80':'#15803d'}}>✓ {preview.total_rows} rows · {preview.columns.length} columns</p>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                {[['Client Name *',clientCol,setClientCol,true],['Status',statusCol,setStatusCol,false],['Notes',notesCol,setNotesCol,false]].map(([label,val,set,req])=>(
+                {[['Client Name *',clientCol,setClientCol,true],['Status',statusCol,setStatusCol,false],['Notes',notesCol,setNotesCol,false],['Assigned To (col)',assignedToCol,setAssignedToCol,false]].map(([label,val,set,req])=>(
                   <div key={label}>
                     <label className="text-xs font-semibold mb-1 block" style={{color:isDark?D.muted:'#374151'}}>{label}</label>
                     <select value={val} onChange={e=>set(e.target.value)}
@@ -418,6 +431,20 @@ function ImportExcelModal({complianceId,complianceName,onClose,onImported,isDark
                     </select>
                   </div>
                 ))}
+              </div>
+              {/* Default assigned-to user (used when no column selected or cell is empty) */}
+              <div>
+                <label className="text-xs font-semibold mb-1 block" style={{color:isDark?D.muted:'#374151'}}>
+                  Default Assigned To <span className="font-normal opacity-60">(used when column is empty)</span>
+                </label>
+                <select value={defaultAssignedTo} onChange={e=>setDefaultAssignedTo(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  style={{backgroundColor:isDark?D.raised:'#fff',borderColor:isDark?D.border:'#d1d5db',color:isDark?D.text:'#1e293b'}}>
+                  <option value="">— Unassigned —</option>
+                  {allUsers.map(u=>(
+                    <option key={u.id} value={u.id}>{`${u.full_name}${(u.departments||[]).length?' ('+u.departments.join(', ')+')':''}`}</option>
+                  ))}
+                </select>
               </div>
               <div className="overflow-x-auto rounded-xl border" style={{borderColor:isDark?D.border:'#e2e8f0'}}>
                 <table className="w-full text-xs">
@@ -462,13 +489,23 @@ function ImportExcelModal({complianceId,complianceName,onClose,onImported,isDark
 }
 
 // ── Assign Clients Modal ───────────────────────────────────────────────────
-function AssignClientsModal({compliance,onClose,onAssigned,isDark}){
+function AssignClientsModal({compliance,onClose,onAssigned,isDark,allUsers=[]}){
   const[clients,setClients]=useState([]);
   const[search,setSearch]=useState('');
   const[selected,setSelected]=useState(new Set());
   const[loading,setLoading]=useState(true);
   const[assigning,setAssigning]=useState(false);
   const[typeFilter,setTypeFilter]=useState('all');
+  const[assignedTo,setAssignedTo]=useState('');  // default assigned_to user
+
+  // Pre-select user whose department matches compliance category
+  useEffect(()=>{
+    if(allUsers.length&&compliance.category){
+      const cat=compliance.category.toLowerCase();
+      const match=allUsers.find(u=>(u.departments||[]).some(d=>d.toLowerCase().includes(cat)||cat.includes(d.toLowerCase())));
+      if(match)setAssignedTo(match.id);
+    }
+  },[allUsers,compliance.category]);
 
   useEffect(()=>{api.get('/clients').then(r=>setClients(Array.isArray(r.data)?r.data:(r.data?.clients||[]))).catch(()=>{}).finally(()=>setLoading(false));},[]);
   const clientTypes=useMemo(()=>[...new Set(clients.map(c=>c.client_type).filter(Boolean))],[clients]);
@@ -481,8 +518,12 @@ function AssignClientsModal({compliance,onClose,onAssigned,isDark}){
   const handleAssign=async()=>{
     if(!selected.size){toast.error('Select at least one client');return;}
     setAssigning(true);
-    try{await api.post(`/compliance/${compliance.id}/assignments/bulk-assign`,{client_ids:[...selected]});
-      toast.success(`${selected.size} client${selected.size>1?'s':''} assigned`);onAssigned();}
+    try{
+      const payload={client_ids:[...selected]};
+      if(assignedTo)payload.assigned_to=assignedTo;
+      await api.post(`/compliance/${compliance.id}/assignments/bulk-assign`,payload);
+      toast.success(`${selected.size} client${selected.size>1?'s':''} assigned`);onAssigned();
+    }
     catch(err){toast.error(err?.response?.data?.detail||'Assignment failed');}
     finally{setAssigning(false);}
   };
@@ -504,6 +545,21 @@ function AssignClientsModal({compliance,onClose,onAssigned,isDark}){
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center"><X className="w-4 h-4 text-white"/></button>
         </div>
+
+        {/* Default Assigned To picker */}
+        <div className="px-4 py-3 border-b flex-shrink-0 flex items-center gap-3"
+          style={{borderColor:isDark?D.border:'#f1f5f9',backgroundColor:isDark?D.raised:'#fafafa'}}>
+          <span className="text-xs font-bold flex-shrink-0" style={{color:isDark?D.muted:'#374151'}}>Assign to:</span>
+          <select value={assignedTo} onChange={e=>setAssignedTo(e.target.value)}
+            className="flex-1 px-3 py-1.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
+            style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#d1d5db',color:isDark?D.text:'#1e293b'}}>
+            <option value="">— Unassigned —</option>
+            {allUsers.map(u=>(
+              <option key={u.id} value={u.id}>{`${u.full_name}${(u.departments||[]).length?' ('+u.departments.join(', ')+')':''}`}</option>
+            ))}
+          </select>
+        </div>
+
         <div className="p-3 border-b flex-shrink-0 flex gap-2" style={{borderColor:isDark?D.border:'#f1f5f9'}}>
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{color:isDark?D.dimmer:'#94a3b8'}}/>
@@ -558,7 +614,6 @@ function AssignClientsModal({compliance,onClose,onAssigned,isDark}){
     </motion.div>
   );
 }
-
 // ── Full Page Detail View ──────────────────────────────────────────────────
 function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUsers}){
   const{user}=useAuth();
@@ -807,7 +862,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
       <div className="flex border-b overflow-x-auto flex-shrink-0" style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',scrollbarWidth:'none'}}>
         {[
           {key:'clients', label:'Clients', icon:Users,    count:stats.total||0},
-          {key:'monthly', label:'Monthly Tracker', icon:BarChart3, count:null},
+          {key:'monthly', label:`${periodConfig?.label||'Period'} Tracker`, icon:BarChart3, count:null},
           {key:'comments',label:'Comments', icon:MessageSquare, count:comments.length||null},
         ].map(({key,label,icon:Icon,count})=>(
           <button key={key} onClick={()=>setActiveTab(key)}
@@ -1250,10 +1305,10 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
       )}
 
       <AnimatePresence>
-        {showImport&&<ImportExcelModal complianceId={compliance.id} complianceName={compliance.name} isDark={isDark} onClose={()=>setShowImport(false)} onImported={()=>{setRefreshKey(k=>k+1);setShowImport(false);}}/>}
+        {showImport&&<ImportExcelModal complianceId={compliance.id} complianceName={compliance.name} compliance={compliance} allUsers={allUsers} isDark={isDark} onClose={()=>setShowImport(false)} onImported={()=>{setRefreshKey(k=>k+1);setShowImport(false);}}/>}
       </AnimatePresence>
       <AnimatePresence>
-        {showAssign&&<AssignClientsModal compliance={compliance} isDark={isDark} onClose={()=>setShowAssign(false)} onAssigned={()=>{setRefreshKey(k=>k+1);setShowAssign(false);}}/>}
+        {showAssign&&<AssignClientsModal compliance={compliance} isDark={isDark} allUsers={allUsers} onClose={()=>setShowAssign(false)} onAssigned={()=>{setRefreshKey(k=>k+1);setShowAssign(false);}}/>}
       </AnimatePresence>
     </motion.div>
   );
