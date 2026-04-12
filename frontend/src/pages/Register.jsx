@@ -114,7 +114,7 @@ export default function Register() {
             <img src="/logo.png" alt="Taskosphere" className="h-16 mx-auto mb-2" />
           </div>
 
-          <div className="p-8 rounded-3xl shadow-2xl"
+          <div className="p-6 sm:p-8 rounded-3xl shadow-2xl"
             style={{ background: cardBg, backdropFilter: 'blur(20px)', border: `1px solid ${cardBdr}` }}>
 
             <div className="mb-7">
