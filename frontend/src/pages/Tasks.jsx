@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import useDark from '../hooks/useDark';
+import { useAuth } from '../contexts/AuthContext';
 
 // ✅ UI COMPONENTS (fixed)
 import { Card, CardContent } from '../components/ui/card';
@@ -711,21 +712,9 @@ const BoardCard = ({
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Tasks() {
 
-  const storedUser = React.useMemo(() => {
-    try { const u = localStorage.getItem('user'); return u ? JSON.parse(u) : null; } catch { return null; }
-  }, []);
-
-  const user = storedUser || { id: '', full_name: 'User', role: 'staff', permissions: { view_other_tasks: [], can_view_all_tasks: false } };
-  const hasPermission = () => true;
-  const navigate = (path) => { window.location.href = path; };
-
-  const RAW_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) || 'https://final-taskosphere-backend.onrender.com';
-  const API_BASE = RAW_URL.replace(/\/api\/?$/, '') + '/api';
-
-  const getAuthHeader = React.useCallback(() => {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  }, []);
+  // ── Auth from AuthContext (single source of truth) ───────────────────
+  const { user: authUser, hasPermission } = useAuth();
+  const user = authUser || { id: '', full_name: 'User', role: 'staff', permissions: { view_other_tasks: [], can_view_all_tasks: false } };
 
   const apiFetch = React.useCallback(async (endpoint) => {
     try {
