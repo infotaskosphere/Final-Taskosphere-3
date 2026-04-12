@@ -42,7 +42,7 @@ const NAV_GROUPS = [
       { path: '/attendance', icon: Clock,           label: 'Attendance' },
       { path: '/reminders', icon: Bell,            label: 'Reminders' },
       { path: '/duedates',   icon: Calendar,      label: 'Compliance Calendar' },
-      { path: '/compliance', icon: ShieldCheck,   label: 'Compliance Tracker' },
+      { path: '/compliance', icon: ShieldCheck,   label: 'Compliance Tracker', permission: 'can_view_compliance' },
       { path: '/visits',     icon: MapPin,        label: 'Client Visits' },
     ],
   },
