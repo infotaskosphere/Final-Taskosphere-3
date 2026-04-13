@@ -1431,17 +1431,40 @@ async def get_users(
             query = {"id": {"$in": team_ids + [current_user.id]}}
             users_raw = await db.users.find(query, {"_id": 0, "password": 0}).to_list(1000)
     else:
+        # Staff scope: own data always; with can_view_user_page can view the full directory
         permissions = get_user_permissions(current_user)
-        if not user_id and not permissions.get("can_view_user_page", False):
-            raise HTTPException(status_code=403, detail="User directory access not permitted")
-        if user_id and user_id != current_user.id:
-            allowed = permissions.get("view_other_activity", [])
-            if user_id not in allowed:
-                raise HTTPException(status_code=403, detail="Not allowed")
-        users_raw = await db.users.find(
-            {"id": user_id or current_user.id},
-            {"_id": 0, "password": 0}
-        ).to_list(1000)
+        can_view_dir = permissions.get("can_view_user_page", False)
+
+        if user_id:
+            # Specific user lookup — own record always allowed
+            if user_id == current_user.id:
+                users_raw = await db.users.find(
+                    {"id": user_id}, {"_id": 0, "password": 0}
+                ).to_list(1000)
+            elif can_view_dir:
+                # Staff with directory access can look up any user by ID
+                users_raw = await db.users.find(
+                    {"id": user_id}, {"_id": 0, "password": 0}
+                ).to_list(1000)
+            else:
+                allowed = permissions.get("view_other_activity", [])
+                if user_id not in allowed:
+                    raise HTTPException(status_code=403, detail="Not allowed")
+                users_raw = await db.users.find(
+                    {"id": user_id}, {"_id": 0, "password": 0}
+                ).to_list(1000)
+        elif can_view_dir:
+            # Staff with can_view_user_page: return full directory (active users only, no passwords)
+            # This is needed for task assignment dropdowns, cross-visibility, etc.
+            users_raw = await db.users.find(
+                {"is_active": True},
+                {"_id": 0, "password": 0, "permissions": 0}   # strip permissions for privacy
+            ).to_list(1000)
+        else:
+            # No directory access — return own record only
+            users_raw = await db.users.find(
+                {"id": current_user.id}, {"_id": 0, "password": 0}
+            ).to_list(1000)
     for u in users_raw:
         if u.get("created_at") and isinstance(u["created_at"], str):
             try:
@@ -4281,10 +4304,8 @@ async def get_efficiency_report(
         if current_user.role != "admin":
             permissions = get_user_permissions(current_user)
             allowed_users = permissions.get("view_other_reports", []) or []
-            if current_user.role == "manager":
-                # Manager: also allowed to view same-department team reports
-                team_ids = await get_team_user_ids(current_user.id)
-                allowed_users = list(set(allowed_users + team_ids))
+            # All non-admin roles (including manager) can only see own + explicitly granted users.
+            # Manager does NOT get automatic team access to reports — must be granted via view_other_reports.
             if target_user_id not in allowed_users:
                 raise HTTPException(status_code=403, detail="Not authorized to view other users' reports")
     logs = await db.activity_logs.find({"user_id": target_user_id}, {"_id": 0}).sort("date", -1).limit(30).to_list(100)
@@ -4317,10 +4338,7 @@ async def export_reports(
         if current_user.role != "admin":
             permissions = get_user_permissions(current_user)
             allowed_users = permissions.get("view_other_reports", []) or []
-            if current_user.role == "manager":
-                # Manager: also allowed to export same-department team reports
-                team_ids = await get_team_user_ids(current_user.id)
-                allowed_users = list(set(allowed_users + team_ids))
+            # All non-admin roles (including manager) can only export own + explicitly granted users.
             if target_user_id not in allowed_users:
                 raise HTTPException(status_code=403, detail="Not authorized to access other users' reports")
     logs = await db.activity_logs.find({"user_id": target_user_id}, {"_id": 0}).to_list(100)
@@ -4886,6 +4904,21 @@ async def import_clients_from_csv(
 
 @api_router.post("/clients", response_model=Client)
 async def create_client(payload: dict, current_user: User = Depends(get_current_user)):
+    """
+    Create a new client.
+    Permission matrix (Assigned + Permission model):
+      Admin                        → always allowed
+      can_edit_clients = True      → allowed (default for Manager & Staff)
+      can_view_all_clients = True  → allowed (has directory access)
+    Without either flag (admin-revoked): deny.
+    """
+    if current_user.role != "admin":
+        perms = get_user_permissions(current_user)
+        if not perms.get("can_edit_clients", False) and not perms.get("can_view_all_clients", False):
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to create clients"
+            )
     try:
         client_data = ClientCreate(**{k: v for k, v in payload.items() if k in ClientCreate.model_fields})
         client = Client(**client_data.model_dump(), created_by=current_user.id)
@@ -4988,12 +5021,23 @@ async def get_client(client_id: str, current_user: User = Depends(get_current_us
     client = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+
+    # Permission matrix — must mirror GET /clients list scope:
+    #   Admin                        → always allowed
+    #   can_view_all_clients = True  → allowed (same as list returning all)
+    #   assigned_to == user.id       → allowed (assigned user owns this client)
+    #   client_id in assigned_clients → allowed (explicitly granted access)
     if current_user.role != "admin":
-        is_assigned = client.get("assigned_to") == current_user.id
         permissions = get_user_permissions(current_user)
-        extra_clients = permissions.get("assigned_clients", [])
-        if not is_assigned and client_id not in extra_clients:
+        can_view_all  = permissions.get("can_view_all_clients", False)
+        is_assigned   = client.get("assigned_to") == current_user.id
+        is_created_by = client.get("created_by") == current_user.id
+        extra_clients = permissions.get("assigned_clients", []) or []
+        in_extra_list = client_id in extra_clients
+
+        if not (can_view_all or is_assigned or is_created_by or in_extra_list):
             raise HTTPException(status_code=403, detail="Not authorized to view this client")
+
     if isinstance(client["created_at"], str):
         client["created_at"] = datetime.fromisoformat(client["created_at"])
     if client.get("birthday") and isinstance(client["birthday"], str):
@@ -5023,12 +5067,15 @@ async def update_client(
         raise HTTPException(status_code=404, detail="Client not found")
  
     perms = get_user_permissions(current_user)
-    if (
-        current_user.role != "admin"
-        and existing.get("assigned_to") != current_user.id
-        and not perms.get("can_edit_clients", False)
-    ):
-        raise HTTPException(status_code=403, detail="Not authorized to edit this client")
+    if current_user.role != "admin":
+        can_edit_all  = perms.get("can_edit_clients", False)
+        is_assigned   = existing.get("assigned_to") == current_user.id
+        is_created_by = existing.get("created_by") == current_user.id
+        extra_clients = perms.get("assigned_clients", []) or []
+        in_extra_list = client_id in extra_clients
+
+        if not (can_edit_all or is_assigned or is_created_by or in_extra_list):
+            raise HTTPException(status_code=403, detail="Not authorized to edit this client")
  
     # ── Whitelist: only persist known fields ────────────────────────
     ALLOWED_FIELDS = {
@@ -5390,22 +5437,17 @@ async def get_activity_summary(
     date_to: Optional[str] = None,
     current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
-    # PERMISSION MATRIX (updated):
-    # Staff   → own activity only (can see view_other_activity explicit list)
-    # Manager → own activity + same-department team (Own + Team)
+    # PERMISSION MATRIX:
     # Admin   → all activity
+    # Manager → own activity only + explicitly granted via view_other_activity list
+    # Staff   → own activity only + explicitly granted via view_other_activity list
+    # (Manager does NOT get automatic team access — must be granted by admin)
     query = {}
     if current_user.role != "admin":
         permissions = get_user_permissions(current_user)
         allowed_others = permissions.get("view_other_activity", []) or []
-
-        if current_user.role == "manager":
-            # Manager: include entire team (same department) + explicitly listed users
-            team_ids = await get_team_user_ids(current_user.id)
-            visible_ids = list(set(team_ids + allowed_others + [current_user.id]))
-        else:
-            # Staff: own data only + explicitly listed users
-            visible_ids = list(set(allowed_others + [current_user.id]))
+        # All non-admin roles use the same rule: own + explicit cross-vis list
+        visible_ids = list(set(allowed_others + [current_user.id]))
 
         if user_id:
             if user_id != current_user.id and user_id not in visible_ids:
@@ -5498,18 +5540,14 @@ async def get_user_activity(
     limit: int = 100,
     current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
-    # PERMISSION MATRIX (updated):
-    # Staff   → own activity only (+ explicitly listed view_other_activity)
-    # Manager → own activity + same-department team (Own + Team)
+    # PERMISSION MATRIX:
     # Admin   → any user's activity
+    # Manager → own activity + explicitly granted via view_other_activity (no auto team)
+    # Staff   → own activity + explicitly granted via view_other_activity
     if current_user.role != "admin":
         permissions = get_user_permissions(current_user)
         allowed_others = permissions.get("view_other_activity", []) or []
-        if current_user.role == "manager":
-            team_ids = await get_team_user_ids(current_user.id)
-            visible_ids = list(set(team_ids + allowed_others + [current_user.id]))
-        else:
-            visible_ids = list(set(allowed_others + [current_user.id]))
+        visible_ids = list(set(allowed_others + [current_user.id]))
         if user_id != current_user.id and user_id not in visible_ids:
             raise HTTPException(status_code=403, detail="You are not authorised to view this user's activity")
     activities = await db.staff_activity.find({"user_id": user_id}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
@@ -5635,6 +5673,12 @@ async def get_audit_logs(
     action: Optional[str] = None,
     current_user: User = Depends(check_permission("can_view_audit_logs"))
 ):
+    """
+    Task Audit Log — role-scoped data access:
+    - Admin: all logs
+    - Manager (Own + Team): logs where user_id is own or same-department staff
+    - Staff (own only): logs where user_id is own
+    """
     query = {}
     if module:
         query["module"] = module
@@ -5642,6 +5686,18 @@ async def get_audit_logs(
         query["record_id"] = record_id
     if action and action != "ALL":
         query["action"] = action
+
+    # Scope audit logs by role
+    if current_user.role != "admin":
+        if current_user.role == "manager":
+            # Manager: own logs + same-department team logs
+            team_ids = await get_team_user_ids(current_user.id)
+            visible_ids = list(set([current_user.id] + team_ids))
+        else:
+            # Staff: own logs only
+            visible_ids = [current_user.id]
+        query["user_id"] = {"$in": visible_ids}
+
     logs = await db.audit_logs.find(query, {"_id": 0}).sort("timestamp", -1).to_list(2000)
     logs = convert_objectids(logs)
     for log in logs:
