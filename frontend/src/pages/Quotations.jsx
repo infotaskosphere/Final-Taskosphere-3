@@ -1,1289 +1,1307 @@
-"""
-backend/quotations.py
-─────────────────────────────────────────────────────────────────────────────
-Quotation Module — FastAPI Router
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useDark } from '@/hooks/useDark';
+import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
+import { useAuth } from '@/contexts/AuthContext';
+import api from '@/lib/api';
+import axios from 'axios';
+import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Plus, Edit, Trash2, Download, Search, Building2, FileText,
+  ChevronRight, ChevronLeft, Check, X, Loader2, Receipt,
+  Phone, Mail, Globe, CreditCard, User, Tag, Info,
+  IndianRupee, Percent, Hash, Calendar, Link, ExternalLink,
+  Send, MessageCircle, Settings, Eye, ArrowRight, Users,
+  Printer, LayoutGrid, List, Filter, TrendingUp, AlertCircle,
+  CheckCircle2, Clock, ArrowUpRight, RefreshCw, FileCheck,
+  DollarSign, BarChart3
+} from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { generateQuotationHTML } from './QuotationTemplates';
 
-PDF FIX (v6 - fpdf2 output fix):
-  - Fixed _safe_pdf_output to use pdf.output() which returns bytes in fpdf2,
-    then write into BytesIO. The old dest=BytesIO pattern is not valid in fpdf2.
-  - All other logic preserved.
-"""
+// ─── Brand Colors ─────────────────────────────────────────────────────────────
+const COLORS = {
+  deepBlue:     '#0D3B66',
+  mediumBlue:   '#1F6FB2',
+  emeraldGreen: '#1FAF5A',
+  amber:        '#F59E0B',
+  coral:        '#EF4444',
+  purple:       '#7C3AED',
+};
 
-import uuid
-import logging
-import re
-import base64
-import tempfile
-import os
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email.mime.text import MIMEText
-from email import encoders
-from datetime import datetime, timezone, date
-from io import BytesIO
-from typing import List, Optional, Any, Dict
+// ─── Dark palette (mirrors Dashboard) ────────────────────────────────────────
+const D = {
+  bg: '#0f172a', card: '#1e293b', raised: '#263348',
+  border: '#334155', text: '#f1f5f9', muted: '#94a3b8', dimmer: '#64748b',
+};
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+const STATUS_META = {
+  draft:    { label: 'Draft',    bg: 'bg-slate-100 dark:bg-slate-700',    text: 'text-slate-600 dark:text-slate-300',    dot: 'bg-slate-400',   hex: '#94A3B8', darkBg: 'rgba(148,163,184,0.15)' },
+  sent:     { label: 'Sent',     bg: 'bg-blue-50 dark:bg-blue-900/30',    text: 'text-blue-600 dark:text-blue-400',      dot: 'bg-blue-500',    hex: '#1F6FB2', darkBg: 'rgba(31,111,178,0.20)'  },
+  accepted: { label: 'Accepted', bg: 'bg-emerald-50 dark:bg-emerald-900/20', text: 'text-emerald-700 dark:text-emerald-400', dot: 'bg-emerald-500', hex: '#1FAF5A', darkBg: 'rgba(31,175,90,0.15)'  },
+  rejected: { label: 'Rejected', bg: 'bg-red-50 dark:bg-red-900/20',     text: 'text-red-600 dark:text-red-400',        dot: 'bg-red-500',     hex: '#EF4444', darkBg: 'rgba(239,68,68,0.15)'   },
+};
 
-from backend.dependencies import db, get_current_user, require_admin
-from backend.models import User
+const STEPS = ['Client & Lead', 'Services & Items', 'Terms', 'Preview'];
+const UNIT_OPTIONS = ['service','month','hour','year','session','document','return','filing','visit','item'];
 
-try:
-    from fpdf import FPDF
-    from fpdf.enums import Align, XPos, YPos
-except ImportError:
-    import subprocess
-    import sys
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "fpdf2"])
-    from fpdf import FPDF
-    from fpdf.enums import Align, XPos, YPos
+const fmt = (n) => new Intl.NumberFormat('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n ?? 0);
+const fmtC = (n) => `₹${fmt(n)}`;
 
-logger = logging.getLogger(__name__)
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const getToken = () => localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+const extractBlobError = async (error) => {
+  try {
+    if (error?.response?.data instanceof Blob) {
+      const text = await error.response.data.text();
+      try { const json = JSON.parse(text); return json?.detail || json?.message || text || 'PDF generation failed'; }
+      catch { return text || 'PDF generation failed'; }
+    }
+    return error?.response?.data?.detail || error?.response?.data?.message || error?.message || 'PDF generation failed';
+  } catch { return 'PDF generation failed due to an unknown error.'; }
+};
+const openWhatsApp = (phone, message) => {
+  let cleaned = (phone || '').replace(/\D/g, '');
+  if (cleaned.length === 10) cleaned = '91' + cleaned;
+  window.open(`https://web.whatsapp.com/send?phone=${cleaned}&text=${encodeURIComponent(message)}`, '_blank');
+};
+const avatarGrad = (name) => {
+  const colors = ['#0D3B66','#1F6FB2','#1FAF5A','#7C3AED','#F59E0B','#EF4444','#0D9488'];
+  const i = (name || '?').charCodeAt(0) % colors.length;
+  return `linear-gradient(135deg, ${colors[i]}, ${colors[(i+2)%colors.length]})`;
+};
 
-router = APIRouter(tags=["Quotations"])
+// ════════════════════════════════════════════════════════════════════════════════
+// STAT CARD (matches Invoicing exactly)
+// ════════════════════════════════════════════════════════════════════════════════
+const StatCard = ({ label, value, sub, icon: Icon, color, bg, onClick, isDark, trend }) => (
+  <div onClick={onClick}
+    className={`rounded-2xl border p-5 relative overflow-hidden cursor-pointer hover:shadow-lg hover:-translate-y-0.5 transition-all ${isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200/80 hover:border-slate-300'}`}>
+    <div className="absolute left-0 top-4 bottom-4 w-[3px] rounded-r-full" style={{ background: color }} />
+    <div className="flex items-start justify-between mb-3 pl-2">
+      <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: bg }}><Icon className="h-5 w-5" style={{ color }} /></div>
+      {trend !== undefined && (<span className={`text-[10px] font-bold px-2 py-1 rounded-full ${trend >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>{trend >= 0 ? '+' : ''}{trend}%</span>)}
+    </div>
+    <p className="text-[10px] font-bold uppercase tracking-widest mb-1 pl-2 text-slate-400">{label}</p>
+    <p className={`text-2xl font-bold tracking-tight pl-2 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{value}</p>
+    {sub && <p className={`text-xs pl-2 mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{sub}</p>}
+  </div>
+);
 
+// ── Status chip ───────────────────────────────────────────────────────────────
+const StatusChip = ({ status }) => {
+  const m = STATUS_META[status] || STATUS_META.draft;
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1 rounded-full ${m.bg} ${m.text} whitespace-nowrap`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${m.dot}`} />{m.label}
+    </span>
+  );
+};
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# DOCUMENT CHECKLISTS per service
-# ═══════════════════════════════════════════════════════════════════════════════
-SERVICE_CHECKLISTS: Dict[str, List[str]] = {
-    "GST Registration": [
-        "PAN Card of Applicant / Business",
-        "Aadhaar Card of Proprietor / Partners / Directors",
-        "Photograph (Passport Size)",
-        "Address Proof of Business Premises (Electricity Bill / Rent Agreement)",
-        "Bank Account Statement / Cancelled Cheque",
-        "Constitution Proof (Partnership Deed / MOA-AOA / Certificate of Incorporation)",
-        "Digital Signature Certificate (for Companies/LLP)",
-        "Letter of Authorization / Board Resolution",
-        "Mobile Number & Email ID",
-    ],
-    "GST Return Filing": [
-        "GSTIN",
-        "GST Username & Password",
-        "Sales Invoices / Register",
-        "Purchase Invoices / Register",
-        "Bank Statement",
-        "Credit / Debit Notes (if any)",
-        "Previous Return Copy (GSTR-3B / GSTR-1)",
-        "E-way Bill Records (if applicable)",
-    ],
-    "GST Annual Return (GSTR-9)": [
-        "GSTIN",
-        "GSTR-1 Filed Returns (All months)",
-        "GSTR-3B Filed Returns (All months)",
-        "Audited Financial Statements",
-        "Purchase & Sales Ledger",
-        "Input Tax Credit (ITC) Reconciliation",
-        "HSN/SAC Code Summary",
-    ],
-    "Income Tax Return (ITR) - Individual": [
-        "PAN Card",
-        "Aadhaar Card",
-        "Form 16 (from Employer)",
-        "Bank Statements (All accounts)",
-        "Interest Certificates (FD/Savings)",
-        "Investment Proofs (80C, 80D, etc.)",
-        "Rental Income Details (if any)",
-        "Capital Gains Statements",
-        "Previous Year ITR Copy",
-    ],
-    "Income Tax Return (ITR) - Business": [
-        "PAN Card of Business / Proprietor",
-        "Aadhaar Card",
-        "Audited Financial Statements (P&L, Balance Sheet)",
-        "Bank Statements (All accounts)",
-        "TDS Certificates / Form 26AS",
-        "GST Returns (if applicable)",
-        "Loan Statements",
-        "Investment / Asset Details",
-        "Previous Year ITR Copy",
-    ],
-    "TDS Return Filing": [
-        "TAN (Tax Deduction Account Number)",
-        "PAN of Deductee(s)",
-        "Challan Details (BSR Code, Date, Amount, Challan No.)",
-        "Nature of Payment & Rate of TDS",
-        "Previous Quarter TDS Return Copy",
-        "Form 16 / 16A Data",
-    ],
-    "Tax Audit (Form 3CA/3CB)": [
-        "PAN Card of Business",
-        "Audited Financial Statements",
-        "Books of Accounts (Ledger, Cash Book, Journal)",
-        "Bank Statements",
-        "GST Returns",
-        "ITR Filed Copies",
-        "Stock Valuation Report",
-        "Fixed Asset Register",
-        "Loan & Advance Details",
-    ],
-    "Company Registration (Pvt. Ltd.)": [
-        "PAN Card of all Proposed Directors",
-        "Aadhaar Card of all Proposed Directors",
-        "Passport Size Photographs of all Directors",
-        "Address Proof of Registered Office (Electricity Bill / NOC)",
-        "Rent Agreement (if rented premises)",
-        "Email IDs & Mobile Numbers of all Directors",
-        "Proposed Company Name(s) (2-3 Options)",
-        "Object Clause / Business Description",
-        "DSC (Digital Signature Certificate) - will be applied",
-        "DIN (Director Identification Number) - will be applied",
-    ],
-    "LLP Registration": [
-        "PAN Card of all Designated Partners",
-        "Aadhaar Card of all Designated Partners",
-        "Passport Size Photographs",
-        "Address Proof of Registered Office",
-        "Proposed LLP Name(s)",
-        "LLP Agreement Draft",
-        "DPIN / DIN of Partners",
-        "Email IDs & Mobile Numbers",
-    ],
-    "ROC Annual Compliance": [
-        "Certificate of Incorporation",
-        "MOA & AOA",
-        "Audited Financial Statements",
-        "Board Resolution",
-        "Minutes of AGM / Board Meeting",
-        "Shareholding Pattern",
-        "List of Directors",
-        "DIN of all Directors",
-        "DSC of Authorized Signatory",
-        "Previous Year Filed Forms",
-    ],
-    "Trademark Registration": [
-        "PAN Card of Applicant",
-        "Aadhaar Card",
-        "Trademark (Logo / Word / Device) in JPEG format",
-        "Business Proof (MSME / GST Certificate / MOA / Partnership Deed)",
-        "TM Class Description (Goods/Services)",
-        "Power of Attorney (TM-48)",
-        "Prior Use Evidence (if claiming use before date)",
-    ],
-    "MSME / Udyam Registration": [
-        "Aadhaar Card of Proprietor / Director / Partner",
-        "PAN Card",
-        "GSTIN (if applicable)",
-        "Bank Account Details",
-        "Business Address Proof",
-        "NIC Code (Business Activity)",
-    ],
-    "Accounting & Bookkeeping": [
-        "Bank Statements (All accounts)",
-        "Sales Invoices",
-        "Purchase Invoices",
-        "Expense Vouchers / Bills",
-        "Payroll Details (if employees)",
-        "Loan Statements",
-        "Credit Card Statements (if any)",
-        "Opening Balance Sheet / Previous Year Data",
-    ],
-    "Payroll Processing": [
-        "Employee Details (Name, PAN, Aadhaar, Bank Account)",
-        "Salary Structure / CTC Breakup",
-        "Attendance Records",
-        "Leave Records",
-        "ESI & PF Registration Numbers",
-        "Professional Tax Registration",
-        "Investment Declarations (Form 12BB)",
-    ],
-    "FEMA / RBI Compliance": [
-        "PAN Card",
-        "Certificate of Incorporation",
-        "MOA & AOA",
-        "Foreign Inward Remittance Certificate (FIRC)",
-        "Valuation Report",
-        "CS Certificate",
-        "Board Resolution for Foreign Investment",
-        "Form FC-GPR / FC-TRS (as applicable)",
-    ],
-    "DSC (Digital Signature Certificate)": [
-        "PAN Card",
-        "Aadhaar Card",
-        "Passport Size Photograph",
-        "Mobile Number (linked to Aadhaar)",
-        "Email ID",
-        "Organisation Certificate (for Class-3 Org DSC)",
-    ],
-    "Other / Custom Service": [
-        "PAN Card",
-        "Aadhaar Card",
-        "Address Proof",
-        "Bank Account Details",
-        "Photograph",
-        "Any specific document advised by our team",
-    ],
+// ════════════════════════════════════════════════════════════════════════════════
+// EMAIL MODAL
+// ════════════════════════════════════════════════════════════════════════════════
+function EmailModal({ open, onClose, quotation, company, pdfType = 'quotation' }) {
+  const [toEmail, setToEmail] = useState('');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    if (!open || !quotation) return;
+    setToEmail(quotation.client_email || '');
+    setSubject(`Quotation ${quotation.quotation_no} from ${company?.name || ''}`);
+    setBody(
+      `Dear ${quotation.client_name || 'Sir/Madam'},\n\n` +
+      `Please find attached our ${pdfType === 'checklist' ? 'document checklist' : 'quotation'} ` +
+      `${quotation.quotation_no} for ${quotation.service}.\n\n` +
+      (pdfType === 'quotation' ? `Total Amount: Rs. ${(quotation.total || 0).toLocaleString()}\nValidity: ${quotation.validity_days || 30} days\n\n` : '') +
+      `Regards,\n${company?.name || ''}`
+    );
+  }, [open, quotation, company, pdfType]);
+
+  const handleSend = async () => {
+    if (!toEmail.trim()) { toast.error('Enter recipient email'); return; }
+    setSending(true);
+    try {
+      await api.post(`/quotations/${quotation.id}/send-email`, { to_email: toEmail, subject, body, pdf_type: pdfType });
+      toast.success(`Email sent to ${toEmail}`); onClose();
+    } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to send email'); }
+    finally { setSending(false); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+            <Mail className="h-5 w-5" /> Send {pdfType === 'checklist' ? 'Checklist' : 'Quotation'} via Email
+          </DialogTitle>
+          <DialogDescription>PDF will be generated and attached automatically.</DialogDescription>
+        </DialogHeader>
+        {!company?.smtp_host && (
+          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-start gap-2">
+            <Settings className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+            <span>SMTP not configured. Add SMTP settings in company profile to enable email.</span>
+          </div>
+        )}
+        <div className="space-y-3 py-1">
+          <div className="space-y-1.5"><Label className="text-xs font-semibold">To Email *</Label><Input value={toEmail} onChange={e => setToEmail(e.target.value)} placeholder="client@company.com" className="h-9 rounded-xl text-sm" /></div>
+          <div className="space-y-1.5"><Label className="text-xs font-semibold">Subject</Label><Input value={subject} onChange={e => setSubject(e.target.value)} className="h-9 rounded-xl text-sm" /></div>
+          <div className="space-y-1.5"><Label className="text-xs font-semibold">Message</Label><Textarea value={body} onChange={e => setBody(e.target.value)} rows={6} className="resize-none rounded-xl text-sm" /></div>
+        </div>
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
+          <Button onClick={handleSend} disabled={sending || !company?.smtp_host} className="rounded-xl gap-2" style={{ background: COLORS.deepBlue }}>
+            {sending ? <><Loader2 className="h-4 w-4 animate-spin" />Sending…</> : <><Send className="h-4 w-4" />Send Email</>}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
-ALL_SERVICES = list(SERVICE_CHECKLISTS.keys())
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PYDANTIC MODELS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class CompanyProfile(BaseModel):
-    id: Optional[str] = None
-    name: str
-    address: str = ""
-    phone: str = ""
-    email: str = ""
-    website: str = ""
-    gstin: str = ""
-    pan: str = ""
-    bank_account_name: str = ""
-    bank_name: str = ""
-    bank_account_no: str = ""
-    bank_ifsc: str = ""
-    logo_base64: Optional[str] = None
-    signature_base64: Optional[str] = None
-    smtp_host: str = ""
-    smtp_port: int = 587
-    smtp_user: str = ""
-    smtp_password: str = ""
-    smtp_from_name: str = ""
-    created_by: Optional[str] = None
-    created_at: Optional[str] = None
-
-
-class QuotationItem(BaseModel):
-    description: str
-    quantity: float = 1.0
-    unit: str = "service"
-    unit_price: float = 0.0
-    amount: float = 0.0
-
-
-class QuotationCreate(BaseModel):
-    company_id: str
-    lead_id: Optional[str] = None
-    client_id: Optional[str] = None          # NEW: link to clients collection
-    client_name: str
-    client_address: str = ""
-    client_email: str = ""
-    client_phone: str = ""
-    service: str
-    subject: str = ""
-    scope_of_work: List[str] = []
-    items: List[QuotationItem] = []
-    gst_rate: float = 18.0
-    payment_terms: str = ""
-    timeline: str = ""
-    validity_days: int = 30
-    advance_terms: str = ""
-    extra_terms: List[str] = []
-    notes: str = ""
-    extra_checklist_items: List[str] = []
-    status: str = "draft"
-
-
-class QuotationOut(QuotationCreate):
-    id: str
-    quotation_no: str
-    date: str
-    created_by: str
-    created_at: str
-    updated_at: str
-    subtotal: float
-    gst_amount: float
-    total: float
-
-
-class EmailSendRequest(BaseModel):
-    to_email: str
-    subject: str = ""
-    body: str = ""
-    pdf_type: str = "quotation"  # "quotation" or "checklist"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# HELPERS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _safe_str(value: Any, max_len: int = 0) -> str:
-    if value is None:
-        return ""
-    text = str(value)
-    text = text.encode("latin-1", errors="replace").decode("latin-1")
-    if max_len and len(text) > max_len:
-        text = text[:max_len]
-    return text
-
-
-def _compute_item_amount(item: QuotationItem) -> float:
-    return round(item.quantity * item.unit_price, 2)
-
-
-def _compute_totals(items: List[QuotationItem], gst_rate: float):
-    subtotal   = sum(i.amount for i in items)
-    gst_amount = round(subtotal * gst_rate / 100, 2)
-    total      = round(subtotal + gst_amount, 2)
-    return subtotal, gst_amount, total
-
-
-def _permission_ok(user: User) -> bool:
-    if user.role == "admin":
-        return True
-    perms = user.permissions if isinstance(user.permissions, dict) else (
-        user.permissions.model_dump() if user.permissions else {}
-    )
-    return bool(perms.get("can_create_quotations", False))
-
-
-async def _next_qtn_number() -> str:
-    year  = datetime.now().year
-    count = await db.quotations.count_documents(
-        {"quotation_no": {"$regex": f"/{year}$"}}
-    )
-    return f"QTN-{count + 1:03d}/{year}"
-
-
-async def _update_lead_status_for_quotation(lead_id: str, new_status: str):
-    if not lead_id:
-        return
-    try:
-        from bson import ObjectId
-        now = datetime.now(timezone.utc)
-        update_payload = {"$set": {"status": new_status, "updated_at": now}}
-        updated = False
-
-        if ObjectId.is_valid(lead_id):
-            result = await db.leads.update_one(
-                {"_id": ObjectId(lead_id)}, update_payload
-            )
-            if result.matched_count > 0:
-                updated = True
-
-        if not updated:
-            result = await db.leads.update_one(
-                {"id": lead_id}, update_payload
-            )
-            if result.matched_count > 0:
-                updated = True
-
-        if not updated:
-            logger.warning(f"Lead '{lead_id}' not found")
-
-    except Exception as e:
-        logger.warning(f"Could not update lead {lead_id} status: {e}")
-
-
-def _extract_dominant_color_from_b64(logo_b64: str):
-    FALLBACK = (13, 59, 102)
-    if not logo_b64:
-        return FALLBACK
-    try:
-        from PIL import Image
-        import io as _io
-        raw       = re.sub(r"^data:image/[^;]+;base64,", "", logo_b64)
-        img_bytes = base64.b64decode(raw)
-        img       = Image.open(_io.BytesIO(img_bytes)).convert("RGB")
-        img       = img.resize((50, 50))
-        pixels    = list(img.getdata())
-        filtered  = [
-            p for p in pixels
-            if not (p[0] > 220 and p[1] > 220 and p[2] > 220)
-            and not (p[0] < 30  and p[1] < 30  and p[2] < 30)
-        ]
-        if not filtered:
-            return FALLBACK
-        r = int(sum(p[0] for p in filtered) / len(filtered))
-        g = int(sum(p[1] for p in filtered) / len(filtered))
-        b = int(sum(p[2] for p in filtered) / len(filtered))
-        return (r, g, b)
-    except Exception as e:
-        logger.warning(f"Dominant colour extraction failed: {e}")
-        return FALLBACK
-
-
-def _lighten(color: tuple, factor: float = 0.85) -> tuple:
-    return tuple(int(c + (255 - c) * factor) for c in color)
-
-
-def _darken(color: tuple, factor: float = 0.6) -> tuple:
-    return tuple(int(c * factor) for c in color)
-
-
-def _safe_pdf_output(pdf: FPDF) -> BytesIO:
-    """
-    Return BytesIO object containing raw PDF bytes for fpdf2.
-    fpdf2's output() method returns bytes directly.
-    We write those bytes into a BytesIO buffer.
-    """
-    output_buffer = BytesIO()
-    try:
-        pdf_bytes = pdf.output()          # fpdf2 returns bytes
-        output_buffer.write(pdf_bytes)
-        output_buffer.seek(0)
-        return output_buffer
-    except Exception as e:
-        logger.error(f"Error during PDF output: {e}")
-        raise RuntimeError(f"PDF output failed: {e}")
-
-
-def _embed_logo(pdf, logo_b64: str, x: float, y: float, h: float) -> None:
-    if not logo_b64:
-        return
-    tmp_path = None
-    try:
-        raw = re.sub(r"^data:image/[^;]+;base64,", "", logo_b64)
-        img_bytes = base64.b64decode(raw)
-        suffix = ".jpg" if ("jpeg" in logo_b64[:30] or "jpg" in logo_b64[:30]) else ".png"
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-        tmp.write(img_bytes)
-        tmp.close()
-        tmp_path = tmp.name
-        pdf.image(tmp_path, x=x, y=y, h=h)
-    except Exception as e:
-        logger.warning(f"Logo embed failed: {e}")
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                pass
-
-
-def _cell(pdf, w, h, txt="", border=0, align="L", fill=False, nl=False):
-    pdf.cell(w, h, txt, border, 1 if nl else 0, align, fill)
-
-
-def _mcell(pdf, w, h, txt, border=0, align="L", fill=False):
-    pdf.multi_cell(w, h, txt, border, align, fill)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PDF BUILDER – QUOTATION
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
-    BRAND      = _extract_dominant_color_from_b64(company.get("logo_base64", ""))
-    BRAND_DARK = _darken(BRAND, 0.7)
-    BRAND_LITE = _lighten(BRAND, 0.88)
-    DARK_TEXT  = (30, 41, 59)
-    MUTED      = (100, 116, 139)
-    WHITE      = (255, 255, 255)
-
-    _q     = q
-    _MUTED = MUTED
-
-    class PDF(FPDF):
-        def header(self):
-            pass
-
-        def footer(self):
-            self.set_y(-12)
-            self.set_font("Helvetica", "I", 7)
-            self.set_text_color(*_MUTED)
-            _cell(self, 0, 5, _safe_str(f"Quotation No: {_q.get('quotation_no', '')}  |  Page {self.page_no()}"), align="C", nl=True)
-
-    pdf = PDF(orientation="P", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=True, margin=18)
-    pdf.add_page()
-    W = pdf.w - 28  # usable width (14 mm margins each side)
-
-    # ── Logo ─────────────────────────────────────────────────────────────────
-    _embed_logo(pdf, company.get("logo_base64", ""), x=14, y=12, h=18)
-
-    # ── Company block ────────────────────────────────────────────────────────
-    pdf.set_xy(14, 32)
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.set_text_color(*BRAND_DARK)
-    _cell(pdf, 0, 6, _safe_str(company.get("name", "")), nl=True)
-
-    pdf.set_font("Helvetica", "", 8)
-    pdf.set_text_color(*MUTED)
-
-    if company.get("address"):
-        _mcell(pdf, W // 2, 4, _safe_str(company.get("address", "")))
-
-    contact_parts = []
-    if company.get("phone"):   contact_parts.append(f"Ph: {company['phone']}")
-    if company.get("email"):   contact_parts.append(f"E: {company['email']}")
-    if company.get("website"): contact_parts.append(company["website"])
-    if contact_parts:
-        _cell(pdf, 0, 4, _safe_str("  |  ".join(contact_parts)), nl=True)
-    if company.get("gstin"):
-        _cell(pdf, 0, 4, _safe_str(f"GSTIN: {company['gstin']}"), nl=True)
-
-    # ── QUOTATION title band ──────────────────────────────────────────────────
-    band_y = 62
-    pdf.set_fill_color(*BRAND)
-    pdf.rect(14, band_y, W, 10, "F")
-    pdf.set_xy(14, band_y + 1.5)
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.set_text_color(*WHITE)
-    _cell(pdf, W, 7, "QUOTATION", align="C", nl=True)
-
-    # ── Meta row ─────────────────────────────────────────────────────────────
-    pdf.set_xy(14, band_y + 13)
-    pdf.set_font("Helvetica", "B", 8)
-    pdf.set_text_color(*DARK_TEXT)
-    _cell(pdf, W / 2, 5, _safe_str(f"Quotation No: {q.get('quotation_no', '')}"), nl=False)
-    _cell(pdf, W / 2, 5, _safe_str(f"Date: {q.get('date', '')}"), align="R", nl=True)
-    pdf.set_xy(14, pdf.get_y())
-    pdf.set_font("Helvetica", "", 8)
-    pdf.set_text_color(*MUTED)
-    _cell(pdf, 0, 4, _safe_str(f"Valid for {q.get('validity_days', 30)} days from date of issue"), nl=True)
-
-    # ── Client block ──────────────────────────────────────────────────────────
-    cl_y = pdf.get_y() + 4
-    pdf.set_fill_color(*BRAND_LITE)
-    pdf.rect(14, cl_y, W, 26, "F")
-    pdf.set_xy(16, cl_y + 2)
-    pdf.set_font("Helvetica", "B", 8)
-    pdf.set_text_color(*BRAND)
-    _cell(pdf, 0, 5, "Prepared For:", nl=True)
-    pdf.set_x(16)
-    pdf.set_font("Helvetica", "B", 11)
-    pdf.set_text_color(*DARK_TEXT)
-    _cell(pdf, 0, 5, _safe_str(q.get("client_name", "")), nl=True)
-    pdf.set_x(16)
-    pdf.set_font("Helvetica", "", 8)
-    pdf.set_text_color(*MUTED)
-    if q.get("client_address"):
-        _cell(pdf, 0, 4, _safe_str(q.get("client_address", ""), max_len=80), nl=True)
-    if q.get("client_email") or q.get("client_phone"):
-        pdf.set_x(16)
-        parts = []
-        if q.get("client_phone"): parts.append(q["client_phone"])
-        if q.get("client_email"): parts.append(q["client_email"])
-        _cell(pdf, 0, 4, _safe_str("  |  ".join(parts)), nl=True)
-
-    # ── Subject ───────────────────────────────────────────────────────────────
-    pdf.set_xy(14, cl_y + 30)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(*DARK_TEXT)
-    subject = q.get("subject") or f"Quotation for {q.get('service', '')}"
-    _cell(pdf, 0, 5, _safe_str(f"Subject: {subject}"), nl=True)
-    pdf.ln(2)
-    pdf.set_font("Helvetica", "", 9)
-    _mcell(
-        pdf, W, 5,
-        "Dear Sir / Madam,\n"
-        "Thank you for your inquiry. We are pleased to submit our quotation as under:"
-    )
-
-    # ── Scope of Work ─────────────────────────────────────────────────────────
-    scope = q.get("scope_of_work", []) or []
-    if scope:
-        pdf.ln(3)
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(*BRAND)
-        _cell(pdf, 0, 6, "Scope of Work / Services", nl=True)
-        pdf.set_draw_color(*BRAND)
-        pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
-        pdf.ln(1)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(*DARK_TEXT)
-        for item in scope:
-            _cell(pdf, 6, 5, "-", nl=False)
-            _cell(pdf, 0, 5, _safe_str(item), nl=True)
-
-    # ── Items Table ────────────────────────────────────────────────────────────
-    items = q.get("items", []) or []
-    if items:
-        pdf.ln(4)
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(*BRAND)
-        _cell(pdf, 0, 6, "Quotation Details", nl=True)
-        pdf.set_draw_color(*BRAND)
-        pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
-        pdf.ln(1)
-
-        sr_w     = 10
-        qty_w    = 18
-        unit_w   = 22
-        uprice_w = 30
-        amt_w    = 30
-        desc_w   = W - sr_w - qty_w - unit_w - uprice_w - amt_w
-
-        # Table header
-        pdf.set_fill_color(*BRAND)
-        pdf.set_text_color(*WHITE)
-        pdf.set_font("Helvetica", "B", 8)
-        _cell(pdf, sr_w,     7, "Sr.",         align="C", fill=True, nl=False)
-        _cell(pdf, desc_w,   7, "Description",            fill=True, nl=False)
-        _cell(pdf, qty_w,    7, "Qty",         align="C", fill=True, nl=False)
-        _cell(pdf, unit_w,   7, "Unit",        align="C", fill=True, nl=False)
-        _cell(pdf, uprice_w, 7, "Unit Price",  align="R", fill=True, nl=False)
-        _cell(pdf, amt_w,    7, "Amount (Rs)", align="R", fill=True, nl=True)
-
-        # Table rows
-        for idx, item in enumerate(items, 1):
-            fill_color = BRAND_LITE if idx % 2 == 0 else WHITE
-            pdf.set_fill_color(*fill_color)
-            pdf.set_text_color(*DARK_TEXT)
-            pdf.set_font("Helvetica", "", 8)
-
-            desc   = _safe_str(item.get("description", ""), max_len=55)
-            qty    = item.get("quantity", 1)
-            unit   = _safe_str(item.get("unit", "service"), max_len=10)
-            uprice = item.get("unit_price", 0)
-            amt    = item.get("amount", 0)
-
-            _cell(pdf, sr_w,     7, str(idx),             align="C", fill=True, nl=False)
-            _cell(pdf, desc_w,   7, desc,                             fill=True, nl=False)
-            _cell(pdf, qty_w,    7, _safe_str(qty),       align="C", fill=True, nl=False)
-            _cell(pdf, unit_w,   7, unit,                 align="C", fill=True, nl=False)
-            _cell(pdf, uprice_w, 7, f"Rs. {uprice:,.2f}", align="R", fill=True, nl=False)
-            _cell(pdf, amt_w,    7, f"Rs. {amt:,.2f}",   align="R", fill=True, nl=True)
-
-        non_amt_w = sr_w + desc_w + qty_w + unit_w + uprice_w
-
-        # Subtotal row
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.set_fill_color(*BRAND_LITE)
-        pdf.set_text_color(*DARK_TEXT)
-        _cell(pdf, non_amt_w, 7, "Sub Total", align="R", fill=True, nl=False)
-        _cell(pdf, amt_w, 7, f"Rs. {q.get('subtotal', 0):,.2f}", align="R", fill=True, nl=True)
-
-        # GST row
-        gst_rate = q.get("gst_rate", 18)
-        if gst_rate and float(gst_rate) > 0:
-            _cell(pdf, non_amt_w, 7, f"GST @ {gst_rate}%", align="R", fill=True, nl=False)
-            _cell(pdf, amt_w, 7, f"Rs. {q.get('gst_amount', 0):,.2f}", align="R", fill=True, nl=True)
-
-        # Total row
-        pdf.set_fill_color(*BRAND)
-        pdf.set_text_color(*WHITE)
-        pdf.set_font("Helvetica", "B", 10)
-        _cell(pdf, non_amt_w, 8, "TOTAL PAYABLE", align="R", fill=True, nl=False)
-        _cell(pdf, amt_w, 8, f"Rs. {q.get('total', 0):,.2f}", align="R", fill=True, nl=True)
-
-    # ── Terms & Conditions ────────────────────────────────────────────────────
-    pdf.ln(5)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_text_color(*BRAND)
-    _cell(pdf, 0, 6, "Terms & Conditions", nl=True)
-    pdf.set_draw_color(*BRAND)
-    pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
-    pdf.ln(1)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(*DARK_TEXT)
-
-    terms = []
-    if q.get("payment_terms"):
-        terms.append(f"1. Payment Terms: {q['payment_terms']}")
-    if q.get("timeline"):
-        terms.append(f"2. Timeline: {q['timeline']}")
-    terms.append(f"3. Validity of Quotation: {q.get('validity_days', 30)} days")
-    terms.append("4. Additional work will be charged separately.")
-    if q.get("advance_terms"):
-        terms.append(f"5. Advance: {q['advance_terms']}")
-    for i, t in enumerate(q.get("extra_terms", []) or [], len(terms) + 1):
-        terms.append(f"{i}. {t}")
-    for term in terms:
-        _mcell(pdf, W, 5, _safe_str(term))
-
-    # ── Bank Details ──────────────────────────────────────────────────────────
-    if company.get("bank_account_no") or company.get("bank_name"):
-        pdf.ln(4)
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(*BRAND)
-        _cell(pdf, 0, 6, "Bank Details", nl=True)
-        pdf.set_draw_color(*BRAND)
-        pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
-        pdf.ln(1)
-        pdf.set_text_color(*DARK_TEXT)
-        half = W / 2
-        for label, val in [
-            ("Account Name", company.get("bank_account_name", "")),
-            ("Bank Name",    company.get("bank_name", "")),
-            ("Account No",   company.get("bank_account_no", "")),
-            ("IFSC Code",    company.get("bank_ifsc", "")),
-        ]:
-            pdf.set_font("Helvetica", "B", 9)
-            _cell(pdf, half * 0.45, 5, _safe_str(f"{label}:"), nl=False)
-            pdf.set_font("Helvetica", "", 9)
-            _cell(pdf, half * 0.55, 5, _safe_str(val), nl=True)
-
-    # ── Signature ─────────────────────────────────────────────────────────────
-    pdf.ln(8)
-    sig_b64 = company.get("signature_base64", "")
-    if sig_b64:
-        sig_y = pdf.get_y()
-        _embed_logo(pdf, sig_b64, x=14, y=sig_y, h=14)
-        pdf.ln(16)
-    else:
-        pdf.ln(14)
-
-    pdf.set_draw_color(*BRAND)
-    pdf.line(14, pdf.get_y(), 80, pdf.get_y())
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(*DARK_TEXT)
-    _cell(pdf, 0, 5, _safe_str(f"For {company.get('name', 'Company')}"), nl=True)
-    pdf.set_font("Helvetica", "", 8)
-    pdf.set_text_color(*MUTED)
-    _cell(pdf, 0, 4, "Authorized Signatory", nl=True)
-    pdf.ln(4)
-    pdf.set_font("Helvetica", "I", 8)
-    _cell(pdf, 0, 4, "We look forward to working with you.", nl=True)
-
-    if q.get("notes"):
-        pdf.ln(4)
-        pdf.set_font("Helvetica", "I", 8)
-        pdf.set_text_color(*MUTED)
-        _mcell(pdf, W, 4, _safe_str(f"Note: {q['notes']}"))
-
-    return _safe_pdf_output(pdf)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PDF BUILDER – CHECKLIST
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
-    BRAND      = _extract_dominant_color_from_b64(company.get("logo_base64", ""))
-    BRAND_DARK = _darken(BRAND, 0.7)
-    BRAND_LITE = _lighten(BRAND, 0.88)
-    DARK_TEXT  = (30, 41, 59)
-    MUTED      = (100, 116, 139)
-    WHITE      = (255, 255, 255)
-
-    _q     = q
-    _MUTED = MUTED
-
-    class PDF(FPDF):
-        def header(self):
-            pass
-
-        def footer(self):
-            self.set_y(-12)
-            self.set_font("Helvetica", "I", 7)
-            self.set_text_color(*_MUTED)
-            _cell(self, 0, 5, _safe_str(f"Document Checklist - {_q.get('client_name', '')}  |  Page {self.page_no()}"), align="C", nl=True)
-
-    pdf = PDF(orientation="P", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=True, margin=18)
-    pdf.add_page()
-    W = pdf.w - 28
-
-    # ── Logo ──────────────────────────────────────────────────────────────────
-    _embed_logo(pdf, company.get("logo_base64", ""), x=14, y=12, h=16)
-
-    pdf.set_xy(14, 30)
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.set_text_color(*BRAND_DARK)
-    _cell(pdf, 0, 6, _safe_str(company.get("name", "")), nl=True)
-
-    # ── Title band ────────────────────────────────────────────────────────────
-    band_y = 50
-    pdf.set_fill_color(*BRAND)
-    pdf.rect(14, band_y, W, 10, "F")
-    pdf.set_xy(14, band_y + 1.5)
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.set_text_color(*WHITE)
-    _cell(pdf, W, 7, "DOCUMENT CHECKLIST", align="C", nl=True)
-
-    # ── Client info block ─────────────────────────────────────────────────────
-    pdf.set_xy(14, band_y + 14)
-    pdf.set_fill_color(*BRAND_LITE)
-    pdf.rect(14, band_y + 14, W, 20, "F")
-    pdf.set_xy(16, band_y + 16)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(*DARK_TEXT)
-    _cell(pdf, W / 2, 5, _safe_str(f"Client Name: {q.get('client_name', '')}"), nl=False)
-    _cell(pdf, W / 2, 5, _safe_str(f"Date: {q.get('date', '')}"), align="R", nl=True)
-    pdf.set_x(16)
-    pdf.set_font("Helvetica", "", 9)
-    _cell(pdf, W / 2, 5, _safe_str(f"Service: {q.get('service', '')}"), nl=False)
-    _cell(pdf, W / 2, 5, _safe_str(f"Ref: {q.get('quotation_no', '')}"), align="R", nl=True)
-    pdf.set_x(16)
-    pdf.set_text_color(*MUTED)
-    pdf.set_font("Helvetica", "I", 8)
-    _cell(
-        pdf, 0, 4,
-        "All documents must be self-attested. Originals may be required for verification.",
-        nl=True
-    )
-
-    # ── Document list ─────────────────────────────────────────────────────────
-    service   = q.get("service", "Other / Custom Service")
-    base_docs = SERVICE_CHECKLISTS.get(service, SERVICE_CHECKLISTS["Other / Custom Service"])
-    extras    = q.get("extra_checklist_items", []) or []
-    all_docs  = base_docs + extras
-
-    pdf.ln(6)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_text_color(*BRAND)
-    _cell(pdf, 0, 6, "Required Documents", nl=True)
-    pdf.set_draw_color(*BRAND)
-    pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
-    pdf.ln(2)
-
-    col_sr   = 12
-    col_recv = 22
-    col_rem  = 28
-    col_doc  = W - col_sr - col_recv - col_rem
-
-    # Table header
-    pdf.set_fill_color(*BRAND)
-    pdf.set_text_color(*WHITE)
-    pdf.set_font("Helvetica", "B", 8)
-    _cell(pdf, col_sr,   7, "Sr.",           align="C", fill=True, nl=False)
-    _cell(pdf, col_doc,  7, "Document Name",             fill=True, nl=False)
-    _cell(pdf, col_recv, 7, "Received",      align="C", fill=True, nl=False)
-    _cell(pdf, col_rem,  7, "Remarks",                   fill=True, nl=True)
-
-    # Table rows
-    for idx, doc_name in enumerate(all_docs, 1):
-        fill_color = BRAND_LITE if idx % 2 == 0 else WHITE
-        pdf.set_fill_color(*fill_color)
-        pdf.set_text_color(*DARK_TEXT)
-        pdf.set_font("Helvetica", "", 8)
-        _cell(pdf, col_sr,   8, str(idx),                          align="C", fill=True,          nl=False)
-        _cell(pdf, col_doc,  8, _safe_str(doc_name, max_len=60),               fill=True,          nl=False)
-        _cell(pdf, col_recv, 8, "",                                align="C", fill=True, border=1, nl=False)
-        _cell(pdf, col_rem,  8, "",                                            fill=True, border=1, nl=True)
-
-    # ── Sign-off ──────────────────────────────────────────────────────────────
-    pdf.ln(8)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(*DARK_TEXT)
-    half = W / 2
-    _cell(pdf, half, 5, "Checked By: _______________________", nl=False)
-    _cell(pdf, half, 5, "Signature: _______________________", align="R", nl=True)
-
-    # ── Client confirmation block ─────────────────────────────────────────────
-    pdf.ln(10)
-    confirm_y = pdf.get_y()
-    pdf.set_fill_color(*BRAND_LITE)
-    pdf.rect(14, confirm_y, W, 22, "F")
-    pdf.set_xy(16, confirm_y + 2)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(*BRAND)
-    _cell(pdf, 0, 5, "Client Confirmation", nl=True)
-    pdf.set_x(16)
-    pdf.set_font("Helvetica", "", 8)
-    pdf.set_text_color(*DARK_TEXT)
-    _cell(pdf, 0, 5, "I confirm that the above documents have been submitted / will be submitted.", nl=True)
-    pdf.set_x(16)
-    _cell(pdf, 0, 5, "", nl=True)
-    pdf.set_x(16)
-    _cell(pdf, 0, 5, "Client Signature: _________________________       Date: ______________", nl=True)
-
-    return _safe_pdf_output(pdf)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# EMAIL HELPER
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _send_email_with_pdf(
-    smtp_host: str, smtp_port: int, smtp_user: str, smtp_password: str,
-    from_name: str, to_email: str, subject: str, body: str,
-    pdf_bytes: bytes, filename: str
-):
-    msg = MIMEMultipart()
-    msg["From"] = f"{from_name} <{smtp_user}>" if from_name else smtp_user
-    msg["To"]   = to_email
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body, "plain"))
-
-    part = MIMEBase("application", "pdf")
-    part.set_payload(pdf_bytes)
-    encoders.encode_base64(part)
-    part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
-    msg.attach(part)
-
-    with smtplib.SMTP(smtp_host, smtp_port) as server:
-        server.starttls()
-        server.login(smtp_user, smtp_password)
-        server.send_message(msg)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# COMPANY ENDPOINTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@router.post("/companies")
-async def create_company(data: dict, current_user: User = Depends(get_current_user)):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
-    now = datetime.now(timezone.utc).isoformat()
-    doc = {
-        "id":                str(uuid.uuid4()),
-        "name":              data.get("name", "").strip(),
-        "address":           data.get("address", ""),
-        "phone":             data.get("phone", ""),
-        "email":             data.get("email", ""),
-        "website":           data.get("website", ""),
-        "gstin":             data.get("gstin", ""),
-        "pan":               data.get("pan", ""),
-        "has_gst":           bool(data.get("has_gst", True)),
-        "bank_account_name": data.get("bank_account_name", ""),
-        "bank_name":         data.get("bank_name", ""),
-        "bank_account_no":   data.get("bank_account_no", ""),
-        "bank_ifsc":         data.get("bank_ifsc", ""),
-        "logo_base64":       data.get("logo_base64"),
-        "signature_base64":  data.get("signature_base64"),
-        "smtp_host":         data.get("smtp_host", ""),
-        "smtp_port":         int(data.get("smtp_port", 587)),
-        "smtp_user":         data.get("smtp_user", ""),
-        "smtp_password":     data.get("smtp_password", ""),
-        "smtp_from_name":    data.get("smtp_from_name", ""),
-        "created_by":        current_user.id,
-        "created_at":        now,
+// ════════════════════════════════════════════════════════════════════════════════
+// WHATSAPP MODAL
+// ════════════════════════════════════════════════════════════════════════════════
+function WhatsAppModal({ open, onClose, quotation, company, pdfType = 'quotation' }) {
+  const [phone, setPhone] = useState('');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    if (!open || !quotation) return;
+    setPhone(quotation.client_phone || '');
+    const base = pdfType === 'checklist'
+      ? `Hi ${quotation.client_name || ''},\n\nPlease find the document checklist for *${quotation.service}* (Ref: ${quotation.quotation_no}).\n\nKindly arrange the required documents.\n\nRegards,\n${company?.name || ''}`
+      : `Hi ${quotation.client_name || ''},\n\nPlease find our quotation *${quotation.quotation_no}* for *${quotation.service}*.\n\n💰 *Total: Rs. ${(quotation.total || 0).toLocaleString()}*\n📅 Valid for ${quotation.validity_days || 30} days\n\nLooking forward to working with you.\n\nRegards,\n${company?.name || ''}`;
+    setMessage(base);
+  }, [open, quotation, company, pdfType]);
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2" style={{ color: '#25D366' }}>
+            <MessageCircle className="h-5 w-5" />Send via WhatsApp
+          </DialogTitle>
+          <DialogDescription>Opens WhatsApp Web. Download PDF first, then attach in the chat.</DialogDescription>
+        </DialogHeader>
+        <div className="p-3 rounded-xl bg-green-50 border border-green-200 text-xs text-green-800">
+          <strong>How it works:</strong> Click "Open WhatsApp Web" — message will be pre-filled. Download PDF separately and attach.
+        </div>
+        <div className="space-y-3 py-1">
+          <div className="space-y-1.5"><Label className="text-xs font-semibold">WhatsApp Number *</Label><Input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91 98765 43210" className="h-9 rounded-xl text-sm" /></div>
+          <div className="space-y-1.5"><Label className="text-xs font-semibold">Message</Label><Textarea value={message} onChange={e => setMessage(e.target.value)} rows={7} className="resize-none rounded-xl text-sm" /></div>
+        </div>
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
+          <Button onClick={() => { if (!phone.trim()) { toast.error('Enter WhatsApp number'); return; } openWhatsApp(phone, message); toast.success('WhatsApp Web opened — attach the PDF manually.'); onClose(); }} className="rounded-xl gap-2 bg-[#25D366] hover:bg-[#20bc5a] text-white">
+            <MessageCircle className="h-4 w-4" />Open WhatsApp Web
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// COMPANY MANAGER
+// ════════════════════════════════════════════════════════════════════════════════
+function CompanyManager({ onClose, onSaved, editingCompany }) {
+  const [form, setForm] = useState({ name:'', address:'', phone:'', email:'', website:'', gstin:'', pan:'', has_gst:true, bank_account_name:'', bank_name:'', bank_account_no:'', bank_ifsc:'', logo_base64:null, signature_base64:null, smtp_host:'', smtp_port:587, smtp_user:'', smtp_password:'', smtp_from_name:'' });
+  const [saving, setSaving] = useState(false);
+  const logoInputRef = useRef(null);
+  const sigInputRef = useRef(null);
+
+  useEffect(() => { if (editingCompany) setForm({ name:editingCompany.name||'', address:editingCompany.address||'', phone:editingCompany.phone||'', email:editingCompany.email||'', website:editingCompany.website||'', gstin:editingCompany.gstin||'', pan:editingCompany.pan||'', has_gst:editingCompany.has_gst !== false, bank_account_name:editingCompany.bank_account_name||'', bank_name:editingCompany.bank_name||'', bank_account_no:editingCompany.bank_account_no||'', bank_ifsc:editingCompany.bank_ifsc||'', logo_base64:editingCompany.logo_base64||null, signature_base64:editingCompany.signature_base64||null, smtp_host:editingCompany.smtp_host||'', smtp_port:editingCompany.smtp_port||587, smtp_user:editingCompany.smtp_user||'', smtp_password:editingCompany.smtp_password||'', smtp_from_name:editingCompany.smtp_from_name||'' }); }, [editingCompany]);
+
+  const handleChange = e => setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
+  const handleFileChange = (e, field) => {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const img = new Image();
+      img.onload = () => { const canvas = document.createElement('canvas'); const MAX=400; let w=img.width,h=img.height; if(w>MAX||h>MAX){if(w>h){h=Math.round(h*MAX/w);w=MAX;}else{w=Math.round(w*MAX/h);h=MAX;}} canvas.width=w;canvas.height=h;canvas.getContext('2d').drawImage(img,0,0,w,h); setForm(prev=>({...prev,[field]:canvas.toDataURL('image/jpeg',0.7)})); };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  };
+  const handleSave = async () => {
+    if (!form.name.trim()) { toast.error('Company name is required'); return; }
+    setSaving(true);
+    try {
+      editingCompany ? await api.put(`/companies/${editingCompany.id}`, form) : await api.post('/companies', form);
+      toast.success(editingCompany ? 'Company updated' : 'Company created'); onSaved(); onClose();
+    } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to save company'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <Dialog open={true} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2" style={{ color: COLORS.deepBlue }}><Building2 className="h-5 w-5" />{editingCompany ? 'Edit Company Profile' : 'Create New Company Profile'}</DialogTitle>
+          <DialogDescription>Manage company details, bank info, and SMTP settings.</DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 py-2 max-h-[60vh] overflow-y-auto pr-4">
+          <div className="space-y-3">
+            <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2"><Info className="h-4 w-4" />Company Details</h4>
+            {[{label:'Company Name *',name:'name',type:'text'},{label:'Phone',name:'phone',type:'text'},{label:'Email',name:'email',type:'email'},{label:'Website',name:'website',type:'text'},{label:'GSTIN',name:'gstin',type:'text'},{label:'PAN',name:'pan',type:'text'}].map(f=>(
+              <div key={f.name} className="space-y-1.5"><Label className="text-xs font-semibold">{f.label}</Label><Input name={f.name} value={form[f.name]} onChange={handleChange} type={f.type} className="h-9 rounded-xl text-sm" /></div>
+            ))}
+            <div className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-slate-50">
+              <div>
+                <p className="text-xs font-semibold text-slate-700">GST Registered</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Enables GST on invoices & quotations</p>
+              </div>
+              <button type="button" onClick={() => setForm(p => ({ ...p, has_gst: !p.has_gst }))}
+                className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${form.has_gst ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.has_gst ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
+            <div className="space-y-1.5"><Label className="text-xs font-semibold">Address</Label><Textarea name="address" value={form.address} onChange={handleChange} rows={2} className="resize-none rounded-xl text-sm" /></div>
+          </div>
+          <div className="space-y-3">
+            <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2"><CreditCard className="h-4 w-4" />Bank Details</h4>
+            {[{label:'Account Name',name:'bank_account_name'},{label:'Bank Name',name:'bank_name'},{label:'Account No.',name:'bank_account_no'},{label:'IFSC Code',name:'bank_ifsc'}].map(f=>(
+              <div key={f.name} className="space-y-1.5"><Label className="text-xs font-semibold">{f.label}</Label><Input name={f.name} value={form[f.name]} onChange={handleChange} className="h-9 rounded-xl text-sm" /></div>
+            ))}
+            <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2 mt-4"><Tag className="h-4 w-4" />Logo & Signature</h4>
+            <div className="space-y-1.5"><Label className="text-xs font-semibold">Company Logo</Label><Input type="file" accept="image/*" onChange={e=>handleFileChange(e,'logo_base64')} className="h-9 rounded-xl text-sm" ref={logoInputRef} />{form.logo_base64&&<div className="flex items-center gap-2"><img src={form.logo_base64} alt="Logo" className="h-12 object-contain rounded border" /><Button variant="outline" size="sm" onClick={()=>{setForm(p=>({...p,logo_base64:null}));if(logoInputRef.current)logoInputRef.current.value='';}}>Remove</Button></div>}</div>
+            <div className="space-y-1.5"><Label className="text-xs font-semibold">Signature</Label><Input type="file" accept="image/*" onChange={e=>handleFileChange(e,'signature_base64')} className="h-9 rounded-xl text-sm" ref={sigInputRef} />{form.signature_base64&&<div className="flex items-center gap-2"><img src={form.signature_base64} alt="Signature" className="h-12 object-contain rounded border" /><Button variant="outline" size="sm" onClick={()=>{setForm(p=>({...p,signature_base64:null}));if(sigInputRef.current)sigInputRef.current.value='';}}>Remove</Button></div>}</div>
+            <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2 mt-4"><Mail className="h-4 w-4" />SMTP Settings</h4>
+            {[{label:'SMTP Host',name:'smtp_host',type:'text'},{label:'SMTP Port',name:'smtp_port',type:'number'},{label:'SMTP User',name:'smtp_user',type:'text'},{label:'SMTP Password',name:'smtp_password',type:'password'},{label:'From Name',name:'smtp_from_name',type:'text'}].map(f=>(
+              <div key={f.name} className="space-y-1.5"><Label className="text-xs font-semibold">{f.label}</Label><Input name={f.name} value={form[f.name]} onChange={handleChange} type={f.type} className="h-9 rounded-xl text-sm" /></div>
+            ))}
+          </div>
+        </div>
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
+          <Button onClick={handleSave} disabled={saving} className="rounded-xl gap-2" style={{ background: COLORS.deepBlue }}>
+            {saving ? <><Loader2 className="h-4 w-4 animate-spin" />Saving…</> : `${editingCompany ? 'Update' : 'Create'} Company`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// COMPANY LIST MODAL
+// ════════════════════════════════════════════════════════════════════════════════
+function CompanyListModal({ open, onClose, onRefresh }) {
+  const [companies, setCompanies] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editingCompany, setEditingCompany] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+
+  const fetchCompanies = async () => {
+    setLoading(true);
+    try { const res = await api.get('/companies'); setCompanies(res.data); }
+    catch { toast.error('Failed to load companies'); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { if (open) fetchCompanies(); }, [open]);
+
+  const handleDelete = async (id, name) => {
+    if (!window.confirm(`Delete company "${name}"?`)) return;
+    setDeletingId(id);
+    try { await api.delete(`/companies/${id}`); toast.success('Company deleted'); fetchCompanies(); onRefresh(); }
+    catch (err) { toast.error(err?.response?.data?.detail || 'Failed to delete'); }
+    finally { setDeletingId(null); }
+  };
+
+  return (
+    <>
+      <Dialog open={open && !showForm} onOpenChange={v => { if (!v) onClose(); }}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2" style={{ color: COLORS.deepBlue }}><Building2 className="h-5 w-5" />Company Profiles<Badge className="ml-2 bg-blue-100 text-blue-700">{companies.length}</Badge></DialogTitle>
+            <DialogDescription>Manage company profiles used in quotations and invoices.</DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end mb-2">
+            <Button onClick={() => { setEditingCompany(null); setShowForm(true); }} className="rounded-xl gap-2" style={{ background: COLORS.emeraldGreen }}><Plus className="h-4 w-4" />Add New Company</Button>
+          </div>
+          {loading ? <MiniLoader height={120} />
+            : companies.length === 0 ? <div className="text-center py-10 text-slate-400"><Building2 className="h-12 w-12 mx-auto mb-3 opacity-30" /><p>No companies added yet.</p></div>
+            : <div className="max-h-[55vh] overflow-y-auto space-y-3 pr-1">
+              {companies.map(company => (
+                <div key={company.id} className="flex items-start gap-4 p-4 rounded-xl border border-slate-200 hover:border-blue-200 hover:bg-blue-50/30 transition-colors">
+                  <div className="w-12 h-12 rounded-xl bg-slate-100 flex-shrink-0 flex items-center justify-center overflow-hidden">{company.logo_base64 ? <img src={company.logo_base64} alt="logo" className="w-full h-full object-contain" /> : <Building2 className="h-5 w-5 text-slate-400" />}</div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-slate-800 truncate">{company.name}</p>
+                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs text-slate-500">
+                      {company.gstin && <span>GSTIN: {company.gstin}</span>}
+                      <span className={`inline-flex items-center gap-1 font-semibold ${company.has_gst === false ? 'text-amber-600' : 'text-emerald-600'}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${company.has_gst === false ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                        {company.has_gst === false ? 'GST Not Registered' : 'GST Registered'}
+                      </span>
+                      {company.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{company.phone}</span>}
+                      {company.email && <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{company.email}</span>}
+                    </div>
+                    <div className="flex items-center gap-1 mt-1">
+                      {company.smtp_host ? <Badge className="text-[10px] px-2 py-0 bg-green-50 text-green-700 border-green-200">Email Ready</Badge> : <Badge className="text-[10px] px-2 py-0 bg-amber-50 text-amber-700 border-amber-200">SMTP Not Set</Badge>}
+                      {company.logo_base64 && <Badge className="text-[10px] px-2 py-0 bg-blue-50 text-blue-700 border-blue-200">Has Logo</Badge>}
+                    </div>
+                  </div>
+                  <div className="flex gap-2 flex-shrink-0">
+                    <Button variant="outline" size="sm" onClick={() => { setEditingCompany(company); setShowForm(true); }} className="rounded-lg gap-1 text-blue-600 border-blue-200 hover:bg-blue-50"><Edit className="h-3.5 w-3.5" />Edit</Button>
+                    <Button variant="outline" size="sm" onClick={() => handleDelete(company.id, company.name)} disabled={deletingId === company.id} className="rounded-lg gap-1 text-red-600 border-red-200 hover:bg-red-50">{deletingId === company.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}Delete</Button>
+                  </div>
+                </div>
+              ))}
+            </div>}
+          <DialogFooter><Button variant="outline" onClick={onClose} className="rounded-xl">Close</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {showForm && <CompanyManager editingCompany={editingCompany} onClose={() => { setShowForm(false); setEditingCompany(null); }} onSaved={() => { fetchCompanies(); onRefresh(); }} />}
+    </>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// QUOTATION MANAGER (create / edit wizard)
+// ════════════════════════════════════════════════════════════════════════════════
+function QuotationManager({ onClose, onSaved, editingQuotation }) {
+  const [step, setStep] = useState(1);
+  const [form, setForm] = useState({ company_id:'', lead_id:'', client_id:'', client_name:'', client_address:'', client_email:'', client_phone:'', service:'', subject:'', scope_of_work:[''], items:[{ description:'', quantity:1, unit:'service', unit_price:0, amount:0 }], gst_rate:18.0, payment_terms:'', timeline:'', validity_days:30, advance_terms:'', extra_terms:[''], notes:'', extra_checklist_items:[''], status:'draft' });
+  const [companies, setCompanies] = useState([]);
+  const [leads, setLeads] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [services, setServices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const [cRes, lRes, sRes, clRes] = await Promise.all([api.get('/companies'), api.get('/leads'), api.get('/quotations/services'), api.get('/clients')]);
+        setCompanies(cRes.data); setLeads(lRes.data); setServices(sRes.data.services); setClients(clRes.data);
+        if (editingQuotation) {
+          setForm({ company_id:editingQuotation.company_id||'', lead_id:editingQuotation.lead_id||'', client_id:editingQuotation.client_id||'', client_name:editingQuotation.client_name||'', client_address:editingQuotation.client_address||'', client_email:editingQuotation.client_email||'', client_phone:editingQuotation.client_phone||'', service:editingQuotation.service||'', subject:editingQuotation.subject||'', scope_of_work:editingQuotation.scope_of_work?.length?editingQuotation.scope_of_work:[''], items:editingQuotation.items?.length?editingQuotation.items:[{description:'',quantity:1,unit:'service',unit_price:0,amount:0}], gst_rate:editingQuotation.gst_rate||18.0, payment_terms:editingQuotation.payment_terms||'', timeline:editingQuotation.timeline||'', validity_days:editingQuotation.validity_days||30, advance_terms:editingQuotation.advance_terms||'', extra_terms:editingQuotation.extra_terms?.length?editingQuotation.extra_terms:[''], notes:editingQuotation.notes||'', extra_checklist_items:editingQuotation.extra_checklist_items?.length?editingQuotation.extra_checklist_items:[''], status:editingQuotation.status||'draft' });
+        } else if (cRes.data.length > 0) {
+          setForm(prev => ({ ...prev, company_id: cRes.data[0].id }));
+        }
+      } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to load data'); }
+      finally { setLoading(false); }
+    };
+    fetchData();
+  }, [editingQuotation]);
+
+  // ── Draft persistence for new quotation (not edit) ────────────────────────
+  const QTN_DRAFT_KEY = 'taskosphere_quotation_add_draft';
+  useEffect(() => {
+    if (!editingQuotation && !loading) {
+      try { localStorage.setItem(QTN_DRAFT_KEY, JSON.stringify({ form, step })); } catch {}
     }
-    if not doc["name"]:
-        raise HTTPException(400, "Company name is required")
-    await db.companies.insert_one(doc)
-    doc.pop("_id", None)
-    return doc
-
-
-@router.get("/companies")
-async def get_companies(current_user: User = Depends(get_current_user)):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
-    query = {} if current_user.role == "admin" else {"created_by": current_user.id}
-    companies = await db.companies.find(query, {"_id": 0}).to_list(500)
-    return companies
-
-
-@router.put("/companies/{company_id}")
-async def update_company(
-    company_id: str, data: dict,
-    current_user: User = Depends(get_current_user)
-):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
-    existing = await db.companies.find_one({"id": company_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(404, "Company not found")
-    if current_user.role != "admin" and existing.get("created_by") != current_user.id:
-        raise HTTPException(403, "Not authorized")
-    allowed = [
-        "name", "address", "phone", "email", "website", "gstin", "pan",
-        "has_gst",
-        "bank_account_name", "bank_name", "bank_account_no", "bank_ifsc",
-        "logo_base64", "signature_base64",
-        "smtp_host", "smtp_port", "smtp_user", "smtp_password", "smtp_from_name",
-    ]
-    update = {k: data[k] for k in allowed if k in data and data[k] is not None}
-    await db.companies.update_one({"id": company_id}, {"$set": update})
-    updated = await db.companies.find_one({"id": company_id}, {"_id": 0})
-    return updated
-
-
-@router.delete("/companies/{company_id}")
-async def delete_company(company_id: str, current_user: User = Depends(get_current_user)):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
-    existing = await db.companies.find_one({"id": company_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(404, "Company not found")
-    if current_user.role != "admin" and existing.get("created_by") != current_user.id:
-        raise HTTPException(403, "Not authorized")
-    await db.companies.delete_one({"id": company_id})
-    return {"message": "Company deleted"}
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# QUOTATION ENDPOINTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@router.get("/quotations/next-number")
-async def get_next_quotation_number(current_user: User = Depends(get_current_user)):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
-    return {"number": await _next_qtn_number()}
-
-
-@router.get("/quotations/services")
-async def get_services(_: User = Depends(get_current_user)):
-    return {"services": ALL_SERVICES, "checklists": SERVICE_CHECKLISTS}
-
-
-@router.post("/quotations")
-async def create_quotation(
-    data: QuotationCreate,
-    current_user: User = Depends(get_current_user)
-):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
-
-    computed_items = []
-    for item in data.items:
-        item.amount = _compute_item_amount(item)
-        computed_items.append(item)
-
-    subtotal, gst_amount, total = _compute_totals(computed_items, data.gst_rate)
-    now    = datetime.now(timezone.utc).isoformat()
-    qtn_no = await _next_qtn_number()
-
-    doc = {
-        "id":           str(uuid.uuid4()),
-        "quotation_no": qtn_no,
-        "date":         date.today().isoformat(),
-        **data.model_dump(),
-        "items":        [i.model_dump() for i in computed_items],
-        "subtotal":     subtotal,
-        "gst_amount":   gst_amount,
-        "total":        total,
-        "created_by":   current_user.id,
-        "created_at":   now,
-        "updated_at":   now,
+  }, [form, step, editingQuotation, loading]);
+  useEffect(() => {
+    if (!editingQuotation) {
+      try {
+        const saved = localStorage.getItem(QTN_DRAFT_KEY);
+        if (saved) {
+          const { form: savedForm, step: savedStep } = JSON.parse(saved);
+          if (savedForm?.client_name?.trim() || savedForm?.service?.trim()) {
+            setForm(prev => ({ ...prev, ...savedForm }));
+            if (savedStep > 1) setStep(savedStep);
+          }
+        }
+      } catch {}
     }
-    await db.quotations.insert_one(doc)
-    doc.pop("_id", None)
+  }, []); // eslint-disable-line
 
-    if data.lead_id:
-        await _update_lead_status_for_quotation(data.lead_id, "proposal")
+  const handleChange = e => setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
+  const handleClientSelect = (clientId) => {
+    if (!clientId || clientId === 'none') { setForm(prev => ({ ...prev, client_id: '' })); return; }
+    const c = clients.find(c => c.id === clientId); if (!c) return;
+    const addr = [c.address, c.city, c.state].filter(Boolean).join(', ');
+    const contact = c.contact_persons?.[0];
+    setForm(prev => ({ ...prev, client_id: clientId, client_name: c.company_name||'', client_email: c.email||contact?.email||'', client_phone: c.phone||contact?.phone||'', client_address: addr }));
+  };
+  const handleLeadSelect = (leadId) => {
+    if (!leadId || leadId === 'none') { setForm(prev => ({ ...prev, lead_id: '' })); return; }
+    setForm(prev => ({ ...prev, lead_id: leadId }));
+    const l = leads.find(l => l.id === leadId);
+    if (l && !form.client_name) setForm(prev => ({ ...prev, lead_id: leadId, client_name: l.company_name||l.name||prev.client_name, client_email: l.email||prev.client_email, client_phone: l.phone||prev.client_phone }));
+  };
+  const handleItemChange = (index, field, value) => {
+    const items = [...form.items]; items[index][field] = value;
+    if (field === 'quantity' || field === 'unit_price') items[index].amount = items[index].quantity * items[index].unit_price;
+    setForm(prev => ({ ...prev, items }));
+  };
+  const addItem = () => setForm(prev => ({ ...prev, items: [...prev.items, { description:'', quantity:1, unit:'service', unit_price:0, amount:0 }] }));
+  const removeItem = (i) => setForm(prev => ({ ...prev, items: prev.items.filter((_,idx)=>idx!==i) }));
+  const handleListChange = (list, i, val) => { const a=[...form[list]]; a[i]=val; setForm(prev=>({...prev,[list]:a})); };
+  const addListItem = (list) => setForm(prev => ({ ...prev, [list]: [...prev[list], ''] }));
+  const removeListItem = (list, i) => setForm(prev => ({ ...prev, [list]: prev[list].filter((_,idx)=>idx!==i) }));
 
-    return doc
+  const handleSave = async () => {
+    if (!form.company_id) { toast.error('Please select a company'); setStep(1); return; }
+    if (!form.client_name.trim()) { toast.error('Client name is required'); setStep(1); return; }
+    if (!form.service.trim()) { toast.error('Service is required — please select a service in Step 2'); setStep(2); return; }
+    setSaving(true);
+    try {
+      const payload = { ...form, scope_of_work: form.scope_of_work.filter(s=>s.trim()), extra_terms: form.extra_terms.filter(t=>t.trim()), extra_checklist_items: form.extra_checklist_items.filter(c=>c.trim()), lead_id: form.lead_id||null, client_id: form.client_id||null };
+      editingQuotation ? await api.put(`/quotations/${editingQuotation.id}`, payload) : await api.post('/quotations', payload);
+      if (!editingQuotation) { try { localStorage.removeItem(QTN_DRAFT_KEY); } catch {} }
+      toast.success(editingQuotation ? 'Quotation updated' : 'Quotation created'); onSaved(); onClose();
+    } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to save quotation'); }
+    finally { setSaving(false); }
+  };
 
+  const subtotal = form.items.reduce((sum,it)=>sum+(it.quantity*it.unit_price),0);
+  const gstAmount = subtotal*(form.gst_rate/100);
+  const total = subtotal+gstAmount;
 
-@router.get("/quotations")
-async def list_quotations(
-    status:  Optional[str] = None,
-    service: Optional[str] = None,
-    lead_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
+  if (loading) return (
+    <Dialog open={true} onOpenChange={v=>{ if(!v) onClose(); }}>
+      <DialogContent className="max-w-2xl"><DialogHeader><DialogTitle className="sr-only">Loading</DialogTitle><DialogDescription className="sr-only">Loading…</DialogDescription></DialogHeader>
+        <MiniLoader height={160} />
+      </DialogContent>
+    </Dialog>
+  );
 
-    query: Dict[str, Any] = {}
-    if current_user.role != "admin":
-        query["created_by"] = current_user.id
-    if status:
-        query["status"] = status
-    if service:
-        query["service"] = service
-    if lead_id:
-        query["lead_id"] = lead_id
+  return (
+    <Dialog open={true} onOpenChange={v=>{ if(!v) onClose(); }}>
+      <DialogContent className="max-w-5xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2" style={{ color: COLORS.deepBlue }}><Receipt className="h-5 w-5" />{editingQuotation ? `Edit ${editingQuotation.quotation_no}` : 'Create New Quotation'}</DialogTitle>
+          <DialogDescription>Step-by-step professional quotation builder.</DialogDescription>
+        </DialogHeader>
 
-    quotations = await db.quotations.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    return quotations
+        {/* Step tabs */}
+        <div className="flex space-x-2 mb-2">
+          {STEPS.map((s,i) => (
+            <button key={s} onClick={() => setStep(i+1)} className={cn("flex-1 text-center py-2 px-1 rounded-xl text-xs font-medium transition-colors", step===(i+1)?'bg-blue-100 text-blue-700 font-semibold':'bg-slate-50 text-slate-500 hover:bg-slate-100')}>
+              <span className={cn("inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] mr-1", step===(i+1)?'bg-blue-600 text-white':'bg-slate-200 text-slate-600')}>{i+1}</span>{s}
+            </button>
+          ))}
+        </div>
 
+        <div className="max-h-[58vh] overflow-y-auto pr-1">
+          {/* Step 1 */}
+          {step===1 && <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5"><Label className="text-xs font-semibold">Select Company *</Label><Select value={form.company_id} onValueChange={v=>{const co=companies.find(c=>c.id===v);setForm(p=>({...p,company_id:v,gst_rate:co?.has_gst===false?0:(p.gst_rate||18)}));}}><SelectTrigger className="h-9 rounded-xl text-sm"><SelectValue placeholder="Select company" /></SelectTrigger><SelectContent>{companies.map(c=><SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select>{companies.length===0&&<p className="text-xs text-amber-600">No companies found. Add a company first.</p>}</div>
+              <div className="space-y-1.5"><Label className="text-xs font-semibold">Link to Lead (Optional)</Label><Select value={form.lead_id||'none'} onValueChange={handleLeadSelect}><SelectTrigger className="h-9 rounded-xl text-sm"><SelectValue placeholder="Select a lead" /></SelectTrigger><SelectContent><SelectItem value="none">-- No Lead --</SelectItem>{leads.map(l=><SelectItem key={l.id} value={l.id}>{l.company_name||l.name||'Unnamed'}{(l.contact_name||l.email)?` — ${l.contact_name||l.email}`:''}</SelectItem>)}</SelectContent></Select></div>
+            </div>
+            <div className="p-3 rounded-xl bg-blue-50 border border-blue-100">
+              <Label className="text-xs font-semibold text-blue-700 flex items-center gap-1 mb-2"><Users className="h-3.5 w-3.5" />Select from Client List (auto-fills details)</Label>
+              <Select value={form.client_id||'none'} onValueChange={handleClientSelect}><SelectTrigger className="h-9 rounded-xl text-sm bg-white"><SelectValue placeholder="Choose existing client…" /></SelectTrigger><SelectContent><SelectItem value="none">-- Enter manually below --</SelectItem>{clients.map(c=><SelectItem key={c.id} value={c.id}>{c.company_name}{c.phone?` — ${c.phone}`:''}{c.email?` — ${c.email}`:''}</SelectItem>)}</SelectContent></Select>
+              {form.client_id && <p className="text-[10px] text-blue-600 mt-1">✓ Client details loaded — you can edit below.</p>}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5"><Label className="text-xs font-semibold">Client Name *</Label><Input name="client_name" value={form.client_name} onChange={handleChange} className="h-9 rounded-xl text-sm" /></div>
+              <div className="space-y-1.5"><Label className="text-xs font-semibold">Client Email</Label><Input name="client_email" value={form.client_email} onChange={handleChange} type="email" className="h-9 rounded-xl text-sm" /></div>
+              <div className="space-y-1.5"><Label className="text-xs font-semibold">Client Phone</Label><Input name="client_phone" value={form.client_phone} onChange={handleChange} className="h-9 rounded-xl text-sm" /></div>
+              <div className="space-y-1.5"><Label className="text-xs font-semibold">Client Address</Label><Textarea name="client_address" value={form.client_address} onChange={handleChange} rows={2} className="resize-none rounded-xl text-sm" /></div>
+            </div>
+          </div>}
 
-@router.get("/quotations/{quotation_id}")
-async def get_quotation(quotation_id: str, current_user: User = Depends(get_current_user)):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
-    q = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
-    if not q:
-        raise HTTPException(404, "Quotation not found")
-    if current_user.role != "admin" and q.get("created_by") != current_user.id:
-        raise HTTPException(403, "Not authorized")
-    return q
+          {/* Step 2 */}
+          {step===2 && <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5"><Label className="text-xs font-semibold">Service *</Label><div className="flex gap-2"><Select value={services.includes(form.service) ? form.service : ''} onValueChange={v=>setForm(p=>({...p,service:v}))}><SelectTrigger className={`h-9 rounded-xl text-sm ${!form.service ? 'border-red-300' : ''}`}><SelectValue placeholder="Select a service" /></SelectTrigger><SelectContent>{services.map(s=><SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select><Input value={form.service} onChange={e=>setForm(p=>({...p,service:e.target.value}))} placeholder="Or type custom service *" className={`h-9 rounded-xl text-sm flex-1 ${!form.service ? 'border-red-300 ring-1 ring-red-200' : ''}`} /></div>{!form.service && <p className="text-[11px] text-red-500 font-medium">⚠ Service is required</p>}</div>
+              <div className="space-y-1.5"><Label className="text-xs font-semibold">Subject</Label><Input name="subject" value={form.subject} onChange={handleChange} className="h-9 rounded-xl text-sm" placeholder="e.g., Quotation for GST Registration" /></div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold">Scope of Work</Label>
+              {form.scope_of_work.map((s,i)=>(<div key={i} className="flex items-center gap-2"><Input value={s} onChange={e=>handleListChange('scope_of_work',i,e.target.value)} className="h-9 rounded-xl text-sm" placeholder="e.g., Filing of GSTR-1 monthly" />{form.scope_of_work.length>1&&<Button variant="ghost" size="icon" onClick={()=>removeListItem('scope_of_work',i)}><Trash2 className="h-4 w-4 text-red-400" /></Button>}</div>))}
+              <Button variant="outline" size="sm" onClick={()=>addListItem('scope_of_work')} className="rounded-xl gap-1 text-blue-600 border-blue-200 hover:bg-blue-50"><Plus className="h-3.5 w-3.5" />Add Scope Item</Button>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold">Quotation Items *</Label>
+              <div className="grid grid-cols-12 gap-1 text-[10px] font-semibold text-slate-500 px-1"><div className="col-span-4">Description</div><div className="col-span-2">Qty</div><div className="col-span-2">Unit</div><div className="col-span-2 text-right">Unit Price</div><div className="col-span-2 text-right">Amount</div></div>
+              {form.items.map((item,i)=>(<div key={i} className="grid grid-cols-12 gap-1 items-center"><Input value={item.description} onChange={e=>handleItemChange(i,'description',e.target.value)} className="col-span-4 h-8 rounded-lg text-sm" placeholder="Item description" /><Input value={item.quantity} onChange={e=>handleItemChange(i,'quantity',parseFloat(e.target.value)||0)} type="number" step="0.01" className="col-span-2 h-8 rounded-lg text-sm" /><Select value={item.unit} onValueChange={v=>handleItemChange(i,'unit',v)}><SelectTrigger className="col-span-2 h-8 rounded-lg text-xs"><SelectValue /></SelectTrigger><SelectContent>{UNIT_OPTIONS.map(u=><SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent></Select><Input value={item.unit_price} onChange={e=>handleItemChange(i,'unit_price',parseFloat(e.target.value)||0)} type="number" step="0.01" className="col-span-2 h-8 rounded-lg text-sm text-right" /><div className="col-span-1 text-right text-sm text-slate-600 font-medium">{item.amount.toFixed(0)}</div>{form.items.length>1&&<Button variant="ghost" size="icon" className="col-span-1 h-8 w-8" onClick={()=>removeItem(i)}><Trash2 className="h-3.5 w-3.5 text-red-400" /></Button>}</div>))}
+              <Button variant="outline" size="sm" onClick={addItem} className="rounded-xl gap-1 text-blue-600 border-blue-200 hover:bg-blue-50"><Plus className="h-3.5 w-3.5" />Add Item</Button>
+            </div>
+          </div>}
 
+          {/* Step 3 */}
+          {step===3 && <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {[{label:'GST Rate (%)',name:'gst_rate',type:'number'},{label:'Validity (Days)',name:'validity_days',type:'number'},{label:'Timeline',name:'timeline',type:'text',placeholder:'e.g., 7 working days'},{label:'Advance Terms',name:'advance_terms',type:'text',placeholder:'e.g., 50% advance required'}].map(f=>(<div key={f.name} className="space-y-1.5"><Label className="text-xs font-semibold">{f.label}</Label><Input name={f.name} value={form[f.name]} onChange={handleChange} type={f.type} placeholder={f.placeholder||''} className="h-9 rounded-xl text-sm" /></div>))}
+            <div className="md:col-span-2 space-y-1.5"><Label className="text-xs font-semibold">Payment Terms</Label><Textarea name="payment_terms" value={form.payment_terms} onChange={handleChange} rows={2} className="resize-none rounded-xl text-sm" /></div>
+            <div className="md:col-span-2 space-y-2"><Label className="text-xs font-semibold">Extra Terms & Conditions</Label>{form.extra_terms.map((t,i)=>(<div key={i} className="flex items-center gap-2"><Input value={t} onChange={e=>handleListChange('extra_terms',i,e.target.value)} className="h-9 rounded-xl text-sm" placeholder="Additional term..." />{form.extra_terms.length>1&&<Button variant="ghost" size="icon" onClick={()=>removeListItem('extra_terms',i)}><Trash2 className="h-4 w-4 text-red-400" /></Button>}</div>))}<Button variant="outline" size="sm" onClick={()=>addListItem('extra_terms')} className="rounded-xl gap-1 text-blue-600 border-blue-200 hover:bg-blue-50"><Plus className="h-3.5 w-3.5" />Add Term</Button></div>
+            <div className="md:col-span-2 space-y-1.5"><Label className="text-xs font-semibold">Notes</Label><Textarea name="notes" value={form.notes} onChange={handleChange} rows={2} className="resize-none rounded-xl text-sm" /></div>
+            <div className="md:col-span-2 space-y-2"><Label className="text-xs font-semibold">Extra Document Checklist Items</Label>{form.extra_checklist_items.map((item,i)=>(<div key={i} className="flex items-center gap-2"><Input value={item} onChange={e=>handleListChange('extra_checklist_items',i,e.target.value)} className="h-9 rounded-xl text-sm" placeholder="e.g., Latest Bank Statement" />{form.extra_checklist_items.length>1&&<Button variant="ghost" size="icon" onClick={()=>removeListItem('extra_checklist_items',i)}><Trash2 className="h-4 w-4 text-red-400" /></Button>}</div>))}<Button variant="outline" size="sm" onClick={()=>addListItem('extra_checklist_items')} className="rounded-xl gap-1 text-blue-600 border-blue-200 hover:bg-blue-50"><Plus className="h-3.5 w-3.5" />Add Checklist Item</Button></div>
+          </div>}
 
-@router.put("/quotations/{quotation_id}")
-async def update_quotation(
-    quotation_id: str,
-    data: dict,
-    current_user: User = Depends(get_current_user)
-):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
-    existing = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(404, "Quotation not found")
-    if current_user.role != "admin" and existing.get("created_by") != current_user.id:
-        raise HTTPException(403, "Not authorized")
+          {/* Step 4 Preview */}
+          {step===4 && <div className="space-y-4">
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+              <h3 className="font-bold text-slate-800">Quotation Summary</h3>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div><span className="text-slate-500">Company:</span> <span className="font-medium">{companies.find(c=>c.id===form.company_id)?.name||'—'}</span></div>
+                <div><span className="text-slate-500">Client:</span> <span className="font-medium">{form.client_name}</span></div>
+                <div><span className="text-slate-500">Service:</span> <span className="font-medium">{form.service}</span></div>
+                <div><span className="text-slate-500">GST:</span> <span className="font-medium">{form.gst_rate}%</span></div>
+                {form.timeline&&<div><span className="text-slate-500">Timeline:</span> <span className="font-medium">{form.timeline}</span></div>}
+                <div><span className="text-slate-500">Validity:</span> <span className="font-medium">{form.validity_days} days</span></div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {form.items.filter(it=>it.description).map((item,i)=>(<div key={i} className="flex justify-between items-center text-sm py-1.5 border-b border-slate-100"><span className="text-slate-700">{item.description} <span className="text-slate-400 text-xs">({item.quantity} {item.unit})</span></span><span className="font-medium text-slate-800">₹{item.amount.toFixed(2)}</span></div>))}
+            </div>
+            <div className="p-3 rounded-xl bg-slate-800 text-white space-y-1.5 text-sm">
+              <div className="flex justify-between"><span className="text-slate-300">Subtotal</span><span>₹{subtotal.toFixed(2)}</span></div>
+              <div className="flex justify-between"><span className="text-slate-300">GST ({form.gst_rate}%)</span><span>₹{gstAmount.toFixed(2)}</span></div>
+              <div className="flex justify-between text-base font-bold border-t border-slate-600 pt-1.5 mt-1"><span>Total Payable</span><span style={{ color: '#4ade80' }}>₹{total.toFixed(2)}</span></div>
+            </div>
+          </div>}
+        </div>
 
-    items_raw = data.get("items", existing.get("items", []))
-    items = []
-    for i in items_raw:
-        if isinstance(i, dict):
-            item = QuotationItem(**i)
-            item.amount = _compute_item_amount(item)
-            items.append(item)
+        <DialogFooter className="gap-2 pt-2 border-t">
+          {step>1 && <Button variant="outline" onClick={()=>setStep(p=>p-1)} className="rounded-xl gap-1"><ChevronLeft className="h-4 w-4" />Previous</Button>}
+          {step<STEPS.length && <Button onClick={()=>setStep(p=>p+1)} className="rounded-xl gap-1" style={{ background: COLORS.deepBlue }}>Next<ChevronRight className="h-4 w-4" /></Button>}
+          {step===STEPS.length && <Button onClick={handleSave} disabled={saving} className="rounded-xl gap-2" style={{ background: COLORS.emeraldGreen }}>{saving?<><Loader2 className="h-4 w-4 animate-spin" />Saving…</>:<><Check className="h-4 w-4" />Save Quotation</>}</Button>}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
-    gst_rate = float(data.get("gst_rate", existing.get("gst_rate", 18)))
-    subtotal, gst_amount, total = _compute_totals(items, gst_rate)
+// ════════════════════════════════════════════════════════════════════════════════
+// MAIN PAGE
+// ════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+// QUOTATION DETAIL PANEL
+// ════════════════════════════════════════════════════════════════════════════
+const QuotationDetailPanel = ({ quotation: q, open, onClose, onEdit, onDelete, isDark, companies, downloading, handleDownload, handleDownloadChecklistPdf, handleConvertToInvoice, convertingId, setEmailModalQuotation, setEmailModalPdfType, setIsEmailModalOpen, setWhatsAppModalQuotation, setWhatsAppModalPdfType, setIsWhatsAppModalOpen }) => {
+  const meta = STATUS_META[q?.status] || STATUS_META.draft;
+  const company = companies?.find(c => c.id === q?.company_id);
 
-    data["items"]      = [i.model_dump() for i in items]
-    data["subtotal"]   = subtotal
-    data["gst_amount"] = gst_amount
-    data["total"]      = total
-    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+  if (!q) return null;
 
-    for f in ["id", "quotation_no", "created_by", "created_at"]:
-        data.pop(f, None)
+  const surface = isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200';
+  const textPrimary = isDark ? 'text-slate-100' : 'text-slate-900';
+  const textSub = isDark ? 'text-slate-400' : 'text-slate-500';
+  const divider = isDark ? 'border-slate-700' : 'border-slate-100';
+  const cardBg = isDark ? 'bg-slate-700/50' : 'bg-slate-50';
 
-    await db.quotations.update_one({"id": quotation_id}, {"$set": data})
+  const items = q.items || [];
+  const scopeItems = Array.isArray(q.scope_of_work) ? q.scope_of_work : (q.scope_of_work ? [q.scope_of_work] : []);
 
-    new_status = data.get("status")
-    lead_id    = data.get("lead_id") or existing.get("lead_id")
-    if lead_id and new_status:
-        if new_status == "sent":
-            await _update_lead_status_for_quotation(lead_id, "proposal")
-        elif new_status == "accepted":
-            await _update_lead_status_for_quotation(lead_id, "negotiation")
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent
+        hideClose
+        className={`max-w-3xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${surface}`}
+      >
+        <DialogTitle className="sr-only">Quotation Detail</DialogTitle>
+        <DialogDescription className="sr-only">Full quotation details</DialogDescription>
 
-    updated = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
-    return updated
+        {/* HEADER */}
+        <div className="px-7 py-5 relative overflow-hidden flex-shrink-0"
+          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+          <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
+            style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+          <div className="relative flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
+                <FileText className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                  <p className="text-white font-bold text-lg">{q.quotation_no}</p>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${meta.bg} ${meta.text}`}>{meta.label}</span>
+                </div>
+                <p className="text-white/70 text-sm">{q.client_name}</p>
+                <p className="text-white/50 text-xs mt-0.5">{q.date} · Valid {q.validity_days || 30} days · {q.service}</p>
+              </div>
+            </div>
+            <button onClick={onClose}
+              className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center flex-shrink-0 transition-colors">
+              <X className="w-4 h-4 text-white" />
+            </button>
+          </div>
+        </div>
 
+        {/* BODY */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="p-6 space-y-5">
 
-@router.delete("/quotations/{quotation_id}")
-async def delete_quotation(quotation_id: str, current_user: User = Depends(get_current_user)):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
-    existing = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(404, "Quotation not found")
-    if current_user.role != "admin" and existing.get("created_by") != current_user.id:
-        raise HTTPException(403, "Not authorized")
-    await db.quotations.delete_one({"id": quotation_id})
-    return {"message": "Quotation deleted"}
+            {/* Summary cards */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className={`rounded-xl p-4 border ${cardBg} ${divider}`}>
+                <p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${textSub}`}>Total Amount</p>
+                <p className={`text-xl font-black text-emerald-600 dark:text-emerald-400`}>{fmtC(q.total || 0)}</p>
+              </div>
+              <div className={`rounded-xl p-4 border ${cardBg} ${divider}`}>
+                <p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${textSub}`}>GST Rate</p>
+                <p className={`text-xl font-black ${textPrimary}`}>{q.gst_rate ?? 18}%</p>
+              </div>
+              <div className={`rounded-xl p-4 border ${cardBg} ${divider}`}>
+                <p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${textSub}`}>Status</p>
+                <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full ${meta.bg} ${meta.text}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />{meta.label}
+                </span>
+              </div>
+            </div>
 
+            {/* Client info */}
+            <div className={`rounded-xl border p-4 ${cardBg} ${divider}`}>
+              <p className={`text-[10px] font-bold uppercase tracking-widest mb-3 ${textSub}`}>Client Information</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className={`text-xs ${textSub}`}>Name</p>
+                  <p className={`text-sm font-semibold ${textPrimary}`}>{q.client_name || '—'}</p>
+                </div>
+                {q.client_email && <div>
+                  <p className={`text-xs ${textSub}`}>Email</p>
+                  <p className={`text-sm font-semibold ${textPrimary}`}>{q.client_email}</p>
+                </div>}
+                {q.client_phone && <div>
+                  <p className={`text-xs ${textSub}`}>Phone</p>
+                  <p className={`text-sm font-semibold ${textPrimary}`}>{q.client_phone}</p>
+                </div>}
+                {q.client_address && <div className="col-span-2">
+                  <p className={`text-xs ${textSub}`}>Address</p>
+                  <p className={`text-sm font-semibold ${textPrimary}`}>{q.client_address}</p>
+                </div>}
+                {company && <div>
+                  <p className={`text-xs ${textSub}`}>Our Company</p>
+                  <p className={`text-sm font-semibold ${textPrimary}`}>{company.name}</p>
+                </div>}
+              </div>
+            </div>
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# PDF EXPORT ENDPOINTS
-# ═══════════════════════════════════════════════════════════════════════════════
+            {/* Line items */}
+            {items.length > 0 && (
+              <div className={`rounded-xl border overflow-hidden ${divider}`}>
+                <div className={`px-5 py-3 border-b ${cardBg} ${divider}`}>
+                  <p className={`text-xs font-bold uppercase tracking-widest ${textSub}`}>Line Items ({items.length})</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'bg-slate-50/60 border-slate-100'}`}>
+                        {['#', 'Description', 'Qty', 'Unit', 'Rate', 'Amount'].map(h => (
+                          <th key={h} className={`px-4 py-2 text-left text-[10px] font-bold uppercase tracking-wider ${textSub}`}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((item, i) => (
+                        <tr key={i} className={`border-b last:border-0 ${isDark ? 'border-slate-700' : 'border-slate-50'}`}>
+                          <td className={`px-4 py-3 text-xs font-bold ${textSub}`}>{i + 1}</td>
+                          <td className={`px-4 py-3 text-sm ${textPrimary}`}>{item.description || '—'}</td>
+                          <td className={`px-4 py-3 text-sm ${textPrimary}`}>{item.quantity}</td>
+                          <td className={`px-4 py-3 text-xs ${textSub}`}>{item.unit || 'service'}</td>
+                          <td className={`px-4 py-3 text-sm ${textPrimary}`}>{fmtC(item.unit_price || 0)}</td>
+                          <td className={`px-4 py-3 text-sm font-semibold text-emerald-600 dark:text-emerald-400`}>{fmtC(item.amount || (item.unit_price * item.quantity) || 0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className={`flex justify-end px-5 py-3 border-t ${divider} gap-6`}>
+                  <span className={`text-xs ${textSub}`}>Total</span>
+                  <span className={`text-sm font-black text-emerald-600 dark:text-emerald-400`}>{fmtC(q.total || 0)}</span>
+                </div>
+              </div>
+            )}
 
-@router.get("/quotations/{quotation_id}/pdf")
-async def export_quotation_pdf(
-    quotation_id: str,
-    current_user: User = Depends(get_current_user)
-):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
+            {/* Scope of work */}
+            {scopeItems.filter(Boolean).length > 0 && (
+              <div className={`rounded-xl border p-4 ${cardBg} ${divider}`}>
+                <p className={`text-[10px] font-bold uppercase tracking-widest mb-3 ${textSub}`}>Scope of Work</p>
+                <ul className="space-y-1.5">
+                  {scopeItems.filter(Boolean).map((s, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <Check className="h-3.5 w-3.5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                      <span className={`text-sm ${textPrimary}`}>{s}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
-    q = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
-    if not q:
-        raise HTTPException(404, "Quotation not found")
-    if current_user.role != "admin" and q.get("created_by") != current_user.id:
-        raise HTTPException(403, "Not authorized")
+            {/* Terms grid */}
+            {(q.payment_terms || q.timeline || q.advance_terms || q.notes) && (
+              <div className="grid grid-cols-2 gap-3">
+                {q.payment_terms && (
+                  <div className={`rounded-xl border p-4 ${cardBg} ${divider}`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 ${textSub}`}>Payment Terms</p>
+                    <p className={`text-sm ${textPrimary}`}>{q.payment_terms}</p>
+                  </div>
+                )}
+                {q.timeline && (
+                  <div className={`rounded-xl border p-4 ${cardBg} ${divider}`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 ${textSub}`}>Timeline</p>
+                    <p className={`text-sm ${textPrimary}`}>{q.timeline}</p>
+                  </div>
+                )}
+                {q.advance_terms && (
+                  <div className={`rounded-xl border p-4 ${cardBg} ${divider}`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 ${textSub}`}>Advance Terms</p>
+                    <p className={`text-sm ${textPrimary}`}>{q.advance_terms}</p>
+                  </div>
+                )}
+                {q.notes && (
+                  <div className={`rounded-xl border p-4 ${cardBg} ${divider} col-span-2`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 ${textSub}`}>Notes</p>
+                    <p className={`text-sm ${textPrimary}`}>{q.notes}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
 
-    company = await db.companies.find_one({"id": q.get("company_id")}, {"_id": 0})
-    if not company:
-        raise HTTPException(404, "Company profile not found. Please add a company profile first.")
+        {/* FOOTER ACTIONS */}
+        <div className={`flex-shrink-0 border-t ${divider} px-6 py-4 flex items-center gap-2 flex-wrap ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+          <Button size="sm" variant="outline" onClick={() => { onEdit(q); onClose(); }}
+            className="h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold">
+            <Edit className="h-3.5 w-3.5" /> Edit
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => handleDownload(q.id, q.quotation_no)} disabled={downloading === q.id}
+            className="h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold">
+            {downloading === q.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} PDF
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no)} disabled={downloading === q.id + '-checklist'}
+            className="h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold">
+            {downloading === q.id + '-checklist' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCheck className="h-3.5 w-3.5" />} Checklist
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => { setEmailModalQuotation(q); setEmailModalPdfType('quotation'); setIsEmailModalOpen(true); onClose(); }}
+            className="h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold">
+            <Mail className="h-3.5 w-3.5" /> Email
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => { setWhatsAppModalQuotation(q); setWhatsAppModalPdfType('quotation'); setIsWhatsAppModalOpen(true); onClose(); }}
+            className="h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold text-green-600 border-green-200 hover:bg-green-50">
+            <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
+          </Button>
+          <Button size="sm" onClick={() => { handleConvertToInvoice(q.id); onClose(); }} disabled={convertingId === q.id}
+            className="h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white ml-auto">
+            {convertingId === q.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />} Convert to Invoice
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => { if (window.confirm('Delete this quotation?')) { onDelete(q.id); onClose(); } }}
+            className="h-9 px-3 rounded-xl text-xs text-red-500 hover:bg-red-50">
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
 
-    try:
-        pdf_buf = _build_quotation_pdf(q, company)
-    except Exception as e:
-        logger.error(f"Quotation PDF build failed for {quotation_id}: {e}", exc_info=True)
-        raise HTTPException(500, f"PDF generation failed: {str(e)}")
+export default function Quotations() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const isDark = useDark();
 
-    pdf_bytes = pdf_buf.getvalue()
-    filename = f"quotation_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
-    return StreamingResponse(
-        iter([pdf_bytes]),
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Content-Length": str(len(pdf_bytes)),
-            "Cache-Control": "no-cache",
-        },
-    )
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [quotations, setQuotations] = useState([]);
+  const [companies, setCompanies] = useState([]);
+  const [services, setServices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState('list'); // 'list' | 'board'
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterService, setFilterService] = useState('all');
+  const [searchInput, setSearchInput] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [downloading, setDownloading] = useState(null);
+  const [convertingId, setConvertingId] = useState(null);
 
+  // Modals
+  const [isManagerOpen, setIsManagerOpen] = useState(false);
+  const [editingQuotation, setEditingQuotation] = useState(null);
+  const [isCompanyListOpen, setIsCompanyListOpen] = useState(false);
+  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+  const [emailModalQuotation, setEmailModalQuotation] = useState(null);
+  const [emailModalPdfType, setEmailModalPdfType] = useState('quotation');
+  const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
+  const [whatsAppModalQuotation, setWhatsAppModalQuotation] = useState(null);
+  const [whatsAppModalPdfType, setWhatsAppModalPdfType] = useState('quotation');
+  const [detailQuotation, setDetailQuotation] = useState(null);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
 
-@router.get("/quotations/{quotation_id}/checklist-pdf")
-async def export_checklist_pdf(
-    quotation_id: str,
-    current_user: User = Depends(get_current_user)
-):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
+  // ── Debounce search ────────────────────────────────────────────────────────
+  useEffect(() => {
+    const t = setTimeout(() => setSearchTerm(searchInput), 250);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
-    q = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
-    if not q:
-        raise HTTPException(404, "Quotation not found")
-    if current_user.role != "admin" and q.get("created_by") != current_user.id:
-        raise HTTPException(403, "Not authorized")
+  // ── Data fetching ──────────────────────────────────────────────────────────
+  const fetchQuotations = async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/quotations');
+      setQuotations(res.data);
+    } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to fetch quotations'); }
+    finally { setLoading(false); }
+  };
 
-    company = await db.companies.find_one({"id": q.get("company_id")}, {"_id": 0})
-    if not company:
-        raise HTTPException(404, "Company profile not found. Please add a company profile first.")
+  const fetchMeta = async () => {
+    try {
+      const [cRes, sRes] = await Promise.all([api.get('/companies'), api.get('/quotations/services')]);
+      setCompanies(cRes.data); setServices(sRes.data.services);
+    } catch {}
+  };
 
-    try:
-        pdf_buf = _build_checklist_pdf(q, company)
-    except Exception as e:
-        logger.error(f"Checklist PDF build failed for {quotation_id}: {e}", exc_info=True)
-        raise HTTPException(500, f"PDF generation failed: {str(e)}")
+  useEffect(() => { fetchMeta(); fetchQuotations(); }, []);
 
-    pdf_bytes = pdf_buf.getvalue()
-    filename = f"checklist_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
-    return StreamingResponse(
-        iter([pdf_bytes]),
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Content-Length": str(len(pdf_bytes)),
-            "Cache-Control": "no-cache",
-        },
-    )
+  // ── Stats ──────────────────────────────────────────────────────────────────
+  const stats = useMemo(() => {
+    const total = quotations.length;
+    const totalValue = quotations.reduce((s, q) => s + (q.total || 0), 0);
+    const accepted = quotations.filter(q => q.status === 'accepted');
+    const acceptedValue = accepted.reduce((s, q) => s + (q.total || 0), 0);
+    const pending = quotations.filter(q => q.status === 'draft' || q.status === 'sent').length;
+    const convRate = total > 0 ? Math.round((accepted.length / total) * 100) : 0;
+    return { total, totalValue, acceptedValue, pending, convRate, acceptedCount: accepted.length };
+  }, [quotations]);
 
+  // ── Filtered ───────────────────────────────────────────────────────────────
+  const filtered = useMemo(() => {
+    return quotations.filter(q => {
+      if (filterStatus !== 'all' && q.status !== filterStatus) return false;
+      if (filterService !== 'all' && q.service !== filterService) return false;
+      if (!searchTerm) return true;
+      const s = searchTerm.toLowerCase();
+      return q.quotation_no?.toLowerCase().includes(s) || q.client_name?.toLowerCase().includes(s) || q.service?.toLowerCase().includes(s) || q.client_email?.toLowerCase().includes(s);
+    });
+  }, [quotations, filterStatus, filterService, searchTerm]);
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# EMAIL SEND ENDPOINT
-# ═══════════════════════════════════════════════════════════════════════════════
+  // ── Board columns ──────────────────────────────────────────────────────────
+  const boardColumns = useMemo(() => {
+    const cols = [
+      { id: 'draft',    label: 'Draft',    color: '#94A3B8', bgLight: '#F8FAFC', bgDark: 'rgba(148,163,184,0.08)' },
+      { id: 'sent',     label: 'Sent',     color: COLORS.mediumBlue, bgLight: '#EFF6FF', bgDark: 'rgba(31,111,178,0.10)' },
+      { id: 'accepted', label: 'Accepted', color: COLORS.emeraldGreen, bgLight: '#F0FDF4', bgDark: 'rgba(31,175,90,0.08)' },
+      { id: 'rejected', label: 'Rejected', color: COLORS.coral, bgLight: '#FEF2F2', bgDark: 'rgba(239,68,68,0.08)' },
+    ];
+    return cols.map(col => ({
+      ...col,
+      items: filtered.filter(q => (q.status || 'draft') === col.id),
+    }));
+  }, [filtered]);
 
-@router.post("/quotations/{quotation_id}/send-email")
-async def send_quotation_email(
-    quotation_id: str,
-    req: EmailSendRequest,
-    current_user: User = Depends(get_current_user)
-):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  const getCompany = (id) => companies.find(c => c.id === id);
 
-    q = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
-    if not q:
-        raise HTTPException(404, "Quotation not found")
-    if current_user.role != "admin" and q.get("created_by") != current_user.id:
-        raise HTTPException(403, "Not authorized")
+  const handleStatusChange = async (qtnId, newStatus) => {
+    try {
+      await api.put(`/quotations/${qtnId}`, { status: newStatus });
+      toast.success('Status updated');
+      setQuotations(prev => prev.map(q => q.id === qtnId ? { ...q, status: newStatus } : q));
+    } catch { toast.error('Failed to update status'); }
+  };
 
-    company = await db.companies.find_one({"id": q.get("company_id")}, {"_id": 0})
-    if not company:
-        raise HTTPException(404, "Company profile not found")
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this quotation?')) return;
+    try { await api.delete(`/quotations/${id}`); toast.success('Quotation deleted'); setQuotations(prev => prev.filter(q => q.id !== id)); }
+    catch (err) { toast.error(err?.response?.data?.detail || 'Failed to delete quotation'); }
+  };
 
-    smtp_host = company.get("smtp_host", "").strip()
-    smtp_user = company.get("smtp_user", "").strip()
-    smtp_pass = company.get("smtp_password", "").strip()
-    if not smtp_host or not smtp_user or not smtp_pass:
-        raise HTTPException(
-            400,
-            "SMTP not configured. Please add SMTP settings to the company profile."
-        )
+  const handleConvertToInvoice = async (qtnId) => {
+    if (!window.confirm('Convert this quotation to a Tax Invoice?')) return;
+    setConvertingId(qtnId);
+    try { await api.post(`/invoices/from-quotation/${qtnId}`); toast.success('Converted to invoice! Redirecting…'); setTimeout(() => navigate('/invoicing'), 1200); }
+    catch (err) { toast.error(err?.response?.data?.detail || 'Conversion failed'); }
+    finally { setConvertingId(null); }
+  };
 
-    try:
-        if req.pdf_type == "checklist":
-            pdf_buf  = _build_checklist_pdf(q, company)
-            filename = f"checklist_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
-        else:
-            pdf_buf  = _build_quotation_pdf(q, company)
-            filename = f"quotation_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
-    except Exception as e:
-        logger.error(f"PDF build failed for email: {e}", exc_info=True)
-        raise HTTPException(500, f"PDF generation failed: {str(e)}")
+  const handlePreview = (q) => {
+    const company = getCompany(q.company_id) || {};
+    const html = generateQuotationHTML(q, { company });
+    const win = window.open('', '_blank'); win.document.write(html); win.document.close();
+  };
 
-    subject = req.subject or f"Quotation {q.get('quotation_no', '')} from {company.get('name', '')}"
-    body    = req.body or (
-        f"Dear {q.get('client_name', 'Sir/Madam')},\n\n"
-        f"Please find attached our quotation {q.get('quotation_no', '')} "
-        f"for {q.get('service', '')}.\n\n"
-        f"Total Amount: Rs. {q.get('total', 0):,.2f}\n\n"
-        f"Validity: {q.get('validity_days', 30)} days\n\n"
-        f"Regards,\n{company.get('name', '')}"
-    )
+  const handlePrint = (q) => {
+    const company = getCompany(q.company_id) || {};
+    const html = generateQuotationHTML(q, { company });
+    const win = window.open('', '_blank'); win.document.write(html); win.document.close(); win.print();
+  };
 
-    try:
-        _send_email_with_pdf(
-            smtp_host=smtp_host,
-            smtp_port=int(company.get("smtp_port", 587)),
-            smtp_user=smtp_user,
-            smtp_password=smtp_pass,
-            from_name=company.get("smtp_from_name", company.get("name", "")),
-            to_email=req.to_email,
-            subject=subject,
-            body=body,
-            pdf_bytes=pdf_buf.getvalue(),
-            filename=filename,
-        )
-    except smtplib.SMTPAuthenticationError:
-        raise HTTPException(400, "SMTP authentication failed. Check username/password in company profile.")
-    except Exception as e:
-        logger.error(f"Email send failed: {e}", exc_info=True)
-        raise HTTPException(500, f"Email send failed: {str(e)}")
+  const handleDownloadPdf = async (qtnId, qtnNo) => {
+    setDownloading(qtnId + '-pdf');
+    try {
+      const token = getToken();
+      const baseURL = (api.defaults?.baseURL ?? '/api').toString().replace(/\/$/, '');
+      const response = await axios.get(`${baseURL}/quotations/${qtnId}/pdf`, { responseType: 'blob', headers: { Authorization: `Bearer ${token}` } });
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+      const a = document.createElement('a'); a.href = url; a.download = `quotation-${(qtnNo||qtnId).replace(/\//g,'-')}.pdf`; document.body.appendChild(a); a.click(); document.body.removeChild(a); window.URL.revokeObjectURL(url);
+      toast.success('Quotation PDF downloaded');
+    } catch (err) { toast.error(await extractBlobError(err)); }
+    finally { setDownloading(null); }
+  };
 
-    return {"message": f"Email sent successfully to {req.to_email}"}
+  const handleDownloadChecklistPdf = async (qtnId, qtnNo) => {
+    setDownloading(qtnId + '-checklist');
+    try {
+      const token = getToken();
+      const baseURL = (api.defaults?.baseURL ?? '/api').toString().replace(/\/$/, '');
+      const response = await axios.get(`${baseURL}/quotations/${qtnId}/checklist-pdf`, { responseType: 'blob', headers: { Authorization: `Bearer ${token}` } });
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+      const a = document.createElement('a'); a.href = url; a.download = `checklist-${(qtnNo||qtnId).replace(/\//g,'-')}.pdf`; document.body.appendChild(a); a.click(); document.body.removeChild(a); window.URL.revokeObjectURL(url);
+      toast.success('Checklist PDF downloaded');
+    } catch (err) { toast.error(await extractBlobError(err)); }
+    finally { setDownloading(null); }
+  };
+
+  // ── Quotation action buttons (reusable) ────────────────────────────────────
+  const QuotationActions = ({ q, compact = false }) => (
+    <div className="flex flex-wrap gap-1">
+      <Button variant="outline" size="sm" onClick={() => handleDownloadPdf(q.id, q.quotation_no)} disabled={downloading === q.id + '-pdf'} className={cn("rounded-lg gap-1 text-xs text-blue-600 border-blue-200 hover:bg-blue-50", compact && "h-7 px-2")}>
+        {downloading === q.id + '-pdf' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}{!compact && 'PDF'}
+      </Button>
+      <Button variant="outline" size="sm" onClick={() => handlePreview(q)} className={cn("rounded-lg gap-1 text-xs text-purple-600 border-purple-200 hover:bg-purple-50", compact && "h-7 px-2")}>
+        <Eye className="h-3 w-3" />{!compact && 'Preview'}
+      </Button>
+      <Button variant="outline" size="sm" onClick={() => handlePrint(q)} className={cn("rounded-lg gap-1 text-xs text-emerald-600 border-emerald-200 hover:bg-emerald-50", compact && "h-7 px-2")}>
+        <Printer className="h-3 w-3" />{!compact && 'Print'}
+      </Button>
+      <Button variant="outline" size="sm" onClick={() => { setEmailModalQuotation(q); setEmailModalPdfType('quotation'); setIsEmailModalOpen(true); }} className={cn("rounded-lg gap-1 text-xs text-blue-600 border-blue-200 hover:bg-blue-50", compact && "h-7 px-2")}>
+        <Mail className="h-3 w-3" />{!compact && 'Email'}
+      </Button>
+      <Button variant="outline" size="sm" onClick={() => { setWhatsAppModalQuotation(q); setWhatsAppModalPdfType('quotation'); setIsWhatsAppModalOpen(true); }} className={cn("rounded-lg gap-1 text-xs text-green-600 border-green-200 hover:bg-green-50", compact && "h-7 px-2")}>
+        <MessageCircle className="h-3 w-3" />{!compact && 'WA'}
+      </Button>
+    </div>
+  );
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // RENDER
+  // ══════════════════════════════════════════════════════════════════════════
+  return (
+    <div className={`min-h-screen p-5 md:p-7 space-y-5 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
+
+      {/* ── PAGE HEADER (matches Invoice) ─────────────────────────────────── */}
+      <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 shadow-sm" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)` }}>
+        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 0%, transparent 60%)' }} />
+        <div className="relative flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 px-4 sm:px-6 pt-4 sm:pt-5 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-white/15 backdrop-blur-sm border border-white/20 flex-shrink-0">
+              <FileText className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">Quotations</h1>
+              <p className="text-sm text-blue-200 mt-0.5">Professional quotes · PDF & email · Convert to invoice · Track status</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setIsCompanyListOpen(true)} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold">
+              <Building2 className="h-4 w-4" /> Companies {companies.length > 0 && <span className="bg-white/20 px-1.5 py-0.5 rounded-full text-[10px] font-bold">{companies.length}</span>}
+            </Button>
+            <Button variant="outline" onClick={() => fetchQuotations()} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm">
+              <RefreshCw className="h-4 w-4" /> Refresh
+            </Button>
+            <Button onClick={() => { setEditingQuotation(null); setIsManagerOpen(true); }} className="h-9 px-5 text-sm rounded-xl bg-white text-slate-800 hover:bg-blue-50 shadow-sm gap-2 font-semibold border-0">
+              <Plus className="h-4 w-4" /> New Quotation
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── STAT CARDS ────────────────────────────────────────────────────── */}
+      {stats.total > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard label="Total Quotations" value={stats.total} sub={`${stats.pending} pending`} icon={FileText} color={COLORS.mediumBlue} bg={`${COLORS.mediumBlue}12`} isDark={isDark} onClick={() => setFilterStatus('all')} />
+          <StatCard label="Total Value" value={fmtC(stats.totalValue)} sub="all quotations" icon={IndianRupee} color={COLORS.emeraldGreen} bg={`${COLORS.emeraldGreen}12`} isDark={isDark} />
+          <StatCard label="Accepted Value" value={fmtC(stats.acceptedValue)} sub={`${stats.acceptedCount} accepted`} icon={CheckCircle2} color="#059669" bg="#05966912" isDark={isDark} onClick={() => setFilterStatus('accepted')} />
+          <StatCard label="Conversion Rate" value={`${stats.convRate}%`} sub={`${stats.acceptedCount} of ${stats.total}`} icon={TrendingUp} color={COLORS.amber} bg={`${COLORS.amber}12`} isDark={isDark} />
+        </div>
+      )}
+
+      {/* ── COMPANY MISSING WARNING ───────────────────────────────────────── */}
+      {companies.length === 0 && (
+        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-center gap-2 dark:bg-amber-900/20 dark:border-amber-700/50 dark:text-amber-300">
+          <Info className="h-4 w-4 flex-shrink-0" />
+          <span>No company profiles yet. <button onClick={() => setIsCompanyListOpen(true)} className="underline font-semibold">Add a company</button> before creating quotations.</span>
+        </div>
+      )}
+
+      {/* ── FILTERS + VIEW TOGGLE ─────────────────────────────────────────── */}
+      <div className={`rounded-2xl border shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+        {/* Search row */}
+        <div className={`flex items-center gap-3 px-3.5 py-3 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          <div className="relative flex-1">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+            <Input placeholder="Search by quotation no., client, service…" className={`pl-10 h-9 border-none focus-visible:ring-1 focus-visible:ring-blue-300 rounded-xl text-sm ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`} value={searchInput} onChange={e => setSearchInput(e.target.value)} />
+            {searchInput && <button onClick={() => setSearchInput('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X className="h-3.5 w-3.5" /></button>}
+          </div>
+          <div className={`h-9 px-3 flex items-center rounded-xl text-xs font-bold border whitespace-nowrap flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-300 border-slate-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+            {filtered.length} <span className="ml-1 font-normal text-slate-400">quotations</span>
+          </div>
+          {/* View mode toggle */}
+          <div className={`flex items-center rounded-xl border overflow-hidden flex-shrink-0 ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+            <button onClick={() => setViewMode('list')} className={`h-9 px-3 flex items-center gap-1.5 text-xs font-semibold transition-all ${viewMode === 'list' ? 'bg-blue-600 text-white' : (isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-white text-slate-500 hover:bg-slate-50')}`}>
+              <List className="h-3.5 w-3.5" /> List
+            </button>
+            <button onClick={() => setViewMode('board')} className={`h-9 px-3 flex items-center gap-1.5 text-xs font-semibold transition-all ${viewMode === 'board' ? 'bg-blue-600 text-white' : (isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-white text-slate-500 hover:bg-slate-50')}`}>
+              <LayoutGrid className="h-3.5 w-3.5" /> Board
+            </button>
+          </div>
+        </div>
+        {/* Filter row */}
+        <div className="flex items-center gap-2 px-3.5 py-2.5 overflow-x-auto">
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className={`h-9 w-[140px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              {Object.entries(STATUS_META).map(([k,v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={filterService} onValueChange={setFilterService}>
+            <SelectTrigger className={`h-9 w-[150px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Services</SelectItem>
+              {services.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {(filterStatus !== 'all' || filterService !== 'all' || searchTerm) && (
+            <button onClick={() => { setFilterStatus('all'); setFilterService('all'); setSearchInput(''); }} className={`h-9 px-3 rounded-xl text-xs font-semibold flex items-center gap-1.5 ${isDark ? 'bg-red-900/30 text-red-400 hover:bg-red-900/50' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}>
+              <X className="h-3 w-3" /> Clear
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── LOADING ───────────────────────────────────────────────────────── */}
+      {loading ? (
+        <div className={`rounded-2xl border p-16 text-center ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <div className="w-10 h-10 rounded-2xl mx-auto flex items-center justify-center mb-3" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}20, ${COLORS.mediumBlue}20)` }}>
+            <MiniLoader height={120} />
+          </div>
+          <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Loading quotations…</p>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className={`rounded-2xl border p-16 text-center ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <div className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center mb-4" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}20, ${COLORS.mediumBlue}20)` }}>
+            <Receipt className="h-8 w-8" style={{ color: COLORS.mediumBlue }} />
+          </div>
+          <h3 className={`text-lg font-bold mb-2 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>No quotations found</h3>
+          <p className={`text-sm mb-6 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{searchTerm || filterStatus !== 'all' ? 'Try adjusting your filters' : 'Create your first quotation to get started'}</p>
+          <Button onClick={() => { setEditingQuotation(null); setIsManagerOpen(true); }} className="h-10 px-6 rounded-xl text-white gap-2" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+            <Plus className="h-4 w-4" /> New Quotation
+          </Button>
+        </div>
+
+      ) : viewMode === 'list' ? (
+        /* ─── LIST VIEW (table style matching Invoicing) ─────────────────── */
+        <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <div className="overflow-x-auto">
+            <table className="w-full" style={{minWidth:620}}>
+              <thead>
+                <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
+                  {['Quotation', 'Client', 'Service', 'Date', 'Amount', 'Status', 'Actions'].map(h => (
+                    <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <AnimatePresence>
+                  {filtered.map((q, idx) => (
+                    <motion.tr key={q.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ delay: idx * 0.02 }}
+                      className={`border-b last:border-0 transition-colors cursor-pointer ${isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50/80'}`}
+                      onClick={() => { setDetailQuotation(q); setIsDetailOpen(true); }}>
+                      <td className="px-4 py-3.5">
+                        <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{q.quotation_no}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Valid {q.validity_days}d</p>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: avatarGrad(q.client_name) }}>
+                            {(q.client_name || '?').charAt(0).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <p className={`text-sm font-medium truncate max-w-[160px] ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{q.client_name || '—'}</p>
+                            {q.client_phone && <p className="text-[10px] text-slate-400 flex items-center gap-1"><Phone className="h-2.5 w-2.5" />{q.client_phone}</p>}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <p className={`text-sm truncate max-w-[140px] ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{q.service}</p>
+                        {getCompany(q.company_id) && <p className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5"><Building2 className="h-2.5 w-2.5" />{getCompany(q.company_id)?.name}</p>}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{q.date}</p>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <p className={`text-sm font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>{fmtC(q.total || 0)}</p>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <Select value={q.status || 'draft'} onValueChange={(v) => handleStatusChange(q.id, v)}>
+                          <SelectTrigger className="h-8 rounded-lg text-xs w-[110px] border-0 p-0 bg-transparent focus:ring-0 shadow-none"><StatusChip status={q.status || 'draft'} /></SelectTrigger>
+                          <SelectContent>{Object.entries(STATUS_META).map(([k,v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <QuotationActions q={q} compact />
+                          <Button variant="outline" size="sm" onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no)} disabled={downloading === q.id + '-checklist'} className="h-7 px-2 rounded-lg gap-1 text-xs text-slate-600 border-slate-200 hover:bg-slate-50">
+                            {downloading === q.id + '-checklist' ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileCheck className="h-3 w-3" />}
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => handleConvertToInvoice(q.id)} disabled={convertingId === q.id} className="h-7 px-2 rounded-lg gap-1 text-xs text-purple-600 border-purple-200 hover:bg-purple-50">
+                            {convertingId === q.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowRight className="h-3 w-3" />}
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => { setEditingQuotation(q); setIsManagerOpen(true); }} className="h-7 px-2 rounded-lg text-xs text-slate-600 border-slate-200 hover:bg-slate-50">
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => handleDelete(q.id)} className="h-7 px-2 rounded-lg text-xs text-red-600 border-red-200 hover:bg-red-50">
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </td>
+                    </motion.tr>
+                  ))}
+                </AnimatePresence>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      ) : (
+        /* ─── BOARD VIEW (Kanban) ─────────────────────────────────────────── */
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          {boardColumns.map(col => (
+            <div key={col.id} className={`rounded-2xl border flex flex-col min-h-[300px] ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              {/* Column header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: isDark ? '#334155' : '#f1f5f9', backgroundColor: isDark ? col.bgDark : col.bgLight }}>
+                <div className="flex items-center gap-2.5">
+                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: col.color }} />
+                  <span className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{col.label}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: isDark ? `${col.color}25` : `${col.color}18`, color: col.color }}>
+                    {col.items.length}
+                  </span>
+                  <span className="text-xs font-semibold" style={{ color: col.color }}>
+                    {fmtC(col.items.reduce((s, q) => s + (q.total || 0), 0))}
+                  </span>
+                </div>
+              </div>
+
+              {/* Cards */}
+              <div className="flex-1 overflow-y-auto p-3 space-y-3" style={{ maxHeight: '70vh' }}>
+                {col.items.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 text-center">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-2" style={{ backgroundColor: isDark ? `${col.color}15` : `${col.color}10` }}>
+                      <Receipt className="h-5 w-5 opacity-40" style={{ color: col.color }} />
+                    </div>
+                    <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No {col.label.toLowerCase()} quotations</p>
+                  </div>
+                ) : (
+                  <AnimatePresence>
+                    {col.items.map((q, idx) => (
+                      <motion.div key={q.id}
+                        initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96 }}
+                        transition={{ duration: 0.18, delay: idx * 0.04 }}
+                        className={`rounded-xl border p-4 cursor-default transition-shadow hover:shadow-md ${isDark ? 'bg-slate-750 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200/80 hover:border-slate-300'}`}
+                        style={{ borderLeft: `3px solid ${col.color}` }}>
+                        {/* Card top */}
+                        <div className="flex items-start justify-between mb-2.5 gap-2">
+                          <div className="min-w-0">
+                            <p className={`text-xs font-bold truncate ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>{q.quotation_no}</p>
+                            <p className={`text-sm font-semibold truncate mt-0.5 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{q.client_name}</p>
+                          </div>
+                          <div className="flex-shrink-0">
+                            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold" style={{ background: avatarGrad(q.client_name) }}>
+                              {(q.client_name || '?').charAt(0).toUpperCase()}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Service */}
+                        <p className={`text-xs truncate mb-2.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{q.service}</p>
+
+                        {/* Amount */}
+                        <div className="flex items-center justify-between mb-3">
+                          <span className={`text-base font-black ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>{fmtC(q.total || 0)}</span>
+                          <span className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{q.date} · {q.validity_days}d</span>
+                        </div>
+
+                        {/* Company */}
+                        {getCompany(q.company_id) && (
+                          <p className={`text-[10px] flex items-center gap-1 mb-2.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                            <Building2 className="h-2.5 w-2.5" />{getCompany(q.company_id)?.name}
+                          </p>
+                        )}
+
+                        {/* Status change */}
+                        <Select value={q.status || 'draft'} onValueChange={(v) => handleStatusChange(q.id, v)}>
+                          <SelectTrigger className="h-7 rounded-lg text-[11px] mb-2.5 border-0 px-0 bg-transparent focus:ring-0 shadow-none w-full">
+                            <StatusChip status={q.status || 'draft'} />
+                          </SelectTrigger>
+                          <SelectContent>{Object.entries(STATUS_META).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
+                        </Select>
+
+                        {/* Action buttons — same as list, compact */}
+                        <div className="flex flex-wrap gap-1 mb-1.5">
+                          <Button variant="outline" size="sm" onClick={() => handleDownloadPdf(q.id, q.quotation_no)} disabled={downloading === q.id + '-pdf'} className="h-6 px-1.5 rounded-md gap-0.5 text-[10px] text-blue-600 border-blue-200 hover:bg-blue-50">
+                            {downloading === q.id + '-pdf' ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Download className="h-2.5 w-2.5" />} PDF
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => handlePreview(q)} className="h-6 px-1.5 rounded-md gap-0.5 text-[10px] text-purple-600 border-purple-200 hover:bg-purple-50"><Eye className="h-2.5 w-2.5" /> View</Button>
+                          <Button variant="outline" size="sm" onClick={() => { setEmailModalQuotation(q); setEmailModalPdfType('quotation'); setIsEmailModalOpen(true); }} className="h-6 px-1.5 rounded-md gap-0.5 text-[10px] text-blue-600 border-blue-200 hover:bg-blue-50"><Mail className="h-2.5 w-2.5" /> Email</Button>
+                          <Button variant="outline" size="sm" onClick={() => { setWhatsAppModalQuotation(q); setWhatsAppModalPdfType('quotation'); setIsWhatsAppModalOpen(true); }} className="h-6 px-1.5 rounded-md gap-0.5 text-[10px] text-green-600 border-green-200 hover:bg-green-50"><MessageCircle className="h-2.5 w-2.5" /> WA</Button>
+                        </div>
+
+                        {/* Checklist + Edit + Delete + Convert */}
+                        <div className="flex items-center gap-1 border-t pt-2" style={{ borderColor: isDark ? '#334155' : '#f1f5f9' }}>
+                          <Button variant="outline" size="sm" onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no)} disabled={downloading === q.id + '-checklist'} className="h-6 px-1.5 rounded-md text-[10px] text-slate-600 border-slate-200 flex-1">
+                            {downloading === q.id + '-checklist' ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <FileCheck className="h-2.5 w-2.5" />} Checklist
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => handleConvertToInvoice(q.id)} disabled={convertingId === q.id} title="Convert to Invoice" className="h-6 px-1.5 rounded-md text-[10px] text-purple-600 border-purple-200">
+                            {convertingId === q.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <ArrowRight className="h-2.5 w-2.5" />}
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => { setEditingQuotation(q); setIsManagerOpen(true); }} className="h-6 px-1.5 rounded-md text-[10px] text-slate-600 border-slate-200">
+                            <Edit className="h-2.5 w-2.5" />
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => handleDelete(q.id)} className="h-6 px-1.5 rounded-md text-[10px] text-red-600 border-red-200">
+                            <Trash2 className="h-2.5 w-2.5" />
+                          </Button>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── MODALS ───────────────────────────────────────────────────────── */}
+      {isManagerOpen && (
+        <QuotationManager onClose={() => setIsManagerOpen(false)} onSaved={() => { fetchQuotations(); fetchMeta(); }} editingQuotation={editingQuotation} />
+      )}
+      <CompanyListModal open={isCompanyListOpen} onClose={() => setIsCompanyListOpen(false)} onRefresh={fetchMeta} />
+      {isEmailModalOpen && <EmailModal open={isEmailModalOpen} onClose={() => setIsEmailModalOpen(false)} quotation={emailModalQuotation} company={getCompany(emailModalQuotation?.company_id)} pdfType={emailModalPdfType} />}
+      {isWhatsAppModalOpen && <WhatsAppModal open={isWhatsAppModalOpen} onClose={() => setIsWhatsAppModalOpen(false)} quotation={whatsAppModalQuotation} company={getCompany(whatsAppModalQuotation?.company_id)} pdfType={whatsAppModalPdfType} />}
+      {detailQuotation && (
+        <QuotationDetailPanel
+          quotation={detailQuotation}
+          open={isDetailOpen}
+          onClose={() => setIsDetailOpen(false)}
+          onEdit={(q) => { setEditingQuotation(q); setIsManagerOpen(true); }}
+          onDelete={handleDelete}
+          isDark={isDark}
+          companies={companies}
+          downloading={downloading}
+          handleDownload={handleDownloadPdf}
+          handleDownloadChecklistPdf={handleDownloadChecklistPdf}
+          handleConvertToInvoice={handleConvertToInvoice}
+          convertingId={convertingId}
+          setEmailModalQuotation={setEmailModalQuotation}
+          setEmailModalPdfType={setEmailModalPdfType}
+          setIsEmailModalOpen={setIsEmailModalOpen}
+          setWhatsAppModalQuotation={setWhatsAppModalQuotation}
+          setWhatsAppModalPdfType={setWhatsAppModalPdfType}
+          setIsWhatsAppModalOpen={setIsWhatsAppModalOpen}
+        />
+      )}
+    </div>
+  );
+}
