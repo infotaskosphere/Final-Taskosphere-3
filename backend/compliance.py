@@ -234,7 +234,7 @@ async def get_common_templates(current_user: User = Depends(get_current_user)):
     return COMMON_COMPLIANCE
 
 
-@router.get("/")
+@router.get("")
 async def list_compliance_masters(
     category: Optional[str] = Query(None),
     fy_year:  Optional[str] = Query(None),
@@ -272,7 +272,7 @@ async def list_compliance_masters(
     return [await _enrich(item) for item in items]
 
 
-@router.post("/")
+@router.post("")
 async def create_compliance_master(
     data: ComplianceMasterCreate,
     current_user: User = Depends(get_current_user),
