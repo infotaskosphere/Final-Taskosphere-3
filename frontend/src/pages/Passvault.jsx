@@ -1290,17 +1290,21 @@ export default function PasswordRepository() {
   });
 
   const { data: stats = {} } = useQuery({
-    queryKey: ['pw-stats'],
+    queryKey: ['pw-stats', user?.id],          // scoped per user
     queryFn: async () => {
       try {
-        const r = await api.get('/passwords/admin/stats');
+        // /passwords/stats returns counts scoped to the current user's permissions:
+        //   Admin   → all entries
+        //   Manager → entries in their department(s)
+        //   Staff   → entries in their dept + view_password_departments list
+        const r = await api.get('/passwords/stats');
         return r.data || {};
       } catch (e) {
         if (process.env.NODE_ENV === 'development') console.warn('pw-stats:', e.message);
         return {};
       }
     },
-    enabled: !!isAdmin,
+    enabled: canView,          // all roles with can_view_passwords, not just admin
     staleTime: 60000,
     retry: false,
   });
@@ -1361,7 +1365,7 @@ export default function PasswordRepository() {
                 <h1 className="text-lg font-bold text-white leading-tight">Password Vault</h1>
                 <p className="text-white/55 text-[11px]">MCA/ROC · GST · IT · TDS · DGFT · TM & more</p>
               </div>
-              {isAdmin && stats.total != null && (
+              {canView && stats.total != null && (
                 <span className="hidden sm:block px-2.5 py-1 bg-white/15 rounded-lg text-white text-xs font-bold">
                   {stats.total} entries
                 </span>
@@ -1396,7 +1400,9 @@ export default function PasswordRepository() {
         </div>
       </motion.div>
 
-      {isAdmin && stats.by_portal_type && Object.keys(stats.by_portal_type).length > 0 && (
+      {/* Portal-type stats cards — shown for all roles with can_view_passwords.
+           Backend /passwords/stats scopes counts to the user's permitted departments. */}
+      {canView && stats.by_portal_type && Object.keys(stats.by_portal_type).length > 0 && (
         <motion.div variants={iv} className="grid grid-cols-3 sm:grid-cols-6 gap-2">
           {Object.entries(stats.by_portal_type).slice(0, 6).map(([type, count]) => {
             const m = PM[type] || PM.OTHER;
