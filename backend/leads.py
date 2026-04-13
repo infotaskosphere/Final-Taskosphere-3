@@ -250,7 +250,7 @@ async def import_leads(
     return {"message": f"Imported {len(df)} leads (processing logic pending)"}
 
 
-@router.post("/", response_model=Lead)
+@router.post("", response_model=Lead)
 async def create_lead(
     lead_data: LeadCreate,
     current_user=Depends(get_current_user),
@@ -278,7 +278,7 @@ async def create_lead(
     return normalize_lead_doc(lead_dict)
 
 
-@router.get("/", response_model=List[Lead])
+@router.get("", response_model=List[Lead])
 async def get_leads(
     status_filter: Optional[Literal[
         "new", "contacted", "meeting", "proposal",
