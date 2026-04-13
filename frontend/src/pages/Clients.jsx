@@ -233,6 +233,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
   const [clientScope, setClientScope] = useState('active'); // 'active' | 'all'
 
   const activeClients = useMemo(() => filteredClients.filter(c => (c?.status || 'active') !== 'inactive'), [filteredClients]);
+  const archivedCount = filteredClients.length - activeClients.length;
 
   useEffect(() => {
     if (open) {
@@ -242,23 +243,24 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
     }
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const scopedClients = useMemo(() => clientScope === 'active' ? activeClients : filteredClients, [clientScope, activeClients, filteredClients]);
-
+  // Always show ALL clients — archived ones appear dimmed/unchecked in Active mode
   const displayedClients = useMemo(() => {
-    if (!clientSearch.trim()) return scopedClients;
+    if (!clientSearch.trim()) return filteredClients;
     const q = clientSearch.toLowerCase();
-    return scopedClients.filter(c =>
+    return filteredClients.filter(c =>
       (c?.company_name || '').toLowerCase().includes(q) ||
       (c?.phone || '').includes(q) ||
       (c?.email || '').toLowerCase().includes(q)
     );
-  }, [scopedClients, clientSearch]);
+  }, [filteredClients, clientSearch]);
 
   const selectedClients = useMemo(() => filteredClients.filter(c => selectedIds.has(c.id)), [filteredClients, selectedIds]);
 
-  const toggleClient = useCallback((id) => {
+  const toggleClient = useCallback((id, isArchived) => {
+    // In Active Clients mode, archived clients cannot be selected
+    if (clientScope === 'active' && isArchived) return;
     setSelectedIds(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
-  }, []);
+  }, [clientScope]);
 
   const handleScopeChange = useCallback((scope) => {
     setClientScope(scope);
@@ -266,7 +268,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
     setSelectedIds(new Set(base.map(c => c.id)));
   }, [activeClients, filteredClients]);
 
-  const someSelected = selectedIds.size > 0 && selectedIds.size < scopedClients.length;
+  const someSelected = selectedIds.size > 0;
   const phoneCount = selectedClients.filter(c => c.phone).length;
   const emailCount = selectedClients.filter(c => c.email).length;
   const isWhatsApp = mode === 'whatsapp';
@@ -349,14 +351,14 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
               <button onClick={() => handleScopeChange('active')}
                 className={`flex-1 text-[11px] font-semibold px-2 py-1.5 rounded-lg border transition-all ${clientScope === 'active' ? 'text-white border-transparent' : (isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50')}`}
                 style={clientScope === 'active' ? { background: accentColor } : {}}>
-                Active Clients
+                Active <span className={`${clientScope === 'active' ? 'opacity-80' : 'opacity-60'}`}>({activeClients.length})</span>
               </button>
               <button onClick={() => handleScopeChange('all')}
                 className={`flex-1 text-[11px] font-semibold px-2 py-1.5 rounded-lg border transition-all ${clientScope === 'all' ? 'text-white border-transparent' : (isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50')}`}
                 style={clientScope === 'all' ? { background: accentColor } : {}}>
-                All Clients
+                All <span className={`${clientScope === 'all' ? 'opacity-80' : 'opacity-60'}`}>({filteredClients.length})</span>
               </button>
-              <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-slate-100 text-slate-500 flex-shrink-0">{selectedIds.size}/{scopedClients.length}</span>
+              <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-slate-100 text-slate-500 flex-shrink-0">{selectedIds.size} ✓</span>
             </div>
             <div className="px-3 py-2 border-b border-slate-100 flex-shrink-0">
               <div className="relative">
@@ -369,11 +371,13 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
               {displayedClients.map(client => {
                 const isSelected = selectedIds.has(client.id);
                 const hasContact = isWhatsApp ? !!client.phone : !!client.email;
+                const isArchived = client.status === 'inactive';
+                const isLocked = clientScope === 'active' && isArchived;
                 return (
-                  <div key={client.id} onClick={() => toggleClient(client.id)}
-                    className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer border-b transition-all ${isDark ? 'border-slate-700' : 'border-slate-50'} ${isSelected ? (isDark ? 'bg-slate-700' : 'bg-white') : (isDark ? 'hover:bg-slate-700/60' : 'hover:bg-white/60')} ${!hasContact ? 'opacity-40' : ''}`}>
-                    <span className="flex-shrink-0" style={{ color: isSelected ? accentColor : '#cbd5e1' }}>
-                      {isSelected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                  <div key={client.id} onClick={() => toggleClient(client.id, isArchived)}
+                    className={`flex items-center gap-3 px-4 py-2.5 border-b transition-all ${isDark ? 'border-slate-700' : 'border-slate-50'} ${isLocked ? 'opacity-35 cursor-not-allowed' : 'cursor-pointer'} ${isSelected && !isLocked ? (isDark ? 'bg-slate-700' : 'bg-white') : (isDark ? 'hover:bg-slate-700/60' : 'hover:bg-white/60')} ${!hasContact && !isLocked ? 'opacity-40' : ''}`}>
+                    <span className="flex-shrink-0" style={{ color: isSelected && !isLocked ? accentColor : '#cbd5e1' }}>
+                      {isSelected && !isLocked ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                     </span>
                     <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0" style={{ background: getAvatarGradient(client.company_name) }}>
                       {client.company_name?.charAt(0).toUpperCase() || '?'}
@@ -382,8 +386,12 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                       <p className={`text-xs font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{client.company_name}</p>
                       <p className="text-[10px] text-slate-400 truncate">{isWhatsApp ? (client.phone || '— no phone') : (client.email || '— no email')}</p>
                     </div>
-                    {!hasContact && <span className="text-[9px] font-bold text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded flex-shrink-0">{isWhatsApp ? 'No phone' : 'No email'}</span>}
-                    {client.status === 'inactive' && <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded flex-shrink-0">Archived</span>}
+                    {!hasContact && !isArchived && <span className="text-[9px] font-bold text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded flex-shrink-0">{isWhatsApp ? 'No phone' : 'No email'}</span>}
+                    {isArchived && (
+                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 ${isLocked ? 'text-slate-400 bg-slate-100' : 'text-amber-600 bg-amber-50'}`}>
+                        {isLocked ? '🔒 Archived' : 'Archived'}
+                      </span>
+                    )}
                   </div>
                 );
               })}
