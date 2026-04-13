@@ -230,23 +230,29 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
   const [clientSearch, setClientSearch] = useState('');
   const [copied, setCopied] = useState(false);
   const [exportDone, setExportDone] = useState(false);
+  const [clientScope, setClientScope] = useState('active'); // 'active' | 'all'
+
+  const activeClients = useMemo(() => filteredClients.filter(c => (c?.status || 'active') !== 'inactive'), [filteredClients]);
 
   useEffect(() => {
     if (open) {
-      setSelectedIds(new Set(filteredClients.map(c => c.id)));
+      setClientScope('active');
+      setSelectedIds(new Set(activeClients.map(c => c.id)));
       setMessage(''); setClientSearch(''); setCopied(false); setExportDone(false);
     }
-  }, [open, filteredClients]);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const scopedClients = useMemo(() => clientScope === 'active' ? activeClients : filteredClients, [clientScope, activeClients, filteredClients]);
 
   const displayedClients = useMemo(() => {
-    if (!clientSearch.trim()) return filteredClients;
+    if (!clientSearch.trim()) return scopedClients;
     const q = clientSearch.toLowerCase();
-    return filteredClients.filter(c =>
+    return scopedClients.filter(c =>
       (c?.company_name || '').toLowerCase().includes(q) ||
       (c?.phone || '').includes(q) ||
       (c?.email || '').toLowerCase().includes(q)
     );
-  }, [filteredClients, clientSearch]);
+  }, [scopedClients, clientSearch]);
 
   const selectedClients = useMemo(() => filteredClients.filter(c => selectedIds.has(c.id)), [filteredClients, selectedIds]);
 
@@ -254,13 +260,13 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
     setSelectedIds(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
   }, []);
 
-  const toggleAll = useCallback(() => {
-    if (selectedIds.size === filteredClients.length) setSelectedIds(new Set());
-    else setSelectedIds(new Set(filteredClients.map(c => c.id)));
-  }, [selectedIds.size, filteredClients]);
+  const handleScopeChange = useCallback((scope) => {
+    setClientScope(scope);
+    const base = scope === 'active' ? activeClients : filteredClients;
+    setSelectedIds(new Set(base.map(c => c.id)));
+  }, [activeClients, filteredClients]);
 
-  const allSelected = selectedIds.size === filteredClients.length;
-  const someSelected = selectedIds.size > 0 && selectedIds.size < filteredClients.length;
+  const someSelected = selectedIds.size > 0 && selectedIds.size < scopedClients.length;
   const phoneCount = selectedClients.filter(c => c.phone).length;
   const emailCount = selectedClients.filter(c => c.email).length;
   const isWhatsApp = mode === 'whatsapp';
@@ -339,14 +345,18 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
         </div>
         <div className="flex flex-1 overflow-hidden">
           <div className={`w-72 flex-shrink-0 border-r flex flex-col ${isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-slate-50/40'}`}>
-            <div className={`flex items-center gap-2 px-4 py-3 border-b flex-shrink-0 ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
-              <button onClick={toggleAll} className="flex items-center gap-2 flex-1 text-left">
-                <span className="flex-shrink-0" style={{ color: accentColor }}>
-                  {allSelected ? <CheckSquare className="h-4 w-4" /> : someSelected ? <MinusSquare className="h-4 w-4" /> : <Square className="h-4 w-4 text-slate-300" />}
-                </span>
-                <span className="text-xs font-semibold text-slate-700">{allSelected ? 'Deselect all' : 'Select all'}</span>
+            <div className={`flex items-center gap-1.5 px-3 py-2.5 border-b flex-shrink-0 ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
+              <button onClick={() => handleScopeChange('active')}
+                className={`flex-1 text-[11px] font-semibold px-2 py-1.5 rounded-lg border transition-all ${clientScope === 'active' ? 'text-white border-transparent' : (isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50')}`}
+                style={clientScope === 'active' ? { background: accentColor } : {}}>
+                Active Clients
               </button>
-              <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-slate-100 text-slate-500">{selectedIds.size}/{filteredClients.length}</span>
+              <button onClick={() => handleScopeChange('all')}
+                className={`flex-1 text-[11px] font-semibold px-2 py-1.5 rounded-lg border transition-all ${clientScope === 'all' ? 'text-white border-transparent' : (isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50')}`}
+                style={clientScope === 'all' ? { background: accentColor } : {}}>
+                All Clients
+              </button>
+              <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-slate-100 text-slate-500 flex-shrink-0">{selectedIds.size}/{scopedClients.length}</span>
             </div>
             <div className="px-3 py-2 border-b border-slate-100 flex-shrink-0">
               <div className="relative">
@@ -373,6 +383,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                       <p className="text-[10px] text-slate-400 truncate">{isWhatsApp ? (client.phone || '— no phone') : (client.email || '— no email')}</p>
                     </div>
                     {!hasContact && <span className="text-[9px] font-bold text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded flex-shrink-0">{isWhatsApp ? 'No phone' : 'No email'}</span>}
+                    {client.status === 'inactive' && <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded flex-shrink-0">Archived</span>}
                   </div>
                 );
               })}
