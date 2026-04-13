@@ -2832,7 +2832,11 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     });
   }, []);
   const updateItem = useCallback((idx, k, val) => setForm(p => ({ ...p, items: p.items.map((it, i) => i !== idx ? it : { ...it, [k]: val }) })), []);
-  const addItem = useCallback(() => setForm(p => ({ ...p, items: [...p.items, emptyItem()] })), []);
+  const addItem = useCallback(() => {
+    const co = (companies || []).find(c => c.id === form.company_id);
+    const noGst = co?.has_gst === false;
+    setForm(p => ({ ...p, items: [...p.items, { ...emptyItem(), gst_rate: noGst ? 0 : 18, cgst_rate: noGst ? 0 : 9, sgst_rate: noGst ? 0 : 9 }] }));
+  }, [companies, form.company_id]);
   const removeItem = useCallback((idx) => setForm(p => ({ ...p, items: p.items.filter((_, i) => i !== idx) })), []);
 
   // Move item from fromIdx to toIdx (drag-and-drop reorder)
@@ -2987,6 +2991,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                       <label className={labelCls}>Company Profile *</label>
                       <Select value={form.company_id} onValueChange={v => {
                         const s = getInvSettings(v);
+                        const co = (companies || []).find(c => c.id === v);
                         setForm(p => ({
                           ...p,
                           company_id: v,
@@ -2996,6 +3001,13 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                           invoice_template:    s.template            || p.invoice_template,
                           invoice_theme:       s.theme               || p.invoice_theme,
                           invoice_custom_color:s.custom_color        || p.invoice_custom_color,
+                          items: p.items.map(it => ({
+                            ...it,
+                            gst_rate: co?.has_gst === false ? 0 : it.gst_rate,
+                            cgst_rate: co?.has_gst === false ? 0 : it.cgst_rate,
+                            sgst_rate: co?.has_gst === false ? 0 : it.sgst_rate,
+                            igst_rate: co?.has_gst === false ? 0 : it.igst_rate,
+                          })),
                         }));
                       }}>
                         <SelectTrigger className={`${inputCls} ${!form.company_id ? 'border-amber-300 dark:border-amber-600' : ''}`}>
