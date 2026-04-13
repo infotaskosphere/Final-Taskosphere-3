@@ -158,7 +158,9 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_manage_invoices: true,      // default module (permission-based)
       can_view_passwords: true,       // default module (permission-based)
       can_edit_passwords: true,       // default module (permission-based)
-      can_view_all_visits: true,      // own + team visits (server-side scoped)
+      can_view_compliance: true,      // DEFAULT ON — Compliance Tracker (own + team scope, dept-scoped server-side)
+      can_manage_compliance: true,    // default module — manager can create/edit compliance masters in own dept
+      can_view_all_visits: false,     // own + dept team visits (server-side scoped via department query)
       can_edit_visits: true,          // edit own + team visits
       can_delete_visits: false,       // admin-granted only
       can_delete_own_visits: true,    // always allowed for own records
@@ -203,6 +205,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_manage_invoices: true,      // default module (permission-based)
       can_view_passwords: true,       // default module (permission-based)
       can_edit_passwords: true,       // default module (permission-based)
+      can_view_compliance: false,     // admin-granted only — Compliance Tracker not shown to staff by default
+      can_manage_compliance: false,   // admin-granted only — staff cannot create/edit compliance masters
       can_view_all_visits: false,     // own visits only (server-side scoped)
       can_edit_visits: true,          // edit own visits
       can_delete_visits: false,       // admin-granted only
@@ -226,6 +230,7 @@ const EMPTY_PERMISSIONS = {
   can_view_staff_rankings: false, can_delete_data: false, can_delete_tasks: false,
   can_connect_email: false, can_view_own_data: false, can_create_quotations: false,
   can_manage_invoices: false, can_view_passwords: false, can_edit_passwords: false,
+  can_view_compliance: false, can_manage_compliance: false,
   can_view_all_visits: false, can_edit_visits: false,
   can_delete_visits: false, can_delete_own_visits: true,
   view_password_departments: [], assigned_clients: [], view_other_tasks: [],
@@ -1223,7 +1228,7 @@ const PendingUserCard = ({ userData, onApprove, onReject, approving }) => (
   </motion.div>
 );
 
-const UserCard = ({ userData, onEdit, onDelete, onOffboard, onPermissions, onApprove, onReject, currentUserId, isAdmin, canEditUsers, canManagePermissions, approving }) => {
+const UserCard = ({ userData, onEdit, onDelete, onOffboard, onPermissions, onApprove, onReject, currentUserId, isAdmin, isManager, canEditUsers, canManagePermissions, approving }) => {
   const [hovered, setHovered] = useState(false);
   const isPending = userData.status === 'pending_approval';
   const roleCfg   = ROLE_CONFIG[userData.role?.toLowerCase()] || ROLE_CONFIG.staff;
@@ -1243,7 +1248,10 @@ const UserCard = ({ userData, onEdit, onDelete, onOffboard, onPermissions, onApp
         {hovered && !isPending && (
           <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}
             className="absolute top-4 right-4 flex gap-1.5 z-20">
-            {canManagePermissions && userData.role !== 'admin' && (
+            {/* Permissions button: Admin can manage anyone (except admin role targets).
+                Manager with can_manage_users can manage their team STAFF only. */}
+            {canManagePermissions && userData.role !== 'admin' &&
+              (isAdmin || userData.role === 'staff') && (
               <button onClick={() => onPermissions(userData)} title="Manage Permissions"
                 className="w-8 h-8 bg-emerald-50 dark:bg-emerald-900/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center border border-emerald-100 dark:border-emerald-800 shadow-sm transition-all">
                 <Shield className="h-3.5 w-3.5" />
@@ -1255,7 +1263,8 @@ const UserCard = ({ userData, onEdit, onDelete, onOffboard, onPermissions, onApp
                 <Pencil className="h-3.5 w-3.5" />
               </button>
             )}
-            {(isAdmin || canEditUsers) && userData.id !== currentUserId && (
+            {/* Delete button: Admin only per permission matrix */}
+            {isAdmin && userData.id !== currentUserId && (
               <button onClick={() => onDelete(userData.id)} title="Delete User"
                 className="w-8 h-8 bg-red-50 dark:bg-red-900/40 hover:bg-red-100 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 rounded-xl flex items-center justify-center border border-red-100 dark:border-red-800 shadow-sm transition-all">
                 <Trash2 className="h-3.5 w-3.5" />
@@ -1861,10 +1870,13 @@ export default function Users() {
   const { user, refreshUser } = useAuth();
   const isDark = useDark();
   const isAdmin              = user?.role === 'admin';
+  const isManager            = user?.role === 'manager';
   const perms                = user?.permissions || {};
   const canViewUserPage      = isAdmin || !!perms.can_view_user_page;
   const canEditUsers         = isAdmin || !!perms.can_manage_users;
-  const canManagePermissions = isAdmin;
+  // Admin can manage any user's permissions.
+  // Manager with can_manage_users can manage permissions for their team STAFF (not admin/manager).
+  const canManagePermissions = isAdmin || (isManager && !!perms.can_manage_users);
 
   // ── Main page tab (Users vs Identix) ─────────────────────────────────────
   const [mainTab, setMainTab] = useState('users'); // 'users' | 'identix' | 'password_resets'
@@ -2000,12 +2012,13 @@ export default function Users() {
   }, [selectedUser, formData, isAdmin, user?.id, refreshUser, fetchUsers]);
 
   const handleDelete = useCallback(async (id) => {
-    if (!isAdmin && !canEditUsers) { toast.error('No permission to delete users'); return; }
+    // Per permission matrix: DELETE users is Admin-only
+    if (!isAdmin) { toast.error('Only administrators can delete users'); return; }
     if (id === user?.id) { toast.error('You cannot delete your own account'); return; }
     if (!window.confirm('Permanently delete this user and all their data?')) return;
     try { await api.delete(`/users/${id}`); toast.success('User removed'); fetchUsers(); }
     catch (err) { toast.error(err.response?.data?.detail || 'Failed to delete user'); }
-  }, [isAdmin, canEditUsers, user?.id, fetchUsers]);
+  }, [isAdmin, user?.id, fetchUsers]);
 
   const handleOffboard = useCallback((userData) => {
     setOffboardTarget(userData);
@@ -2013,14 +2026,24 @@ export default function Users() {
   }, []);
 
   const openPermissionsDialog = useCallback(async (userData) => {
+    // Manager can only manage permissions for staff
+    if (!isAdmin && isManager && userData.role !== 'staff') {
+      toast.error('Managers can only manage permissions for staff members');
+      return;
+    }
     setSelectedUserForPerms(userData);
     setActivePermTab('modules');
     await fetchPermissions(userData.id);
     setPermDialogOpen(true);
-  }, [fetchPermissions]);
+  }, [isAdmin, isManager, fetchPermissions]);
 
   const handleSavePermissions = useCallback(async () => {
-    if (!canManagePermissions) { toast.error('Only administrators can update permissions'); return; }
+    if (!canManagePermissions) { toast.error('Only administrators or managers can update permissions'); return; }
+    // Managers cannot update permissions for other managers or admins
+    if (!isAdmin && isManager && selectedUserForPerms?.role !== 'staff') {
+      toast.error('Managers can only update permissions for staff members');
+      return;
+    }
     setLoading(true);
     try {
       const ensureArray = v => Array.isArray(v) ? v : [];
@@ -2045,7 +2068,7 @@ export default function Users() {
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to update permissions');
     } finally { setLoading(false); }
-  }, [canManagePermissions, permissions, selectedUserForPerms?.id, user?.id, refreshUser, fetchUsers]);
+  }, [isAdmin, isManager, canManagePermissions, permissions, selectedUserForPerms?.id, selectedUserForPerms?.role, user?.id, refreshUser, fetchUsers]);
 
   const resetPermissionsToRole = useCallback((role) => {
     setPermissions({ ...(DEFAULT_ROLE_PERMISSIONS[role] || EMPTY_PERMISSIONS) });
@@ -2261,7 +2284,7 @@ export default function Users() {
               ? filteredUsers.map(u => (
                   <UserCard key={u.id} userData={u} onEdit={handleEdit} onDelete={handleDelete}
                     onOffboard={handleOffboard} onPermissions={openPermissionsDialog} onApprove={handleApprove} onReject={handleReject}
-                    currentUserId={user?.id || ''} isAdmin={isAdmin} canEditUsers={canEditUsers}
+                    currentUserId={user?.id || ''} isAdmin={isAdmin} isManager={isManager} canEditUsers={canEditUsers}
                     canManagePermissions={canManagePermissions} approving={approvingId} />
                 ))
               : (
@@ -2578,9 +2601,18 @@ export default function Users() {
             subtitle="Configure access levels and module permissions" />
           <div className="p-6 space-y-5 bg-white dark:bg-slate-900">
             <PermissionMatrixSummary permissions={permissions} />
+            {/* Manager scope notice */}
+            {isManager && !isAdmin && (
+              <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+                <AlertTriangle className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed">
+                  <strong>Manager scope:</strong> You can only grant permissions you yourself possess. Admin-only flags (Delete, Send Reminders, Rankings) are locked and cannot be changed.
+                </p>
+              </div>
+            )}
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Quick Reset:</span>
-              {['staff', 'manager', 'admin'].map(role => {
+              {(isAdmin ? ['staff', 'manager', 'admin'] : ['staff']).map(role => {
                 const cfg = ROLE_CONFIG[role]; const RIcon = cfg.icon;
                 return (
                   <button key={role} onClick={() => resetPermissionsToRole(role)}
