@@ -1352,50 +1352,52 @@ export default function PasswordRepository() {
   return (
     <motion.div className="space-y-4" variants={cv} initial="hidden" animate="visible">
       <motion.div variants={iv}>
-        <div className="relative overflow-hidden rounded-xl px-4 py-3"
-          style={{ background: `linear-gradient(135deg,${C.deepBlue} 0%,${C.medBlue} 100%)`, boxShadow: '0 4px 20px rgba(13,59,102,0.25)' }}>
-          <div className="absolute right-0 top-0 w-48 h-48 rounded-full -mr-16 -mt-16 opacity-10"
+        <div className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
+          style={{ background: `linear-gradient(135deg,${C.deepBlue} 0%,${C.medBlue} 100%)`, boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
+          <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
             style={{ background: 'radial-gradient(circle,white 0%,transparent 70%)' }} />
-          <div className="relative flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-white/15 rounded-xl flex items-center justify-center">
-                <KeyRound className="h-5 w-5 text-white" />
-              </div>
-              <div>
-                <h1 className="text-lg font-bold text-white leading-tight">Password Vault</h1>
-                <p className="text-white/55 text-[11px]">MCA/ROC · GST · IT · TDS · DGFT · TM & more</p>
-              </div>
+          <div className="absolute right-24 bottom-0 w-32 h-32 rounded-full mb-[-30px] opacity-5" style={{ background: 'white' }} />
+          <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5" style={{ background: 'white' }} />
+          <div className="relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 min-w-0">
+            <div className="flex-1 min-w-0">
+              <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                <KeyRound className="h-3 w-3" /> Password Management
+              </p>
+              <h1 className="text-lg sm:text-2xl font-bold text-white tracking-tight leading-tight">Password Vault</h1>
+              <p className="text-white/60 text-sm mt-1">MCA/ROC · GST · IT · TDS · DGFT · TM & more</p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
               {canView && stats.total != null && (
-                <span className="hidden sm:block px-2.5 py-1 bg-white/15 rounded-lg text-white text-xs font-bold">
+                <span className="hidden sm:flex items-center px-3 py-1.5 bg-white/15 rounded-xl text-white text-xs font-bold border border-white/20">
                   {stats.total} entries
                 </span>
               )}
+              {canEdit && (
+                <>
+                  <Button onClick={dlTemplate} size="sm"
+                    className="rounded-xl font-bold h-8 text-xs gap-1.5 text-white hover:bg-white/20 border border-white/20"
+                    style={{ background: 'rgba(255,255,255,0.15)' }}>
+                    <Download className="h-3.5 w-3.5" /> Template
+                  </Button>
+                  <Button onClick={() => setImportOpen(true)} size="sm"
+                    className="rounded-xl font-bold h-8 text-xs gap-1.5 text-white hover:bg-white/20 border border-white/20"
+                    style={{ background: 'rgba(255,255,255,0.15)' }}>
+                    <Upload className="h-3.5 w-3.5" /> Import
+                  </Button>
+                  <Button onClick={() => setShareClientOpen(true)} size="sm"
+                    className="rounded-xl font-bold h-8 text-xs gap-1.5 text-white hover:bg-white/20 border border-white/20"
+                    style={{ background: 'rgba(255,255,255,0.15)' }}
+                    title="Share all credentials of a client via WhatsApp">
+                    <Share2 className="h-3.5 w-3.5" /> Share Client
+                  </Button>
+                  <Button onClick={() => { setEditEntry(null); setEditOpen(true); }} size="sm"
+                    className="rounded-xl font-bold h-8 text-xs gap-1.5 text-white shadow-lg"
+                    style={{ background: C.green }}>
+                    <Plus className="h-3.5 w-3.5" /> Add
+                  </Button>
+                </>
+              )}
             </div>
-            {canEdit && (
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <Button onClick={dlTemplate} size="sm"
-                  className="rounded-lg font-bold h-8 text-xs gap-1.5 text-white hover:bg-white/20"
-                  style={{ background: 'rgba(255,255,255,0.15)' }}>
-                  <Download className="h-3.5 w-3.5" /> Template
-                </Button>
-                <Button onClick={() => setImportOpen(true)} size="sm"
-                  className="rounded-lg font-bold h-8 text-xs gap-1.5 text-white hover:bg-white/20"
-                  style={{ background: 'rgba(255,255,255,0.15)' }}>
-                  <Upload className="h-3.5 w-3.5" /> Import
-                </Button>
-                <Button onClick={() => setShareClientOpen(true)} size="sm"
-                  className="rounded-lg font-bold h-8 text-xs gap-1.5 text-white hover:bg-white/20"
-                  style={{ background: 'rgba(255,255,255,0.15)' }}
-                  title="Share all credentials of a client via WhatsApp">
-                  <Share2 className="h-3.5 w-3.5" /> Share Client
-                </Button>
-                <Button onClick={() => { setEditEntry(null); setEditOpen(true); }} size="sm"
-                  className="rounded-lg font-bold h-8 text-xs gap-1.5 text-white shadow-lg"
-                  style={{ background: C.green }}>
-                  <Plus className="h-3.5 w-3.5" /> Add
-                </Button>
-              </div>
-            )}
           </div>
         </div>
       </motion.div>
