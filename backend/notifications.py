@@ -358,7 +358,7 @@ async def send_notification(
 
 # ====================== GET NOTIFICATIONS ======================
 
-@router.get("/", response_model=List[Notification])
+@router.get("", response_model=List[Notification])
 async def get_my_notifications(
     current_user: User = Depends(get_current_user),
     limit: int = 100,
