@@ -133,7 +133,10 @@ function AppRoutes() {
 
       {/* PERMISSION-BASED MODULES */}
       <Route path="/documents"    element={<Permission permission="can_view_documents"><PageLoader><DocumentsRegister /></PageLoader></Permission>} />
-      <Route path="/clients"      element={<Permission permission="can_view_all_clients"><PageLoader><Clients /></PageLoader></Permission>} />
+      {/* Clients — Protected (not Permission-gated).
+           can_view_all_clients controls DATA scope server-side (all vs assigned),
+           not page access. All authenticated users can visit /clients. */}
+      <Route path="/clients"      element={<Protected><PageLoader><Clients /></PageLoader></Protected>} />
       <Route path="/passwords"    element={<Permission permission="can_view_passwords"><PageLoader><Passvault /></PageLoader></Permission>} />
       <Route path="/dsc"          element={<Permission permission="can_view_all_dsc"><PageLoader><DSCRegister /></PageLoader></Permission>} />
       <Route path="/leads"        element={<Permission permission="can_view_all_leads"><PageLoader><LeadsPage /></PageLoader></Permission>} />
