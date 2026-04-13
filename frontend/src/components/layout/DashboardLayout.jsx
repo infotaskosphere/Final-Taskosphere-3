@@ -53,7 +53,10 @@ const NAV_GROUPS = [
       // Permission-based modules — only visible when user has the flag
       { path: '/dsc',       icon: FileText,  label: 'DSC Register',      permission: 'can_view_all_dsc'     },
       { path: '/documents', icon: FileText,  label: 'Document Register', permission: 'can_view_documents'   },
-      { path: '/clients',   icon: Users,     label: 'Clients',           permission: 'can_view_all_clients' },
+      // Clients — always visible to all authenticated users.
+      // "Assigned + Permission" model: can_view_all_clients controls DATA SCOPE (all vs assigned),
+      // not page access. Users without the flag still see their own assigned clients.
+      { path: '/clients',   icon: Users,     label: 'Clients' },
       { path: '/passwords', icon: KeyRound,  label: 'Password Vault',    permission: 'can_view_passwords'   },
     ],
   },
