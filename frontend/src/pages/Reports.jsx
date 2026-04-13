@@ -212,14 +212,13 @@ export default function Reports() {
   const t    = tok(dark);
 
   const isAdmin   = user?.role === 'admin';
-  const isManager = user?.role === 'manager';
   const canDL     = isAdmin || hasPermission('can_download_reports');
 
-  // Cross-visibility: view_other_reports is array of user IDs this user can view
+  // Cross-visibility: view_other_reports is the ONLY way non-admin users see other users' reports.
+  // Manager has NO automatic team access — they must be granted explicit cross-visibility by admin.
   const crossVisReports    = user?.permissions?.view_other_reports || [];
   const hasCrossVisReports = crossVisReports.length > 0;
-  // Managers always get team-level switching (Own + Team scope enforced server-side)
-  const canSwitchUser = isAdmin || isManager || hasCrossVisReports;
+  const canSwitchUser = isAdmin || hasCrossVisReports;
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [tasks,      setTasks]      = useState([]);
@@ -247,16 +246,15 @@ export default function Reports() {
       api.get('/tasks'),
       api.get('/dashboard/stats'),
       api.get('/attendance/history'),
-      (isAdmin || isManager || hasCrossVisReports) ? api.get('/users') : Promise.resolve({data:[]}),
+      (isAdmin || hasCrossVisReports) ? api.get('/users') : Promise.resolve({data:[]}),
     ]);
     if (r1.status==='fulfilled') setTasks(r1.value?.data||[]);
     if (r2.status==='fulfilled') setDashStats(r2.value?.data||null);
     if (r3.status==='fulfilled') setAttendance(r3.value?.data||[]);
     if (r4.status==='fulfilled') {
       const rawUsers = r4.value?.data || [];
-      // Admin: all users. Manager: team users returned from /users (already dept-scoped server-side).
-      // Staff with cross-vis: only explicitly listed users.
-      setAllUsers(isAdmin || isManager ? rawUsers : rawUsers.filter(u => crossVisReports.includes(u.id || u._id)));
+      // Admin sees all users. All other roles (including manager) only see explicit cross-vis users.
+      setAllUsers(isAdmin ? rawUsers : rawUsers.filter(u => crossVisReports.includes(u.id || u._id)));
     }
     setLoading(false); setRefreshing(false);
   };
@@ -295,11 +293,11 @@ export default function Reports() {
 
   // ── Unique users (dropdown) ───────────────────────────────────────────────
   const uUsers = useMemo(()=>{
-    if (!isAdmin && !isManager && !hasCrossVisReports) return [];
+    if (!isAdmin && !hasCrossVisReports) return [];
     const m=new Map();
     allUsers.forEach(u=>{if(u.id&&u.full_name)m.set(u.id,u);});
     return Array.from(m.values());
-  },[allUsers,isAdmin,isManager]);
+  },[allUsers,isAdmin]);
 
   // ── Chart data ─────────────────────────────────────────────────────────────
   const statusData = useMemo(()=>[
@@ -366,8 +364,8 @@ export default function Reports() {
 
   // ── Efficiency cards — real tasks + real attendance ───────────────────────
   const effCards = useMemo(()=>{
-    if (!isAdmin && !isManager && !hasCrossVisReports) {
-      // Regular staff: own data only
+    if (!isAdmin && !hasCrossVisReports) {
+      // Own data only (staff, manager without cross-vis)
       const myT=tasks.filter(t=>t.assigned_to===user?.id);
       const myA=attendance.filter(a=>a.user_id===user?.id);
       const myM=myA.reduce((s,a)=>s+(a.duration_minutes||0),0);
@@ -380,8 +378,8 @@ export default function Reports() {
         pct:myT.length>0?Math.round((myT.filter(t=>t.status==='completed').length/myT.length)*100):0,
       }];
     }
-    // Staff with cross-vis (but not manager/admin): show own + explicitly listed
-    if (!isAdmin && !isManager && hasCrossVisReports) {
+    // Non-admin WITH cross-vis (manager or staff with view_other_reports): own + explicitly listed
+    if (!isAdmin && hasCrossVisReports) {
       const uMap={};
       if (user?.id) uMap[user.id]={user_id:user.id,user_name:user.full_name||'You',total:0,done:0,pend:0,mins:0,days:0,pct:0};
       allUsers.forEach(u=>{if(crossVisReports.includes(u.id))uMap[u.id]={user_id:u.id,user_name:u.full_name,total:0,done:0,pend:0,mins:0,days:0,pct:0};});
@@ -393,7 +391,7 @@ export default function Reports() {
       else if(selUser===user?.id) cards=cards.filter(c=>c.user_id===user?.id);
       return cards.sort((a,b)=>b.done-a.done);
     }
-    // Admin and Manager: aggregate over all available users (server already scoped for manager)
+    // Admin: aggregate over all users
     const uMap={};
     allUsers.forEach(u=>{uMap[u.id]={user_id:u.id,user_name:u.full_name,total:0,done:0,pend:0,mins:0,days:0,pct:0};});
     tasks.forEach(t=>{const u=t.assigned_to;if(u&&uMap[u]){uMap[u].total++;t.status==='completed'?uMap[u].done++:uMap[u].pend++;}});
@@ -402,7 +400,7 @@ export default function Reports() {
     let cards=Object.values(uMap);
     if(selUser!=='all') cards=cards.filter(c=>c.user_id===selUser);
     return cards.sort((a,b)=>b.done-a.done);
-  },[tasks,attendance,allUsers,isAdmin,isManager,user,selUser,hasCrossVisReports,crossVisReports]);
+  },[tasks,attendance,allUsers,isAdmin,user,selUser,hasCrossVisReports,crossVisReports]);
 
   const teamWL = useMemo(()=>(dashStats?.team_workload||[]).slice(0,12),[dashStats]);
 
@@ -478,7 +476,8 @@ export default function Reports() {
     {id:'attend',     label:'Attendance',  icon:Clock     },
     {id:'efficiency', label:'Efficiency',  icon:Zap       },
     {id:'performers', label:'Performers',  icon:Award     },
-    ...(isAdmin || isManager ? [{id:'team',label:'Team',icon:Users}] : []),
+    // Team tab: Admin only. Non-admin users (including manager) see only own + cross-vis data.
+    ...(isAdmin ? [{id:'team',label:'Team',icon:Users}] : []),
   ];
 
   const cursorStyle={fill:dark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.03)'};
@@ -540,9 +539,8 @@ export default function Reports() {
                   <select value={selUser} onChange={e=>setSelUser(e.target.value)}
                     className="h-8 px-3 text-xs rounded-xl font-semibold focus:outline-none focus:ring-2 focus:ring-white/50"
                     style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.25)',color:'white'}}>
-                    {isAdmin   && <option value="all" style={{color:'#1e293b'}}>All Users</option>}
-                    {isManager && <option value="all" style={{color:'#1e293b'}}>All Team</option>}
-                    {!isAdmin && !isManager && <option value={user?.id || 'all'} style={{color:'#1e293b'}}>My Reports</option>}
+                    {isAdmin && <option value="all" style={{color:'#1e293b'}}>All Users</option>}
+                    {!isAdmin && hasCrossVisReports && <option value={user?.id || 'all'} style={{color:'#1e293b'}}>My Reports</option>}
                     {uUsers.map(u=><option key={u.id} value={u.id} style={{color:'#1e293b'}}>{u.full_name}</option>)}
                   </select>
                 )}
@@ -813,7 +811,7 @@ export default function Reports() {
                   <table className="w-full text-sm min-w-[600px]">
                     <thead>
                       <tr style={{background:t.card2}}>
-                        {((isAdmin||isManager)?['Employee','Date','In','Out','Duration','Status','Notes']:['Date','In','Out','Duration','Status','Notes']).map(h=>(
+                        {(isAdmin?['Employee','Date','In','Out','Duration','Status','Notes']:['Date','In','Out','Duration','Status','Notes']).map(h=>(
                           <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider"
                             style={{color:t.textMute}}>{h}</th>
                         ))}
@@ -833,7 +831,7 @@ export default function Reports() {
                           <tr key={i} style={{borderTop:`1px solid ${t.border2}`}}
                             onMouseEnter={e=>e.currentTarget.style.background=t.hover}
                             onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                            {(isAdmin||isManager)&&<td className="px-4 py-2.5 text-xs font-medium" style={{color:t.text}}>{a.user_name||'—'}</td>}
+                            {isAdmin&&<td className="px-4 py-2.5 text-xs font-medium" style={{color:t.text}}>{a.user_name||'—'}</td>}
                             <td className="px-4 py-2.5 font-medium text-xs" style={{color:t.text}}>{a.date}</td>
                             <td className="px-4 py-2.5 text-xs" style={{color:t.textSub}}>{pi}</td>
                             <td className="px-4 py-2.5 text-xs" style={{color:t.textSub}}>{po}</td>
@@ -943,8 +941,8 @@ export default function Reports() {
         {tab==='performers'&&(
           <motion.div key="pf" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Sec title={(isAdmin||isManager)?'Star Performers':'Your Rank'} desc="Ranked by overall score" dark={dark}
-                action={(isAdmin||isManager)&&(
+              <Sec title={isAdmin?'Star Performers':'Your Rank'} desc="Ranked by overall score" dark={dark}
+                action={isAdmin&&(
                   <div className="flex gap-1">
                     {['all','monthly','weekly'].map(p=>(
                       <button key={p} onClick={()=>setRankPeriod(p)}
@@ -1035,8 +1033,8 @@ export default function Reports() {
           </motion.div>
         )}
 
-        {/* ──────── TEAM (admin + manager) ──────── */}
-        {tab==='team'&&(isAdmin||isManager)&&(
+        {/* ──────── TEAM (admin only) ──────── */}
+        {tab==='team'&&isAdmin&&(
           <motion.div key="tm" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
             {teamWL.length>0?(
               <Sec title="Team Workload Distribution"
