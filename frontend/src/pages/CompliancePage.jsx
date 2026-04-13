@@ -2005,7 +2005,7 @@ export default function CompliancePage(){
       if(catFilter!=='all')params.set('category',catFilter);
       if(fyFilter!=='all')params.set('fy_year',fyFilter);
       const[listRes,dashRes,usersRes]=await Promise.all([
-        api.get(`/compliance/?${params}`),
+        api.get(`/compliance?${params}`),
         api.get('/compliance/dashboard/summary'),
         api.get('/users').catch(()=>({data:[]})),
       ]);
