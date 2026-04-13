@@ -58,6 +58,10 @@ import {
 } from 'lucide-react';
 
 const API_BASE = api.defaults.baseURL;
+const getAuthHeader = () => {
+  const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
 
 const IST_TIMEZONE = 'Asia/Kolkata';
 
