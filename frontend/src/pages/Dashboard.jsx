@@ -859,8 +859,8 @@ export default function Dashboard() {
   }, []);
 
   // ── Core State ─────────────────────────────────────────────────────────────
-  const [tasks,             setTasks]             = useState([]);   // ✅ ADD THIS
-  const [visits,            setVisits]            = useState([]); // ✅ ADD THIS
+  const [tasks,             setTasks]             = useState([]);
+  const [visits,            setVisits]            = useState([]);
   const [loading,           setLoading]           = useState(false);
   const [rankings,          setRankings]          = useState([]);
   const [rankingPeriod,     setRankingPeriod]     = useState('monthly');
@@ -886,7 +886,7 @@ export default function Dashboard() {
   };
   const { order: dashOrder, moveSection: dashMove, resetOrder: dashReset } = usePageLayout('dashboard', DASHBOARD_SECTIONS);
 
-  // ── Real Data State (replaces all stubs) ──────────────────────────────────
+  // ── Real Data State ────────────────────────────────────────────────────────
   const [allUsers,         setAllUsers]         = useState([]);
   const [usersLoading,     setUsersLoading]     = useState(true);
   const [stats,            setStats]            = useState({
@@ -916,10 +916,10 @@ export default function Dashboard() {
           apiFetch('/dashboard/stats'),
           apiFetch('/duedates/upcoming?days=30'),
           apiFetch('/attendance/today'),
-          apiFetch('/todos'),   // ← FIX: backend scopes by JWT; no user_id param needed
+          apiFetch('/todos'),
           apiFetch('/visits'),
           apiFetch('/holidays'),
-          apiFetch('/dashboard/dept-members'),  // dept-scoped team count for all roles
+          apiFetch('/dashboard/dept-members'),
           apiFetch('/email/reminders'),
         ]);
         
@@ -942,7 +942,7 @@ export default function Dashboard() {
       console.error('Dashboard wave-1 fetch error:', e);
     }
     
-    setDataLoading(false); // <--- Line 941 (from your error log)
+    setDataLoading(false);
 
     // ── Wave 2: secondary ──
     try {
@@ -956,7 +956,6 @@ export default function Dashboard() {
         setAllUsers(usersData);   
         setUsersLoading(false); 
       }
-      // CHECK HERE: Ensure the line below isn't "trapped" outside a block
       if (Array.isArray(leadsRes)) setLeadsData(leadsRes);
       if (Array.isArray(rankingsData)) setRankings(rankingsData);
       
@@ -1060,7 +1059,6 @@ export default function Dashboard() {
 
   const teamTaskBreakdown = useMemo(() => {
     if (!hasCrossVisibility) return [];
-    // Build list: current user + all cross visibility users
     const allUids = [...new Set([user?.id, ...crossVisibilityUserIds].filter(Boolean))];
     return allUids
       .map(uid => {
@@ -1080,9 +1078,7 @@ export default function Dashboard() {
     if (!hasCrossVisibility) return 0;
     return tasks.filter(t => {
       const isIncomplete = t.status !== 'completed';
-      // Include current user own tasks
       const isMyTask = t.assigned_to === user?.id || (t.sub_assignees || []).includes(user?.id);
-      // Include cross visibility users tasks
       const isCrossTask =
         crossVisibilityUserIds.includes(t.assigned_to) ||
         (t.sub_assignees || []).some(id => crossVisibilityUserIds.includes(id));
@@ -1105,7 +1101,7 @@ export default function Dashboard() {
     [upcomingDueDates]
   );
 
-  // ── Todo Actions (real API) ────────────────────────────────────────────────
+  // ── Todo Actions ──────────────────────────────────────────────────────────
   const addTodo = async () => {
     if (!newTodo.trim()) return;
     try {
@@ -1138,7 +1134,6 @@ export default function Dashboard() {
     const todo = todosRaw.find(t => (t._id || t.id) === id);
     if (!todo) return;
     const nowCompleted = !(todo.is_completed || todo.status === 'completed');
-    // Optimistic update
     setTodosRaw(prev =>
       prev.map(t =>
         (t._id || t.id) === id
@@ -1157,7 +1152,6 @@ export default function Dashboard() {
       });
     } catch {
       toast.error('Failed to update todo');
-      // Revert on failure
       setTodosRaw(prev =>
         prev.map(t =>
           (t._id || t.id) === id
@@ -1169,7 +1163,6 @@ export default function Dashboard() {
   };
 
   const handleDeleteTodo = async (id) => {
-    // Optimistic remove
     setTodosRaw(prev => prev.filter(t => (t._id || t.id) !== id));
     try {
       await fetch(`${API_BASE}/todos/${id}`, {
@@ -1179,15 +1172,13 @@ export default function Dashboard() {
       toast.success('Todo deleted');
     } catch {
       toast.error('Failed to delete todo');
-      // Re-fetch to restore
       const data = await apiFetch('/todos');
       if (Array.isArray(data)) setTodosRaw(data);
     }
   };
 
-  // ── Task Status Update (real API) ─────────────────────────────────────────
+  // ── Task Status Update ────────────────────────────────────────────────────
   const updateAssignedTaskStatus = async (taskId, newStatus) => {
-    // Optimistic update
     setTasks(prev =>
       prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t)
     );
@@ -1199,7 +1190,6 @@ export default function Dashboard() {
       });
       if (!res.ok) {
         toast.error('Failed to update status');
-        // Revert — re-fetch tasks
         const data = await apiFetch('/tasks');
         if (Array.isArray(data)) setTasks(data);
       } else {
@@ -1210,7 +1200,7 @@ export default function Dashboard() {
     }
   };
 
-  // ── Punch In / Out (real API) ─────────────────────────────────────────────
+  // ── Punch In / Out ────────────────────────────────────────────────────────
   const handlePunchAction = async (action) => {
     setLoading(true);
     try {
@@ -1229,7 +1219,6 @@ export default function Dashboard() {
           setActionDone(true);
           setMustPunchIn(false);
         }
-        // Refresh attendance record
         const updated = await apiFetch('/attendance/today');
         if (updated) setTodayAttendance(updated);
       } else {
@@ -1242,7 +1231,7 @@ export default function Dashboard() {
     setLoading(false);
   };
 
-  // ── Duration Helper ────────────────────────────────────────────────────────
+  // ── Duration Helper ───────────────────────────────────────────────────────
   const getTodayDuration = () => {
     if (!todayAttendance?.punch_in) return '0h 0m';
     if (todayAttendance.punch_out) {
@@ -1268,7 +1257,6 @@ export default function Dashboard() {
     isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
   const isOverdue = (dueDate) => dueDate && new Date(dueDate) < new Date();
 
-  // Upcoming reminders for dashboard card
   const upcomingReminders = useMemo(() =>
     (Array.isArray(reminders) ? reminders : [])
       .filter(r => !r.is_dismissed && r.remind_at)
@@ -1341,7 +1329,6 @@ export default function Dashboard() {
     return Moon;
   };
 
- 
   const RankingItem = React.memo(({ member, index, period }) => {
     const isGold   = index === 0;
     const isSilver = index === 1;
@@ -1545,7 +1532,7 @@ export default function Dashboard() {
                           View All
                         </span>
                       </motion.button>
- 
+
                       {/* Vertical divider */}
                       <div
                         className="self-stretch"
@@ -1557,7 +1544,7 @@ export default function Dashboard() {
                       />
                     </>
                   )}
- 
+
                   <LiveClock compact />
                 </div>
 
@@ -1637,9 +1624,7 @@ export default function Dashboard() {
         {dashOrder.map((sectionId) => {
           if (sectionId === 'metrics') return (
         <React.Fragment key="metrics">
-        {/* KEY METRICS — 6 EQUAL CARDS
-            Cards: My Task | Todo | Overdue | DSC | Completion | Team Task
-            All cards use identical padding, flex layout, and min-h to stay same size. */}
+        {/* KEY METRICS — 6 EQUAL CARDS */}
         <motion.div
           className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 [&>*]:min-w-0"
           variants={itemVariants}
@@ -1894,7 +1879,8 @@ export default function Dashboard() {
               {recentTasks.length === 0
                 ? <div className={`text-center py-7 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No recent tasks</div>
                 : (
-                  <div className="slim-scroll space-y-2 max-h-[220px]" style={slimScroll}>
+                  // ── CHANGED: max-h-[220px] → max-h-[260px] ──
+                  <div className="slim-scroll space-y-2 max-h-[260px]" style={slimScroll}>
                     <AnimatePresence>
                       {recentTasks.map(task => {
                         const statusStyle   = getStatusStyle(task.status);
@@ -1942,7 +1928,7 @@ export default function Dashboard() {
               {sortedDueDates.length === 0
                 ? <div className={`text-center py-7 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No upcoming deadlines</div>
                 : (
-                  <div className="slim-scroll space-y-2 max-h-[220px]" style={slimScroll}>
+                  <div className="slim-scroll space-y-2 max-h-[260px]" style={slimScroll}>
                     <AnimatePresence>
                       {sortedDueDates.map(due => {
                         const dl    = due.days_remaining ?? 0;
@@ -2067,7 +2053,8 @@ export default function Dashboard() {
                 {tasksAssignedToMe.length === 0
                   ? <div className={`h-24 flex items-center justify-center text-sm border border-dashed rounded-xl ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-200'}`}>No tasks assigned to you</div>
                   : (
-                    <div className="slim-scroll space-y-1.5 max-h-[200px]" style={slimScroll}>
+                    // ── CHANGED: max-h-[200px] → max-h-[260px] ──
+                    <div className="slim-scroll space-y-1.5 max-h-[260px]" style={slimScroll}>
                       <AnimatePresence>
                         {tasksAssignedToMe.map(task => (
                           <TaskStrip key={task.id} task={task} isToMe={true}
@@ -2094,7 +2081,8 @@ export default function Dashboard() {
                 {tasksAssignedByMe.length === 0
                   ? <div className={`h-24 flex items-center justify-center text-sm border border-dashed rounded-xl ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-200'}`}>No tasks assigned yet</div>
                   : (
-                    <div className="slim-scroll space-y-1.5 max-h-[200px]" style={slimScroll}>
+                    // ── CHANGED: max-h-[200px] → max-h-[260px] ──
+                    <div className="slim-scroll space-y-1.5 max-h-[260px]" style={slimScroll}>
                       <AnimatePresence>
                         {tasksAssignedByMe.map(task => (
                           <TaskStrip key={task.id} task={task} isToMe={false}
@@ -2108,7 +2096,7 @@ export default function Dashboard() {
               </div>
             </SectionCard>
 
-            {/* My To-Do List — moved here as 3rd card */}
+            {/* My To-Do List — 3rd card */}
             <SectionCard className="hover:shadow-md transition">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
@@ -2212,7 +2200,7 @@ export default function Dashboard() {
           );
           if (sectionId === 'performers') return (
         <React.Fragment key="performers">
-        {/* STAR PERFORMERS + TO-DO + VISITS */}
+        {/* STAR PERFORMERS + REMINDERS + VISITS */}
         <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
 
           {/* Star Performers */}
@@ -2248,7 +2236,7 @@ export default function Dashboard() {
             </div>
           </SectionCard>
 
-          {/* Reminders Card — replaces My Todo */}
+          {/* Reminders Card */}
           <SectionCard>
             <CardHeaderRow
               iconBg={isDark ? 'bg-purple-900/40' : 'bg-purple-50'}
@@ -2299,15 +2287,15 @@ export default function Dashboard() {
           </SectionCard>
 
           {/* Visits Section */}
-          <VisitsCard 
-            isDark={isDark} 
-            navigate={navigate} 
-            currentUserId={user?.id} 
-            onSelectVisit={setSelectedVisit} 
-            visits={visits} // ✅ FIXED: Changed from [] to visits
-            isLoading={dataLoading} 
+          <VisitsCard
+            isDark={isDark}
+            navigate={navigate}
+            currentUserId={user?.id}
+            onSelectVisit={setSelectedVisit}
+            visits={visits}
+            isLoading={dataLoading}
           />
-          </motion.div>
+        </motion.div>
         </React.Fragment>
           );
           if (sectionId === 'quick_access') return (
@@ -2358,7 +2346,7 @@ export default function Dashboard() {
             </motion.div>
           ))}
 
-          {/* Team Members tile — visible to ALL roles; admins see total, others see dept-scoped count */}
+          {/* Team Members tile */}
           <motion.div whileHover={{ y:-3, transition:springPhysics.card }} whileTap={{ scale:0.97 }}
             onClick={() => isAdmin ? navigate('/users') : undefined}
             className={`${metricCardCls} ${metricCardDefault} ${isAdmin ? 'cursor-pointer' : 'cursor-default'}`}>
