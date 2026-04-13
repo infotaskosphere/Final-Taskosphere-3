@@ -299,7 +299,7 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
         }:{}),
       };
       if(existing?.id){await api.patch(`/compliance/${existing.id}`,payload);toast.success('Updated');}
-      else{await api.post('/compliance/',payload);toast.success('Created');}
+      else{await api.post('/compliance',payload);toast.success('Created');}
       onSave();
     }catch(err){toast.error(err?.response?.data?.detail||'Save failed');}
     finally{setSaving(false);}
@@ -968,7 +968,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
       if(search.trim())params.set('search',search.trim());
       const[asgn,cm]=await Promise.all([
         api.get(`/compliance/${compliance.id}/assignments?${params}`),
-        api.get('/compliance/').then(r=>(r.data||[]).find(c=>c.id===compliance.id)||compliance),
+        api.get('/compliance').then(r=>(r.data||[]).find(c=>c.id===compliance.id)||compliance),
       ]);
       // Enrich assigned_to_name from allUsers if backend didn't resolve it
       const uMap={}; (allUsers||[]).forEach(u=>{uMap[u.id]=u.full_name;});
@@ -1841,7 +1841,7 @@ export default function CompliancePage(){
       if(catFilter!=='all')params.set('category',catFilter);
       if(fyFilter!=='all')params.set('fy_year',fyFilter);
       const[listRes,dashRes,usersRes]=await Promise.all([
-        api.get(`/compliance/?${params}`),
+        api.get(`/compliance?${params}`),
         api.get('/compliance/dashboard/summary'),
         api.get('/users').catch(()=>({data:[]})),
       ]);
