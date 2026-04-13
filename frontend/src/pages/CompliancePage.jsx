@@ -241,19 +241,28 @@ function defaultDayFor(frequency, category){
 }
 
 // Compute preview dates for the current selection
-function computeDueDates(frequency, applicablePeriods, recurDay, recurMonth, fyYear){
+function computeDueDates(frequency, applicablePeriods, recurDay, recurMonth, fyYear, filingOffset=1){
   const day = recurDay === 'last' ? null : parseInt(recurDay, 10);
   const results = [];
 
   if(frequency === 'monthly'){
     const yr = fyYear ? parseInt(fyYear.split('-')[0], 10) : new Date().getFullYear();
     applicablePeriods.forEach(key => {
-      const mIdx = parseInt(key, 10) - 1; // 0-based month
-      const year = (mIdx < 3) ? yr + 1 : yr; // Indian FY: Apr=start, Jan-Mar = next year
-      const daysInMonth = new Date(year, mIdx + 1, 0).getDate();
+      const mIdx = parseInt(key, 10) - 1; // 0-based applicable month
+      // filing month = applicable month + offset
+      const filingMIdx = (mIdx + parseInt(filingOffset, 10)) % 12;
+      const filingYearBump = (mIdx + parseInt(filingOffset, 10)) >= 12 ? 1 : 0;
+      const baseYear = (mIdx < 3) ? yr + 1 : yr; // Indian FY
+      const filingYear = baseYear + filingYearBump;
+      const daysInMonth = new Date(filingYear, filingMIdx + 1, 0).getDate();
       const d = day ? Math.min(day, daysInMonth) : daysInMonth;
-      const dt = new Date(year, mIdx, d);
-      results.push({ label: `${MONTH_NAMES[mIdx]} ${year}`, date: dt.toISOString().slice(0,10) });
+      const dt = new Date(filingYear, filingMIdx, d);
+      const offsetLabel = parseInt(filingOffset)===0?'same month':parseInt(filingOffset)===1?'next month':'2 months after';
+      results.push({
+        label: `${MONTH_NAMES[mIdx]} return`,
+        filing: `${MONTH_NAMES[filingMIdx]} ${filingYear}`,
+        date: dt.toISOString().slice(0,10),
+      });
     });
     results.sort((a,b)=>a.date.localeCompare(b.date));
   }
@@ -300,6 +309,7 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
   const[dueDate,setDueDate]=useState(existing?.due_date||'');
   const[recurDay,setRecurDay]=useState(existing?.recurring_day||'20');
   const[recurMonth,setRecurMonth]=useState(existing?.recurring_quarter_month||'4');
+  const[filingOffset,setFilingOffset]=useState(existing?.filing_offset??'1');
   const[desc,setDesc]=useState(existing?.description||'');
   const[saving,setSaving]=useState(false);
   const[templates,setTemplates]=useState([]);
@@ -351,8 +361,8 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
   const inputCls='w-full px-3.5 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all';
 
   const previewDates = useMemo(()=>
-    computeDueDates(frequency, applicablePeriods, recurDay, recurMonth, fyYear),
-    [frequency, applicablePeriods, recurDay, recurMonth, fyYear]
+    computeDueDates(frequency, applicablePeriods, recurDay, recurMonth, fyYear, filingOffset),
+    [frequency, applicablePeriods, recurDay, recurMonth, fyYear, filingOffset]
   );
 
   const recurringLabel=()=>{
@@ -395,6 +405,7 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
         ...(dueType==='recurring'?{
           recurring_due:true,
           recurring_day:recurDay,
+          filing_offset:frequency==='monthly'?parseInt(filingOffset,10):undefined,
           recurring_quarter_month:frequency==='quarterly'?recurMonth:undefined,
           period_label:period||recurringLabel(),
           // Store first computed date as the canonical next due_date
@@ -547,13 +558,19 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
                   <div className="flex items-center gap-3 flex-wrap">
                     <div className="flex items-center gap-2">
                       <Repeat className="w-3.5 h-3.5 text-blue-500"/>
-                      <span className="text-xs font-semibold" style={{color:isDark?D.muted:'#374151'}}>Due on day</span>
+                      <span className="text-xs font-semibold" style={{color:isDark?D.muted:'#374151'}}>File in</span>
                     </div>
+                    <select value={filingOffset} onChange={e=>setFilingOffset(e.target.value)}
+                      className="px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" style={inputStyle}>
+                      <option value="0">Same month (e.g. advance tax)</option>
+                      <option value="1">Next month (e.g. GST, TDS, PF)</option>
+                      <option value="2">2 months after (e.g. TCS annual)</option>
+                    </select>
+                    <span className="text-xs font-semibold" style={{color:isDark?D.muted:'#374151'}}>· due on day</span>
                     <select value={recurDay} onChange={e=>setRecurDay(e.target.value)}
                       className="px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" style={inputStyle}>
                       {RECURRING_DAYS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
                     </select>
-                    <span className="text-xs font-bold text-blue-500">of every selected month</span>
                   </div>
                 </>
               )}
@@ -674,9 +691,11 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {previewDates.map((pd,i)=>(
-                      <span key={i} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg"
+                      <span key={i} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg flex items-center gap-1"
                         style={{backgroundColor:isDark?'rgba(31,111,178,0.2)':'rgba(31,111,178,0.1)',color:'#1F6FB2'}}>
-                        {pd.label} · {new Date(pd.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}
+                        <span style={{color:isDark?'#93c5fd':'#1e40af'}}>{pd.label}</span>
+                        <span style={{opacity:0.5}}>→</span>
+                        <span>{pd.filing} · {new Date(pd.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</span>
                       </span>
                     ))}
                   </div>
