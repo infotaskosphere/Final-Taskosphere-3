@@ -215,14 +215,13 @@ export default function Reports() {
   const t    = tok(dark);
 
   const isAdmin   = user?.role === 'admin';
-  const isManager = user?.role === 'manager';
   const canDL     = isAdmin || hasPermission('can_download_reports');
 
-  // Cross-visibility: view_other_reports is array of user IDs this user can view
+  // Cross-visibility: view_other_activity is the ONLY way non-admin users see other users' activity.
+  // Manager has NO automatic team access — must be granted via view_other_activity by admin.
   const crossVisReports    = user?.permissions?.view_other_reports || [];
   const hasCrossVisReports = crossVisReports.length > 0;
-  // Managers always get team-level switching (Own + Team scope enforced server-side)
-  const canSwitchUser = isAdmin || isManager || hasCrossVisReports;
+  const canSwitchUser = isAdmin || hasCrossVisReports;
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [tasks,      setTasks]      = useState([]);
@@ -250,16 +249,15 @@ export default function Reports() {
       api.get('/tasks'),
       api.get('/dashboard/stats'),
       api.get('/attendance/history'),
-      (isAdmin || isManager || hasCrossVisReports) ? api.get('/users') : Promise.resolve({data:[]}),
+      (isAdmin || hasCrossVisReports) ? api.get('/users') : Promise.resolve({data:[]}),
     ]);
     if (r1.status==='fulfilled') setTasks(r1.value?.data||[]);
     if (r2.status==='fulfilled') setDashStats(r2.value?.data||null);
     if (r3.status==='fulfilled') setAttendance(r3.value?.data||[]);
     if (r4.status==='fulfilled') {
       const rawUsers = r4.value?.data || [];
-      // Admin: all users. Manager: team users returned from /users (already dept-scoped server-side).
-      // Staff with cross-vis: only explicitly listed users.
-      setAllUsers(isAdmin || isManager ? rawUsers : rawUsers.filter(u => crossVisReports.includes(u.id || u._id)));
+      // Admin sees all. All other roles (including manager) only see explicit cross-vis users.
+      setAllUsers(isAdmin ? rawUsers : rawUsers.filter(u => crossVisReports.includes(u.id || u._id)));
     }
     setLoading(false); setRefreshing(false);
   };
@@ -298,11 +296,11 @@ export default function Reports() {
 
   // ── Unique users (dropdown) ───────────────────────────────────────────────
   const uUsers = useMemo(()=>{
-    if (!isAdmin && !isManager && !hasCrossVisReports) return [];
+    if (!isAdmin && !hasCrossVisReports) return [];
     const m=new Map();
     allUsers.forEach(u=>{if(u.id&&u.full_name)m.set(u.id,u);});
     return Array.from(m.values());
-  },[allUsers,isAdmin,isManager]);
+  },[allUsers,isAdmin]);
 
   // ── Chart data ─────────────────────────────────────────────────────────────
   const statusData = useMemo(()=>[
@@ -369,8 +367,8 @@ export default function Reports() {
 
   // ── Efficiency cards — real tasks + real attendance ───────────────────────
   const effCards = useMemo(()=>{
-    if (!isAdmin && !isManager && !hasCrossVisReports) {
-      // Regular staff: own data only
+    if (!isAdmin && !hasCrossVisReports) {
+      // Own data only (staff and manager without explicit cross-vis)
       const myT=tasks.filter(t=>t.assigned_to===user?.id);
       const myA=attendance.filter(a=>a.user_id===user?.id);
       const myM=myA.reduce((s,a)=>s+(a.duration_minutes||0),0);
@@ -383,9 +381,8 @@ export default function Reports() {
         pct:myT.length>0?Math.round((myT.filter(t=>t.status==='completed').length/myT.length)*100):0,
       }];
     }
-    // Staff with cross-vis (but not manager/admin): show own data + cross-vis users' data
-    if (!isAdmin && !isManager && hasCrossVisReports) {
-      const allowedIds = new Set([user?.id, ...crossVisReports]);
+    // Non-admin WITH cross-vis (manager or staff with view_other_reports): own + explicitly listed
+    if (!isAdmin && hasCrossVisReports) {
       const uMap={};
       if (user?.id) uMap[user.id]={user_id:user.id,user_name:user.full_name||'You',total:0,done:0,pend:0,mins:0,days:0,pct:0};
       allUsers.forEach(u=>{if(crossVisReports.includes(u.id))uMap[u.id]={user_id:u.id,user_name:u.full_name,total:0,done:0,pend:0,mins:0,days:0,pct:0};});
@@ -397,7 +394,7 @@ export default function Reports() {
       else if(selUser===user?.id) cards=cards.filter(c=>c.user_id===user?.id);
       return cards.sort((a,b)=>b.done-a.done);
     }
-    // Admin and Manager: aggregate view over all available users (server already scoped for manager)
+    // Admin only: aggregate over all available users
     const uMap={};
     allUsers.forEach(u=>{uMap[u.id]={user_id:u.id,user_name:u.full_name,total:0,done:0,pend:0,mins:0,days:0,pct:0};});
     tasks.forEach(t=>{const u=t.assigned_to;if(u&&uMap[u]){uMap[u].total++;t.status==='completed'?uMap[u].done++:uMap[u].pend++;}});
@@ -406,7 +403,7 @@ export default function Reports() {
     let cards=Object.values(uMap);
     if(selUser!=='all') cards=cards.filter(c=>c.user_id===selUser);
     return cards.sort((a,b)=>b.done-a.done);
-  },[tasks,attendance,allUsers,isAdmin,isManager,user,selUser,hasCrossVisReports,crossVisReports]);
+  },[tasks,attendance,allUsers,isAdmin,user,selUser,hasCrossVisReports,crossVisReports]);
 
   const teamWL = useMemo(()=>(dashStats?.team_workload||[]).slice(0,12),[dashStats]);
 
@@ -482,8 +479,8 @@ export default function Reports() {
     {id:'attend',     label:'Attendance',  icon:Clock     },
     {id:'efficiency', label:'Efficiency',  icon:Zap       },
     {id:'performers', label:'Performers',  icon:Award     },
-    // Team tab: Admin sees all team; Manager sees own department team
-    ...(isAdmin || isManager ? [{id:'team',label:'Team',icon:Users}] : []),
+    // Team tab: Admin only. Non-admin users (including manager) see own + cross-vis data only.
+    ...(isAdmin ? [{id:'team',label:'Team',icon:Users}] : []),
   ];
 
   const cursorStyle={fill:dark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.03)'};
@@ -534,8 +531,7 @@ export default function Reports() {
                     className="h-8 px-3 text-xs rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
                     style={{background:t.inputBg,border:`1px solid ${t.inputBdr}`,color:t.text}}>
                     {isAdmin  && <option value="all">All Users</option>}
-                    {isManager && <option value="all">All Team</option>}
-                    {!isAdmin && !isManager && <option value={user?.id || 'all'}>My Reports</option>}
+                    {!isAdmin && hasCrossVisReports && <option value={user?.id || 'all'}>My Reports</option>}
                     {uUsers.map(u=><option key={u.id} value={u.id}>{u.full_name}</option>)}
                   </select>
                 )}
@@ -1030,8 +1026,8 @@ export default function Reports() {
           </motion.div>
         )}
 
-        {/* ──────── TEAM (admin + manager) ──────── */}
-        {tab==='team'&&(isAdmin||isManager)&&(
+        {/* ──────── TEAM (admin only) ──────── */}
+        {tab==='team'&&isAdmin&&(
           <motion.div key="tm" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
             {teamWL.length>0?(
               <Sec title="Team Workload Distribution"
