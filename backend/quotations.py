@@ -915,6 +915,7 @@ async def create_company(data: dict, current_user: User = Depends(get_current_us
         "website":           data.get("website", ""),
         "gstin":             data.get("gstin", ""),
         "pan":               data.get("pan", ""),
+        "has_gst":           bool(data.get("has_gst", True)),
         "bank_account_name": data.get("bank_account_name", ""),
         "bank_name":         data.get("bank_name", ""),
         "bank_account_no":   data.get("bank_account_no", ""),
@@ -959,6 +960,7 @@ async def update_company(
         raise HTTPException(403, "Not authorized")
     allowed = [
         "name", "address", "phone", "email", "website", "gstin", "pan",
+        "has_gst",
         "bank_account_name", "bank_name", "bank_account_no", "bank_ifsc",
         "logo_base64", "signature_base64",
         "smtp_host", "smtp_port", "smtp_user", "smtp_password", "smtp_from_name",
