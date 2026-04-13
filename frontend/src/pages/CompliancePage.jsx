@@ -939,13 +939,16 @@ function AssignClientsModal({compliance,onClose,onAssigned,isDark,allUsers=[]}){
     }
   },[allUsers,compliance.category]);
 
-  useEffect(()=>{api.get('/clients').then(r=>{const all=Array.isArray(r.data)?r.data:(r.data?.clients||[]);setClients(all.filter(c=>!c.status||c.status==='active'));}).catch(()=>{}).finally(()=>setLoading(false));},[]);
-  const clientTypes=useMemo(()=>[...new Set(clients.map(c=>c.client_type).filter(Boolean))],[clients]);
+  useEffect(()=>{api.get('/clients').then(r=>{const all=Array.isArray(r.data)?r.data:(r.data?.clients||[]);setClients(all);}).catch(()=>{}).finally(()=>setLoading(false));},[]);
+  const[clientScope,setClientScope]=useState('active');
+  const activeClientsList=useMemo(()=>clients.filter(c=>!c.status||c.status==='active'),[clients]);
+  const scopedClients=useMemo(()=>clientScope==='active'?activeClientsList:clients,[clientScope,activeClientsList,clients]);
+  const clientTypes=useMemo(()=>[...new Set(scopedClients.map(c=>c.client_type).filter(Boolean))],[scopedClients]);
   const filtered=useMemo(()=>{
-    let list=typeFilter!=='all'?clients.filter(c=>c.client_type===typeFilter):clients;
+    let list=typeFilter!=='all'?scopedClients.filter(c=>c.client_type===typeFilter):scopedClients;
     if(search)list=list.filter(c=>(c.company_name||'').toLowerCase().includes(search.toLowerCase()));
     return list;
-  },[clients,search,typeFilter]);
+  },[scopedClients,search,typeFilter]);
 
   const handleAssign=async()=>{
     if(!selected.size){toast.error('Select at least one client');return;}
@@ -999,7 +1002,20 @@ function AssignClientsModal({compliance,onClose,onAssigned,isDark,allUsers=[]}){
           </div>
         </div>
 
-        <div className="p-3 border-b flex-shrink-0 flex gap-2" style={{borderColor:isDark?D.border:'#f1f5f9'}}>
+        <div className="p-3 border-b flex-shrink-0 flex flex-col gap-2" style={{borderColor:isDark?D.border:'#f1f5f9'}}>
+          <div className="flex gap-1.5">
+            <button onClick={()=>{setClientScope('active');setSelected(new Set());}}
+              className={`flex-1 text-[11px] font-semibold px-2 py-1.5 rounded-lg border transition-all ${clientScope==='active'?'text-white border-transparent bg-blue-600':'border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+              style={clientScope==='active'?{background:'linear-gradient(135deg,#0D3B66,#1F6FB2)'}:{}}>
+              Active Clients <span className="opacity-70">({activeClientsList.length})</span>
+            </button>
+            <button onClick={()=>{setClientScope('all');setSelected(new Set());}}
+              className={`flex-1 text-[11px] font-semibold px-2 py-1.5 rounded-lg border transition-all ${clientScope==='all'?'text-white border-transparent':'border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+              style={clientScope==='all'?{background:'linear-gradient(135deg,#0D3B66,#1F6FB2)'}:{}}>
+              All Clients <span className="opacity-70">({clients.length})</span>
+            </button>
+          </div>
+          <div className="flex gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{color:isDark?D.dimmer:'#94a3b8'}}/>
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search clients…"
@@ -1012,6 +1028,7 @@ function AssignClientsModal({compliance,onClose,onAssigned,isDark,allUsers=[]}){
             <option value="all">All Types</option>
             {clientTypes.map(t=><option key={t} value={t}>{t}</option>)}
           </select>
+          </div>
         </div>
         <div className="px-4 py-2 flex items-center justify-between border-b flex-shrink-0" style={{borderColor:isDark?D.border:'#f1f5f9'}}>
           <span className="text-xs font-semibold" style={{color:isDark?D.muted:'#64748b'}}>{selected.size} selected · {filtered.length} shown</span>
