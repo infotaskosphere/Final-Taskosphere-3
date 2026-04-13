@@ -32,6 +32,13 @@ import {
   Loader2, Mail, Send,
 } from 'lucide-react';
 
+// ─── API Helpers ─────────────────────────────────────────────────────────────
+const API_BASE = api.defaults.baseURL;
+const getAuthHeader = () => {
+  const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 // ─── Brand Colors ────────────────────────────────────────────────────────────
 const COLORS = {
   deepBlue:     '#0D3B66',
