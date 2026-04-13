@@ -635,6 +635,28 @@ async def get_access_logs(
     )
     return logs
 
+@router.get("/stats")
+async def get_password_stats_user(current_user: User = Depends(get_current_user)):
+    """Stats scoped to the current user's permitted departments."""
+    p = getattr(current_user, 'permissions', None) or {}
+    can_view = current_user.role == 'admin' or bool(p.get('can_view_passwords'))
+    if not can_view:
+        raise HTTPException(403, "Access denied")
+
+    allowed_depts = p.get('password_departments') if isinstance(p, dict) else None
+    if current_user.role == 'admin' or not allowed_depts:
+        query: dict = {}
+    else:
+        query = {"department": {"$in": allowed_depts}}
+
+    total = await db.passwords.count_documents(query)
+    by_type: dict = {}
+    docs = await db.passwords.find(query, {"_id": 0, "portal_type": 1}).to_list(5000)
+    for d in docs:
+        ptype = d.get("portal_type", "OTHER") or "OTHER"
+        by_type[ptype] = by_type.get(ptype, 0) + 1
+    return {"total": total, "by_portal_type": by_type}
+
 @router.get("/admin/stats")
 async def get_password_stats(current_user: User = Depends(require_admin)):
     total = await db.passwords.count_documents({})
