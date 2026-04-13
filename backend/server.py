@@ -402,9 +402,9 @@ async def startup_event():
         logger.error(f"Consent cleanup failed: {e}")
 
 # ====================== HEALTH ======================
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
-    return {"status": "ok", "cors": "configured correctly"}
+    return JSONResponse({"status": "ok", "cors": "configured correctly"})
 
 @app.get("/")
 async def root():
@@ -574,28 +574,38 @@ api_router = APIRouter(prefix="/api")
 
 # HELPERS - Email Service Functions
 def _brevo_send(to_email: str, subject: str, body_plain: str, body_html: str = None):
-    """Core Brevo SMTP sender used by all email functions."""
-    smtp_host = os.getenv("BREVO_SMTP_HOST", "smtp-relay.brevo.com")
-    smtp_port = int(os.getenv("BREVO_SMTP_PORT", "587"))
-    smtp_user = os.getenv("BREVO_SMTP_USER")
-    smtp_pass = os.getenv("BREVO_SMTP_PASS")
-    sender    = os.getenv("SENDER_EMAIL")
+    """Core Brevo HTTP API sender — SMTP (port 587) is blocked on Render free tier."""
+    api_key      = os.getenv("BREVO_API_KEY")
+    sender_email = os.getenv("SENDER_EMAIL")
+    sender_name  = os.getenv("SENDER_NAME", "TaskoSphere")
 
-    if not smtp_user or not smtp_pass or not sender:
-        raise Exception("Brevo SMTP environment variables not configured (BREVO_SMTP_USER, BREVO_SMTP_PASS, SENDER_EMAIL)")
+    if not api_key or not sender_email:
+        raise Exception(
+            "Brevo API env vars not configured. "
+            "Set BREVO_API_KEY and SENDER_EMAIL in Render environment variables."
+        )
 
-    msg = MIMEMultipart("alternative")
-    msg["From"]    = sender
-    msg["To"]      = to_email
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body_plain, "plain"))
+    payload = {
+        "sender": {"name": sender_name, "email": sender_email},
+        "to": [{"email": to_email}],
+        "subject": subject,
+        "textContent": body_plain,
+    }
     if body_html:
-        msg.attach(MIMEText(body_html, "html"))
+        payload["htmlContent"] = body_html
 
-    with smtplib.SMTP(smtp_host, smtp_port) as server:
-        server.starttls()
-        server.login(smtp_user, smtp_pass)
-        server.sendmail(sender, to_email, msg.as_string())
+    response = httpx.post(
+        "https://api.brevo.com/v3/smtp/email",
+        headers={
+            "api-key": api_key,
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=30,
+    )
+
+    if response.status_code not in (200, 201):
+        raise Exception(f"Brevo API error {response.status_code}: {response.text}")
     return True
 
 
