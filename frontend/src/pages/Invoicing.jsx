@@ -2985,7 +2985,19 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     <div>
                       <label className={labelCls}>Company Profile *</label>
-                      <Select value={form.company_id} onValueChange={v => setField('company_id', v)}>
+                      <Select value={form.company_id} onValueChange={v => {
+                        const s = getInvSettings(v);
+                        setForm(p => ({
+                          ...p,
+                          company_id: v,
+                          supply_state:        s.supply_state        || p.supply_state,
+                          notes:               s.default_notes       || p.notes,
+                          terms_conditions:    s.default_terms       || p.terms_conditions,
+                          invoice_template:    s.template            || p.invoice_template,
+                          invoice_theme:       s.theme               || p.invoice_theme,
+                          invoice_custom_color:s.custom_color        || p.invoice_custom_color,
+                        }));
+                      }}>
                         <SelectTrigger className={`${inputCls} ${!form.company_id ? 'border-amber-300 dark:border-amber-600' : ''}`}>
                           <SelectValue placeholder="— Select company profile —" />
                         </SelectTrigger>
