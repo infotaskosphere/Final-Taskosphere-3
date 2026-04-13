@@ -102,6 +102,17 @@ const ROLE_CONFIG = {
   staff:   { gradient: 'from-slate-400 to-slate-500',   hex: '#475569', icon: UserIcon,  label: 'Staff'   },
 };
 
+// ── Transfer Options for Offboarding Dialog ───────────────────────────────────
+const TRANSFER_OPTIONS = [
+  { key: 'transfer_tasks',     label: 'Tasks',     desc: 'Active & pending tasks',       icon: ClipboardList,   color: '#3B82F6', countKey: 'tasks'     },
+  { key: 'transfer_clients',   label: 'Clients',   desc: 'Assigned client accounts',     icon: UsersIcon,       color: '#10B981', countKey: 'clients'   },
+  { key: 'transfer_dsc',       label: 'DSC',       desc: 'Digital signature certificates', icon: Fingerprint,   color: '#8B5CF6', countKey: 'dsc'       },
+  { key: 'transfer_documents', label: 'Documents', desc: 'Files & document records',     icon: FileText,        color: '#F59E0B', countKey: 'documents' },
+  { key: 'transfer_todos',     label: 'To-Dos',    desc: 'Personal to-do items',         icon: CheckCircle,     color: '#06B6D4', countKey: 'todos'     },
+  { key: 'transfer_visits',    label: 'Visits',    desc: 'Scheduled client visits',      icon: MapPin,          color: '#EC4899', countKey: 'visits'    },
+  { key: 'transfer_leads',     label: 'Leads',     desc: 'Sales leads & prospects',      icon: Target,          color: '#F97316', countKey: 'leads'     },
+];
+
 const DEFAULT_ROLE_PERMISSIONS = {
     admin: {
       can_view_all_tasks: true, can_view_all_clients: true, can_view_all_dsc: true,
