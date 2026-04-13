@@ -312,6 +312,146 @@ async def create_compliance_master(
     return await _enrich(doc)
 
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DASHBOARD SUMMARY
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/dashboard/summary")
+async def compliance_dashboard(current_user: User = Depends(get_current_user)):
+    # ── Permission gate ─────────────────────────────────────────────────────
+    perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
+            (current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else {})
+    if current_user.role != "admin" and not perms.get("can_view_compliance", False):
+        raise HTTPException(403, "You do not have permission to view the Compliance Dashboard")
+
+    # ── Dept scope for non-admins ────────────────────────────────────────────
+    allowed_cats = get_allowed_categories(current_user)
+    scope_filter: dict = {}
+    if allowed_cats is not None:
+        if not allowed_cats:
+            return {
+                "total_compliance_types": 0, "total_assignments": 0,
+                "completed_or_filed": 0, "pending": 0, "overall_pct": 0.0,
+                "overdue": 0, "due_this_month": 0, "by_category": {},
+            }
+        scope_filter = {"category": {"$in": allowed_cats}}
+
+    total_types = await db.compliance_masters.count_documents(scope_filter)
+
+    # For assignments, first gather scoped compliance IDs
+    if allowed_cats is not None:
+        scoped_ids = [
+            m["id"] async for m in db.compliance_masters.find(scope_filter, {"_id": 0, "id": 1})
+        ]
+        asgn_filter = {"compliance_id": {"$in": scoped_ids}} if scoped_ids else {"compliance_id": "NONE"}
+    else:
+        asgn_filter = {}
+
+    total_asgn = await db.compliance_assignments.count_documents(asgn_filter)
+    done       = await db.compliance_assignments.count_documents({**asgn_filter, "status": {"$in": ["completed", "filed"]}})
+    pending    = await db.compliance_assignments.count_documents({**asgn_filter, "status": {"$in": ["not_started", "in_progress"]}})
+
+    cat_pipeline = [{"$match": scope_filter}, {"$group": {"_id": "$category", "count": {"$sum": 1}}}]
+    by_cat = await db.compliance_masters.aggregate(cat_pipeline).to_list(20)
+
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    overdue = await db.compliance_masters.count_documents({
+        **scope_filter, "due_date": {"$lt": now_str, "$ne": None},
+    })
+
+    import calendar as cal
+    now = datetime.now(IST)
+    month_end   = f"{now.year}-{now.month:02d}-{cal.monthrange(now.year, now.month)[1]:02d}"
+    month_start = f"{now.year}-{now.month:02d}-01"
+    due_this_month = await db.compliance_masters.count_documents({
+        **scope_filter, "due_date": {"$gte": month_start, "$lte": month_end},
+    })
+
+    return {
+        "total_compliance_types": total_types,
+        "total_assignments":      total_asgn,
+        "completed_or_filed":     done,
+        "pending":                pending,
+        "overall_pct":            round(done / total_asgn * 100, 1) if total_asgn else 0.0,
+        "overdue":                overdue,
+        "due_this_month":         due_this_month,
+        "by_category":            {r["_id"]: r["count"] for r in by_cat},
+        "allowed_categories":     allowed_cats,   # frontend uses this to hide tabs
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CALENDAR → TRACKER SYNC
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/sync-from-calendar")
+async def sync_from_calendar(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Sync due_dates collection → compliance_masters.
+    Creates a compliance master for any due_date that doesn't already have one.
+    Called automatically after creating/updating a due date.
+    """
+    due_dates = await db.due_dates.find({}, {"_id": 0}).to_list(5000)
+    created = 0
+    updated = 0
+
+    CATEGORY_MAP = {
+        "GST": "GST", "ROC": "ROC", "MCA": "ROC", "ITR": "ITR",
+        "TDS": "TDS", "AUDIT": "AUDIT", "PF": "PF_ESIC", "ESIC": "PF_ESIC",
+        "PT": "PT", "INCOME TAX": "ITR",
+    }
+
+    for dd in due_dates:
+        title     = dd.get("title", "").strip()
+        due_date  = dd.get("due_date")
+        if isinstance(due_date, datetime):
+            due_date = due_date.strftime("%Y-%m-%d")
+        elif isinstance(due_date, str) and "T" in due_date:
+            due_date = due_date[:10]
+
+        category = dd.get("category", "OTHER").upper()
+        category = CATEGORY_MAP.get(category, "OTHER")
+
+        # Check if a compliance master already linked to this due_date entry
+        existing = await db.compliance_masters.find_one(
+            {"calendar_due_date_id": dd["id"]}, {"_id": 0}
+        )
+
+        if existing:
+            # Update due_date if changed
+            if existing.get("due_date") != due_date:
+                await db.compliance_masters.update_one(
+                    {"id": existing["id"]},
+                    {"$set": {"due_date": due_date, "updated_at": _now()}}
+                )
+                updated += 1
+        else:
+            # Create new compliance master
+            doc = {
+                "id":                      str(uuid.uuid4()),
+                "name":                    title,
+                "category":                category if category in CATEGORIES else "OTHER",
+                "frequency":               "one_time",
+                "fy_year":                 None,
+                "period_label":            None,
+                "due_date":                due_date,
+                "description":             dd.get("description", ""),
+                "applicable_entity_types": [],
+                "calendar_due_date_id":    dd["id"],
+                "created_by":              current_user.id,
+                "created_by_name":         getattr(current_user, "full_name", ""),
+                "created_at":              _now(),
+                "updated_at":              _now(),
+            }
+            await db.compliance_masters.insert_one({**doc, "_id": doc["id"]})
+            created += 1
+
+    return {"synced": True, "created": created, "updated": updated}
+
+
 @router.patch("/{compliance_id}")
 async def update_compliance_master(
     compliance_id: str,
@@ -809,74 +949,6 @@ async def import_from_excel(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DASHBOARD SUMMARY
-# ─────────────────────────────────────────────────────────────────────────────
-
-@router.get("/dashboard/summary")
-async def compliance_dashboard(current_user: User = Depends(get_current_user)):
-    # ── Permission gate ─────────────────────────────────────────────────────
-    perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
-            (current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else {})
-    if current_user.role != "admin" and not perms.get("can_view_compliance", False):
-        raise HTTPException(403, "You do not have permission to view the Compliance Dashboard")
-
-    # ── Dept scope for non-admins ────────────────────────────────────────────
-    allowed_cats = get_allowed_categories(current_user)
-    scope_filter: dict = {}
-    if allowed_cats is not None:
-        if not allowed_cats:
-            return {
-                "total_compliance_types": 0, "total_assignments": 0,
-                "completed_or_filed": 0, "pending": 0, "overall_pct": 0.0,
-                "overdue": 0, "due_this_month": 0, "by_category": {},
-            }
-        scope_filter = {"category": {"$in": allowed_cats}}
-
-    total_types = await db.compliance_masters.count_documents(scope_filter)
-
-    # For assignments, first gather scoped compliance IDs
-    if allowed_cats is not None:
-        scoped_ids = [
-            m["id"] async for m in db.compliance_masters.find(scope_filter, {"_id": 0, "id": 1})
-        ]
-        asgn_filter = {"compliance_id": {"$in": scoped_ids}} if scoped_ids else {"compliance_id": "NONE"}
-    else:
-        asgn_filter = {}
-
-    total_asgn = await db.compliance_assignments.count_documents(asgn_filter)
-    done       = await db.compliance_assignments.count_documents({**asgn_filter, "status": {"$in": ["completed", "filed"]}})
-    pending    = await db.compliance_assignments.count_documents({**asgn_filter, "status": {"$in": ["not_started", "in_progress"]}})
-
-    cat_pipeline = [{"$match": scope_filter}, {"$group": {"_id": "$category", "count": {"$sum": 1}}}]
-    by_cat = await db.compliance_masters.aggregate(cat_pipeline).to_list(20)
-
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    overdue = await db.compliance_masters.count_documents({
-        **scope_filter, "due_date": {"$lt": now_str, "$ne": None},
-    })
-
-    import calendar as cal
-    now = datetime.now(IST)
-    month_end   = f"{now.year}-{now.month:02d}-{cal.monthrange(now.year, now.month)[1]:02d}"
-    month_start = f"{now.year}-{now.month:02d}-01"
-    due_this_month = await db.compliance_masters.count_documents({
-        **scope_filter, "due_date": {"$gte": month_start, "$lte": month_end},
-    })
-
-    return {
-        "total_compliance_types": total_types,
-        "total_assignments":      total_asgn,
-        "completed_or_filed":     done,
-        "pending":                pending,
-        "overall_pct":            round(done / total_asgn * 100, 1) if total_asgn else 0.0,
-        "overdue":                overdue,
-        "due_this_month":         due_this_month,
-        "by_category":            {r["_id"]: r["count"] for r in by_cat},
-        "allowed_categories":     allowed_cats,   # frontend uses this to hide tabs
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # INDEXES  (call once at startup, idempotent)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1046,74 +1118,3 @@ async def update_monthly_status(
 
     doc = await db.compliance_assignments.find_one({"id": assignment_id}, {"_id": 0})
     return doc
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CALENDAR → TRACKER SYNC
-# ─────────────────────────────────────────────────────────────────────────────
-
-@router.post("/sync-from-calendar")
-async def sync_from_calendar(
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Sync due_dates collection → compliance_masters.
-    Creates a compliance master for any due_date that doesn't already have one.
-    Called automatically after creating/updating a due date.
-    """
-    due_dates = await db.due_dates.find({}, {"_id": 0}).to_list(5000)
-    created = 0
-    updated = 0
-
-    CATEGORY_MAP = {
-        "GST": "GST", "ROC": "ROC", "MCA": "ROC", "ITR": "ITR",
-        "TDS": "TDS", "AUDIT": "AUDIT", "PF": "PF_ESIC", "ESIC": "PF_ESIC",
-        "PT": "PT", "INCOME TAX": "ITR",
-    }
-
-    for dd in due_dates:
-        title     = dd.get("title", "").strip()
-        due_date  = dd.get("due_date")
-        if isinstance(due_date, datetime):
-            due_date = due_date.strftime("%Y-%m-%d")
-        elif isinstance(due_date, str) and "T" in due_date:
-            due_date = due_date[:10]
-
-        category = dd.get("category", "OTHER").upper()
-        category = CATEGORY_MAP.get(category, "OTHER")
-
-        # Check if a compliance master already linked to this due_date entry
-        existing = await db.compliance_masters.find_one(
-            {"calendar_due_date_id": dd["id"]}, {"_id": 0}
-        )
-
-        if existing:
-            # Update due_date if changed
-            if existing.get("due_date") != due_date:
-                await db.compliance_masters.update_one(
-                    {"id": existing["id"]},
-                    {"$set": {"due_date": due_date, "updated_at": _now()}}
-                )
-                updated += 1
-        else:
-            # Create new compliance master
-            doc = {
-                "id":                      str(uuid.uuid4()),
-                "name":                    title,
-                "category":                category if category in CATEGORIES else "OTHER",
-                "frequency":               "one_time",
-                "fy_year":                 None,
-                "period_label":            None,
-                "due_date":                due_date,
-                "description":             dd.get("description", ""),
-                "applicable_entity_types": [],
-                "calendar_due_date_id":    dd["id"],
-                "created_by":              current_user.id,
-                "created_by_name":         getattr(current_user, "full_name", ""),
-                "created_at":              _now(),
-                "updated_at":              _now(),
-            }
-            await db.compliance_masters.insert_one({**doc, "_id": doc["id"]})
-            created += 1
-
-    return {"synced": True, "created": created, "updated": updated}
