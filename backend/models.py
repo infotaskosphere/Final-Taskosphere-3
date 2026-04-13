@@ -170,7 +170,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_passwords": True,       # DEFAULT_MODULE (Permission-based)
           "can_edit_passwords": True,       # DEFAULT_MODULE (Permission-based)
           "view_password_departments": [],
-          "can_view_compliance": True,      # Compliance Tracker — dept-scoped view (own dept only)
+          "can_view_compliance": False,     # ADMIN_GRANTED_ONLY — Compliance Tracker not shown to staff by default
           "can_manage_compliance": False,   # ADMIN_GRANTED_ONLY — staff can only update assignments
           "can_view_all_visits": False,     # SCOPE: own visits only
           "can_edit_visits": True,          # DEFAULT_MODULE (own visits)
