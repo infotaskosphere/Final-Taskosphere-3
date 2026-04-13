@@ -246,13 +246,14 @@ async def _find_visit_by_any_id(visit_id: str) -> Optional[dict]:
     return None
 
 
-def _can_read_visit(current_user: User, visit_owner_id: str) -> bool:
+def _can_read_visit(current_user: User, visit_owner_id: str, team_ids: list = None) -> bool:
     """
-    SIMPLIFIED PERMISSION MODEL (v6):
+    PERMISSION MODEL:
     - Own visit: always readable
     - Admin: always readable
-    - can_view_all_visits perm: readable
-    - view_other_visits list: readable for listed UIDs
+    - Manager: own + same-department team (team_ids) + can_view_all_visits
+    - Staff: own + view_other_visits list + can_view_all_visits
+    team_ids: pre-fetched department team IDs (caller must provide for manager scope)
     """
     if not visit_owner_id:
         return current_user.role == "admin"
@@ -263,6 +264,10 @@ def _can_read_visit(current_user: User, visit_owner_id: str) -> bool:
     perms = _get_perms(current_user)
     if perms.get("can_view_all_visits"):
         return True
+    # Manager: allow same-department team members' visits
+    if current_user.role == "manager" and team_ids:
+        if str(visit_owner_id) in [str(t) for t in team_ids]:
+            return True
     allowed = perms.get("view_other_visits") or []
     return str(visit_owner_id) in [str(x) for x in allowed]
 
@@ -579,12 +584,34 @@ async def list_visits(
         if user_id:
             query["assigned_to"] = user_id
 
+    elif current_user.role == "manager":
+        # SCOPE: OWN + SAME-DEPARTMENT TEAM (Own + Team)
+        # Manager sees own visits + all staff in the same department(s)
+        # can_view_all_visits=True overrides to see all (admin-granted escalation)
+        perms   = _get_perms(current_user)
+        allowed = [str(x) for x in (perms.get("view_other_visits") or []) if x is not None]
+
+        if perms.get("can_view_all_visits"):
+            # Admin-granted: see all visits in the system
+            if user_id:
+                query["assigned_to"] = user_id
+        else:
+            # Default manager scope: own + same-department team + explicit cross-vis list
+            team_ids = await get_team_user_ids(current_user.id)
+            visible  = list(set([str(current_user.id)] + team_ids + allowed))
+            if user_id:
+                if user_id not in visible:
+                    raise HTTPException(403, "Not authorised to view this user's visits")
+                query["assigned_to"] = user_id
+            else:
+                query["assigned_to"] = {"$in": visible}
+
     else:
-        # SCOPE: OWN + CROSS-VISIBILITY only (same for Manager and Staff)
-        # "Team" = users explicitly listed in view_other_visits (cross-visibility), NOT all department members
+        # STAFF SCOPE: OWN + explicit cross-vis list only
         perms   = _get_perms(current_user)
         allowed = [str(x) for x in (perms.get("view_other_visits") or []) if x is not None]
         if perms.get("can_view_all_visits"):
+            # Admin-granted universal access for this staff member
             if user_id:
                 query["assigned_to"] = user_id
         elif user_id:
@@ -642,7 +669,9 @@ async def visit_summary(
     current_user: User = Depends(get_current_user),
 ):
     target_uid = user_id or str(current_user.id)
-    if not _can_read_visit(current_user, target_uid):
+    # For manager scope, pre-fetch team IDs so _can_read_visit can validate team members
+    team_ids = await get_team_user_ids(current_user.id) if current_user.role == "manager" else []
+    if not _can_read_visit(current_user, target_uid, team_ids):
         raise HTTPException(403, "Not authorised")
 
     now   = datetime.now(IST)
@@ -945,7 +974,8 @@ async def add_comment(
     visit = await _find_visit_by_any_id(visit_id)
     if not visit:
         raise HTTPException(404, f"Visit not found: id={visit_id}")
-    if not _can_read_visit(current_user, visit.get("assigned_to", "")):
+    team_ids = await get_team_user_ids(current_user.id) if current_user.role == "manager" else []
+    if not _can_read_visit(current_user, visit.get("assigned_to", ""), team_ids):
         raise HTTPException(403, "Not authorised")
 
     comment = {
@@ -1004,7 +1034,8 @@ async def get_visit(
     visit = await _find_visit_by_any_id(visit_id)
     if not visit:
         raise HTTPException(404, f"Visit not found: id={visit_id}")
-    if not _can_read_visit(current_user, visit.get("assigned_to", "")):
+    team_ids = await get_team_user_ids(current_user.id) if current_user.role == "manager" else []
+    if not _can_read_visit(current_user, visit.get("assigned_to", ""), team_ids):
         raise HTTPException(403, "Not authorised")
 
     visit = (await _enrich_visits([visit]))[0]
