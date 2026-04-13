@@ -752,26 +752,12 @@ export default function DueDates() {
 
       <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
 
-        <div className="flex justify-end">
-          <button
-            onClick={() => setShowLayoutCustomizer(true)}
-            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all active:scale-95"
-            style={{
-              background:  isDark ? 'rgba(31,111,178,0.15)' : 'rgba(31,111,178,0.07)',
-              borderColor: isDark ? 'rgba(31,111,178,0.4)'  : 'rgba(31,111,178,0.22)',
-              color:       isDark ? '#60a5fa'                : '#1F6FB2',
-            }}
-          >
-            <Settings2 size={13} />
-            Customize Layout
-          </button>
-        </div>
-
         {ddOrder.map((sectionId) => {
 
           /* ── BANNER ─────────────────────────────────────────────────── */
           if (sectionId === 'banner') return (
-            <motion.div key="banner" variants={itemVariants}>
+            <React.Fragment key="banner">
+            <motion.div variants={itemVariants}>
               <div className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
                 style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: `0 8px 32px rgba(13,59,102,0.28)` }}>
                 <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
@@ -893,6 +879,21 @@ export default function DueDates() {
                 </div>
               </div>
             </motion.div>
+            <motion.div variants={itemVariants} className="flex justify-end">
+              <button
+                onClick={() => setShowLayoutCustomizer(true)}
+                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all active:scale-95"
+                style={{
+                  background:  isDark ? 'rgba(31,111,178,0.15)' : 'rgba(31,111,178,0.07)',
+                  borderColor: isDark ? 'rgba(31,111,178,0.4)'  : 'rgba(31,111,178,0.22)',
+                  color:       isDark ? '#60a5fa'                : '#1F6FB2',
+                }}
+              >
+                <Settings2 size={13} />
+                Customize Layout
+              </button>
+            </motion.div>
+            </React.Fragment>
           );
 
           /* ── METRICS ─────────────────────────────────────────────────── */
