@@ -118,7 +118,7 @@ scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Kolkata"))
 _last_reminder_date_cache: Optional[str] = None
 
 # ====================== APP ======================
-app = FastAPI(title="Taskosphere Backend")
+app = FastAPI(title="Taskosphere Backend", redirect_slashes=False)
 
 # === CRITICAL: CORS MUST BE THE VERY FIRST MIDDLEWARE ===
 # Registered BEFORE startup_event and all other middleware.
