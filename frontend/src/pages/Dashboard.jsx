@@ -57,6 +57,8 @@ import {
   BellRing,
 } from 'lucide-react';
 
+const API_BASE = api.defaults.baseURL;
+
 const IST_TIMEZONE = 'Asia/Kolkata';
 
 const COLORS = {
