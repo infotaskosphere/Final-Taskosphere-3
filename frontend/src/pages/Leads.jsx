@@ -950,7 +950,7 @@ export default function LeadsPage() {
 
   const fetchLeads = async () => {
     try {
-      const r = await api.get('/leads/');
+      const r = await api.get('/leads');
       setLeads(r.data);
     } catch {
       toast.error('Failed to fetch leads');
@@ -1062,7 +1062,7 @@ export default function LeadsPage() {
         await api.patch(`/leads/${editingLead.id}`, payload);
         toast.success('Lead updated!');
       } else {
-        await api.post('/leads/', payload);
+        await api.post('/leads', payload);
         try { localStorage.removeItem(LEADS_DRAFT_KEY); } catch {}
         toast.success('Lead created!');
       }
