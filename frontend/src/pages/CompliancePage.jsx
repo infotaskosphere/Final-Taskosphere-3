@@ -207,7 +207,89 @@ function CalendarPicker({value,onChange,isDark,onClose}){
   );
 }
 
+
 // ── Add/Edit Compliance Modal ──────────────────────────────────────────────
+// Smart due-date logic: selecting a period (month / quarter / half) auto-
+// computes and previews the exact filing dates so nothing is ever forgotten.
+
+// Quarter → [first month index (0-based), last month index, filing month index]
+const QUARTER_MAP = {
+  Q1:{ label:'Q1', sub:'Apr – Jun',  months:[3,4,5],  filingMonth:6,  filingLabel:'July'   },
+  Q2:{ label:'Q2', sub:'Jul – Sep',  months:[6,7,8],  filingMonth:9,  filingLabel:'October'},
+  Q3:{ label:'Q3', sub:'Oct – Dec',  months:[9,10,11], filingMonth:0, filingLabel:'January',filingYearOffset:1},
+  Q4:{ label:'Q4', sub:'Jan – Mar',  months:[0,1,2],  filingMonth:3,  filingLabel:'April'  },
+};
+const HALF_MAP = {
+  H1:{ label:'H1 — First Half',  sub:'Apr – Sep', filingMonth:9,  filingLabel:'Oct 31',  defaultDay:'31' },
+  H2:{ label:'H2 — Second Half', sub:'Oct – Mar', filingMonth:3,  filingLabel:'Apr 30',  defaultDay:'30', filingYearOffset:1 },
+};
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTH_PILLS = Array.from({length:12},(_,i)=>({key:String(i+1).padStart(2,'0'),label:MONTH_NAMES[i],monthIdx:i}));
+
+// Smart default recurring day per frequency/category
+function defaultDayFor(frequency, category){
+  if(frequency==='monthly'){
+    if(category==='GST')   return '20'; // GSTR-3B
+    if(category==='TDS')   return '7';
+    if(category==='PF_ESIC') return '15';
+    if(category==='PT')    return '15';
+    return '20';
+  }
+  if(frequency==='quarterly') return '13';
+  if(frequency==='half_yearly') return '30';
+  return '1';
+}
+
+// Compute preview dates for the current selection
+function computeDueDates(frequency, applicablePeriods, recurDay, recurMonth, fyYear){
+  const day = recurDay === 'last' ? null : parseInt(recurDay, 10);
+  const results = [];
+
+  if(frequency === 'monthly'){
+    const yr = fyYear ? parseInt(fyYear.split('-')[0], 10) : new Date().getFullYear();
+    applicablePeriods.forEach(key => {
+      const mIdx = parseInt(key, 10) - 1; // 0-based month
+      const year = (mIdx < 3) ? yr + 1 : yr; // Indian FY: Apr=start, Jan-Mar = next year
+      const daysInMonth = new Date(year, mIdx + 1, 0).getDate();
+      const d = day ? Math.min(day, daysInMonth) : daysInMonth;
+      const dt = new Date(year, mIdx, d);
+      results.push({ label: `${MONTH_NAMES[mIdx]} ${year}`, date: dt.toISOString().slice(0,10) });
+    });
+    results.sort((a,b)=>a.date.localeCompare(b.date));
+  }
+
+  if(frequency === 'quarterly'){
+    const yr = fyYear ? parseInt(fyYear.split('-')[0], 10) : new Date().getFullYear();
+    const qMonth = parseInt(recurMonth, 10); // 1=first, 2=second, 3=third, 4=after quarter
+    applicablePeriods.forEach(key => {
+      const q = QUARTER_MAP[key]; if(!q) return;
+      let mIdx;
+      if(qMonth === 4)      mIdx = q.filingMonth;
+      else                   mIdx = q.months[qMonth - 1];
+      const yOffset = (q.filingYearOffset && qMonth >= 3) ? 1 : 0;
+      const year = (mIdx < 3 && (key === 'Q3' || key === 'Q4')) ? yr + 1 : yr + yOffset;
+      const daysInMonth = new Date(year, mIdx + 1, 0).getDate();
+      const d = day ? Math.min(day, daysInMonth) : daysInMonth;
+      const dt = new Date(year, mIdx, d);
+      results.push({ label: key, date: dt.toISOString().slice(0,10) });
+    });
+  }
+
+  if(frequency === 'half_yearly'){
+    const yr = fyYear ? parseInt(fyYear.split('-')[0], 10) : new Date().getFullYear();
+    applicablePeriods.forEach(key => {
+      const h = HALF_MAP[key]; if(!h) return;
+      const mIdx = h.filingMonth;
+      const year = h.filingYearOffset ? yr + 1 : yr;
+      const d2 = parseInt(h.defaultDay, 10);
+      const dt = new Date(year, mIdx, d2);
+      results.push({ label: `${key} — Due ${h.filingLabel} ${year}`, date: dt.toISOString().slice(0,10) });
+    });
+  }
+
+  return results;
+}
+
 function ComplianceFormModal({existing,onClose,onSave,isDark}){
   const[name,setName]=useState(existing?.name||'');
   const[category,setCategory]=useState(existing?.category||'ROC');
@@ -216,45 +298,76 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
   const[period,setPeriod]=useState(existing?.period_label||'');
   const[dueType,setDueType]=useState(existing?.recurring_due?'recurring':'specific');
   const[dueDate,setDueDate]=useState(existing?.due_date||'');
-  const[recurDay,setRecurDay]=useState(existing?.recurring_day||'11');
-  const[recurMonth,setRecurMonth]=useState(existing?.recurring_quarter_month||'3');
+  const[recurDay,setRecurDay]=useState(existing?.recurring_day||'20');
+  const[recurMonth,setRecurMonth]=useState(existing?.recurring_quarter_month||'4');
   const[desc,setDesc]=useState(existing?.description||'');
   const[saving,setSaving]=useState(false);
   const[templates,setTemplates]=useState([]);
   const[calendarOpen,setCalendarOpen]=useState(false);
-  // Applicable periods — which months/quarters/halves this compliance covers
-  const[applicablePeriods,setApplicablePeriods]=useState(()=>{
-    if(existing?.applicable_periods)return existing.applicable_periods;
-    return[];
-  });
+  const[applicablePeriods,setApplicablePeriods]=useState(()=>existing?.applicable_periods||[]);
   const calendarRef=useRef(null);
 
   const isRecurring=['monthly','quarterly','half_yearly'].includes(frequency);
-  useEffect(()=>{api.get('/compliance/common-templates').then(r=>setTemplates(r.data||[])).catch(()=>{});},[]);
-  useEffect(()=>{if(isRecurring)setDueType('recurring');else setDueType('specific');},[frequency]);
-  useEffect(()=>{setApplicablePeriods([]);},[frequency]);
 
-  // Close calendar on outside click
+  // When frequency changes, reset periods and set smart defaults
   useEffect(()=>{
-    if(!calendarOpen)return;
+    setApplicablePeriods([]);
+    setRecurDay(defaultDayFor(frequency, category));
+    if(isRecurring) setDueType('recurring'); else setDueType('specific');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[frequency]);
+
+  // When category changes while monthly, update smart default day
+  useEffect(()=>{
+    if(frequency==='monthly') setRecurDay(defaultDayFor(frequency, category));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[category]);
+
+  useEffect(()=>{
+    api.get('/compliance/common-templates').then(r=>setTemplates(r.data||[])).catch(()=>{});
+  },[]);
+
+  useEffect(()=>{
+    if(!calendarOpen) return;
     const fn=(e)=>{if(calendarRef.current&&!calendarRef.current.contains(e.target))setCalendarOpen(false);};
     document.addEventListener('mousedown',fn);
     return()=>document.removeEventListener('mousedown',fn);
   },[calendarOpen]);
 
+  // Auto-generate period label from selections
+  useEffect(()=>{
+    if(applicablePeriods.length===0){setPeriod('');return;}
+    if(frequency==='monthly'){
+      const names=applicablePeriods.map(k=>MONTH_NAMES[parseInt(k,10)-1]);
+      setPeriod(names.join(', ')+(fyYear?` FY${fyYear.slice(2)}`:''));
+    } else if(frequency==='quarterly'){
+      setPeriod(applicablePeriods.join(', ')+(fyYear?` FY${fyYear.slice(2)}`:''));
+    } else if(frequency==='half_yearly'){
+      setPeriod(applicablePeriods.join(' & ')+(fyYear?` FY${fyYear.slice(2)}`:''));
+    }
+  },[applicablePeriods, frequency, fyYear]);
+
   const inputStyle={backgroundColor:isDark?D.raised:'#fff',borderColor:isDark?D.border:'#d1d5db',color:isDark?D.text:'#1e293b'};
   const inputCls='w-full px-3.5 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all';
 
+  const previewDates = useMemo(()=>
+    computeDueDates(frequency, applicablePeriods, recurDay, recurMonth, fyYear),
+    [frequency, applicablePeriods, recurDay, recurMonth, fyYear]
+  );
+
   const recurringLabel=()=>{
     const day=recurDay==='last'?'Last day':`${recurDay}`;
-    if(frequency==='monthly')return`Due on day ${day} of every month`;
-    if(frequency==='quarterly'){const mo=QUARTER_MONTHS.find(m=>m.value===recurMonth)?.label||'';return`Due on day ${day} · ${mo}`;}
-    if(frequency==='half_yearly')return`Due on day ${day} of every 6th month`;
-    return'';
+    if(frequency==='monthly') return `Due on day ${day} of every selected month`;
+    if(frequency==='quarterly'){
+      const mo=QUARTER_MONTHS.find(m=>m.value===recurMonth)?.label||'';
+      return `Due on day ${day} · ${mo}`;
+    }
+    if(frequency==='half_yearly') return `Auto-computed from half selection`;
+    return '';
   };
 
   const fmtDisplayDate=(d)=>{
-    if(!d)return'Select due date…';
+    if(!d) return 'Select due date…';
     try{const dt=new Date(d);return dt.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});}
     catch{return d;}
   };
@@ -263,26 +376,13 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
     setApplicablePeriods(prev=>prev.includes(key)?prev.filter(k=>k!==key):[...prev,key]);
   };
 
-  // Period options per frequency
-  const MONTH_PILLS=[
-    {key:'01',label:'Jan'},{key:'02',label:'Feb'},{key:'03',label:'Mar'},
-    {key:'04',label:'Apr'},{key:'05',label:'May'},{key:'06',label:'Jun'},
-    {key:'07',label:'Jul'},{key:'08',label:'Aug'},{key:'09',label:'Sep'},
-    {key:'10',label:'Oct'},{key:'11',label:'Nov'},{key:'12',label:'Dec'},
-  ];
-  const QUARTER_PILLS=[
-    {key:'Q1',label:'Q1',sub:'Jan – Mar'},
-    {key:'Q2',label:'Q2',sub:'Apr – Jun'},
-    {key:'Q3',label:'Q3',sub:'Jul – Sep'},
-    {key:'Q4',label:'Q4',sub:'Oct – Dec'},
-  ];
-  const HALF_PILLS=[
-    {key:'H1',label:'H1 — First Half',sub:'Apr – Sep'},
-    {key:'H2',label:'H2 — Second Half',sub:'Oct – Mar'},
-  ];
+  const QUARTER_PILLS=Object.entries(QUARTER_MAP).map(([k,v])=>({key:k,...v}));
+  const HALF_PILLS=Object.entries(HALF_MAP).map(([k,v])=>({key:k,...v}));
 
   const handleSave=async()=>{
     if(!name.trim()){toast.error('Name is required');return;}
+    // For monthly: if periods selected and recurring, use first computed date as due_date
+    const firstComputed = previewDates.length > 0 ? previewDates[0].date : undefined;
     setSaving(true);
     try{
       const payload={
@@ -293,9 +393,12 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
         applicable_periods:applicablePeriods.length>0?applicablePeriods:undefined,
         ...(dueType==='specific'&&dueDate?{due_date:dueDate}:{}),
         ...(dueType==='recurring'?{
-          recurring_due:true,recurring_day:recurDay,
+          recurring_due:true,
+          recurring_day:recurDay,
           recurring_quarter_month:frequency==='quarterly'?recurMonth:undefined,
           period_label:period||recurringLabel(),
+          // Store first computed date as the canonical next due_date
+          ...(firstComputed&&!dueDate?{due_date:firstComputed}:{}),
         }:{}),
       };
       if(existing?.id){await api.patch(`/compliance/${existing.id}`,payload);toast.success('Updated');}
@@ -304,6 +407,10 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
     }catch(err){toast.error(err?.response?.data?.detail||'Save failed');}
     finally{setSaving(false);}
   };
+
+  const pillBase='py-2 rounded-xl text-xs font-bold border transition-all hover:opacity-90 active:scale-95 cursor-pointer select-none';
+  const pillOn={backgroundColor:'#1F6FB2',borderColor:'#1F6FB2',color:'#fff',boxShadow:'0 2px 8px rgba(31,111,178,0.4)'};
+  const pillOff={backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#374151'};
 
   return(
     <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
@@ -314,23 +421,33 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
         initial={{scale:0.92,y:24}} animate={{scale:1,y:0}} exit={{scale:0.92,y:24}}
         transition={{type:'spring',stiffness:220,damping:22}} onClick={e=>e.stopPropagation()}>
 
+        {/* Header */}
         <div className="px-6 py-5 flex items-center justify-between text-white flex-shrink-0"
           style={{background:'linear-gradient(135deg,#0D3B66,#1F6FB2)'}}>
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><BookOpen className="w-5 h-5 text-white"/></div>
-            <div><h2 className="text-lg font-black">{existing?'Edit Compliance':'New Compliance'}</h2>
-              <p className="text-blue-200 text-xs">Define compliance type and due schedule</p></div>
+            <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+              <BookOpen className="w-5 h-5 text-white"/>
+            </div>
+            <div>
+              <h2 className="text-lg font-black">{existing?'Edit Compliance':'New Compliance'}</h2>
+              <p className="text-blue-200 text-xs">Define compliance type and filing schedule</p>
+            </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center"><X className="w-4 h-4 text-white"/></button>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
+            <X className="w-4 h-4 text-white"/>
+          </button>
         </div>
 
-        <div className="overflow-y-auto flex-1 p-6 space-y-4" style={{scrollbarWidth:'thin'}}>
+        <div className="overflow-y-auto flex-1 p-6 space-y-5" style={{scrollbarWidth:'thin'}}>
+
+          {/* Quick Templates */}
           {!existing&&templates.length>0&&(
             <div>
               <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{color:isDark?D.muted:'#64748b'}}>Quick Templates</p>
               <div className="flex flex-wrap gap-1.5">
                 {templates.slice(0,14).map(t=>(
-                  <button key={t.name} onClick={()=>{setName(t.name);setCategory(t.category);setFrequency(t.frequency);}}
+                  <button key={t.name}
+                    onClick={()=>{setName(t.name);setCategory(t.category);setFrequency(t.frequency);}}
                     className="text-[11px] px-2 py-1 rounded-lg border font-semibold transition-all hover:opacity-80 active:scale-95"
                     style={{backgroundColor:CATEGORY_CFG[t.category]?.bg,borderColor:CATEGORY_CFG[t.category]?.border,color:CATEGORY_CFG[t.category]?.color}}>
                     {t.name}
@@ -340,11 +457,15 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
             </div>
           )}
 
+          {/* Name */}
           <div>
             <label className="text-sm font-semibold mb-1.5 block" style={{color:isDark?D.muted:'#374151'}}>Compliance Name *</label>
-            <input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. AOC-4 Filing FY 2025-26" className={inputCls} style={inputStyle}/>
+            <input value={name} onChange={e=>setName(e.target.value)}
+              placeholder="e.g. GSTR-3B, AOC-4 Filing, MSME Form 1"
+              className={inputCls} style={inputStyle}/>
           </div>
 
+          {/* Category + Frequency */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-sm font-semibold mb-1.5 block" style={{color:isDark?D.muted:'#374151'}}>Category</label>
@@ -360,6 +481,7 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
             </div>
           </div>
 
+          {/* FY Year + Period Label */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-sm font-semibold mb-1.5 block" style={{color:isDark?D.muted:'#374151'}}>FY Year</label>
@@ -370,197 +492,239 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
             </div>
             <div>
               <label className="text-sm font-semibold mb-1.5 block" style={{color:isDark?D.muted:'#374151'}}>Period Label</label>
-              <input value={period} onChange={e=>setPeriod(e.target.value)} placeholder="e.g. Q1 FY25-26, Apr 2025" className={inputCls} style={inputStyle}/>
+              <input value={period} onChange={e=>setPeriod(e.target.value)}
+                placeholder="Auto-filled from selection"
+                className={inputCls} style={inputStyle}/>
             </div>
           </div>
 
-          {/* ── Smart Due Date section ────────────────────────────── */}
-          <div className="rounded-2xl border overflow-visible" style={{borderColor:isDark?D.border:'#e2e8f0'}}>
-            <div className="px-4 py-2.5 flex items-center justify-between rounded-t-2xl" style={{backgroundColor:isDark?D.raised:'#f8fafc'}}>
+          {/* ── SCHEDULE SECTION ─────────────────────────────────────────── */}
+          <div className="rounded-2xl border overflow-hidden" style={{borderColor:isDark?D.border:'#e2e8f0'}}>
+            <div className="px-4 py-3 flex items-center justify-between"
+              style={{backgroundColor:isDark?D.raised:'#f0f7ff',borderBottom:`1px solid ${isDark?D.border:'#dbeafe'}`}}>
               <div className="flex items-center gap-2">
-                <Calendar className="w-3.5 h-3.5" style={{color:isDark?D.dimmer:'#94a3b8'}}/>
-                <span className="text-xs font-bold uppercase tracking-wider" style={{color:isDark?D.muted:'#64748b'}}>Due Date</span>
+                <Calendar className="w-4 h-4 text-blue-500"/>
+                <span className="text-sm font-black" style={{color:isDark?D.text:'#1e293b'}}>Filing Schedule</span>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-600">
+                  {frequency==='monthly'?'Monthly'
+                  :frequency==='quarterly'?'Quarterly'
+                  :frequency==='half_yearly'?'Half-Yearly'
+                  :frequency==='annual'?'Annual':'One-Time'}
+                </span>
               </div>
               {isRecurring&&(
-                <div className="flex items-center gap-1 rounded-lg overflow-hidden border text-xs font-semibold" style={{borderColor:isDark?D.border:'#e2e8f0'}}>
+                <div className="flex items-center gap-1 rounded-lg overflow-hidden border text-xs font-semibold"
+                  style={{borderColor:isDark?D.border:'#e2e8f0'}}>
                   {[['specific','One-time'],['recurring','Recurring']].map(([v,l])=>(
                     <button key={v} onClick={()=>setDueType(v)} className="px-2.5 py-1 transition-all"
-                      style={{backgroundColor:dueType===v?'#1F6FB2':'transparent',color:dueType===v?'#fff':isDark?D.dimmer:'#64748b'}}>{l}</button>
+                      style={{backgroundColor:dueType===v?'#1F6FB2':'transparent',
+                              color:dueType===v?'#fff':isDark?D.dimmer:'#64748b'}}>{l}</button>
                   ))}
                 </div>
               )}
             </div>
-            <div className="p-4 space-y-3">
-              {dueType==='specific'?(
-                /* ── Calendar Picker ── */
-                <div className="relative" ref={calendarRef}>
-                  <button
-                    onClick={()=>setCalendarOpen(o=>!o)}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 border rounded-xl text-sm font-semibold transition-all hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    style={{
-                      backgroundColor:isDark?D.raised:'#fff',
-                      borderColor:calendarOpen?'#1F6FB2':(isDark?D.border:'#d1d5db'),
-                      color:dueDate?(isDark?D.text:'#0f172a'):(isDark?D.dimmer:'#94a3b8'),
-                    }}>
-                    <Calendar className="w-4 h-4 flex-shrink-0" style={{color:dueDate?'#1F6FB2':(isDark?D.dimmer:'#94a3b8')}}/>
-                    <span className="flex-1 text-left">{fmtDisplayDate(dueDate)}</span>
-                    <ChevronDown className="w-4 h-4 flex-shrink-0 opacity-50" style={{transform:calendarOpen?'rotate(180deg)':'none',transition:'transform 0.2s'}}/>
-                  </button>
-                  <AnimatePresence>
-                    {calendarOpen&&(
-                      <motion.div className="absolute left-0 top-full mt-1.5 z-[10000]"
-                        initial={{opacity:0,y:-8,scale:0.97}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:-8,scale:0.97}}
-                        transition={{duration:0.15,ease:'easeOut'}}>
-                        <CalendarPicker value={dueDate} onChange={setDueDate} isDark={isDark} onClose={()=>setCalendarOpen(false)}/>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              ):(
+
+            <div className="p-4 space-y-4">
+
+              {/* ── MONTHLY ── */}
+              {frequency==='monthly'&&dueType==='recurring'&&(
                 <>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <div className="flex items-center gap-2"><Repeat className="w-3.5 h-3.5 text-blue-500"/>
-                      <span className="text-xs font-semibold" style={{color:isDark?D.muted:'#374151'}}>Due on day</span></div>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider mb-2.5" style={{color:isDark?D.muted:'#64748b'}}>
+                      Applicable Months <span className="normal-case font-normal">(tap to select · blank = all months)</span>
+                    </p>
+                    <div className="grid grid-cols-4 gap-2">
+                      {MONTH_PILLS.map(m=>{
+                        const sel=applicablePeriods.includes(m.key);
+                        return(
+                          <button key={m.key} onClick={()=>togglePeriod(m.key)}
+                            className={pillBase} style={sel?pillOn:pillOff}>{m.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <Repeat className="w-3.5 h-3.5 text-blue-500"/>
+                      <span className="text-xs font-semibold" style={{color:isDark?D.muted:'#374151'}}>Due on day</span>
+                    </div>
                     <select value={recurDay} onChange={e=>setRecurDay(e.target.value)}
                       className="px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" style={inputStyle}>
                       {RECURRING_DAYS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
                     </select>
-                    <span className="text-xs" style={{color:isDark?D.dimmer:'#94a3b8'}}>of every</span>
-                    {frequency==='monthly'&&<span className="text-xs font-bold text-blue-500">month</span>}
-                    {frequency==='half_yearly'&&<span className="text-xs font-bold text-blue-500">6th month</span>}
+                    <span className="text-xs font-bold text-blue-500">of every selected month</span>
                   </div>
-                  {frequency==='quarterly'&&(
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold" style={{color:isDark?D.muted:'#374151'}}>Quarter month:</span>
+                </>
+              )}
+
+              {/* ── QUARTERLY ── */}
+              {frequency==='quarterly'&&dueType==='recurring'&&(
+                <>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider mb-2.5" style={{color:isDark?D.muted:'#64748b'}}>
+                      Applicable Quarters <span className="normal-case font-normal">(tap to select · blank = all quarters)</span>
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {QUARTER_PILLS.map(q=>{
+                        const sel=applicablePeriods.includes(q.key);
+                        return(
+                          <button key={q.key} onClick={()=>togglePeriod(q.key)}
+                            className="py-3 px-3 rounded-xl border transition-all hover:opacity-90 active:scale-95 text-left"
+                            style={sel?{...pillOn,padding:'12px'}:{...pillOff,padding:'12px'}}>
+                            <p className="text-xs font-black" style={{color:sel?'#fff':isDark?D.text:'#0f172a'}}>{q.label}</p>
+                            <p className="text-[10px] mt-0.5" style={{color:sel?'rgba(255,255,255,0.75)':isDark?D.dimmer:'#94a3b8'}}>{q.sub}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-semibold mb-1.5 block" style={{color:isDark?D.muted:'#374151'}}>Filing falls in</label>
                       <select value={recurMonth} onChange={e=>setRecurMonth(e.target.value)}
-                        className="flex-1 px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" style={inputStyle}>
+                        className="w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" style={inputStyle}>
                         {QUARTER_MONTHS.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}
                       </select>
                     </div>
-                  )}
-                  {recurringLabel()&&(
-                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{backgroundColor:isDark?'rgba(59,130,246,0.1)':'#eff6ff'}}>
-                      <Info className="w-3.5 h-3.5 text-blue-500 flex-shrink-0"/>
-                      <p className="text-xs font-semibold text-blue-600 dark:text-blue-400">{recurringLabel()}</p>
+                    <div>
+                      <label className="text-xs font-semibold mb-1.5 block" style={{color:isDark?D.muted:'#374151'}}>Due on day</label>
+                      <select value={recurDay} onChange={e=>setRecurDay(e.target.value)}
+                        className="w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" style={inputStyle}>
+                        {RECURRING_DAYS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
+                      </select>
                     </div>
-                  )}
+                  </div>
                 </>
               )}
+
+              {/* ── HALF-YEARLY ── */}
+              {frequency==='half_yearly'&&dueType==='recurring'&&(
+                <>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider mb-2.5" style={{color:isDark?D.muted:'#64748b'}}>
+                      Applicable Halves <span className="normal-case font-normal">(e.g. MSME Form 1)</span>
+                    </p>
+                    <div className="grid grid-cols-1 gap-2">
+                      {HALF_PILLS.map(h=>{
+                        const sel=applicablePeriods.includes(h.key);
+                        return(
+                          <button key={h.key} onClick={()=>togglePeriod(h.key)}
+                            className="py-3 px-4 rounded-xl border transition-all hover:opacity-90 active:scale-95 flex items-center justify-between"
+                            style={sel?pillOn:pillOff}>
+                            <div>
+                              <p className="text-sm font-black text-left" style={{color:sel?'#fff':isDark?D.text:'#0f172a'}}>{h.label}</p>
+                              <p className="text-[11px] mt-0.5 text-left" style={{color:sel?'rgba(255,255,255,0.75)':isDark?D.dimmer:'#94a3b8'}}>
+                                {h.sub} · Due {h.filingLabel}
+                              </p>
+                            </div>
+                            {sel&&<CheckCircle2 className="w-5 h-5 text-white opacity-90 flex-shrink-0"/>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[11px] mt-2" style={{color:isDark?D.dimmer:'#94a3b8'}}>
+                      Due dates follow MCA standard: H1 → Oct 31, H2 → Apr 30
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {/* ── ONE-TIME SPECIFIC DATE (all frequencies) ── */}
+              {(dueType==='specific'||frequency==='annual'||frequency==='one_time')&&(
+                <div>
+                  {(frequency==='annual'||frequency==='one_time')&&(
+                    <p className="text-xs font-bold uppercase tracking-wider mb-2.5" style={{color:isDark?D.muted:'#64748b'}}>
+                      {frequency==='annual'?'Annual Filing Due Date':'One-Time Due Date'}
+                    </p>
+                  )}
+                  <div className="relative" ref={calendarRef}>
+                    <button
+                      onClick={()=>setCalendarOpen(o=>!o)}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 border rounded-xl text-sm font-semibold transition-all hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{
+                        backgroundColor:isDark?D.raised:'#fff',
+                        borderColor:calendarOpen?'#1F6FB2':(isDark?D.border:'#d1d5db'),
+                        color:dueDate?(isDark?D.text:'#0f172a'):(isDark?D.dimmer:'#94a3b8'),
+                      }}>
+                      <Calendar className="w-4 h-4 flex-shrink-0" style={{color:dueDate?'#1F6FB2':(isDark?D.dimmer:'#94a3b8')}}/>
+                      <span className="flex-1 text-left">{fmtDisplayDate(dueDate)}</span>
+                      <ChevronDown className="w-4 h-4 flex-shrink-0 opacity-50"
+                        style={{transform:calendarOpen?'rotate(180deg)':'none',transition:'transform 0.2s'}}/>
+                    </button>
+                    <AnimatePresence>
+                      {calendarOpen&&(
+                        <motion.div className="absolute left-0 top-full mt-1.5 z-[10000]"
+                          initial={{opacity:0,y:-8,scale:0.97}} animate={{opacity:1,y:0,scale:1}}
+                          exit={{opacity:0,y:-8,scale:0.97}} transition={{duration:0.15,ease:'easeOut'}}>
+                          <CalendarPicker value={dueDate} onChange={setDueDate} isDark={isDark} onClose={()=>setCalendarOpen(false)}/>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </div>
+              )}
+
+              {/* ── COMPUTED DATES PREVIEW ── */}
+              {previewDates.length>0&&(
+                <div className="rounded-xl p-3 space-y-2" style={{backgroundColor:isDark?'rgba(59,130,246,0.08)':'#eff6ff',border:'1px solid rgba(59,130,246,0.2)'}}>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-blue-500"/>
+                    <p className="text-xs font-bold text-blue-600">Computed Filing Dates</p>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {previewDates.map((pd,i)=>(
+                      <span key={i} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg"
+                        style={{backgroundColor:isDark?'rgba(31,111,178,0.2)':'rgba(31,111,178,0.1)',color:'#1F6FB2'}}>
+                        {pd.label} · {new Date(pd.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-[10px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>
+                    First date will be saved as the next due date
+                  </p>
+                </div>
+              )}
+
+              {/* Clear periods */}
+              {applicablePeriods.length>0&&(
+                <button onClick={()=>setApplicablePeriods([])}
+                  className="text-[11px] font-bold hover:opacity-70 transition-opacity flex items-center gap-1"
+                  style={{color:isDark?D.dimmer:'#94a3b8'}}>
+                  <X className="w-3 h-3"/>Clear selection
+                </button>
+              )}
+
             </div>
           </div>
 
-          {/* ── Compliance Applicable Period (Monthly / Quarterly / Half-Yearly) ── */}
-          {isRecurring&&(
-            <div className="rounded-2xl border overflow-hidden" style={{borderColor:isDark?D.border:'#e2e8f0'}}>
-              <div className="px-4 py-2.5 flex items-center gap-2" style={{backgroundColor:isDark?D.raised:'#f8fafc'}}>
-                <Target className="w-3.5 h-3.5" style={{color:isDark?D.dimmer:'#94a3b8'}}/>
-                <span className="text-xs font-bold uppercase tracking-wider" style={{color:isDark?D.muted:'#64748b'}}>
-                  Compliance Applicable For
-                </span>
-                {applicablePeriods.length>0&&(
-                  <span className="ml-auto text-[10px] font-black px-2 py-0.5 rounded-full"
-                    style={{backgroundColor:'rgba(31,111,178,0.12)',color:'#1F6FB2'}}>
-                    {applicablePeriods.length} selected
-                  </span>
-                )}
-              </div>
-              <div className="p-4 space-y-3">
-                <p className="text-xs" style={{color:isDark?D.dimmer:'#94a3b8'}}>
-                  {frequency==='monthly'&&'Select the months this compliance is applicable for (leave blank = all months)'}
-                  {frequency==='quarterly'&&'Select the quarters this compliance is applicable for (leave blank = all quarters)'}
-                  {frequency==='half_yearly'&&'Select which half of the year this compliance applies to'}
-                </p>
-                {/* Monthly: 12 month pills in 3 rows of 4 */}
-                {frequency==='monthly'&&(
-                  <div className="grid grid-cols-4 gap-2">
-                    {MONTH_PILLS.map(m=>{
-                      const sel=applicablePeriods.includes(m.key);
-                      return(
-                        <button key={m.key} onClick={()=>togglePeriod(m.key)}
-                          className="py-2 rounded-xl text-xs font-bold border transition-all hover:opacity-90 active:scale-95"
-                          style={{
-                            backgroundColor:sel?'#1F6FB2':(isDark?D.raised:'#f8fafc'),
-                            borderColor:sel?'#1F6FB2':(isDark?D.border:'#e2e8f0'),
-                            color:sel?'#fff':(isDark?D.muted:'#374151'),
-                            boxShadow:sel?'0 2px 6px rgba(31,111,178,0.35)':'none',
-                          }}>
-                          {m.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-                {/* Quarterly: 4 quarter pills */}
-                {frequency==='quarterly'&&(
-                  <div className="grid grid-cols-2 gap-2">
-                    {QUARTER_PILLS.map(q=>{
-                      const sel=applicablePeriods.includes(q.key);
-                      return(
-                        <button key={q.key} onClick={()=>togglePeriod(q.key)}
-                          className="py-3 px-3 rounded-xl border transition-all hover:opacity-90 active:scale-95 text-left"
-                          style={{
-                            backgroundColor:sel?'#1F6FB2':(isDark?D.raised:'#f8fafc'),
-                            borderColor:sel?'#1F6FB2':(isDark?D.border:'#e2e8f0'),
-                            boxShadow:sel?'0 2px 6px rgba(31,111,178,0.35)':'none',
-                          }}>
-                          <p className="text-xs font-black" style={{color:sel?'#fff':(isDark?D.text:'#0f172a')}}>{q.label}</p>
-                          <p className="text-[10px] mt-0.5" style={{color:sel?'rgba(255,255,255,0.75)':(isDark?D.dimmer:'#94a3b8')}}>{q.sub}</p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-                {/* Half-Yearly: 2 half pills */}
-                {frequency==='half_yearly'&&(
-                  <div className="grid grid-cols-1 gap-2">
-                    {HALF_PILLS.map(h=>{
-                      const sel=applicablePeriods.includes(h.key);
-                      return(
-                        <button key={h.key} onClick={()=>togglePeriod(h.key)}
-                          className="py-3 px-4 rounded-xl border transition-all hover:opacity-90 active:scale-95 flex items-center justify-between"
-                          style={{
-                            backgroundColor:sel?'#1F6FB2':(isDark?D.raised:'#f8fafc'),
-                            borderColor:sel?'#1F6FB2':(isDark?D.border:'#e2e8f0'),
-                            boxShadow:sel?'0 2px 6px rgba(31,111,178,0.35)':'none',
-                          }}>
-                          <div>
-                            <p className="text-sm font-black text-left" style={{color:sel?'#fff':(isDark?D.text:'#0f172a')}}>{h.label}</p>
-                            <p className="text-[11px] mt-0.5" style={{color:sel?'rgba(255,255,255,0.75)':(isDark?D.dimmer:'#94a3b8')}}>{h.sub}</p>
-                          </div>
-                          {sel&&<CheckCircle2 className="w-5 h-5 text-white opacity-90 flex-shrink-0"/>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-                {applicablePeriods.length>0&&(
-                  <button onClick={()=>setApplicablePeriods([])}
-                    className="text-[11px] font-bold hover:opacity-70 transition-opacity" style={{color:isDark?D.dimmer:'#94a3b8'}}>
-                    Clear selection
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
+          {/* Description */}
           <div>
             <label className="text-sm font-semibold mb-1.5 block" style={{color:isDark?D.muted:'#374151'}}>Description (optional)</label>
-            <textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={2} placeholder="Notes about this compliance type…"
+            <textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={2}
+              placeholder="Notes about this compliance type…"
               className={`${inputCls} resize-none`} style={inputStyle}/>
           </div>
+
         </div>
 
+        {/* Footer */}
         <div className="px-6 py-4 flex justify-end gap-2 border-t flex-shrink-0"
           style={{borderColor:isDark?D.border:'#e2e8f0',backgroundColor:isDark?D.raised:'#f8fafc'}}>
-          <Button variant="ghost" onClick={onClose} className="font-semibold rounded-xl" style={{color:isDark?D.muted:undefined}}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving||!name.trim()} className="font-semibold text-white rounded-xl px-5" style={{backgroundColor:'#1F6FB2'}}>
-            {saving?<><Loader2 className="w-4 h-4 mr-1.5 animate-spin"/>Saving…</>:<><CheckCircle2 className="w-4 h-4 mr-1.5"/>{existing?'Save Changes':'Create'}</>}
+          <Button variant="ghost" onClick={onClose} className="font-semibold rounded-xl"
+            style={{color:isDark?D.muted:undefined}}>Cancel</Button>
+          <Button onClick={handleSave} disabled={saving||!name.trim()}
+            className="font-semibold text-white rounded-xl px-5" style={{backgroundColor:'#1F6FB2'}}>
+            {saving
+              ?<><Loader2 className="w-4 h-4 mr-1.5 animate-spin"/>Saving…</>
+              :<><CheckCircle2 className="w-4 h-4 mr-1.5"/>{existing?'Save Changes':'Create'}</>}
           </Button>
         </div>
       </motion.div>
     </motion.div>
   );
 }
+
 
 // ── Import Excel Modal ─────────────────────────────────────────────────────
 function ImportExcelModal({complianceId,complianceName,onClose,onImported,isDark,allUsers=[],compliance}){
@@ -1841,7 +2005,7 @@ export default function CompliancePage(){
       if(catFilter!=='all')params.set('category',catFilter);
       if(fyFilter!=='all')params.set('fy_year',fyFilter);
       const[listRes,dashRes,usersRes]=await Promise.all([
-        api.get(`/compliance?${params}`),
+        api.get(`/compliance/?${params}`),
         api.get('/compliance/dashboard/summary'),
         api.get('/users').catch(()=>({data:[]})),
       ]);
