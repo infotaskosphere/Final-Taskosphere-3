@@ -457,7 +457,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
 const ModernClientCard = React.memo(({
   onSendBirthdayWish, client, index, isDark, users,
   getClientAssignments, openWhatsApp, handleEdit,
-  canDeleteData, onDelete, setSelectedClient, setDetailDialogOpen, getClientNumber,
+  canDeleteData, canEditClients, onDelete, setSelectedClient, setDetailDialogOpen, getClientNumber,
 }) => {
   const cfg            = TYPE_CONFIG[client.client_type] || TYPE_CONFIG.proprietor;
   const avatarGrad     = getAvatarGradient(client.company_name);
@@ -504,13 +504,14 @@ const ModernClientCard = React.memo(({
       color: '#16a34a',
       hoverBg: isDark ? 'rgba(34,197,94,0.1)' : '#f0fdf4',
     },
-    {
+    // Edit button — only shown when user has can_edit_clients permission
+    ...(canEditClients ? [{
       onClick: e => { e.stopPropagation(); handleEdit(client); },
       icon: <Edit style={{ width: 12, height: 12 }} />,
       label: 'Edit',
       color: '#2563eb',
       hoverBg: isDark ? 'rgba(59,130,246,0.1)' : '#eff6ff',
-    },
+    }] : []),
     {
       onClick: e => { e.stopPropagation(); onSendBirthdayWish(client.id, client.company_name); },
       icon: <span style={{ fontSize: 11 }}>🎂</span>,
@@ -742,7 +743,7 @@ const ModernClientCard = React.memo(({
 const GST_TREATMENT_LABELS = { regular: 'Regular Taxpayer', composition: 'Composition Scheme', unregistered: 'Unregistered', consumer: 'Consumer (B2C)', overseas: 'Overseas / SEZ' };
 const INV_STATUS_COLORS = { paid: { bg: '#f0fdf4', text: '#166534', border: '#bbf7d0' }, sent: { bg: '#eff6ff', text: '#1e40af', border: '#bfdbfe' }, draft: { bg: '#f8fafc', text: '#475569', border: '#e2e8f0' }, overdue: { bg: '#fef2f2', text: '#dc2626', border: '#fecaca' }, partially_paid: { bg: '#fefce8', text: '#92400e', border: '#fde68a' }, cancelled: { bg: '#fafafa', text: '#9ca3af', border: '#e5e7eb' } };
 
-const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDetailDialogOpen, isDark, users, getClientAssignments, openWhatsApp, handleEdit }) => {
+const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDetailDialogOpen, isDark, users, getClientAssignments, openWhatsApp, handleEdit, canEditClients }) => {
   const [activeTab, setActiveTab] = React.useState('details');
   const [clientInvoices, setClientInvoices] = React.useState([]);
   const [invoicesLoading, setInvoicesLoading] = React.useState(false);
@@ -1162,9 +1163,11 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
             <Button onClick={() => { setDetailDialogOpen(false); openWhatsApp(selectedClient.phone, selectedClient.company_name); }} className="h-10 px-4 text-sm rounded-xl text-white gap-2" style={{ background: '#25D366' }}>
               <MessageCircle className="h-4 w-4" /> WhatsApp
             </Button>
-            <Button onClick={() => { setDetailDialogOpen(false); handleEdit(selectedClient); }} className="h-10 px-4 text-sm rounded-xl text-white gap-2" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
-              <Edit className="h-4 w-4" /> Edit
-            </Button>
+            {canEditClients && (
+              <Button onClick={() => { setDetailDialogOpen(false); handleEdit(selectedClient); }} className="h-10 px-4 text-sm rounded-xl text-white gap-2" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                <Edit className="h-4 w-4" /> Edit
+              </Button>
+            )}
           </div>
         </div>
 
@@ -1207,9 +1210,13 @@ const PaginationBar = React.memo(({ safePg, totalPgs, pageStart, pageSize, total
 export default function Clients() {
   const { user, hasPermission } = useAuth();
   const isDark = useDark();
+  const isAdmin           = user?.role === 'admin';
   const canViewAllClients = hasPermission("can_view_all_clients");
   const canDeleteData     = hasPermission("can_delete_data");
   const canAssignClients  = hasPermission("can_assign_clients");
+  // can_edit_clients: true by default for Manager & Staff — gates Create/Edit actions
+  // Admin always can edit; others need the flag OR to own the specific client (backend enforces)
+  const canEditClients    = isAdmin || hasPermission("can_edit_clients");
   const navigate = useNavigate();
   const location = useLocation();
   const handleSendBirthdayWish = async (clientId, clientName) => {
@@ -1844,13 +1851,13 @@ export default function Clients() {
           </div>
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
             <button onClick={e => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors"><MessageCircle className="h-3.5 w-3.5" /></button>
-            <button onClick={e => { e.stopPropagation(); handleEdit(client); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"><Edit className="h-3.5 w-3.5" /></button>
+            {canEditClients && <button onClick={e => { e.stopPropagation(); handleEdit(client); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"><Edit className="h-3.5 w-3.5" /></button>}
             {canDeleteData && <button onClick={e => { e.stopPropagation(); handleDelete(client); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>}
           </div>
         </div>
       </div>
     );
-  }, [isDark, users, getClientAssignments, getClientNumber, openWhatsApp, handleEdit, canDeleteData, handleDelete]);
+  }, [isDark, users, getClientAssignments, getClientNumber, openWhatsApp, handleEdit, canEditClients, canDeleteData, handleDelete]);
 
   // ── Pagination derived values ──────────────────────────────────────────────
   const boardTotalPages = Math.ceil(sortedClients.length / BOARD_PAGE_SIZE);
@@ -1881,11 +1888,13 @@ export default function Clients() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={downloadTemplate} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm"><FileText className="h-4 w-4" /> CSV Template</Button>
-            <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importLoading} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl backdrop-blur-sm">{importLoading ? 'Importing…' : 'Import CSV'}</Button>
+            {canEditClients && <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importLoading} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl backdrop-blur-sm">{importLoading ? 'Importing…' : 'Import CSV'}</Button>}
             <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
+              {canEditClients && (
               <DialogTrigger asChild>
                 <Button onClick={openAddDialog} className="h-9 px-5 text-sm rounded-xl bg-white text-slate-800 hover:bg-blue-50 shadow-sm gap-2 font-semibold border-0"><Plus className="h-4 w-4" /> New Client</Button>
               </DialogTrigger>
+              )}
               <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto bg-white rounded-2xl border border-slate-200 shadow-2xl p-0">
                 <div className={`sticky top-0 z-10 border-b px-8 py-5 flex items-center justify-between ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
                   <div>
@@ -2357,6 +2366,7 @@ export default function Clients() {
                   openWhatsApp={openWhatsApp}
                   handleEdit={handleEdit}
                   canDeleteData={canDeleteData}
+                  canEditClients={canEditClients}
                   onDelete={handleDelete}
                   setSelectedClient={setSelectedClient}
                   setDetailDialogOpen={setDetailDialogOpen}
@@ -2404,7 +2414,8 @@ export default function Clients() {
       <ClientDetailPopup
         selectedClient={selectedClient} detailDialogOpen={detailDialogOpen}
         setDetailDialogOpen={setDetailDialogOpen} isDark={isDark} users={users}
-        getClientAssignments={getClientAssignments} openWhatsApp={openWhatsApp} handleEdit={handleEdit}
+        getClientAssignments={getClientAssignments} openWhatsApp={openWhatsApp}
+        handleEdit={handleEdit} canEditClients={canEditClients}
       />
 
       {/* BULK MSG */}
