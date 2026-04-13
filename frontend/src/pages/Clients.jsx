@@ -2188,8 +2188,8 @@ export default function Clients() {
         </div>
       )}
 
-      {/* BIRTHDAY REMINDERS */}
-      {canViewAllClients && todayReminders.length > 0 && (
+      {/* BIRTHDAY REMINDERS — shown for all roles; only clients visible to the user appear */}
+      {todayReminders.length > 0 && (
         <div className="flex items-center gap-5 border border-pink-200 rounded-2xl p-5 shadow-sm" style={{ background: 'linear-gradient(135deg, #fff0f6, #fff5f0)' }}>
           <div className={`w-11 h-11 rounded-xl shadow-sm text-pink-500 flex items-center justify-center flex-shrink-0 ${isDark ? 'bg-slate-700' : 'bg-white'}`}><Cake className="h-5 w-5" /></div>
           <div className="flex-1">
@@ -2208,9 +2208,9 @@ export default function Clients() {
         </div>
       )}
 
-      {/* STATS */}
-      {canViewAllClients && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* STATS — shown for all roles; values reflect only clients visible to this user.
+           Admin → all clients. Manager/Staff → assigned/scoped clients only. */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: 'Total Clients',  value: stats.totalClients,  icon: <Users className="h-5 w-5" />,    iconBg: 'rgba(13,59,102,0.1)',   iconColor: '#0D3B66', bar: '#1F6FB2' },
             { label: 'Active',         value: stats.activeClients, icon: <Briefcase className="h-5 w-5" />, iconBg: 'rgba(31,175,90,0.1)',   iconColor: '#1FAF5A', bar: '#059669' },
@@ -2225,7 +2225,6 @@ export default function Clients() {
             </div>
           ))}
         </div>
-      )}
 
       {/* FILTERS + SORT + VIEW TOGGLE */}
       <div className={`rounded-2xl border shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
