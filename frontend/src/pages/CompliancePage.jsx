@@ -15,8 +15,10 @@ import {
   FileUp, Zap, Target, Calendar, BookOpen, FolderOpen,
   ArrowLeft, StickyNote, ShieldCheck, AlertTriangle,
   Info, Repeat, LayoutGrid, List, MessageSquare, Send,
-  BarChart3, ChevronLeft, TrendingUp,
+  BarChart3, ChevronLeft, TrendingUp, Settings2,
 } from 'lucide-react';
+import LayoutCustomizer from '@/components/layout/LayoutCustomizer';
+import { usePageLayout } from '@/hooks/usePageLayout';
 
 const D = {
   bg:'#0f172a',card:'#1e293b',raised:'#263348',border:'#334155',
@@ -1996,11 +1998,16 @@ function ComplianceCard({item,onClick,onEdit,onDelete,isDark,viewMode='board'}){
 }
 
 // ── Main Page ──────────────────────────────────────────────────────────────
+const COMPLIANCE_SECTIONS = ['banner', 'stats', 'filters', 'content'];
+const COMPLIANCE_LABELS   = { banner: 'Header Banner', stats: 'Stats Cards', filters: 'Filters & Search', content: 'Compliance Grid' };
+
 export default function CompliancePage(){
   const isDark=useDark();
   const{user,hasPermission}=useAuth();
   const isAdmin = user?.role === 'admin';
   const canManage = isAdmin || hasPermission('can_manage_compliance');
+  const { order: cpOrder, moveSection: cpMove, resetOrder: cpReset } = usePageLayout('compliance', COMPLIANCE_SECTIONS);
+  const [showLayoutCustomizer, setShowLayoutCustomizer] = useState(false);
   // Categories this user is allowed to see (null = all, for admin)
   const [allowedCategories, setAllowedCategories] = useState(null); // populated from dashboard response
 
@@ -2076,178 +2083,222 @@ export default function CompliancePage(){
   }
 
   return(
+    <>
+      <LayoutCustomizer
+        isOpen={showLayoutCustomizer}
+        onClose={() => setShowLayoutCustomizer(false)}
+        order={cpOrder}
+        sectionLabels={COMPLIANCE_LABELS}
+        onDragEnd={cpMove}
+        onReset={cpReset}
+        isDark={isDark}
+      />
     <div className="min-h-screen p-3 sm:p-4 md:p-6 lg:p-8" style={{background:isDark?D.bg:'#f8fafc'}}>
       <motion.div className="max-w-[1600px] mx-auto space-y-6" variants={containerVariants} initial="hidden" animate="visible">
 
-        <motion.div variants={itemVariants}>
-          <div className="relative overflow-hidden rounded-2xl px-6 py-5"
-            style={{background:'linear-gradient(135deg,#0D3B66 0%,#1F6FB2 100%)',boxShadow:'0 8px 32px rgba(13,59,102,0.25)'}}>
-            <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10" style={{background:'radial-gradient(circle,white 0%,transparent 70%)'}}/>
-            <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <p className="text-white/60 text-xs font-semibold uppercase tracking-widest mb-1">Compliance Management</p>
-                <h1 className="text-2xl font-bold text-white tracking-tight">Universal Compliance Tracker</h1>
-                <p className="text-white/60 text-sm mt-1">
-                  {isAdmin
-                    ? 'Track ROC, GST, ITR, TDS filings across all clients in real time'
-                    : `Viewing compliance for: ${(user?.departments||[]).join(', ')||'your department'}`
-                  }
-                </p>
-              </div>
-              {/* Only admin and managers with can_manage_compliance see Add button */}
-              {canManage&&(
-                <button onClick={()=>setShowAddModal(true)}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white border border-white/30 hover:bg-white/15 transition-all self-start md:self-auto">
-                  <Plus className="w-4 h-4"/>Add Compliance
-                </button>
-              )}
-            </div>
-          </div>
-        </motion.div>
+        {cpOrder.map((sectionId) => {
 
-        {/* Dept-scope info banner for non-admins */}
-        {!isAdmin&&allowedCategories&&allowedCategories.length>0&&(
-          <motion.div variants={itemVariants}
-            className="flex items-center gap-2.5 px-4 py-3 rounded-xl border text-sm font-medium"
-            style={{backgroundColor:isDark?'rgba(31,111,178,0.12)':'#eff6ff',borderColor:isDark?'rgba(31,111,178,0.3)':'#bfdbfe',color:isDark?'#93c5fd':'#1d4ed8'}}>
-            <ShieldCheck className="w-4 h-4 flex-shrink-0"/>
-            <span>
-              You are viewing compliance items for your department
-              {' '}({allowedCategories.map(c=>CATEGORY_CFG[c]?.label||c).join(', ')}).
-              {!canManage&&' Contact your admin to create or delete compliance types.'}
-            </span>
-          </motion.div>
-        )}
-
-        {dashboard&&(
-          <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              {icon:BookOpen,     label:'Compliance Types',   value:dashboard.total_compliance_types, unit:'defined',color:'#1F6FB2'},
-              {icon:Users,        label:'Client Assignments', value:dashboard.total_assignments,      unit:'total records',color:'#8B5CF6'},
-              {icon:CheckCircle2, label:'Completed / Filed',  value:dashboard.completed_or_filed,     unit:`${dashboard.overall_pct}% done`,color:'#1FAF5A'},
-              {icon:AlertTriangle,label:'Pending',            value:dashboard.pending,unit:`${dashboard.overdue>0?dashboard.overdue+' overdue':'none overdue'}`,color:dashboard.overdue>0?'#EF4444':'#F59E0B'},
-            ].map(({icon:Icon,label,value,unit,color})=>(
-              <div key={label} className="rounded-2xl border p-4 hover:shadow-md transition-all"
-                style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0'}}>
-                <div className="flex items-start justify-between mb-2">
+          /* ── BANNER ── */
+          if (sectionId === 'banner') return (
+            <React.Fragment key="banner">
+            <motion.div variants={itemVariants}>
+              <div className="relative overflow-hidden rounded-2xl px-6 py-5"
+                style={{background:'linear-gradient(135deg,#0D3B66 0%,#1F6FB2 100%)',boxShadow:'0 8px 32px rgba(13,59,102,0.25)'}}>
+                <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10" style={{background:'radial-gradient(circle,white 0%,transparent 70%)'}}/>
+                <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{color:isDark?D.dimmer:'#94a3b8'}}>{label}</p>
-                    <p className="text-2xl font-black" style={{color}}>{value??'—'}</p>
-                    <p className="text-[11px] mt-0.5" style={{color:isDark?D.dimmer:'#94a3b8'}}>{unit}</p>
+                    <p className="text-white/60 text-xs font-semibold uppercase tracking-widest mb-1">Compliance Management</p>
+                    <h1 className="text-2xl font-bold text-white tracking-tight">Compliance Tracker</h1>
+                    <p className="text-white/60 text-sm mt-1">
+                      {isAdmin
+                        ? 'Track ROC, GST, ITR, TDS filings across all clients in real time'
+                        : `Viewing compliance for: ${(user?.departments||[]).join(', ')||'your department'}`
+                      }
+                    </p>
                   </div>
-                  <div className="p-2 rounded-xl" style={{backgroundColor:`${color}15`}}><Icon className="w-4 h-4" style={{color}}/></div>
+                  <div className="flex items-center gap-2 flex-wrap self-start md:self-auto">
+                    {canManage&&(
+                      <button onClick={()=>setShowAddModal(true)}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white border border-white/30 hover:bg-white/15 transition-all">
+                        <Plus className="w-4 h-4"/>Add Compliance
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
-            ))}
-          </motion.div>
-        )}
-
-        <motion.div variants={itemVariants} className="flex items-center gap-3 flex-wrap">
-          <div className="relative flex-1 min-w-[180px] max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{color:isDark?D.dimmer:'#94a3b8'}}/>
-            <input value={searchQ} onChange={e=>setSearchQ(e.target.value)} placeholder="Search compliance…"
-              className="w-full pl-9 pr-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
-          </div>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {/* Show 'All' tab only if user has access to more than one category */}
-            {(visibleCategories.length>1||isAdmin)&&(
-              <button key="all" onClick={()=>setCatFilter('all')}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all"
-                style={{backgroundColor:catFilter==='all'?(isDark?D.raised:'#f1f5f9'):(isDark?D.card:'#fff'),
-                  borderColor:catFilter==='all'?'#1F6FB2':(isDark?D.border:'#e2e8f0'),
-                  color:catFilter==='all'?'#1F6FB2':(isDark?D.muted:'#64748b')}}>
-                All
+            </motion.div>
+            <motion.div variants={itemVariants} className="flex justify-end">
+              <button
+                onClick={() => setShowLayoutCustomizer(true)}
+                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all active:scale-95"
+                style={{
+                  background:  isDark ? 'rgba(31,111,178,0.15)' : 'rgba(31,111,178,0.07)',
+                  borderColor: isDark ? 'rgba(31,111,178,0.4)'  : 'rgba(31,111,178,0.22)',
+                  color:       isDark ? '#60a5fa'                : '#1F6FB2',
+                }}
+              >
+                <Settings2 size={13} /> Customize Layout
               </button>
-            )}
-            {visibleCategories.map(cat=>{
-              const cfg=CATEGORY_CFG[cat];const active=catFilter===cat;
-              return(<button key={cat} onClick={()=>setCatFilter(cat)}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all"
-                style={{backgroundColor:active?(cfg?.bg||(isDark?D.raised:'#f1f5f9')):(isDark?D.card:'#fff'),borderColor:active?(cfg?.color||'#1F6FB2'):(isDark?D.border:'#e2e8f0'),color:active?(cfg?.color||'#1F6FB2'):(isDark?D.muted:'#64748b')}}>
-                {cfg?.label||cat}
-              </button>);
-            })}
-          </div>
-          {fyYears.length>0&&(
-            <select value={fyFilter} onChange={e=>setFyFilter(e.target.value)}
-              className="px-3 py-2 border rounded-xl text-sm focus:outline-none"
-              style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}>
-              <option value="all">All FY</option>
-              {fyYears.map(y=><option key={y} value={y}>FY {y}</option>)}
-            </select>
-          )}
-          <button onClick={()=>setRefreshKey(k=>k+1)} className="p-2 rounded-xl border hover:opacity-80"
-            style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#64748b'}}>
-            <RefreshCw className={`w-4 h-4 ${loading?'animate-spin':''}`}/>
-          </button>
-          {/* View toggle */}
-          <div className="flex items-center border rounded-xl overflow-hidden flex-shrink-0"
-            style={{borderColor:isDark?D.border:'#e2e8f0',backgroundColor:isDark?D.card:'#fff'}}>
-            <button onClick={()=>setViewMode('board')} title="Board View"
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold transition-all"
-              style={{backgroundColor:viewMode==='board'?(isDark?D.raised:'#f1f5f9'):'transparent',
-                color:viewMode==='board'?'#1F6FB2':(isDark?D.dimmer:'#94a3b8')}}>
-              <LayoutGrid className="w-3.5 h-3.5"/><span className="hidden sm:inline">Board</span>
-            </button>
-            <button onClick={()=>setViewMode('list')} title="List View"
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold transition-all"
-              style={{backgroundColor:viewMode==='list'?(isDark?D.raised:'#f1f5f9'):'transparent',
-                color:viewMode==='list'?'#1F6FB2':(isDark?D.dimmer:'#94a3b8')}}>
-              <List className="w-3.5 h-3.5"/><span className="hidden sm:inline">List</span>
-            </button>
-          </div>
-          {filtered.length>0&&<span className="text-xs font-semibold" style={{color:isDark?D.dimmer:'#94a3b8'}}>{filtered.length} types</span>}
-        </motion.div>
+            </motion.div>
+            </React.Fragment>
+          );
 
-        {loading?(
-          <div className="flex items-center justify-center py-20"><Loader2 className="w-7 h-7 text-blue-500 animate-spin"/></div>
-        ):filtered.length===0?(
-          <motion.div variants={itemVariants} className="flex flex-col items-center justify-center py-20 gap-4 rounded-2xl border"
-            style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0'}}>
-            <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{backgroundColor:isDark?D.raised:'#f1f5f9'}}>
-              <ShieldCheck className="w-8 h-8" style={{color:isDark?D.dimmer:'#cbd5e1'}}/>
-            </div>
-            <div className="text-center">
-              <p className="text-lg font-bold" style={{color:isDark?D.text:'#0f172a'}}>{searchQ||catFilter!=='all'?'No matching compliance':'No compliance defined yet'}</p>
-              <p className="text-sm mt-1" style={{color:isDark?D.muted:'#64748b'}}>{searchQ||catFilter!=='all'?'Adjust filters':canManage?'Add a compliance type to start tracking':'No compliance items found for your department'}</p>
-            </div>
-            {!searchQ&&catFilter==='all'&&canManage&&(
-              <button onClick={()=>setShowAddModal(true)} className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white" style={{backgroundColor:'#1F6FB2'}}>
-                <Plus className="w-4 h-4"/>Add First Compliance
+          /* ── STATS ── */
+          if (sectionId === 'stats') return (
+            <React.Fragment key="stats">
+              {/* Dept-scope info banner for non-admins */}
+              {!isAdmin&&allowedCategories&&allowedCategories.length>0&&(
+                <motion.div variants={itemVariants}
+                  className="flex items-center gap-2.5 px-4 py-3 rounded-xl border text-sm font-medium"
+                  style={{backgroundColor:isDark?'rgba(31,111,178,0.12)':'#eff6ff',borderColor:isDark?'rgba(31,111,178,0.3)':'#bfdbfe',color:isDark?'#93c5fd':'#1d4ed8'}}>
+                  <ShieldCheck className="w-4 h-4 flex-shrink-0"/>
+                  <span>
+                    You are viewing compliance items for your department
+                    {' '}({allowedCategories.map(c=>CATEGORY_CFG[c]?.label||c).join(', ')}).
+                    {!canManage&&' Contact your admin to create or delete compliance types.'}
+                  </span>
+                </motion.div>
+              )}
+              {dashboard&&(
+                <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    {icon:BookOpen,     label:'Compliance Types',   value:dashboard.total_compliance_types, unit:'defined',color:'#1F6FB2'},
+                    {icon:Users,        label:'Client Assignments', value:dashboard.total_assignments,      unit:'total records',color:'#8B5CF6'},
+                    {icon:CheckCircle2, label:'Completed / Filed',  value:dashboard.completed_or_filed,     unit:`${dashboard.overall_pct}% done`,color:'#1FAF5A'},
+                    {icon:AlertTriangle,label:'Pending',            value:dashboard.pending,unit:`${dashboard.overdue>0?dashboard.overdue+' overdue':'none overdue'}`,color:dashboard.overdue>0?'#EF4444':'#F59E0B'},
+                  ].map(({icon:Icon,label,value,unit,color})=>(
+                    <div key={label} className="rounded-2xl border p-4 hover:shadow-md transition-all"
+                      style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0'}}>
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{color:isDark?D.dimmer:'#94a3b8'}}>{label}</p>
+                          <p className="text-2xl font-black" style={{color}}>{value??'—'}</p>
+                          <p className="text-[11px] mt-0.5" style={{color:isDark?D.dimmer:'#94a3b8'}}>{unit}</p>
+                        </div>
+                        <div className="p-2 rounded-xl" style={{backgroundColor:`${color}15`}}><Icon className="w-4 h-4" style={{color}}/></div>
+                      </div>
+                    </div>
+                  ))}
+                </motion.div>
+              )}
+            </React.Fragment>
+          );
+
+          /* ── FILTERS ── */
+          if (sectionId === 'filters') return (
+            <motion.div key="filters" variants={itemVariants} className="flex items-center gap-3 flex-wrap">
+              <div className="relative flex-1 min-w-[180px] max-w-xs">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{color:isDark?D.dimmer:'#94a3b8'}}/>
+                <input value={searchQ} onChange={e=>setSearchQ(e.target.value)} placeholder="Search compliance…"
+                  className="w-full pl-9 pr-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {(visibleCategories.length>1||isAdmin)&&(
+                  <button key="all" onClick={()=>setCatFilter('all')}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all"
+                    style={{backgroundColor:catFilter==='all'?(isDark?D.raised:'#f1f5f9'):(isDark?D.card:'#fff'),
+                      borderColor:catFilter==='all'?'#1F6FB2':(isDark?D.border:'#e2e8f0'),
+                      color:catFilter==='all'?'#1F6FB2':(isDark?D.muted:'#64748b')}}>
+                    All
+                  </button>
+                )}
+                {visibleCategories.map(cat=>{
+                  const cfg=CATEGORY_CFG[cat];const active=catFilter===cat;
+                  return(<button key={cat} onClick={()=>setCatFilter(cat)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all"
+                    style={{backgroundColor:active?(cfg?.bg||(isDark?D.raised:'#f1f5f9')):(isDark?D.card:'#fff'),borderColor:active?(cfg?.color||'#1F6FB2'):(isDark?D.border:'#e2e8f0'),color:active?(cfg?.color||'#1F6FB2'):(isDark?D.muted:'#64748b')}}>
+                    {cfg?.label||cat}
+                  </button>);
+                })}
+              </div>
+              {fyYears.length>0&&(
+                <select value={fyFilter} onChange={e=>setFyFilter(e.target.value)}
+                  className="px-3 py-2 border rounded-xl text-sm focus:outline-none"
+                  style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}>
+                  <option value="all">All FY</option>
+                  {fyYears.map(y=><option key={y} value={y}>FY {y}</option>)}
+                </select>
+              )}
+              <button onClick={()=>setRefreshKey(k=>k+1)} className="p-2 rounded-xl border hover:opacity-80"
+                style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#64748b'}}>
+                <RefreshCw className={`w-4 h-4 ${loading?'animate-spin':''}`}/>
               </button>
-            )}
-          </motion.div>
-        ):viewMode==='list'?(
-          <motion.div className="rounded-2xl border overflow-hidden" variants={containerVariants}
-            style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0'}}>
-            {/* List header */}
-            <div className="grid px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b"
-              style={{gridTemplateColumns:'4px 1fr 110px 100px 130px 100px 80px 72px',
-                backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
-              <div/><div>Compliance Name</div><div>FY Year</div><div>Due Date</div>
-              <div>Progress</div><div>% Done</div><div>Clients</div>
-              {canManage&&<div>Actions</div>}
-            </div>
-            {filtered.map(item=>(
-              <ComplianceCard key={item.id} item={item} isDark={isDark} viewMode="list"
-                canManage={canManage}
-                onClick={()=>setDetailItem(item)}
-                onEdit={canManage?(e=>{e&&e.stopPropagation();setEditingItem(item);}):undefined}
-                onDelete={canManage?(e=>{e&&e.stopPropagation();handleDelete(item.id,item.name);}):undefined}/>
-            ))}
-          </motion.div>
-        ):(
-          <motion.div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 items-stretch" variants={containerVariants}>
-            {filtered.map(item=>(
-              <ComplianceCard key={item.id} item={item} isDark={isDark} viewMode="board"
-                canManage={canManage}
-                onClick={()=>setDetailItem(item)}
-                onEdit={canManage?(e=>{e&&e.stopPropagation();setEditingItem(item);}):undefined}
-                onDelete={canManage?(e=>{e&&e.stopPropagation();handleDelete(item.id,item.name);}):undefined}/>
-            ))}
-          </motion.div>
-        )}
+              <div className="flex items-center border rounded-xl overflow-hidden flex-shrink-0"
+                style={{borderColor:isDark?D.border:'#e2e8f0',backgroundColor:isDark?D.card:'#fff'}}>
+                <button onClick={()=>setViewMode('board')} title="Board View"
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold transition-all"
+                  style={{backgroundColor:viewMode==='board'?(isDark?D.raised:'#f1f5f9'):'transparent',
+                    color:viewMode==='board'?'#1F6FB2':(isDark?D.dimmer:'#94a3b8')}}>
+                  <LayoutGrid className="w-3.5 h-3.5"/><span className="hidden sm:inline">Board</span>
+                </button>
+                <button onClick={()=>setViewMode('list')} title="List View"
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold transition-all"
+                  style={{backgroundColor:viewMode==='list'?(isDark?D.raised:'#f1f5f9'):'transparent',
+                    color:viewMode==='list'?'#1F6FB2':(isDark?D.dimmer:'#94a3b8')}}>
+                  <List className="w-3.5 h-3.5"/><span className="hidden sm:inline">List</span>
+                </button>
+              </div>
+              {filtered.length>0&&<span className="text-xs font-semibold" style={{color:isDark?D.dimmer:'#94a3b8'}}>{filtered.length} types</span>}
+            </motion.div>
+          );
+
+          /* ── CONTENT ── */
+          if (sectionId === 'content') return (
+            <React.Fragment key="content">
+              {loading?(
+                <div className="flex items-center justify-center py-20"><Loader2 className="w-7 h-7 text-blue-500 animate-spin"/></div>
+              ):filtered.length===0?(
+                <motion.div variants={itemVariants} className="flex flex-col items-center justify-center py-20 gap-4 rounded-2xl border"
+                  style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0'}}>
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{backgroundColor:isDark?D.raised:'#f1f5f9'}}>
+                    <ShieldCheck className="w-8 h-8" style={{color:isDark?D.dimmer:'#cbd5e1'}}/>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-bold" style={{color:isDark?D.text:'#0f172a'}}>{searchQ||catFilter!=='all'?'No matching compliance':'No compliance defined yet'}</p>
+                    <p className="text-sm mt-1" style={{color:isDark?D.muted:'#64748b'}}>{searchQ||catFilter!=='all'?'Adjust filters':canManage?'Add a compliance type to start tracking':'No compliance items found for your department'}</p>
+                  </div>
+                  {!searchQ&&catFilter==='all'&&canManage&&(
+                    <button onClick={()=>setShowAddModal(true)} className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white" style={{backgroundColor:'#1F6FB2'}}>
+                      <Plus className="w-4 h-4"/>Add First Compliance
+                    </button>
+                  )}
+                </motion.div>
+              ):viewMode==='list'?(
+                <motion.div className="rounded-2xl border overflow-hidden" variants={containerVariants}
+                  style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0'}}>
+                  <div className="grid px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b"
+                    style={{gridTemplateColumns:'4px 1fr 110px 100px 130px 100px 80px 72px',
+                      backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
+                    <div/><div>Compliance Name</div><div>FY Year</div><div>Due Date</div>
+                    <div>Progress</div><div>% Done</div><div>Clients</div>
+                    {canManage&&<div>Actions</div>}
+                  </div>
+                  {filtered.map(item=>(
+                    <ComplianceCard key={item.id} item={item} isDark={isDark} viewMode="list"
+                      canManage={canManage}
+                      onClick={()=>setDetailItem(item)}
+                      onEdit={canManage?(e=>{e&&e.stopPropagation();setEditingItem(item);}):undefined}
+                      onDelete={canManage?(e=>{e&&e.stopPropagation();handleDelete(item.id,item.name);}):undefined}/>
+                  ))}
+                </motion.div>
+              ):(
+                <motion.div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 items-stretch" variants={containerVariants}>
+                  {filtered.map(item=>(
+                    <ComplianceCard key={item.id} item={item} isDark={isDark} viewMode="board"
+                      canManage={canManage}
+                      onClick={()=>setDetailItem(item)}
+                      onEdit={canManage?(e=>{e&&e.stopPropagation();setEditingItem(item);}):undefined}
+                      onDelete={canManage?(e=>{e&&e.stopPropagation();handleDelete(item.id,item.name);}):undefined}/>
+                  ))}
+                </motion.div>
+              )}
+            </React.Fragment>
+          );
+
+          return null;
+        })}
+
       </motion.div>
 
       <AnimatePresence>
@@ -2258,5 +2309,6 @@ export default function CompliancePage(){
         )}
       </AnimatePresence>
     </div>
+    </>
   );
 }
