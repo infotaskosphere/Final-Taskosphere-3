@@ -487,7 +487,7 @@ export default function Reminders() {
           );
 
           // ── BIG CALENDAR VIEW ──────────────────────────────────────────────
-          if (sectionId === 'calendar_view') return (
+          if (sectionId === 'calendar_view') return !showListView ? (
             <motion.div key="calendar_view" variants={itemVariants}>
               <SectionCard>
                 <CardHeaderRow
@@ -592,7 +592,7 @@ export default function Reminders() {
                 </div>
               </SectionCard>
             </motion.div>
-          );
+          ) : null;
 
           if (sectionId === 'reminders_list') return showListView ? (
             <motion.div key="reminders_list" variants={itemVariants}>
@@ -646,16 +646,14 @@ export default function Reminders() {
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      <AnimatePresence>
                         {filteredReminders.map(rem => {
                           const remId = resolveId(rem);
                           const isDue = rem.remind_at && isPast(new Date(rem.remind_at));
                           const gcalUrl = buildGCalURL(rem);
 
                           return (
-                            <motion.div key={remId} variants={itemVariants} layout
-                              whileHover={{ y: -2, transition: springPhysics.lift }}
-                              className={`relative p-4 rounded-xl border transition-all ${
+                            <div key={remId}
+                              className={`relative p-4 rounded-xl border transition-colors ${
                                 isDue
                                   ? isDark ? 'bg-red-900/15 border-red-800 hover:border-red-700' : 'bg-red-50/70 border-red-200 hover:border-red-300'
                                   : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'
@@ -710,10 +708,9 @@ export default function Reminders() {
                                   )}
                                 </div>
                               </div>
-                            </motion.div>
+                            </div>
                           );
                         })}
-                      </AnimatePresence>
                     </div>
                   )}
                 </div>
