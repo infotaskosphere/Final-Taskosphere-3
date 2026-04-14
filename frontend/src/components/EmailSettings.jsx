@@ -1,9 +1,21 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// EmailSettings.jsx  v5  — Dashboard-aligned design (full feature restore)
-// All v4 features retained + redesigned to match Dashboard/Attendance UI
+// EmailSettings.jsx  v6  — Preview-before-save, past-date filtering, dedup
+// Changes from v5:
+//   1. ScanPreviewPanel — shows all extracted events BEFORE any data is written
+//      - Checkbox per event (checked by default if future & not already saved)
+//      - Past-dated events greyed + unchecked + "PAST — SKIPPED" badge
+//      - Already-saved events get "ALREADY SAVED" badge + disabled checkbox
+//      - Override save-type dropdown per event
+//      - "Select All Future / None" bulk controls
+//      - "Save N Selected" button — saves in one batch call
+//   2. Sync base date — each account's Sync button passes last_synced to API
+//      (?since_date=...) so only new emails since last sync are fetched
+//   3. Session-level dedup — savedKeys Set tracks event keys saved this session;
+//      a new scan deduplicates against it before merging into the panel
+//   4. Old EventRow (individual save buttons) removed — replaced by preview panel
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import api from "@/lib/api";
@@ -15,13 +27,14 @@ import {
   RefreshCw, Calendar, Bell, Eraser, Clock, Sparkles,
   Settings2, ToggleLeft, ToggleRight, Zap, AlertTriangle,
   CheckSquare, Filter, Tag, BookOpen, Activity, ChevronRight,
+  Square, Save, CalendarOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, isBefore, startOfDay } from "date-fns";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DESIGN TOKENS  (mirrors Dashboard / Attendance exactly)
+// DESIGN TOKENS
 // ─────────────────────────────────────────────────────────────────────────────
 const COLORS = {
   deepBlue:     "#0D3B66",
@@ -44,7 +57,6 @@ const D = {
   dimmer:  "#64748b",
 };
 
-// ─── ANIMATIONS (identical to Dashboard) ─────────────────────────────────────
 const containerVariants = {
   hidden:  { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
@@ -55,7 +67,6 @@ const itemVariants = {
 };
 const springPhysics = { lift: { type: "spring", stiffness: 320, damping: 24, mass: 0.9 } };
 
-// ─── PROVIDER / CATEGORY CONSTANTS ───────────────────────────────────────────
 const PROVIDER_COLORS = {
   gmail: "#EA4335", outlook: "#0078D4", yahoo: "#720E9E", icloud: "#3B82F6", other: "#374151",
 };
@@ -76,6 +87,27 @@ const CATEGORY_CONFIG = {
     bg: "#F0FDF4", border: "#BBF7D0", darkBg: "rgba(31,175,90,0.12)",
   },
 };
+
+// ─── Date helpers ─────────────────────────────────────────────────────────────
+function isEventPast(event) {
+  if (!event.date) return false;
+  try { return isBefore(startOfDay(parseISO(event.date)), startOfDay(new Date())); }
+  catch { return false; }
+}
+
+// Stable dedup key: prefer event_id from backend, else title+date+time
+function eventKey(event) {
+  return event.id || event.event_id || `${event.title}||${event.date}||${event.time || ""}`;
+}
+
+// Determine category for an event using save_category or event_type fallback
+function resolveCategory(event) {
+  if (event.save_category && ["todo","reminder","visit"].includes(event.save_category)) return event.save_category;
+  const et = event.event_type || "";
+  if (["Visit","Online Meeting","Conference","Interview","Meeting"].includes(et)) return "visit";
+  if (["Trademark Hearing","Court Hearing","Deadline","Appointment"].includes(et)) return "reminder";
+  return "reminder";
+}
 
 const QUICK_PROVIDERS = [
   {
@@ -161,14 +193,11 @@ const SUGGESTED_SENDERS = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SHARED LAYOUT PRIMITIVES  (matches Dashboard exactly)
+// SHARED LAYOUT PRIMITIVES
 // ─────────────────────────────────────────────────────────────────────────────
 function SectionCard({ children, className = "", style = {} }) {
   return (
-    <div
-      className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm ${className}`}
-      style={style}
-    >
+    <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm ${className}`} style={style}>
       {children}
     </div>
   );
@@ -183,9 +212,7 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
           <div className="flex items-center gap-2">
             <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">{title}</h3>
             {badge !== undefined && badge > 0 && (
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500 text-white leading-none">
-                {badge}
-              </span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500 text-white leading-none">{badge}</span>
             )}
           </div>
           {subtitle && <p className="text-xs text-slate-400 dark:text-slate-500">{subtitle}</p>}
@@ -196,9 +223,6 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// STAT CARD  (matches Dashboard metric cards)
-// ─────────────────────────────────────────────────────────────────────────────
 function StatCard({ icon: Icon, label, value, unit, color, trend }) {
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -3, transition: springPhysics.lift }} whileTap={{ scale: 0.985 }}>
@@ -215,9 +239,7 @@ function StatCard({ icon: Icon, label, value, unit, color, trend }) {
             </div>
           </div>
           {trend && (
-            <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500 truncate border-t border-slate-100 dark:border-slate-700 pt-2 mt-1">
-              {trend}
-            </p>
+            <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500 truncate border-t border-slate-100 dark:border-slate-700 pt-2 mt-1">{trend}</p>
           )}
         </div>
       </div>
@@ -225,9 +247,6 @@ function StatCard({ icon: Icon, label, value, unit, color, trend }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AUTO-SAVE STATUS BADGE  (restored from v4)
-// ─────────────────────────────────────────────────────────────────────────────
 function AutoSaveStatusBadge({ prefs, onEdit, isDark }) {
   if (!prefs) return null;
   const isActive = prefs.auto_save_reminders || prefs.auto_save_visits || prefs.auto_save_todos;
@@ -235,16 +254,13 @@ function AutoSaveStatusBadge({ prefs, onEdit, isDark }) {
   if (prefs.auto_save_todos)     activeParts.push("Todos");
   if (prefs.auto_save_reminders) activeParts.push("Reminders");
   if (prefs.auto_save_visits)    activeParts.push("Visits");
-
   return (
-    <button
-      onClick={onEdit}
+    <button onClick={onEdit}
       className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all hover:opacity-80 active:scale-95"
       style={isActive
         ? { backgroundColor: isDark ? "rgba(31,175,90,0.15)" : "#dcfce7", borderColor: isDark ? "#14532d" : "#bbf7d0", color: COLORS.emeraldGreen }
         : { backgroundColor: isDark ? D.raised : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.muted : "#64748b" }
-      }
-    >
+      }>
       <Zap className="w-3 h-3" />
       {isActive ? `Auto-Save ON · ${activeParts.join(", ")}` : "Auto-Save OFF"}
       <Settings2 className="w-3 h-3 ml-0.5 opacity-60" />
@@ -252,16 +268,11 @@ function AutoSaveStatusBadge({ prefs, onEdit, isDark }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GMAIL AUTH-FAIL BANNER  (restored from v4)
-// ─────────────────────────────────────────────────────────────────────────────
 function GmailChecklistBanner({ onDismiss, isDark }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+    <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
       className="rounded-2xl overflow-hidden border"
-      style={{ borderColor: isDark ? "#7f1d1d" : "#fecaca", backgroundColor: isDark ? "rgba(239,68,68,0.08)" : "#fef2f2" }}
-    >
+      style={{ borderColor: isDark ? "#7f1d1d" : "#fecaca", backgroundColor: isDark ? "rgba(239,68,68,0.08)" : "#fef2f2" }}>
       <div className="flex items-center gap-3 px-4 py-3 border-b"
         style={{ borderColor: isDark ? "#7f1d1d" : "#fecaca", backgroundColor: isDark ? "rgba(239,68,68,0.12)" : "#fee2e2" }}>
         <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
@@ -288,28 +299,18 @@ function GmailChecklistBanner({ onDismiss, isDark }) {
             </div>
           </div>
         ))}
-        <div className="mt-2 p-2.5 rounded-xl text-xs font-medium"
-          style={{ backgroundColor: isDark ? D.raised : "#ffffff", border: `1px solid ${isDark ? "#7f1d1d" : "#fecaca"}`, color: isDark ? "#fca5a5" : "#dc2626" }}>
-          After completing all 3 steps, generate a <strong>brand new</strong> App Password and try again.
-        </div>
       </div>
     </motion.div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CATEGORY RULES PANEL  (restored from v4 — collapsible accordion)
-// ─────────────────────────────────────────────────────────────────────────────
 function CategoryRulesPanel({ isDark }) {
   const [open, setOpen] = useState(false);
-
   return (
     <SectionCard>
-      <button
-        onClick={() => setOpen(o => !o)}
+      <button onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between px-4 py-3.5 text-left transition-colors"
-        style={{ backgroundColor: open ? (isDark ? D.raised : "#f8fafc") : "transparent" }}
-      >
+        style={{ backgroundColor: open ? (isDark ? D.raised : "#f8fafc") : "transparent" }}>
         <div className="flex items-center gap-2.5">
           <div className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-900/40">
             <BookOpen className="w-4 h-4 text-purple-500" />
@@ -319,60 +320,30 @@ function CategoryRulesPanel({ isDark }) {
             <p className="text-xs text-slate-400 dark:text-slate-500">How emails are automatically classified</p>
           </div>
         </div>
-        {open
-          ? <ChevronUp className="w-4 h-4 text-slate-400 flex-shrink-0" />
-          : <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />
-        }
+        {open ? <ChevronUp className="w-4 h-4 text-slate-400 flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />}
       </button>
-
       <AnimatePresence>
         {open && (
-          <motion.div
-            initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }}
-            className="overflow-hidden"
-          >
+          <motion.div initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }} className="overflow-hidden">
             <div className="px-4 pb-4 pt-1 space-y-3 border-t border-slate-100 dark:border-slate-700">
               {[
-                {
-                  cat: "todo",
-                  label: "→ Saved as Todo",
-                  desc: "Action required notices",
-                  examples: ["Examination Report", "Office Action", "Objection Raised", "Reply Required", "Show Cause Notice (to respond)", "Reply within X days"],
-                },
-                {
-                  cat: "reminder",
-                  label: "→ Saved as Reminder",
-                  desc: "Scheduled dates and hearings",
-                  examples: ["Trademark Hearing", "Court Hearing (NCLT, HC)", "GST Filing Dates (GSTR-1, 3B)", "Income Tax / Advance Tax", "Due Dates", "ROC Filing Deadlines"],
-                },
-                {
-                  cat: "visit",
-                  label: "→ Saved as Visit",
-                  desc: "Meetings and consultations",
-                  examples: ["Zoom Meeting Invite", "Google Meet Link", "Microsoft Teams", "Client Visit Scheduled", "Office Visit", "Conference / Webinar"],
-                },
+                { cat: "todo",     label: "→ Saved as Todo",     desc: "Action required notices",      examples: ["Examination Report","Office Action","Objection Raised","Reply Required","Show Cause Notice","Reply within X days"] },
+                { cat: "reminder", label: "→ Saved as Reminder", desc: "Scheduled dates and hearings", examples: ["Trademark Hearing","Court Hearing (NCLT, HC)","GST Filing Dates","Income Tax / Advance Tax","Due Dates","ROC Filing Deadlines"] },
+                { cat: "visit",    label: "→ Saved as Visit",    desc: "Meetings and consultations",   examples: ["Zoom Meeting Invite","Google Meet Link","Microsoft Teams","Client Visit Scheduled","Office Visit","Conference / Webinar"] },
               ].map(({ cat, label, desc, examples }) => {
                 const cfg = CATEGORY_CONFIG[cat];
                 return (
-                  <div
-                    key={cat}
-                    className="rounded-xl border p-3.5"
-                    style={{ borderColor: isDark ? `${cfg.color}30` : cfg.border, backgroundColor: isDark ? cfg.darkBg : cfg.bg }}
-                  >
+                  <div key={cat} className="rounded-xl border p-3.5"
+                    style={{ borderColor: isDark ? `${cfg.color}30` : cfg.border, backgroundColor: isDark ? cfg.darkBg : cfg.bg }}>
                     <div className="flex items-center gap-2 mb-2.5">
-                      <span className="text-xs font-black px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: cfg.color }}>
-                        {cfg.label.toUpperCase()}
-                      </span>
+                      <span className="text-xs font-black px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: cfg.color }}>{cfg.label.toUpperCase()}</span>
                       <span className="text-xs font-bold" style={{ color: cfg.color }}>{label}</span>
                       <span className="text-[10px] ml-auto" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>{desc}</span>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       {examples.map(ex => (
-                        <span
-                          key={ex}
-                          className="text-[10px] font-medium px-2 py-0.5 rounded-md border"
-                          style={{ backgroundColor: isDark ? "rgba(255,255,255,0.05)" : "#ffffff", borderColor: isDark ? `${cfg.color}35` : cfg.border, color: cfg.color }}
-                        >
+                        <span key={ex} className="text-[10px] font-medium px-2 py-0.5 rounded-md border"
+                          style={{ backgroundColor: isDark ? "rgba(255,255,255,0.05)" : "#ffffff", borderColor: isDark ? `${cfg.color}35` : cfg.border, color: cfg.color }}>
                           {ex}
                         </span>
                       ))}
@@ -381,7 +352,7 @@ function CategoryRulesPanel({ isDark }) {
                 );
               })}
               <p className="text-[10px] pt-1" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
-                ℹ️ AI uses these rules + context to classify. You can always override the category before clicking Save.
+                ℹ️ AI uses these rules + context to classify. You can override the category in the preview panel before saving.
               </p>
             </div>
           </motion.div>
@@ -391,9 +362,6 @@ function CategoryRulesPanel({ isDark }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AUTO-SAVE DIALOG  (restored from v4, redesigned)
-// ─────────────────────────────────────────────────────────────────────────────
 function AutoSaveDialog({ onSave, onSkip, isDark }) {
   const [autoReminders, setAutoReminders] = useState(true);
   const [autoVisits,    setAutoVisits]    = useState(true);
@@ -413,25 +381,17 @@ function AutoSaveDialog({ onSave, onSkip, isDark }) {
       });
       toast.success("✓ Auto-save enabled! Daily scan scheduled.");
       onSave({ auto_save_reminders: autoReminders, auto_save_visits: autoVisits, auto_save_todos: autoTodos, scan_time_hour: scanHour });
-    } catch {
-      toast.error("Failed to save preferences");
-    } finally {
-      setSaving(false);
-    }
+    } catch { toast.error("Failed to save preferences"); }
+    finally { setSaving(false); }
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
-    >
-      <motion.div
-        initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }}
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4">
+      <motion.div initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }}
         transition={{ type: "spring", stiffness: 220, damping: 22 }}
         className="w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
-        style={{ backgroundColor: isDark ? D.card : "#ffffff", border: isDark ? `1px solid ${D.border}` : "1px solid #e2e8f0" }}
-      >
-        {/* Header */}
+        style={{ backgroundColor: isDark ? D.card : "#ffffff", border: isDark ? `1px solid ${D.border}` : "1px solid #e2e8f0" }}>
         <div className="px-6 py-5 text-white" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
@@ -446,18 +406,14 @@ function AutoSaveDialog({ onSave, onSkip, isDark }) {
             Taskosphere will <strong>automatically</strong> scan your inbox every day and save events to the right place.
           </p>
         </div>
-
         <div className="p-6 space-y-3">
           {[
             { label: "Save Notices as Todos",      desc: "Examination reports, objections → Todo",   icon: CheckSquare, color: COLORS.purple,       val: autoTodos,     set: setAutoTodos },
             { label: "Save Hearings as Reminders", desc: "Trademark hearings, GST dates → Reminder", icon: Bell,        color: COLORS.deepBlue,     val: autoReminders, set: setAutoReminders },
             { label: "Save Meetings as Visits",    desc: "Zoom, Google Meet, client visits → Visit", icon: Calendar,    color: COLORS.emeraldGreen, val: autoVisits,    set: setAutoVisits },
           ].map(item => (
-            <div
-              key={item.label}
-              className="flex items-center justify-between p-4 rounded-2xl border"
-              style={{ backgroundColor: isDark ? `${item.color}15` : `${item.color}08`, borderColor: isDark ? `${item.color}30` : `${item.color}20` }}
-            >
+            <div key={item.label} className="flex items-center justify-between p-4 rounded-2xl border"
+              style={{ backgroundColor: isDark ? `${item.color}15` : `${item.color}08`, borderColor: isDark ? `${item.color}30` : `${item.color}20` }}>
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${item.color}15` }}>
                   <item.icon className="w-4 h-4" style={{ color: item.color }} />
@@ -474,12 +430,8 @@ function AutoSaveDialog({ onSave, onSkip, isDark }) {
               </button>
             </div>
           ))}
-
-          {/* Scan time picker */}
-          <div
-            className="flex items-center gap-3 p-4 rounded-2xl border"
-            style={{ backgroundColor: isDark ? D.raised : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0" }}
-          >
+          <div className="flex items-center gap-3 p-4 rounded-2xl border"
+            style={{ backgroundColor: isDark ? D.raised : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0" }}>
             <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: isDark ? "#ffffff10" : "#f1f5f9" }}>
               <Clock className="w-4 h-4 text-slate-500" />
             </div>
@@ -487,30 +439,20 @@ function AutoSaveDialog({ onSave, onSkip, isDark }) {
               <p className="text-sm font-bold" style={{ color: isDark ? D.text : "#1e293b" }}>Daily Scan Time (IST)</p>
               <p className="text-xs" style={{ color: isDark ? D.muted : "#64748b" }}>Inbox scanned automatically every day</p>
             </div>
-            <select
-              value={scanHour} onChange={e => setScanHour(Number(e.target.value))}
+            <select value={scanHour} onChange={e => setScanHour(Number(e.target.value))}
               className="px-3 py-1.5 text-sm font-semibold rounded-xl border focus:outline-none focus:ring-2 focus:ring-blue-400"
-              style={{ backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.text : "#1e293b" }}
-            >
+              style={{ backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.text : "#1e293b" }}>
               {[6,7,8,9,10,11,12,13,14,15,16,17,18,19,20].map(h => (
-                <option key={h} value={h}>
-                  {h === 12 ? "12:00 PM (Noon)" : h < 12 ? `${h}:00 AM` : `${h-12}:00 PM`}
-                </option>
+                <option key={h} value={h}>{h === 12 ? "12:00 PM (Noon)" : h < 12 ? `${h}:00 AM` : `${h-12}:00 PM`}</option>
               ))}
             </select>
           </div>
-
           <div className="flex gap-3 pt-1">
             <Button variant="ghost" onClick={onSkip} className="flex-1 rounded-xl h-11 text-sm font-semibold"
-              style={{ color: isDark ? D.muted : undefined }}>
-              Not now
-            </Button>
-            <Button onClick={handleSave} disabled={saving}
-              className="flex-1 rounded-xl h-11 text-sm font-bold text-white"
+              style={{ color: isDark ? D.muted : undefined }}>Not now</Button>
+            <Button onClick={handleSave} disabled={saving} className="flex-1 rounded-xl h-11 text-sm font-bold text-white"
               style={{ background: saving ? "#9CA3AF" : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-              {saving
-                ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Saving…</>
-                : <><Sparkles className="w-4 h-4 mr-2" />Enable Auto-Save</>}
+              {saving ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Saving…</> : <><Sparkles className="w-4 h-4 mr-2" />Enable Auto-Save</>}
             </Button>
           </div>
         </div>
@@ -536,11 +478,7 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
 
   useEffect(() => { setTimeout(() => emailRef.current?.focus(), 50); }, []);
 
-  const inputStyle = {
-    backgroundColor: isDark ? D.raised : "#ffffff",
-    borderColor: isDark ? D.border : "#d1d5db",
-    color: isDark ? D.text : "#1e293b",
-  };
+  const inputStyle = { backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#d1d5db", color: isDark ? D.text : "#1e293b" };
   const inputCls = "w-full px-3.5 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all";
 
   const handleConnect = async () => {
@@ -565,15 +503,10 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
 
   return (
     <SectionCard>
-      {/* Header strip */}
-      <div
-        className="px-5 py-4 flex items-center gap-3 border-b border-slate-100 dark:border-slate-700"
-        style={{ backgroundColor: provider.color + (isDark ? "20" : "0d") }}
-      >
+      <div className="px-5 py-4 flex items-center gap-3 border-b border-slate-100 dark:border-slate-700"
+        style={{ backgroundColor: provider.color + (isDark ? "20" : "0d") }}>
         <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-black text-white flex-shrink-0"
-          style={{ backgroundColor: provider.color }}>
-          {provider.icon}
-        </div>
+          style={{ backgroundColor: provider.color }}>{provider.icon}</div>
         <div className="flex-1">
           <p className="font-bold text-sm" style={{ color: isDark ? D.text : "#1e293b" }}>Connect {provider.label}</p>
           <p className="text-xs" style={{ color: isDark ? D.muted : "#64748b" }}>IMAP · App Password · No OAuth needed</p>
@@ -586,47 +519,44 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
           </a>
         )}
       </div>
-
       <div className="p-5 space-y-4">
         <AnimatePresence>
           {authError && provider.id === "gmail" && (
             <GmailChecklistBanner onDismiss={() => setAuthError(false)} isDark={isDark} />
           )}
         </AnimatePresence>
-
-        {/* Steps accordion */}
         {provider.steps.length > 0 && (
           <div className="rounded-xl overflow-hidden border" style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
-            <button
-              onClick={() => setShowSteps(s => !s)}
-              className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold transition-colors"
-              style={{ backgroundColor: isDark ? D.raised : "#f8fafc", color: isDark ? D.muted : "#374151" }}
-            >
-              <span className="flex items-center gap-2"><Info className="w-4 h-4" />How to get your App Password</span>
-              {showSteps ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            <button onClick={() => setShowSteps(s => !s)}
+              className="w-full flex items-center justify-between px-4 py-2.5 text-left text-xs font-semibold transition-colors"
+              style={{ backgroundColor: isDark ? D.raised : "#f8fafc", color: isDark ? D.muted : "#64748b" }}>
+              <span className="flex items-center gap-1.5"><Info className="w-3.5 h-3.5" />Setup instructions for {provider.label}</span>
+              {showSteps ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
             <AnimatePresence>
               {showSteps && (
                 <motion.div initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }} className="overflow-hidden">
-                  <div className="px-4 py-3 space-y-2.5" style={{ backgroundColor: isDark ? D.card : "#ffffff" }}>
+                  <div className="p-4 space-y-2.5 border-t" style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
                     {provider.steps.map(step => (
-                      <div key={step.num} className="flex items-start gap-3">
-                        <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black text-white flex-shrink-0 mt-0.5"
-                          style={{ backgroundColor: provider.color }}>{step.num}</span>
-                        <p className="text-sm" style={{ color: isDark ? D.muted : "#475569" }}>
+                      <div key={step.num} className="flex items-start gap-2.5">
+                        <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 text-white text-[10px] font-black"
+                          style={{ backgroundColor: provider.color }}>{step.num}</div>
+                        <p className="text-xs" style={{ color: isDark ? D.muted : "#374151" }}>
                           {step.text}
                           {step.link && (
-                            <> <a href={step.link} target="_blank" rel="noopener noreferrer"
-                              className="font-semibold underline" style={{ color: provider.color }}>{step.linkText}</a></>
+                            <a href={step.link} target="_blank" rel="noopener noreferrer"
+                              className="ml-1.5 font-semibold underline inline-flex items-center gap-1" style={{ color: provider.color }}>
+                              {step.linkText}<ExternalLink className="w-2.5 h-2.5" />
+                            </a>
                           )}
                         </p>
                       </div>
                     ))}
                     {provider.note && (
-                      <div className="mt-2 p-2.5 rounded-lg border text-xs font-medium"
-                        style={{ backgroundColor: isDark ? "rgba(245,158,11,0.08)" : "#fffbeb", borderColor: isDark ? "#92400e" : "#fde68a", color: isDark ? "#fbbf24" : "#92400e" }}>
+                      <p className="text-[11px] font-semibold mt-1 pt-2 border-t"
+                        style={{ borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? "#fbbf24" : "#92400e" }}>
                         {provider.note}
-                      </div>
+                      </p>
                     )}
                   </div>
                 </motion.div>
@@ -634,71 +564,56 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
             </AnimatePresence>
           </div>
         )}
-
-        {/* Credential inputs */}
         <div className="space-y-3">
           <div>
-            <label className="text-xs font-bold uppercase tracking-wide block mb-1.5" style={{ color: isDark ? D.muted : "#6b7280" }}>Email Address</label>
-            <input ref={emailRef} type="text" inputMode="email" autoComplete="email"
-              value={emailVal} onChange={e => setEmailVal(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleConnect()}
-              placeholder={`you@${provider.domain || "example.com"}`}
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: isDark ? D.muted : "#374151" }}>Email Address</label>
+            <input ref={emailRef} type="email" value={emailVal} onChange={e => setEmailVal(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleConnect()} placeholder={`your@${provider.domain || "email.com"}`}
               className={inputCls} style={inputStyle} />
           </div>
           <div>
-            <label className="text-xs font-bold uppercase tracking-wide block mb-1.5" style={{ color: isDark ? D.muted : "#6b7280" }}>
-              App Password <span className="font-normal normal-case text-slate-400">(NOT your login password)</span>
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: isDark ? D.muted : "#374151" }}>
+              App Password <span className="font-normal text-slate-400">(not your login password)</span>
             </label>
             <div className="relative">
-              <input type={showPass ? "text" : "password"}
-                value={password} onChange={e => setPassword(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && handleConnect()}
-                placeholder={provider.placeholder || "app password"}
-                className={`${inputCls} pr-11 font-mono`} style={inputStyle} />
-              <button onClick={() => setShowPass(s => !s)} type="button"
-                className="absolute right-3 top-1/2 -translate-y-1/2 transition-colors"
+              <input type={showPass ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleConnect()} placeholder={provider.placeholder}
+                className={inputCls + " pr-10"} style={inputStyle} />
+              <button onClick={() => setShowPass(s => !s)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 transition-opacity hover:opacity-70"
                 style={{ color: isDark ? D.muted : "#9ca3af" }}>
                 {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
           </div>
           <div>
-            <label className="text-xs font-bold uppercase tracking-wide block mb-1.5" style={{ color: isDark ? D.muted : "#6b7280" }}>
-              Friendly Name <span className="font-normal normal-case text-slate-400">(optional)</span>
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: isDark ? D.muted : "#374151" }}>
+              Account Label <span className="font-normal text-slate-400">(optional)</span>
             </label>
-            <input type="text" value={label} onChange={e => setLabel(e.target.value)}
-              placeholder="e.g. Trademark Gmail, Personal Yahoo"
+            <input type="text" value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. Work Gmail, CA Office"
               className={inputCls} style={inputStyle} />
           </div>
           {provider.id === "other" && (
-            <div className="grid grid-cols-3 gap-2">
-              <div className="col-span-2">
-                <label className="text-xs font-bold uppercase tracking-wide block mb-1.5" style={{ color: isDark ? D.muted : "#6b7280" }}>IMAP Host</label>
-                <input type="text" value={host} onChange={e => setHost(e.target.value)} placeholder="imap.yourdomain.com"
-                  className={inputCls} style={inputStyle} />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: isDark ? D.muted : "#374151" }}>IMAP Host</label>
+                <input type="text" value={host} onChange={e => setHost(e.target.value)} placeholder="imap.yourdomain.com" className={inputCls} style={inputStyle} />
               </div>
               <div>
-                <label className="text-xs font-bold uppercase tracking-wide block mb-1.5" style={{ color: isDark ? D.muted : "#6b7280" }}>Port</label>
-                <input type="number" value={port} onChange={e => setPort(Number(e.target.value))}
-                  className={inputCls} style={inputStyle} />
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: isDark ? D.muted : "#374151" }}>Port</label>
+                <input type="number" value={port} onChange={e => setPort(e.target.value)} placeholder="993" className={inputCls} style={inputStyle} />
               </div>
             </div>
           )}
         </div>
-
-        <div className="flex gap-2 pt-1">
-          <Button variant="ghost" onClick={onCancel} className="flex-1 rounded-xl h-10 font-semibold text-sm"
-            style={{ color: isDark ? D.muted : undefined }}>Cancel</Button>
-          <Button onClick={handleConnect} disabled={loading}
-            className="flex-1 rounded-xl h-10 text-sm font-bold text-white px-6"
-            style={{ background: loading ? "#9CA3AF" : `linear-gradient(135deg, ${provider.color}, ${provider.color}CC)` }}>
-            {loading
-              ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Testing & Connecting…</>
-              : <><Wifi className="w-4 h-4 mr-2" />Connect Account</>}
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={onCancel} className="flex-1 h-10 rounded-xl text-sm font-semibold"
+            style={{ borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.muted : "#374151", backgroundColor: "transparent" }}>Cancel</Button>
+          <Button onClick={handleConnect} disabled={loading} className="flex-1 h-10 rounded-xl text-sm font-bold text-white"
+            style={{ background: loading ? "#9CA3AF" : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+            {loading ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Connecting…</> : <><Wifi className="w-4 h-4 mr-2" />Connect Account</>}
           </Button>
         </div>
-
-        {/* Security note */}
         <div className="flex items-center gap-2 p-3 rounded-xl border"
           style={{ backgroundColor: isDark ? "rgba(31,175,90,0.08)" : "#f0fdf4", borderColor: isDark ? "#14532d" : "#bbf7d0" }}>
           <Shield className="w-4 h-4 text-emerald-500 flex-shrink-0" />
@@ -725,34 +640,20 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, is
   const hasError = !!conn.sync_error;
 
   const handleSaveLabel = async () => {
-    try {
-      await api.patch(`/email/connections/${encodeURIComponent(conn.email_address)}`, { label: labelVal });
-      toast.success("Label updated"); setEditingLabel(false);
-    } catch { toast.error("Failed to update label"); }
+    try { await api.patch(`/email/connections/${encodeURIComponent(conn.email_address)}`, { label: labelVal }); toast.success("Label updated"); setEditingLabel(false); }
+    catch { toast.error("Failed to update label"); }
   };
-
-  const handleTest = async () => {
-    setTesting(true);
-    try { await onTest(conn.email_address); } finally { setTesting(false); }
-  };
-
-  const handleSync = async () => {
-    setSyncing(true);
-    try { await onSync(conn.email_address); } finally { setSyncing(false); }
-  };
+  const handleTest = async () => { setTesting(true); try { await onTest(conn.email_address); } finally { setTesting(false); } };
+  // Pass last_synced as the base date so only new emails are fetched
+  const handleSync = async () => { setSyncing(true); try { await onSync(conn.email_address, conn.last_synced); } finally { setSyncing(false); } };
 
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -2, transition: springPhysics.lift }}>
       <SectionCard>
-        {/* Top row — identity + status */}
-        <div
-          className="px-4 py-3.5 flex items-center gap-3 border-b border-slate-100 dark:border-slate-700"
-          style={{ backgroundColor: hasError ? (isDark ? "rgba(239,68,68,0.08)" : "#fef2f2") : undefined }}
-        >
+        <div className="px-4 py-3.5 flex items-center gap-3 border-b border-slate-100 dark:border-slate-700"
+          style={{ backgroundColor: hasError ? (isDark ? "rgba(239,68,68,0.08)" : "#fef2f2") : undefined }}>
           <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-black text-white flex-shrink-0"
-            style={{ backgroundColor: conn.is_active ? color : "#9CA3AF" }}>
-            {icon}
-          </div>
+            style={{ backgroundColor: conn.is_active ? color : "#9CA3AF" }}>{icon}</div>
           <div className="flex-1 min-w-0">
             {editingLabel ? (
               <div className="flex items-center gap-2">
@@ -765,11 +666,8 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, is
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <p className="font-semibold text-sm truncate" style={{ color: isDark ? D.text : "#1e293b" }}>
-                  {conn.label || conn.email_address}
-                </p>
-                <button onClick={() => setEditingLabel(true)} className="p-0.5 flex-shrink-0 transition-colors"
-                  style={{ color: isDark ? D.dimmer : "#cbd5e1" }}>
+                <p className="font-semibold text-sm truncate" style={{ color: isDark ? D.text : "#1e293b" }}>{conn.label || conn.email_address}</p>
+                <button onClick={() => setEditingLabel(true)} className="p-0.5 flex-shrink-0 transition-colors" style={{ color: isDark ? D.dimmer : "#cbd5e1" }}>
                   <Edit2 className="w-3 h-3" />
                 </button>
               </div>
@@ -795,37 +693,35 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, is
             )}
           </div>
         </div>
-
-        {/* Error message */}
         {hasError && (
           <div className="mx-4 mt-3 p-3 rounded-xl border text-xs"
             style={{ backgroundColor: isDark ? "rgba(239,68,68,0.08)" : "#fef2f2", borderColor: isDark ? "#7f1d1d" : "#fecaca", color: isDark ? "#fca5a5" : "#dc2626" }}>
             {conn.sync_error}
           </div>
         )}
-
-        {/* Category chips */}
         <div className="px-4 py-2.5 flex items-center gap-2 flex-wrap">
           {[
             { color: COLORS.purple,       border: "#DDD6FE", bg: isDark ? "rgba(139,92,246,0.12)" : "#F5F3FF", icon: CheckSquare, label: "Todos"     },
             { color: COLORS.deepBlue,     border: "#BFDBFE", bg: isDark ? "rgba(13,59,102,0.20)"  : "#EFF6FF", icon: Bell,        label: "Reminders" },
             { color: COLORS.emeraldGreen, border: "#BBF7D0", bg: isDark ? "rgba(31,175,90,0.12)"  : "#F0FDF4", icon: Calendar,    label: "Visits"    },
           ].map(item => (
-            <div key={item.label}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border"
+            <div key={item.label} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border"
               style={{ backgroundColor: item.bg, borderColor: item.border, color: item.color }}>
               <item.icon className="w-3 h-3" /> {item.label}
             </div>
           ))}
+          {conn.last_synced && (
+            <span className="text-[10px] ml-auto font-mono" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+              Sync base: {format(parseISO(conn.last_synced), "dd MMM yy, h:mm a")}
+            </span>
+          )}
         </div>
-
-        {/* Footer actions */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 border-t border-slate-100 dark:border-slate-700"
           style={{ backgroundColor: isDark ? D.raised : "#f8fafc" }}>
           <p className="text-xs truncate" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
             {conn.last_synced
-              ? `Synced ${format(parseISO(conn.last_synced), "MMM d, h:mm a")}`
-              : conn.connected_at ? `Connected ${format(parseISO(conn.connected_at), "MMM d, yyyy")}` : ""}
+              ? `Synced ${format(parseISO(conn.last_synced), "MMM d, h:mm a")} · only new emails since this date are fetched`
+              : conn.connected_at ? `Connected ${format(parseISO(conn.connected_at), "MMM d, yyyy")} · first full scan` : ""}
             {conn.imap_host && <><span className="mx-1.5">·</span><span className="font-medium">{conn.imap_host}</span></>}
           </p>
           <div className="flex items-center gap-1 flex-shrink-0">
@@ -844,8 +740,7 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, is
               style={{ color: isDark ? D.muted : "#64748b" }}>
               {conn.is_active ? "Pause" : "Resume"}
             </button>
-            <button onClick={() => onDisconnect(conn.email_address)}
-              className="p-1.5 rounded-lg transition-all active:scale-95"
+            <button onClick={() => onDisconnect(conn.email_address)} className="p-1.5 rounded-lg transition-all active:scale-90"
               style={{ color: isDark ? D.muted : "#94a3b8" }}
               onMouseEnter={e => { e.currentTarget.style.color = COLORS.red; e.currentTarget.style.backgroundColor = isDark ? "rgba(239,68,68,0.12)" : "#fef2f2"; }}
               onMouseLeave={e => { e.currentTarget.style.color = isDark ? D.muted : "#94a3b8"; e.currentTarget.style.backgroundColor = "transparent"; }}>
@@ -859,121 +754,323 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, is
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EVENT ROW  (with category badge + correct save logic — restored from v4)
+// SCAN PREVIEW PANEL
+// Shows all extracted events before anything is saved. User checks/unchecks.
+// Past-dated events are greyed out + unchecked. Already-saved are disabled.
 // ─────────────────────────────────────────────────────────────────────────────
-function EventRow({ event, defaultType, isDark }) {
+function ScanPreviewPanel({ events, savedKeys, onSaved, onDismiss, isDark }) {
+  // Enrich events with computed flags on first render / when events/savedKeys change
+  const enriched = useMemo(() => events.map(ev => ({
+    ...ev,
+    _key:          eventKey(ev),
+    _past:         isEventPast(ev),
+    _alreadySaved: savedKeys.has(eventKey(ev)),
+    _cat:          resolveCategory(ev),
+  })), [events, savedKeys]);
+
+  // Default checked state: true only if future & not already saved
+  const [checked, setChecked] = useState(() => {
+    const m = {};
+    events.forEach(ev => {
+      const k = eventKey(ev);
+      m[k] = !isEventPast(ev) && !savedKeys.has(k);
+    });
+    return m;
+  });
+
+  // Per-event save-type overrides
+  const [saveTypes, setSaveTypes] = useState(() => {
+    const m = {};
+    events.forEach(ev => { m[eventKey(ev)] = resolveCategory(ev); });
+    return m;
+  });
+
   const [saving,   setSaving]   = useState(false);
-  const [saved,    setSaved]    = useState(false);
-  const [error,    setError]    = useState(null);
-  const [saveType, setSaveType] = useState(defaultType || event.save_category || "reminder");
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
 
-  const handleSave = async () => {
-    setSaving(true); setError(null);
-    try {
-      if (saveType === "todo") {
-        const dateStr = event.date || new Date().toISOString().slice(0, 10);
-        await api.post("/email/save-as-todo", {
-          event_id:    event.id || "",
-          title:       event.title,
-          description: [
-            event.organizer   && `From: ${event.organizer}`,
-            event.description && `Notes: ${event.description}`,
-            event.source_from && `Sender: ${event.source_from}`,
-          ].filter(Boolean).join("\n") || null,
-          remind_at: `${dateStr}T10:00:00`,
-        });
-        toast.success(`✓ Todo: ${event.title}`);
+  const futureSelectable = enriched.filter(e => !e._past && !e._alreadySaved);
+  const selectedCount    = futureSelectable.filter(e => checked[e._key]).length;
+  const pastCount        = enriched.filter(e => e._past).length;
+  const dupCount         = enriched.filter(e => e._alreadySaved).length;
+  const futureCount      = futureSelectable.length;
 
-      } else if (saveType === "reminder") {
-        const dateStr = event.date || new Date().toISOString().slice(0, 10);
-        const timeStr = event.time || "10:00";
-        let remindAt;
-        try { remindAt = new Date(`${dateStr}T${timeStr}:00+05:30`).toISOString(); }
-        catch { remindAt = new Date(Date.now() + 86400000).toISOString(); }
-        await api.post("/email/save-as-reminder", {
-          event_id:    event.id || "",
-          title:       event.title,
-          description: [
-            event.organizer      && `From: ${event.organizer}`,
-            event.description    && `Notes: ${event.description}`,
-            event.source_subject && `Subject: ${event.source_subject}`,
-          ].filter(Boolean).join("\n") || null,
-          remind_at: remindAt,
-        });
-        toast.success(`✓ Reminder: ${event.title}`);
-
-      } else {
-        await api.post("/email/save-as-visit", {
-          event_id:   event.id || "",
-          title:      event.title,
-          visit_date: event.date || new Date().toISOString().slice(0, 10),
-          notes:      event.description || event.source_subject || "",
-        });
-        toast.success(`✓ Visit: ${event.title}`);
-      }
-      setSaved(true);
-    } catch (err) {
-      const msg = err?.response?.data?.detail || "Failed to save. Please try again.";
-      setError(msg); toast.error(msg);
-    } finally { setSaving(false); }
+  const toggleAll = (val) => {
+    const next = { ...checked };
+    futureSelectable.forEach(e => { next[e._key] = val; });
+    setChecked(next);
   };
 
-  const catCfg = CATEGORY_CONFIG[saveType] || CATEGORY_CONFIG.reminder;
+  // Group by current save-type (which user may have changed via dropdown)
+  const groupedByType = useMemo(() => {
+    const g = { todo: [], reminder: [], visit: [] };
+    enriched.forEach(ev => {
+      const cat = saveTypes[ev._key] || ev._cat;
+      if (g[cat]) g[cat].push(ev);
+    });
+    return g;
+  }, [enriched, saveTypes]);
+
+  const handleSaveSelected = async () => {
+    const toSave = enriched.filter(e => !e._past && !e._alreadySaved && checked[e._key]);
+    if (toSave.length === 0) { toast.error("No future events selected to save"); return; }
+    setSaving(true);
+    setProgress({ done: 0, total: toSave.length });
+
+    const newlySavedKeys = new Set();
+    let ok = 0, fail = 0;
+
+    for (const ev of toSave) {
+      const cat = saveTypes[ev._key] || ev._cat;
+      try {
+        if (cat === "todo") {
+          const dateStr = ev.date || new Date().toISOString().slice(0, 10);
+          await api.post("/email/save-as-todo", {
+            event_id:    ev.id || ev.event_id || "",
+            title:       ev.title,
+            description: [ev.organizer && `From: ${ev.organizer}`, ev.description && `Notes: ${ev.description}`, ev.source_from && `Sender: ${ev.source_from}`].filter(Boolean).join("\n") || null,
+            remind_at:   `${dateStr}T10:00:00`,
+          });
+        } else if (cat === "reminder") {
+          const dateStr = ev.date || new Date().toISOString().slice(0, 10);
+          const timeStr = ev.time || "10:00";
+          let remindAt;
+          try { remindAt = new Date(`${dateStr}T${timeStr}:00+05:30`).toISOString(); }
+          catch { remindAt = new Date(Date.now() + 86400000).toISOString(); }
+          await api.post("/email/save-as-reminder", {
+            event_id:    ev.id || ev.event_id || "",
+            title:       ev.title,
+            description: [ev.organizer && `From: ${ev.organizer}`, ev.description && `Notes: ${ev.description}`, ev.source_subject && `Subject: ${ev.source_subject}`].filter(Boolean).join("\n") || null,
+            remind_at:   remindAt,
+          });
+        } else {
+          await api.post("/email/save-as-visit", {
+            event_id:   ev.id || ev.event_id || "",
+            title:      ev.title,
+            visit_date: ev.date || new Date().toISOString().slice(0, 10),
+            notes:      ev.description || ev.source_subject || "",
+          });
+        }
+        newlySavedKeys.add(ev._key);
+        ok++;
+      } catch { fail++; }
+      setProgress(p => ({ ...p, done: p.done + 1 }));
+    }
+
+    setSaving(false);
+    onSaved(newlySavedKeys);   // bubble up so parent updates savedKeys state
+    if (ok > 0)   toast.success(`✓ Saved ${ok} event${ok > 1 ? "s" : ""} successfully`);
+    if (fail > 0) toast.error(`${fail} event${fail > 1 ? "s" : ""} failed to save`);
+  };
+
+  const catGroups = [
+    { cat: "todo",     icon: CheckSquare, color: COLORS.purple,       label: "Todos — Action Required"           },
+    { cat: "reminder", icon: Bell,        color: COLORS.deepBlue,     label: "Reminders — Hearings & Deadlines"  },
+    { cat: "visit",    icon: Calendar,    color: COLORS.emeraldGreen, label: "Visits — Meetings & Consultations" },
+  ];
 
   return (
-    <div
-      className="p-3.5 rounded-xl border transition-all"
-      style={{ backgroundColor: isDark ? catCfg.darkBg : catCfg.bg, borderColor: catCfg.border }}
-    >
-      <div className="flex items-start gap-3">
-        <div className="flex-1 min-w-0">
-          {/* AI-suggested category badge */}
-          {event.save_category && (
-            <span className="inline-flex mb-1 text-[9px] font-black px-1.5 py-0.5 rounded-full text-white"
-              style={{ backgroundColor: CATEGORY_CONFIG[event.save_category]?.color || "#6B7280" }}>
-              AI: {(CATEGORY_CONFIG[event.save_category]?.label || "").toUpperCase()}
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+      <SectionCard>
+        {/* ── Panel Header ── */}
+        <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700"
+          style={{ background: `linear-gradient(135deg,${COLORS.deepBlue}10,${COLORS.mediumBlue}06)` }}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-900/40">
+                <Eye className="w-4 h-4 text-purple-500" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100">
+                  Preview Before Saving
+                  <span className="ml-2 text-xs font-normal px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400">
+                    {events.length} found
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                  Review which events to save — past dates and duplicates are pre-filtered out
+                </p>
+              </div>
+            </div>
+            <button onClick={onDismiss}
+              className="p-1.5 rounded-lg transition-all hover:bg-slate-100 dark:hover:bg-slate-700"
+              style={{ color: isDark ? D.muted : "#94a3b8" }}>
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Summary chips */}
+          <div className="flex flex-wrap gap-2 mt-3">
+            <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400">
+              <CheckCircle2 className="w-3 h-3" /> {futureCount} future (saveable)
             </span>
-          )}
-          <p className="text-sm font-bold truncate" style={{ color: isDark ? D.text : "#1e293b" }}>{event.title}</p>
-          <p className="text-xs font-mono mt-0.5" style={{ color: catCfg.color }}>
-            {event.date ? `📅 ${event.date}${event.time ? ` · ${event.time}` : ""}` : "Date not found"}
-            {event.email_account && <span className="ml-2" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>· {event.email_account}</span>}
-          </p>
-          {event.description && (
-            <p className="text-xs mt-0.5 truncate" style={{ color: isDark ? D.muted : "#64748b" }}>{event.description}</p>
+            {pastCount > 0 && (
+              <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500">
+                <CalendarOff className="w-3 h-3" /> {pastCount} past (auto-skipped)
+              </span>
+            )}
+            {dupCount > 0 && (
+              <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                <CheckCircle2 className="w-3 h-3" /> {dupCount} already saved
+              </span>
+            )}
+          </div>
+
+          {/* Select controls */}
+          {futureCount > 0 && (
+            <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-700">
+              <span className="text-xs font-semibold" style={{ color: isDark ? D.muted : "#64748b" }}>Select:</span>
+              <button onClick={() => toggleAll(true)}
+                className="text-xs font-bold px-2.5 py-1 rounded-lg transition-all active:scale-95 border"
+                style={{ color: COLORS.mediumBlue, borderColor: COLORS.mediumBlue + "40", backgroundColor: isDark ? COLORS.mediumBlue + "15" : COLORS.mediumBlue + "08" }}>
+                All Future ({futureCount})
+              </button>
+              <button onClick={() => toggleAll(false)}
+                className="text-xs font-semibold px-2.5 py-1 rounded-lg transition-all active:scale-95 border"
+                style={{ color: isDark ? D.muted : "#64748b", borderColor: isDark ? D.border : "#e2e8f0" }}>
+                None
+              </button>
+              <span className="ml-auto text-xs font-bold" style={{ color: isDark ? D.text : "#1e293b" }}>
+                {selectedCount} selected
+              </span>
+            </div>
           )}
         </div>
 
-        {/* Save type + save button */}
-        <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-          <select value={saveType} onChange={e => setSaveType(e.target.value)} disabled={saved}
-            className="text-[11px] font-bold rounded-lg border px-2 py-1 focus:outline-none cursor-pointer"
-            style={{ borderColor: catCfg.border, color: catCfg.color, backgroundColor: isDark ? D.raised : catCfg.bg }}>
-            <option value="todo">→ Todo</option>
-            <option value="reminder">→ Reminder</option>
-            <option value="visit">→ Visit</option>
-          </select>
-          <button onClick={handleSave} disabled={saving || saved}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-all active:scale-95 disabled:opacity-60"
-            style={{ backgroundColor: saved ? COLORS.emeraldGreen : catCfg.color }}>
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              : saved ? <><CheckCircle2 className="w-3.5 h-3.5" />Saved</>
-              : <><Check className="w-3.5 h-3.5" />Save</>}
-          </button>
+        {/* ── Event Groups ── */}
+        <div className="p-4 space-y-5">
+          {catGroups.map(({ cat, icon: Icon, color, label }) => {
+            const group = groupedByType[cat];
+            if (!group || group.length === 0) return null;
+            return (
+              <div key={cat} className="space-y-2">
+                <p className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color }}>
+                  <Icon className="w-3.5 h-3.5" /> {label} ({group.length})
+                </p>
+                {group.map(ev => {
+                  const cfg        = CATEGORY_CONFIG[ev._cat];
+                  const isSelectable = !ev._past && !ev._alreadySaved;
+                  const isChecked    = !!checked[ev._key];
+
+                  return (
+                    <div key={ev._key} className="rounded-xl border transition-all"
+                      style={{
+                        backgroundColor: ev._past || ev._alreadySaved
+                          ? (isDark ? "rgba(255,255,255,0.02)" : "#f8fafc")
+                          : isChecked ? (isDark ? cfg.darkBg : cfg.bg) : (isDark ? "rgba(255,255,255,0.03)" : "#fdfdfe"),
+                        borderColor: ev._past || ev._alreadySaved
+                          ? (isDark ? D.border : "#e2e8f0")
+                          : isChecked ? cfg.border : (isDark ? D.border : "#e2e8f0"),
+                        opacity: ev._past ? 0.5 : 1,
+                      }}>
+                      <div className="p-3 flex items-start gap-3">
+                        {/* Checkbox */}
+                        <button
+                          disabled={!isSelectable}
+                          onClick={() => isSelectable && setChecked(p => ({ ...p, [ev._key]: !p[ev._key] }))}
+                          className={`flex-shrink-0 mt-0.5 transition-all ${isSelectable ? "cursor-pointer hover:opacity-80 active:scale-90" : "cursor-not-allowed opacity-40"}`}
+                          style={{ color: isChecked && isSelectable ? cfg.color : (isDark ? D.dimmer : "#cbd5e1") }}>
+                          {isChecked && isSelectable
+                            ? <CheckSquare className="w-[18px] h-[18px]" />
+                            : <Square      className="w-[18px] h-[18px]" />}
+                        </button>
+
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+                            {ev.save_category && (
+                              <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full text-white"
+                                style={{ backgroundColor: CATEGORY_CONFIG[ev.save_category]?.color || "#6B7280" }}>
+                                AI: {(CATEGORY_CONFIG[ev.save_category]?.label || "").toUpperCase()}
+                              </span>
+                            )}
+                            {ev._past && (
+                              <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-slate-400 text-white flex items-center gap-0.5">
+                                <CalendarOff className="w-2.5 h-2.5" /> PAST DATE — SKIPPED
+                              </span>
+                            )}
+                            {ev._alreadySaved && (
+                              <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-blue-500 text-white flex items-center gap-0.5">
+                                <CheckCircle2 className="w-2.5 h-2.5" /> ALREADY SAVED
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm font-bold truncate"
+                            style={{ color: (ev._past || ev._alreadySaved) ? (isDark ? D.dimmer : "#94a3b8") : (isDark ? D.text : "#1e293b") }}>
+                            {ev.title}
+                          </p>
+                          <p className="text-xs font-mono mt-0.5" style={{ color: ev._past ? (isDark ? D.dimmer : "#94a3b8") : cfg.color }}>
+                            {ev.date ? `📅 ${ev.date}${ev.time ? ` · ${ev.time}` : ""}` : "Date not found"}
+                            {ev.email_account && <span className="ml-2" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>· {ev.email_account}</span>}
+                          </p>
+                          {ev.description && (
+                            <p className="text-xs mt-0.5 truncate" style={{ color: isDark ? D.muted : "#64748b" }}>{ev.description}</p>
+                          )}
+                        </div>
+
+                        {/* Save-type override (only for selectable) */}
+                        {isSelectable && (
+                          <select value={saveTypes[ev._key] || ev._cat}
+                            onChange={e => setSaveTypes(p => ({ ...p, [ev._key]: e.target.value }))}
+                            className="text-[11px] font-bold rounded-lg border px-2 py-1 focus:outline-none cursor-pointer flex-shrink-0"
+                            style={{ borderColor: cfg.border, color: cfg.color, backgroundColor: isDark ? D.raised : cfg.bg }}>
+                            <option value="todo">→ Todo</option>
+                            <option value="reminder">→ Reminder</option>
+                            <option value="visit">→ Visit</option>
+                          </select>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+
+          {futureCount === 0 && (
+            <div className="py-8 text-center">
+              <CalendarOff className="w-8 h-8 mx-auto mb-2" style={{ color: isDark ? D.dimmer : "#cbd5e1" }} />
+              <p className="text-sm font-medium" style={{ color: isDark ? D.muted : "#64748b" }}>
+                {events.length === 0
+                  ? "No events found in scanned emails."
+                  : "All events are past-dated or already saved — nothing new to add."}
+              </p>
+            </div>
+          )}
         </div>
-      </div>
-      {error && (
-        <p className="text-xs mt-2 rounded-lg px-2 py-1 border"
-          style={{ color: COLORS.red, backgroundColor: isDark ? "rgba(239,68,68,0.08)" : "#fef2f2", borderColor: isDark ? "#7f1d1d" : "#fecaca" }}>
-          {error}
-        </p>
-      )}
-    </div>
+
+        {/* ── Footer / Save button ── */}
+        {futureCount > 0 && (
+          <div className="px-4 py-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between gap-3"
+            style={{ backgroundColor: isDark ? D.raised : "#f8fafc" }}>
+            <div className="text-xs" style={{ color: isDark ? D.muted : "#64748b" }}>
+              {saving
+                ? <span className="flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" />Saving {progress.done} / {progress.total}…</span>
+                : <><span className="font-bold" style={{ color: isDark ? D.text : "#1e293b" }}>{selectedCount}</span> of {futureCount} future events selected</>
+              }
+            </div>
+            <div className="flex gap-2">
+              <button onClick={onDismiss} disabled={saving}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all disabled:opacity-40"
+                style={{ borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.muted : "#64748b" }}>
+                Dismiss
+              </button>
+              <button onClick={handleSaveSelected} disabled={saving || selectedCount === 0}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-bold text-white transition-all active:scale-95 disabled:opacity-50"
+                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                {saving
+                  ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Saving…</>
+                  : <><Save className="w-3.5 h-3.5" />Save {selectedCount > 0 ? `${selectedCount} Selected` : "Selected"}</>}
+              </button>
+            </div>
+          </div>
+        )}
+      </SectionCard>
+    </motion.div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SENDER WHITELIST MANAGER  (restored from v4 with full feature set)
+// SENDER WHITELIST MANAGER
 // ─────────────────────────────────────────────────────────────────────────────
 function SenderWhitelistManager({ isDark }) {
   const [senders,  setSenders]  = useState([]);
@@ -982,45 +1079,34 @@ function SenderWhitelistManager({ isDark }) {
   const [newLabel, setNewLabel] = useState("");
   const [adding,   setAdding]   = useState(false);
 
-  const inputStyle = {
-    backgroundColor: isDark ? D.raised : "#ffffff",
-    borderColor: isDark ? D.border : "#d1d5db",
-    color: isDark ? D.text : "#1e293b",
-  };
+  const inputStyle = { backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#d1d5db", color: isDark ? D.text : "#1e293b" };
   const inputCls = "px-3.5 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all";
 
   const fetchSenders = useCallback(async () => {
     try { const res = await api.get("/email/sender-whitelist"); setSenders(res.data?.senders || []); }
     catch { setSenders([]); } finally { setLoading(false); }
   }, []);
-
   useEffect(() => { fetchSenders(); }, [fetchSenders]);
 
   const handleAdd = async (emailAddr, label) => {
     const addr = (emailAddr || newEmail).trim().toLowerCase();
-    const lbl  = (label || newLabel).trim();
-    if (!addr) { toast.error("Enter a sender email or @domain.com"); return; }
-    if (!addr.includes("@")) { toast.error("Must contain @ — use email@domain.com or @domain.com"); return; }
+    const lbl  = label || newLabel;
+    if (!addr) { toast.error("Enter an email or domain"); return; }
+    if (senders.find(s => s.email_address === addr)) { toast.error("Already in whitelist"); return; }
     setAdding(true);
     try {
-      const res = await api.post("/email/sender-whitelist", { email_address: addr, label: lbl || addr });
-      setSenders(res.data?.senders || []);
-      setNewEmail(""); setNewLabel("");
+      const updated = [...senders, { email_address: addr, label: lbl || addr }];
+      await api.put("/email/sender-whitelist", { senders: updated });
+      setSenders(updated); setNewEmail(""); setNewLabel("");
       toast.success(`✓ ${addr} added to whitelist`);
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to add sender");
-    } finally { setAdding(false); }
+    } catch { toast.error("Failed to add sender"); } finally { setAdding(false); }
   };
 
   const handleRemove = async (addr) => {
-    try {
-      const res = await api.delete(`/email/sender-whitelist/${encodeURIComponent(addr)}`);
-      setSenders(res.data?.senders || []);
-      toast.success("Sender removed");
-    } catch { toast.error("Failed to remove sender"); }
+    const updated = senders.filter(s => s.email_address !== addr);
+    try { await api.put("/email/sender-whitelist", { senders: updated }); setSenders(updated); toast.success(`${addr} removed`); }
+    catch { toast.error("Failed to remove sender"); }
   };
-
-  const isWhitelistActive = senders.length > 0;
 
   return (
     <SectionCard>
@@ -1028,81 +1114,54 @@ function SenderWhitelistManager({ isDark }) {
         iconBg={isDark ? "bg-emerald-900/40" : "bg-emerald-50"}
         icon={<Filter className="w-4 h-4 text-emerald-500" />}
         title="Sender Whitelist"
-        subtitle={isWhitelistActive
-          ? `${senders.length} approved sender${senders.length !== 1 ? "s" : ""} — others are ignored`
-          : "No filter active — all senders are scanned"}
-        badge={senders.length || undefined}
+        subtitle="Only these senders will be scanned for events"
+        badge={senders.length}
       />
       <div className="p-4 space-y-4">
-        {/* Info banner */}
-        <div className="p-3 rounded-xl border flex items-start gap-2"
-          style={{ backgroundColor: isDark ? "rgba(59,130,246,0.08)" : "#eff6ff", borderColor: isDark ? "#1d4ed8" : "#bfdbfe" }}>
-          <Info className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
-          <div className="text-xs" style={{ color: isDark ? "#93c5fd" : "#1e40af" }}>
-            <p className="font-bold mb-0.5">How the whitelist works</p>
-            <p>When one or more senders are added, <strong>only emails from those senders</strong> are scanned and auto-saved. All other emails are ignored. Leave empty to scan all.</p>
-            <p className="mt-1">Use <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">@domain.com</code> to match all emails from a domain (e.g. <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">@ipindia.gov.in</code>).</p>
-          </div>
-        </div>
-
-        {/* Quick-add suggested senders */}
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
-            Quick Add — Common Legal Senders
-          </p>
-          <div className="flex flex-wrap gap-1.5">
+          <p className="text-[10px] font-bold uppercase tracking-widest mb-2.5" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Quick Add — Recommended Senders</p>
+          <div className="flex flex-wrap gap-2">
             {SUGGESTED_SENDERS.map(s => {
-              const already = senders.some(existing => existing.email_address === s.email_address);
+              const exists = senders.find(x => x.email_address === s.email_address);
               return (
-                <button key={s.email_address}
-                  onClick={() => !already && handleAdd(s.email_address, s.label)}
-                  disabled={already || adding}
-                  className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border transition-all active:scale-95"
-                  style={already
-                    ? { backgroundColor: isDark ? "rgba(31,175,90,0.12)" : "#dcfce7", borderColor: "#bbf7d0", color: COLORS.emeraldGreen, cursor: "default" }
-                    : { backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.muted : "#374151" }
-                  }>
-                  {already ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
-                  {s.label}
+                <button key={s.email_address} onClick={() => !exists && handleAdd(s.email_address, s.label)} disabled={!!exists}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border-2 transition-all active:scale-95"
+                  style={exists
+                    ? { borderColor: isDark ? "#14532d" : "#bbf7d0", backgroundColor: isDark ? "rgba(31,175,90,0.12)" : "#f0fdf4", color: COLORS.emeraldGreen, cursor: "default" }
+                    : { borderColor: isDark ? D.border : "#e2e8f0", backgroundColor: isDark ? D.raised : "#f8fafc", color: isDark ? D.muted : "#374151" }}
+                  onMouseEnter={e => { if (!exists) { e.currentTarget.style.borderColor = COLORS.emeraldGreen + "60"; e.currentTarget.style.color = COLORS.emeraldGreen; } }}
+                  onMouseLeave={e => { if (!exists) { e.currentTarget.style.borderColor = isDark ? D.border : "#e2e8f0"; e.currentTarget.style.color = isDark ? D.muted : "#374151"; } }}>
+                  {exists ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}{s.label}
                 </button>
               );
             })}
           </div>
         </div>
-
-        {/* Custom sender input */}
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
-            Add Custom Sender
-          </p>
+        <div className="space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Add Custom Sender</p>
           <div className="flex gap-2">
-            <input type="text" value={newEmail} onChange={e => setNewEmail(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleAdd()}
-              placeholder="sender@domain.com or @domain.com"
-              className={`flex-1 h-9 ${inputCls}`} style={inputStyle} />
-            <input type="text" value={newLabel} onChange={e => setNewLabel(e.target.value)}
-              placeholder="Label (optional)"
-              className={`w-36 h-9 ${inputCls}`} style={inputStyle} />
-            <Button onClick={() => handleAdd()} disabled={!newEmail.trim() || adding}
-              className="h-9 rounded-xl text-sm font-semibold text-white px-4"
-              style={{ backgroundColor: COLORS.deepBlue }}>
+            <input value={newEmail} onChange={e => setNewEmail(e.target.value)} placeholder="@domain.com or user@email.com"
+              onKeyDown={e => e.key === "Enter" && handleAdd()} className={inputCls + " flex-1"} style={inputStyle} />
+            <input value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="Label (optional)"
+              onKeyDown={e => e.key === "Enter" && handleAdd()} className={inputCls + " w-36"} style={inputStyle} />
+            <Button onClick={() => handleAdd()} disabled={adding} className="h-10 px-4 rounded-xl text-sm font-semibold text-white"
+              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
               {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
             </Button>
           </div>
         </div>
-
-        {/* Active whitelist */}
         {loading ? (
-          <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>
+          <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-blue-400" /></div>
         ) : senders.length === 0 ? (
-          <div className="py-4 text-center text-sm" style={{ color: isDark ? D.muted : "#94a3b8" }}>
-            No senders added — all emails are scanned
+          <div className="py-6 text-center">
+            <Filter className="w-7 h-7 mx-auto mb-2 opacity-20" />
+            <p className="text-xs" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+              No whitelist set — all senders are scanned.<br />Add senders above to restrict scanning.
+            </p>
           </div>
         ) : (
           <div className="space-y-1.5">
-            <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
-              Active Whitelist ({senders.length})
-            </p>
+            <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Active Whitelist ({senders.length})</p>
             {senders.map(s => (
               <motion.div key={s.email_address} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-xl border"
@@ -1117,8 +1176,7 @@ function SenderWhitelistManager({ isDark }) {
                     <p className="text-[10px] font-mono" style={{ color: isDark ? D.muted : "#94a3b8" }}>{s.email_address}</p>
                   )}
                 </div>
-                <button onClick={() => handleRemove(s.email_address)}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg transition-all active:scale-90"
+                <button onClick={() => handleRemove(s.email_address)} className="w-7 h-7 flex items-center justify-center rounded-lg transition-all active:scale-90"
                   style={{ color: isDark ? D.muted : "#94a3b8" }}
                   onMouseEnter={e => { e.currentTarget.style.color = COLORS.red; e.currentTarget.style.backgroundColor = isDark ? "rgba(239,68,68,0.12)" : "#fef2f2"; }}
                   onMouseLeave={e => { e.currentTarget.style.color = isDark ? D.muted : "#94a3b8"; e.currentTarget.style.backgroundColor = "transparent"; }}>
@@ -1126,16 +1184,11 @@ function SenderWhitelistManager({ isDark }) {
                 </button>
               </motion.div>
             ))}
-            <button
-              onClick={async () => {
-                if (!window.confirm("Clear entire whitelist? Emails from ALL senders will be scanned again.")) return;
-                try {
-                  await api.put("/email/sender-whitelist", { senders: [] });
-                  setSenders([]);
-                  toast.success("Whitelist cleared — all senders will now be scanned");
-                } catch { toast.error("Failed to clear whitelist"); }
-              }}
-              className="text-xs font-semibold flex items-center gap-1 mt-1 active:scale-95 transition-all"
+            <button onClick={async () => {
+              if (!window.confirm("Clear entire whitelist? Emails from ALL senders will be scanned again.")) return;
+              try { await api.put("/email/sender-whitelist", { senders: [] }); setSenders([]); toast.success("Whitelist cleared"); }
+              catch { toast.error("Failed to clear whitelist"); }
+            }} className="text-xs font-semibold flex items-center gap-1 mt-1 active:scale-95 transition-all"
               style={{ color: isDark ? "#f87171" : COLORS.red }}>
               <Trash2 className="w-3 h-3" /> Clear entire whitelist
             </button>
@@ -1163,13 +1216,14 @@ export default function EmailSettings() {
   const [showAutoDialog,  setShowAutoDialog]  = useState(false);
   const [prefsChecked,    setPrefsChecked]    = useState(false);
   const [activeTab,       setActiveTab]       = useState("accounts");
+  // Session-level set of saved event keys — prevents duplicates within the session
+  const [savedKeys, setSavedKeys] = useState(() => new Set());
 
   const loadConnections = useCallback(async () => {
     try {
       const res = await api.get("/email/connections");
       setConnections(res.data?.connections || []);
-    } catch (err) { console.error("Failed to load connections:", err); }
-    finally { setLoading(false); }
+    } catch { } finally { setLoading(false); }
   }, []);
 
   const loadAutoSavePrefs = useCallback(async () => {
@@ -1219,31 +1273,71 @@ export default function EmailSettings() {
     } catch { toast.error("Failed to update"); }
   };
 
-  const handleSync = async (emailAddress) => {
+  // handleSync — uses last_synced as the base date so only new emails since
+  // last sync are fetched. Shows events in preview panel, no auto-save.
+  const handleSync = useCallback(async (emailAddress, lastSynced) => {
     try {
-      const res = await api.get("/email/extract-events?force_refresh=true&limit=50", { timeout: 60000 });
-      const events = (res.data || []).filter(e => e.email_account === emailAddress);
-      toast.success(`✓ Synced — ${events.length} legal event(s) found`);
+      const sinceParam = lastSynced ? `&since_date=${encodeURIComponent(lastSynced)}` : "";
+      const emailParam = `&email=${encodeURIComponent(emailAddress)}`;
+      const res = await api.get(
+        `/email/extract-events?force_refresh=true&limit=50${sinceParam}${emailParam}`,
+        { timeout: 60000 }
+      );
+      const raw    = (res.data || []).filter(e => !e.email_account || e.email_account === emailAddress);
+      const deduped = raw.filter(e => !savedKeys.has(eventKey(e)));
+
+      if (deduped.length === 0) {
+        toast.success("Sync complete — no new legal events found since last sync");
+        loadConnections();
+        return;
+      }
+
+      // Merge into panel, avoiding duplicate keys
+      setExtractedEvents(prev => {
+        const existingKeys = new Set(prev.map(eventKey));
+        const newOnes      = deduped.filter(e => !existingKeys.has(eventKey(e)));
+        return [...prev, ...newOnes];
+      });
+
+      const futureCount = deduped.filter(e => !isEventPast(e)).length;
+      const pastCount   = deduped.filter(e => isEventPast(e)).length;
+      toast.success(`✓ Synced — ${futureCount} new future event${futureCount !== 1 ? "s" : ""}${pastCount > 0 ? ` · ${pastCount} past (filtered)` : ""}`);
       loadConnections();
     } catch (err) { toast.error(err?.response?.data?.detail || "Sync failed"); }
-  };
+  }, [savedKeys, loadConnections]);
 
+  // handleScanAll — scans all accounts; each account's last_synced is the
+  // natural base date on the backend. Shows everything in preview panel.
   const handleScanAll = async () => {
     if (connections.length === 0) { toast.error("No email accounts connected"); return; }
     setScanning(true);
     try {
-      const res = await api.get("/email/extract-events?force_refresh=true&limit=100", { timeout: 90000 });
-      const events = res.data || [];
-      setExtractedEvents(events);
-      toast.success(events.length === 0
-        ? "All emails scanned — no legal events found (junk filtered)"
-        : `✓ Found ${events.length} legal event(s) across ${connections.length} account(s)`);
-    } catch (err) {
-      if (err.code === "ECONNABORTED" || err.message?.includes("timeout")) {
-        toast.error("Scan taking too long. Try syncing accounts individually.");
-      } else {
-        toast.error(err?.response?.data?.detail || "Scan failed");
+      const res    = await api.get("/email/extract-events?force_refresh=true&limit=100", { timeout: 90000 });
+      const raw    = res.data || [];
+      const deduped = raw.filter(e => !savedKeys.has(eventKey(e)));
+
+      if (raw.length === 0) {
+        toast.success("All emails scanned — no legal events found");
+        return;
       }
+
+      // Merge avoiding duplicate keys
+      setExtractedEvents(prev => {
+        const existingKeys = new Set(prev.map(eventKey));
+        const newOnes      = deduped.filter(e => !existingKeys.has(eventKey(e)));
+        return [...prev, ...newOnes];
+      });
+
+      const futureCount = deduped.filter(e => !isEventPast(e)).length;
+      const pastCount   = deduped.filter(e => isEventPast(e)).length;
+      toast.success(
+        `✓ ${raw.length} event${raw.length !== 1 ? "s" : ""} found · ${futureCount} future (review in preview)${pastCount > 0 ? ` · ${pastCount} past (filtered)` : ""}`
+      );
+    } catch (err) {
+      if (err.code === "ECONNABORTED" || err.message?.includes("timeout"))
+        toast.error("Scan taking too long. Try syncing accounts individually.");
+      else
+        toast.error(err?.response?.data?.detail || "Scan failed");
     } finally { setScanning(false); }
   };
 
@@ -1253,6 +1347,7 @@ export default function EmailSettings() {
     try {
       await api.delete("/email/events/clear-all");
       setExtractedEvents([]);
+      setSavedKeys(new Set()); // also reset session keys when cache cleared
       toast.success("Cache cleared. Run a fresh scan anytime.");
     } catch { toast.error("Failed to clear cache"); }
     finally { setClearing(false); }
@@ -1265,13 +1360,18 @@ export default function EmailSettings() {
     }
   };
 
-  const activeProvider = QUICK_PROVIDERS.find(p => p.id === activeForm);
+  // Called by ScanPreviewPanel after successful saves — add keys to session set
+  const handleEventsSaved = useCallback((newKeys) => {
+    setSavedKeys(prev => {
+      const next = new Set(prev);
+      newKeys.forEach(k => next.add(k));
+      return next;
+    });
+  }, []);
 
-  const todoEvents     = extractedEvents.filter(e => e.save_category === "todo");
-  const reminderEvents = extractedEvents.filter(e => e.save_category === "reminder" || (!e.save_category && ["Trademark Hearing","Court Hearing","Deadline","Appointment","Other"].includes(e.event_type)));
-  const visitEvents    = extractedEvents.filter(e => e.save_category === "visit"    || (!e.save_category && ["Visit","Online Meeting","Conference","Interview","Meeting"].includes(e.event_type)));
-
-  const autoSaveActive = autoSavePrefs?.auto_save_reminders || autoSavePrefs?.auto_save_visits || autoSavePrefs?.auto_save_todos;
+  const activeProvider   = QUICK_PROVIDERS.find(p => p.id === activeForm);
+  const autoSaveActive   = autoSavePrefs?.auto_save_reminders || autoSavePrefs?.auto_save_visits || autoSavePrefs?.auto_save_todos;
+  const futureEventCount = extractedEvents.filter(e => !isEventPast(e) && !savedKeys.has(eventKey(e))).length;
 
   const TAB_CONFIG = [
     { id: "accounts",  label: "Accounts",    icon: Mail   },
@@ -1283,8 +1383,7 @@ export default function EmailSettings() {
     <TooltipProvider>
       <AnimatePresence>
         {showAutoDialog && (
-          <AutoSaveDialog
-            isDark={isDark}
+          <AutoSaveDialog isDark={isDark}
             onSave={prefs => { setAutoSavePrefs(prev => ({ ...prev, ...prefs })); setShowAutoDialog(false); }}
             onSkip={() => {
               setShowAutoDialog(false);
@@ -1294,17 +1393,14 @@ export default function EmailSettings() {
         )}
       </AnimatePresence>
 
-      <motion.div
-        className="min-h-screen p-5 md:p-6 lg:p-8 space-y-5"
+      <motion.div className="min-h-screen p-5 md:p-6 lg:p-8 space-y-5"
         style={{ background: isDark ? D.bg : "#f8fafc" }}
-        variants={containerVariants} initial="hidden" animate="visible"
-      >
-        {/* ══ PAGE HEADER ══════════════════════════════════════════════════════ */}
+        variants={containerVariants} initial="hidden" animate="visible">
+
+        {/* ══ PAGE HEADER ══ */}
         <motion.div variants={itemVariants}>
-          <div
-            className="relative overflow-hidden rounded-2xl px-6 py-5"
-            style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: "0 8px 32px rgba(13,59,102,0.25)" }}
-          >
+          <div className="relative overflow-hidden rounded-2xl px-6 py-5"
+            style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: "0 8px 32px rgba(13,59,102,0.25)" }}>
             <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
               style={{ background: "radial-gradient(circle, white 0%, transparent 70%)" }} />
             <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1312,11 +1408,10 @@ export default function EmailSettings() {
                 <p className="text-white/60 text-xs font-medium uppercase tracking-widest mb-1">Integrations</p>
                 <h1 className="text-2xl font-bold text-white tracking-tight">Email Integration</h1>
                 <p className="text-white/60 text-sm mt-1">
-                  Connect accounts · auto-classify hearings, deadlines &amp; meetings
+                  Connect accounts · preview before saving · past dates filtered · no duplicates
                 </p>
               </div>
               <div className="flex gap-2 flex-wrap items-center">
-                {/* Auto-save status badge in header */}
                 <AutoSaveStatusBadge prefs={autoSavePrefs} onEdit={() => setShowAutoDialog(true)} isDark={isDark} />
                 {connections.length > 0 && (
                   <>
@@ -1328,9 +1423,7 @@ export default function EmailSettings() {
                     <button onClick={handleScanAll} disabled={scanning}
                       className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold border transition-all active:scale-95"
                       style={{ backgroundColor: "rgba(255,255,255,0.15)", borderColor: "rgba(255,255,255,0.25)", color: "#ffffff" }}>
-                      {scanning
-                        ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Scanning…</>
-                        : <><RefreshCw className="w-3.5 h-3.5" />Scan All</>}
+                      {scanning ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Scanning…</> : <><RefreshCw className="w-3.5 h-3.5" />Scan All</>}
                     </button>
                   </>
                 )}
@@ -1339,15 +1432,15 @@ export default function EmailSettings() {
           </div>
         </motion.div>
 
-        {/* ══ STAT CARDS ═══════════════════════════════════════════════════════ */}
+        {/* ══ STAT CARDS ══ */}
         <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-3" variants={itemVariants}>
-          <StatCard icon={Mail}     label="Connected" value={connections.length}         unit="accounts"   color={COLORS.deepBlue}     trend={connections.length > 0 ? "IMAP active" : "Add an account"} />
-          <StatCard icon={Bell}     label="Extracted" value={extractedEvents.length}     unit="events"     color={COLORS.purple}       trend={`${reminderEvents.length} reminders · ${todoEvents.length} todos`} />
-          <StatCard icon={Filter}   label="Whitelist" value={0}                          unit="senders"    color={COLORS.emeraldGreen} trend="Manage in Whitelist tab" />
-          <StatCard icon={Activity} label="Auto-Save" value={autoSaveActive ? "ON" : "OFF"} unit="daily scan" color={autoSaveActive ? COLORS.emeraldGreen : COLORS.orange} trend={autoSaveActive ? `Daily at ${autoSavePrefs?.scan_time_hour || 12}:00` : "Click badge to enable"} />
+          <StatCard icon={Mail}     label="Connected"  value={connections.length}              unit="accounts"     color={COLORS.deepBlue}     trend={connections.length > 0 ? "IMAP active" : "Add an account"} />
+          <StatCard icon={Eye}      label="In Preview" value={extractedEvents.length}          unit="events found" color={COLORS.purple}       trend={`${futureEventCount} future · ready to save`} />
+          <StatCard icon={Filter}   label="Whitelist"  value={0}                               unit="senders"      color={COLORS.emeraldGreen} trend="Manage in Whitelist tab" />
+          <StatCard icon={Activity} label="Auto-Save"  value={autoSaveActive ? "ON" : "OFF"}   unit="daily scan"   color={autoSaveActive ? COLORS.emeraldGreen : COLORS.orange} trend={autoSaveActive ? `Daily at ${autoSavePrefs?.scan_time_hour || 12}:00` : "Click badge to enable"} />
         </motion.div>
 
-        {/* ══ TAB BAR ══════════════════════════════════════════════════════════ */}
+        {/* ══ TAB BAR ══ */}
         <motion.div variants={itemVariants}>
           <div className="flex items-center gap-1 p-1 rounded-2xl border"
             style={{ backgroundColor: isDark ? D.card : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0" }}>
@@ -1364,25 +1457,25 @@ export default function EmailSettings() {
           </div>
         </motion.div>
 
-        {/* ══ ACCOUNTS TAB ═════════════════════════════════════════════════════ */}
+        {/* ══ ACCOUNTS TAB ══ */}
         {activeTab === "accounts" && (
           <div className="space-y-4">
-            {/* Info banner */}
             <motion.div variants={itemVariants}>
               <div className="px-4 py-3.5 rounded-2xl border flex items-start gap-3"
                 style={{ backgroundColor: isDark ? "rgba(59,130,246,0.08)" : "#eff6ff", borderColor: isDark ? "#1d4ed8" : "#bfdbfe" }}>
                 <Info className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
                 <div className="text-xs" style={{ color: isDark ? "#93c5fd" : "#1e40af" }}>
-                  <span className="font-bold">Multiple accounts supported. </span>
-                  Smart rules auto-classify: <strong>notices → Todos</strong>, <strong>hearings → Reminders</strong>, <strong>meetings → Visits</strong>.
+                  <span className="font-bold">Preview-first workflow. </span>
+                  After scanning, events appear in a <strong>preview panel</strong> where you choose which to save.
+                  Only <strong>future-dated</strong> events are selectable. Past-dated and already-saved items are automatically filtered.
+                  Each account's Sync button only fetches emails received <strong>after its last sync date</strong>.
                   {!autoSaveActive && (
-                    <> <button onClick={() => setShowAutoDialog(true)} className="font-bold underline ml-1">Enable Auto-Save</button> to skip manual clicks.</>
+                    <> <button onClick={() => setShowAutoDialog(true)} className="font-bold underline ml-1">Enable Auto-Save</button> for hands-free daily sync.</>
                   )}
                 </div>
               </div>
             </motion.div>
 
-            {/* Connected accounts list */}
             {loading ? (
               <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-500" /></div>
             ) : connections.length === 0 && !showAddOptions && !activeForm ? (
@@ -1414,11 +1507,9 @@ export default function EmailSettings() {
               </AnimatePresence>
             )}
 
-            {/* Add another dashed button */}
             {connections.length > 0 && !showAddOptions && !activeForm && (
               <motion.div variants={itemVariants}>
-                <button
-                  onClick={() => { setShowAddOptions(true); setActiveForm(null); }}
+                <button onClick={() => { setShowAddOptions(true); setActiveForm(null); }}
                   className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed text-sm font-semibold transition-all"
                   style={{ borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.muted : "#64748b" }}
                   onMouseEnter={e => { e.currentTarget.style.borderColor = COLORS.mediumBlue; e.currentTarget.style.color = COLORS.mediumBlue; }}
@@ -1428,7 +1519,6 @@ export default function EmailSettings() {
               </motion.div>
             )}
 
-            {/* Provider picker grid */}
             <AnimatePresence>
               {(showAddOptions || connections.length === 0) && !activeForm && (
                 <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
@@ -1448,8 +1538,7 @@ export default function EmailSettings() {
                     />
                     <div className="p-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
                       {QUICK_PROVIDERS.map(prov => (
-                        <button key={prov.id}
-                          onClick={() => { setActiveForm(prov.id); setShowAddOptions(false); }}
+                        <button key={prov.id} onClick={() => { setActiveForm(prov.id); setShowAddOptions(false); }}
                           className="flex flex-col items-center gap-2.5 p-4 rounded-xl border-2 border-transparent transition-all active:scale-95"
                           style={{ backgroundColor: isDark ? prov.color + "15" : prov.color + "08" }}
                           onMouseEnter={e => e.currentTarget.style.borderColor = prov.color + "60"}
@@ -1466,7 +1555,6 @@ export default function EmailSettings() {
               )}
             </AnimatePresence>
 
-            {/* Connect form */}
             <AnimatePresence>
               {activeForm && activeProvider && (
                 <ConnectForm key={activeForm} provider={activeProvider} isDark={isDark}
@@ -1475,59 +1563,22 @@ export default function EmailSettings() {
               )}
             </AnimatePresence>
 
-            {/* Extracted events — grouped by category */}
+            {/* ══ SCAN PREVIEW PANEL — shown after any Sync / Scan All ══ */}
             <AnimatePresence>
               {extractedEvents.length > 0 && (
-                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                  <SectionCard>
-                    <CardHeaderRow
-                      iconBg={isDark ? "bg-purple-900/40" : "bg-purple-50"}
-                      icon={<Sparkles className="w-4 h-4 text-purple-500" />}
-                      title="Extracted Legal Events"
-                      subtitle="AI-classified — review and save to the right place"
-                      badge={extractedEvents.length}
-                      action={
-                        <button onClick={() => setExtractedEvents([])}
-                          className="text-xs font-semibold transition-all"
-                          style={{ color: isDark ? D.muted : "#94a3b8" }}>
-                          Clear
-                        </button>
-                      }
-                    />
-                    <div className="p-4 space-y-4">
-                      {todoEvents.length > 0 && (
-                        <div className="space-y-2">
-                          <p className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: COLORS.purple }}>
-                            <CheckSquare className="w-3.5 h-3.5" /> Save as Todos — Action Required ({todoEvents.length})
-                          </p>
-                          {todoEvents.map((ev, i) => <EventRow key={i} event={ev} defaultType="todo" isDark={isDark} />)}
-                        </div>
-                      )}
-                      {reminderEvents.length > 0 && (
-                        <div className="space-y-2">
-                          <p className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: COLORS.deepBlue }}>
-                            <Bell className="w-3.5 h-3.5" /> Save as Reminders — Hearings &amp; Deadlines ({reminderEvents.length})
-                          </p>
-                          {reminderEvents.map((ev, i) => <EventRow key={i} event={ev} defaultType="reminder" isDark={isDark} />)}
-                        </div>
-                      )}
-                      {visitEvents.length > 0 && (
-                        <div className="space-y-2">
-                          <p className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: COLORS.emeraldGreen }}>
-                            <Calendar className="w-3.5 h-3.5" /> Save as Visits — Meetings &amp; Consultations ({visitEvents.length})
-                          </p>
-                          {visitEvents.map((ev, i) => <EventRow key={i} event={ev} defaultType="visit" isDark={isDark} />)}
-                        </div>
-                      )}
-                    </div>
-                  </SectionCard>
-                </motion.div>
+                <ScanPreviewPanel
+                  events={extractedEvents}
+                  savedKeys={savedKeys}
+                  onSaved={handleEventsSaved}
+                  onDismiss={() => setExtractedEvents([])}
+                  isDark={isDark}
+                />
               )}
             </AnimatePresence>
           </div>
         )}
 
-        {/* ══ WHITELIST TAB ════════════════════════════════════════════════════ */}
+        {/* ══ WHITELIST TAB ══ */}
         {activeTab === "whitelist" && (
           <motion.div variants={itemVariants} className="space-y-4">
             <div className="px-4 py-3.5 rounded-2xl border flex items-start gap-3"
@@ -1535,7 +1586,7 @@ export default function EmailSettings() {
               <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: COLORS.amber }} />
               <div className="text-xs" style={{ color: isDark ? "#fbbf24" : "#92400e" }}>
                 <p className="font-bold mb-0.5">What is the Sender Whitelist?</p>
-                <p>By default, all emails from all senders are scanned. Once you add any sender here, <strong>ONLY emails from those approved senders</strong> will be processed. This prevents irrelevant emails from cluttering your todos, reminders, and visits.</p>
+                <p>By default, all emails from all senders are scanned. Once you add any sender here, <strong>ONLY emails from those approved senders</strong> will be processed.</p>
                 <p className="mt-1.5 font-semibold">Recommended for CA/CS firms: add IP India, GST Portal, Income Tax, MCA, and your client domains.</p>
               </div>
             </div>
@@ -1543,23 +1594,18 @@ export default function EmailSettings() {
           </motion.div>
         )}
 
-        {/* ══ SMART RULES TAB ══════════════════════════════════════════════════ */}
+        {/* ══ SMART RULES TAB ══ */}
         {activeTab === "rules" && (
           <motion.div variants={itemVariants} className="space-y-4">
-            {/* Explanation */}
             <div className="px-4 py-3.5 rounded-2xl border flex items-start gap-3"
               style={{ backgroundColor: isDark ? D.raised : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0" }}>
               <Info className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
               <div className="text-xs" style={{ color: isDark ? D.muted : "#64748b" }}>
                 <p className="font-bold mb-0.5" style={{ color: isDark ? D.text : "#374151" }}>How Smart Categorization Works</p>
-                <p>When an email is scanned, Taskosphere uses AI + keyword rules to decide where to save it. You can always override the suggested category before clicking Save.</p>
+                <p>When an email is scanned, Taskosphere uses AI + keyword rules to decide the category. A preview panel is shown before saving — you can override the category and select/deselect freely.</p>
               </div>
             </div>
-
-            {/* Collapsible category rules panel (restored from v4) */}
             <CategoryRulesPanel isDark={isDark} />
-
-            {/* Auto-save settings summary */}
             {autoSavePrefs && (
               <SectionCard>
                 <CardHeaderRow
@@ -1591,15 +1637,13 @@ export default function EmailSettings() {
                       </span>
                     </div>
                   ))}
-                  <div className="flex items-center justify-between pt-1 border-t"
-                    style={{ borderColor: isDark ? D.border : "#f1f5f9" }}>
+                  <div className="flex items-center justify-between pt-1 border-t" style={{ borderColor: isDark ? D.border : "#f1f5f9" }}>
                     <span className="text-sm font-medium" style={{ color: isDark ? D.text : "#374151" }}>Daily scan time</span>
                     <span className="text-xs font-bold" style={{ color: isDark ? D.muted : "#64748b" }}>
                       {autoSavePrefs.scan_time_hour < 12
                         ? `${autoSavePrefs.scan_time_hour}:00 AM`
-                        : autoSavePrefs.scan_time_hour === 12
-                          ? "12:00 PM"
-                          : `${autoSavePrefs.scan_time_hour - 12}:00 PM`} IST
+                        : autoSavePrefs.scan_time_hour === 12 ? "12:00 PM"
+                        : `${autoSavePrefs.scan_time_hour - 12}:00 PM`} IST
                     </span>
                   </div>
                 </div>
@@ -1608,7 +1652,7 @@ export default function EmailSettings() {
           </motion.div>
         )}
 
-        {/* ══ TIPS — always visible ═════════════════════════════════════════════ */}
+        {/* ══ TIPS ══ */}
         <motion.div variants={itemVariants}>
           <SectionCard>
             <CardHeaderRow
@@ -1621,11 +1665,12 @@ export default function EmailSettings() {
               <ul className="space-y-2">
                 {[
                   "Gmail requires: (1) IMAP enabled, (2) 2-Step Verification ON, (3) App Password generated — all 3 are mandatory",
+                  "Scan & Sync results show a preview panel first — select which events to save; nothing is written until you click 'Save Selected'",
+                  "Past-dated events are automatically greyed out and unchecked — they cannot be saved to prevent stale data",
+                  "Each account's Sync button fetches only emails received after its last sync date — prevents rescanning old emails",
+                  "Within a session, already-saved events show an 'Already Saved' badge and cannot be re-saved; duplicates are blocked",
                   "Add @ipindia.gov.in to whitelist to auto-import all trademark hearings and notices without filtering",
-                  "Examination Reports are saved as Todos (action required), Hearings as Reminders, Zoom/Meet as Visits",
                   "Use 'Reset Cache' if you see wrong or stale results, then 'Scan All' for a completely fresh extraction",
-                  "FIX: Deleting one reminder or visit from Attendance will NOT delete other auto-synced items",
-                  "If GEMINI_API_KEY is not set on the server, keyword-based fallback classification is used instead of AI",
                 ].map((tip, i) => (
                   <li key={i} className="flex items-start gap-2.5 text-xs" style={{ color: isDark ? D.muted : "#64748b" }}>
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
