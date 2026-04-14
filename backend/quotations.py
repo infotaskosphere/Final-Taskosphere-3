@@ -460,282 +460,492 @@ def _mcell(pdf, w, h, txt, border=0, align="L", fill=False):
 # PDF BUILDER – QUOTATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
-    BRAND      = _extract_dominant_color_from_b64(company.get("logo_base64", ""))
-    BRAND_DARK = _darken(BRAND, 0.7)
-    BRAND_LITE = _lighten(BRAND, 0.88)
-    DARK_TEXT  = (30, 41, 59)
-    MUTED      = (100, 116, 139)
-    WHITE      = (255, 255, 255)
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# HELPERS — hex color, amount in words (needed by PDF builder)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_ONES = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine',
+         'Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen',
+         'Seventeen','Eighteen','Nineteen']
+_TENS = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety']
+
+
+def _hex_to_rgb(hex_color: str) -> tuple:
+    """Convert a CSS hex color string to an (R, G, B) tuple."""
+    try:
+        h = hex_color.strip().lstrip("#")
+        if len(h) == 3:
+            h = "".join(c * 2 for c in h)
+        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+    except Exception:
+        return (13, 59, 102)
+
+
+def _amount_in_words(n: float) -> str:
+    try:
+        rupees = int(n)
+        paise = round((n - rupees) * 100)
+
+        def _grp(num):
+            if num == 0: return ""
+            if num < 20: return _ONES[num] + " "
+            if num < 100: return _TENS[num // 10] + (" " + _ONES[num % 10] if num % 10 else "") + " "
+            return _ONES[num // 100] + " Hundred " + _grp(num % 100)
+
+        def _convert(num):
+            if num == 0: return "Zero "
+            r = ""
+            cr = num // 10_000_000; num %= 10_000_000
+            lk = num // 100_000; num %= 100_000
+            th = num // 1000; num %= 1000
+            if cr: r += _grp(cr) + "Crore "
+            if lk: r += _grp(lk) + "Lakh "
+            if th: r += _grp(th) + "Thousand "
+            r += _grp(num)
+            return r
+
+        r = _convert(rupees).strip()
+        p = f" and {_convert(paise).strip()} Paise" if paise else ""
+        return f"Rupees {r}{p} Only"
+    except Exception:
+        return f"Rupees {n:.2f} Only"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PDF BUILDER – QUOTATION  (matches Invoice PDF layout exactly)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
+    # ── Resolve brand color from quotation/company settings → default
+    raw_color = (
+        q.get("invoice_custom_color")
+        or company.get("invoice_custom_color")
+        or company.get("brand_color")
+        or "#0D3B66"
+    )
+    BRAND = _hex_to_rgb(raw_color)
+    BL    = _lighten(BRAND, 0.92)
+    BD    = _darken(BRAND, 0.65)
+    DARK  = (30, 41, 59)
+    MUTED = (100, 116, 139)
+    WHITE = (255, 255, 255)
+
+    title_label = "Quotation"
     _q     = q
     _MUTED = MUTED
 
     class PDF(FPDF):
-        def header(self):
-            pass
-
+        def header(self): pass
         def footer(self):
             self.set_y(-12)
             self.set_font("Helvetica", "I", 7)
             self.set_text_color(*_MUTED)
-            _cell(self, 0, 5, _safe_str(f"Quotation No: {_q.get('quotation_no', '')}  |  Page {self.page_no()}"), align="C", nl=True)
+            _cell(self, 0, 5,
+                  _safe_str(f"This is a computer-generated document.  \u00b7  {_q.get('quotation_no','')}  \u00b7  Page {self.page_no()}"),
+                  align="C", nl=True)
 
     pdf = PDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.add_page()
-    W = pdf.w - 28  # usable width (14 mm margins each side)
 
-    # ── Logo ─────────────────────────────────────────────────────────────────
-    _embed_logo(pdf, company.get("logo_base64", ""), x=14, y=12, h=18)
+    MARGIN    = 14
+    CONTENT_W = pdf.w - MARGIN * 2
 
-    # ── Company block ────────────────────────────────────────────────────────
-    pdf.set_xy(14, 32)
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.set_text_color(*BRAND_DARK)
-    _cell(pdf, 0, 6, _safe_str(company.get("name", "")), nl=True)
+    # ══════════════════════════════════════════════════════
+    # HEADER BAND — full-width coloured rectangle
+    # ══════════════════════════════════════════════════════
+    HEADER_H = 44
+    pdf.set_fill_color(*BRAND)
+    pdf.rect(0, 0, pdf.w, HEADER_H, "F")
 
-    pdf.set_font("Helvetica", "", 8)
-    pdf.set_text_color(*MUTED)
+    # Logo (top-left)
+    if company.get("logo_base64"):
+        _embed_logo(pdf, company["logo_base64"], x=MARGIN, y=7, h=16)
+        logo_offset = 20
+    else:
+        logo_offset = 0
 
-    if company.get("address"):
-        _mcell(pdf, W // 2, 4, _safe_str(company.get("address", "")))
+    # Company info — left column
+    pdf.set_xy(MARGIN + logo_offset, 7)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(*WHITE)
+    _cell(pdf, CONTENT_W * 0.55, 6, _safe_str(company.get("name", "")), nl=True)
+
+    pdf.set_x(MARGIN + logo_offset)
+    pdf.set_font("Helvetica", "", 7.5)
+    pdf.set_text_color(210, 225, 245)
+
+    addr_lines = _safe_str(company.get("address", ""))
+    if addr_lines:
+        _mcell(pdf, CONTENT_W * 0.55, 4, addr_lines)
+        pdf.set_x(MARGIN + logo_offset)
 
     contact_parts = []
-    if company.get("phone"):   contact_parts.append(f"Ph: {company['phone']}")
-    if company.get("email"):   contact_parts.append(f"E: {company['email']}")
-    if company.get("website"): contact_parts.append(company["website"])
+    if company.get("phone"): contact_parts.append(f"Ph: {company['phone']}")
+    if company.get("email"): contact_parts.append(company["email"])
     if contact_parts:
-        _cell(pdf, 0, 4, _safe_str("  |  ".join(contact_parts)), nl=True)
+        _cell(pdf, CONTENT_W * 0.55, 4, _safe_str("  \u00b7  ".join(contact_parts)), nl=True)
+        pdf.set_x(MARGIN + logo_offset)
+
     if company.get("gstin"):
-        _cell(pdf, 0, 4, _safe_str(f"GSTIN: {company['gstin']}"), nl=True)
+        pdf.set_font("Helvetica", "B", 7.5)
+        pdf.set_text_color(*WHITE)
+        _cell(pdf, CONTENT_W * 0.55, 4, _safe_str(f"GSTIN: {company['gstin']}"), nl=True)
+    if company.get("pan"):
+        pdf.set_font("Helvetica", "", 7.5)
+        pdf.set_text_color(210, 225, 245)
+        pdf.set_x(MARGIN + logo_offset)
+        _cell(pdf, CONTENT_W * 0.55, 4, _safe_str(f"PAN: {company['pan']}"), nl=True)
 
-    # ── QUOTATION title band ──────────────────────────────────────────────────
-    band_y = 62
-    pdf.set_fill_color(*BRAND)
-    pdf.rect(14, band_y, W, 10, "F")
-    pdf.set_xy(14, band_y + 1.5)
-    pdf.set_font("Helvetica", "B", 13)
+    # Document type — right column
+    right_col_x = MARGIN + CONTENT_W * 0.60
+    right_col_w = CONTENT_W * 0.40
+
+    pdf.set_xy(right_col_x, 7)
+    pdf.set_font("Helvetica", "B", 20)
     pdf.set_text_color(*WHITE)
-    _cell(pdf, W, 7, "QUOTATION", align="C", nl=True)
+    _cell(pdf, right_col_w, 10, title_label, align="R", nl=True)
 
-    # ── Meta row ─────────────────────────────────────────────────────────────
-    pdf.set_xy(14, band_y + 13)
-    pdf.set_font("Helvetica", "B", 8)
-    pdf.set_text_color(*DARK_TEXT)
-    _cell(pdf, W / 2, 5, _safe_str(f"Quotation No: {q.get('quotation_no', '')}"), nl=False)
-    _cell(pdf, W / 2, 5, _safe_str(f"Date: {q.get('date', '')}"), align="R", nl=True)
-    pdf.set_xy(14, pdf.get_y())
+    pdf.set_x(right_col_x)
     pdf.set_font("Helvetica", "", 8)
-    pdf.set_text_color(*MUTED)
-    _cell(pdf, 0, 4, _safe_str(f"Valid for {q.get('validity_days', 30)} days from date of issue"), nl=True)
+    pdf.set_text_color(210, 225, 245)
+    qtn_no = q.get("quotation_no", "")
+    _cell(pdf, right_col_w, 5, _safe_str(f"# {qtn_no}"), align="R", nl=True)
 
-    # ── Client block ──────────────────────────────────────────────────────────
-    cl_y = pdf.get_y() + 4
-    pdf.set_fill_color(*BRAND_LITE)
-    pdf.rect(14, cl_y, W, 26, "F")
-    pdf.set_xy(16, cl_y + 2)
-    pdf.set_font("Helvetica", "B", 8)
-    pdf.set_text_color(*BRAND)
-    _cell(pdf, 0, 5, "Prepared For:", nl=True)
-    pdf.set_x(16)
+    pdf.set_x(right_col_x)
+    _cell(pdf, right_col_w, 5, _safe_str(f"Date: {q.get('date', '')}"), align="R", nl=True)
+
+    # ══════════════════════════════════════════════════════
+    # PREPARED FOR / VALIDITY — two-column section
+    # ══════════════════════════════════════════════════════
+    info_y = HEADER_H + 5
+    pdf.set_xy(MARGIN, info_y)
+
+    bill_w = CONTENT_W * 0.56
+    pdf.set_font("Helvetica", "B", 7.5)
+    pdf.set_text_color(*MUTED)
+    _cell(pdf, bill_w, 5, "PREPARED FOR", nl=True)
+
+    pdf.set_x(MARGIN)
     pdf.set_font("Helvetica", "B", 11)
-    pdf.set_text_color(*DARK_TEXT)
-    _cell(pdf, 0, 5, _safe_str(q.get("client_name", "")), nl=True)
-    pdf.set_x(16)
+    pdf.set_text_color(*DARK)
+    _cell(pdf, bill_w, 6, _safe_str(q.get("client_name", ""), 50), nl=True)
+
+    pdf.set_x(MARGIN)
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(*MUTED)
     if q.get("client_address"):
-        _cell(pdf, 0, 4, _safe_str(q.get("client_address", ""), max_len=80), nl=True)
-    if q.get("client_email") or q.get("client_phone"):
-        pdf.set_x(16)
-        parts = []
-        if q.get("client_phone"): parts.append(q["client_phone"])
-        if q.get("client_email"): parts.append(q["client_email"])
-        _cell(pdf, 0, 4, _safe_str("  |  ".join(parts)), nl=True)
+        _mcell(pdf, bill_w, 4, _safe_str(q["client_address"], 90))
+        pdf.set_x(MARGIN)
 
-    # ── Subject ───────────────────────────────────────────────────────────────
-    pdf.set_xy(14, cl_y + 30)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(*DARK_TEXT)
-    subject = q.get("subject") or f"Quotation for {q.get('service', '')}"
-    _cell(pdf, 0, 5, _safe_str(f"Subject: {subject}"), nl=True)
-    pdf.ln(2)
-    pdf.set_font("Helvetica", "", 9)
-    _mcell(
-        pdf, W, 5,
-        "Dear Sir / Madam,\n"
-        "Thank you for your inquiry. We are pleased to submit our quotation as under:"
-    )
+    contact_c = []
+    if q.get("client_phone"): contact_c.append(q["client_phone"])
+    if q.get("client_email"): contact_c.append(q["client_email"])
+    if contact_c:
+        _cell(pdf, bill_w, 4, _safe_str("  \u00b7  ".join(contact_c)), nl=True)
 
-    # ── Scope of Work ─────────────────────────────────────────────────────────
-    scope = q.get("scope_of_work", []) or []
-    if scope:
-        pdf.ln(3)
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(*BRAND)
-        _cell(pdf, 0, 6, "Scope of Work / Services", nl=True)
-        pdf.set_draw_color(*BRAND)
-        pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
-        pdf.ln(1)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(*DARK_TEXT)
-        for item in scope:
-            _cell(pdf, 6, 5, "-", nl=False)
-            _cell(pdf, 0, 5, _safe_str(item), nl=True)
-
-    # ── Items Table ────────────────────────────────────────────────────────────
-    items = q.get("items", []) or []
-    if items:
-        pdf.ln(4)
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(*BRAND)
-        _cell(pdf, 0, 6, "Quotation Details", nl=True)
-        pdf.set_draw_color(*BRAND)
-        pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
-        pdf.ln(1)
-
-        sr_w     = 10
-        qty_w    = 18
-        unit_w   = 22
-        uprice_w = 30
-        amt_w    = 30
-        desc_w   = W - sr_w - qty_w - unit_w - uprice_w - amt_w
-
-        # Table header
-        pdf.set_fill_color(*BRAND)
-        pdf.set_text_color(*WHITE)
+    if q.get("client_gstin"):
+        pdf.set_x(MARGIN)
         pdf.set_font("Helvetica", "B", 8)
-        _cell(pdf, sr_w,     7, "Sr.",         align="C", fill=True, nl=False)
-        _cell(pdf, desc_w,   7, "Description",            fill=True, nl=False)
-        _cell(pdf, qty_w,    7, "Qty",         align="C", fill=True, nl=False)
-        _cell(pdf, unit_w,   7, "Unit",        align="C", fill=True, nl=False)
-        _cell(pdf, uprice_w, 7, "Unit Price",  align="R", fill=True, nl=False)
-        _cell(pdf, amt_w,    7, "Amount (Rs)", align="R", fill=True, nl=True)
+        pdf.set_text_color(*DARK)
+        _cell(pdf, bill_w, 4, _safe_str(f"GSTIN: {q['client_gstin']}"), nl=True)
 
-        # Table rows
-        for idx, item in enumerate(items, 1):
-            fill_color = BRAND_LITE if idx % 2 == 0 else WHITE
-            pdf.set_fill_color(*fill_color)
-            pdf.set_text_color(*DARK_TEXT)
-            pdf.set_font("Helvetica", "", 8)
+    # Right: Validity block
+    due_x = MARGIN + CONTENT_W * 0.62
+    due_w = CONTENT_W * 0.38
+    pdf.set_xy(due_x, info_y)
 
-            desc   = _safe_str(item.get("description", ""), max_len=55)
-            qty    = item.get("quantity", 1)
-            unit   = _safe_str(item.get("unit", "service"), max_len=10)
-            uprice = item.get("unit_price", 0)
-            amt    = item.get("amount", 0)
+    pdf.set_font("Helvetica", "B", 7.5)
+    pdf.set_text_color(*MUTED)
+    _cell(pdf, due_w, 5, "VALIDITY", align="R", nl=True)
 
-            _cell(pdf, sr_w,     7, str(idx),             align="C", fill=True, nl=False)
-            _cell(pdf, desc_w,   7, desc,                             fill=True, nl=False)
-            _cell(pdf, qty_w,    7, _safe_str(qty),       align="C", fill=True, nl=False)
-            _cell(pdf, unit_w,   7, unit,                 align="C", fill=True, nl=False)
-            _cell(pdf, uprice_w, 7, f"Rs. {uprice:,.2f}", align="R", fill=True, nl=False)
-            _cell(pdf, amt_w,    7, f"Rs. {amt:,.2f}",   align="R", fill=True, nl=True)
+    pdf.set_x(due_x)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(*DARK)
+    _cell(pdf, due_w, 7, _safe_str(f"{q.get('validity_days', 30)} Days"), align="R", nl=True)
 
-        non_amt_w = sr_w + desc_w + qty_w + unit_w + uprice_w
-
-        # Subtotal row
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.set_fill_color(*BRAND_LITE)
-        pdf.set_text_color(*DARK_TEXT)
-        _cell(pdf, non_amt_w, 7, "Sub Total", align="R", fill=True, nl=False)
-        _cell(pdf, amt_w, 7, f"Rs. {q.get('subtotal', 0):,.2f}", align="R", fill=True, nl=True)
-
-        # GST row
-        gst_rate = q.get("gst_rate", 18)
-        if gst_rate and float(gst_rate) > 0:
-            _cell(pdf, non_amt_w, 7, f"GST @ {gst_rate}%", align="R", fill=True, nl=False)
-            _cell(pdf, amt_w, 7, f"Rs. {q.get('gst_amount', 0):,.2f}", align="R", fill=True, nl=True)
-
-        # Total row
-        pdf.set_fill_color(*BRAND)
-        pdf.set_text_color(*WHITE)
-        pdf.set_font("Helvetica", "B", 10)
-        _cell(pdf, non_amt_w, 8, "TOTAL PAYABLE", align="R", fill=True, nl=False)
-        _cell(pdf, amt_w, 8, f"Rs. {q.get('total', 0):,.2f}", align="R", fill=True, nl=True)
-
-    # ── Terms & Conditions ────────────────────────────────────────────────────
-    pdf.ln(5)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_text_color(*BRAND)
-    _cell(pdf, 0, 6, "Terms & Conditions", nl=True)
-    pdf.set_draw_color(*BRAND)
-    pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
-    pdf.ln(1)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(*DARK_TEXT)
-
-    terms = []
-    if q.get("payment_terms"):
-        terms.append(f"1. Payment Terms: {q['payment_terms']}")
-    if q.get("timeline"):
-        terms.append(f"2. Timeline: {q['timeline']}")
-    terms.append(f"3. Validity of Quotation: {q.get('validity_days', 30)} days")
-    terms.append("4. Additional work will be charged separately.")
-    if q.get("advance_terms"):
-        terms.append(f"5. Advance: {q['advance_terms']}")
-    for i, t in enumerate(q.get("extra_terms", []) or [], len(terms) + 1):
-        terms.append(f"{i}. {t}")
-    for term in terms:
-        _mcell(pdf, W, 5, _safe_str(term))
-
-    # ── Bank Details ──────────────────────────────────────────────────────────
-    if company.get("bank_account_no") or company.get("bank_name"):
-        pdf.ln(4)
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(*BRAND)
-        _cell(pdf, 0, 6, "Bank Details", nl=True)
-        pdf.set_draw_color(*BRAND)
-        pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
-        pdf.ln(1)
-        pdf.set_text_color(*DARK_TEXT)
-        half = W / 2
-        for label, val in [
-            ("Account Name", company.get("bank_account_name", "")),
-            ("Bank Name",    company.get("bank_name", "")),
-            ("Account No",   company.get("bank_account_no", "")),
-            ("IFSC Code",    company.get("bank_ifsc", "")),
-        ]:
-            pdf.set_font("Helvetica", "B", 9)
-            _cell(pdf, half * 0.45, 5, _safe_str(f"{label}:"), nl=False)
-            pdf.set_font("Helvetica", "", 9)
-            _cell(pdf, half * 0.55, 5, _safe_str(val), nl=True)
-
-    # ── Signature ─────────────────────────────────────────────────────────────
-    pdf.ln(8)
-    sig_b64 = company.get("signature_base64", "")
-    if sig_b64:
-        sig_y = pdf.get_y()
-        _embed_logo(pdf, sig_b64, x=14, y=sig_y, h=14)
-        pdf.ln(16)
-    else:
-        pdf.ln(14)
-
-    pdf.set_draw_color(*BRAND)
-    pdf.line(14, pdf.get_y(), 80, pdf.get_y())
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(*DARK_TEXT)
-    _cell(pdf, 0, 5, _safe_str(f"For {company.get('name', 'Company')}"), nl=True)
+    pdf.set_x(due_x)
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(*MUTED)
-    _cell(pdf, 0, 4, "Authorized Signatory", nl=True)
-    pdf.ln(4)
+    _cell(pdf, due_w, 5, _safe_str(q.get("payment_terms", "As per terms")), align="R", nl=True)
+
+    if q.get("subject"):
+        pdf.set_x(due_x)
+        _cell(pdf, due_w, 5, _safe_str(f"Re: {q['subject']}", 50), align="R", nl=True)
+
+    is_inter = q.get("is_interstate", False)
+    supply_label = "Interstate (IGST)" if is_inter else "Intrastate (CGST+SGST)"
+    pdf.set_x(due_x)
+    _cell(pdf, due_w, 5, _safe_str(supply_label), align="R", nl=True)
+
+    # Divider
+    div_y = max(pdf.get_y(), info_y + 30) + 2
+    pdf.set_draw_color(*_lighten(BRAND, 0.70))
+    pdf.set_line_width(0.3)
+    pdf.line(MARGIN, div_y, MARGIN + CONTENT_W, div_y)
+    pdf.set_line_width(0.2)
+
+    # ══════════════════════════════════════════════════════
+    # ITEMS TABLE (same layout as invoice)
+    # ══════════════════════════════════════════════════════
+    table_y = div_y + 3
+    pdf.set_xy(MARGIN, table_y)
+
+    sr_w   = 7
+    hsn_w  = 20
+    qty_w  = 13
+    disc_w = 13
+    rate_w = 24
+    amt_w  = 26
+    tax_w  = 18
+    n_tax_cols = 1 if is_inter else 2
+    desc_w = CONTENT_W - sr_w - hsn_w - qty_w - disc_w - rate_w - tax_w * n_tax_cols - amt_w
+
+    def _th(txt, w, a="C"):
+        pdf.set_fill_color(*BRAND)
+        pdf.set_text_color(*WHITE)
+        pdf.set_font("Helvetica", "B", 7)
+        _cell(pdf, w, 7, txt, align=a, fill=True, nl=False)
+
+    _th("Sr",          sr_w)
+    _th("Description", desc_w, "L")
+    _th("HSN/SAC",     hsn_w)
+    _th("Qty",         qty_w)
+    _th("Disc%",       disc_w)
+    _th("Rate",        rate_w, "R")
+    if is_inter:
+        _th("IGST%",   tax_w)
+    else:
+        _th("CGST%",   tax_w)
+        _th("SGST%",   tax_w)
+    _th("Amount",      amt_w, "R")
+    _cell(pdf, 0, 0, "", nl=True)
+
+    items = q.get("items", []) or []
+
+    # Compute item-level GST
+    gst_rate = float(q.get("gst_rate", 18))
+    computed_items = []
+    for it in items:
+        qty   = float(it.get("quantity", 1))
+        price = float(it.get("unit_price", 0))
+        disc_pct = float(it.get("discount_pct", 0))
+        item_gst = float(it.get("gst_rate", gst_rate))
+        disc = price * qty * disc_pct / 100
+        taxable = round(price * qty - disc, 2)
+        if is_inter:
+            igst = round(taxable * item_gst / 100, 2)
+            computed_items.append({**it, "taxable_value": taxable, "cgst_rate": 0, "sgst_rate": 0,
+                "igst_rate": item_gst, "cgst_amount": 0, "sgst_amount": 0, "igst_amount": igst,
+                "total_amount": round(taxable + igst, 2), "discount_pct": disc_pct})
+        else:
+            half = item_gst / 2
+            cgst = round(taxable * half / 100, 2)
+            sgst = round(taxable * half / 100, 2)
+            computed_items.append({**it, "taxable_value": taxable, "cgst_rate": half, "sgst_rate": half,
+                "igst_rate": 0, "cgst_amount": cgst, "sgst_amount": sgst, "igst_amount": 0,
+                "total_amount": round(taxable + cgst + sgst, 2), "discount_pct": disc_pct})
+
+    for idx, it in enumerate(computed_items, 1):
+        row_bg = BL if idx % 2 == 0 else WHITE
+        pdf.set_fill_color(*row_bg)
+        pdf.set_text_color(*DARK)
+        pdf.set_font("Helvetica", "", 7.5)
+
+        _cell(pdf, sr_w,   7, str(idx),                                          align="C", fill=True, nl=False)
+        _cell(pdf, desc_w, 7, _safe_str(it.get("description", ""), 42),          align="L", fill=True, nl=False)
+        _cell(pdf, hsn_w,  7, _safe_str(str(it.get("hsn_sac", ""))[:12]),        align="C", fill=True, nl=False)
+        _cell(pdf, qty_w,  7, f"{float(it.get('quantity', 1)):.2f}",             align="C", fill=True, nl=False)
+        _cell(pdf, disc_w, 7, f"{float(it.get('discount_pct', 0)):.1f}%",        align="C", fill=True, nl=False)
+        _cell(pdf, rate_w, 7, f"Rs.{float(it.get('unit_price', 0)):,.2f}",       align="R", fill=True, nl=False)
+        if is_inter:
+            _cell(pdf, tax_w, 7, f"{float(it.get('igst_rate', 0)):.1f}%",        align="C", fill=True, nl=False)
+        else:
+            _cell(pdf, tax_w, 7, f"{float(it.get('cgst_rate', 0)):.1f}%",        align="C", fill=True, nl=False)
+            _cell(pdf, tax_w, 7, f"{float(it.get('sgst_rate', 0)):.1f}%",        align="C", fill=True, nl=False)
+        _cell(pdf, amt_w,  7, f"Rs.{float(it.get('total_amount', 0)):,.2f}",     align="R", fill=True, nl=True)
+
+        # Sub-detail line
+        sub_parts = []
+        if it.get("item_details"): sub_parts.append(_safe_str(it["item_details"]))
+        if it.get("unit"):         sub_parts.append(_safe_str(it["unit"]))
+        if sub_parts:
+            pdf.set_x(MARGIN + sr_w)
+            pdf.set_font("Helvetica", "I", 6.5)
+            pdf.set_text_color(*MUTED)
+            pdf.set_fill_color(*row_bg)
+            sub_w = desc_w + hsn_w + qty_w + disc_w + rate_w + tax_w * n_tax_cols + amt_w
+            _cell(pdf, sub_w, 4, _safe_str("  ".join(sub_parts)), align="L", fill=True, nl=True)
+
+    # ══════════════════════════════════════════════════════
+    # TOTALS BLOCK
+    # ══════════════════════════════════════════════════════
+    subtotal      = sum(float(it.get("unit_price", 0)) * float(it.get("quantity", 1)) for it in computed_items)
+    total_discount = sum(float(it.get("unit_price", 0)) * float(it.get("quantity", 1)) * float(it.get("discount_pct", 0)) / 100 for it in computed_items)
+    total_taxable = sum(float(it.get("taxable_value", 0)) for it in computed_items)
+    total_cgst    = sum(float(it.get("cgst_amount", 0)) for it in computed_items)
+    total_sgst    = sum(float(it.get("sgst_amount", 0)) for it in computed_items)
+    total_igst    = sum(float(it.get("igst_amount", 0)) for it in computed_items)
+    total_gst     = round(total_cgst + total_sgst + total_igst, 2)
+    grand_total   = round(total_taxable + total_gst, 2)
+
+    def _trow(label, value, bold=False, strike=False):
+        bg = BRAND if bold else BL
+        tc = WHITE if bold else DARK
+        pdf.set_fill_color(*bg)
+        pdf.set_text_color(*tc)
+        pdf.set_font("Helvetica", "B" if bold else "", 8 if not bold else 9)
+        _cell(pdf, CONTENT_W - amt_w, 7, label, align="R", fill=True, nl=False)
+        prefix = "-Rs." if strike else "Rs."
+        val_str = f"{prefix}{abs(float(value)):,.2f}"
+        _cell(pdf, amt_w, 7, val_str, align="R", fill=True, nl=True)
+
+    pdf.set_x(MARGIN)
+    _trow("Subtotal", subtotal)
+    if total_discount > 0:
+        _trow("Discount", total_discount, strike=True)
+    _trow("Taxable Value", total_taxable)
+
+    tt = total_taxable or 1
+    if is_inter:
+        igst_pct = round(total_igst / tt * 100, 1)
+        _trow(f"IGST ({igst_pct:.1f}%)", total_igst)
+    else:
+        cgst_pct = round(total_cgst / tt * 100, 1)
+        sgst_pct = round(total_sgst / tt * 100, 1)
+        _trow(f"CGST ({cgst_pct:.1f}%)", total_cgst)
+        _trow(f"SGST ({sgst_pct:.1f}%)", total_sgst)
+
+    _trow("GRAND TOTAL", grand_total, bold=True)
+
+    # Amount in words
+    pdf.set_x(MARGIN)
     pdf.set_font("Helvetica", "I", 8)
-    _cell(pdf, 0, 4, "We look forward to working with you.", nl=True)
+    pdf.set_text_color(*MUTED)
+    _cell(pdf, CONTENT_W, 5, _safe_str(_amount_in_words(grand_total)), nl=True)
 
-    if q.get("notes"):
-        pdf.ln(4)
-        pdf.set_font("Helvetica", "I", 8)
-        pdf.set_text_color(*MUTED)
-        _mcell(pdf, W, 4, _safe_str(f"Note: {q['notes']}"))
+    # ══════════════════════════════════════════════════════
+    # GST SUMMARY
+    # ══════════════════════════════════════════════════════
+    pdf.ln(5)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*BRAND)
+    _cell(pdf, 0, 5, "GST Summary", nl=True)
+    pdf.set_draw_color(*_lighten(BRAND, 0.70))
+    pdf.line(MARGIN, pdf.get_y(), MARGIN + CONTENT_W, pdf.get_y())
+    pdf.ln(1)
 
-    return _safe_pdf_output(pdf)
+    from typing import Dict as _Dict
+    gst_sum: _Dict[float, _Dict[str, float]] = {}
+    for it in computed_items:
+        r = float(it.get("gst_rate", it.get("cgst_rate", 0) * 2 if not is_inter else it.get("igst_rate", 0)))
+        if is_inter:
+            r = float(it.get("igst_rate", gst_rate))
+        else:
+            r = float(it.get("cgst_rate", 0)) * 2
+        if r not in gst_sum:
+            gst_sum[r] = {"taxable": 0.0, "cgst": 0.0, "sgst": 0.0, "igst": 0.0}
+        gst_sum[r]["taxable"] += float(it.get("taxable_value", 0))
+        gst_sum[r]["cgst"]    += float(it.get("cgst_amount",   0))
+        gst_sum[r]["sgst"]    += float(it.get("sgst_amount",   0))
+        gst_sum[r]["igst"]    += float(it.get("igst_amount",   0))
 
+    g_w = CONTENT_W / 5
+    pdf.set_fill_color(*BRAND)
+    pdf.set_text_color(*WHITE)
+    pdf.set_font("Helvetica", "B", 7.5)
+    for col_hdr in ["GST Rate", "Taxable Amt", "CGST", "SGST / IGST", "Total GST"]:
+        _cell(pdf, g_w, 6, col_hdr, align="C", fill=True, nl=False)
+    _cell(pdf, 0, 0, "", nl=True)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# PDF BUILDER – CHECKLIST
-# ═══════════════════════════════════════════════════════════════════════════════
+    pdf.set_font("Helvetica", "", 7.5)
+    for i, (rate, row) in enumerate(sorted(gst_sum.items())):
+        pdf.set_fill_color(*(BL if i % 2 == 0 else WHITE))
+        pdf.set_text_color(*DARK)
+        gst_tot = row["cgst"] + row["sgst"] + row["igst"]
+        _cell(pdf, g_w, 6, f"{rate:.1f}%",              align="C", fill=True, nl=False)
+        _cell(pdf, g_w, 6, f"Rs.{row['taxable']:,.2f}", align="C", fill=True, nl=False)
+        _cell(pdf, g_w, 6, f"Rs.{row['cgst']:,.2f}",    align="C", fill=True, nl=False)
+        _cell(pdf, g_w, 6, f"Rs.{row['sgst'] or row['igst']:,.2f}", align="C", fill=True, nl=False)
+        _cell(pdf, g_w, 6, f"Rs.{gst_tot:,.2f}",        align="C", fill=True, nl=True)
+
+    # ══════════════════════════════════════════════════════
+    # BANK DETAILS
+    # ══════════════════════════════════════════════════════
+    if company.get("bank_account_no") or company.get("bank_name"):
+        pdf.ln(5)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*BRAND)
+        _cell(pdf, 0, 5, "Bank Details for Payment", nl=True)
+        pdf.set_draw_color(*_lighten(BRAND, 0.70))
+        pdf.line(MARGIN, pdf.get_y(), MARGIN + CONTENT_W, pdf.get_y())
+        pdf.ln(1)
+        half_w = CONTENT_W / 2
+        for lbl, val in [
+            ("Account Name", company.get("bank_account_name", "")),
+            ("Bank Name",    company.get("bank_name",          "")),
+            ("Account No",   company.get("bank_account_no",    "")),
+            ("IFSC Code",    company.get("bank_ifsc",          "")),
+        ]:
+            pdf.set_font("Helvetica", "B", 8); pdf.set_text_color(*DARK)
+            _cell(pdf, half_w * 0.42, 5, _safe_str(f"{lbl}:"), nl=False)
+            pdf.set_font("Helvetica", "", 8)
+            _cell(pdf, half_w * 0.58, 5, _safe_str(val), nl=True)
+
+    # ══════════════════════════════════════════════════════
+    # TERMS & NOTES
+    # ══════════════════════════════════════════════════════
+    terms_text = "\n".join(q.get("extra_terms", []))
+    notes_text = q.get("notes", "")
+    if terms_text or notes_text:
+        pdf.ln(5)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*BRAND)
+        _cell(pdf, 0, 5, "Terms & Notes", nl=True)
+        pdf.set_draw_color(*_lighten(BRAND, 0.70))
+        pdf.line(MARGIN, pdf.get_y(), MARGIN + CONTENT_W, pdf.get_y())
+        pdf.ln(1)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(*DARK)
+        if terms_text:
+            _mcell(pdf, CONTENT_W, 4, _safe_str(terms_text))
+        if notes_text:
+            _mcell(pdf, CONTENT_W, 4, _safe_str(f"Note: {notes_text}"))
+
+    # ══════════════════════════════════════════════════════
+    # SIGNATURE — bottom-right
+    # ══════════════════════════════════════════════════════
+    pdf.ln(8)
+    sig_y   = pdf.get_y()
+    sig_x   = MARGIN + CONTENT_W - 58
+    sig_w   = 55
+
+    sig_b64 = company.get("signature_base64", "")
+    if sig_b64:
+        _embed_logo(pdf, sig_b64, x=sig_x, y=sig_y, h=14)
+        sig_y += 16
+
+    pdf.set_draw_color(*BRAND)
+    pdf.set_line_width(0.4)
+    pdf.line(sig_x, sig_y, sig_x + sig_w, sig_y)
+    pdf.set_line_width(0.2)
+
+    pdf.set_xy(sig_x, sig_y + 1)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(*DARK)
+    _cell(pdf, sig_w, 5, _safe_str(f"For {company.get('name', '')}"), align="C", nl=True)
+
+    pdf.set_x(sig_x)
+    pdf.set_font("Helvetica", "", 7)
+    pdf.set_text_color(*MUTED)
+    _cell(pdf, sig_w, 4, "Authorised Signatory", align="C", nl=True)
+
+    # ── Output
+    buf = BytesIO()
+    buf.write(pdf.output())
+    buf.seek(0)
+    return buf
 
 def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
     BRAND      = _extract_dominant_color_from_b64(company.get("logo_base64", ""))
@@ -1141,6 +1351,13 @@ async def delete_quotation(quotation_id: str, current_user: User = Depends(get_c
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/quotations/{quotation_id}/pdf")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PDF EXPORT ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/quotations/{quotation_id}/pdf")
 async def export_quotation_pdf(
     quotation_id: str,
     current_user: User = Depends(get_current_user)
@@ -1165,7 +1382,12 @@ async def export_quotation_pdf(
         raise HTTPException(500, f"PDF generation failed: {str(e)}")
 
     pdf_bytes = pdf_buf.getvalue()
-    filename = f"quotation_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
+
+    # Company name prefix in filename
+    company_prefix = (company.get("name", "") or "").strip().replace(" ", "_").replace("/", "_").replace("\\", "_")
+    safe_qtn_no = (q.get("quotation_no", quotation_id) or quotation_id).replace("/", "-").replace("\\", "-")
+    filename = f"{company_prefix}_Quotation_{safe_qtn_no}.pdf" if company_prefix else f"Quotation_{safe_qtn_no}.pdf"
+
     return StreamingResponse(
         iter([pdf_bytes]),
         media_type="application/pdf",
@@ -1202,7 +1424,11 @@ async def export_checklist_pdf(
         raise HTTPException(500, f"PDF generation failed: {str(e)}")
 
     pdf_bytes = pdf_buf.getvalue()
-    filename = f"checklist_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
+
+    company_prefix = (company.get("name", "") or "").strip().replace(" ", "_").replace("/", "_").replace("\\", "_")
+    safe_qtn_no = (q.get("quotation_no", quotation_id) or quotation_id).replace("/", "-").replace("\\", "-")
+    filename = f"{company_prefix}_Checklist_{safe_qtn_no}.pdf" if company_prefix else f"Checklist_{safe_qtn_no}.pdf"
+
     return StreamingResponse(
         iter([pdf_bytes]),
         media_type="application/pdf",
@@ -1246,13 +1472,17 @@ async def send_quotation_email(
             "SMTP not configured. Please add SMTP settings to the company profile."
         )
 
+    # Company name prefix in filename
+    company_prefix = (company.get("name", "") or "").strip().replace(" ", "_").replace("/", "_").replace("\\", "_")
+    safe_qtn_no = (q.get("quotation_no", quotation_id) or quotation_id).replace("/", "-").replace("\\", "-")
+
     try:
         if req.pdf_type == "checklist":
             pdf_buf  = _build_checklist_pdf(q, company)
-            filename = f"checklist_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
+            filename = f"{company_prefix}_Checklist_{safe_qtn_no}.pdf" if company_prefix else f"Checklist_{safe_qtn_no}.pdf"
         else:
             pdf_buf  = _build_quotation_pdf(q, company)
-            filename = f"quotation_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
+            filename = f"{company_prefix}_Quotation_{safe_qtn_no}.pdf" if company_prefix else f"Quotation_{safe_qtn_no}.pdf"
     except Exception as e:
         logger.error(f"PDF build failed for email: {e}", exc_info=True)
         raise HTTPException(500, f"PDF generation failed: {str(e)}")
