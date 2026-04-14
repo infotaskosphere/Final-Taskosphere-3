@@ -246,7 +246,9 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
         customColor: invData.invoice_custom_color || invSettings.custom_color || '#0D3B66',
       });
 
-      const filename = `Invoice_${(invoiceNo || '').replace(/[\/\s]/g, '_')}.pdf`;
+      const companySlug = (baseCompany?.name || '').replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_');
+      const invoiceSlug = (invoiceNo || '').replace(/[/\s]/g, '_');
+      const filename = companySlug ? `${companySlug}_${invoiceSlug}.pdf` : `Invoice_${invoiceSlug}.pdf`;
 
       // 4. PRIMARY: Try backend HTML-to-PDF endpoint (uses headless browser = identical to print)
       //    This is the PREFERRED path — produces 100% identical output to browser print
@@ -2052,9 +2054,13 @@ const InlineStatusDropdown = ({ inv, onStatusChange, isDark }) => {
     e.stopPropagation();
     if (!open && triggerRef.current) {
       const r = triggerRef.current.getBoundingClientRect();
-      // Position dropdown below the button, right-aligned, nudged inside viewport
+      // Approximate height of dropdown (header + N rows)
+      const dropHeight = INLINE_STATUSES.length * 38 + 38;
+      const spaceBelow = window.innerHeight - r.bottom;
+      // Flip above the trigger if not enough space below
+      const topPos = spaceBelow < dropHeight + 8 ? r.top - dropHeight - 4 : r.bottom + 4;
       setDropPos({
-        top:  r.bottom + 4,
+        top:  Math.max(4, topPos),
         left: Math.max(8, r.right - 160),   // 160 = w-40
       });
     }
@@ -3331,13 +3337,17 @@ const InvoiceDetailPanel = ({
   companies // ✅ REQUIRED for DriveUploadBtn
 }) => {
   const [payments, setPayments] = useState([]);
+  const [statusHistory, setStatusHistory] = useState([]);
 
   useEffect(() => {
     if (open && invoice) {
-      api
-        .get('/payments', { params: { invoice_id: invoice.id } })
+      api.get('/payments', { params: { invoice_id: invoice.id } })
         .then(r => setPayments(r.data || []))
         .catch(() => setPayments([]));
+      // Fetch full invoice to get status_history
+      api.get(`/invoices/${invoice.id}`)
+        .then(r => setStatusHistory(r.data?.status_history || []))
+        .catch(() => setStatusHistory([]));
     }
   }, [open, invoice?.id]);
 
@@ -3460,6 +3470,47 @@ const InvoiceDetailPanel = ({
                 </div>
               </div>
             </div>
+
+            {/* STATUS HISTORY TIMELINE */}
+            {statusHistory.length > 0 && (
+              <div className={`border rounded-2xl overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                <div className={`px-5 py-3 border-b ${isDark ? 'bg-slate-700/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+                  <p className={`text-xs font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    Status Change Log
+                  </p>
+                </div>
+                <div className="px-5 py-4 space-y-3">
+                  {[...statusHistory].reverse().map((entry, i) => {
+                    const sm = STATUS_META[entry.status] || STATUS_META.draft;
+                    return (
+                      <div key={i} className="flex items-start gap-3">
+                        <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${sm.dot}`} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${sm.bg} ${sm.text}`}>
+                              {sm.label}
+                            </span>
+                            {entry.changed_by && (
+                              <span className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                by {entry.changed_by}
+                              </span>
+                            )}
+                          </div>
+                          <p className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                            {entry.changed_at
+                              ? new Date(entry.changed_at).toLocaleString('en-IN', {
+                                  day: '2-digit', month: 'short', year: 'numeric',
+                                  hour: '2-digit', minute: '2-digit',
+                                })
+                              : '—'}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
           </div>
         </div>
@@ -3900,7 +3951,14 @@ const fetchAll = useCallback(async () => {
       if (!win) { toast.error('Allow pop-ups to download PDF'); return; }
       win.document.write(html);
       win.document.close();
-      win.onload = () => { win.focus(); win.print(); };
+      win.onload = () => {
+        // Set document title to drive browser PDF filename: CompanyName_InvoiceNo
+        const companySlug = (company?.name || '').replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_');
+        const invoiceSlug = (invData.invoice_no || '').replace(/[\/\s]/g, '_');
+        win.document.title = companySlug ? `${companySlug}_${invoiceSlug}` : invoiceSlug;
+        win.focus();
+        win.print();
+      };
       toast.success(`PDF ready: ${inv.invoice_no}`);
     } catch (err) {
       console.error('PDF error:', err);
