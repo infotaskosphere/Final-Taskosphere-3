@@ -1572,11 +1572,122 @@ function GoalSettingsModal({ goal, onSave, onClose, isDark, hoursWorkedToday, ta
 // ═════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═════════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EDIT ATTENDANCE MODAL — Admin / permitted users can edit past attendance
+// ═══════════════════════════════════════════════════════════════════════════════
+function EditAttendanceModal({ record, isOpen, status, setStatus, note, setNote, onClose, onSave, loading, isDark }) {
+  if (!isOpen || !record) return null;
+  const D = isDark
+    ? { bg: '#0f172a', raised: '#1e293b', border: '#334155', text: '#f1f5f9', muted: '#94a3b8' }
+    : { bg: '#ffffff', raised: '#f8fafc', border: '#e2e8f0', text: '#1e293b', muted: '#64748b' };
+
+  const STATUS_OPTIONS = [
+    { value: 'present',  label: 'Present',        emoji: '\u2705', color: '#22c55e' },
+    { value: 'absent',   label: 'Absent',         emoji: '\u274c', color: '#ef4444' },
+    { value: 'half_day', label: 'Half Day',       emoji: '\ud83c\udf17', color: '#f59e0b' },
+    { value: 'leave',    label: 'Leave',          emoji: '\ud83c\udfd6\ufe0f', color: '#f97316' },
+    { value: 'late',     label: 'Late',           emoji: '\u23f0', color: '#eab308' },
+    { value: 'wfh',      label: 'Work From Home', emoji: '\ud83c\udfe0', color: '#3b82f6' },
+  ];
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+        style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+          className="w-full max-w-md rounded-2xl border shadow-2xl overflow-hidden"
+          style={{ backgroundColor: D.bg, borderColor: D.border }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: D.border }}>
+            <div>
+              <h2 className="text-lg font-bold flex items-center gap-2" style={{ color: D.text }}>
+                <Edit2 className="w-4 h-4 text-blue-500" /> Edit Attendance
+              </h2>
+              <p className="text-xs mt-0.5" style={{ color: D.muted }}>
+                {record.date}{record.user_id ? ` \u00b7 User: ${record.user_id.slice(0, 8)}...` : ''}
+              </p>
+            </div>
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">
+              <X className="w-4 h-4" style={{ color: D.muted }} />
+            </button>
+          </div>
+
+          <div className="p-5 space-y-4">
+            <div>
+              <label className="text-sm font-semibold mb-2 block" style={{ color: D.text }}>Status</label>
+              <div className="grid grid-cols-3 gap-2">
+                {STATUS_OPTIONS.map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setStatus(opt.value)}
+                    className="flex flex-col items-center gap-1 p-2.5 rounded-xl border-2 transition-all text-xs font-semibold"
+                    style={{
+                      borderColor: status === opt.value ? opt.color : D.border,
+                      backgroundColor: status === opt.value
+                        ? isDark ? `${opt.color}22` : `${opt.color}15`
+                        : 'transparent',
+                      color: status === opt.value ? opt.color : D.muted,
+                    }}
+                  >
+                    <span className="text-lg">{opt.emoji}</span>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-sm font-semibold mb-1.5 block" style={{ color: D.text }}>
+                Admin Note <span className="font-normal text-xs" style={{ color: D.muted }}>(optional)</span>
+              </label>
+              <textarea
+                value={note}
+                onChange={e => setNote(e.target.value)}
+                placeholder="Reason for editing this record..."
+                rows={3}
+                className="w-full px-3 py-2 rounded-xl border text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"
+                style={{ backgroundColor: D.raised, borderColor: D.border, color: D.text }}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t" style={{ borderColor: D.border }}>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 rounded-lg text-sm font-semibold border transition hover:shadow-sm"
+              style={{ borderColor: D.border, color: D.muted }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onSave}
+              disabled={loading || !status}
+              className="px-4 py-2 rounded-lg text-sm font-bold text-white transition hover:shadow-md disabled:opacity-50 flex items-center gap-1.5"
+              style={{ backgroundColor: '#2563eb' }}
+            >
+              {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+              Save Changes
+            </button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 export default function Attendance() {
   const { user, hasPermission, logout } = useAuth();
   const isDark = useDark();
   const isAdmin         = user?.role === 'admin';
   const canViewRankings = hasPermission('can_view_staff_rankings');
+  const canEditAttendance = isAdmin || hasPermission('can_edit_attendance');
 
   // ── Cross-visibility ───────────────────────────────────────────────────────
   // view_other_attendance is an array of user IDs that this user can view
@@ -1647,6 +1758,11 @@ export default function Attendance() {
   const [editName,           setEditName]           = useState('');
   const [editDate,           setEditDate]           = useState('');
   const [editLoading,        setEditLoading]        = useState(false);
+  const [editAttendanceRecord, setEditAttendanceRecord] = useState(null);
+  const [editAttendanceStatus, setEditAttendanceStatus] = useState('');
+  const [editAttendanceNote,   setEditAttendanceNote]   = useState('');
+  const [editAttendanceLoading, setEditAttendanceLoading] = useState(false);
+  const [showEditAttendanceModal, setShowEditAttendanceModal] = useState(false);
   const pdfInputRef    = useRef(null);
   const trademarkPdfRef = useRef(null);
 
@@ -2172,6 +2288,37 @@ export default function Attendance() {
     } catch (err) { toast.error(`PDF extraction failed: ${err.message}`); }
     finally { setPdfImporting(false); }
   }, []);
+
+  const openEditAttendance = useCallback((record) => {
+    setEditAttendanceRecord(record);
+    setEditAttendanceStatus(record.status === 'present' && record.punch_in
+      ? (record.is_half_day ? 'half_day' : 'present')
+      : record.status || 'absent');
+    setEditAttendanceNote(record.edit_note || record.admin_note || '');
+    setShowEditAttendanceModal(true);
+  }, []);
+
+  const handleEditAttendanceSave = useCallback(async () => {
+    if (!editAttendanceRecord) return;
+    setEditAttendanceLoading(true);
+    try {
+      const payload = {
+        date: editAttendanceRecord.date,
+        user_id: editAttendanceRecord.user_id || user?.id,
+        status: editAttendanceStatus,
+        note: editAttendanceNote.trim(),
+      };
+      await api.patch('/attendance/edit-record', payload);
+      toast.success('Attendance updated to "' + editAttendanceStatus + '" for ' + editAttendanceRecord.date);
+      setShowEditAttendanceModal(false);
+      setEditAttendanceRecord(null);
+      await fetchData();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Failed to update attendance');
+    } finally {
+      setEditAttendanceLoading(false);
+    }
+  }, [editAttendanceRecord, editAttendanceStatus, editAttendanceNote, user?.id, fetchData]);
 
   const handleEditHolidaySave = useCallback(async () => {
     if (!editName.trim() || !editDate) { toast.error('Name and date required'); return; }
@@ -2813,6 +2960,22 @@ export default function Attendance() {
           />
         )}
       </AnimatePresence>
+
+      {/* ── Edit Attendance Modal ──────────────────────────────────────────── */}
+      {showEditAttendanceModal && (
+        <EditAttendanceModal
+          record={editAttendanceRecord}
+          isOpen={showEditAttendanceModal}
+          status={editAttendanceStatus}
+          setStatus={setEditAttendanceStatus}
+          note={editAttendanceNote}
+          setNote={setEditAttendanceNote}
+          onClose={() => { setShowEditAttendanceModal(false); setEditAttendanceRecord(null); }}
+          onSave={handleEditAttendanceSave}
+          loading={editAttendanceLoading}
+          isDark={isDark}
+        />
+      )}
 
       {/* ── Layout Customizer Panel ─────────────────────────────────────────── */}
       <LayoutCustomizer
@@ -4029,6 +4192,20 @@ export default function Attendance() {
                               {record.is_late && !isAbsent && (
                                 <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded text-red-500"
                                   style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>Late</span>
+                              )}
+                              {canEditAttendance && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); openEditAttendance(record); }}
+                                  className="flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded transition-all hover:shadow-sm active:scale-95"
+                                  style={{
+                                    color: isDark ? '#93c5fd' : '#2563eb',
+                                    backgroundColor: isDark ? 'rgba(59,130,246,0.15)' : '#eff6ff',
+                                    border: '1px solid ' + (isDark ? 'rgba(59,130,246,0.3)' : '#bfdbfe'),
+                                  }}
+                                  title="Edit attendance record"
+                                >
+                                  <Edit2 className="w-2.5 h-2.5" /> Edit
+                                </button>
                               )}
                             </div>
                           </div>
