@@ -8,6 +8,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Edit, Trash2, Download, Search, Building2, FileText,
   ChevronRight, ChevronLeft, Check, X, Loader2, Receipt,
@@ -119,7 +120,7 @@ const StatusChip = ({ status }) => {
   );
 };
 
-// ── Inline status dropdown (same pattern as invoices) ─────────────────────────
+// ── Inline status dropdown ─────────────────────────────────────────────────────
 const INLINE_QTN_STATUSES = ['draft', 'sent', 'accepted', 'rejected'];
 
 const InlineQuotationStatusDropdown = ({ qtn, onStatusChange, isDark }) => {
@@ -414,7 +415,6 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
               </div>
             ))}
 
-            {/* ── FIX 1: GST Toggle — properly aligned ── */}
             <div className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-slate-50">
               <div>
                 <p className="text-xs font-semibold text-slate-700">GST Registered</p>
@@ -1506,6 +1506,115 @@ export default function Quotations() {
     </div>
   );
 
+  // ── Shared sub-components for list view ───────────────────────────────────
+  const QtnRow = ({ q, srNo }) => (
+    <tr
+      className={`border-b last:border-0 transition-colors cursor-pointer ${isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50'}`}
+      onClick={() => { setDetailQuotation(q); setIsDetailOpen(true); }}
+    >
+      <td className="w-1 p-0" style={{ width: 4, padding: 0 }}>
+        <div style={{ width: 4, minHeight: 48, background: STATUS_META[q.status]?.hex || '#94A3B8', borderRadius: '0 4px 4px 0' }} />
+      </td>
+      <td className={`px-3 py-3.5 text-xs font-mono w-10 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{srNo}</td>
+      <td className="px-4 py-3.5">
+        <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{q.quotation_no}</p>
+        <p className="text-[10px] text-slate-400 mt-0.5">Valid {q.validity_days || 30}d</p>
+      </td>
+      <td className="px-4 py-3.5">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+            style={{ background: avatarGrad(q.client_name) }}>
+            {(q.client_name || '?').charAt(0).toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <p className={`text-sm font-medium truncate max-w-[180px] ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{q.client_name || '—'}</p>
+            {q.client_phone && <p className="text-[10px] text-slate-400 flex items-center gap-1"><Phone className="h-2.5 w-2.5" />{q.client_phone}</p>}
+          </div>
+        </div>
+      </td>
+      <td className="px-4 py-3.5">
+        <p className={`text-sm truncate max-w-[140px] ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{q.service}</p>
+        {getCompany(q.company_id) && (
+          <p className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
+            <Building2 className="h-2.5 w-2.5" />{getCompany(q.company_id)?.name}
+          </p>
+        )}
+      </td>
+      <td className="px-4 py-3.5">
+        <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{q.date}</p>
+      </td>
+      <td className="px-4 py-3.5">
+        <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(q.total || 0)}</p>
+      </td>
+      <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
+        <InlineQuotationStatusDropdown qtn={q} onStatusChange={handleStatusChange} isDark={isDark} />
+      </td>
+      <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-1">
+          <button onClick={() => { setEditingQuotation(q); setIsManagerOpen(true); }} title="Edit"
+            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}>
+            <Edit className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={() => handleDownloadPdf(q.id, q.quotation_no, q.company_id)} title="Download PDF"
+            disabled={downloading === q.id + '-pdf'}
+            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}>
+            {downloading === q.id + '-pdf' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+          </button>
+          <button onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no, q.company_id)} title="Checklist PDF"
+            disabled={downloading === q.id + '-checklist'}
+            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}>
+            {downloading === q.id + '-checklist' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCheck className="h-3.5 w-3.5" />}
+          </button>
+          <button onClick={() => handleConvertToInvoice(q.id)} title="Convert to Invoice"
+            disabled={convertingId === q.id}
+            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-purple-400 hover:bg-purple-900/30' : 'text-slate-400 hover:text-purple-600 hover:bg-purple-50'}`}>
+            {convertingId === q.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />}
+          </button>
+          <button onClick={() => handleDelete(q.id)} title="Delete"
+            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+
+  const TableHead = () => (
+    <thead>
+      <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
+        <th className="w-1 p-0" style={{ width: 4, padding: 0 }} />
+        <th className={`px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sr</th>
+        {['Quotation', 'Client', 'Service', 'Date', 'Amount', 'Status', 'Actions'].map(h => (
+          <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
+        ))}
+      </tr>
+    </thead>
+  );
+
+  const PaginationBar = ({ page, totalPages, setPage, accentClass, bgClass }) => totalPages <= 1 ? null : (
+    <div className={`flex items-center justify-between px-5 py-3 border-t ${isDark ? 'border-slate-700 bg-slate-800/60' : `border-slate-100 ${bgClass}`}`}>
+      <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+        Page {page} of {totalPages}
+      </span>
+      <div className="flex items-center gap-1">
+        <button disabled={page === 1} onClick={() => setPage(p => Math.max(1, p - 1))}
+          className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors disabled:opacity-30 ${isDark ? 'hover:bg-slate-700 text-slate-300' : `hover:${accentClass} text-slate-600`}`}>‹</button>
+        {Array.from({ length: totalPages }, (_, i) => i + 1)
+          .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
+          .reduce((acc, p, i, arr) => { if (i > 0 && p - arr[i-1] > 1) acc.push('…'); acc.push(p); return acc; }, [])
+          .map((p, i) => p === '…' ? (
+            <span key={`e${i}`} className="px-1 text-xs text-slate-400">…</span>
+          ) : (
+            <button key={p} onClick={() => setPage(p)}
+              className={`w-7 h-7 rounded-lg text-xs font-bold transition-colors ${page === p ? 'text-white shadow-sm' : `${isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600'}`}`}
+              style={page === p ? { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` } : {}}>{p}</button>
+          ))}
+        <button disabled={page === totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+          className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors disabled:opacity-30 ${isDark ? 'hover:bg-slate-700 text-slate-300' : `hover:${accentClass} text-slate-600`}`}>›</button>
+      </div>
+    </div>
+  );
+
   // ══════════════════════════════════════════════════════════════════════════
   // RENDER
   // ══════════════════════════════════════════════════════════════════════════
@@ -1625,7 +1734,7 @@ export default function Quotations() {
         </div>
       </div>
 
-      {/* ── LOADING / EMPTY ───────────────────────────────────────────────── */}
+      {/* ── LOADING / EMPTY / CONTENT ─────────────────────────────────────── */}
       {loading ? (
         <div className={`rounded-2xl border p-16 text-center ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <MiniLoader height={120} />
@@ -1650,183 +1759,60 @@ export default function Quotations() {
         </div>
 
       ) : viewMode === 'list' ? (
-        /* ─── LIST VIEW — invoice-style split sections ───────────────────── */
+        /* ─── LIST VIEW ──────────────────────────────────────────────────── */
         <div className="space-y-4">
-
-          {/* helper to render one row */}
-          {(() => {
-            const QtnRow = ({ q, srNo }) => (
-              <tr
-                className={`border-b last:border-0 transition-colors cursor-pointer ${isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50'}`}
-                onClick={() => { setDetailQuotation(q); setIsDetailOpen(true); }}
-              >
-                {/* colour strip */}
-                <td className="w-1 p-0" style={{ width: 4, padding: 0 }}>
-                  <div style={{ width: 4, minHeight: 48, background: STATUS_META[q.status]?.hex || '#94A3B8', borderRadius: '0 4px 4px 0' }} />
-                </td>
-                <td className={`px-3 py-3.5 text-xs font-mono w-10 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{srNo}</td>
-                {/* quotation no */}
-                <td className="px-4 py-3.5">
-                  <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{q.quotation_no}</p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">Valid {q.validity_days || 30}d</p>
-                </td>
-                {/* client */}
-                <td className="px-4 py-3.5">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                      style={{ background: avatarGrad(q.client_name) }}>
-                      {(q.client_name || '?').charAt(0).toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <p className={`text-sm font-medium truncate max-w-[180px] ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{q.client_name || '—'}</p>
-                      {q.client_phone && <p className="text-[10px] text-slate-400 flex items-center gap-1"><Phone className="h-2.5 w-2.5" />{q.client_phone}</p>}
-                    </div>
-                  </div>
-                </td>
-                {/* service */}
-                <td className="px-4 py-3.5">
-                  <p className={`text-sm truncate max-w-[140px] ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{q.service}</p>
-                  {getCompany(q.company_id) && (
-                    <p className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
-                      <Building2 className="h-2.5 w-2.5" />{getCompany(q.company_id)?.name}
-                    </p>
-                  )}
-                </td>
-                {/* date */}
-                <td className="px-4 py-3.5">
-                  <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{q.date}</p>
-                </td>
-                {/* amount */}
-                <td className="px-4 py-3.5">
-                  <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(q.total || 0)}</p>
-                </td>
-                {/* status */}
-                <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
-                  <InlineQuotationStatusDropdown qtn={q} onStatusChange={handleStatusChange} isDark={isDark} />
-                </td>
-                {/* actions */}
-                <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => { setEditingQuotation(q); setIsManagerOpen(true); }} title="Edit"
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}>
-                      <Edit className="h-3.5 w-3.5" />
-                    </button>
-                    <button onClick={() => handleDownloadPdf(q.id, q.quotation_no, q.company_id)} title="Download PDF"
-                      disabled={downloading === q.id + '-pdf'}
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}>
-                      {downloading === q.id + '-pdf' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-                    </button>
-                    <button onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no, q.company_id)} title="Checklist PDF"
-                      disabled={downloading === q.id + '-checklist'}
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}>
-                      {downloading === q.id + '-checklist' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCheck className="h-3.5 w-3.5" />}
-                    </button>
-                    <button onClick={() => handleConvertToInvoice(q.id)} title="Convert to Invoice"
-                      disabled={convertingId === q.id}
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-purple-400 hover:bg-purple-900/30' : 'text-slate-400 hover:text-purple-600 hover:bg-purple-50'}`}>
-                      {convertingId === q.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />}
-                    </button>
-                    <button onClick={() => handleDelete(q.id)} title="Delete"
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            );
-
-            const TableHead = () => (
-              <thead>
-                <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
-                  <th className="w-1 p-0" style={{ width: 4, padding: 0 }} />
-                  <th className={`px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sr</th>
-                  {['Quotation', 'Client', 'Service', 'Date', 'Amount', 'Status', 'Actions'].map(h => (
-                    <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-            );
-
-            const PaginationBar = ({ page, totalPages, setPage, accentClass, bgClass }) => totalPages <= 1 ? null : (
-              <div className={`flex items-center justify-between px-5 py-3 border-t ${isDark ? 'border-slate-700 bg-slate-800/60' : `border-slate-100 ${bgClass}`}`}>
-                <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  Page {page} of {totalPages}
+          {/* ── ACTIVE section (draft + sent) ── */}
+          {pendingQuotations.length > 0 && (
+            <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              <div className={`flex items-center gap-3 px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-700/30' : 'border-slate-100 bg-amber-50/60'}`}>
+                <div className="w-2 h-6 rounded-full" style={{ background: 'linear-gradient(180deg, #1F6FB2, #F59E0B)' }} />
+                <Clock className="h-4 w-4 text-amber-500" />
+                <span className={`text-sm font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Active</span>
+                <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${isDark ? 'bg-amber-900/40 text-amber-300' : 'bg-amber-100 text-amber-700'}`}>{pendingQuotations.length}</span>
+                <span className={`ml-auto text-xs font-bold ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
+                  {fmtC(pendingQuotations.reduce((s, q) => s + (q.total || 0), 0))} pending
                 </span>
-                <div className="flex items-center gap-1">
-                  <button disabled={page === 1} onClick={() => setPage(p => Math.max(1, p - 1))}
-                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors disabled:opacity-30 ${isDark ? 'hover:bg-slate-700 text-slate-300' : `hover:${accentClass} text-slate-600`}`}>‹</button>
-                  {Array.from({ length: totalPages }, (_, i) => i + 1)
-                    .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
-                    .reduce((acc, p, i, arr) => { if (i > 0 && p - arr[i-1] > 1) acc.push('…'); acc.push(p); return acc; }, [])
-                    .map((p, i) => p === '…' ? (
-                      <span key={`e${i}`} className="px-1 text-xs text-slate-400">…</span>
-                    ) : (
-                      <button key={p} onClick={() => setPage(p)}
-                        className={`w-7 h-7 rounded-lg text-xs font-bold transition-colors ${page === p ? 'text-white shadow-sm' : `${isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600'}`}`}
-                        style={page === p ? { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` } : {}}>{p}</button>
-                    ))}
-                  <button disabled={page === totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors disabled:opacity-30 ${isDark ? 'hover:bg-slate-700 text-slate-300' : `hover:${accentClass} text-slate-600`}`}>›</button>
-                </div>
               </div>
-            );
+              <div className="overflow-x-auto">
+                <table className="w-full" style={{ minWidth: 700 }}>
+                  <TableHead />
+                  <tbody>
+                    {paginatedPending.map((q, idx) => (
+                      <QtnRow key={q.id} q={q} srNo={(pendingPage - 1) * SECTION_PAGE_SIZE + idx + 1} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <PaginationBar page={pendingPage} totalPages={totalPendingPages} setPage={setPendingPage} accentClass="bg-amber-100" bgClass="bg-amber-50/40" />
+            </div>
+          )}
 
-            return (
-              <>
-                {/* ── ACTIVE section (draft + sent) ── */}
-                {pendingQuotations.length > 0 && (
-                  <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                    <div className={`flex items-center gap-3 px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-700/30' : 'border-slate-100 bg-amber-50/60'}`}>
-                      <div className="w-2 h-6 rounded-full" style={{ background: 'linear-gradient(180deg, #1F6FB2, #F59E0B)' }} />
-                      <Clock className="h-4 w-4 text-amber-500" />
-                      <span className={`text-sm font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Active</span>
-                      <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${isDark ? 'bg-amber-900/40 text-amber-300' : 'bg-amber-100 text-amber-700'}`}>{pendingQuotations.length}</span>
-                      <span className={`ml-auto text-xs font-bold ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
-                        {fmtC(pendingQuotations.reduce((s, q) => s + (q.total || 0), 0))} pending
-                      </span>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full" style={{ minWidth: 700 }}>
-                        <TableHead />
-                        <tbody>
-                          {paginatedPending.map((q, idx) => (
-                            <QtnRow key={q.id} q={q} srNo={(pendingPage - 1) * SECTION_PAGE_SIZE + idx + 1} />
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    <PaginationBar page={pendingPage} totalPages={totalPendingPages} setPage={setPendingPage} accentClass="bg-amber-100" bgClass="bg-amber-50/40" />
-                  </div>
-                )}
-
-                {/* ── CLOSED section (accepted + rejected) ── */}
-                {closedQuotations.length > 0 && (
-                  <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                    <div className={`flex items-center gap-3 px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-700/30' : 'border-slate-100 bg-emerald-50/60'}`}>
-                      <div className="w-2 h-6 rounded-full bg-emerald-500" />
-                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                      <span className={`text-sm font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Closed</span>
-                      <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${isDark ? 'bg-emerald-900/40 text-emerald-300' : 'bg-emerald-100 text-emerald-700'}`}>{closedQuotations.length}</span>
-                      <span className={`ml-auto text-xs font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                        {fmtC(closedQuotations.filter(q => q.status === 'accepted').reduce((s, q) => s + (q.total || 0), 0))} accepted
-                      </span>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full" style={{ minWidth: 700 }}>
-                        <TableHead />
-                        <tbody>
-                          {paginatedClosed.map((q, idx) => (
-                            <QtnRow key={q.id} q={q} srNo={(closedPage - 1) * SECTION_PAGE_SIZE + idx + 1} />
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    <PaginationBar page={closedPage} totalPages={totalClosedPages} setPage={setClosedPage} accentClass="bg-emerald-100" bgClass="bg-emerald-50/40" />
-                  </div>
-                )}
-              </>
-            );
-          })()}
+          {/* ── CLOSED section (accepted + rejected) ── */}
+          {closedQuotations.length > 0 && (
+            <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              <div className={`flex items-center gap-3 px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-700/30' : 'border-slate-100 bg-emerald-50/60'}`}>
+                <div className="w-2 h-6 rounded-full bg-emerald-500" />
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                <span className={`text-sm font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Closed</span>
+                <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${isDark ? 'bg-emerald-900/40 text-emerald-300' : 'bg-emerald-100 text-emerald-700'}`}>{closedQuotations.length}</span>
+                <span className={`ml-auto text-xs font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                  {fmtC(closedQuotations.filter(q => q.status === 'accepted').reduce((s, q) => s + (q.total || 0), 0))} accepted
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full" style={{ minWidth: 700 }}>
+                  <TableHead />
+                  <tbody>
+                    {paginatedClosed.map((q, idx) => (
+                      <QtnRow key={q.id} q={q} srNo={(closedPage - 1) * SECTION_PAGE_SIZE + idx + 1} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <PaginationBar page={closedPage} totalPages={totalClosedPages} setPage={setClosedPage} accentClass="bg-emerald-100" bgClass="bg-emerald-50/40" />
+            </div>
+          )}
+        </div>
 
       ) : (
         /* ─── BOARD VIEW (Kanban) ─────────────────────────────────────────── */
@@ -1902,7 +1888,7 @@ export default function Quotations() {
                           <SelectContent>{Object.entries(STATUS_META).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
                         </Select>
 
-                        {/* Board card action buttons with tooltips */}
+                        {/* Board card action buttons */}
                         <div className="flex flex-wrap gap-1 mb-1.5">
                           <Button variant="outline" size="sm" title="Download PDF"
                             onClick={() => handleDownloadPdf(q.id, q.quotation_no)}
