@@ -1150,6 +1150,7 @@ export default function Tasks() {
 
   const stats = {
     myTask:     myTasks.length,
+    assignedByMe: scopedTasks.filter(t => t.created_by === user?.id).length,
     total:      scopedTasks.length,
     todo:       scopedTasks.filter(t => t.status === 'pending').length,
     inProgress: scopedTasks.filter(t => t.status === 'in_progress').length,
@@ -1226,7 +1227,7 @@ export default function Tasks() {
     const creatorId = filterAssignedByMe ? user?.id : (filterCreatedBy !== 'all' ? filterCreatedBy : null);
     const assignedByCreator = creatorId
       ? list.filter(t => t.created_by === creatorId && t.assigned_to !== creatorId)
-      : list.filter(t => t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id));
+      : list.filter(t => t.created_by === user?.id);
 
     return {
       total:          list.length,
@@ -1714,7 +1715,7 @@ export default function Tasks() {
             id: 'mine',
             label: buildLabel('Assigned By', 'mine'),
             value: filteredStats.myTask,
-            total: stats.myTask,
+            total: stats.assignedByMe,
             accent: isDark ? '#60a5fa' : COLORS.deepBlue,
             icon: SlidersHorizontal,
             active: showMyTasksOnly,
