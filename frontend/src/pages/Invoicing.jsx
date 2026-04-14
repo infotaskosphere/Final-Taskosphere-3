@@ -2746,6 +2746,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   const navigate = useNavigate();
   const defaultForm = {
     invoice_type: 'tax_invoice', company_id: '', client_id: '', lead_id: '',
+    invoice_no: '',
     client_name: '', client_address: '', client_email: '', client_phone: '', client_gstin: '', client_state: '',
     invoice_date: format(new Date(), 'yyyy-MM-dd'),
     due_date: '',  // intentionally empty — user sets this manually or via quick-fill buttons
@@ -2880,7 +2881,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     const company = (companies || []).find(c => c.id === form.company_id) || {};
     const previewInv = {
       ...form,
-      invoice_no: editingInv?.invoice_no || 'PREVIEW-001',
+      invoice_no: form.invoice_no || editingInv?.invoice_no || 'PREVIEW-001',
       invoice_date: form.invoice_date || format(new Date(), 'yyyy-MM-dd'),
       due_date: form.due_date || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
       client_name: form.client_name || 'Client Name'
@@ -2904,12 +2905,12 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     setLoading(true);
     try {
       const payload = { ...form, ...totals };
-      if (editingInv) await api.put(`/invoices/${editingInv.id}`, payload);
+      if (editingInv?.id) await api.put(`/invoices/${editingInv.id}`, payload);
       else {
         await api.post('/invoices', payload);
         try { localStorage.removeItem(INV_DRAFT_KEY); } catch {}
       }
-      toast.success(editingInv ? 'Invoice updated successfully' : 'Invoice created successfully');
+      toast.success(editingInv?.id ? 'Invoice updated successfully' : 'Invoice created successfully');
       saveItemMemory(form.items);
       // Auto-sync new client data back to client record (non-fatal)
       if (form.client_id) {
@@ -2953,7 +2954,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
             <div className="relative flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center"><Receipt className="h-5 w-5 text-white" /></div>
-                <div><p className="text-white/50 text-[10px] uppercase tracking-widest">{editingInv ? `Edit · ${editingInv.invoice_no}` : 'New Document'}</p><h2 className="text-white font-bold text-xl">{editingInv ? 'Edit Invoice' : 'Create Invoice / Estimate'}</h2></div>
+                <div><p className="text-white/50 text-[10px] uppercase tracking-widest">{editingInv?.id ? `Edit · ${editingInv.invoice_no}` : editingInv ? 'Duplicate Document' : 'New Document'}</p><h2 className="text-white font-bold text-xl">{editingInv?.id ? 'Edit Invoice' : editingInv ? 'Duplicate Invoice' : 'Create Invoice / Estimate'}</h2></div>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <Select value={form.invoice_type} onValueChange={v => setField('invoice_type', v)}>
@@ -2992,15 +2993,17 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                     </div>
                     <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Invoice Details</h3>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                     <div>
                       <label className={labelCls}>Company Profile *</label>
                       <Select value={form.company_id} onValueChange={v => {
                         const s = getInvSettings(v);
                         const co = (companies || []).find(c => c.id === v);
+                        const nextNo = !editingInv?.id ? (getNextInvoiceNumber(v) || '') : '';
                         setForm(p => ({
                           ...p,
                           company_id: v,
+                          invoice_no: (!editingInv?.id && !p.invoice_no) ? nextNo : p.invoice_no,
                           supply_state:        s.supply_state        || p.supply_state,
                           notes:               s.default_notes       || p.notes,
                           terms_conditions:    s.default_terms       || p.terms_conditions,
@@ -3022,6 +3025,23 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                         <SelectContent>{(companies || []).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
                       </Select>
                       {!form.company_id && <p className="text-[10px] text-amber-500 mt-1">⚠ Required to generate invoice</p>}
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className={labelCls + " mb-0"}>Invoice Number *</label>
+                        {form.company_id && !editingInv?.id && (
+                          <button type="button"
+                            onClick={() => setField('invoice_no', getNextInvoiceNumber(form.company_id) || '')}
+                            className="text-[10px] font-semibold text-blue-500 hover:text-blue-400 transition-colors flex items-center gap-1">
+                            <RefreshCw className="h-2.5 w-2.5" /> Auto
+                          </button>
+                        )}
+                      </div>
+                      <Input className={`${inputCls} font-mono`}
+                        placeholder="e.g. INV-2024-001"
+                        value={form.invoice_no || ''}
+                        onChange={e => setField('invoice_no', e.target.value)} />
+                      <p className={`text-[10px] mt-1 ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>Editable — auto-filled from settings</p>
                     </div>
                     <div>
                       <label className={labelCls}>Reference No. <span className="text-slate-400 font-normal normal-case">(PO / Order no.)</span></label>
@@ -3265,7 +3285,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                           const company = (companies || []).find(c => c.id === form.company_id) || {};
                           const previewInv = {
                             ...form,
-                            invoice_no: editingInv?.invoice_no || 'PREVIEW-001',
+                            invoice_no: form.invoice_no || editingInv?.invoice_no || 'PREVIEW-001',
                             invoice_date: form.invoice_date || format(new Date(), 'yyyy-MM-dd'),
                             due_date: form.due_date || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
                             client_name: form.client_name || 'Client Name'
@@ -3333,6 +3353,8 @@ const InvoiceDetailPanel = ({
   onDelete,
   onDownloadPdf,
   onSendEmail,
+  onDuplicate,
+  onSaleReturn,
   isDark,
   companies // ✅ REQUIRED for DriveUploadBtn
 }) => {
@@ -3360,7 +3382,7 @@ const InvoiceDetailPanel = ({
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent
         hideClose
-        className={`max-w-2xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${
+        className={`max-w-2xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 [&>button.absolute]:hidden ${
           isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
         }`}
       >
@@ -3534,6 +3556,46 @@ const InvoiceDetailPanel = ({
           >
             <Edit className="h-3.5 w-3.5" /> Edit
           </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              onClose();
+              onDuplicate?.(invoice);
+            }}
+            className="rounded-xl text-xs h-9 gap-1.5"
+          >
+            <Copy className="h-3.5 w-3.5" /> Duplicate
+          </Button>
+
+          {/* Sale Return: Credit Note & Debit Note — only for Tax Invoices */}
+          {invoice.invoice_type === 'tax_invoice' && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  onClose();
+                  onSaleReturn?.(invoice, 'credit_note');
+                }}
+                className={`rounded-xl text-xs h-9 gap-1.5 ${isDark ? 'border-purple-700 text-purple-400 hover:bg-purple-900/30' : 'border-purple-200 text-purple-600 hover:bg-purple-50'}`}
+              >
+                <ArrowRightLeft className="h-3.5 w-3.5" /> Credit Note
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  onClose();
+                  onSaleReturn?.(invoice, 'debit_note');
+                }}
+                className={`rounded-xl text-xs h-9 gap-1.5 ${isDark ? 'border-amber-700 text-amber-400 hover:bg-amber-900/30' : 'border-amber-200 text-amber-600 hover:bg-amber-50'}`}
+              >
+                <ArrowRightLeft className="h-3.5 w-3.5" /> Debit Note
+              </Button>
+            </>
+          )}
 
           <Button
             variant="outline"
@@ -3910,6 +3972,41 @@ const fetchAll = useCallback(async () => {
   }, [selectedIds, fetchAll]);
 
   const handleEdit = useCallback((inv) => { setEditingInv(inv); setFormOpen(true); }, []);
+
+  // Duplicate: clone the invoice (no id) → opens form in "new" mode pre-filled with cloned data
+  const handleDuplicateInv = useCallback((inv) => {
+    const { id, invoice_no, created_at, updated_at, status_history, amount_paid, amount_due, ...rest } = inv;
+    setEditingInv({
+      ...rest,
+      id: null,
+      invoice_no: '',          // will be auto-filled when company is selected
+      status: 'draft',
+      amount_paid: 0,
+      invoice_date: format(new Date(), 'yyyy-MM-dd'),
+      due_date: '',
+    });
+    setFormOpen(true);
+    toast.info('Duplicated — edit details and save as new invoice', { duration: 2500 });
+  }, []);
+
+  // Sale Return: open form pre-filled as Credit Note / Debit Note referencing the original invoice
+  const handleSaleReturn = useCallback((inv, returnType) => {
+    const { id, invoice_no, created_at, updated_at, status_history, amount_paid, amount_due, ...rest } = inv;
+    const label = returnType === 'credit_note' ? 'Credit Note' : 'Debit Note';
+    setEditingInv({
+      ...rest,
+      id: null,
+      invoice_no: '',
+      invoice_type: returnType,
+      reference_no: invoice_no,   // reference the original invoice
+      status: 'draft',
+      amount_paid: 0,
+      invoice_date: format(new Date(), 'yyyy-MM-dd'),
+      due_date: '',
+    });
+    setFormOpen(true);
+    toast.info(`${label} pre-filled from ${invoice_no} — review and save`, { duration: 2500 });
+  }, []);
 
   const handleDelete = useCallback(async (inv) => {
     if (!window.confirm(`Delete invoice ${inv.invoice_no}?`)) return;
@@ -4484,6 +4581,8 @@ const fetchAll = useCallback(async () => {
         onDelete={handleDelete}
         onDownloadPdf={handleDownloadPdf}
         onSendEmail={handleSendEmail}
+        onDuplicate={handleDuplicateInv}
+        onSaleReturn={handleSaleReturn}
         isDark={isDark}
         companies={companies}
       />
