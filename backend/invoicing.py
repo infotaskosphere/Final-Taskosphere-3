@@ -2104,8 +2104,11 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(get_c
     # Use frontend-supplied number if non-empty; otherwise auto-generate
     requested_no = (data.invoice_no or "").strip()
     if requested_no:
-        # Duplicate check: reject if already in use
-        conflict = await db.invoices.find_one({"invoice_no": requested_no})
+        # Duplicate check: reject if already in use (scoped to same company)
+        dup_filter = {"invoice_no": requested_no}
+        if data.company_id:
+            dup_filter["company_id"] = data.company_id
+        conflict = await db.invoices.find_one(dup_filter)
         if conflict:
             raise HTTPException(400, f"Invoice number '{requested_no}' is already in use. Please choose a different number.")
         inv_no = requested_no
@@ -2293,11 +2296,15 @@ async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(g
     new_invoice_no = data.get("invoice_no", "").strip() if data.get("invoice_no") else ""
     old_invoice_no = ex.get("invoice_no", "")
     if new_invoice_no and new_invoice_no != old_invoice_no:
-        # Check for duplicate: reject if another invoice already has this number
-        conflict = await db.invoices.find_one({
+        # Check for duplicate: reject if another invoice already has this number (scoped to same company)
+        dup_filter = {
             "invoice_no": new_invoice_no,
             "id": {"$ne": inv_id}
-        })
+        }
+        company_id = ex.get("company_id")
+        if company_id:
+            dup_filter["company_id"] = company_id
+        conflict = await db.invoices.find_one(dup_filter)
         if conflict:
             raise HTTPException(400, f"Invoice number '{new_invoice_no}' is already in use by another invoice")
         # Allow the update — will be included in the $set below
@@ -2311,6 +2318,7 @@ async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(g
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     data = _compute_invoice_totals(data)
     data["amount_due"] = round(data["grand_total"] - ex.get("amount_paid", 0), 2)
+    logger.info(f"UPDATE invoice {inv_id}: $set keys = {list(data.keys())}, invoice_no in payload = {'invoice_no' in data}, invoice_no value = {data.get('invoice_no', 'NOT PRESENT')}")
     await db.invoices.update_one({"id": inv_id}, {"$set": data})
     return await db.invoices.find_one({"id": inv_id}, {"_id": 0})
 
