@@ -246,9 +246,9 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
         customColor: invData.invoice_custom_color || invSettings.custom_color || '#0D3B66',
       });
 
-      const companySlug = (baseCompany?.name || '').replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_');
+      const clientSlug = (invData.client_name || '').replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_');
       const invoiceSlug = (invoiceNo || '').replace(/[/\s]/g, '_');
-      const filename = companySlug ? `${companySlug}_${invoiceSlug}.pdf` : `Invoice_${invoiceSlug}.pdf`;
+      const filename = clientSlug ? `${clientSlug}_${invoiceSlug}.pdf` : `Invoice_${invoiceSlug}.pdf`;
 
       // 4. PRIMARY: Try backend HTML-to-PDF endpoint (uses headless browser = identical to print)
       //    This is the PREFERRED path — produces 100% identical output to browser print
@@ -4049,10 +4049,10 @@ const fetchAll = useCallback(async () => {
       win.document.write(html);
       win.document.close();
       win.onload = () => {
-        // Set document title to drive browser PDF filename: CompanyName_InvoiceNo
-        const companySlug = (company?.name || '').replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_');
+        // Set document title to drive browser PDF filename: ClientName_InvoiceNo
+        const clientSlug = (invData.client_name || '').replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_');
         const invoiceSlug = (invData.invoice_no || '').replace(/[\/\s]/g, '_');
-        win.document.title = companySlug ? `${companySlug}_${invoiceSlug}` : invoiceSlug;
+        win.document.title = clientSlug ? `${clientSlug}_${invoiceSlug}` : invoiceSlug;
         win.focus();
         win.print();
       };
