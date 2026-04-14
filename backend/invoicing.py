@@ -312,14 +312,44 @@ def _perm(user: User) -> bool:
 # ═══════════════════════════════════════════════════════════
 
 async def _next_invoice_no(prefix: str = "INV", company_id: str = None) -> str:
+    """
+    Generate the next available invoice number for the given prefix + FY.
+    Uses MAX-based (not count-based) numbering so renames/deletes never
+    cause collisions: scans the highest sequential number already issued
+    and increments from there. Also retries if the candidate is taken.
+    """
     today = date.today()
     fy_start = today.year if today.month >= 4 else today.year - 1
     fy_label = f"{fy_start % 100:02d}-{(fy_start + 1) % 100:02d}"
-    query: dict = {"invoice_no": {"$regex": f"^{prefix}-"}}
+
+    # Regex: e.g.  "INV-0042/26-27"  →  capture group 1 = "0042"
+    pattern = rf"^{re.escape(prefix)}-(\d+)/{re.escape(fy_label)}$"
+
+    query: dict = {"invoice_no": {"$regex": f"^{re.escape(prefix)}-"}}
     if company_id:
         query["company_id"] = company_id
-    count = await db.invoices.count_documents(query)
-    return f"{prefix}-{count + 1:04d}/{fy_label}"
+
+    # Pull all matching invoice numbers in one shot (projection only)
+    cursor = db.invoices.find(query, {"_id": 0, "invoice_no": 1})
+    max_seq = 0
+    async for doc in cursor:
+        m = re.match(pattern, doc.get("invoice_no", ""))
+        if m:
+            seq = int(m.group(1))
+            if seq > max_seq:
+                max_seq = seq
+
+    # Find next candidate that is not already taken (handles any edge-case gaps)
+    candidate_seq = max_seq + 1
+    for _ in range(50):  # safety: try up to 50 slots
+        candidate = f"{prefix}-{candidate_seq:04d}/{fy_label}"
+        taken = await db.invoices.find_one({"invoice_no": candidate})
+        if not taken:
+            return candidate
+        candidate_seq += 1
+
+    # Absolute fallback — uuid suffix, will never collide
+    return f"{prefix}-{candidate_seq:04d}-{str(uuid.uuid4())[:4].upper()}/{fy_label}"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -987,6 +1017,7 @@ class InvoiceCreate(BaseModel):
     client_phone: str = ""
     client_gstin: str = ""
     client_state: str = ""
+    invoice_no: Optional[str] = None   # if provided by frontend, use it (after dup-check); else auto-generate
     invoice_date: str = ""
     due_date: str = ""
     supply_state: str = ""
@@ -2069,11 +2100,22 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(get_c
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     now = datetime.now(timezone.utc).isoformat()
     prefix = {"proforma": "PRO", "estimate": "EST", "credit_note": "CN", "debit_note": "DN"}.get(data.invoice_type, "INV")
-    inv_no = await _next_invoice_no(prefix, data.company_id)
+
+    # Use frontend-supplied number if non-empty; otherwise auto-generate
+    requested_no = (data.invoice_no or "").strip()
+    if requested_no:
+        # Duplicate check: reject if already in use
+        conflict = await db.invoices.find_one({"invoice_no": requested_no})
+        if conflict:
+            raise HTTPException(400, f"Invoice number '{requested_no}' is already in use. Please choose a different number.")
+        inv_no = requested_no
+    else:
+        inv_no = await _next_invoice_no(prefix, data.company_id)
+
     inv_date = data.invoice_date or date.today().isoformat()
     due_date = data.due_date or (date.today() + timedelta(days=30)).isoformat()
     raw = {"id": str(uuid.uuid4()), "invoice_no": inv_no, "invoice_date": inv_date, "due_date": due_date,
-           **data.model_dump(), "amount_paid": 0.0, "amount_due": 0.0, "pdf_drive_link": "",
+           **data.model_dump(exclude={"invoice_no"}), "amount_paid": 0.0, "amount_due": 0.0, "pdf_drive_link": "",
            "created_by": current_user.id, "created_at": now, "updated_at": now}
     raw = _compute_invoice_totals(raw)
     raw["amount_due"] = raw["grand_total"]
