@@ -7,7 +7,7 @@ import api from '@/lib/api';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import { motion, AnimatePresence } from 'framer-motion';
+import { format } from 'date-fns';
 import {
   Plus, Edit, Trash2, Download, Search, Building2, FileText,
   ChevronRight, ChevronLeft, Check, X, Loader2, Receipt,
@@ -16,7 +16,7 @@ import {
   Send, MessageCircle, Settings, Eye, ArrowRight, Users,
   Printer, LayoutGrid, List, Filter, TrendingUp, AlertCircle,
   CheckCircle2, Clock, ArrowUpRight, RefreshCw, FileCheck,
-  DollarSign, BarChart3
+  DollarSign, BarChart3, ChevronDown, CheckSquare, Copy,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
 import { generateQuotationHTML } from './QuotationTemplates';
 
 // ─── Brand Colors ─────────────────────────────────────────────────────────────
@@ -115,6 +116,85 @@ const StatusChip = ({ status }) => {
     <span className={`inline-flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1 rounded-full ${m.bg} ${m.text} whitespace-nowrap`}>
       <span className={`w-1.5 h-1.5 rounded-full ${m.dot}`} />{m.label}
     </span>
+  );
+};
+
+// ── Inline status dropdown (same pattern as invoices) ─────────────────────────
+const INLINE_QTN_STATUSES = ['draft', 'sent', 'accepted', 'rejected'];
+
+const InlineQuotationStatusDropdown = ({ qtn, onStatusChange, isDark }) => {
+  const [open, setOpen]       = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const [dropPos, setDropPos] = React.useState({ top: 0, left: 0 });
+  const triggerRef            = React.useRef(null);
+  const m = STATUS_META[qtn?.status] || STATUS_META.draft;
+
+  const handleToggle = (e) => {
+    e.stopPropagation();
+    if (!open && triggerRef.current) {
+      const r = triggerRef.current.getBoundingClientRect();
+      const dropHeight = INLINE_QTN_STATUSES.length * 38 + 38;
+      const spaceBelow = window.innerHeight - r.bottom;
+      const topPos = spaceBelow < dropHeight + 8 ? r.top - dropHeight - 4 : r.bottom + 4;
+      setDropPos({ top: Math.max(4, topPos), left: Math.max(8, r.right - 160) });
+    }
+    setOpen(v => !v);
+  };
+
+  const handleSelect = async (newStatus) => {
+    if (newStatus === qtn.status) { setOpen(false); return; }
+    setLoading(true);
+    try {
+      await api.put(`/quotations/${qtn.id}`, { status: newStatus, status_history_entry: { status: newStatus, changed_at: new Date().toISOString() } });
+      onStatusChange(qtn.id, newStatus);
+      toast.success(`Status → ${STATUS_META[newStatus]?.label || newStatus}`);
+    } catch {
+      toast.error('Failed to update status');
+    } finally {
+      setLoading(false);
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div onClick={e => e.stopPropagation()}>
+      <button ref={triggerRef} type="button" onClick={handleToggle}
+        className={`inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full transition-all
+          hover:ring-2 hover:ring-offset-1 hover:ring-current cursor-pointer select-none
+          ${m.bg} ${m.text} whitespace-nowrap`}
+        title="Click to change status">
+        {loading ? <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+          : <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${m.dot}`} />}
+        {m.label}
+        <ChevronDown className={`w-2.5 h-2.5 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-[9998]" onClick={() => setOpen(false)} />
+          <div className={`fixed z-[9999] w-40 rounded-xl border shadow-2xl overflow-hidden
+            ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-200'}`}
+            style={{ top: dropPos.top, left: dropPos.left }}>
+            <div className={`px-3 py-2 border-b text-[9px] font-bold uppercase tracking-widest
+              ${isDark ? 'border-slate-700 text-slate-500' : 'border-slate-100 text-slate-400'}`}>
+              Change Status
+            </div>
+            {INLINE_QTN_STATUSES.map(s => {
+              const sm = STATUS_META[s];
+              const isCurrent = qtn.status === s;
+              return (
+                <button key={s} type="button" onClick={() => handleSelect(s)}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-[11px] font-semibold transition-colors
+                    ${isCurrent ? `${sm.bg} ${sm.text}` : isDark ? 'text-slate-300 hover:bg-slate-700/70' : 'text-slate-600 hover:bg-slate-50'}`}>
+                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${sm.dot}`} />
+                  <span className="flex-1 text-left">{sm.label}</span>
+                  {isCurrent && <Check className="w-3 h-3 opacity-70" />}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
   );
 };
 
@@ -1091,6 +1171,107 @@ const QuotationDetailPanel = ({
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
+// QUOTATION SETTINGS MODAL
+// ════════════════════════════════════════════════════════════════════════════════
+const QTN_SETTINGS_KEY = 'taskosphere_quotation_settings';
+const getQtnSettings = () => {
+  try { return JSON.parse(localStorage.getItem(QTN_SETTINGS_KEY) || '{}'); } catch { return {}; }
+};
+
+function QuotationSettings({ open, onClose, isDark }) {
+  const defaults = { default_gst_rate: 18, default_validity_days: 30, default_payment_terms: '', default_notes: '', default_advance_terms: '' };
+  const [form, setForm] = React.useState({ ...defaults, ...getQtnSettings() });
+  const [saving, setSaving] = React.useState(false);
+
+  const handleSave = () => {
+    setSaving(true);
+    try {
+      localStorage.setItem(QTN_SETTINGS_KEY, JSON.stringify(form));
+      toast.success('Quotation settings saved!');
+      onClose();
+    } catch { toast.error('Failed to save settings'); }
+    finally { setSaving(false); }
+  };
+
+  const inputCls = `h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`;
+  const labelCls = 'text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block';
+  const sectionCls = `border rounded-2xl p-5 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`;
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className={`max-w-xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 [&>button.absolute]:hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <DialogTitle className="sr-only">Quotation Settings</DialogTitle>
+        <DialogDescription className="sr-only">Configure default quotation values</DialogDescription>
+        <div className="px-6 py-5 flex items-center justify-between flex-shrink-0"
+          style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center">
+              <Settings className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-white font-bold text-lg leading-tight">Quotation Settings</h2>
+              <p className="text-blue-200 text-xs">Configure defaults for new quotations</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center">
+            <X className="h-4 w-4 text-white" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          <div className={sectionCls}>
+            <h3 className={`text-sm font-semibold mb-4 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Default Values</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className={labelCls}>Default GST Rate (%)</label>
+                <Input type="number" className={inputCls} value={form.default_gst_rate}
+                  onChange={e => setForm(p => ({ ...p, default_gst_rate: parseFloat(e.target.value) || 18 }))} />
+              </div>
+              <div>
+                <label className={labelCls}>Default Validity (Days)</label>
+                <Input type="number" className={inputCls} value={form.default_validity_days}
+                  onChange={e => setForm(p => ({ ...p, default_validity_days: parseInt(e.target.value) || 30 }))} />
+              </div>
+            </div>
+          </div>
+          <div className={sectionCls}>
+            <h3 className={`text-sm font-semibold mb-4 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Default Text</h3>
+            <div className="space-y-4">
+              <div>
+                <label className={labelCls}>Default Payment Terms</label>
+                <Textarea className={`rounded-xl text-sm min-h-[70px] resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}
+                  value={form.default_payment_terms}
+                  onChange={e => setForm(p => ({ ...p, default_payment_terms: e.target.value }))}
+                  placeholder="e.g., 50% advance, balance on delivery" />
+              </div>
+              <div>
+                <label className={labelCls}>Default Advance Terms</label>
+                <Input className={inputCls} value={form.default_advance_terms}
+                  onChange={e => setForm(p => ({ ...p, default_advance_terms: e.target.value }))}
+                  placeholder="e.g., 50% advance required" />
+              </div>
+              <div>
+                <label className={labelCls}>Default Notes</label>
+                <Textarea className={`rounded-xl text-sm min-h-[70px] resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}
+                  value={form.default_notes}
+                  onChange={e => setForm(p => ({ ...p, default_notes: e.target.value }))}
+                  placeholder="Notes shown on every new quotation" />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className={`flex-shrink-0 flex gap-3 px-6 py-4 border-t ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
+          <Button variant="ghost" onClick={onClose} className="h-10 px-5 rounded-xl text-slate-500">Cancel</Button>
+          <Button onClick={handleSave} disabled={saving} className="h-10 px-6 rounded-xl text-white font-semibold ml-auto"
+            style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+            {saving ? 'Saving…' : '✓ Save Settings'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════════
 export default function Quotations() {
@@ -1115,6 +1296,7 @@ export default function Quotations() {
   const [isManagerOpen,         setIsManagerOpen]         = useState(false);
   const [editingQuotation,      setEditingQuotation]      = useState(null);
   const [isCompanyListOpen,     setIsCompanyListOpen]     = useState(false);
+  const [isSettingsOpen,        setIsSettingsOpen]        = useState(false);
   const [isEmailModalOpen,      setIsEmailModalOpen]      = useState(false);
   const [emailModalQuotation,   setEmailModalQuotation]   = useState(null);
   const [emailModalPdfType,     setEmailModalPdfType]     = useState('quotation');
@@ -1124,11 +1306,19 @@ export default function Quotations() {
   const [detailQuotation,       setDetailQuotation]       = useState(null);
   const [isDetailOpen,          setIsDetailOpen]          = useState(false);
 
+  // Pagination
+  const SECTION_PAGE_SIZE = 10;
+  const [pendingPage,  setPendingPage]  = useState(1);
+  const [closedPage,   setClosedPage]   = useState(1);
+  const [selectedIds,  setSelectedIds]  = useState(new Set());
+
   // ── Debounce search ────────────────────────────────────────────────────────
   useEffect(() => {
-    const t = setTimeout(() => setSearchTerm(searchInput), 250);
+    const t = setTimeout(() => { setSearchTerm(searchInput); setPendingPage(1); setClosedPage(1); }, 250);
     return () => clearTimeout(t);
   }, [searchInput]);
+
+  useEffect(() => { setPendingPage(1); setClosedPage(1); }, [filterStatus, filterService]);
 
   // ── Data fetching ──────────────────────────────────────────────────────────
   const fetchQuotations = async () => {
@@ -1182,14 +1372,37 @@ export default function Quotations() {
     return cols.map(col => ({ ...col, items: filtered.filter(q => (q.status || 'draft') === col.id) }));
   }, [filtered]);
 
+  // ── Split: pending (draft/sent) vs closed (accepted/rejected) ─────────────
+  const pendingQuotations = useMemo(() =>
+    filtered.filter(q => q.status === 'draft' || q.status === 'sent' || !q.status),
+    [filtered]);
+  const closedQuotations = useMemo(() =>
+    filtered.filter(q => q.status === 'accepted' || q.status === 'rejected'),
+    [filtered]);
+
+  const paginatedPending = useMemo(() => {
+    const start = (pendingPage - 1) * SECTION_PAGE_SIZE;
+    return pendingQuotations.slice(start, start + SECTION_PAGE_SIZE);
+  }, [pendingQuotations, pendingPage]);
+  const totalPendingPages = useMemo(() => Math.max(1, Math.ceil(pendingQuotations.length / SECTION_PAGE_SIZE)), [pendingQuotations]);
+
+  const paginatedClosed = useMemo(() => {
+    const start = (closedPage - 1) * SECTION_PAGE_SIZE;
+    return closedQuotations.slice(start, start + SECTION_PAGE_SIZE);
+  }, [closedQuotations, closedPage]);
+  const totalClosedPages = useMemo(() => Math.max(1, Math.ceil(closedQuotations.length / SECTION_PAGE_SIZE)), [closedQuotations]);
+
   // ── Helpers ────────────────────────────────────────────────────────────────
   const getCompany = (id) => companies.find(c => c.id === id);
 
   const handleStatusChange = async (qtnId, newStatus) => {
     try {
+      const historyEntry = { status: newStatus, changed_at: new Date().toISOString() };
       await api.put(`/quotations/${qtnId}`, { status: newStatus });
       toast.success('Status updated');
-      setQuotations(prev => prev.map(q => q.id === qtnId ? { ...q, status: newStatus } : q));
+      setQuotations(prev => prev.map(q => q.id === qtnId
+        ? { ...q, status: newStatus, status_history: [...(q.status_history || []), historyEntry] }
+        : q));
     } catch { toast.error('Failed to update status'); }
   };
 
@@ -1225,28 +1438,36 @@ export default function Quotations() {
     const win = window.open('', '_blank'); win.document.write(html); win.document.close(); win.print();
   };
 
-  const handleDownloadPdf = async (qtnId, qtnNo) => {
+  const handleDownloadPdf = async (qtnId, qtnNo, companyId) => {
     setDownloading(qtnId + '-pdf');
     try {
       const token   = getToken();
       const baseURL = (api.defaults?.baseURL ?? '/api').toString().replace(/\/$/, '');
       const response = await axios.get(`${baseURL}/quotations/${qtnId}/pdf`, { responseType: 'blob', headers: { Authorization: `Bearer ${token}` } });
       const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
-      const a   = document.createElement('a'); a.href = url; a.download = `quotation-${(qtnNo || qtnId).replace(/\//g, '-')}.pdf`;
+      const a   = document.createElement('a'); a.href = url;
+      const co  = companies.find(c => c.id === companyId);
+      const companySlug = (co?.name || '').replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_');
+      const qtnSlug = (qtnNo || qtnId).replace(/\//g, '-');
+      a.download = companySlug ? `${companySlug}_${qtnSlug}.pdf` : `quotation-${qtnSlug}.pdf`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a); window.URL.revokeObjectURL(url);
       toast.success('Quotation PDF downloaded');
     } catch (err) { toast.error(await extractBlobError(err)); }
     finally { setDownloading(null); }
   };
 
-  const handleDownloadChecklistPdf = async (qtnId, qtnNo) => {
+  const handleDownloadChecklistPdf = async (qtnId, qtnNo, companyId) => {
     setDownloading(qtnId + '-checklist');
     try {
       const token   = getToken();
       const baseURL = (api.defaults?.baseURL ?? '/api').toString().replace(/\/$/, '');
       const response = await axios.get(`${baseURL}/quotations/${qtnId}/checklist-pdf`, { responseType: 'blob', headers: { Authorization: `Bearer ${token}` } });
       const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
-      const a   = document.createElement('a'); a.href = url; a.download = `checklist-${(qtnNo || qtnId).replace(/\//g, '-')}.pdf`;
+      const a   = document.createElement('a'); a.href = url;
+      const co  = companies.find(c => c.id === companyId);
+      const companySlug = (co?.name || '').replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_');
+      const qtnSlug = (qtnNo || qtnId).replace(/\//g, '-');
+      a.download = companySlug ? `${companySlug}_checklist-${qtnSlug}.pdf` : `checklist-${qtnSlug}.pdf`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a); window.URL.revokeObjectURL(url);
       toast.success('Checklist PDF downloaded');
     } catch (err) { toast.error(await extractBlobError(err)); }
@@ -1310,6 +1531,10 @@ export default function Quotations() {
               className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold">
               <Building2 className="h-4 w-4" /> Companies
               {companies.length > 0 && <span className="bg-white/20 px-1.5 py-0.5 rounded-full text-[10px] font-bold">{companies.length}</span>}
+            </Button>
+            <Button variant="outline" onClick={() => setIsSettingsOpen(true)}
+              className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold">
+              <Settings className="h-4 w-4" /> Settings
             </Button>
             <Button variant="outline" onClick={() => fetchQuotations()}
               className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm">
@@ -1425,124 +1650,183 @@ export default function Quotations() {
         </div>
 
       ) : viewMode === 'list' ? (
-        /* ─── LIST VIEW ──────────────────────────────────────────────────── */
-        <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <div className="overflow-x-auto">
-            <table className="w-full" style={{ minWidth: 620 }}>
+        /* ─── LIST VIEW — invoice-style split sections ───────────────────── */
+        <div className="space-y-4">
+
+          {/* helper to render one row */}
+          {(() => {
+            const QtnRow = ({ q, srNo }) => (
+              <tr
+                className={`border-b last:border-0 transition-colors cursor-pointer ${isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50'}`}
+                onClick={() => { setDetailQuotation(q); setIsDetailOpen(true); }}
+              >
+                {/* colour strip */}
+                <td className="w-1 p-0" style={{ width: 4, padding: 0 }}>
+                  <div style={{ width: 4, minHeight: 48, background: STATUS_META[q.status]?.hex || '#94A3B8', borderRadius: '0 4px 4px 0' }} />
+                </td>
+                <td className={`px-3 py-3.5 text-xs font-mono w-10 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{srNo}</td>
+                {/* quotation no */}
+                <td className="px-4 py-3.5">
+                  <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{q.quotation_no}</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Valid {q.validity_days || 30}d</p>
+                </td>
+                {/* client */}
+                <td className="px-4 py-3.5">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                      style={{ background: avatarGrad(q.client_name) }}>
+                      {(q.client_name || '?').charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className={`text-sm font-medium truncate max-w-[180px] ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{q.client_name || '—'}</p>
+                      {q.client_phone && <p className="text-[10px] text-slate-400 flex items-center gap-1"><Phone className="h-2.5 w-2.5" />{q.client_phone}</p>}
+                    </div>
+                  </div>
+                </td>
+                {/* service */}
+                <td className="px-4 py-3.5">
+                  <p className={`text-sm truncate max-w-[140px] ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{q.service}</p>
+                  {getCompany(q.company_id) && (
+                    <p className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
+                      <Building2 className="h-2.5 w-2.5" />{getCompany(q.company_id)?.name}
+                    </p>
+                  )}
+                </td>
+                {/* date */}
+                <td className="px-4 py-3.5">
+                  <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{q.date}</p>
+                </td>
+                {/* amount */}
+                <td className="px-4 py-3.5">
+                  <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(q.total || 0)}</p>
+                </td>
+                {/* status */}
+                <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
+                  <InlineQuotationStatusDropdown qtn={q} onStatusChange={handleStatusChange} isDark={isDark} />
+                </td>
+                {/* actions */}
+                <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => { setEditingQuotation(q); setIsManagerOpen(true); }} title="Edit"
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}>
+                      <Edit className="h-3.5 w-3.5" />
+                    </button>
+                    <button onClick={() => handleDownloadPdf(q.id, q.quotation_no, q.company_id)} title="Download PDF"
+                      disabled={downloading === q.id + '-pdf'}
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}>
+                      {downloading === q.id + '-pdf' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                    </button>
+                    <button onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no, q.company_id)} title="Checklist PDF"
+                      disabled={downloading === q.id + '-checklist'}
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}>
+                      {downloading === q.id + '-checklist' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCheck className="h-3.5 w-3.5" />}
+                    </button>
+                    <button onClick={() => handleConvertToInvoice(q.id)} title="Convert to Invoice"
+                      disabled={convertingId === q.id}
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-purple-400 hover:bg-purple-900/30' : 'text-slate-400 hover:text-purple-600 hover:bg-purple-50'}`}>
+                      {convertingId === q.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />}
+                    </button>
+                    <button onClick={() => handleDelete(q.id)} title="Delete"
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+
+            const TableHead = () => (
               <thead>
                 <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
+                  <th className="w-1 p-0" style={{ width: 4, padding: 0 }} />
+                  <th className={`px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sr</th>
                   {['Quotation', 'Client', 'Service', 'Date', 'Amount', 'Status', 'Actions'].map(h => (
                     <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
                   ))}
                 </tr>
               </thead>
-              <tbody>
-                <AnimatePresence>
-                  {filtered.map((q, idx) => (
-                    <motion.tr key={q.id}
-                      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                      transition={{ delay: idx * 0.02 }}
-                      className={`border-b last:border-0 transition-colors cursor-pointer ${isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50/80'}`}
-                      onClick={() => { setDetailQuotation(q); setIsDetailOpen(true); }}
-                    >
-                      <td className="px-4 py-3.5">
-                        <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{q.quotation_no}</p>
-                        <p className="text-[10px] text-slate-400 mt-0.5">Valid {q.validity_days}d</p>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                            style={{ background: avatarGrad(q.client_name) }}>
-                            {(q.client_name || '?').charAt(0).toUpperCase()}
-                          </div>
-                          <div className="min-w-0">
-                            <p className={`text-sm font-medium truncate max-w-[160px] ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{q.client_name || '—'}</p>
-                            {q.client_phone && <p className="text-[10px] text-slate-400 flex items-center gap-1"><Phone className="h-2.5 w-2.5" />{q.client_phone}</p>}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <p className={`text-sm truncate max-w-[140px] ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{q.service}</p>
-                        {getCompany(q.company_id) && (
-                          <p className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
-                            <Building2 className="h-2.5 w-2.5" />{getCompany(q.company_id)?.name}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{q.date}</p>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <p className={`text-sm font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>{fmtC(q.total || 0)}</p>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <Select value={q.status || 'draft'} onValueChange={(v) => handleStatusChange(q.id, v)}>
-                          <SelectTrigger className="h-8 rounded-lg text-xs w-[110px] border-0 p-0 bg-transparent focus:ring-0 shadow-none">
-                            <StatusChip status={q.status || 'draft'} />
-                          </SelectTrigger>
-                          <SelectContent>{Object.entries(STATUS_META).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
-                        </Select>
-                      </td>
-                      {/* ── FIX 2: Action buttons with tooltips ── */}
-                      <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center gap-1 flex-wrap">
-                          <Button variant="outline" size="sm" title="Download PDF"
-                            onClick={() => handleDownloadPdf(q.id, q.quotation_no)}
-                            disabled={downloading === q.id + '-pdf'}
-                            className="h-7 px-2 rounded-lg gap-1 text-xs text-blue-600 border-blue-200 hover:bg-blue-50">
-                            {downloading === q.id + '-pdf' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
-                          </Button>
-                          <Button variant="outline" size="sm" title="Preview Quotation"
-                            onClick={() => handlePreview(q)}
-                            className="h-7 px-2 rounded-lg gap-1 text-xs text-purple-600 border-purple-200 hover:bg-purple-50">
-                            <Eye className="h-3 w-3" />
-                          </Button>
-                          <Button variant="outline" size="sm" title="Print Quotation"
-                            onClick={() => handlePrint(q)}
-                            className="h-7 px-2 rounded-lg gap-1 text-xs text-emerald-600 border-emerald-200 hover:bg-emerald-50">
-                            <Printer className="h-3 w-3" />
-                          </Button>
-                          <Button variant="outline" size="sm" title="Send via Email"
-                            onClick={() => { setEmailModalQuotation(q); setEmailModalPdfType('quotation'); setIsEmailModalOpen(true); }}
-                            className="h-7 px-2 rounded-lg gap-1 text-xs text-blue-600 border-blue-200 hover:bg-blue-50">
-                            <Mail className="h-3 w-3" />
-                          </Button>
-                          <Button variant="outline" size="sm" title="Send via WhatsApp"
-                            onClick={() => { setWhatsAppModalQuotation(q); setWhatsAppModalPdfType('quotation'); setIsWhatsAppModalOpen(true); }}
-                            className="h-7 px-2 rounded-lg gap-1 text-xs text-green-600 border-green-200 hover:bg-green-50">
-                            <MessageCircle className="h-3 w-3" />
-                          </Button>
-                          <Button variant="outline" size="sm" title="Download Document Checklist"
-                            onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no)}
-                            disabled={downloading === q.id + '-checklist'}
-                            className="h-7 px-2 rounded-lg gap-1 text-xs text-slate-600 border-slate-200 hover:bg-slate-50">
-                            {downloading === q.id + '-checklist' ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileCheck className="h-3 w-3" />}
-                          </Button>
-                          <Button variant="outline" size="sm" title="Convert to Invoice"
-                            onClick={() => handleConvertToInvoice(q.id)}
-                            disabled={convertingId === q.id}
-                            className="h-7 px-2 rounded-lg gap-1 text-xs text-purple-600 border-purple-200 hover:bg-purple-50">
-                            {convertingId === q.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowRight className="h-3 w-3" />}
-                          </Button>
-                          <Button variant="outline" size="sm" title="Edit Quotation"
-                            onClick={() => { setEditingQuotation(q); setIsManagerOpen(true); }}
-                            className="h-7 px-2 rounded-lg text-xs text-slate-600 border-slate-200 hover:bg-slate-50">
-                            <Edit className="h-3 w-3" />
-                          </Button>
-                          <Button variant="outline" size="sm" title="Delete Quotation"
-                            onClick={() => handleDelete(q.id)}
-                            className="h-7 px-2 rounded-lg text-xs text-red-600 border-red-200 hover:bg-red-50">
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </td>
-                    </motion.tr>
-                  ))}
-                </AnimatePresence>
-              </tbody>
-            </table>
-          </div>
-        </div>
+            );
+
+            const PaginationBar = ({ page, totalPages, setPage, accentClass, bgClass }) => totalPages <= 1 ? null : (
+              <div className={`flex items-center justify-between px-5 py-3 border-t ${isDark ? 'border-slate-700 bg-slate-800/60' : `border-slate-100 ${bgClass}`}`}>
+                <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  Page {page} of {totalPages}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button disabled={page === 1} onClick={() => setPage(p => Math.max(1, p - 1))}
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors disabled:opacity-30 ${isDark ? 'hover:bg-slate-700 text-slate-300' : `hover:${accentClass} text-slate-600`}`}>‹</button>
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
+                    .reduce((acc, p, i, arr) => { if (i > 0 && p - arr[i-1] > 1) acc.push('…'); acc.push(p); return acc; }, [])
+                    .map((p, i) => p === '…' ? (
+                      <span key={`e${i}`} className="px-1 text-xs text-slate-400">…</span>
+                    ) : (
+                      <button key={p} onClick={() => setPage(p)}
+                        className={`w-7 h-7 rounded-lg text-xs font-bold transition-colors ${page === p ? 'text-white shadow-sm' : `${isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600'}`}`}
+                        style={page === p ? { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` } : {}}>{p}</button>
+                    ))}
+                  <button disabled={page === totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors disabled:opacity-30 ${isDark ? 'hover:bg-slate-700 text-slate-300' : `hover:${accentClass} text-slate-600`}`}>›</button>
+                </div>
+              </div>
+            );
+
+            return (
+              <>
+                {/* ── ACTIVE section (draft + sent) ── */}
+                {pendingQuotations.length > 0 && (
+                  <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    <div className={`flex items-center gap-3 px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-700/30' : 'border-slate-100 bg-amber-50/60'}`}>
+                      <div className="w-2 h-6 rounded-full" style={{ background: 'linear-gradient(180deg, #1F6FB2, #F59E0B)' }} />
+                      <Clock className="h-4 w-4 text-amber-500" />
+                      <span className={`text-sm font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Active</span>
+                      <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${isDark ? 'bg-amber-900/40 text-amber-300' : 'bg-amber-100 text-amber-700'}`}>{pendingQuotations.length}</span>
+                      <span className={`ml-auto text-xs font-bold ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
+                        {fmtC(pendingQuotations.reduce((s, q) => s + (q.total || 0), 0))} pending
+                      </span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full" style={{ minWidth: 700 }}>
+                        <TableHead />
+                        <tbody>
+                          {paginatedPending.map((q, idx) => (
+                            <QtnRow key={q.id} q={q} srNo={(pendingPage - 1) * SECTION_PAGE_SIZE + idx + 1} />
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <PaginationBar page={pendingPage} totalPages={totalPendingPages} setPage={setPendingPage} accentClass="bg-amber-100" bgClass="bg-amber-50/40" />
+                  </div>
+                )}
+
+                {/* ── CLOSED section (accepted + rejected) ── */}
+                {closedQuotations.length > 0 && (
+                  <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    <div className={`flex items-center gap-3 px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-700/30' : 'border-slate-100 bg-emerald-50/60'}`}>
+                      <div className="w-2 h-6 rounded-full bg-emerald-500" />
+                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                      <span className={`text-sm font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Closed</span>
+                      <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${isDark ? 'bg-emerald-900/40 text-emerald-300' : 'bg-emerald-100 text-emerald-700'}`}>{closedQuotations.length}</span>
+                      <span className={`ml-auto text-xs font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                        {fmtC(closedQuotations.filter(q => q.status === 'accepted').reduce((s, q) => s + (q.total || 0), 0))} accepted
+                      </span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full" style={{ minWidth: 700 }}>
+                        <TableHead />
+                        <tbody>
+                          {paginatedClosed.map((q, idx) => (
+                            <QtnRow key={q.id} q={q} srNo={(closedPage - 1) * SECTION_PAGE_SIZE + idx + 1} />
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <PaginationBar page={closedPage} totalPages={totalClosedPages} setPage={setClosedPage} accentClass="bg-emerald-100" bgClass="bg-emerald-50/40" />
+                  </div>
+                )}
+              </>
+            );
+          })()}
 
       ) : (
         /* ─── BOARD VIEW (Kanban) ─────────────────────────────────────────── */
@@ -1686,6 +1970,7 @@ export default function Quotations() {
         />
       )}
       <CompanyListModal open={isCompanyListOpen} onClose={() => setIsCompanyListOpen(false)} onRefresh={fetchMeta} />
+      {isSettingsOpen && <QuotationSettings open={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} isDark={isDark} />}
       {isEmailModalOpen && (
         <EmailModal
           open={isEmailModalOpen}
