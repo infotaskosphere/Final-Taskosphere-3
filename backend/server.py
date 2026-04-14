@@ -2390,7 +2390,87 @@ async def export_attendance_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=attendance_{user_id}.pdf"}
     )
+# ─────────────────────────────────────────────────────────────────────────────
+# EDIT ATTENDANCE RECORD — Admin / permitted users
+# PATCH /api/attendance/edit-record
+# ─────────────────────────────────────────────────────────────────────────────
+@api_router.patch("/attendance/edit-record")
+async def edit_attendance_record(
+    data: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Allow admin or users with can_edit_attendance permission to
+    manually correct an attendance record's status.
+    Body: { date, user_id, status, note }
+    """
+    is_admin = current_user.role == "admin"
+    perms    = get_user_permissions(current_user)
+    if not is_admin and not perms.get("can_edit_attendance", False):
+        raise HTTPException(status_code=403, detail="Not authorized to edit attendance records")
 
+    date_str  = data.get("date")
+    user_id   = data.get("user_id") or current_user.id
+    status    = data.get("status")
+    note      = data.get("note", "").strip()
+
+    if not date_str or not status:
+        raise HTTPException(status_code=400, detail="date and status are required")
+
+    valid_statuses = {"present", "absent", "half_day", "leave", "late", "wfh"}
+    if status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+
+    existing = await db.attendance.find_one(
+        {"user_id": user_id, "date": date_str}, {"_id": 0}
+    )
+
+    update_fields = {
+        "status":      status,
+        "edited_by":   current_user.id,
+        "edited_at":   datetime.now(timezone.utc).isoformat(),
+        "admin_note":  note or None,
+        "auto_marked": False,
+    }
+
+    # Status-specific adjustments
+    if status == "absent":
+        update_fields["punch_in"]  = None
+        update_fields["punch_out"] = None
+        update_fields["duration_minutes"] = 0
+    elif status == "leave":
+        update_fields["punch_in"]  = None
+        update_fields["punch_out"] = None
+        update_fields["duration_minutes"] = 0
+        update_fields["leave_reason"] = note or "Admin marked leave"
+    elif status == "half_day":
+        update_fields["is_half_day"] = True
+    elif status == "late":
+        update_fields["is_late"] = True
+    elif status == "wfh":
+        update_fields["location_type"] = "wfh"
+
+    await db.attendance.update_one(
+        {"user_id": user_id, "date": date_str},
+        {"$set": update_fields},
+        upsert=True
+    )
+
+    await create_audit_log(
+        current_user,
+        action="EDIT_ATTENDANCE_RECORD",
+        module="attendance",
+        record_id=f"{user_id}_{date_str}",
+        old_data=existing,
+        new_data=update_fields,
+    )
+
+    return {
+        "message": f"Attendance updated to '{status}' for {date_str}",
+        "date":    date_str,
+        "user_id": user_id,
+        "status":  status,
+    }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MANUAL ABSENT MARKING ENDPOINT (Admin only)
