@@ -39,8 +39,15 @@ export function generateQuotationHTML(qtn, options = {}) {
     amount_paid:      0,
   };
 
+  // Override company.invoice_title to "Quotation" so all templates
+  // display "Quotation" instead of "Tax Invoice" or "Estimate"
+  const companyOverride = {
+    ...company,
+    invoice_title: 'Quotation',
+  };
+
   return generateInvoiceHTML(inv, {
-    company,
+    company:     companyOverride,
     template:    template    || qtn.invoice_template    || 'classic',
     theme:       theme       || qtn.invoice_theme       || 'classic_blue',
     customColor: customColor || qtn.invoice_custom_color || '#0D3B66',
