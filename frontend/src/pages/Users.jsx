@@ -127,7 +127,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_view_staff_rankings: true, can_delete_data: true, can_delete_tasks: true,
       can_connect_email: true, can_view_own_data: true, can_create_quotations: true,
       can_manage_invoices: true, can_view_passwords: true, can_edit_passwords: true,
-      can_view_compliance: true, can_manage_compliance: true,
+      can_edit_attendance: true, can_view_compliance: true, can_manage_compliance: true,
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [],
       view_other_activity: [], view_other_visits: [],
@@ -171,6 +171,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_edit_passwords: true,       // default module (permission-based)
       can_view_compliance: true,      // DEFAULT ON — Compliance Tracker (own + team scope, dept-scoped server-side)
       can_manage_compliance: true,    // default module — manager can create/edit compliance masters in own dept
+      can_edit_attendance: false,       // admin-granted only — edit past attendance records
       can_view_all_visits: false,     // own + dept team visits (server-side scoped via department query)
       can_edit_visits: true,          // edit own + team visits
       can_delete_visits: false,       // admin-granted only
@@ -218,6 +219,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_edit_passwords: true,       // default module (permission-based)
       can_view_compliance: false,     // admin-granted only — Compliance Tracker not shown to staff by default
       can_manage_compliance: false,   // admin-granted only — staff cannot create/edit compliance masters
+      can_edit_attendance: false,       // admin-granted only — edit past attendance records
       can_view_all_visits: false,     // own visits only (server-side scoped)
       can_edit_visits: true,          // edit own visits
       can_delete_visits: false,       // admin-granted only
@@ -241,7 +243,7 @@ const EMPTY_PERMISSIONS = {
   can_view_staff_rankings: false, can_delete_data: false, can_delete_tasks: false,
   can_connect_email: false, can_view_own_data: false, can_create_quotations: false,
   can_manage_invoices: false, can_view_passwords: false, can_edit_passwords: false,
-  can_view_compliance: false, can_manage_compliance: false,
+  can_edit_attendance: false, can_view_compliance: false, can_manage_compliance: false,
   can_view_all_visits: false, can_edit_visits: false,
   can_delete_visits: false, can_delete_own_visits: true,
   view_password_departments: [], assigned_clients: [], view_other_tasks: [],
@@ -271,6 +273,7 @@ const OPS_PERMS = [
   { key: 'can_assign_clients',      label: 'Client Assignment',      desc: 'Assign and reassign staff to clients',             icon: Briefcase    },
   { key: 'can_manage_users',        label: 'User Governance',        desc: 'Manage team members and roles',                    icon: UsersIcon    },
   { key: 'can_view_attendance',     label: 'Attendance Management',  desc: 'Review punch timings and late reports',            icon: Clock        },
+  { key: 'can_edit_attendance',    label: 'Edit Attendance',        desc: 'Edit past attendance records (mark absent, half day, leave)',  icon: Edit         },
   { key: 'can_view_staff_activity', label: 'Staff Monitoring',       desc: 'View app usage and screen activity',               icon: Activity     },
   { key: 'can_send_reminders',      label: 'Automated Reminders',    desc: 'Trigger email/notification reminders',             icon: Bell         },
   { key: 'can_download_reports',    label: 'Export Data',            desc: 'Download CSV/PDF versions of reports',             icon: Download     },
