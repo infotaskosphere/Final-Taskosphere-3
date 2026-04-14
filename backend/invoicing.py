@@ -2308,7 +2308,8 @@ async def download_invoice_pdf(
         raise HTTPException(500, f"PDF generation failed: {e}")
 
     safe_name = (inv.get("invoice_no") or inv_id).replace("/", "_").replace("\\", "_")
-    filename = f"Invoice_{safe_name}.pdf"
+    company_prefix = (company.get("name", "") or "").strip().replace(" ", "_").replace("/", "_").replace("\\", "_")
+    filename = f"{company_prefix}_Invoice_{safe_name}.pdf" if company_prefix else f"Invoice_{safe_name}.pdf"
     pdf_bytes = pdf_buf.getvalue()
 
     # Auto-upload to Google Drive in the background (if configured)
@@ -2384,16 +2385,19 @@ async def upload_invoice_to_drive(inv_id: str, current_user: User = Depends(get_
         client_folder_id = DRIVE_FOLDERS["invoices"]
 
     safe_inv_no = (inv.get("invoice_no") or inv_id).replace("/", "_").replace("\\", "_")
+    company_prefix = (company.get("name", "") or "").strip().replace(" ", "_").replace("/", "_").replace("\\", "_")
 
     # ✅ FIX v6.2: added `await` to both _upload_to_drive calls —
     #    previously the coroutine object itself was stored in pdf_link,
     #    causing bson.errors.InvalidDocument when saving to MongoDB.
+    _inv_fname = f"{company_prefix}_Invoice_{safe_inv_no}.pdf" if company_prefix else f"Invoice_{safe_inv_no}.pdf"
     pdf_link = await _upload_to_drive(
-        pdf_bytes, f"Invoice_{safe_inv_no}.pdf", "invoices", "application/pdf",
+        pdf_bytes, _inv_fname, "invoices", "application/pdf",
         custom_parent_id=client_folder_id
     )
+    _json_fname = f"{company_prefix}_Invoice_{safe_inv_no}.json" if company_prefix else f"Invoice_{safe_inv_no}.json"
     await _upload_to_drive(
-        json.dumps(inv, default=str).encode(), f"Invoice_{safe_inv_no}.json",
+        json.dumps(inv, default=str).encode(), _json_fname,
         "invoices", "application/json", custom_parent_id=client_folder_id
     )
 
