@@ -399,11 +399,11 @@ export default function Reminders() {
       <LayoutCustomizer
         isOpen={showCustomize}
         onClose={() => setShowCustomize(false)}
-        sections={REM_SECTIONS}
-        labels={REM_LABELS}
+        sectionLabels={REM_LABELS}
         order={remOrder}
-        onMove={remMove}
+        onDragEnd={remMove}
         onReset={remReset}
+        isDark={isDark}
       />
 
       <motion.div
