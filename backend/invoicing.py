@@ -2213,9 +2213,19 @@ async def update_invoice_status(
     if new_status not in INV_STATUS:
         raise HTTPException(400, f"Invalid status. Must be one of: {INV_STATUS}")
 
+    now_iso = datetime.now(timezone.utc).isoformat()
+    history_entry = {
+        "status": new_status,
+        "changed_at": now_iso,
+        "changed_by": getattr(current_user, "username", getattr(current_user, "email", "system")),
+    }
+
     result = await db.invoices.update_one(
         {"id": inv_id},
-        {"$set": {"status": new_status, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        {
+            "$set": {"status": new_status, "updated_at": now_iso},
+            "$push": {"status_history": history_entry},
+        },
     )
     if result.matched_count == 0:
         raise HTTPException(404, "Invoice not found")
