@@ -2246,7 +2246,25 @@ async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(g
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     ex = await db.invoices.find_one({"id": inv_id})
     if not ex: raise HTTPException(404, "Invoice not found")
-    for f in ("id", "invoice_no", "created_by", "created_at", "amount_paid", "pdf_drive_link"):
+
+    # ── Handle invoice_no update separately ──────────────────────────────────
+    new_invoice_no = data.get("invoice_no", "").strip() if data.get("invoice_no") else ""
+    old_invoice_no = ex.get("invoice_no", "")
+    if new_invoice_no and new_invoice_no != old_invoice_no:
+        # Check for duplicate: reject if another invoice already has this number
+        conflict = await db.invoices.find_one({
+            "invoice_no": new_invoice_no,
+            "id": {"$ne": inv_id}
+        })
+        if conflict:
+            raise HTTPException(400, f"Invoice number '{new_invoice_no}' is already in use by another invoice")
+        # Allow the update — will be included in the $set below
+    elif not new_invoice_no:
+        # If empty string sent, keep the original number
+        data["invoice_no"] = old_invoice_no
+
+    # ── Strip truly immutable fields ─────────────────────────────────────────
+    for f in ("id", "created_by", "created_at", "amount_paid", "pdf_drive_link"):
         data.pop(f, None)
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     data = _compute_invoice_totals(data)
