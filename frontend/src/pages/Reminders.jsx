@@ -209,6 +209,183 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
   );
 }
 
+// ── Shared Reminder Detail Popup ─────────────────────────────────────────────
+function ReminderDetailPopup({ rem, isDark, isViewingOther, onClose, onEdit, onDelete, COLORS }) {
+  if (!rem) return null;
+  const remId = resolveId(rem);
+  const isDue = rem.remind_at && isPast(new Date(rem.remind_at));
+  const gcalUrl = buildGCalURL(rem);
+
+  return (
+    <motion.div
+      key="reminder-detail-popup"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+      style={{
+        background: "rgba(7,15,30,0.72)",
+        backdropFilter: "blur(10px)",
+      }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.88, y: 40, opacity: 0 }}
+        animate={{ scale: 1, y: 0, opacity: 1 }}
+        exit={{ scale: 0.88, y: 40, opacity: 0 }}
+        transition={{ type: "spring", stiffness: 220, damping: 22 }}
+        className={`w-full max-w-xl rounded-3xl overflow-hidden shadow-2xl ${isDark ? "bg-slate-800 border border-slate-700" : "bg-white border border-slate-200"}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Popup Header */}
+        <div
+          className="px-8 py-7 relative overflow-hidden"
+          style={{
+            background: `linear-gradient(135deg, ${isDue ? COLORS.coral : COLORS.purple}, ${COLORS.mediumBlue})`,
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-white/15 flex items-center justify-center flex-shrink-0">
+                <BellRing className="w-7 h-7 text-white" />
+              </div>
+              <div>
+                <p className="text-white/60 text-[11px] font-semibold uppercase tracking-widest mb-1">
+                  {rem.reminder_type === "meeting" ? "Meeting" : "Reminder"}
+                  {rem.source === "email_auto" && " · From Email"}
+                </p>
+                <h2 className="text-xl font-bold text-white leading-tight">
+                  {rem.title || "Untitled"}
+                </h2>
+                {isDue && (
+                  <span className="inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-white/20 text-white">
+                    OVERDUE
+                  </span>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-all flex-shrink-0"
+            >
+              <X className="w-5 h-5 text-white" />
+            </button>
+          </div>
+        </div>
+
+        {/* Popup Body */}
+        <div className="px-8 py-6 space-y-5">
+          {/* Date & Time */}
+          <div className={`flex items-start gap-3 p-4 rounded-2xl ${isDark ? "bg-slate-700/50" : "bg-slate-50"}`}>
+            <Clock className={`h-5 w-5 flex-shrink-0 mt-0.5 ${isDue ? "text-red-500" : isDark ? "text-purple-400" : "text-purple-500"}`} />
+            <div>
+              <p className={`text-xs font-semibold mb-0.5 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                Date & Time
+              </p>
+              <p className={`text-sm font-semibold ${isDue ? "text-red-500" : isDark ? "text-slate-100" : "text-slate-800"}`}>
+                {formatReminderTime(rem.remind_at)}
+              </p>
+            </div>
+          </div>
+
+          {/* Description */}
+          {rem.description && (
+            <div className={`p-4 rounded-2xl ${isDark ? "bg-slate-700/50" : "bg-slate-50"}`}>
+              <p className={`text-xs font-semibold mb-1.5 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                Description
+              </p>
+              <p className={`text-sm leading-relaxed ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+                {stripHtml(rem.description)}
+              </p>
+            </div>
+          )}
+
+          {/* Meta badges */}
+          <div className="flex flex-wrap gap-2">
+            {rem.priority && (
+              <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg ${
+                rem.priority === "high"
+                  ? "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400"
+                  : rem.priority === "low"
+                  ? "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400"
+                  : "bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400"
+              }`}>
+                {rem.priority.charAt(0).toUpperCase() + rem.priority.slice(1)} Priority
+              </span>
+            )}
+            {rem.source === "email_auto" && (
+              <span className="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+                From Email
+              </span>
+            )}
+            {rem.reminder_type === "meeting" && (
+              <span className="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400">
+                Meeting
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Popup Footer */}
+        <div
+          className={`px-8 py-5 flex gap-3 border-t ${isDark ? "border-slate-700" : "border-slate-100"}`}
+        >
+          <a
+            href={gcalUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold border transition-colors ${
+              isDark
+                ? "border-slate-600 text-slate-300 hover:bg-slate-700"
+                : "border-slate-200 text-slate-600 hover:bg-slate-50"
+            }`}
+            title="Add to Google Calendar"
+          >
+            <ExternalLink className="h-4 w-4" /> Google Cal
+          </a>
+          {!isViewingOther && (
+            <>
+              <button
+                onClick={() => {
+                  onClose();
+                  onEdit(rem);
+                }}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold border transition-colors ${
+                  isDark
+                    ? "border-slate-600 text-slate-300 hover:bg-slate-700"
+                    : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                <Edit2 className="h-4 w-4" /> Edit
+              </button>
+              <button
+                onClick={() => {
+                  onClose();
+                  onDelete(remId);
+                }}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold border transition-colors ${
+                  isDark
+                    ? "border-red-800 text-red-400 hover:bg-red-900/30"
+                    : "border-red-200 text-red-500 hover:bg-red-50"
+                }`}
+              >
+                <Trash2 className="h-4 w-4" /> Delete
+              </button>
+            </>
+          )}
+          <Button
+            variant="outline"
+            onClick={onClose}
+            className="ml-auto rounded-xl text-xs px-4 py-2.5"
+          >
+            Close
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ── Main Component ───────────────────────────────────────────────────────────
 export default function Reminders() {
   const isDark = useDark();
@@ -225,7 +402,9 @@ export default function Reminders() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [showListView, setShowListView] = useState(false);
-  const [calendarPopupReminder, setCalendarPopupReminder] = useState(null);
+
+  // ── UNIFIED popup state — shared by BOTH calendar and list views ──────────
+  const [activePopupReminder, setActivePopupReminder] = useState(null);
 
   // Calendar state
   const [calendarMonth, setCalendarMonth] = useState(new Date());
@@ -297,6 +476,19 @@ export default function Reminders() {
   useEffect(() => {
     fetchReminders();
   }, [fetchReminders]);
+
+  // ── Keep popup in sync: if reminder is updated, refresh popup data ─────────
+  useEffect(() => {
+    if (activePopupReminder) {
+      const updated = reminders.find(r => resolveId(r) === resolveId(activePopupReminder));
+      if (updated) {
+        setActivePopupReminder(updated);
+      } else {
+        // Reminder was deleted, close popup
+        setActivePopupReminder(null);
+      }
+    }
+  }, [reminders]);
 
   // ── Popup Reminder Notifications ──────────────────────────────────────────
   useEffect(() => {
@@ -437,7 +629,12 @@ export default function Reminders() {
     setShowForm(true);
   };
 
-  // Filtered reminders
+  // ── Open the unified detail popup ─────────────────────────────────────────
+  const openDetailPopup = (rem) => {
+    setActivePopupReminder(rem);
+  };
+
+  // Filtered reminders — used by list view
   const filteredReminders = useMemo(() => {
     let list = Array.isArray(reminders) ? reminders : [];
 
@@ -452,6 +649,7 @@ export default function Reminders() {
     } else if (filterStatus === "dismissed") {
       list = list.filter((r) => r.is_dismissed);
     } else {
+      // "all" — show non-dismissed
       list = list.filter((r) => !r.is_dismissed);
     }
 
@@ -495,7 +693,7 @@ export default function Reminders() {
     };
   }, [reminders]);
 
-  // Calendar data — reminders grouped by date
+  // Calendar data — reminders grouped by date (ALL non-dismissed, same source as list)
   const calendarDays = useMemo(() => {
     const monthStart = startOfMonth(calendarMonth);
     const monthEnd = endOfMonth(calendarMonth);
@@ -504,6 +702,7 @@ export default function Reminders() {
 
   const remindersByDate = useMemo(() => {
     const map = {};
+    // Use same base: all non-dismissed reminders with a date
     const active = reminders.filter((r) => !r.is_dismissed && r.remind_at);
     active.forEach((r) => {
       try {
@@ -754,7 +953,6 @@ export default function Reminders() {
                             onClick={() => {
                               if (dayReminders.length === 0) {
                                 const dt = format(day, "yyyy-MM-dd'T'09:00");
-                                setFormDatetime(dt);
                                 resetForm();
                                 setFormDatetime(dt);
                                 setShowForm(true);
@@ -791,7 +989,8 @@ export default function Reminders() {
                                   key={resolveId(rem)}
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setCalendarPopupReminder(rem);
+                                    // ── Opens the SHARED popup ──────────────
+                                    openDetailPopup(rem);
                                   }}
                                   className={`text-[9px] sm:text-[10px] font-semibold px-1.5 py-0.5 rounded-md truncate cursor-pointer transition-all hover:opacity-80 ${
                                     isPast(new Date(rem.remind_at))
@@ -823,6 +1022,7 @@ export default function Reminders() {
               </motion.div>
             ) : null;
 
+          // ── LIST VIEW ──────────────────────────────────────────────────────
           if (sectionId === "reminders_list")
             return showListView ? (
               <motion.div key="reminders_list" variants={itemVariants}>
@@ -909,7 +1109,7 @@ export default function Reminders() {
                           return (
                             <div
                               key={remId}
-                              className={`relative p-4 rounded-xl border transition-colors ${
+                              className={`relative p-4 rounded-xl border transition-colors cursor-pointer ${
                                 isDue
                                   ? isDark
                                     ? "bg-red-900/15 border-red-800 hover:border-red-700"
@@ -918,6 +1118,8 @@ export default function Reminders() {
                                     ? "bg-slate-800 border-slate-700 hover:border-slate-600"
                                     : "bg-white border-slate-200 hover:border-slate-300"
                               }`}
+                              // ── Clicking the card opens the SHARED popup ──
+                              onClick={() => openDetailPopup(rem)}
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -973,6 +1175,7 @@ export default function Reminders() {
                                     </div>
                                   </div>
                                 </div>
+                                {/* Action buttons — stop propagation so they don't open popup */}
                                 <div className="flex items-center gap-1 flex-shrink-0">
                                   <a
                                     href={gcalUrl}
@@ -980,19 +1183,26 @@ export default function Reminders() {
                                     rel="noopener noreferrer"
                                     className={`p-2 rounded-lg transition-colors ${isDark ? "hover:bg-slate-700 text-slate-400" : "hover:bg-slate-100 text-slate-400"}`}
                                     title="Add to Google Calendar"
+                                    onClick={(e) => e.stopPropagation()}
                                   >
                                     <ExternalLink className="h-3.5 w-3.5" />
                                   </a>
                                   {!isViewingOther && (
                                     <>
                                       <button
-                                        onClick={() => startEdit(rem)}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          startEdit(rem);
+                                        }}
                                         className={`p-2 rounded-lg transition-colors ${isDark ? "hover:bg-slate-700 text-slate-400" : "hover:bg-slate-100 text-slate-400"}`}
                                       >
                                         <Edit2 className="h-3.5 w-3.5" />
                                       </button>
                                       <button
-                                        onClick={() => handleDelete(remId)}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDelete(remId);
+                                        }}
                                         className={`p-2 rounded-lg transition-colors ${isDark ? "hover:bg-red-900/30 text-slate-400 hover:text-red-400" : "hover:bg-red-50 text-slate-400 hover:text-red-500"}`}
                                       >
                                         <Trash2 className="h-3.5 w-3.5" />
@@ -1015,162 +1225,19 @@ export default function Reminders() {
         })}
       </motion.div>
 
-      {/* CALENDAR REMINDER POPUP */}
+      {/* ── SHARED REMINDER DETAIL POPUP (Calendar + List) ───────────────── */}
       <AnimatePresence>
-        {calendarPopupReminder &&
-          (() => {
-            const rem = calendarPopupReminder;
-            const remId = resolveId(rem);
-            const isDue = rem.remind_at && isPast(new Date(rem.remind_at));
-            const gcalUrl = buildGCalURL(rem);
-            return (
-              <motion.div
-                key="cal-popup"
-                className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-                style={{
-                  background: "rgba(7,15,30,0.72)",
-                  backdropFilter: "blur(10px)",
-                }}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setCalendarPopupReminder(null)}
-              >
-                <motion.div
-                  initial={{ scale: 0.88, y: 40, opacity: 0 }}
-                  animate={{ scale: 1, y: 0, opacity: 1 }}
-                  exit={{ scale: 0.88, y: 40, opacity: 0 }}
-                  transition={{ type: "spring", stiffness: 220, damping: 22 }}
-                  className={`w-full max-w-md rounded-3xl overflow-hidden shadow-2xl ${isDark ? "bg-slate-800 border border-slate-700" : "bg-white border border-slate-200"}`}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {/* Popup Header */}
-                  <div
-                    className="px-6 py-5 relative overflow-hidden"
-                    style={{
-                      background: `linear-gradient(135deg, ${isDue ? COLORS.coral : COLORS.purple}, ${COLORS.mediumBlue})`,
-                    }}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center">
-                          <BellRing className="w-5 h-5 text-white" />
-                        </div>
-                        <div>
-                          <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest">
-                            Reminder
-                          </p>
-                          <h2 className="text-lg font-bold text-white truncate max-w-[220px]">
-                            {rem.title || "Untitled"}
-                          </h2>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setCalendarPopupReminder(null)}
-                        className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-all"
-                      >
-                        <X className="w-4 h-4 text-white" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Popup Body */}
-                  <div className="px-6 py-5 space-y-3">
-                    {rem.description && (
-                      <div>
-                        <p
-                          className={`text-xs font-semibold mb-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}
-                        >
-                          Description
-                        </p>
-                        <p
-                          className={`text-sm ${isDark ? "text-slate-200" : "text-slate-700"}`}
-                        >
-                          {stripHtml(rem.description)}
-                        </p>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2">
-                      <Clock
-                        className={`h-4 w-4 flex-shrink-0 ${isDue ? "text-red-500" : isDark ? "text-slate-400" : "text-slate-500"}`}
-                      />
-                      <span
-                        className={`text-sm font-medium ${isDue ? "text-red-500" : isDark ? "text-slate-200" : "text-slate-700"}`}
-                      >
-                        {formatReminderTime(rem.remind_at)}
-                      </span>
-                      {isDue && (
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-red-500 text-white ml-1">
-                          OVERDUE
-                        </span>
-                      )}
-                    </div>
-                    {rem.source === "email_auto" && (
-                      <span className="inline-block text-[10px] font-semibold px-2 py-0.5 rounded-md bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
-                        From Email
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Popup Footer — same buttons as list view */}
-                  <div
-                    className={`px-6 py-4 flex gap-2 border-t ${isDark ? "border-slate-700" : "border-slate-100"}`}
-                  >
-                    <a
-                      href={gcalUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${
-                        isDark
-                          ? "border-slate-600 text-slate-300 hover:bg-slate-700"
-                          : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                      }`}
-                      title="Add to Google Calendar"
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" /> Google Cal
-                    </a>
-                    {!isViewingOther && (
-                      <>
-                        <button
-                          onClick={() => {
-                            setCalendarPopupReminder(null);
-                            startEdit(rem);
-                          }}
-                          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${
-                            isDark
-                              ? "border-slate-600 text-slate-300 hover:bg-slate-700"
-                              : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                          }`}
-                        >
-                          <Edit2 className="h-3.5 w-3.5" /> Edit
-                        </button>
-                        <button
-                          onClick={() => {
-                            setCalendarPopupReminder(null);
-                            handleDelete(remId);
-                          }}
-                          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${
-                            isDark
-                              ? "border-red-800 text-red-400 hover:bg-red-900/30"
-                              : "border-red-200 text-red-500 hover:bg-red-50"
-                          }`}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" /> Delete
-                        </button>
-                      </>
-                    )}
-                    <Button
-                      variant="outline"
-                      onClick={() => setCalendarPopupReminder(null)}
-                      className="ml-auto rounded-xl text-xs"
-                    >
-                      Close
-                    </Button>
-                  </div>
-                </motion.div>
-              </motion.div>
-            );
-          })()}
+        {activePopupReminder && (
+          <ReminderDetailPopup
+            rem={activePopupReminder}
+            isDark={isDark}
+            isViewingOther={isViewingOther}
+            COLORS={COLORS}
+            onClose={() => setActivePopupReminder(null)}
+            onEdit={startEdit}
+            onDelete={handleDelete}
+          />
+        )}
       </AnimatePresence>
 
       {/* CREATE / EDIT MODAL */}
