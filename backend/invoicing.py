@@ -311,25 +311,46 @@ def _perm(user: User) -> bool:
 # NEXT INVOICE NUMBER
 # ═══════════════════════════════════════════════════════════
 
-async def _next_invoice_no(prefix: str = "INV", company_id: str = None) -> str:
+async def _next_invoice_no(
+    prefix: str = "INV",
+    company_id: str = None,
+    separator: str = "/",
+    include_fy: bool = True,
+    fy_format: str = "short",
+    include_month: bool = False,
+    number_padding: int = 3,
+) -> str:
     """
-    Generate the next available invoice number for the given prefix + FY.
-    Uses MAX-based (not count-based) numbering so renames/deletes never
-    cause collisions: scans the highest sequential number already issued
-    and increments from there. Also retries if the candidate is taken.
+    Generate the next available invoice number using the exact format from
+    Invoice Settings (prefix, separator, FY label, month, padding).
+    MAX-based scan so deletions/renames never cause collisions.
     """
     today = date.today()
     fy_start = today.year if today.month >= 4 else today.year - 1
-    fy_label = f"{fy_start % 100:02d}-{(fy_start + 1) % 100:02d}"
 
-    # Regex: e.g.  "INV-0042/26-27"  →  capture group 1 = "0042"
-    pattern = rf"^{re.escape(prefix)}-(\d+)/{re.escape(fy_label)}$"
+    if fy_format == "long":
+        fy_label = f"{fy_start}-{fy_start + 1}"
+    else:
+        fy_label = f"{fy_start % 100:02d}-{(fy_start + 1) % 100:02d}"
 
-    query: dict = {"invoice_no": {"$regex": f"^{re.escape(prefix)}-"}}
+    month_str = f"{today.month:02d}"
+    sep = separator if separator and separator.lower() != "none" else ""
+
+    # Build regex to scan existing invoices with this exact format
+    # Pattern matches: prefix [sep fy]? [sep month]? sep NUMBER
+    scan_parts = [re.escape(prefix)]
+    if include_fy:
+        scan_parts.append(re.escape(fy_label))
+    if include_month:
+        scan_parts.append(re.escape(month_str))
+    scan_parts.append(r"(\d+)")
+    pattern = re.escape(sep).join(scan_parts)
+    pattern = f"^{pattern}$"
+
+    query: dict = {"invoice_no": {"$regex": f"^{re.escape(prefix)}"}}
     if company_id:
         query["company_id"] = company_id
 
-    # Pull all matching invoice numbers in one shot (projection only)
     cursor = db.invoices.find(query, {"_id": 0, "invoice_no": 1})
     max_seq = 0
     async for doc in cursor:
@@ -339,17 +360,24 @@ async def _next_invoice_no(prefix: str = "INV", company_id: str = None) -> str:
             if seq > max_seq:
                 max_seq = seq
 
-    # Find next candidate that is not already taken (handles any edge-case gaps)
+    def _build(seq: int) -> str:
+        parts = [prefix]
+        if include_fy:
+            parts.append(fy_label)
+        if include_month:
+            parts.append(month_str)
+        parts.append(str(seq).zfill(number_padding))
+        return sep.join(parts)
+
     candidate_seq = max_seq + 1
-    for _ in range(50):  # safety: try up to 50 slots
-        candidate = f"{prefix}-{candidate_seq:04d}/{fy_label}"
+    for _ in range(50):
+        candidate = _build(candidate_seq)
         taken = await db.invoices.find_one({"invoice_no": candidate})
         if not taken:
             return candidate
         candidate_seq += 1
 
-    # Absolute fallback — uuid suffix, will never collide
-    return f"{prefix}-{candidate_seq:04d}-{str(uuid.uuid4())[:4].upper()}/{fy_label}"
+    return _build(candidate_seq)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -2217,22 +2245,38 @@ async def invoice_stats(year: Optional[int] = None, month: Optional[int] = None,
 async def get_next_invoice_number(
     company_id: str = Query(..., description="Company ID to scope the numbering"),
     invoice_type: str = Query("tax_invoice", description="Invoice type"),
+    prefix: Optional[str] = Query(None, description="Custom prefix from Invoice Settings"),
+    separator: str = Query("/", description="Separator character"),
+    include_fy: bool = Query(True, description="Include financial year in number"),
+    fy_format: str = Query("short", description="FY format: short=25-26, long=2025-2026"),
+    include_month: bool = Query(False, description="Include month in number"),
+    number_padding: int = Query(3, description="Zero-pad width for sequential number"),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Returns the next available invoice number for the given company and type.
+    Returns the next available invoice number using the exact format settings
+    configured in Invoice Settings (prefix, separator, FY, month, padding).
     Scans existing invoices in the DB (MAX-based) so it is always accurate
     regardless of deletions or renames.
     """
     if not _perm(current_user):
         raise HTTPException(403, "Access denied")
-    prefix = {
-        "proforma":    "PRO",
-        "estimate":    "EST",
-        "credit_note": "CN",
-        "debit_note":  "DN",
-    }.get(invoice_type, "INV")
-    next_no = await _next_invoice_no(prefix, company_id)
+    if not prefix:
+        prefix = {
+            "proforma":    "PRO",
+            "estimate":    "EST",
+            "credit_note": "CN",
+            "debit_note":  "DN",
+        }.get(invoice_type, "INV")
+    next_no = await _next_invoice_no(
+        prefix=prefix,
+        company_id=company_id,
+        separator=separator,
+        include_fy=include_fy,
+        fy_format=fy_format,
+        include_month=include_month,
+        number_padding=number_padding,
+    )
     return {"invoice_no": next_no}
 
 
