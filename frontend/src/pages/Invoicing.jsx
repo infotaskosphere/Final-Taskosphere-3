@@ -25,7 +25,7 @@ import {
   Upload, Database, FileUp, CheckSquare, AlertTriangle, Phone, Mail,
   FileSpreadsheet, Briefcase, PieChart, Settings, Table, FileDown, BookOpen,
   ExternalLink, GripVertical} from 'lucide-react';
-import InvoiceSettings, { getInvSettings, getNextInvoiceNumber } from './InvoiceSettings';
+import InvoiceSettings, { getInvSettings } from './InvoiceSettings';
 import { COLOR_THEMES, INVOICE_TEMPLATES, generateInvoiceHTML } from './InvoiceTemplates';
 import PartyLedger from './PartyLedger';
 
@@ -2770,6 +2770,17 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   // ── useRef ──
   const previewRef = useRef(null);
 
+  // ── Fetch next invoice number from backend (DB-accurate) ──
+  const fetchNextInvoiceNo = async (companyId, invoiceType = 'tax_invoice') => {
+    if (!companyId) return '';
+    try {
+      const { data } = await api.get('/invoices/next-number', { params: { company_id: companyId, invoice_type: invoiceType } });
+      return data.invoice_no || '';
+    } catch {
+      return '';
+    }
+  };
+
   // ── useEffect ──
   const INV_DRAFT_KEY = 'taskosphere_invoice_add_draft';
   useEffect(() => {
@@ -2957,7 +2968,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                 <div><p className="text-white/50 text-[10px] uppercase tracking-widest">{editingInv?.id ? `Edit · ${editingInv.invoice_no}` : editingInv ? 'Duplicate Document' : 'New Document'}</p><h2 className="text-white font-bold text-xl">{editingInv?.id ? 'Edit Invoice' : editingInv ? 'Duplicate Invoice' : 'Create Invoice / Estimate'}</h2></div>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
-                <Select value={form.invoice_type} onValueChange={v => setField('invoice_type', v)}>
+                <Select value={form.invoice_type} onValueChange={async v => { setField('invoice_type', v); if (form.company_id && !editingInv?.id) { const n = await fetchNextInvoiceNo(form.company_id, v); if (n) setField('invoice_no', n); } }}>
                   <SelectTrigger className="w-44 h-9 rounded-xl border-white/20 bg-white/10 text-white text-xs font-semibold"><SelectValue /></SelectTrigger>
                   <SelectContent>{INV_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
                 </Select>
@@ -2996,10 +3007,10 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                     <div>
                       <label className={labelCls}>Company Profile *</label>
-                      <Select value={form.company_id} onValueChange={v => {
+                      <Select value={form.company_id} onValueChange={async v => {
                         const s = getInvSettings(v);
                         const co = (companies || []).find(c => c.id === v);
-                        const nextNo = !editingInv?.id ? (getNextInvoiceNumber(v) || '') : '';
+                        const nextNo = !editingInv?.id ? (await fetchNextInvoiceNo(v, form.invoice_type) || '') : '';
                         setForm(p => ({
                           ...p,
                           company_id: v,
@@ -3031,7 +3042,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                         <label className={labelCls + " mb-0"}>Invoice Number *</label>
                         {form.company_id && !editingInv?.id && (
                           <button type="button"
-                            onClick={() => setField('invoice_no', getNextInvoiceNumber(form.company_id) || '')}
+                            onClick={async () => setField('invoice_no', await fetchNextInvoiceNo(form.company_id, form.invoice_type) || '')}
                             className="text-[10px] font-semibold text-blue-500 hover:text-blue-400 transition-colors flex items-center gap-1">
                             <RefreshCw className="h-2.5 w-2.5" /> Auto
                           </button>
