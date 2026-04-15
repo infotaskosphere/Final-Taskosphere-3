@@ -2770,11 +2770,33 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   // ── useRef ──
   const previewRef = useRef(null);
 
-  // ── Fetch next invoice number from backend (DB-accurate) ──
+  // ── Fetch next invoice number from backend (DB-accurate, respects Invoice Settings format) ──
   const fetchNextInvoiceNo = async (companyId, invoiceType = 'tax_invoice') => {
     if (!companyId) return '';
     try {
-      const { data } = await api.get('/invoices/next-number', { params: { company_id: companyId, invoice_type: invoiceType } });
+      const s = getInvSettings(companyId);
+
+      // Pick the right prefix per invoice type (respects separate prefixes in settings)
+      const prefixMap = {
+        tax_invoice:  s.prefix               || 'INV',
+        proforma:     s.proforma_prefix       || s.prefix || 'PRO',
+        estimate:     s.estimate_prefix       || s.prefix || 'EST',
+        credit_note:  s.credit_note_prefix    || 'CN',
+        debit_note:   s.debit_note_prefix     || 'DN',
+      };
+      const prefix = prefixMap[invoiceType] || s.prefix || 'INV';
+
+      const params = {
+        company_id:     companyId,
+        invoice_type:   invoiceType,
+        prefix,
+        separator:      (!s.separator || s.separator === 'none') ? '' : s.separator,
+        include_fy:     s.include_fy  !== undefined ? s.include_fy  : true,
+        fy_format:      s.fy_format   || 'short',
+        include_month:  s.include_month !== undefined ? s.include_month : false,
+        number_padding: s.number_padding || 3,
+      };
+      const { data } = await api.get('/invoices/next-number', { params });
       return data.invoice_no || '';
     } catch {
       return '';
