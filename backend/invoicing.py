@@ -1,26 +1,3 @@
-"""
-invoicing.py  —  v6.3
-──────────────────────────────────────────────────────────────────────────────
-CHANGES in v6.1 (bug-fixes over v6.0):
-    GET /invoices/{inv_id} so FastAPI no longer treats "drive-status" as an
-    invoice ID (was causing 404 / wrong handler every time).
-  - FIXED: PDF now reads invoice_custom_color / company color instead of
-    using a hardcoded navy constant.
-  - FIXED: PDF layout rebuilt to match the Invoice Settings "Preview" tab
-    (dark full-width header, logo left + doc-type right, Bill To / Due Date
-    two-column section, Disc% column in items table, signature bottom-right).
-  - FIXED: .vyb backup extension now correctly routed to the .vyp SQLite
-    parser (KhataBook Pro uses .vyb, same SQLite schema as .vyp).
-  - Added _hex_to_rgb() helper used by the PDF builder.
-
-CHANGES in v6.2 (bug-fixes over v6.1):
-  - FIXED: _upload_to_drive() is async — added missing `await` in
-    upload_invoice_to_drive() and parse_backup_file() endpoints.
-    Previously the coroutine object was passed directly to MongoDB causing:
-    bson.errors.InvalidDocument: cannot encode object: <coroutine object
-    _upload_to_drive ...>
-"""
-
 import uuid
 import sqlite3
 import logging
@@ -1055,6 +1032,7 @@ class InvoiceCreate(BaseModel):
     discount_amount: float = 0.0
     shipping_charges: float = 0.0
     other_charges: float = 0.0
+    advance_received: float = 0.0
     payment_terms: str = "Due on receipt"
     notes: str = ""
     terms_conditions: str = ""
@@ -2145,12 +2123,27 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(get_c
 
     inv_date = data.invoice_date or date.today().isoformat()
     due_date = data.due_date or (date.today() + timedelta(days=30)).isoformat()
+    advance = max(0.0, float(data.advance_received or 0))
     raw = {"id": str(uuid.uuid4()), "invoice_no": inv_no, "invoice_date": inv_date, "due_date": due_date,
-           **data.model_dump(exclude={"invoice_no"}), "amount_paid": 0.0, "amount_due": 0.0, "pdf_drive_link": "",
+           **data.model_dump(exclude={"invoice_no"}), "amount_paid": advance, "amount_due": 0.0, "pdf_drive_link": "",
            "created_by": current_user.id, "created_at": now, "updated_at": now}
     raw = _compute_invoice_totals(raw)
-    raw["amount_due"] = raw["grand_total"]
+    raw["amount_due"] = round(raw["grand_total"] - advance, 2)
+    if raw["amount_due"] <= 0:
+        raw["status"] = "paid"
+    elif advance > 0:
+        raw["status"] = "partially_paid"
     await db.invoices.insert_one({**raw})
+    # Record advance as a payment entry so history is tracked
+    if advance > 0:
+        await db.payments.insert_one({
+            "id": str(uuid.uuid4()), "invoice_id": raw["id"],
+            "company_id": data.company_id,
+            "amount": advance, "payment_date": inv_date,
+            "payment_mode": "advance", "reference_no": "",
+            "notes": "Advance received at invoice creation",
+            "created_by": current_user.id, "created_at": now,
+        })
     raw.pop("_id", None)
     return raw
 
