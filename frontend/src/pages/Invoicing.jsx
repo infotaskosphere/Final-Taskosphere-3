@@ -2520,52 +2520,170 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
 // PAYMENT MODAL
 // ════════════════════════════════════════════════════════════════════════════════
 const PaymentModal = ({ invoice, open, onClose, onSuccess, isDark }) => {
-  // ── useState ──
   const [form, setForm] = useState({ amount: '', payment_date: format(new Date(), 'yyyy-MM-dd'), payment_mode: 'neft', reference_no: '', notes: '' });
   const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [histLoading, setHistLoading] = useState(false);
 
-  // ── useEffect ──
-  useEffect(() => { if (open && invoice) setForm(p => ({ ...p, amount: invoice.amount_due?.toFixed(2) || '' })); }, [open, invoice]);
+  useEffect(() => {
+    if (open && invoice) {
+      setForm(p => ({ ...p, amount: invoice.amount_due?.toFixed(2) || '' }));
+      setHistLoading(true);
+      api.get('/payments', { params: { invoice_id: invoice.id } })
+        .then(r => setHistory(r.data || []))
+        .catch(() => setHistory([]))
+        .finally(() => setHistLoading(false));
+    }
+  }, [open, invoice]);
 
-  // ── Handlers ──
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.amount || parseFloat(form.amount) <= 0) { toast.error('Enter a valid amount'); return; }
+    const amt = parseFloat(form.amount);
+    if (!amt || amt <= 0) { toast.error('Enter a valid amount'); return; }
+    if (amt > (invoice.amount_due || 0) + 0.01) {
+      if (!window.confirm(`Amount ₹${amt.toLocaleString()} exceeds balance due ₹${(invoice.amount_due||0).toLocaleString()}. Record anyway?`)) return;
+    }
     setLoading(true);
     try {
-      await api.post('/payments', { invoice_id: invoice.id, amount: parseFloat(form.amount), payment_date: form.payment_date, payment_mode: form.payment_mode, reference_no: form.reference_no, notes: form.notes });
+      await api.post('/payments', { invoice_id: invoice.id, amount: amt, payment_date: form.payment_date, payment_mode: form.payment_mode, reference_no: form.reference_no, notes: form.notes });
       toast.success('Payment recorded!'); onSuccess?.(); onClose();
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to record payment'); }
     finally { setLoading(false); }
   };
 
+  const quickFill = (pct) => {
+    const amt = Math.round((invoice.amount_due || 0) * pct / 100 * 100) / 100;
+    setForm(p => ({ ...p, amount: String(amt) }));
+  };
+
+  const enteredAmt = parseFloat(form.amount) || 0;
+  const balanceAfter = Math.max(0, (invoice.amount_due || 0) - enteredAmt);
+  const isPartial = enteredAmt > 0 && enteredAmt < (invoice.amount_due || 0) - 0.01;
+  const isFull    = enteredAmt >= (invoice.amount_due || 0) - 0.01;
+
   if (!invoice) return null;
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-md rounded-2xl p-0 overflow-hidden">
+      <DialogContent className="max-w-lg rounded-2xl p-0 overflow-hidden">
         <DialogTitle className="sr-only">Record Payment</DialogTitle>
-        <DialogDescription className="sr-only">Record payment</DialogDescription>
+        <DialogDescription className="sr-only">Record payment for {invoice.invoice_no}</DialogDescription>
+
+        {/* ── Header ── */}
         <div className="px-6 py-5" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center"><IndianRupee className="h-5 w-5 text-white" /></div>
-            <div><p className="text-white/60 text-[10px] uppercase tracking-widest">Record Payment</p><h2 className="text-white font-bold text-lg">{invoice.invoice_no}</h2></div>
+            <div>
+              <p className="text-white/60 text-[10px] uppercase tracking-widest">Record Payment</p>
+              <h2 className="text-white font-bold text-lg">{invoice.invoice_no}</h2>
+              <p className="text-white/50 text-xs">{invoice.client_name}</p>
+            </div>
           </div>
-          <div className="mt-4 flex gap-4">
+          <div className="mt-4 grid grid-cols-3 gap-3">
             {[['Invoice Total', invoice.grand_total, 'text-white'], ['Paid So Far', invoice.amount_paid, 'text-emerald-300'], ['Balance Due', invoice.amount_due, 'text-amber-300']].map(([l, v, cls]) => (
-              <div key={l} className="flex-1 bg-white/10 rounded-xl px-3 py-2"><p className="text-white/50 text-[9px] uppercase tracking-wider">{l}</p><p className={`font-bold text-sm ${cls}`}>{fmtC(v)}</p></div>
+              <div key={l} className="bg-white/10 rounded-xl px-3 py-2">
+                <p className="text-white/50 text-[9px] uppercase tracking-wider">{l}</p>
+                <p className={`font-bold text-sm ${cls}`}>{fmtC(v)}</p>
+              </div>
             ))}
           </div>
         </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Amount (₹) *</label><div className="relative"><span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span><Input type="number" step="0.01" min="0.01" className="pl-8 h-11 rounded-xl" value={form.amount} onChange={e => setForm(p => ({ ...p, amount: e.target.value }))} required /></div></div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Date *</label><Input type="date" className="h-11 rounded-xl" value={form.payment_date} onChange={e => setForm(p => ({ ...p, payment_date: e.target.value }))} required /></div>
-            <div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Mode</label><Select value={form.payment_mode} onValueChange={v => setForm(p => ({ ...p, payment_mode: v }))}><SelectTrigger className="h-11 rounded-xl"><SelectValue /></SelectTrigger><SelectContent>{PAY_MODES.map(m => <SelectItem key={m} value={m}>{m.toUpperCase()}</SelectItem>)}</SelectContent></Select></div>
-          </div>
-          <div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Reference / UTR No.</label><Input className="h-11 rounded-xl" placeholder="Transaction / cheque reference" value={form.reference_no} onChange={e => setForm(p => ({ ...p, reference_no: e.target.value }))} /></div>
-          <div><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Notes</label><Textarea className="rounded-xl text-sm min-h-[70px] resize-none" value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} /></div>
-          <div className="flex gap-3 pt-2"><Button type="button" variant="ghost" onClick={onClose} className="flex-1 h-11 rounded-xl">Cancel</Button><Button type="submit" disabled={loading} className="flex-1 h-11 rounded-xl text-white font-semibold" style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen}, #15803d)` }}>{loading ? 'Recording…' : '✓ Record Payment'}</Button></div>
-        </form>
+
+        <div className="p-6 space-y-4 max-h-[65vh] overflow-y-auto">
+
+          {/* ── Payment history ── */}
+          {(histLoading || history.length > 0) && (
+            <div className={`rounded-xl border p-3 ${isDark ? 'border-slate-700 bg-slate-800/40' : 'border-slate-200 bg-slate-50/60'}`}>
+              <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Payment History</p>
+              {histLoading ? (
+                <p className="text-xs text-slate-400 py-1">Loading…</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {history.map((p, i) => (
+                    <div key={p.id || i} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>{p.payment_mode || 'other'}</span>
+                        <span className={`truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{p.payment_date}{p.reference_no ? ` · ${p.reference_no}` : ''}</span>
+                      </div>
+                      <span className={`font-bold flex-shrink-0 ml-2 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{fmtC(p.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Amount + quick-fill ── */}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Amount (₹) *</label>
+              <div className="relative mb-2">
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">₹</span>
+                <Input type="number" step="0.01" min="0.01" className="pl-8 h-11 rounded-xl" value={form.amount}
+                  onChange={e => setForm(p => ({ ...p, amount: e.target.value }))} required />
+              </div>
+              {/* Quick-fill buttons */}
+              <div className="grid grid-cols-4 gap-2">
+                {[['Full', 100], ['75%', 75], ['50%', 50], ['25%', 25]].map(([label, pct]) => (
+                  <button key={label} type="button" onClick={() => quickFill(pct)}
+                    className={`py-2 px-1 rounded-xl text-xs font-bold transition-all border ${
+                      (pct === 100 && isFull) || (pct !== 100 && isPartial && Math.abs(enteredAmt - Math.round((invoice.amount_due||0)*pct/100*100)/100) < 0.01)
+                        ? (isDark ? 'border-blue-500 bg-blue-900/30 text-blue-300' : 'border-blue-500 bg-blue-50 text-blue-700')
+                        : (isDark ? 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-500' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50')
+                    }`}>
+                    <p>{label}</p>
+                    <p className={`text-[10px] font-normal mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{fmtC(Math.round((invoice.amount_due||0)*pct/100*100)/100)}</p>
+                  </button>
+                ))}
+              </div>
+              {/* Live balance-after indicator */}
+              {enteredAmt > 0 && (
+                <div className={`mt-2 flex items-center justify-between text-xs px-3 py-2 rounded-lg ${
+                  isFull
+                    ? (isDark ? 'bg-emerald-900/20 text-emerald-400' : 'bg-emerald-50 text-emerald-700')
+                    : (isDark ? 'bg-amber-900/20 text-amber-400' : 'bg-amber-50 text-amber-700')
+                }`}>
+                  <span>{isFull ? '✓ Invoice will be fully paid' : `Partial — balance remaining:`}</span>
+                  {!isFull && <span className="font-bold">{fmtC(balanceAfter)}</span>}
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Date *</label>
+                <Input type="date" className="h-11 rounded-xl" value={form.payment_date}
+                  onChange={e => setForm(p => ({ ...p, payment_date: e.target.value }))} required />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Payment Mode</label>
+                <Select value={form.payment_mode} onValueChange={v => setForm(p => ({ ...p, payment_mode: v }))}>
+                  <SelectTrigger className="h-11 rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent>{PAY_MODES.map(m => <SelectItem key={m} value={m}>{m.toUpperCase()}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Reference / UTR No.</label>
+              <Input className="h-11 rounded-xl" placeholder="Transaction / cheque reference"
+                value={form.reference_no} onChange={e => setForm(p => ({ ...p, reference_no: e.target.value }))} />
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Notes</label>
+              <Textarea className="rounded-xl text-sm min-h-[60px] resize-none" value={form.notes}
+                onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} />
+            </div>
+
+            <div className="flex gap-3 pt-1">
+              <Button type="button" variant="ghost" onClick={onClose} className="flex-1 h-11 rounded-xl">Cancel</Button>
+              <Button type="submit" disabled={loading} className="flex-1 h-11 rounded-xl text-white font-semibold"
+                style={{ background: isFull ? `linear-gradient(135deg, ${COLORS.emeraldGreen}, #15803d)` : `linear-gradient(135deg, ${COLORS.amber}, #d97706)` }}>
+                {loading ? 'Recording…' : isFull ? '✓ Record Full Payment' : '✓ Record Partial Payment'}
+              </Button>
+            </div>
+          </form>
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -2752,7 +2870,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     due_date: '',  // intentionally empty — user sets this manually or via quick-fill buttons
     supply_state: '', is_interstate: false,
     items: [emptyItem()],
-    gst_rate: 18, discount_amount: 0, shipping_charges: 0, other_charges: 0,
+    gst_rate: 18, discount_amount: 0, shipping_charges: 0, other_charges: 0, advance_received: 0,
     payment_terms: 'Due on receipt', notes: '', terms_conditions: '', reference_no: '',
     is_recurring: false, recurrence_pattern: 'monthly', status: 'draft',
     invoice_template: 'prestige', invoice_theme: 'classic_blue', invoice_custom_color: '#0D3B66',
@@ -3208,6 +3326,29 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                     <div><label className={labelCls}>Shipping (₹)</label><Input type="number" min="0" step="any" className={inputCls} value={form.shipping_charges} onChange={e => setField('shipping_charges', parseFloat(e.target.value) || 0)} /></div>
                     <div><label className={labelCls}>Other Charges (₹)</label><Input type="number" min="0" step="any" className={inputCls} value={form.other_charges} onChange={e => setField('other_charges', parseFloat(e.target.value) || 0)} /></div>
                   </div>
+                  <div className={`mt-4 p-4 rounded-xl border-2 border-dashed ${isDark ? 'border-emerald-700/50 bg-emerald-900/10' : 'border-emerald-200 bg-emerald-50/50'}`}>
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-5 h-5 rounded-md bg-emerald-500/20 flex items-center justify-center"><IndianRupee className="h-3 w-3 text-emerald-600" /></div>
+                      <label className={`text-xs font-bold uppercase tracking-widest ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>Advance Received from Client</label>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="relative flex-1"><span className={`absolute left-3 top-1/2 -translate-y-1/2 font-bold text-sm ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>₹</span><Input type="number" min="0" step="any" className={`${inputCls} pl-7`} placeholder="0.00" value={form.advance_received || ''} onChange={e => setField('advance_received', parseFloat(e.target.value) || 0)} /></div>
+                      <div className="flex gap-1.5">
+                        {[25, 50, 75, 100].map(pct => (
+                          <button key={pct} type="button"
+                            onClick={() => setField('advance_received', Math.round(totals.grand_total * pct / 100 * 100) / 100)}
+                            className={`text-[10px] font-bold px-2.5 py-1.5 rounded-lg transition-colors ${isDark ? 'bg-slate-700 text-slate-300 hover:bg-emerald-900/40 hover:text-emerald-300' : 'bg-slate-100 text-slate-600 hover:bg-emerald-100 hover:text-emerald-700'}`}>
+                            {pct}%
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {(form.advance_received || 0) > 0 && (
+                      <p className={`text-xs mt-2 font-medium ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>
+                        Balance due at delivery: {fmtC(Math.max(0, totals.grand_total - (form.advance_received || 0)))}
+                      </p>
+                    )}
+                  </div>
                 </div>
                 <div className={`${sectionCls} space-y-2`}>
                   <h3 className={`text-sm font-semibold mb-4 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Invoice Summary</h3>
@@ -3231,6 +3372,16 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                     <span className={isDark ? 'text-slate-100' : 'text-slate-900'}>Grand Total</span>
                     <span style={{ color: COLORS.mediumBlue }}>{fmtC(totals.grand_total)}</span>
                   </div>
+                  {(form.advance_received || 0) > 0 && (<>
+                    <div className="flex justify-between text-sm py-1.5 border-b border-dashed border-emerald-200 dark:border-emerald-800">
+                      <span className={`font-medium ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>− Advance Received</span>
+                      <span className={`font-semibold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>− {fmtC(form.advance_received)}</span>
+                    </div>
+                    <div className="flex justify-between text-base font-bold pt-2">
+                      <span className={isDark ? 'text-amber-300' : 'text-amber-700'}>Balance Due at Delivery</span>
+                      <span className={isDark ? 'text-amber-300' : 'text-amber-700'}>{fmtC(Math.max(0, totals.grand_total - (form.advance_received||0)))}</span>
+                    </div>
+                  </>)}
                 </div>
                 <div className={sectionCls}>
                   <h3 className={`text-sm font-semibold mb-4 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Payment Terms</h3>
@@ -4342,6 +4493,9 @@ const fetchAll = useCallback(async () => {
                         <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                           <Hl text={inv.invoice_no || '—'} query={searchTerm} />
                         </p>
+                        {(() => { const co = (companies||[]).find(c=>c.id===inv.company_id); return co ? (
+                          <p className="text-[10px] mt-0.5 font-semibold truncate max-w-[180px]" style={{color: getCompanyStripColor(inv.company_id, companies)}}>{co.name}</p>
+                        ) : null; })()}
                         {inv.reference_no && <p className="text-[10px] text-slate-400 mt-0.5">Ref: {inv.reference_no}</p>}
                       </td>
                       <td className="px-4 py-3.5">
@@ -4498,6 +4652,9 @@ const fetchAll = useCallback(async () => {
                         <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                           <Hl text={inv.invoice_no || '—'} query={searchTerm} />
                         </p>
+                        {(() => { const co = (companies||[]).find(c=>c.id===inv.company_id); return co ? (
+                          <p className="text-[10px] mt-0.5 font-semibold truncate max-w-[180px]" style={{color: getCompanyStripColor(inv.company_id, companies)}}>{co.name}</p>
+                        ) : null; })()}
                         {inv.reference_no && <p className="text-[10px] text-slate-400 mt-0.5">Ref: {inv.reference_no}</p>}
                       </td>
                       <td className="px-4 py-3.5">
