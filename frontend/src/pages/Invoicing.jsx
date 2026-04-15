@@ -3113,6 +3113,21 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                   <SelectTrigger className="w-44 h-9 rounded-xl border-white/20 bg-white/10 text-white text-xs font-semibold"><SelectValue /></SelectTrigger>
                   <SelectContent>{INV_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
                 </Select>
+                {!editingInv && (
+                  <button type="button"
+                    title="Clear all form data and start fresh"
+                    onClick={() => {
+                      if (window.confirm('Clear all form data and start fresh?')) {
+                        try { localStorage.removeItem(INV_DRAFT_KEY); } catch {}
+                        setForm(defaultForm);
+                        setActiveTab('details');
+                      }
+                    }}
+                    className="h-9 px-3 rounded-xl border border-white/20 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors flex-shrink-0">
+                    <X className="h-3 w-3" />
+                    Clear
+                  </button>
+                )}
                 <button type="button" onClick={onClose}
                   className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors">
                   <X className="h-4 w-4 text-white" />
