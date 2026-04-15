@@ -2540,8 +2540,8 @@ const PaymentModal = ({ invoice, open, onClose, onSuccess, isDark }) => {
     e.preventDefault();
     const amt = parseFloat(form.amount);
     if (!amt || amt <= 0) { toast.error('Enter a valid amount'); return; }
-    if (amt > (invoice.amount_due || 0) + 0.01) {
-      if (!window.confirm(`Amount ₹${amt.toLocaleString()} exceeds balance due ₹${(invoice.amount_due||0).toLocaleString()}. Record anyway?`)) return;
+    if (amt > amountDue + 0.01) {
+      if (!window.confirm(`Amount ₹${amt.toLocaleString()} exceeds balance due ₹${amountDue.toLocaleString()}. Record anyway?`)) return;
     }
     setLoading(true);
     try {
@@ -2552,16 +2552,17 @@ const PaymentModal = ({ invoice, open, onClose, onSuccess, isDark }) => {
   };
 
   const quickFill = (pct) => {
-    const amt = Math.round((invoice.amount_due || 0) * pct / 100 * 100) / 100;
+    const amt = Math.round(amountDue * pct / 100 * 100) / 100;
     setForm(p => ({ ...p, amount: String(amt) }));
   };
 
-  const enteredAmt = parseFloat(form.amount) || 0;
-  const balanceAfter = Math.max(0, (invoice.amount_due || 0) - enteredAmt);
-  const isPartial = enteredAmt > 0 && enteredAmt < (invoice.amount_due || 0) - 0.01;
-  const isFull    = enteredAmt >= (invoice.amount_due || 0) - 0.01;
-
   if (!invoice) return null;
+
+  const enteredAmt = parseFloat(form.amount) || 0;
+  const amountDue  = invoice?.amount_due || 0;
+  const balanceAfter = Math.max(0, amountDue - enteredAmt);
+  const isPartial = enteredAmt > 0 && enteredAmt < amountDue - 0.01;
+  const isFull    = enteredAmt >= amountDue - 0.01;
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-lg rounded-2xl p-0 overflow-hidden">
@@ -2579,7 +2580,7 @@ const PaymentModal = ({ invoice, open, onClose, onSuccess, isDark }) => {
             </div>
           </div>
           <div className="mt-4 grid grid-cols-3 gap-3">
-            {[['Invoice Total', invoice.grand_total, 'text-white'], ['Paid So Far', invoice.amount_paid, 'text-emerald-300'], ['Balance Due', invoice.amount_due, 'text-amber-300']].map(([l, v, cls]) => (
+            {[['Invoice Total', invoice.grand_total, 'text-white'], ['Paid So Far', invoice.amount_paid, 'text-emerald-300'], ['Balance Due', amountDue, 'text-amber-300']].map(([l, v, cls]) => (
               <div key={l} className="bg-white/10 rounded-xl px-3 py-2">
                 <p className="text-white/50 text-[9px] uppercase tracking-wider">{l}</p>
                 <p className={`font-bold text-sm ${cls}`}>{fmtC(v)}</p>
@@ -2626,12 +2627,12 @@ const PaymentModal = ({ invoice, open, onClose, onSuccess, isDark }) => {
                 {[['Full', 100], ['75%', 75], ['50%', 50], ['25%', 25]].map(([label, pct]) => (
                   <button key={label} type="button" onClick={() => quickFill(pct)}
                     className={`py-2 px-1 rounded-xl text-xs font-bold transition-all border ${
-                      (pct === 100 && isFull) || (pct !== 100 && isPartial && Math.abs(enteredAmt - Math.round((invoice.amount_due||0)*pct/100*100)/100) < 0.01)
+                      (pct === 100 && isFull) || (pct !== 100 && isPartial && Math.abs(enteredAmt - Math.round(amountDue*pct/100*100)/100) < 0.01)
                         ? (isDark ? 'border-blue-500 bg-blue-900/30 text-blue-300' : 'border-blue-500 bg-blue-50 text-blue-700')
                         : (isDark ? 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-500' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50')
                     }`}>
                     <p>{label}</p>
-                    <p className={`text-[10px] font-normal mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{fmtC(Math.round((invoice.amount_due||0)*pct/100*100)/100)}</p>
+                    <p className={`text-[10px] font-normal mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{fmtC(Math.round(amountDue*pct/100*100)/100)}</p>
                   </button>
                 ))}
               </div>
