@@ -2213,6 +2213,29 @@ async def invoice_stats(year: Optional[int] = None, month: Optional[int] = None,
 # invoice ID and routed it to get_invoice() → always 404.
 # ══════════════════════════════════════════════════════════════
 
+@router.get("/invoices/next-number")
+async def get_next_invoice_number(
+    company_id: str = Query(..., description="Company ID to scope the numbering"),
+    invoice_type: str = Query("tax_invoice", description="Invoice type"),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns the next available invoice number for the given company and type.
+    Scans existing invoices in the DB (MAX-based) so it is always accurate
+    regardless of deletions or renames.
+    """
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    prefix = {
+        "proforma":    "PRO",
+        "estimate":    "EST",
+        "credit_note": "CN",
+        "debit_note":  "DN",
+    }.get(invoice_type, "INV")
+    next_no = await _next_invoice_no(prefix, company_id)
+    return {"invoice_no": next_no}
+
+
 @router.get("/invoices/drive-status")
 async def check_drive_status(current_user: User = Depends(get_current_user)):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
