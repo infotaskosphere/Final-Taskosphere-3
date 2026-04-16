@@ -4,6 +4,8 @@ import { useDark } from '@/hooks/useDark';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
+import FinancialYearSelect from '@/components/ui/FinancialYearSelect';
+import { FY_OPTIONS, getCurrentFY } from '@/lib/financialYears';
 import {
   TrendingUp, TrendingDown, BookOpen, Upload, FileText,
   BarChart3, PieChart, Scale, ChevronRight, AlertCircle, Zap,
@@ -30,11 +32,7 @@ const STATUS_COLORS = {
   overdue:   {bg:'#fee2e2',text:'#dc2626',label:'Overdue'},
   cancelled: {bg:'#f3f4f6',text:'#9ca3af',label:'Cancelled'},
 };
-const FY_OPTIONS = [
-  {label:'2025-26',from:'2025-04-01',to:'2026-03-31'},
-  {label:'2024-25',from:'2024-04-01',to:'2025-03-31'},
-  {label:'2023-24',from:'2023-04-01',to:'2024-03-31'},
-];
+// FY_OPTIONS is imported from @/lib/financialYears — auto-generates all years
 
 function Badge({status}) {
   const s = STATUS_COLORS[status]||STATUS_COLORS.draft;
@@ -72,7 +70,7 @@ export default function AccountingDashboard() {
 
   const [summary,    setSummary]    = useState(null);
   const [accLoading, setAccLoading] = useState(true);
-  const [fy,         setFy]         = useState(FY_OPTIONS[0]);
+  const [fy,         setFy]         = useState(getCurrentFY);
 
   const [invStats,   setInvStats]   = useState(null);
   const [recentInv,  setRecentInv]  = useState([]);
@@ -171,17 +169,7 @@ export default function AccountingDashboard() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex gap-1">
-            {FY_OPTIONS.map(o=>(
-              <button key={o.label} onClick={()=>setFy(o)}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
-                  fy.label===o.label?'text-white border-transparent':
-                  'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-blue-300'}`}
-                style={fy.label===o.label?{background:COLORS.mediumBlue}:{}}>
-                FY {o.label}
-              </button>
-            ))}
-          </div>
+          <FinancialYearSelect value={fy.label} onChange={setFy} />
           <button onClick={refreshAll}
             className="p-2 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 transition">
             <RefreshCw size={16} className={`text-gray-500 ${spinning?'animate-spin':''}`}/>
