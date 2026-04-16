@@ -33,7 +33,6 @@ from pydantic import BaseModel, Field, field_validator
 
 from backend.dependencies import db, get_current_user
 from backend.models import User
-from backend.accounting import post_journal_entry
 
 # ✅ Google imports (clean)
 from google.auth.transport.requests import Request
@@ -2135,39 +2134,6 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(get_c
     elif advance > 0:
         raw["status"] = "partially_paid"
     await db.invoices.insert_one({**raw})
-
-    # ── Auto-post Sales Journal Entry ─────────────────────────────────────
-    # Only for actual tax invoices (not proforma/estimate/credit note)
-    if data.invoice_type == "tax_invoice":
-        try:
-            org_id  = str(current_user.id)
-            subtotal = round(float(raw.get("subtotal") or raw.get("grand_total", 0)), 2)
-            cgst     = round(float(raw.get("total_cgst", 0)), 2)
-            sgst     = round(float(raw.get("total_sgst", 0)), 2)
-            igst     = round(float(raw.get("total_igst", 0)), 2)
-            grand    = round(float(raw.get("grand_total", 0)), 2)
-
-            jlines = [
-                # Dr Sundry Debtors — full invoice amount receivable
-                {"account_code": "1010", "type": "Dr", "amount": grand,    "narration": f"Invoice {inv_no} – Debtor"},
-                # Cr Sales Revenue — net amount before tax
-                {"account_code": "4003", "type": "Cr", "amount": subtotal, "narration": f"Sales – {inv_no}"},
-            ]
-            if cgst: jlines.append({"account_code": "2010", "type": "Cr", "amount": cgst, "narration": "Output CGST"})
-            if sgst: jlines.append({"account_code": "2011", "type": "Cr", "amount": sgst, "narration": "Output SGST"})
-            if igst: jlines.append({"account_code": "2012", "type": "Cr", "amount": igst, "narration": "Output IGST"})
-
-            await post_journal_entry(org_id, {
-                "date":      inv_date,
-                "narration": f"Sales Invoice {inv_no} – {data.client_name or ''}",
-                "ref_no":    inv_no,
-                "lines":     jlines,
-            }, org_id)
-        except Exception as je:
-            # Journal failure must not block invoice creation
-            import logging
-            logging.getLogger(__name__).warning(f"Auto-journal failed for invoice {inv_no}: {je}")
-
     # Record advance as a payment entry so history is tracked
     if advance > 0:
         await db.payments.insert_one({
@@ -2683,43 +2649,6 @@ async def record_payment(data: PaymentCreate, current_user: User = Depends(get_c
     await db.invoices.update_one({"id": data.invoice_id},
         {"$set": {"amount_paid": round(total_paid, 2), "amount_due": amount_due, "status": new_status,
                   "updated_at": datetime.now(timezone.utc).isoformat()}})
-
-    # ── Auto-post Payment Receipt Journal Entry ──────────────────────────
-    # Dr Bank/Cash  (receipt account)
-    # Cr Sundry Debtors (clears the debtor balance)
-    try:
-        org_id      = str(current_user.id)
-        pay_amount  = round(float(data.amount), 2)
-        inv_no      = inv.get("invoice_no", "")
-        pay_date    = data.payment_date or date.today().isoformat()
-        # Map payment mode → ledger account
-        mode_map = {
-            "cash":   "1001",   # Cash in Hand
-            "cheque": "1002",   # Bank – SBI (default)
-            "neft":   "1002",
-            "rtgs":   "1002",
-            "upi":    "1002",
-            "online": "1002",
-            "advance":"2060",   # Advance from Customers (already handled at invoice creation)
-        }
-        bank_ac = mode_map.get((data.payment_mode or "").lower(), "1002")
-
-        if bank_ac != "2060":   # Skip journal for advance mode (already posted at invoice creation)
-            await post_journal_entry(org_id, {
-                "date":      pay_date,
-                "narration": f"Payment received – Inv {inv_no} from {inv.get('client_name','')}",
-                "ref_no":    data.reference_no or inv_no,
-                "lines": [
-                    {"account_code": bank_ac, "type": "Dr", "amount": pay_amount,
-                     "narration": f"Receipt – {inv_no}"},
-                    {"account_code": "1010",  "type": "Cr", "amount": pay_amount,
-                     "narration": f"Debtor settled – {inv_no}"},
-                ],
-            }, org_id)
-    except Exception as je:
-        import logging
-        logging.getLogger(__name__).warning(f"Auto-journal failed for payment on invoice {data.invoice_id}: {je}")
-
     return payment_data
 
 
