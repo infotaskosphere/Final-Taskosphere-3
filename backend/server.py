@@ -35,7 +35,6 @@ try:
 except ImportError:
     _gemini_ai = None
 from backend.passwords import router as passwords_router
-from backend.accounting import router as accounting_router
 
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -6525,6 +6524,5 @@ api_router.include_router(telegram_router)
 api_router.include_router(leads_router)
 api_router.include_router(notification_router)
 api_router.include_router(email_router)
-api_router.include_router(accounting_router)
 app.include_router(google_auth_router)
 app.include_router(api_router)
