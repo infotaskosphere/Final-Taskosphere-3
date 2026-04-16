@@ -32,11 +32,15 @@ export default function Reconciliation() {
   const [search,      setSearch]      = useState('');
   const [reviewed,    setReviewed]    = useState(new Set());
 
-  // Fetch statements list
+  // Fetch statements list and auto-load first one
   useEffect(() => {
-    api.get('/accounting/bank-statements').then(r => setStatements(r.data || [])).catch(() => {});
+    api.get('/accounting/bank-statements').then(r => {
+      const stmts = r.data || [];
+      setStatements(stmts);
+      if (stmts.length > 0) loadStatement(stmts[0]);
+    }).catch(() => {});
     api.get('/accounting/accounts').then(r => setAccounts(r.data || [])).catch(() => {});
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const accMap   = accounts.reduce((m, a) => { m[a.code] = a; return m; }, {});
   const accOptions = accounts.sort((a, b) => a.code.localeCompare(b.code));
