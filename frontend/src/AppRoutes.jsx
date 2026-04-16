@@ -32,14 +32,14 @@ const Reminders         = lazy(() => import("@/pages/Reminders.jsx"));
 const CompliancePage    = lazy(() => import("@/pages/CompliancePage.jsx")); // ← NEW
 
 // ── Accounting Module ───────────────────────────────────────────────────────
-const AccountingDashboard = lazy(() => import("@/pages/AccountingDashboard.jsx"));
-const BankStatements      = lazy(() => import("@/pages/BankStatements.jsx"));
-const ChartOfAccounts     = lazy(() => import("@/pages/ChartOfAccounts.jsx"));
-const JournalEntries      = lazy(() => import("@/pages/JournalEntries.jsx"));
-const LedgerView          = lazy(() => import("@/pages/LedgerView.jsx"));
-const FinancialReports    = lazy(() => import("@/pages/FinancialReports.jsx"));
-const Reconciliation      = lazy(() => import("@/pages/Reconciliation.jsx"));
-const OpeningBalances     = lazy(() => import("@/pages/OpeningBalances.jsx"));
+const AccountingDashboard = lazy(() => import("@/pages/accounting/AccountingDashboard.jsx"));
+const BankStatements      = lazy(() => import("@/pages/accounting/BankStatements.jsx"));
+const ChartOfAccounts     = lazy(() => import("@/pages/accounting/ChartOfAccounts.jsx"));
+const JournalEntries      = lazy(() => import("@/pages/accounting/JournalEntries.jsx"));
+const LedgerView          = lazy(() => import("@/pages/accounting/LedgerView.jsx"));
+const FinancialReports    = lazy(() => import("@/pages/accounting/FinancialReports.jsx"));
+const Reconciliation      = lazy(() => import("@/pages/accounting/Reconciliation.jsx"));
+const OpeningBalances     = lazy(() => import("@/pages/accounting/OpeningBalances.jsx"));
 
 /* ── Route Guards ───────────────────────────────────────────────────────── */
 
