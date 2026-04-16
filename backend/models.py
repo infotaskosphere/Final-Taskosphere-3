@@ -55,8 +55,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_own_data": True,
           "can_create_quotations": True,
           "can_manage_invoices": True,
-          "can_view_accounting": True,
-          "can_manage_accounting": True,
+          "can_view_passwords": True,
           "can_edit_passwords": True,
           "view_password_departments": [],   # empty = all (admin sees everything)
           "can_view_compliance": True,       # Compliance Tracker — view all categories
@@ -113,8 +112,6 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_own_data": True,        # DEFAULT_MODULE
           "can_create_quotations": True,    # DEFAULT_MODULE (Permission-based)
           "can_manage_invoices": True,      # DEFAULT_MODULE (Permission-based)
-          "can_view_accounting": True,
-          "can_manage_accounting": True,
           "can_view_passwords": True,       # DEFAULT_MODULE (Permission-based)
           "can_edit_passwords": True,       # DEFAULT_MODULE (Permission-based)
           "view_password_departments": [],  # defaults to own departments
@@ -170,8 +167,6 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_own_data": True,        # DEFAULT_MODULE
           "can_create_quotations": True,    # DEFAULT_MODULE (Permission-based)
           "can_manage_invoices": True,      # DEFAULT_MODULE (Permission-based)
-          "can_view_accounting": True,
-          "can_manage_accounting": True,
           "can_view_passwords": True,       # DEFAULT_MODULE (Permission-based)
           "can_edit_passwords": True,       # DEFAULT_MODULE (Permission-based)
           "view_password_departments": [],
@@ -232,11 +227,6 @@ class UserPermissions(BaseModel):
     # download PDFs, manage product catalog.
     # Admin always has this regardless of the flag.
     can_manage_invoices: bool = False
-    # ── Accounting Module ────────────────────────────────────────────────────
-    # can_view_accounting  → access the full AI Accounting module
-    # can_manage_accounting → upload bank statements, post/delete journal entries
-    can_view_accounting: bool = False
-    can_manage_accounting: bool = False
     # ── Password Repository ──────────────────────────────────────────────────
     can_view_passwords: bool = False
     can_edit_passwords: bool = False
