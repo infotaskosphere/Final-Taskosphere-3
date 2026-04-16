@@ -8,6 +8,7 @@ import {
   PanelLeftClose, PanelLeftOpen, Target, Sun, Moon, MapPin,
   Settings, Mail, Receipt, X, KeyRound,
   CreditCard, Fingerprint, Bell, ShieldCheck,
+  BookOpen, Database, Scale, BookMarked, Zap, IndianRupee,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -58,6 +59,22 @@ const NAV_GROUPS = [
       // not page access. Users without the flag still see their own assigned clients.
       { path: '/clients',   icon: Users,     label: 'Clients' },
       { path: '/passwords', icon: KeyRound,  label: 'Password Vault',    permission: 'can_view_passwords'   },
+    ],
+  },
+  {
+    id: 'accounting',
+    dividerLabel: 'AI Accounting',
+    items: [
+      { path: '/accounting',                  icon: BookOpen,    label: 'Accounting Home'       },
+      { path: '/accounting/bank-statements',  icon: Database,    label: 'Bank Statements'        },
+      { path: '/accounting/accounts',         icon: Scale,       label: 'Chart of Accounts'      },
+      { path: '/accounting/journal',          icon: BookMarked,  label: 'Journal Entries'        },
+      { path: '/accounting/ledger',           icon: FileText,    label: 'Ledger'                 },
+      { path: '/accounting/pl',               icon: BarChart3,   label: 'P & L Statement'        },
+      { path: '/accounting/balance-sheet',    icon: Scale,       label: 'Balance Sheet'          },
+      { path: '/accounting/trial-balance',    icon: Receipt,     label: 'Trial Balance'          },
+      { path: '/accounting/reconcile',        icon: Zap,         label: 'AI Reconciliation'      },
+      { path: '/accounting/opening-balances', icon: IndianRupee, label: 'Opening Balances'        },
     ],
   },
   {
