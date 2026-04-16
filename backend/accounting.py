@@ -290,15 +290,28 @@ def _clean_amount(val: Any) -> float:
 
 
 def _parse_date(val: Any) -> Optional[str]:
-    """Return ISO date string or None."""
+    """Return ISO date string or None. Handles many Indian bank date formats."""
     if not val:
         return None
     s = str(val).strip()
-    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d %b %Y", "%d-%b-%Y", "%d/%m/%y"):
+    # Remove trailing time portion if present (e.g. "01/04/2024 00:00:00")
+    s = re.split(r"\s+\d{1,2}:\d{2}", s)[0].strip()
+    for fmt in (
+        "%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d %b %Y", "%d-%b-%Y",
+        "%d/%m/%y", "%d-%m-%y", "%d %B %Y", "%d-%B-%Y",
+        "%d %b %y", "%d-%b-%y", "%d.%m.%Y", "%d.%m.%y",
+        "%Y/%m/%d", "%m/%d/%Y", "%b %d, %Y", "%B %d, %Y",
+    ):
         try:
             return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
         except ValueError:
             continue
+    # Try dateutil as last resort
+    try:
+        from dateutil import parser as du_parser
+        return du_parser.parse(s, dayfirst=True).strftime("%Y-%m-%d")
+    except Exception:
+        pass
     return None
 
 
@@ -398,51 +411,183 @@ def parse_generic_pdf(content: bytes) -> List[Dict]:
     return transactions
 
 
-def parse_excel_statement(content: bytes, filename: str = "") -> List[Dict]:
-    """Parse Excel / CSV bank statement."""
+def _df_to_transactions(df):
+    """Convert a normalised DataFrame to transaction list using flexible column matching."""
+    import pandas as pd
+    transactions = []
+    df.columns = [str(c).strip().lower() for c in df.columns]
+    col_map = {}
+    for c in df.columns:
+        if re.search(r"txn.*date|tran.*date|value date", c):
+            col_map.setdefault("date", c)
+        elif re.search(r"^date$", c) and "date" not in col_map:
+            col_map.setdefault("date", c)
+        elif re.search(r"desc|narr|particular|detail|remark", c):
+            col_map.setdefault("desc", c)
+        elif re.search(r"debit|withdraw|dr\b", c):
+            col_map.setdefault("debit", c)
+        elif re.search(r"credit|deposit|cr\b", c):
+            col_map.setdefault("credit", c)
+        elif re.search(r"balance|bal\b", c):
+            col_map.setdefault("balance", c)
+        elif re.search(r"ref|chq|cheque|utr", c):
+            col_map.setdefault("ref", c)
+    if "date" not in col_map:
+        return transactions
+    for _, row in df.iterrows():
+        date_val = _parse_date(row.get(col_map.get("date", ""), ""))
+        if not date_val:
+            continue
+        debit  = _clean_amount(row.get(col_map.get("debit",  ""), 0))
+        credit = _clean_amount(row.get(col_map.get("credit", ""), 0))
+        if debit == 0 and credit == 0:
+            continue
+        transactions.append({
+            "date":        date_val,
+            "description": str(row.get(col_map.get("desc",    ""), ""))[:200].strip(),
+            "ref_no":      str(row.get(col_map.get("ref",     ""), "")).strip(),
+            "debit":       debit,
+            "credit":      credit,
+            "balance":     _clean_amount(row.get(col_map.get("balance", ""), 0)),
+        })
+    return transactions
+
+
+def _parse_sbi_tsv_xls(content: bytes) -> List[Dict]:
+    """
+    Parse SBI bank statements exported as .xls but actually tab-separated text.
+    Header rows contain account metadata; transaction rows start after Txn Date header.
+    """
     transactions = []
     try:
-        if filename.lower().endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(content))
-        else:
-            df = pd.read_excel(io.BytesIO(content), engine="openpyxl")
-
-        # Normalise column names
-        df.columns = [str(c).strip().lower() for c in df.columns]
+        text = content.decode("utf-8", errors="replace")
+        lines = text.splitlines()
+        header_idx = None
+        for i, line in enumerate(lines):
+            if re.search(r"txn\s*date", line, re.IGNORECASE):
+                header_idx = i
+                break
+        if header_idx is None:
+            return transactions
+        rows = [line.split("	") for line in lines[header_idx:] if line.strip()]
+        rows = [r for r in rows if r and not r[0].strip().startswith("*")]
+        if len(rows) < 2:
+            return transactions
+        headers = [h.strip().lower() for h in rows[0]]
+        data_rows = rows[1:]
         col_map = {}
-        for c in df.columns:
-            if re.search(r"txn.*date|tran.*date|date|value date", c):
-                col_map.setdefault("date", c)
-            elif re.search(r"desc|narr|particular|detail|remark", c):
-                col_map.setdefault("desc", c)
-            elif re.search(r"debit|withdrawl|dr", c):
-                col_map.setdefault("debit", c)
-            elif re.search(r"credit|deposit|cr", c):
-                col_map.setdefault("credit", c)
-            elif re.search(r"balance|bal", c):
-                col_map.setdefault("balance", c)
-            elif re.search(r"ref|chq|cheque|utr", c):
-                col_map.setdefault("ref", c)
-
-        for _, row in df.iterrows():
-            date_val = _parse_date(row.get(col_map.get("date", ""), ""))
+        for i, h in enumerate(headers):
+            if re.search(r"txn.*date|tran.*date", h):
+                col_map.setdefault("date", i)
+            elif re.search(r"desc|narr|particular|detail|remark", h):
+                col_map.setdefault("desc", i)
+            elif re.search(r"debit|withdraw|dr", h):
+                col_map.setdefault("debit", i)
+            elif re.search(r"credit|deposit|cr", h):
+                col_map.setdefault("credit", i)
+            elif re.search(r"balance|bal", h):
+                col_map.setdefault("balance", i)
+            elif re.search(r"ref|chq|cheque|utr", h):
+                col_map.setdefault("ref", i)
+        if "date" not in col_map:
+            return transactions
+        def _get(row, key):
+            idx = col_map.get(key)
+            if idx is None or idx >= len(row):
+                return ""
+            return row[idx].strip()
+        for row in data_rows:
+            date_val = _parse_date(_get(row, "date"))
             if not date_val:
                 continue
-            debit  = _clean_amount(row.get(col_map.get("debit", ""), 0))
-            credit = _clean_amount(row.get(col_map.get("credit", ""), 0))
+            debit  = _clean_amount(_get(row, "debit"))
+            credit = _clean_amount(_get(row, "credit"))
             if debit == 0 and credit == 0:
                 continue
             transactions.append({
                 "date":        date_val,
-                "description": str(row.get(col_map.get("desc", ""), ""))[:200].strip(),
-                "ref_no":      str(row.get(col_map.get("ref", ""), "")).strip(),
+                "description": _get(row, "desc")[:200],
+                "ref_no":      _get(row, "ref"),
                 "debit":       debit,
                 "credit":      credit,
-                "balance":     _clean_amount(row.get(col_map.get("balance", ""), 0)),
+                "balance":     _clean_amount(_get(row, "balance")),
             })
     except Exception as e:
-        logger.error("Excel parse error: %s", e)
+        logger.error("SBI TSV-XLS parse error: %s", e)
     return transactions
+
+
+def parse_excel_statement(content: bytes, filename: str = "") -> List[Dict]:
+    """
+    Parse Excel / CSV / TSV bank statement.
+    Tries multiple strategies:
+      1. SBI tab-delimited .xls (plain text disguised as Excel)
+      2. Real Excel via openpyxl
+      3. Real Excel via xlrd (older .xls binary)
+      4. CSV (comma, semicolon, or tab separated)
+    """
+    import pandas as pd
+    fname_lower = filename.lower()
+
+    # Strategy 1: SBI tab-delimited text masquerading as .xls
+    try:
+        snippet = content[:500].decode("utf-8", errors="replace")
+        if re.search(r"account\s*name|txn\s*date|account\s*number|sbin", snippet, re.IGNORECASE):
+            txns = _parse_sbi_tsv_xls(content)
+            if txns:
+                logger.info("Parsed %d txns via SBI TSV-XLS strategy", len(txns))
+                return txns
+    except Exception as e:
+        logger.warning("SBI TSV sniff failed: %s", e)
+
+    # Strategy 2: Real Excel via openpyxl
+    if not fname_lower.endswith(".csv"):
+        try:
+            df = pd.read_excel(io.BytesIO(content), engine="openpyxl", header=None)
+            header_row = None
+            for i, row in df.iterrows():
+                vals = [str(v).lower() for v in row if pd.notna(v)]
+                if any(re.search(r"txn.*date|tran.*date|date", v) for v in vals):
+                    header_row = i
+                    break
+            if header_row is not None:
+                df.columns = df.iloc[header_row]
+                df = df.iloc[header_row + 1:].reset_index(drop=True)
+                txns = _df_to_transactions(df)
+                if txns:
+                    logger.info("Parsed %d txns via openpyxl strategy", len(txns))
+                    return txns
+        except Exception as e:
+            logger.warning("openpyxl parse failed: %s", e)
+
+    # Strategy 3: Real Excel via xlrd (old .xls binary)
+    if not fname_lower.endswith(".csv"):
+        try:
+            import xlrd
+            wb = xlrd.open_workbook(file_contents=content)
+            ws = wb.sheet_by_index(0)
+            data = [ws.row_values(i) for i in range(ws.nrows)]
+            if data:
+                df = pd.DataFrame(data[1:], columns=data[0])
+                txns = _df_to_transactions(df)
+                if txns:
+                    logger.info("Parsed %d txns via xlrd strategy", len(txns))
+                    return txns
+        except Exception as e:
+            logger.warning("xlrd parse failed: %s", e)
+
+    # Strategy 4: CSV (comma, semicolon, or tab)
+    for sep in (",", ";", "	"):
+        try:
+            df = pd.read_csv(io.BytesIO(content), sep=sep)
+            txns = _df_to_transactions(df)
+            if txns:
+                logger.info("Parsed %d txns via CSV sep=%r strategy", len(txns), sep)
+                return txns
+        except Exception:
+            continue
+
+    return []
 
 
 def detect_bank(filename: str, first_text: str) -> str:
