@@ -9,13 +9,14 @@ import {
   RefreshCw, Download, ChevronDown, ChevronUp, Building2, Hash,
   CalendarDays, Clock, Database, ArrowUpDown, Search, Filter
 } from 'lucide-react';
+import { FY_STRINGS, getCurrentFY } from '@/lib/financialYears';
 
 const COLORS = { deepBlue:'#0D3B66', mediumBlue:'#1F6FB2', emerald:'#1FAF5A', coral:'#EF4444', amber:'#F59E0B', teal:'#0D9488' };
 const card = "rounded-2xl border border-gray-200/60 dark:border-white/10 bg-white dark:bg-gray-900 shadow-sm";
 const fmt = n => new Intl.NumberFormat('en-IN',{maximumFractionDigits:0}).format(n||0);
 
 const BANKS = ['SBI','HDFC','ICICI','Axis','Kotak','Bank of Baroda','Punjab National Bank','Canara Bank','Union Bank','Other'];
-const FYS   = ['2024-25','2023-24','2022-23','2021-22'];
+// FY_STRINGS auto-generated from @/lib/financialYears — edit START_YEAR/END_YEAR there
 const ACCT_CODES = [
   {code:'1002',label:'Bank Account – SBI'},
   {code:'1003',label:'Bank Account – HDFC'},
@@ -31,7 +32,7 @@ export default function BankStatements() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [selected, setSelected] = useState(null);   // statement detail view
-  const [form, setForm] = useState({ bank_name:'SBI', account_number:'', bank_account_code:'1002', financial_year:'2024-25' });
+  const [form, setForm] = useState({ bank_name:'SBI', account_number:'', bank_account_code:'1002', financial_year: getCurrentFY().label });
   const [search, setSearch] = useState('');
   const [expandedId, setExpandedId] = useState(null);
 
@@ -148,7 +149,7 @@ export default function BankStatements() {
             <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Financial Year</label>
             <select value={form.financial_year} onChange={e=>setForm(f=>({...f,financial_year:e.target.value}))}
               className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-800 dark:text-white px-2 py-1.5">
-              {FYS.map(y=><option key={y}>{y}</option>)}
+              {FY_STRINGS.map(y=><option key={y}>{y}</option>)}
             </select>
           </div>
         </div>
