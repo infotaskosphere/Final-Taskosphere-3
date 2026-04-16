@@ -60,23 +60,7 @@ const NAV_GROUPS = [
       { path: '/clients',   icon: Users,     label: 'Clients' },
       { path: '/passwords', icon: KeyRound,  label: 'Password Vault',    permission: 'can_view_passwords'   },
     ],
-  },
-  {
-    id: 'accounting',
-    dividerLabel: 'AI Accounting',
-    items: [
-      { path: '/accounting',                  icon: BookOpen,    label: 'Accounting Home'       },
-      { path: '/accounting/bank-statements',  icon: Database,    label: 'Bank Statements'        },
-      { path: '/accounting/accounts',         icon: Scale,       label: 'Chart of Accounts'      },
-      { path: '/accounting/journal',          icon: BookMarked,  label: 'Journal Entries'        },
-      { path: '/accounting/ledger',           icon: FileText,    label: 'Ledger'                 },
-      { path: '/accounting/pl',               icon: BarChart3,   label: 'P & L Statement'        },
-      { path: '/accounting/balance-sheet',    icon: Scale,       label: 'Balance Sheet'          },
-      { path: '/accounting/trial-balance',    icon: Receipt,     label: 'Trial Balance'          },
-      { path: '/accounting/reconcile',        icon: Zap,         label: 'AI Reconciliation'      },
-      { path: '/accounting/opening-balances', icon: IndianRupee, label: 'Opening Balances'        },
-    ],
-  },
+  }
   {
     id: 'proposals',
     dividerLabel: 'Client Proposals',
@@ -113,6 +97,19 @@ const NAV_GROUPS = [
   },
 ];
 
+const ACCOUNTING_ITEMS = [
+  { path: '/accounting',                  icon: BookOpen,    label: 'Accounting Home'    },
+  { path: '/accounting/bank-statements',  icon: Database,    label: 'Bank Statements'    },
+  { path: '/accounting/accounts',         icon: Scale,       label: 'Chart of Accounts'  },
+  { path: '/accounting/journal',          icon: BookMarked,  label: 'Journal Entries'    },
+  { path: '/accounting/ledger',           icon: FileText,    label: 'Ledger'             },
+  { path: '/accounting/pl',               icon: BarChart3,   label: 'P & L Statement'    },
+  { path: '/accounting/balance-sheet',    icon: Scale,       label: 'Balance Sheet'      },
+  { path: '/accounting/trial-balance',    icon: Receipt,     label: 'Trial Balance'      },
+  { path: '/accounting/reconcile',        icon: Zap,         label: 'AI Reconciliation'  },
+  { path: '/accounting/opening-balances', icon: IndianRupee, label: 'Opening Balances'   },
+];
+
 const springSnap = { type: 'spring', stiffness: 500, damping: 28 };
 const springMed  = { type: 'spring', stiffness: 400, damping: 24 };
 const springSoft = { type: 'spring', stiffness: 300, damping: 20 };
@@ -139,7 +136,8 @@ const DashboardLayout = ({ children }) => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('sidebarCollapsed') === 'true';
   });
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [userMenuOpen,    setUserMenuOpen]    = useState(false);
+  const [accountingOpen,  setAccountingOpen]  = useState(false);
   const [isDark, setIsDark] = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('theme') === 'dark';
@@ -202,6 +200,15 @@ const DashboardLayout = ({ children }) => {
     document.addEventListener('mousedown', handle);
     return () => document.removeEventListener('mousedown', handle);
   }, [userMenuOpen]);
+
+  useEffect(() => {
+    if (!accountingOpen) return;
+    const handle = (e) => {
+      if (!e.target.closest('[data-accounting-menu]')) setAccountingOpen(false);
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [accountingOpen]);
 
   useEffect(() => {
     const fetchUnread = async () => {
@@ -507,6 +514,81 @@ const DashboardLayout = ({ children }) => {
                 </AnimatePresence>
               </motion.div>
             </motion.button>
+
+            {/* Accounting Dropdown */}
+            <div className="relative flex-shrink-0" data-accounting-menu>
+              <motion.button
+                onClick={() => setAccountingOpen(prev => !prev)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+                  isDark
+                    ? 'border-slate-600 bg-slate-800/60 text-slate-200 hover:bg-slate-700/80'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                } ${location.pathname.startsWith('/accounting') ? 'ring-2 ring-blue-400/40' : ''}`}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.97 }}
+                aria-label="Accounting menu"
+              >
+                <BookOpen className="h-3.5 w-3.5 flex-shrink-0" style={{ color: COLORS.mediumBlue }} />
+                <span className="hidden sm:block whitespace-nowrap">Accounting</span>
+                <motion.div animate={{ rotate: accountingOpen ? 180 : 0 }} transition={springSoft}>
+                  <ChevronDown className="h-3 w-3 text-slate-400" />
+                </motion.div>
+              </motion.button>
+
+              <AnimatePresence>
+                {accountingOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                    transition={springSoft}
+                    className="absolute right-0 mt-2 z-[200] overflow-hidden"
+                    style={{
+                      width: 'min(220px, calc(100vw - 2rem))',
+                      background:   isDark ? '#1e293b' : '#ffffff',
+                      borderRadius: '16px',
+                      boxShadow: isDark
+                        ? '0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(51,65,85,0.8)'
+                        : '0 8px 32px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06)',
+                    }}
+                  >
+                    <div className="px-3 py-2.5" style={{ borderBottom: isDark ? '1px solid #334155' : '1px solid #f1f5f9' }}>
+                      <p className={`text-xs font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
+                        AI Accounting
+                      </p>
+                    </div>
+                    <div className="p-1.5">
+                      {ACCOUNTING_ITEMS.map(item => {
+                        const Icon = item.icon;
+                        const isActive = location.pathname === item.path ||
+                          location.pathname.startsWith(item.path + '/');
+                        return (
+                          <motion.div key={item.path} whileHover={{ x: 2 }} transition={springSnap}>
+                            <Link
+                              to={item.path}
+                              onClick={() => setAccountingOpen(false)}
+                              className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-medium transition-colors mb-0.5 ${
+                                isActive
+                                  ? 'text-white'
+                                  : isDark
+                                    ? 'text-slate-300 hover:bg-slate-700'
+                                    : 'text-slate-600 hover:bg-slate-50'
+                              }`}
+                              style={isActive ? {
+                                background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`,
+                              } : {}}
+                            >
+                              <Icon className="h-3.5 w-3.5 flex-shrink-0" style={isActive ? { color: 'white' } : { color: COLORS.mediumBlue }} />
+                              {item.label}
+                            </Link>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
 
             {/* User menu */}
             <div className="relative flex-shrink-0" data-user-menu>
