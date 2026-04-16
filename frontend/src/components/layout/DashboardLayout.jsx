@@ -60,7 +60,7 @@ const NAV_GROUPS = [
       { path: '/clients',   icon: Users,     label: 'Clients' },
       { path: '/passwords', icon: KeyRound,  label: 'Password Vault',    permission: 'can_view_passwords'   },
     ],
-  }
+  },
   {
     id: 'proposals',
     dividerLabel: 'Client Proposals',
