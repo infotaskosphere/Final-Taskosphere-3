@@ -7,6 +7,8 @@ import {
   BarChart3, Scale, Receipt, PieChart, Download, RefreshCw,
   TrendingUp, TrendingDown, Printer, FileSpreadsheet
 } from 'lucide-react';
+import FinancialYearSelect from '@/components/ui/FinancialYearSelect';
+import { FY_OPTIONS, getCurrentFY } from '@/lib/financialYears';
 
 const COLORS = { mediumBlue:'#1F6FB2', emerald:'#1FAF5A', coral:'#EF4444', amber:'#F59E0B', purple:'#7C3AED', teal:'#0D9488' };
 const card = "rounded-2xl border border-gray-200/60 dark:border-white/10 bg-white dark:bg-gray-900 shadow-sm";
@@ -20,11 +22,9 @@ const REPORTS = [
   { id:'trading',label:'Trading A/c',    icon:PieChart,     color:COLORS.purple    },
 ];
 
-const FYS = [
-  { label:'2024-25', from:'2024-04-01', to:'2025-03-31', as_on:'2025-03-31' },
-  { label:'2023-24', from:'2023-04-01', to:'2024-03-31', as_on:'2024-03-31' },
-  { label:'2022-23', from:'2022-04-01', to:'2023-03-31', as_on:'2023-03-31' },
-];
+// FY_OPTIONS imported from @/lib/financialYears — auto-generates all years
+// as_on is last day of the FY (March 31 of endYear)
+const FYS = FY_OPTIONS.map(o => ({ ...o, as_on: o.to }));
 
 const EXPORT_URLS = {
   pl:      (fy) => `/accounting/reports/export/profit-loss?from_date=${fy.from}&to_date=${fy.to}`,
@@ -49,7 +49,7 @@ async function downloadExcel(url, filename) {
 export default function FinancialReports({ defaultTab }) {
   const dark = useDark();
   const [activeTab, setActiveTab] = useState(defaultTab || 'pl');
-  const [fy,        setFy]        = useState(FYS[0]);
+  const [fy,        setFy]        = useState(() => { const c = getCurrentFY(); return {...c, as_on: c.to}; });
   const [data,      setData]      = useState({});
   const [loading,   setLoading]   = useState(false);
 
@@ -82,13 +82,7 @@ export default function FinancialReports({ defaultTab }) {
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Indian Accounting Standards – Ind AS compliant</p>
         </div>
         <div className="flex items-center gap-2">
-          {FYS.map(f => (
-            <button key={f.label} onClick={()=>handleFy(f)}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${fy.label===f.label?'text-white border-transparent':'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700'}`}
-              style={fy.label===f.label?{background:COLORS.mediumBlue}:{}}>
-              FY {f.label}
-            </button>
-          ))}
+          <FinancialYearSelect value={fy.label} onChange={f => handleFy({...f, as_on: f.to})} />
           <button onClick={print} className="p-2 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 text-gray-500" title="Print">
             <Printer size={14}/>
           </button>
