@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useDark } from '@/hooks/useDark';
 import api from '@/lib/api';
 import { toast } from 'sonner';
@@ -66,6 +66,9 @@ export default function FinancialReports({ defaultTab }) {
     finally { setLoading(false); }
   }, [activeTab, fy]);
 
+  // Auto-fetch on mount
+  useEffect(() => { fetchReport(activeTab, fy); }, []); // eslint-disable-line
+
   const handleTab = tab => { setActiveTab(tab); fetchReport(tab); };
   const handleFy  = fyObj => { setFy(fyObj); fetchReport(activeTab, fyObj); };
 
@@ -112,13 +115,13 @@ export default function FinancialReports({ defaultTab }) {
         </button>
       </div>
 
-      {/* Load prompt */}
+      {/* Load prompt — shown only if auto-fetch failed or no data yet after load */}
       {!data[activeTab] && !loading && (
         <div className={`${card} p-10 text-center`}>
           <BarChart3 size={36} className="mx-auto mb-3 text-gray-300 dark:text-gray-600"/>
-          <p className="text-gray-500 text-sm mb-3">Click to generate the report</p>
+          <p className="text-gray-500 text-sm mb-3">No data found for this period. Try refreshing or check your journal entries.</p>
           <button onClick={()=>fetchReport()} className="px-5 py-2 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition" style={{background:COLORS.mediumBlue}}>
-            Generate {REPORTS.find(r=>r.id===activeTab)?.label}
+            Retry {REPORTS.find(r=>r.id===activeTab)?.label}
           </button>
         </div>
       )}
