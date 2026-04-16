@@ -1,34 +1,3 @@
-/**
- * QuotationSettings.jsx  — v2.0  (mirrors InvoiceSettings.jsx exactly)
- *
- * ── FEATURES ────────────────────────────────────────────────────────────────
- *  • Per-company configuration (switch companies in left panel)
- *  • Numbering  — prefix, separator, FY format, padding, start number,
- *                 sequence counter reset
- *  • Identity   — document titles, authorized signatory, show/hide fields
- *  • Defaults   — validity days, notes, T&C, supply state, default GST rate
- *  • Bank / UPI — bank details shown on quotation footer, bank detail preview
- *  • Design     — default template, theme/color per company
- *  • Live preview of generated quotation number
- *  • Fully contained — no overflow, all panels scroll internally
- *  • Settings stored in localStorage (JSON per company)
- *
- * ── INTEGRATION ──────────────────────────────────────────────────────────────
- *
- *  import QuotationSettings, { getQtnSettings, getNextQuotationNumber } from './QuotationSettings';
- *
- *  <QuotationSettings
- *    open={settingsOpen}
- *    onClose={() => setSettingsOpen(false)}
- *    companies={companies}
- *    isDark={isDark}
- *  />
- *
- *  const s       = getQtnSettings(company.id);
- *  const nextNum = getNextQuotationNumber(company.id);
- * ─────────────────────────────────────────────────────────────────────────────
- */
-
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Dialog, DialogContent, DialogTitle, DialogDescription,
