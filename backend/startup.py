@@ -55,6 +55,14 @@ async def startup_event():
         await db.payments.create_index("invoice_id")
         await db.payments.create_index([("created_by", 1), ("payment_date", -1)])
 
+        # ✅ ACCOUNTING INDEXES
+        await db.accounts.create_index([("org_id", 1), ("code", 1)], unique=True, background=True)
+        await db.accounts.create_index([("org_id", 1), ("type", 1)])
+        await db.journal_entries.create_index([("org_id", 1), ("date", -1)])
+        await db.journal_entries.create_index([("org_id", 1), ("bank_statement_id", 1)])
+        await db.journal_entries.create_index([("org_id", 1), ("date", 1)])
+        await db.bank_statements.create_index([("org_id", 1), ("uploaded_at", -1)])
+
         # ✅ EMAIL FIX
         try:
             await db.email_connections.drop_index("user_id_1_provider_1")
