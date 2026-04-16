@@ -28,19 +28,8 @@ const Quotations        = lazy(() => import("@/pages/Quotations.jsx"));
 const GeneralSettings   = lazy(() => import("@/pages/GeneralSettings.jsx"));
 const Passvault         = lazy(() => import("@/pages/Passvault.jsx"));
 const Invoicing         = lazy(() => import("@/pages/Invoicing.jsx"));
-const ImportInvoices    = lazy(() => import("@/pages/ImportInvoices.jsx"));
 const Reminders         = lazy(() => import("@/pages/Reminders.jsx"));
 const CompliancePage    = lazy(() => import("@/pages/CompliancePage.jsx")); // ← NEW
-
-// ── Accounting Module ───────────────────────────────────────────────────────
-const AccountingDashboard = lazy(() => import("@/pages/accounting/AccountingDashboard.jsx"));
-const BankStatements      = lazy(() => import("@/pages/accounting/BankStatements.jsx"));
-const ChartOfAccounts     = lazy(() => import("@/pages/accounting/ChartOfAccounts.jsx"));
-const JournalEntries      = lazy(() => import("@/pages/accounting/JournalEntries.jsx"));
-const LedgerView          = lazy(() => import("@/pages/accounting/LedgerView.jsx"));
-const FinancialReports    = lazy(() => import("@/pages/accounting/FinancialReports.jsx"));
-const Reconciliation      = lazy(() => import("@/pages/accounting/Reconciliation.jsx"));
-const OpeningBalances     = lazy(() => import("@/pages/accounting/OpeningBalances.jsx"));
 
 /* ── Route Guards ───────────────────────────────────────────────────────── */
 
@@ -153,23 +142,9 @@ function AppRoutes() {
       <Route path="/leads"        element={<Permission permission="can_view_all_leads"><PageLoader><LeadsPage /></PageLoader></Permission>} />
       <Route path="/quotations"   element={<Permission permission={["can_create_quotations", "can_manage_invoices"]}><PageLoader><Quotations /></PageLoader></Permission>} />
       <Route path="/invoicing"    element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><Invoicing /></PageLoader></Permission>} />
-      <Route path="/invoicing/import" element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><ImportInvoices /></PageLoader></Permission>} />
       <Route path="/staff-activity" element={<Permission permission="can_view_staff_activity"><PageLoader><StaffActivity /></PageLoader></Permission>} />
       <Route path="/task-audit"   element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
       <Route path="/users"        element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
-
-      {/* ── AI Accounting Module ─────────────────────────────────────── */}
-      <Route path="/accounting"              element={<Protected><PageLoader><AccountingDashboard /></PageLoader></Protected>} />
-      <Route path="/accounting/bank-statements" element={<Protected><PageLoader><BankStatements /></PageLoader></Protected>} />
-      <Route path="/accounting/accounts"     element={<Protected><PageLoader><ChartOfAccounts /></PageLoader></Protected>} />
-      <Route path="/accounting/journal"      element={<Protected><PageLoader><JournalEntries /></PageLoader></Protected>} />
-      <Route path="/accounting/ledger"       element={<Protected><PageLoader><LedgerView /></PageLoader></Protected>} />
-      <Route path="/accounting/pl"           element={<Protected><PageLoader><FinancialReports defaultTab="pl" /></PageLoader></Protected>} />
-      <Route path="/accounting/balance-sheet" element={<Protected><PageLoader><FinancialReports defaultTab="bs" /></PageLoader></Protected>} />
-      <Route path="/accounting/trial-balance" element={<Protected><PageLoader><FinancialReports defaultTab="tb" /></PageLoader></Protected>} />
-      <Route path="/accounting/trading"      element={<Protected><PageLoader><FinancialReports defaultTab="trading" /></PageLoader></Protected>} />
-      <Route path="/accounting/reconcile"    element={<Protected><PageLoader><Reconciliation /></PageLoader></Protected>} />
-      <Route path="/accounting/opening-balances" element={<Protected><PageLoader><OpeningBalances /></PageLoader></Protected>} />
 
       {/* Fallback */}
       <Route path="*" element={<Navigate to="/login" replace />} />
