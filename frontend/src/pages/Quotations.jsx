@@ -918,37 +918,38 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
             </div>
           )}
 
-          {/* Step 4 Preview */}
-          {step === 4 && (
-            <div className="space-y-4">
-              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-                <h3 className="font-bold text-slate-800">Quotation Summary</h3>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div><span className="text-slate-500">Company:</span> <span className="font-medium">{companies.find(c => c.id === form.company_id)?.name || '—'}</span></div>
-                  <div><span className="text-slate-500">Client:</span> <span className="font-medium">{form.client_name}</span></div>
-                  <div><span className="text-slate-500">Service:</span> <span className="font-medium">{form.service}</span></div>
-                  <div><span className="text-slate-500">GST:</span> <span className="font-medium">{form.gst_rate}%</span></div>
-                  {form.timeline && <div><span className="text-slate-500">Timeline:</span> <span className="font-medium">{form.timeline}</span></div>}
-                  <div><span className="text-slate-500">Validity:</span> <span className="font-medium">{form.validity_days} days</span></div>
+          {/* Step 4 — Live PDF Preview */}
+          {step === 4 && (() => {
+            const previewCompany = companies.find(c => c.id === form.company_id) || {};
+            const previewQtn = {
+              ...form,
+              quotation_no: editingQuotation?.quotation_no || 'QTN-PREVIEW',
+              date: editingQuotation?.date || new Date().toISOString().slice(0, 10),
+            };
+            const previewHTML = generateQuotationHTML(previewQtn, { company: previewCompany });
+            return (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-50 border border-blue-100 text-xs text-blue-700">
+                  <Eye className="h-3.5 w-3.5 flex-shrink-0" />
+                  <span><strong>Live preview</strong> — uses real template engine, reflects every setting change. This is pixel-identical to the PDF &amp; printed output.</span>
+                </div>
+                <div className="rounded-xl border border-slate-200 overflow-hidden shadow-sm" style={{ height: '52vh' }}>
+                  <iframe
+                    key={JSON.stringify(form)}
+                    title="Quotation Preview"
+                    style={{ width: '100%', height: '100%', border: 'none' }}
+                    srcDoc={previewHTML}
+                  />
+                </div>
+                {/* Quick totals bar */}
+                <div className="flex items-center justify-between px-4 py-2 rounded-xl bg-slate-800 text-white text-sm">
+                  <span className="text-slate-400 text-xs">Subtotal: <strong className="text-white">₹{subtotal.toFixed(2)}</strong></span>
+                  {form.gst_rate > 0 && <span className="text-slate-400 text-xs">GST ({form.gst_rate}%): <strong className="text-white">₹{gstAmount.toFixed(2)}</strong></span>}
+                  <span className="font-bold text-base" style={{ color: '#4ade80' }}>Total: ₹{total.toFixed(2)}</span>
                 </div>
               </div>
-              <div className="space-y-2">
-                {form.items.filter(it => it.description).map((item, i) => (
-                  <div key={i} className="flex justify-between items-center text-sm py-1.5 border-b border-slate-100">
-                    <span className="text-slate-700">{item.description} <span className="text-slate-400 text-xs">({item.quantity} {item.unit})</span></span>
-                    <span className="font-medium text-slate-800">₹{item.amount.toFixed(2)}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="p-3 rounded-xl bg-slate-800 text-white space-y-1.5 text-sm">
-                <div className="flex justify-between"><span className="text-slate-300">Subtotal</span><span>₹{subtotal.toFixed(2)}</span></div>
-                <div className="flex justify-between"><span className="text-slate-300">GST ({form.gst_rate}%)</span><span>₹{gstAmount.toFixed(2)}</span></div>
-                <div className="flex justify-between text-base font-bold border-t border-slate-600 pt-1.5 mt-1">
-                  <span>Total Payable</span><span style={{ color: '#4ade80' }}>₹{total.toFixed(2)}</span>
-                </div>
-              </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
 
         <DialogFooter className="gap-2 pt-2 border-t">
