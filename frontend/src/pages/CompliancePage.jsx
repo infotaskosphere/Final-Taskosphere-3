@@ -1004,7 +1004,7 @@ function AssignClientsModal({compliance,onClose,onAssigned,isDark,allUsers=[]}){
               </select>
             </div>
             <p className="text-[10px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>
-              ℹ️ Each client's service-specific staff is auto-assigned first, then their default staff, then this fallback.
+              ℹ️ Each client's service-specific user is auto-assigned first, then their default user, then this fallback.
             </p>
           </div>
         </div>
@@ -1063,17 +1063,17 @@ function AssignClientsModal({compliance,onClose,onAssigned,isDark,allUsers=[]}){
                     <div className="flex items-center gap-2 flex-wrap mt-0.5">
                       <span className="text-[11px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>{client.client_type}</span>
                       {(()=>{
-                        // Show auto-detected staff: service-specific assignment first, then default
+                        // Show auto-detected user: service-specific assignment first, then default
                         const cat=(compliance.category||'').toLowerCase();
                         const kwMap={roc:['roc','mca'],gst:['gst'],itr:['itr','income'],tds:['tds'],audit:['audit'],pf_esic:['pf','esic'],pt:['pt','professional']};
                         const kws=kwMap[cat]||[];
                         const svcAsgn=(client.assignments||[]).find(a=>(a.services||[]).some(s=>kws.some(k=>s.toLowerCase().includes(k))));
-                        const staffId=svcAsgn?.user_id||client.assigned_to;
-                        const staffName=allUsers.find(u=>u.id===staffId)?.full_name;
-                        if(staffName)return(
+                        const assignedUserId=svcAsgn?.user_id||client.assigned_to;
+                        const assignedUserName=allUsers.find(u=>u.id===assignedUserId)?.full_name;
+                        if(assignedUserName)return(
                           <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-1"
                             style={{backgroundColor:isDark?'rgba(139,92,246,0.12)':'#f5f3ff',color:'#8B5CF6'}}>
-                            👤 {staffName}{svcAsgn?' (service)':' (default)'}
+                            👤 {assignedUserName}{svcAsgn?' (service)':' (default)'}
                           </span>
                         );
                         if(assignedTo){
