@@ -1126,7 +1126,13 @@ export default function TodoDashboard() {
         : [];
       if (canSeeEveryone) return allUsers.filter(u => (u.id || u._id) !== selfId);
       if (list.length > 0) return allUsers.filter(u => list.includes(u.id || u._id) && (u.id || u._id) !== selfId);
-      return [];
+      // Manager default: Own + Team (same-department staff, mirrors backend scope)
+      const myDepts = new Set(user?.departments || []);
+      return allUsers.filter(u =>
+        (u.id || u._id) !== selfId &&
+        u.role === 'staff' &&
+        (u.departments || []).some(d => myDepts.has(d))
+      );
     }
     const list = Array.isArray(user?.permissions?.view_other_todos)
       ? user.permissions.view_other_todos.filter(id => id !== 'everyone')
