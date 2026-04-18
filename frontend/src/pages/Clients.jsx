@@ -198,7 +198,7 @@ const ActiveFilterChips = ({ statusFilter, clientTypeFilter, serviceFilter, assi
   if (statusFilter !== 'all') chips.push({ key: 'status', label: statusFilter === 'active' ? 'Active' : 'Archived', onRemove: () => onClear('status') });
   if (clientTypeFilter !== 'all') { const t = CLIENT_TYPES.find(x => x.value === clientTypeFilter); chips.push({ key: 'type', label: t?.label || clientTypeFilter, onRemove: () => onClear('clientType') }); }
   if (serviceFilter !== 'all') chips.push({ key: 'service', label: serviceFilter, onRemove: () => onClear('service') });
-  if (assignedToFilter !== 'all') { const u = users.find(x => x.id === assignedToFilter); chips.push({ key: 'assigned', label: u?.full_name || u?.name || 'Staff', onRemove: () => onClear('assigned') }); }
+  if (assignedToFilter !== 'all') { const u = users.find(x => x.id === assignedToFilter); chips.push({ key: 'assigned', label: u?.full_name || u?.name || 'User', onRemove: () => onClear('assigned') }); }
   if (chips.length === 0) return null;
   return (
     <div className="flex items-center gap-2 px-3.5 py-2 flex-wrap">
@@ -1133,7 +1133,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                   {clientAssignments.length > 0 && (
                     <div className={`border rounded-2xl p-5 col-span-2 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
                       <h3 className={`text-xs font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-3 flex items-center gap-2`}>
-                        <Briefcase className="h-3.5 w-3.5" /> Staff Assignments
+                        <Briefcase className="h-3.5 w-3.5" /> User Assignments
                       </h3>
                       <div className="flex flex-col gap-2">
                         {clientAssignments.map((a, i) => {
@@ -1233,7 +1233,7 @@ export default function Clients() {
   const canViewAllClients = hasPermission("can_view_all_clients");
   const canDeleteData     = hasPermission("can_delete_data");
   const canAssignClients  = hasPermission("can_assign_clients");
-  // can_edit_clients: true by default for Manager & Staff — gates Create/Edit actions
+  // can_edit_clients: true by default for Manager & User — gates Create/Edit actions
   // Admin always can edit; others need the flag OR to own the specific client (backend enforces)
   const canEditClients    = isAdmin || hasPermission("can_edit_clients");
   const navigate = useNavigate();
@@ -2124,12 +2124,12 @@ export default function Clients() {
                   
                   {/* Notes */}
                   <div><label className={labelCls}>Internal Notes</label><Textarea className={`min-h-[110px] rounded-xl text-sm resize-y focus:border-blue-400 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} placeholder="Internal remarks…" value={formData.notes} onChange={e => setFormData(p => ({ ...p, notes: e.target.value }))} /></div>
-                  {/* Staff Assignments */}
+                  {/* User Assignments */}
                   {canAssignClients && (
                     <div className={`border rounded-2xl p-6 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`}>
                       <div className="flex items-center justify-between mb-5">
-                        <SectionHeading icon={<Briefcase className="h-4 w-4" />} title="Staff Assignments" subtitle="Assign staff members with specific services" isDark={isDark} />
-                        <Button type="button" size="sm" onClick={addAssignment} variant="outline" className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2"><Plus className="h-3 w-3 mr-1" /> Add Staff</Button>
+                        <SectionHeading icon={<Briefcase className="h-4 w-4" />} title="User Assignments" subtitle="Assign users with specific services" isDark={isDark} />
+                        <Button type="button" size="sm" onClick={addAssignment} variant="outline" className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2"><Plus className="h-3 w-3 mr-1" /> Add User</Button>
                       </div>
                       <div className="space-y-4">{(formData.assignments || []).map((assignment, idx) => (
                         <div key={idx} className={`border rounded-xl p-5 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
@@ -2138,7 +2138,7 @@ export default function Clients() {
                             {(formData.assignments || []).length > 1 && <button type="button" onClick={() => removeAssignment(idx)} className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash className="h-3.5 w-3.5" /></button>}
                           </div>
                           <div className="mb-4">
-                            <label className={labelCls}>Staff Member</label>
+                            <label className={labelCls}>User</label>
                             <Select value={assignment.user_id || 'unassigned'} onValueChange={v => updateAssignmentUser(idx, v === 'unassigned' ? '' : v)}>
                               <SelectTrigger className={`h-11 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}><SelectValue placeholder="Select team member" /></SelectTrigger>
                               <SelectContent>
@@ -2160,7 +2160,7 @@ export default function Clients() {
                             </Select>
                           </div>
                           <div>
-                            <label className={labelCls}>Services for this staff member <span className="text-slate-300 font-normal">(optional — leave blank for all)</span></label>
+                            <label className={labelCls}>Services for this user <span className="text-slate-300 font-normal">(optional — leave blank for all)</span></label>
                             <div className="flex flex-wrap gap-2 mt-1">
                               {formData.services.map(svc => { const d = svc.startsWith('Other:') ? svc.replace('Other: ', '') : svc; const isSel = assignment.services.includes(svc); return <button key={svc} type="button" onClick={() => toggleAssignmentService(idx, svc)} className={`px-3 py-1 text-xs font-semibold rounded-xl border transition-all ${isSel ? 'text-white border-transparent shadow-sm' : isDark ? 'bg-slate-700 text-slate-300 border-slate-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`} style={isSel ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' } : {}}>{d}</button>; })}
                               {formData.services.length === 0 && <p className="text-xs text-slate-400 italic">Select services above first</p>}
@@ -2228,7 +2228,7 @@ export default function Clients() {
       )}
 
       {/* STATS — shown for all roles; values reflect only clients visible to this user.
-           Admin → all clients. Manager/Staff → assigned/scoped clients only. */}
+           Admin → all clients. Manager/User → assigned/scoped clients only. */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: 'Total Clients',  value: stats.totalClients,  icon: <Users className="h-5 w-5" />,    iconBg: 'rgba(13,59,102,0.1)',   iconColor: '#0D3B66', bar: '#1F6FB2' },
@@ -2321,8 +2321,8 @@ export default function Clients() {
           </Select>
           {canAssignClients && users.length > 0 && (
             <Select value={assignedToFilter} onValueChange={setAssignedToFilter}>
-              <SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue placeholder="All Staff" /></SelectTrigger>
-              <SelectContent><SelectItem value="all">All Staff</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name || u.name || u.email}</SelectItem>)}</SelectContent>
+              <SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue placeholder="All Users" /></SelectTrigger>
+              <SelectContent><SelectItem value="all">All Users</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name || u.name || u.email}</SelectItem>)}</SelectContent>
             </Select>
           )}
         </div>
