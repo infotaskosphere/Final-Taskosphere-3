@@ -90,7 +90,8 @@ from backend.dependencies import (
     require_manager_or_admin,
     verify_record_access,
     verify_client_access,
-    get_team_user_ids
+    get_team_user_ids,
+    get_cross_visibility_union,
 )
 
 # External Services
@@ -1476,11 +1477,15 @@ async def get_users(
                 raise HTTPException(status_code=403, detail="User not in your departments")
             users_raw = [target_user]
         else:
-            team_ids = await get_team_user_ids(current_user.id)
-            query = {"id": {"$in": team_ids + [current_user.id]}}
+            # Manager: self + everyone in their cross-visibility union.
+            # "Team" is now purely explicit (admin-curated view_other_* lists).
+            cross_ids = await get_cross_visibility_union(current_user.id)
+            visible_ids = list(set(cross_ids + [current_user.id]))
+            query = {"id": {"$in": visible_ids}}
             users_raw = await db.users.find(query, {"_id": 0, "password": 0}).to_list(1000)
     else:
-        # Staff scope: own data always; with can_view_user_page can view the full directory
+        # Staff scope: own data always; with can_view_user_page can view the full directory.
+        # Without can_view_user_page, staff still see self + their cross-visibility union.
         permissions = get_user_permissions(current_user)
         can_view_dir = permissions.get("can_view_user_page", False)
 
@@ -1496,8 +1501,9 @@ async def get_users(
                     {"id": user_id}, {"_id": 0, "password": 0}
                 ).to_list(1000)
             else:
-                allowed = permissions.get("view_other_activity", [])
-                if user_id not in allowed:
+                # Allow lookup if target is in any of this staff's cross-vis lists
+                cross_ids = await get_cross_visibility_union(current_user.id)
+                if user_id not in cross_ids:
                     raise HTTPException(status_code=403, detail="Not allowed")
                 users_raw = await db.users.find(
                     {"id": user_id}, {"_id": 0, "password": 0}
@@ -1510,9 +1516,11 @@ async def get_users(
                 {"_id": 0, "password": 0, "permissions": 0}   # strip permissions for privacy
             ).to_list(1000)
         else:
-            # No directory access — return own record only
+            # No directory access — return self + cross-visibility union
+            cross_ids = await get_cross_visibility_union(current_user.id)
+            visible_ids = list(set(cross_ids + [current_user.id]))
             users_raw = await db.users.find(
-                {"id": current_user.id}, {"_id": 0, "password": 0}
+                {"id": {"$in": visible_ids}}, {"_id": 0, "password": 0}
             ).to_list(1000)
     for u in users_raw:
         if u.get("created_at") and isinstance(u["created_at"], str):
