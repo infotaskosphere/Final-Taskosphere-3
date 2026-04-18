@@ -742,7 +742,7 @@ export default function Tasks() {
   };
   const canAssignTasks = hasPermission('can_assign_tasks');
   const canEditTasks   = hasPermission('can_edit_tasks');
-  const canDeleteTasks = isAdmin || hasPermission('can_edit_tasks');
+  const canDeleteTasks = isAdmin || hasPermission('can_delete_tasks');
 
   // ── Core state ────────────────────────────────────────────────────────────
   const [tasks,          setTasks]          = useState([]);
