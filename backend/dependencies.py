@@ -75,6 +75,43 @@ def _get_perm(user: User, key: str, default: Any = False) -> Any:
     return default
 
 # ==========================================================
+# PERMISSION NORMALISER
+# Fills in any missing permission flags from DEFAULT_ROLE_PERMISSIONS
+# so that users created before a permission was added to the template
+# still behave correctly without requiring a DB migration.
+# Called inside get_current_user on every authenticated request.
+# ==========================================================
+def _normalize_permissions(user_dict: dict) -> dict:
+    """
+    Merge DEFAULT_ROLE_PERMISSIONS[role] into user_dict["permissions"] as a
+    baseline. User-specific overrides (stored in DB) take precedence; only
+    keys that are entirely absent are filled from the role template.
+
+    This fixes the common case where an existing user was created before a
+    new permission flag (e.g. can_view_tasks, can_view_clients) was added to
+    the template — without a DB migration those keys would be missing and
+    _get_perm() would fall through to its False default, triggering 403s.
+    """
+    from backend.models import DEFAULT_ROLE_PERMISSIONS  # local import avoids circular
+
+    role = user_dict.get("role", "staff")
+    template = DEFAULT_ROLE_PERMISSIONS.get(role, {})
+    perms = user_dict.get("permissions", {})
+
+    # Pydantic model → dict so we can merge cleanly
+    if hasattr(perms, "model_dump"):
+        perms = perms.model_dump()
+    elif not isinstance(perms, dict):
+        perms = {}
+
+    # Only fill keys that are completely absent (never override DB values)
+    merged = {**template, **perms}
+
+    user_dict["permissions"] = merged
+    return user_dict
+
+
+# ==========================================================
 # CURRENT USER DEPENDENCY
 # ==========================================================
 async def get_current_user(
@@ -108,6 +145,11 @@ async def get_current_user(
     for key, value in list(user_dict.items()):
         if value == "":
             user_dict[key] = None
+
+    # Ensure all permission flags expected by MODULE_ACTION_MAP are present.
+    # Users created before a flag was added to DEFAULT_ROLE_PERMISSIONS would
+    # otherwise hit False defaults and receive spurious 403s.
+    user_dict = _normalize_permissions(user_dict)
 
     try:
         return User(**user_dict)
@@ -778,12 +820,18 @@ async def verify_activity_access(
 
 MODULE_ACTION_MAP: Dict[str, str] = {
     # tasks
-    "tasks.view":           "can_edit_tasks",        # scope filtered separately
+    # FIX: tasks.view previously required can_edit_tasks, locking out users whose
+    # edit flag was False. Now uses can_view_tasks (True by default for all roles).
+    # Data scope (own/team/all) is enforced inside the endpoint body.
+    "tasks.view":           "can_view_tasks",
     "tasks.create":         "can_edit_tasks",
     "tasks.edit":           "can_edit_tasks",
     "tasks.delete":         "can_delete_tasks",
     # clients
-    "clients.view":         "can_view_all_clients",
+    # FIX: clients.view previously required can_view_all_clients, 403-ing staff who
+    # only have assigned-client access. The endpoint body already handles scope.
+    # Now uses can_view_clients (True by default for all roles).
+    "clients.view":         "can_view_clients",
     "clients.create":       "can_edit_clients",
     "clients.edit":         "can_edit_clients",
     "clients.delete":       "can_delete_data",
