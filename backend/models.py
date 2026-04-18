@@ -177,8 +177,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_passwords": False,       # ADMIN_GRANTED_ONLY
           "can_edit_passwords": False,       # ADMIN_GRANTED_ONLY
           "view_password_departments": [],
-          "can_view_compliance": False,      # ADMIN_GRANTED_ONLY (Compliance Tracker not in Staff default spec)
-          "can_manage_compliance": False,    # ADMIN_GRANTED_ONLY
+          "can_view_compliance": True,       # Compliance Tracker → VIEW (Own)
+          "can_manage_compliance": True,     # Compliance Tracker → CREATE, EDIT, UPDATE (Own)
           "can_edit_attendance": True,       # Attendance → EDIT/UPDATE (Own)
           "can_view_all_visits": False,      # SCOPE: own visits only (server-side scoped)
           "can_edit_visits": True,           # Client Visits → EDIT/UPDATE (Own)
