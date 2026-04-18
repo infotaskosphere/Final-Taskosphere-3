@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import GifLoader, { MiniLoader } from "@/components/ui/GifLoader.jsx";
 import { useDark } from '@/hooks/useDark';
@@ -17,8 +16,11 @@ import {
   Plus, Edit, Trash2, AlertCircle, ArrowDownCircle, ArrowUpCircle,
   History, Search, ArrowUpDown, Printer, CheckSquare, Square,
   MinusSquare, XCircle, Key, Shield, Clock, TrendingDown,
+  Sparkles, Loader2,
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { detectDscDuplicates } from '@/lib/aiDuplicateEngine';
+import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 
 // ─── Print styles ─────────────────────────────────────────────────────────────
 const PRINT_STYLE = `
@@ -217,6 +219,10 @@ export default function DSCRegister() {
   const [bulkPersonName, setBulkPersonName] = useState('');
   const [bulkNotes, setBulkNotes]           = useState('');
   const [bulkLoading, setBulkLoading]       = useState(false);
+  // ── AI Duplicate detection ────────────────────────────────────────────────
+  const [showDupDialog, setShowDupDialog] = useState(false);
+  const [dupGroups,     setDupGroups]     = useState([]);
+  const [detectingDups, setDetectingDups] = useState(false);
 
   const [formData, setFormData] = useState({
     holder_name: '', dsc_type: '', dsc_password: '',
@@ -248,6 +254,26 @@ export default function DSCRegister() {
   }, []);
 
   const handlePrint = () => window.print();
+
+  // ── AI Duplicate Detection ─────────────────────────────────────────────────
+  const handleDetectDscDuplicates = useCallback(() => {
+    if (detectingDups) return;
+    setDetectingDups(true);
+    setTimeout(() => {
+      try {
+        const groups = detectDscDuplicates(dscList);
+        setDupGroups(groups);
+        setShowDupDialog(true);
+        if (!groups.length) toast.success(`Scanned ${dscList.length} DSCs — no duplicates found ✓`);
+        else toast.info(`Found ${groups.length} duplicate group${groups.length !== 1 ? 's' : ''}`);
+      } catch (e) {
+        toast.error('Duplicate scan failed. Please try again.');
+        console.error('DSC duplicate detection error:', e);
+      } finally {
+        setDetectingDups(false);
+      }
+    }, 60);
+  }, [dscList, detectingDups]);
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
   const extractItems = (data) => {
@@ -637,6 +663,18 @@ export default function DSCRegister() {
             <Button variant="outline" onClick={handlePrint}
               className="h-9 px-4 gap-2 rounded-xl text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 backdrop-blur-sm">
               <Printer className="h-4 w-4" />Print
+            </Button>
+            {/* ── AI Duplicate Detector ── */}
+            <Button
+              variant="outline"
+              onClick={handleDetectDscDuplicates}
+              disabled={detectingDups || dscList.length === 0}
+              className="h-9 px-4 gap-2 rounded-xl text-sm backdrop-blur-sm font-semibold transition-all disabled:opacity-40"
+              style={{ backgroundColor: 'rgba(139,92,246,0.25)', borderColor: 'rgba(167,139,250,0.6)', color: '#ede9fe' }}
+            >
+              {detectingDups
+                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Scanning…</>
+                : <><Sparkles className="h-3.5 w-3.5" />AI Duplicates</>}
             </Button>
             <Dialog open={dialogOpen} onOpenChange={open => { setDialogOpen(open); if (!open) resetForm(); }}>
               <DialogTrigger asChild>
@@ -1081,6 +1119,48 @@ export default function DSCRegister() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── AI Duplicate Detection Dialog ─────────────────────────────── */}
+      <AIDuplicateDialog
+        open={showDupDialog}
+        onClose={() => setShowDupDialog(false)}
+        groups={dupGroups}
+        items={dscList}
+        entityLabel="DSC"
+        accentColor="#4f46e5"
+        isDark={isDark}
+        canDelete={true}
+        canEdit={true}
+        getTitle={(d) => d.holder_name || 'Unknown Holder'}
+        getSubtitle={(d) => [d.pan ? `PAN: ${d.pan}` : null, d.email].filter(Boolean).join(' · ') || null}
+        getMeta={(d) => [
+          d.dsc_type  ? d.dsc_type.toUpperCase()  : null,
+          d.dsc_class ? `Class ${d.dsc_class}`    : null,
+          d.status    ? d.status.toUpperCase()    : null,
+          d.expiry_date ? `Exp: ${format(new Date(d.expiry_date), 'MMM yyyy')}` : null,
+        ].filter(Boolean)}
+        compareFields={(a, b) => [
+          { label: 'Holder',        a: a.holder_name,   b: b.holder_name },
+          { label: 'PAN',           a: a.pan,           b: b.pan },
+          { label: 'Email',         a: a.email,         b: b.email },
+          { label: 'Serial No.',    a: a.serial_number, b: b.serial_number },
+          { label: 'Type',          a: a.dsc_type,      b: b.dsc_type },
+          { label: 'Class',         a: a.dsc_class,     b: b.dsc_class },
+          { label: 'Status',        a: a.status,        b: b.status },
+          { label: 'Expiry',        a: a.expiry_date ? format(new Date(a.expiry_date), 'MMM dd, yyyy') : '—', b: b.expiry_date ? format(new Date(b.expiry_date), 'MMM dd, yyyy') : '—' },
+          { label: 'Associated',    a: a.associated_with, b: b.associated_with },
+        ]}
+        onEdit={(d) => { setEditingDSC(d); setDialogOpen(true); setShowDupDialog(false); }}
+        onDelete={async (d) => {
+          if (!window.confirm(`Delete DSC for "${d.holder_name}"?`)) return;
+          try {
+            await api.delete(`/dsc/${d.id}`);
+            setDscList((prev) => prev.filter((x) => x.id !== d.id));
+            toast.success('DSC deleted');
+          } catch { toast.error('Failed to delete DSC'); }
+        }}
+        onView={(d) => { setSelectedDSC(d); setLogDialogOpen(true); setShowDupDialog(false); }}
+      />
     </div>
   );
 }
