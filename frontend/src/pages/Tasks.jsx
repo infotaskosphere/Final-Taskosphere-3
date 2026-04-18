@@ -839,13 +839,20 @@ export default function Tasks() {
       try {
         const tasksData = await apiFetch('/tasks');
         if (Array.isArray(tasksData)) setTasks(tasksData);
-      } catch (e) { console.error('Tasks wave-1 fetch error:', e); }
+        else if (tasksData === null) toast.error("You don't have permission to view tasks.");
+      } catch (e) {
+        if (e?.response?.status === 403) toast.error("You don't have permission to view tasks.");
+        else console.error('Tasks wave-1 fetch error:', e);
+      }
       setDataLoading(false);
       try {
         const [usersData, clientsData] = await Promise.all([apiFetch('/users'), apiFetch('/clients')]);
         if (Array.isArray(usersData))   { setUsers(usersData);   setUsersLoading(false); }
         if (Array.isArray(clientsData))   setClients(clientsData);
-      } catch (e) { console.error('Tasks wave-2 fetch error:', e); setUsersLoading(false); }
+      } catch (e) {
+        console.error('Tasks wave-2 fetch error:', e);
+        setUsersLoading(false);
+      }
     };
     loadAll();
   }, [apiFetch]);
