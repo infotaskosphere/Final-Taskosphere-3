@@ -31,7 +31,7 @@ from fastapi.responses import StreamingResponse
 
 from pydantic import BaseModel, Field, field_validator
 
-from backend.dependencies import db, get_current_user
+from backend.dependencies import db, get_current_user, check_module_permission
 from backend.models import User
 
 # ✅ Google imports (clean)
@@ -1591,7 +1591,7 @@ def _build_invoice_pdf(inv: dict, company: dict) -> BytesIO:
 @router.post("/invoices/parse-vyp")
 async def parse_vyp_file(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("invoicing", "create"))
 ):
     if not _perm(current_user):
         raise HTTPException(403, "Access denied")
@@ -1616,7 +1616,7 @@ async def parse_vyp_file(
 @router.post("/invoices/parse-backup")
 async def parse_backup_file(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("invoicing", "create"))
 ):
     if not _perm(current_user):
         raise HTTPException(403, "Access denied")
@@ -1708,7 +1708,7 @@ class ImportBackupResult(BaseModel):
 @router.post("/invoices/import-backup", response_model=ImportBackupResult)
 async def import_backup(
     data: ImportBackupRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("invoicing", "create")),
 ):
     """
     Bulk-saves the JSON output of /invoices/parse-backup into MongoDB.
@@ -1989,7 +1989,7 @@ async def import_backup(
 async def sync_invoices_for_client(
     client_id: str,
     data: dict,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("invoicing", "create")),
 ):
     """
     Bulk-update client details across all invoices that reference this client_id.
@@ -2012,7 +2012,7 @@ async def sync_invoices_for_client(
 async def upload_pdf_bytes_to_drive(
     inv_id: str,
     payload: dict,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("invoicing", "create"))
 ):
     if not _perm(current_user):
         raise HTTPException(403, "Access denied")
@@ -2060,7 +2060,7 @@ async def upload_pdf_bytes_to_drive(
 # ═══════════════════════════════════════════════════════════
 
 @router.post("/products", response_model=Product)
-async def create_product(data: ProductCreate, current_user: User = Depends(get_current_user)):
+async def create_product(data: ProductCreate, current_user: User = Depends(check_module_permission("invoicing", "create"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     now = datetime.now(timezone.utc).isoformat()
     doc = {"id": str(uuid.uuid4()), **data.model_dump(), "created_by": current_user.id, "created_at": now}
@@ -2069,7 +2069,7 @@ async def create_product(data: ProductCreate, current_user: User = Depends(get_c
 
 
 @router.get("/products")
-async def list_products(search: Optional[str] = None, current_user: User = Depends(get_current_user)):
+async def list_products(search: Optional[str] = None, current_user: User = Depends(check_module_permission("invoicing", "view"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     q: dict = {}
     if current_user.role != "admin": q["created_by"] = current_user.id
@@ -2080,7 +2080,7 @@ async def list_products(search: Optional[str] = None, current_user: User = Depen
 
 
 @router.put("/products/{pid}")
-async def update_product(pid: str, data: ProductCreate, current_user: User = Depends(get_current_user)):
+async def update_product(pid: str, data: ProductCreate, current_user: User = Depends(check_module_permission("invoicing", "create"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     ex = await db.products.find_one({"id": pid})
     if not ex: raise HTTPException(404, "Product not found")
@@ -2091,7 +2091,7 @@ async def update_product(pid: str, data: ProductCreate, current_user: User = Dep
 
 
 @router.delete("/products/{pid}")
-async def delete_product(pid: str, current_user: User = Depends(get_current_user)):
+async def delete_product(pid: str, current_user: User = Depends(check_module_permission("invoicing", "delete"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     await db.products.delete_one({"id": pid})
     return {"message": "Product deleted"}
@@ -2102,7 +2102,7 @@ async def delete_product(pid: str, current_user: User = Depends(get_current_user
 # ═══════════════════════════════════════════════════════════
 
 @router.post("/invoices", response_model=Invoice)
-async def create_invoice(data: InvoiceCreate, current_user: User = Depends(get_current_user)):
+async def create_invoice(data: InvoiceCreate, current_user: User = Depends(check_module_permission("invoicing", "create"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     now = datetime.now(timezone.utc).isoformat()
     prefix = {"proforma": "PRO", "estimate": "EST", "credit_note": "CN", "debit_note": "DN"}.get(data.invoice_type, "INV")
@@ -2154,7 +2154,7 @@ async def list_invoices(
     page_size: int = Query(20, ge=1, le=10000, description="Results per page"),
     status: Optional[str] = Query(None, description="Filter by status"),
     search: Optional[str] = Query(None, description="Search by client name or invoice number"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("invoicing", "view")),
 ):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     q: dict = {} if current_user.role == "admin" else {"created_by": current_user.id}
@@ -2185,7 +2185,7 @@ async def list_invoices(
 
 @router.get("/invoices/stats")
 async def invoice_stats(year: Optional[int] = None, month: Optional[int] = None,
-                        current_user: User = Depends(get_current_user)):
+                        current_user: User = Depends(check_module_permission("invoicing", "view"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     q: dict = {"invoice_type": "tax_invoice", "status": {"$ne": "cancelled"}}
     if current_user.role != "admin": q["created_by"] = current_user.id
@@ -2244,7 +2244,7 @@ async def get_next_invoice_number(
     fy_format: str = Query("short", description="FY format: short=25-26, long=2025-2026"),
     include_month: bool = Query(False, description="Include month in number"),
     number_padding: int = Query(3, description="Zero-pad width for sequential number"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("invoicing", "view")),
 ):
     """
     Returns the next available invoice number using the exact format settings
@@ -2274,7 +2274,7 @@ async def get_next_invoice_number(
 
 
 @router.get("/invoices/drive-status")
-async def check_drive_status(current_user: User = Depends(get_current_user)):
+async def check_drive_status(current_user: User = Depends(check_module_permission("invoicing", "view"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     configured = _drive_configured()
     accessible = False
@@ -2305,7 +2305,7 @@ async def check_drive_status(current_user: User = Depends(get_current_user)):
 async def update_invoice_status(
     inv_id: str,
     payload: dict,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("invoicing", "create")),
 ):
     """
     Update only the status of an invoice — used by the list page dropdown.
@@ -2339,7 +2339,7 @@ async def update_invoice_status(
 
 
 @router.get("/invoices/{inv_id}")
-async def get_invoice(inv_id: str, current_user: User = Depends(get_current_user)):
+async def get_invoice(inv_id: str, current_user: User = Depends(check_module_permission("invoicing", "view"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
     if not inv: raise HTTPException(404, "Invoice not found")
@@ -2347,7 +2347,7 @@ async def get_invoice(inv_id: str, current_user: User = Depends(get_current_user
 
 
 @router.put("/invoices/{inv_id}")
-async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(get_current_user)):
+async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(check_module_permission("invoicing", "create"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     ex = await db.invoices.find_one({"id": inv_id})
     if not ex: raise HTTPException(404, "Invoice not found")
@@ -2384,7 +2384,7 @@ async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(g
 
 
 @router.delete("/invoices/bulk-delete")
-async def bulk_delete_invoices(ids: List[str], current_user: User = Depends(get_current_user)):
+async def bulk_delete_invoices(ids: List[str], current_user: User = Depends(check_module_permission("invoicing", "delete"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     if not ids: raise HTTPException(400, "No IDs provided")
     deleted, failed = 0, 0
@@ -2398,7 +2398,7 @@ async def bulk_delete_invoices(ids: List[str], current_user: User = Depends(get_
 
 
 @router.delete("/invoices/{inv_id}")
-async def delete_invoice(inv_id: str, current_user: User = Depends(get_current_user)):
+async def delete_invoice(inv_id: str, current_user: User = Depends(check_module_permission("invoicing", "delete"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     result = await db.invoices.delete_one({"id": inv_id})
     if result.deleted_count == 0: raise HTTPException(404, "Invoice not found")
@@ -2413,7 +2413,7 @@ async def delete_invoice(inv_id: str, current_user: User = Depends(get_current_u
 async def download_invoice_pdf(
     inv_id: str,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("invoicing", "view")),
 ):
     """
     Generates a fresh PDF, streams it as a file download, AND - when Google
@@ -2481,7 +2481,7 @@ async def download_invoice_pdf(
 # ═══════════════════════════════════════════════════════════
 
 @router.post("/invoices/{inv_id}/upload-to-drive")
-async def upload_invoice_to_drive(inv_id: str, current_user: User = Depends(get_current_user)):
+async def upload_invoice_to_drive(inv_id: str, current_user: User = Depends(check_module_permission("invoicing", "create"))):
     """
     Optional: generate PDF and upload to Google Drive.
     Only works if Drive credentials are configured.
@@ -2546,7 +2546,7 @@ async def upload_invoice_to_drive(inv_id: str, current_user: User = Depends(get_
 # ═══════════════════════════════════════════════════════════
 
 @router.post("/invoices/from-quotation/{qtn_id}")
-async def convert_quotation(qtn_id: str, current_user: User = Depends(get_current_user)):
+async def convert_quotation(qtn_id: str, current_user: User = Depends(check_module_permission("invoicing", "create"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     q = await db.quotations.find_one({"id": qtn_id}, {"_id": 0})
     if not q: raise HTTPException(404, "Quotation not found")
@@ -2570,7 +2570,7 @@ async def convert_quotation(qtn_id: str, current_user: User = Depends(get_curren
 
 @router.post("/invoices/{inv_id}/send-email")
 async def send_invoice_email(inv_id: str, background_tasks: BackgroundTasks,
-                              current_user: User = Depends(get_current_user)):
+                              current_user: User = Depends(check_module_permission("invoicing", "create"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
     if not inv: raise HTTPException(404, "Invoice not found")
@@ -2599,7 +2599,7 @@ async def send_invoice_email(inv_id: str, background_tasks: BackgroundTasks,
 # ═══════════════════════════════════════════════════════════
 
 @router.post("/invoices/{inv_id}/mark-sent")
-async def mark_invoice_sent(inv_id: str, current_user: User = Depends(get_current_user)):
+async def mark_invoice_sent(inv_id: str, current_user: User = Depends(check_module_permission("invoicing", "create"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     result = await db.invoices.update_one({"id": inv_id},
         {"$set": {"status": "sent", "updated_at": datetime.now(timezone.utc).isoformat()}})
@@ -2612,7 +2612,7 @@ async def mark_invoice_sent(inv_id: str, current_user: User = Depends(get_curren
 # ═══════════════════════════════════════════════════════════
 
 @router.post("/invoices/{inv_id}/generate-recurring")
-async def generate_recurring(inv_id: str, current_user: User = Depends(get_current_user)):
+async def generate_recurring(inv_id: str, current_user: User = Depends(check_module_permission("invoicing", "create"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     template = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
     if not template: raise HTTPException(404, "Template invoice not found")
@@ -2633,7 +2633,7 @@ async def generate_recurring(inv_id: str, current_user: User = Depends(get_curre
 # ═══════════════════════════════════════════════════════════
 
 @router.post("/payments")
-async def record_payment(data: PaymentCreate, current_user: User = Depends(get_current_user)):
+async def record_payment(data: PaymentCreate, current_user: User = Depends(check_module_permission("invoicing", "create"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     inv = await db.invoices.find_one({"id": data.invoice_id})
     if not inv: raise HTTPException(404, "Invoice not found")
@@ -2653,7 +2653,7 @@ async def record_payment(data: PaymentCreate, current_user: User = Depends(get_c
 
 
 @router.get("/payments")
-async def list_payments(invoice_id: Optional[str] = None, current_user: User = Depends(get_current_user)):
+async def list_payments(invoice_id: Optional[str] = None, current_user: User = Depends(check_module_permission("invoicing", "view"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     q: dict = {}
     if invoice_id: q["invoice_id"] = invoice_id
@@ -2661,7 +2661,7 @@ async def list_payments(invoice_id: Optional[str] = None, current_user: User = D
 
 
 @router.delete("/payments/{pid}")
-async def delete_payment(pid: str, current_user: User = Depends(get_current_user)):
+async def delete_payment(pid: str, current_user: User = Depends(check_module_permission("invoicing", "delete"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     result = await db.payments.delete_one({"id": pid})
     if result.deleted_count == 0: raise HTTPException(404, f"Payment {pid} not found")
@@ -2673,7 +2673,7 @@ async def delete_payment(pid: str, current_user: User = Depends(get_current_user
 # ═══════════════════════════════════════════════════════════
 
 @router.post("/credit-notes")
-async def create_credit_note(data: CreditNoteCreate, current_user: User = Depends(get_current_user)):
+async def create_credit_note(data: CreditNoteCreate, current_user: User = Depends(check_module_permission("invoicing", "create"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     inv_no = await _next_invoice_no("CN", data.company_id)
     now = datetime.now(timezone.utc).isoformat()
