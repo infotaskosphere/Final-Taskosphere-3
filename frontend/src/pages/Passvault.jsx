@@ -1296,7 +1296,7 @@ export default function PasswordRepository() {
         // /passwords/stats returns counts scoped to the current user's permissions:
         //   Admin   → all entries
         //   Manager → entries in their department(s)
-        //   Staff   → entries in their dept + view_password_departments list
+        //   User    → entries in their dept + view_password_departments list
         const r = await api.get('/passwords/stats');
         return r.data || {};
       } catch (e) {
