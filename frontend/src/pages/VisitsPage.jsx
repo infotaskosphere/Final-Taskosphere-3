@@ -1330,8 +1330,8 @@ export default function VisitsPage() {
   });
 
   const { data: clients = [] } = useQuery({ queryKey: ["clients"], queryFn: fetchClients });
-  // Manager always has Own + Team visibility; staff need explicit view_other_visits entries
-  const hasCrossVisibility = isMgr || !!(user?.permissions?.view_other_visits?.length || user?.permissions?.can_view_all_visits);
+  // Cross-visibility is purely explicit — admin curates view_other_visits per user
+  const hasCrossVisibility = !!(user?.permissions?.view_other_visits?.length || user?.permissions?.can_view_all_visits);
   const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: fetchUsers, enabled: isAdmin || isMgr || hasCrossVisibility });
   const summary = useMemo(() => {
     const total = visits.length;
@@ -1560,7 +1560,7 @@ export default function VisitsPage() {
         {(isAdmin || isMgr) && (
           <select value={filterUser} onChange={e => setFilterUser(e.target.value)}
             className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-400 shadow-sm">
-            <option value="all">All Staff</option>
+            <option value="all">All Users</option>
             {users.filter(u => u.is_active).map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
           </select>
         )}
