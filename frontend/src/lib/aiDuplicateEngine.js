@@ -1,25 +1,3 @@
-/**
- * ╔══════════════════════════════════════════════════════════════════════════╗
- * ║           TASKOSPHERE  —  AI DUPLICATE DETECTION ENGINE  v2             ║
- * ║   Pure JS · Zero 3rd-party AI · Runs entirely in the browser            ║
- * ║                                                                          ║
- * ║  Algorithms:                                                             ║
- * ║   • Jaccard similarity  — bag-of-words overlap ratio                    ║
- * ║   • Trigram similarity  — character-level n-gram fingerprinting         ║
- * ║   • Levenshtein distance — edit-distance for short strings              ║
- * ║   • Phonetic normalizer — strips legal suffixes (Pvt, Ltd, LLP …)      ║
- * ║   • Weighted composite score — field-weight matrix per entity type      ║
- * ║   • Confidence bands    — HIGH / MEDIUM / LOW with human reasons        ║
- * ║                                                                          ║
- * ║  v2 Changes:                                                             ║
- * ║   • Clients: company name is gating primary criteria                    ║
- * ║   • Passwords: same portal+client+username required — not just client   ║
- * ║   • DSC: dsc_type mismatch is a hard blocker                            ║
- * ║   • Tasks: title alone insufficient — checks dept/assignee/notes        ║
- * ╚══════════════════════════════════════════════════════════════════════════╝
- */
-
-// ─── Core normalizer ─────────────────────────────────────────────────────────
 export const norm = (s) =>
   (s || '')
     .toLowerCase()
@@ -27,30 +5,36 @@ export const norm = (s) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-// Strip common Indian legal/business suffixes for smarter entity matching
+/**
+ * Strip Indian business/legal suffixes so "ABC Pvt Ltd" and "ABC Private Limited"
+ * compare as "abc" vs "abc" rather than failing on suffix differences.
+ */
 export const normEntity = (s) =>
   norm(s)
     .replace(
-      /\b(pvt|private|ltd|limited|llp|inc|corp|co|and|&|the|mr|mrs|ms|dr|prof|shri|smt|firm|enterprises?|solutions?|services?|associates?|consultants?|group|india|technologies?|tech|systems?)\b/g,
+      /\b(pvt|private|ltd|limited|llp|inc|corp|co|and|&|the|mr|mrs|ms|dr|prof|shri|smt|firm|enterprises?|solutions?|services?|associates?|consultants?|group|india|technologies?|tech|systems?|trading|traders?|industries|international|global|national|infotech|infocomm)\b/g,
       ' '
     )
     .replace(/\s+/g, ' ')
     .trim();
 
-// Normalise PAN / GSTIN / email for exact-match dedup
+/** Strips whitespace and uppercases — for PAN, GSTIN, serial numbers */
 export const normId = (s) => (s || '').replace(/\s/g, '').toUpperCase();
 
-// ─── Jaccard (word-token) similarity ─────────────────────────────────────────
+/** Phone: extract last 10 digits only */
+const normPhone = (s) => (s || '').replace(/\D/g, '').slice(-10);
+
+/** Jaccard similarity on word tokens (bag-of-words overlap ratio) */
 export const jaccardSim = (a, b, minLen = 2) => {
-  const wa = new Set(norm(a).split(' ').filter((w) => w.length > minLen));
-  const wb = new Set(norm(b).split(' ').filter((w) => w.length > minLen));
+  const wa = new Set(norm(a).split(' ').filter((w) => w.length >= minLen));
+  const wb = new Set(norm(b).split(' ').filter((w) => w.length >= minLen));
   if (!wa.size || !wb.size) return 0;
   let inter = 0;
   wa.forEach((w) => { if (wb.has(w)) inter++; });
   return inter / (wa.size + wb.size - inter);
 };
 
-// ─── Trigram (character n-gram) similarity ────────────────────────────────────
+/** Trigram similarity — better for typos and partial string matches */
 export const trigramSim = (a, b) => {
   const trig = (s) => {
     const r = new Set();
@@ -66,7 +50,7 @@ export const trigramSim = (a, b) => {
   return inter / (sa.size + sb.size - inter);
 };
 
-// ─── Levenshtein distance (for short strings like usernames/PIDs) ─────────────
+/** Levenshtein edit distance for short strings (usernames, IDs) */
 export const levenshtein = (a, b) => {
   const s1 = norm(a);
   const s2 = norm(b);
@@ -86,41 +70,64 @@ export const levenshtein = (a, b) => {
   return dp[s1.length][s2.length];
 };
 
-// Normalised edit similarity 0-1
+/** Normalised edit similarity 0–1 */
 export const editSim = (a, b) => {
   const maxLen = Math.max((a || '').length, (b || '').length);
   if (!maxLen) return 1;
   return 1 - levenshtein(a, b) / maxLen;
 };
 
-// ─── Generic duplicate grouper ────────────────────────────────────────────────
-export const groupDuplicates = (items, scoreAndReason, threshold = 40) => {
+/** Best of jaccard + trigram for a given pair of strings */
+const bestSim = (a, b) => Math.max(jaccardSim(a, b), trigramSim(a, b));
+
+/** Best of jaccard + trigram on entity-normalised strings */
+const bestEntitySim = (a, b) =>
+  Math.max(
+    jaccardSim(normEntity(a), normEntity(b)),
+    trigramSim(normEntity(a), normEntity(b))
+  );
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GENERIC DUPLICATE GROUPER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Groups items that score above threshold with each other.
+ * Uses union-find style: once an item is in a group it is "used" and
+ * cannot seed another group (prevents double-counting).
+ *
+ * @param {Array}    items         — full data array
+ * @param {Function} scoreAndReason — (a, b) => { score, reasons[], exact }
+ * @param {number}   threshold     — minimum score (0–100) to flag
+ * @returns {Array}  groups
+ */
+export const groupDuplicates = (items, scoreAndReason, threshold) => {
   const used = new Set();
   const groups = [];
 
   items.forEach((a, i) => {
     if (used.has(a.id)) return;
-    const group = [a.id];
-    const allReasons = [];
+    const group  = [a.id];
+    const allR   = [];
 
     items.forEach((b, j) => {
       if (i === j || used.has(b.id)) return;
       const { score, reasons, exact } = scoreAndReason(a, b);
       if (!exact && score < threshold) return;
       group.push(b.id);
-      allReasons.push({ id: b.id, score: Math.round(score), reasons, exact });
+      allR.push({ id: b.id, score: Math.round(score), reasons, exact });
     });
 
     if (group.length > 1) {
-      const hasHigh = allReasons.some((r) => r.exact || r.score >= 65);
+      const hasHigh   = allR.some((r) => r.exact || r.score >= 70);
       const confidence = hasHigh ? 'high' : 'medium';
-      const topReason = allReasons[0]?.reasons?.join(' · ') || 'Similar records detected';
+      const topReason  = allR[0]?.reasons?.join(' · ') || 'Similar records detected';
       groups.push({
-        item_ids: group.map(String),
+        item_ids:   group.map(String),
         confidence,
-        reason: topReason,
-        score: Math.max(...allReasons.map((r) => r.score)),
-        source: 'local',
+        reason:     topReason,
+        score:      Math.max(...allR.map((r) => r.score)),
+        source:     'local',
       });
       group.forEach((id) => used.add(id));
     }
@@ -129,378 +136,235 @@ export const groupDuplicates = (items, scoreAndReason, threshold = 40) => {
   return groups;
 };
 
-// ════════════════════════════════════════════════════════════════════════════════
-// DOMAIN-SPECIFIC ENGINES
-// ════════════════════════════════════════════════════════════════════════════════
-
-// ─── CLIENTS ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// CLIENTS
+// ═══════════════════════════════════════════════════════════════════════════════
 /**
- * v2 Logic:
- * - Company name similarity is the GATING criterion.
- *   If name similarity is below 55%, the pair is NEVER flagged as duplicate,
- *   no matter how many other fields match.
- * - Rationale: Two different companies can share a phone number, email account,
- *   or even a CA's contact without being the same client.
- * - Hard identifiers (GSTIN / PAN) override the name gate because they are
- *   legally unique to one entity — same GSTIN = same company by definition.
+ * TRUE DUPLICATE DEFINITION FOR CLIENTS
+ * ───────────────────────────────────────
+ * A client is a duplicate only when it represents the SAME legal business entity
+ * entered more than once.
+ *
+ * HARD RULE — name is the gate:
+ *   Different companies can share a CA's phone number, a shared email, or even
+ *   a common accountant's PAN. Shared contact details alone NEVER qualify.
+ *   Name similarity ≥ 70% (after stripping legal suffixes) is required first.
+ *
+ * EXCEPTION — legal IDs bypass the name gate:
+ *   GSTIN and PAN are legally unique to one entity in India. If two records
+ *   share the same valid GSTIN (15 chars) or PAN (10 chars), they ARE the same
+ *   entity regardless of how the name was typed.
+ *
+ * CORROBORATION (after name gate passes):
+ *   At least one of email / phone / city+state combo must corroborate.
+ *   Name alone at 70–80% similarity is borderline — we need confirmation.
+ *
+ * THRESHOLD: 70
  */
-export const detectClientDuplicates = (clients) => {
-  return groupDuplicates(
+export const detectClientDuplicates = (clients) =>
+  groupDuplicates(
     clients,
     (a, b) => {
       const reasons = [];
       let score = 0;
 
-      // ── Hard legal identifiers (legally unique — override everything) ──────
-      const gA = normId(a.gstin);
-      const gB = normId(b.gstin);
-      const exactGstin = gA.length >= 15 && gB.length >= 15 && gA === gB;
-      if (exactGstin) { score += 95; reasons.push('Identical GSTIN (legally same entity)'); }
-
-      const pA = normId(a.pan);
-      const pB = normId(b.pan);
-      const exactPan = pA.length >= 10 && pB.length >= 10 && pA === pB;
-      if (exactPan) { score += 88; reasons.push('Identical PAN (legally same entity)'); }
-
-      // If a hard ID matched, skip name gate — same legal entity regardless of name
-      if (exactGstin || exactPan) {
-        return { score, reasons, exact: true };
+      // ── Legal ID gate (bypasses everything — legally same entity) ──────────
+      const gA = normId(a.gstin || '');
+      const gB = normId(b.gstin || '');
+      if (gA.length === 15 && gB.length === 15 && gA === gB) {
+        return { score: 98, reasons: ['Identical GSTIN — legally same entity'], exact: true };
       }
 
-      // ── Name gate — MUST pass before any soft field adds score ───────────
-      // Without strong name similarity, shared phone/email means nothing
-      const nameA = normEntity(a.company_name || a.name || '');
-      const nameB = normEntity(b.company_name || b.name || '');
-      if (!nameA || !nameB) return { score: 0, reasons: [], exact: false };
+      const pA = normId(a.pan || '');
+      const pB = normId(b.pan || '');
+      if (pA.length === 10 && pB.length === 10 && pA === pB) {
+        return { score: 93, reasons: ['Identical PAN — legally same entity'], exact: true };
+      }
 
-      const exactName   = norm(a.company_name || '') === norm(b.company_name || '');
-      const nameTri     = trigramSim(nameA, nameB);
-      const nameJaccard = jaccardSim(nameA, nameB);
-      const nameScore   = Math.max(nameTri, nameJaccard);
+      // ── Name gate — must pass before any other field contributes ───────────
+      const rawNameA = a.company_name || a.name || '';
+      const rawNameB = b.company_name || b.name || '';
+      if (!rawNameA.trim() || !rawNameB.trim()) return { score: 0, reasons: [], exact: false };
 
-      // Name gate: if name similarity < 0.55, not a duplicate — hard stop
-      if (!exactName && nameScore < 0.55) {
+      const exactNameRaw  = norm(rawNameA) === norm(rawNameB);
+      const nameSim       = bestEntitySim(rawNameA, rawNameB);
+
+      // Hard stop: name similarity < 70% and names not exact → not a duplicate
+      if (!exactNameRaw && nameSim < 0.70) {
         return { score: 0, reasons: [], exact: false };
       }
 
-      if (exactName) {
-        score += 65; reasons.push('Exact company name match');
-      } else if (nameScore >= 0.80) {
-        score += 55; reasons.push(`Company name ${Math.round(nameScore * 100)}% similar`);
-      } else if (nameScore >= 0.65) {
-        score += 40; reasons.push(`Company name ${Math.round(nameScore * 100)}% similar`);
+      if (exactNameRaw) {
+        score += 70;
+        reasons.push('Exact company name');
+      } else if (nameSim >= 0.88) {
+        score += 62;
+        reasons.push(`Company name ${Math.round(nameSim * 100)}% similar`);
+      } else if (nameSim >= 0.78) {
+        score += 48;
+        reasons.push(`Company name ${Math.round(nameSim * 100)}% similar — needs corroboration`);
       } else {
-        // 0.55–0.65: borderline — needs multiple corroborating fields
-        score += 20; reasons.push(`Company name loosely similar (${Math.round(nameScore * 100)}%)`);
+        // 0.70–0.78: borderline — needs TWO corroborating fields to cross threshold
+        score += 28;
+        reasons.push(`Company name loosely similar (${Math.round(nameSim * 100)}%)`);
       }
 
-      // ── Corroborating fields (only meaningful AFTER name gate passes) ─────
+      // ── Corroborating fields ───────────────────────────────────────────────
       const eA = norm(a.email || '');
       const eB = norm(b.email || '');
-      if (eA && eB && eA === eB) { score += 25; reasons.push('Same email address'); }
-
-      const phA = (a.phone || '').replace(/\D/g, '').slice(-10);
-      const phB = (b.phone || '').replace(/\D/g, '').slice(-10);
-      if (phA.length >= 10 && phA === phB) { score += 20; reasons.push('Same phone number'); }
-
-      if (a.city && b.city && norm(a.city) === norm(b.city)) {
-        score += 5; reasons.push(`Same city (${a.city})`);
+      if (eA && eB && eA === eB) {
+        score += 22;
+        reasons.push('Same email address');
       }
+
+      const phA = normPhone(a.phone || '');
+      const phB = normPhone(b.phone || '');
+      if (phA.length === 10 && phA === phB) {
+        score += 18;
+        reasons.push('Same phone number');
+      }
+
+      // City + state together (weak individually, meaningful together)
+      const sameCity  = a.city  && b.city  && norm(a.city)  === norm(b.city);
+      const sameState = a.state && b.state && norm(a.state) === norm(b.state);
+      if (sameCity && sameState) {
+        score += 7;
+        reasons.push(`Same city & state (${a.city}, ${a.state})`);
+      } else if (sameCity) {
+        score += 3;
+        reasons.push(`Same city (${a.city})`);
+      }
+
+      // Same client type (minor corroboration)
       if (a.client_type && b.client_type && a.client_type === b.client_type) {
-        score += 5; reasons.push(`Same type (${a.client_type})`);
+        score += 4;
+        reasons.push(`Same type (${a.client_type})`);
       }
 
-      return { score, reasons, exact: exactName };
+      return { score, reasons, exact: exactNameRaw };
     },
-    55  // Higher threshold — needs meaningful name overlap to qualify
+    70  // Must have strong name similarity + at least one corroborating field
   );
-};
 
-// ─── TODOS ────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// PASSWORD VAULT
+// ═══════════════════════════════════════════════════════════════════════════════
 /**
- * v2 Logic:
- * - Title similarity alone is NOT enough to flag as duplicate.
- * - Tasks are work items; different people can have tasks with similar titles
- *   for completely different clients / purposes.
- * - A true duplicate must have:
- *     (a) HIGH title similarity  AND
- *     (b) at least ONE of: same assignee, same department/service, or
- *         notes content overlap
- * - If title is exact AND same assignee AND same dept → very high confidence.
+ * TRUE DUPLICATE DEFINITION FOR PASSWORDS
+ * ─────────────────────────────────────────
+ * A password entry is a duplicate only when the SAME credential (same login)
+ * for the SAME portal has been saved more than once for the SAME client.
+ *
+ * A company legitimately has:
+ *   - GST Portal login (portal_type = GST)
+ *   - DGFT Portal login (portal_type = DGFT)
+ *   - MCA login        (portal_type = MCA)
+ *   - Income Tax login (portal_type = INCOME_TAX)
+ *   ...all for the same company. These are NOT duplicates.
+ *
+ * THREE HARD GATES — all three must pass:
+ *   Gate 1: portal_type must be the SAME after canonicalization
+ *           (MCA ≡ ROC, TDS ≡ TRACES — same underlying government portal)
+ *   Gate 2: client/company name must be ≥ 65% similar
+ *   Gate 3: username / login ID must match or be ≥ 90% similar
+ *           (a one-character typo in username = likely same credential)
+ *
+ * If ANY gate fails → score = 0, not a duplicate.
+ *
+ * THRESHOLD: 78 (very high — all three gates + bonus signals needed)
  */
-export const detectTodoDuplicates = (todos) => {
-  return groupDuplicates(
-    todos,
-    (a, b) => {
-      const reasons = [];
-      let score = 0;
 
-      // ── Title similarity ──────────────────────────────────────────────────
-      const titleSim  = jaccardSim(a.title, b.title);
-      const titleTri  = trigramSim(a.title, b.title);
-      const titleBest = Math.max(titleSim, titleTri);
-      const exactTitle = norm(a.title) === norm(b.title);
-
-      if (exactTitle) {
-        score += 40; reasons.push('Exact title match');
-      } else if (titleBest >= 0.75) {
-        score += titleBest * 35; reasons.push(`Title ${Math.round(titleBest * 100)}% similar`);
-      } else if (titleBest >= 0.55) {
-        score += titleBest * 20; reasons.push(`Title loosely similar (${Math.round(titleBest * 100)}%)`);
-      } else {
-        // Titles not similar enough — never a duplicate
-        return { score: 0, reasons: [], exact: false };
-      }
-
-      // ── Corroborating signals — at least one required to pass threshold ───
-
-      // Same assignee
-      const sameAssignee =
-        (a.assigned_to && b.assigned_to && norm(a.assigned_to) === norm(b.assigned_to)) ||
-        (a.user_id && b.user_id && String(a.user_id) === String(b.user_id));
-      if (sameAssignee) { score += 25; reasons.push('Same assignee'); }
-
-      // Same department / service
-      const deptA = norm(a.department || a.service || a.category || '');
-      const deptB = norm(b.department || b.service || b.category || '');
-      const sameDept = deptA && deptB && deptA === deptB;
-      if (sameDept) { score += 20; reasons.push(`Same dept/service (${a.department || a.service || a.category})`); }
-
-      // Notes / description overlap
-      const notesA = a.notes || a.description || '';
-      const notesB = b.notes || b.description || '';
-      if (notesA && notesB) {
-        const notesSim = jaccardSim(notesA, notesB);
-        if (notesSim >= 0.45) { score += notesSim * 25; reasons.push(`Notes ${Math.round(notesSim * 100)}% similar`); }
-      }
-
-      // Same client / associated entity
-      const clientA = normEntity(a.client_name || a.associated_with || '');
-      const clientB = normEntity(b.client_name || b.associated_with || '');
-      if (clientA && clientB && jaccardSim(clientA, clientB) > 0.6) {
-        score += 15; reasons.push('Same client / entity');
-      }
-
-      // Same due date
-      const sameDate =
-        a.due_date && b.due_date &&
-        new Date(a.due_date).toDateString() === new Date(b.due_date).toDateString();
-      if (sameDate) { score += 8; reasons.push('Same due date'); }
-
-      // Same priority
-      if (a.priority && b.priority && norm(a.priority) === norm(b.priority)) {
-        score += 5; reasons.push(`Same priority (${a.priority})`);
-      }
-
-      const exact = exactTitle && sameAssignee && sameDept;
-      return { score, reasons, exact };
-    },
-    62  // Requires title + at least one strong corroborating signal
-  );
-};
-
-// ─── DSC REGISTER ─────────────────────────────────────────────────────────────
 /**
- * v2 Logic:
- * - DSC type (CLASS 3 vs ORGANISATION) are entirely different certificate types
- *   issued for different purposes. A mismatch is a HARD BLOCKER.
- * - DSC class mismatch is also a hard blocker.
- * - PAN + same type = definitive duplicate (renewed/replaced DSC).
- * - Serial number exact match = definitive duplicate (literally same token).
+ * Canonical portal groups: portals that are the same government system
+ * despite different labels. Within a group, portal_type is treated as equal.
  */
-export const detectDscDuplicates = (dscs) => {
-  return groupDuplicates(
-    dscs,
-    (a, b) => {
-      const reasons = [];
-      let score = 0;
-
-      // ── Hard blockers — different type/class = cannot be duplicate ────────
-      const typeA = norm(a.dsc_type || '');
-      const typeB = norm(b.dsc_type || '');
-      if (typeA && typeB && typeA !== typeB) {
-        // ORGANISATION vs CLASS 3 are fundamentally different — hard stop
-        return { score: 0, reasons: [], exact: false };
-      }
-
-      const classA = norm(a.dsc_class || '');
-      const classB = norm(b.dsc_class || '');
-      if (classA && classB && classA !== classB) {
-        // Class 2 vs Class 3 are different products — hard stop
-        return { score: 0, reasons: [], exact: false };
-      }
-
-      // ── Hard identifiers ─────────────────────────────────────────────────
-      const sA = normId(a.serial_number || '');
-      const sB = normId(b.serial_number || '');
-      const exactSerial = sA.length > 4 && sB.length > 4 && sA === sB;
-      if (exactSerial) { score += 95; reasons.push('Identical serial number (same physical token)'); }
-
-      const pA = normId(a.pan || '');
-      const pB = normId(b.pan || '');
-      const exactPan = pA.length >= 10 && pB.length >= 10 && pA === pB;
-      if (exactPan) { score += 85; reasons.push('Identical PAN'); }
-
-      if (exactSerial || exactPan) {
-        if (typeA && typeB) { reasons.push(`Same DSC type (${a.dsc_type})`); }
-        return { score, reasons, exact: true };
-      }
-
-      // ── Holder name (strong similarity needed) ────────────────────────────
-      const holderSim = jaccardSim(a.holder_name, b.holder_name);
-      const holderTri = trigramSim(normEntity(a.holder_name), normEntity(b.holder_name));
-      const exactHolder = norm(a.holder_name) === norm(b.holder_name);
-      if (exactHolder) {
-        score += 55; reasons.push('Exact holder name');
-      } else if (holderSim >= 0.70) {
-        score += holderSim * 45; reasons.push(`Holder name ${Math.round(holderSim * 100)}% similar`);
-      } else if (holderTri >= 0.75) {
-        score += holderTri * 35; reasons.push(`Holder ${Math.round(holderTri * 100)}% similar`);
-      } else {
-        // Holder name too different — not a duplicate
-        return { score: 0, reasons: [], exact: false };
-      }
-
-      // ── Corroborating fields ──────────────────────────────────────────────
-      const eA = norm(a.email || '');
-      const eB = norm(b.email || '');
-      if (eA && eB && eA === eB) { score += 30; reasons.push('Identical email'); }
-
-      const mA = (a.mobile || a.phone || '').replace(/\D/g, '').slice(-10);
-      const mB = (b.mobile || b.phone || '').replace(/\D/g, '').slice(-10);
-      if (mA.length >= 10 && mA === mB) { score += 20; reasons.push('Same mobile'); }
-
-      if (typeA && typeB && typeA === typeB) { score += 10; reasons.push(`Same DSC type (${a.dsc_type})`); }
-      if (classA && classB && classA === classB) { score += 8; reasons.push('Same DSC class'); }
-
-      // Expiry proximity
-      if (a.expiry_date && b.expiry_date) {
-        const diff = Math.abs(new Date(a.expiry_date) - new Date(b.expiry_date)) / 86400000;
-        if (diff === 0) { score += 15; reasons.push('Identical expiry date'); }
-        else if (diff <= 30) { score += 8; reasons.push(`Expiry within ${Math.round(diff)} days of each other`); }
-      }
-
-      const exact = exactHolder && (eA && eB && eA === eB) && typeA === typeB;
-      return { score, reasons, exact };
-    },
-    58  // Needs strong holder name + at least one corroborating field
-  );
+const PORTAL_CANON = {
+  MCA:          'mca_roc',
+  ROC:          'mca_roc',
+  TDS:          'tds_traces',
+  TRACES:       'tds_traces',
+  GST:          'gst',
+  INCOME_TAX:   'income_tax',
+  DGFT:         'dgft',
+  TRADEMARK:    'trademark',
+  EPFO:         'epfo',
+  ESIC:         'esic',
+  MSME:         'msme',
+  RERA:         'rera',
+  OTHER:        'other',
 };
 
-// ─── DOCUMENTS REGISTER ───────────────────────────────────────────────────────
-export const detectDocumentDuplicates = (docs) => {
-  return groupDuplicates(
-    docs,
-    (a, b) => {
-      const reasons = [];
-      let score = 0;
+const canonPortal = (pt) =>
+  PORTAL_CANON[(pt || '').toString().trim().toUpperCase()] ||
+  norm(pt || '');
 
-      // Document number — unique identifier
-      const dnA = normId(a.document_number || a.reference_no || '');
-      const dnB = normId(b.document_number || b.reference_no || '');
-      const exactDocNum = dnA.length > 3 && dnB.length > 3 && dnA === dnB;
-      if (exactDocNum) { score += 90; reasons.push('Identical document number'); }
-
-      // PAN
-      const pA = normId(a.pan || '');
-      const pB = normId(b.pan || '');
-      if (pA.length >= 10 && pB.length >= 10 && pA === pB) { score += 75; reasons.push('Identical PAN'); }
-
-      if (exactDocNum || (pA && pB && pA === pB)) {
-        return { score, reasons, exact: true };
-      }
-
-      // Holder name gate
-      const holderA = normEntity(a.holder_name || '');
-      const holderB = normEntity(b.holder_name || '');
-      if (!holderA || !holderB) return { score: 0, reasons: [], exact: false };
-
-      const holderSim = Math.max(jaccardSim(holderA, holderB), trigramSim(holderA, holderB));
-      const exactHolder = norm(a.holder_name) === norm(b.holder_name);
-
-      if (exactHolder) { score += 50; reasons.push('Exact holder name'); }
-      else if (holderSim >= 0.70) { score += holderSim * 40; reasons.push(`Holder ${Math.round(holderSim * 100)}% similar`); }
-      else { return { score: 0, reasons: [], exact: false }; }
-
-      const sameType = a.document_type && b.document_type &&
-        norm(a.document_type) === norm(b.document_type);
-      if (sameType) { score += 20; reasons.push(`Same document type (${a.document_type})`); }
-
-      const assocA = normEntity(a.associated_with || '');
-      const assocB = normEntity(b.associated_with || '');
-      if (assocA && assocB && jaccardSim(assocA, assocB) > 0.6) {
-        score += 15; reasons.push('Same associated entity');
-      }
-
-      if (a.notes && b.notes) {
-        const noteSim = jaccardSim(a.notes, b.notes);
-        if (noteSim > 0.55) { score += noteSim * 12; reasons.push(`Notes ${Math.round(noteSim * 100)}% similar`); }
-      }
-
-      return { score, reasons, exact: exactHolder && sameType };
-    },
-    52
-  );
-};
-
-// ─── PASSWORD VAULT ───────────────────────────────────────────────────────────
-/**
- * v2 Logic:
- * - A company legitimately has MANY different portal passwords (GST, DGFT,
- *   Income Tax, MCA, Trademark, etc.) — same company ≠ duplicate.
- * - True duplicate = same client + same portal/service + same or very similar
- *   username/login ID.
- * - Portal type is now a GATING criterion alongside client name.
- *   If portal types differ, the pair is NOT a duplicate (different services).
- * - Username/login similarity is required as third confirmation.
- */
-export const detectPasswordDuplicates = (entries) => {
-  return groupDuplicates(
+export const detectPasswordDuplicates = (entries) =>
+  groupDuplicates(
     entries,
     (a, b) => {
       const reasons = [];
       let score = 0;
 
-      // ── Gate 1: Portal / service type must match ──────────────────────────
-      const portalA = norm(a.portal_type || a.service_type || a.type || '');
-      const portalB = norm(b.portal_type || b.service_type || b.type || '');
-      if (portalA && portalB && portalA !== portalB) {
-        // GST portal ≠ DGFT portal — completely different credentials
-        return { score: 0, reasons: [], exact: false };
-      }
-      const samePortal = portalA && portalB && portalA === portalB;
+      // ── Gate 1: Portal type must be canonically the same ──────────────────
+      const cpA = canonPortal(a.portal_type);
+      const cpB = canonPortal(b.portal_type);
 
-      // ── Gate 2: Client/company name must be similar ───────────────────────
-      const clientA = normEntity(a.client_name || a.company_name || '');
-      const clientB = normEntity(b.client_name || b.company_name || '');
-      if (!clientA || !clientB) return { score: 0, reasons: [], exact: false };
+      if (!cpA || !cpB) return { score: 0, reasons: [], exact: false };
 
-      const clientSim   = Math.max(jaccardSim(clientA, clientB), trigramSim(clientA, clientB));
-      const exactClient = norm(a.client_name || a.company_name || '') ===
-                          norm(b.client_name || b.company_name || '');
-
-      if (!exactClient && clientSim < 0.55) {
+      // 'other' portals with different portal_name = different service
+      if (cpA !== cpB) {
+        // Completely different government portal → cannot be same credential
         return { score: 0, reasons: [], exact: false };
       }
 
-      if (exactClient) { score += 40; reasons.push('Same client'); }
-      else { score += clientSim * 30; reasons.push(`Client ${Math.round(clientSim * 100)}% similar`); }
+      // For 'other' type: also require portal_name to be similar
+      if (cpA === 'other' && cpB === 'other') {
+        const pnA = a.portal_name || '';
+        const pnB = b.portal_name || '';
+        if (pnA && pnB && bestSim(pnA, pnB) < 0.65) {
+          // Same 'OTHER' category but different portal names = different sites
+          return { score: 0, reasons: [], exact: false };
+        }
+      }
 
-      if (samePortal) { score += 20; reasons.push(`Same portal/service (${a.portal_type || a.service_type || a.type})`); }
+      score += 20;
+      reasons.push(`Same portal type (${a.portal_type})`);
 
-      // ── Gate 3: Username / login ID must match or be very similar ─────────
+      // ── Gate 2: Client name must be similar ───────────────────────────────
+      const rawCA = a.client_name || a.company_name || '';
+      const rawCB = b.client_name || b.company_name || '';
+      if (!rawCA.trim() || !rawCB.trim()) return { score: 0, reasons: [], exact: false };
+
+      const exactClient = norm(rawCA) === norm(rawCB);
+      const clientSim   = bestEntitySim(rawCA, rawCB);
+
+      if (!exactClient && clientSim < 0.65) {
+        // Different client — not a duplicate
+        return { score: 0, reasons: [], exact: false };
+      }
+
+      if (exactClient) {
+        score += 38; reasons.push('Same client');
+      } else {
+        score += Math.round(clientSim * 30);
+        reasons.push(`Client name ${Math.round(clientSim * 100)}% similar`);
+      }
+
+      // ── Gate 3: Username / login ID must match ────────────────────────────
       const uA = norm(a.username || a.user_id || a.login_id || '');
       const uB = norm(b.username || b.user_id || b.login_id || '');
 
       if (!uA || !uB) {
-        // No username — only flag if client + portal + PAN all match exactly
+        // No username stored — require PAN + portal + exact client as fallback
         const pA2 = normId(a.pan || '');
         const pB2 = normId(b.pan || '');
-        const exactPan2 = pA2.length >= 10 && pB2.length >= 10 && pA2 === pB2;
-        if (exactPan2 && samePortal && exactClient) {
-          score += 35; reasons.push('Same PAN + same portal + same client');
+        const panMatch = pA2.length === 10 && pB2.length === 10 && pA2 === pB2;
+        if (panMatch && exactClient) {
+          score += 42;
+          reasons.push('Same PAN + same client + same portal (no username stored)');
           return { score, reasons, exact: true };
         }
+        // Insufficient data to confirm — do not flag
         return { score: 0, reasons: [], exact: false };
       }
 
@@ -508,28 +372,384 @@ export const detectPasswordDuplicates = (entries) => {
       const userSim   = editSim(uA, uB);
 
       if (exactUser) {
-        score += 40; reasons.push('Identical username/login ID');
-      } else if (userSim >= 0.88) {
-        score += userSim * 30; reasons.push(`Username ${Math.round(userSim * 100)}% similar`);
+        score += 42; reasons.push('Identical username / login ID');
+      } else if (userSim >= 0.90) {
+        // Very close — likely a typo in the same credential
+        score += Math.round(userSim * 35);
+        reasons.push(`Username ${Math.round(userSim * 100)}% similar (likely same login)`);
       } else {
-        // Username too different — likely different credentials for same portal
+        // Username too different — different credentials, not a duplicate
         return { score: 0, reasons: [], exact: false };
       }
 
-      // PAN match adds strong confirmation
+      // ── Bonus signals (score boosters, not gates) ─────────────────────────
       const pA = normId(a.pan || '');
       const pB = normId(b.pan || '');
-      if (pA.length >= 10 && pB.length >= 10 && pA === pB) {
-        score += 20; reasons.push('Identical PAN');
+      if (pA.length === 10 && pB.length === 10 && pA === pB) {
+        score += 15; reasons.push('Identical PAN');
+      }
+
+      // Same portal_name (the descriptive label user entered, e.g. "GST Portal - ABC Ltd")
+      if (a.portal_name && b.portal_name) {
+        const pnSim = bestSim(a.portal_name, b.portal_name);
+        if (pnSim >= 0.80) {
+          score += 8; reasons.push(`Portal name ${Math.round(pnSim * 100)}% similar`);
+        }
       }
 
       const dA = norm(a.department || '');
       const dB = norm(b.department || '');
-      if (dA && dB && dA === dB) { score += 5; reasons.push(`Same department (${a.department})`); }
+      if (dA && dB && dA === dB) {
+        score += 5; reasons.push(`Same department (${a.department})`);
+      }
 
-      const exact = exactClient && samePortal && exactUser;
+      const exact = exactClient && exactUser && cpA === cpB;
       return { score, reasons, exact };
     },
-    68  // High threshold — needs client + portal + username all aligned
+    78  // Very high — all three gates + bonus signals must align
   );
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DSC REGISTER
+// ═══════════════════════════════════════════════════════════════════════════════
+/**
+ * TRUE DUPLICATE DEFINITION FOR DSC
+ * ───────────────────────────────────
+ * A DSC record is a duplicate only when the SAME physical DSC token (or the
+ * same certificate) has been entered more than once.
+ *
+ * HARD BLOCKERS — if ANY of these differ, it is NOT a duplicate:
+ *   1. dsc_type mismatch:  "Class 3" ≠ "Organisation" — these are completely
+ *      different certificate types issued by different authorities for different
+ *      purposes. A person can legitimately hold both.
+ *   2. dsc_class mismatch: Class 2 ≠ Class 3 — different assurance levels.
+ *
+ * DEFINITIVE MATCH — if ANY of these match (after type/class gate passes):
+ *   • Serial number exact match → same physical token
+ *   • PAN exact match → same legal holder (PAN is unique per person/entity)
+ *
+ * STRONG MATCH (no definitive ID, use holder name + corroboration):
+ *   • Holder name ≥ 75% similar AND (same email OR same mobile OR exact expiry)
+ *
+ * THRESHOLD: 65
+ */
+
+/**
+ * Canonicalise DSC type strings so free-text variations compare correctly.
+ * Users may type: "Class 3", "CLASS 3", "class3", "Class-3" → canon: "class3"
+ *                 "Organisation", "organization", "org" → canon: "organisation"
+ *                 "Signature", "Digital Signature" → canon: "signature"
+ *                 "Encryption" → canon: "encryption"
+ */
+const canonDscType = (t) => {
+  const s = norm(t || '').replace(/[-\s]/g, '');
+  if (/class\s*3|class3/.test(s))            return 'class3';
+  if (/class\s*2|class2/.test(s))            return 'class2';
+  if (/class\s*1|class1/.test(s))            return 'class1';
+  if (/organ/.test(s))                        return 'organisation';
+  if (/encry/.test(s))                        return 'encryption';
+  if (/sign/.test(s))                         return 'signature';
+  if (/individual|personal/.test(s))          return 'individual';
+  return s || null;
 };
+
+export const detectDscDuplicates = (dscs) =>
+  groupDuplicates(
+    dscs,
+    (a, b) => {
+      const reasons = [];
+      let score = 0;
+
+      // ── Hard blocker 1: DSC type must match ───────────────────────────────
+      const ctA = canonDscType(a.dsc_type);
+      const ctB = canonDscType(b.dsc_type);
+      if (ctA && ctB && ctA !== ctB) {
+        // "Class 3" vs "Organisation" are different certificates — hard stop
+        return { score: 0, reasons: [], exact: false };
+      }
+
+      // ── Hard blocker 2: DSC class must match ──────────────────────────────
+      const clA = norm(a.dsc_class || '');
+      const clB = norm(b.dsc_class || '');
+      if (clA && clB && clA !== clB) {
+        // Class 2 vs Class 3 are different security levels — hard stop
+        return { score: 0, reasons: [], exact: false };
+      }
+
+      // ── Definitive identifiers ────────────────────────────────────────────
+      const sA = normId(a.serial_number || '');
+      const sB = normId(b.serial_number || '');
+      if (sA.length > 4 && sB.length > 4 && sA === sB) {
+        const r = ['Identical serial number (same physical token)'];
+        if (ctA) r.push(`Same DSC type (${a.dsc_type})`);
+        return { score: 97, reasons: r, exact: true };
+      }
+
+      const pA = normId(a.pan || '');
+      const pB = normId(b.pan || '');
+      if (pA.length === 10 && pB.length === 10 && pA === pB) {
+        const r = ['Identical PAN — same certificate holder'];
+        if (ctA) r.push(`Same DSC type (${a.dsc_type})`);
+        if (clA) r.push(`Same class (${a.dsc_class})`);
+        return { score: 90, reasons: r, exact: true };
+      }
+
+      // ── Holder name gate — must be ≥ 75% similar ─────────────────────────
+      const rawHA = a.holder_name || '';
+      const rawHB = b.holder_name || '';
+      if (!rawHA.trim() || !rawHB.trim()) return { score: 0, reasons: [], exact: false };
+
+      const exactHolder = norm(rawHA) === norm(rawHB);
+      const holderSim   = bestEntitySim(rawHA, rawHB);
+
+      if (!exactHolder && holderSim < 0.75) {
+        // Holder names too different — cannot be same certificate
+        return { score: 0, reasons: [], exact: false };
+      }
+
+      if (exactHolder) {
+        score += 55; reasons.push('Exact holder name');
+      } else {
+        score += Math.round(holderSim * 48);
+        reasons.push(`Holder name ${Math.round(holderSim * 100)}% similar`);
+      }
+
+      // Add type/class to score now that name is confirmed similar
+      if (ctA && ctB && ctA === ctB) { score += 10; reasons.push(`Same DSC type (${a.dsc_type})`); }
+      if (clA && clB && clA === clB) { score += 8;  reasons.push(`Same DSC class (${a.dsc_class})`); }
+
+      // ── Corroborating fields ───────────────────────────────────────────────
+      const eA = norm(a.email || '');
+      const eB = norm(b.email || '');
+      if (eA && eB && eA === eB) { score += 28; reasons.push('Identical email'); }
+
+      const mA = normPhone(a.mobile || a.phone || '');
+      const mB = normPhone(b.mobile || b.phone || '');
+      if (mA.length === 10 && mA === mB) { score += 18; reasons.push('Same mobile'); }
+
+      // Identical expiry = strong signal of same DSC issued on same day
+      if (a.expiry_date && b.expiry_date) {
+        const dA2 = new Date(a.expiry_date).toDateString();
+        const dB2 = new Date(b.expiry_date).toDateString();
+        if (dA2 === dB2) { score += 15; reasons.push('Identical expiry date'); }
+      }
+
+      // Associated entity
+      if (a.associated_with && b.associated_with) {
+        const assocSim = bestEntitySim(a.associated_with, b.associated_with);
+        if (assocSim >= 0.75) { score += 8; reasons.push(`Associated entity ${Math.round(assocSim * 100)}% similar`); }
+      }
+
+      const exact = exactHolder && eA && eB && eA === eB && ctA === ctB;
+      return { score, reasons, exact };
+    },
+    65  // Holder name (strong) + at least one corroborating field required
+  );
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TASKS
+// ═══════════════════════════════════════════════════════════════════════════════
+/**
+ * TRUE DUPLICATE DEFINITION FOR TASKS
+ * ─────────────────────────────────────
+ * A task is a duplicate only when the SAME piece of work has been created more
+ * than once in the system for the same client and the same team member.
+ *
+ * WHY TITLE ALONE IS NOT ENOUGH:
+ *   "Trademark Application" is a common task title — there will be hundreds of
+ *   them across different clients, assignees, and time periods. None of those
+ *   are duplicates of each other.
+ *
+ * REQUIRED COMBINATION for a true task duplicate:
+ *   (A) Title similarity ≥ 70%     [the work description]
+ *   AND
+ *   (B) Same department/service    [the same area of work]
+ *   AND
+ *   (C) Same assignee              [the same person doing it]
+ *   AND
+ *   (D) Same client OR notes ≥ 50% similar [the same subject matter]
+ *
+ *   If (A)+(B)+(C) all match but (D) doesn't → POSSIBLE duplicate, low score.
+ *   If (A)+(B)+(C)+(D) all match → HIGH confidence duplicate.
+ *
+ * THRESHOLD: 75
+ */
+export const detectTodoDuplicates = (todos) =>
+  groupDuplicates(
+    todos,
+    (a, b) => {
+      const reasons = [];
+      let score = 0;
+
+      // ── (A) Title similarity — must be ≥ 70% ─────────────────────────────
+      const titleSim  = jaccardSim(a.title, b.title);
+      const titleTri  = trigramSim(a.title, b.title);
+      const titleBest = Math.max(titleSim, titleTri);
+      const exactTitle = norm(a.title || '') === norm(b.title || '');
+
+      if (exactTitle) {
+        score += 35; reasons.push('Exact title match');
+      } else if (titleBest >= 0.80) {
+        score += Math.round(titleBest * 32); reasons.push(`Title ${Math.round(titleBest * 100)}% similar`);
+      } else if (titleBest >= 0.70) {
+        score += Math.round(titleBest * 24); reasons.push(`Title ${Math.round(titleBest * 100)}% similar`);
+      } else {
+        // Title not similar enough — not a duplicate regardless of other fields
+        return { score: 0, reasons: [], exact: false };
+      }
+
+      // ── (B) Department / service must match ───────────────────────────────
+      const deptA = norm(a.department || a.service || a.category || '');
+      const deptB = norm(b.department || b.service || b.category || '');
+
+      if (!deptA || !deptB || deptA !== deptB) {
+        // Different departments = different work areas = NOT a duplicate
+        // (e.g. "Trademark Application" in GST dept vs Trademark dept are different)
+        return { score: 0, reasons: [], exact: false };
+      }
+      score += 22; reasons.push(`Same department (${a.department || a.service || a.category})`);
+
+      // ── (C) Same assignee ─────────────────────────────────────────────────
+      const assigneeA = norm(a.assigned_to || String(a.user_id || ''));
+      const assigneeB = norm(b.assigned_to || String(b.user_id || ''));
+      const sameAssignee = assigneeA && assigneeB && assigneeA === assigneeB;
+
+      if (!sameAssignee) {
+        // Different people doing same-titled work in same dept is coordination, not duplication
+        return { score: 0, reasons: [], exact: false };
+      }
+      score += 20; reasons.push('Same assignee');
+
+      // ── (D) Client OR notes must corroborate ──────────────────────────────
+      let dCorroborated = false;
+
+      // Client name match
+      const clientA = normEntity(a.client_name || a.associated_with || a.client || '');
+      const clientB = normEntity(b.client_name || b.associated_with || b.client || '');
+      if (clientA && clientB) {
+        const cSim = bestSim(clientA, clientB);
+        if (cSim >= 0.65) {
+          score += Math.round(cSim * 18);
+          reasons.push(`Same client (${Math.round(cSim * 100)}% similar)`);
+          dCorroborated = true;
+        }
+      }
+
+      // Notes / description overlap
+      const notesA = (a.notes || a.description || '').trim();
+      const notesB = (b.notes || b.description || '').trim();
+      if (notesA && notesB) {
+        const nSim = jaccardSim(notesA, notesB);
+        if (nSim >= 0.50) {
+          score += Math.round(nSim * 15);
+          reasons.push(`Notes ${Math.round(nSim * 100)}% similar`);
+          dCorroborated = true;
+        }
+      }
+
+      // If neither client nor notes corroborated → cap score below threshold
+      if (!dCorroborated) {
+        // Title + dept + assignee match but we can't confirm same work subject
+        // Cap at 70 which is below the 75 threshold — won't be flagged
+        score = Math.min(score, 70);
+      }
+
+      // ── Minor bonus signals ───────────────────────────────────────────────
+      const sameDate =
+        a.due_date && b.due_date &&
+        new Date(a.due_date).toDateString() === new Date(b.due_date).toDateString();
+      if (sameDate) { score += 6; reasons.push('Same due date'); }
+
+      if (a.priority && b.priority && norm(a.priority) === norm(b.priority)) {
+        score += 4; reasons.push(`Same priority (${a.priority})`);
+      }
+
+      const exact = exactTitle && sameAssignee && deptA === deptB && dCorroborated;
+      return { score, reasons, exact };
+    },
+    75  // Title + dept + assignee + (client or notes) all required
+  );
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DOCUMENTS REGISTER
+// ═══════════════════════════════════════════════════════════════════════════════
+/**
+ * TRUE DUPLICATE DEFINITION FOR DOCUMENTS
+ * ─────────────────────────────────────────
+ * A document record is a duplicate only when the SAME physical document has
+ * been registered more than once.
+ *
+ * DEFINITIVE: document number / reference number exact match
+ * DEFINITIVE: PAN + same document type (identity documents are PAN-unique)
+ * STRONG: holder name (≥80%) + same document type + same associated entity
+ *
+ * THRESHOLD: 60
+ */
+export const detectDocumentDuplicates = (docs) =>
+  groupDuplicates(
+    docs,
+    (a, b) => {
+      const reasons = [];
+      let score = 0;
+
+      // ── Definitive: document number ───────────────────────────────────────
+      const dnA = normId(a.document_number || a.reference_no || '');
+      const dnB = normId(b.document_number || b.reference_no || '');
+      if (dnA.length > 3 && dnB.length > 3 && dnA === dnB) {
+        return { score: 95, reasons: ['Identical document number — same document'], exact: true };
+      }
+
+      // ── Definitive: PAN ───────────────────────────────────────────────────
+      const pA = normId(a.pan || '');
+      const pB = normId(b.pan || '');
+      if (pA.length === 10 && pB.length === 10 && pA === pB) {
+        const sameType = a.document_type && b.document_type &&
+          norm(a.document_type) === norm(b.document_type);
+        if (sameType) {
+          return { score: 88, reasons: ['Same PAN + same document type'], exact: true };
+        }
+        score += 55; reasons.push('Identical PAN');
+      }
+
+      // ── Holder name gate ─────────────────────────────────────────────────
+      const holderA = normEntity(a.holder_name || '');
+      const holderB = normEntity(b.holder_name || '');
+      if (!holderA || !holderB) return { score: 0, reasons: [], exact: false };
+
+      const exactHolder = norm(a.holder_name || '') === norm(b.holder_name || '');
+      const holderSim   = bestSim(holderA, holderB);
+
+      if (!exactHolder && holderSim < 0.80) {
+        return { score: 0, reasons: [], exact: false };
+      }
+
+      if (exactHolder) { score += 48; reasons.push('Exact holder name'); }
+      else { score += Math.round(holderSim * 38); reasons.push(`Holder ${Math.round(holderSim * 100)}% similar`); }
+
+      // Document type must match — same person can have an Agreement AND an NDA
+      const sameType = a.document_type && b.document_type &&
+        norm(a.document_type) === norm(b.document_type);
+      if (!sameType) {
+        // Different document types = different documents = not a duplicate
+        return { score: 0, reasons: [], exact: false };
+      }
+      score += 18; reasons.push(`Same document type (${a.document_type})`);
+
+      // Associated entity
+      const assocA = normEntity(a.associated_with || '');
+      const assocB = normEntity(b.associated_with || '');
+      if (assocA && assocB) {
+        const aSim = bestSim(assocA, assocB);
+        if (aSim >= 0.70) { score += 14; reasons.push('Same associated entity'); }
+      }
+
+      // Notes similarity
+      if (a.notes && b.notes) {
+        const nSim = jaccardSim(a.notes, b.notes);
+        if (nSim >= 0.55) { score += Math.round(nSim * 10); reasons.push(`Notes ${Math.round(nSim * 100)}% similar`); }
+      }
+
+      return { score, reasons, exact: exactHolder && sameType };
+    },
+    60
+  );
