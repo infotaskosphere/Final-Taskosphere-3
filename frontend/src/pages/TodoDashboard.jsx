@@ -1097,8 +1097,13 @@ export default function TodoDashboard() {
   const { data: allClients = [] } = useQuery({
     queryKey: ['clients'],
     queryFn:  async () => {
-      const res = await api.get('/clients');
-      return res.data || [];
+      try {
+        const res = await api.get('/clients');
+        return res.data || [];
+      } catch (e) {
+        if (e?.response?.status === 403) toast.error("You don't have permission to view clients.");
+        return [];
+      }
     },
   });
 
