@@ -830,16 +830,16 @@ function ClientConversionDialog({
               <ServiceSelector selected={clientForm.services} onChange={v => setField('services', v)} extra={availableServices || []} />
             </div>
 
-            {/* Staff Assignment */}
+            {/* User Assignment */}
             <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-5 space-y-3">
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">
                   <Briefcase className="h-4 w-4 text-slate-400" />
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Staff Assignment</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">User Assignment</p>
                 </div>
                 <button type="button" onClick={addAssignment}
                   className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 transition-all active:scale-95">
-                  <Plus className="h-3 w-3" /> Add Staff
+                  <Plus className="h-3 w-3" /> Add User
                 </button>
               </div>
               <div className="space-y-2">
@@ -847,7 +847,7 @@ function ClientConversionDialog({
                   <div key={idx} className="flex items-center gap-2 border border-slate-200 rounded-xl p-3 bg-white">
                     <div className="w-5 h-5 rounded-md bg-slate-100 text-slate-400 text-[10px] font-bold flex items-center justify-center flex-shrink-0">{idx + 1}</div>
                     <Select value={a.user_id || 'unassigned'} onValueChange={v => updateAssignment(idx, v === 'unassigned' ? '' : v)}>
-                      <SelectTrigger className="flex-1 h-8 rounded-xl text-xs border-slate-200"><SelectValue placeholder="Select staff…" /></SelectTrigger>
+                      <SelectTrigger className="flex-1 h-8 rounded-xl text-xs border-slate-200"><SelectValue placeholder="Select user…" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="unassigned">— Unassigned —</SelectItem>
                         {allUsers.map(u => (
