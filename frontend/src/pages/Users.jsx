@@ -2764,6 +2764,14 @@ export default function Users() {
               <div className="space-y-5">
                 <SectionHeader icon={UsersIcon} title="Cross-User Data Access" color={COLORS.emeraldGreen} />
                 <p className="text-sm text-slate-500 dark:text-slate-400 -mt-2">Select team members whose data this user can view</p>
+                {selectedUserForPerms?.role === 'manager' && (
+                  <div className="flex items-start gap-2.5 rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 px-3.5 py-2.5">
+                    <UsersIcon className="h-4 w-4 mt-0.5 shrink-0 text-violet-500" />
+                    <p className="text-xs text-violet-700 dark:text-violet-300 leading-snug">
+                      <span className="font-semibold">Managers automatically see their entire department team</span> — tasks, attendance, todos, reports, visits, and activity for all same-department staff are visible by default. Use the lists below only to grant access to <span className="font-medium">specific staff outside their department</span>.
+                    </p>
+                  </div>
+                )}
                 {[
                   { key: 'view_other_tasks',      label: 'Tasks',      icon: Layers,      color: '#3B82F6' },
                   { key: 'view_other_attendance', label: 'Attendance', icon: Clock,       color: '#8B5CF6' },
