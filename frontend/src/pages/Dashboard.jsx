@@ -983,6 +983,8 @@ export default function Dashboard() {
 
   const hasCrossVisibility = useMemo(() => {
     if (isAdmin) return true;
+    // Manager always has Own + Team visibility (scope enforced server-side by department)
+    if (user?.role === 'manager') return true;
     const perms = user?.permissions || {};
     return (
       (perms.view_other_tasks && perms.view_other_tasks.length > 0) ||
@@ -994,9 +996,18 @@ export default function Dashboard() {
     if (isAdmin) {
       return [...new Set(tasks.map(t => t.assigned_to).filter(id => id && id !== user?.id))];
     }
+    // Manager: derive team from same-department staff in the allUsers list
+    // (mirrors backend get_same_department_user_ids — same dept, staff role, excluding self)
+    if (user?.role === 'manager') {
+      const myDepts = new Set(user?.departments || []);
+      return allUsers
+        .filter(u => u.id !== user?.id && u.role === 'staff' &&
+          (u.departments || []).some(d => myDepts.has(d)))
+        .map(u => u.id);
+    }
     const perms = user?.permissions || {};
     return (perms.view_other_tasks || []).filter(id => id !== user?.id);
-  }, [user, isAdmin, tasks]);
+  }, [user, isAdmin, tasks, allUsers]);
 
   const openLeadsCount = useMemo(
     () => leadsData.filter(
