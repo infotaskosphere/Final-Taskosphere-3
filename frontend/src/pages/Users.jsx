@@ -2802,40 +2802,216 @@ export default function Users() {
                 })}
               </div>
             )}
-            {activePermTab === 'clients' && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <SectionHeader icon={Briefcase} title="Client Portfolio" color={COLORS.teal} />
-                  {(permissions.assigned_clients || []).length > 0 && (
-                    <button onClick={() => setPermissions(p => ({ ...p, assigned_clients: [] }))} className="text-xs font-semibold text-red-500 hover:text-red-600 dark:text-red-400 transition-colors -mt-5">Clear All</button>
+            {activePermTab === 'clients' && (() => {
+              const assignedClients = permissions.assigned_clients || [];
+              const CLIENT_TYPE_LABELS = { pvt_ltd: 'Pvt Ltd', llp: 'LLP', partnership: 'Partnership', huf: 'HUF', trust: 'Trust', proprietor: 'Proprietor', other: 'Other' };
+              const CLIENT_TYPE_COLORS = {
+                pvt_ltd:     { bg: '#EFF6FF', text: '#1D4ED8', border: '#BFDBFE' },
+                llp:         { bg: '#F5F3FF', text: '#6D28D9', border: '#DDD6FE' },
+                partnership: { bg: '#FFFBEB', text: '#B45309', border: '#FDE68A' },
+                huf:         { bg: '#F0FDFA', text: '#0F766E', border: '#99F6E4' },
+                trust:       { bg: '#FFF1F2', text: '#BE123C', border: '#FECDD3' },
+                proprietor:  { bg: '#F8FAFC', text: '#475569', border: '#CBD5E1' },
+                other:       { bg: '#F0F9FF', text: '#0369A1', border: '#BAE6FD' },
+              };
+              const ALL_SERVICES = ['GST', 'Trademark', 'Income Tax', 'ROC', 'Audit', 'Compliance', 'Company Registration', 'Tax Planning', 'Accounting', 'Payroll', 'Other'];
+
+              // Derive unique services present in clients list
+              const presentServices = useMemo
+                ? useMemo(() => {
+                    const s = new Set();
+                    clients.forEach(c => (c.services || []).forEach(sv => s.add(sv.replace('Other: ', 'Other'))));
+                    return ALL_SERVICES.filter(sv => s.has(sv));
+                  }, [clients])
+                : ALL_SERVICES;
+
+              // Local filter state scoped to this render via refs stored on window (safe for tabs)
+              const [cpSvcFilter, setCpSvcFilter] = React.useState('');
+              const [cpTypeFilter, setCpTypeFilter] = React.useState('');
+
+              const filteredForTab = clients.filter(c => {
+                const q = clientSearch.toLowerCase();
+                if (q && !(c.company_name || '').toLowerCase().includes(q) && !(c.phone || '').includes(clientSearch) && !(c.email || '').toLowerCase().includes(q)) return false;
+                if (cpSvcFilter && !(c.services || []).some(s => s === cpSvcFilter || s.replace('Other: ', 'Other') === cpSvcFilter)) return false;
+                if (cpTypeFilter && (c.client_type || 'proprietor') !== cpTypeFilter) return false;
+                return true;
+              });
+
+              const allFilteredSelected = filteredForTab.length > 0 && filteredForTab.every(c => assignedClients.includes(c.id));
+              const someFilteredSelected = filteredForTab.some(c => assignedClients.includes(c.id));
+
+              const toggleAll = () => {
+                if (allFilteredSelected) {
+                  const toRemove = new Set(filteredForTab.map(c => c.id));
+                  setPermissions(p => ({ ...p, assigned_clients: (p.assigned_clients || []).filter(id => !toRemove.has(id)) }));
+                } else {
+                  const toAdd = filteredForTab.map(c => c.id);
+                  setPermissions(p => ({ ...p, assigned_clients: [...new Set([...(p.assigned_clients || []), ...toAdd])] }));
+                }
+              };
+
+              return (
+                <div className="space-y-4">
+                  {/* Header row */}
+                  <div className="flex items-center justify-between">
+                    <SectionHeader icon={Briefcase} title="Client Portfolio" color={COLORS.teal} />
+                    {assignedClients.length > 0 && (
+                      <button onClick={() => setPermissions(p => ({ ...p, assigned_clients: [] }))}
+                        className="text-xs font-semibold text-red-500 hover:text-red-600 dark:text-red-400 transition-colors -mt-5">
+                        Clear All
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Stats bar */}
+                  <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xl font-bold" style={{ color: COLORS.teal }}>{assignedClients.length}</span>
+                      <span className="text-sm text-slate-500 dark:text-slate-400">assigned</span>
+                    </div>
+                    <div className={`w-px h-5 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xl font-bold text-slate-400">{clients.length - assignedClients.length}</span>
+                      <span className="text-sm text-slate-500 dark:text-slate-400">unassigned</span>
+                    </div>
+                    <div className={`w-px h-5 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
+                    <span className="text-xs text-slate-400">{clients.length} total</span>
+                    {/* Select-filtered bulk button */}
+                    {filteredForTab.length > 0 && filteredForTab.length < clients.length && (
+                      <button onClick={toggleAll}
+                        className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all"
+                        style={allFilteredSelected
+                          ? { background: '#fef2f2', borderColor: '#fecaca', color: '#dc2626' }
+                          : { background: isDark ? 'rgba(15,118,110,0.15)' : '#f0fdfa', borderColor: '#5eead4', color: COLORS.teal }}>
+                        {allFilteredSelected
+                          ? <><XCircle className="h-3 w-3" /> Deselect filtered ({filteredForTab.length})</>
+                          : <><CheckCircle className="h-3 w-3" /> Select filtered ({filteredForTab.length})</>}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Search */}
+                  <div className="relative">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                    <Input placeholder="Search by name, phone, email…" value={clientSearch} onChange={e => setClientSearch(e.target.value)} className="pl-11 h-10 rounded-xl" />
+                    {clientSearch && (
+                      <button onClick={() => setClientSearch('')} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Filters row: service chips + type dropdown */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Type filter */}
+                    <select
+                      value={cpTypeFilter}
+                      onChange={e => setCpTypeFilter(e.target.value)}
+                      className={`h-8 px-3 rounded-xl border text-xs font-semibold appearance-none outline-none cursor-pointer transition-colors ${isDark ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-white border-slate-200 text-slate-700'}`}
+                      style={cpTypeFilter ? { borderColor: COLORS.teal, color: COLORS.teal } : {}}>
+                      <option value="">All Types</option>
+                      {Object.entries(CLIENT_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
+                    <div className={`w-px h-5 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
+                    {/* Service chips */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        onClick={() => setCpSvcFilter('')}
+                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all"
+                        style={!cpSvcFilter
+                          ? { background: GRADIENT, color: '#fff', borderColor: 'transparent' }
+                          : isDark ? { background: '#1e293b', color: '#94a3b8', borderColor: '#334155' } : { background: '#f8fafc', color: '#64748b', borderColor: '#e2e8f0' }}>
+                        All
+                      </button>
+                      {presentServices.map(svc => (
+                        <button key={svc} onClick={() => setCpSvcFilter(prev => prev === svc ? '' : svc)}
+                          className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all"
+                          style={cpSvcFilter === svc
+                            ? { background: GRADIENT, color: '#fff', borderColor: 'transparent' }
+                            : isDark ? { background: '#1e293b', color: '#94a3b8', borderColor: '#334155' } : { background: '#f8fafc', color: '#64748b', borderColor: '#e2e8f0' }}>
+                          {svc}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Select-all / deselect-all row for full list */}
+                  {filteredForTab.length === clients.length && filteredForTab.length > 0 && (
+                    <div className="flex items-center gap-3">
+                      <button onClick={toggleAll}
+                        className="flex items-center gap-1.5 text-xs font-semibold transition-colors"
+                        style={{ color: allFilteredSelected ? '#dc2626' : COLORS.teal }}>
+                        {allFilteredSelected
+                          ? <><XCircle className="h-3.5 w-3.5" /> Deselect All ({clients.length})</>
+                          : <><CheckCircle className="h-3.5 w-3.5" /> Select All ({clients.length})</>}
+                      </button>
+                      {someFilteredSelected && !allFilteredSelected && (
+                        <span className="text-[10px] text-slate-400">{assignedClients.length} of {clients.length} selected</span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Client grid */}
+                  <div className="users-slim max-h-[380px] overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-2 pr-1" style={slimScroll}>
+                    {filteredForTab.length === 0 && (
+                      <div className="col-span-2 flex flex-col items-center justify-center py-10 text-slate-400">
+                        <Briefcase className="h-8 w-8 mb-2 opacity-30" />
+                        <p className="text-sm font-medium">No clients match filters</p>
+                        <button onClick={() => { setClientSearch(''); setCpSvcFilter(''); setCpTypeFilter(''); }}
+                          className="mt-2 text-xs font-semibold" style={{ color: COLORS.teal }}>Clear filters</button>
+                      </div>
+                    )}
+                    {filteredForTab.map(client => {
+                      const isAssigned = assignedClients.includes(client.id);
+                      const typeCfg = CLIENT_TYPE_COLORS[client.client_type] || CLIENT_TYPE_COLORS.proprietor;
+                      const typeLabel = CLIENT_TYPE_LABELS[client.client_type] || 'Other';
+                      const svcCount = (client.services || []).length;
+                      return (
+                        <button key={client.id}
+                          onClick={() => setPermissions(prev => ({ ...prev, assigned_clients: isAssigned ? (prev.assigned_clients || []).filter(id => id !== client.id) : [...(prev.assigned_clients || []), client.id] }))}
+                          className="flex items-start gap-3 p-3.5 rounded-xl border-2 text-left transition-all hover:shadow-sm"
+                          style={isAssigned
+                            ? { borderColor: '#1FAF5A', background: isDark ? 'rgba(31,175,90,0.12)' : '#f0fdf4' }
+                            : isDark ? { borderColor: '#334155', background: '#1e293b' } : { borderColor: '#e2e8f0', background: '#f8fafc' }}>
+                          {/* Avatar */}
+                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-white text-sm font-bold mt-0.5 ${isAssigned ? 'bg-emerald-500' : ''}`}
+                            style={isAssigned ? {} : { background: `linear-gradient(135deg, ${['#0D3B66','#065f46','#7c2d12','#4c1d95','#831843'][client.company_name?.charCodeAt(0) % 5] || '#0D3B66'}, #1F6FB2)` }}>
+                            {isAssigned ? <CheckCircle className="h-4 w-4" /> : client.company_name?.charAt(0).toUpperCase()}
+                          </div>
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            <p className={`font-semibold text-sm leading-tight truncate ${isAssigned ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-800 dark:text-slate-100'}`}>
+                              {client.company_name}
+                            </p>
+                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                              <span className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full border"
+                                style={{ background: typeCfg.bg, color: typeCfg.text, borderColor: typeCfg.border }}>
+                                {typeLabel}
+                              </span>
+                              {svcCount > 0 && (
+                                <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+                                  {svcCount} svc{svcCount !== 1 ? 's' : ''}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Footer summary */}
+                  {(cpSvcFilter || cpTypeFilter || clientSearch) && (
+                    <p className="text-[11px] text-slate-400 text-right">
+                      Showing {filteredForTab.length} of {clients.length} clients
+                      {filteredForTab.filter(c => assignedClients.includes(c.id)).length > 0 && (
+                        <> · <span style={{ color: COLORS.teal }}>{filteredForTab.filter(c => assignedClients.includes(c.id)).length} selected in view</span></>
+                      )}
+                    </p>
                   )}
                 </div>
-                <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                  <span className="text-sm font-semibold" style={{ color: COLORS.teal }}>{(permissions.assigned_clients || []).length}</span>
-                  <span className="text-sm text-slate-500 dark:text-slate-400">clients assigned</span>
-                </div>
-                <div className="relative">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                  <Input placeholder="Search clients…" value={clientSearch} onChange={e => setClientSearch(e.target.value)} className="pl-11 h-11 rounded-xl" />
-                </div>
-                <div className="users-slim max-h-[400px] overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-2 pr-1" style={slimScroll}>
-                  {clients.filter(c => (c.company_name || '').toLowerCase().includes(clientSearch.toLowerCase())).map(client => {
-                    const isAssigned = (permissions.assigned_clients || []).includes(client.id);
-                    return (
-                      <button key={client.id}
-                        onClick={() => setPermissions(prev => ({ ...prev, assigned_clients: isAssigned ? (prev.assigned_clients || []).filter(id => id !== client.id) : [...(prev.assigned_clients || []), client.id] }))}
-                        className="flex items-center gap-3 p-3.5 rounded-xl border-2 text-left transition-all hover:shadow-sm"
-                        style={isAssigned ? { borderColor: '#1FAF5A', background: isDark ? 'rgba(31,175,90,0.12)' : '#f0fdf4' } : isDark ? { borderColor: '#334155', background: '#1e293b' } : { borderColor: '#e2e8f0', background: '#f8fafc' }}>
-                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${isAssigned ? 'bg-emerald-500 text-white' : isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-200 text-slate-500'}`}>
-                          {isAssigned ? <CheckCircle className="h-4 w-4" /> : <Briefcase className="h-4 w-4" />}
-                        </div>
-                        <span className={`font-medium text-sm leading-tight ${isAssigned ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-700 dark:text-slate-200'}`}>{client.company_name}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
           <div className={`px-6 py-4 border-t flex items-center justify-between gap-4 rounded-b-2xl ${isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-100 bg-slate-50'}`}>
             <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
