@@ -99,7 +99,7 @@ const DEPARTMENTS = [
 const ROLE_CONFIG = {
   admin:   { gradient: 'from-violet-600 to-indigo-600', hex: '#7C3AED', icon: Crown,     label: 'Admin'   },
   manager: { gradient: 'from-blue-500 to-cyan-500',     hex: '#1F6FB2', icon: Briefcase, label: 'Manager' },
-  staff:   { gradient: 'from-slate-400 to-slate-500',   hex: '#475569', icon: UserIcon,  label: 'Staff'   },
+  staff:   { gradient: 'from-slate-400 to-slate-500',   hex: '#475569', icon: UserIcon,  label: 'User'    },
 };
 
 // ── Transfer Options for Offboarding Dialog ───────────────────────────────────
@@ -129,6 +129,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_connect_email: true, can_view_own_data: true, can_create_quotations: true,
       can_manage_invoices: true, can_view_passwords: true, can_edit_passwords: true,
       can_edit_attendance: true, can_view_compliance: true, can_manage_compliance: true,
+      can_view_all_visits: true, can_edit_visits: true, can_delete_visits: true, can_delete_own_visits: true,
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [],
       view_other_activity: [], view_other_visits: [],
@@ -158,7 +159,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_manage_settings: true,      // General Settings → VIEW, UPDATE (Own + Team)
       can_assign_tasks: false,        // admin-granted only
       can_assign_clients: false,      // admin-granted only
-      can_view_staff_activity: true,  // Staff Activity → VIEW (Own + Team)
+      can_view_staff_activity: false, // Staff Activity module removed
       can_send_reminders: false,      // admin-granted only
       can_view_user_page: false,      // admin-granted only
       can_view_audit_logs: false,     // admin-granted only
@@ -186,7 +187,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       view_other_activity: [], view_other_visits: [],
     },
     // SCOPE: OWN only
-    // DEFAULT: Only the modules explicitly listed in the Staff permission spec are ON.
+    // DEFAULT: Only the modules explicitly listed in the User permission spec are ON.
     // Everything else is admin-granted only.
     staff: {
       can_view_tasks: true,           // GATE: access /tasks endpoint (own scope enforced server-side)
@@ -210,7 +211,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_manage_settings: true,      // General Settings → VIEW, UPDATE (Own)
       can_assign_tasks: false,        // admin-granted only
       can_assign_clients: false,      // admin-granted only
-      can_view_staff_activity: true,  // Staff Activity → VIEW (Own)
+      can_view_staff_activity: false, // Staff Activity module removed
       can_send_reminders: false,      // admin-granted only
       can_view_user_page: false,      // admin-granted only
       can_view_audit_logs: false,     // admin-granted only
@@ -279,21 +280,20 @@ const GLOBAL_PERMS = [
 ];
 
 const OPS_PERMS = [
-  { key: 'can_assign_tasks',        label: 'Task Delegation',        desc: 'Assign tasks to other staff members',              icon: ArrowUpRight },
-  { key: 'can_assign_clients',      label: 'Client Assignment',      desc: 'Assign and reassign staff to clients',             icon: Briefcase    },
+  { key: 'can_assign_tasks',        label: 'Task Delegation',        desc: 'Assign tasks to other users',              icon: ArrowUpRight },
+  { key: 'can_assign_clients',      label: 'Client Assignment',      desc: 'Assign and reassign users to clients',             icon: Briefcase    },
   { key: 'can_manage_users',        label: 'User Governance',        desc: 'Manage team members and roles',                    icon: UsersIcon    },
   { key: 'can_view_attendance',     label: 'Attendance Management',  desc: 'Review punch timings and late reports',            icon: Clock        },
   { key: 'can_edit_attendance',    label: 'Edit Attendance',        desc: 'Edit past attendance records (mark absent, half day, leave)',  icon: Edit         },
-  { key: 'can_view_staff_activity', label: 'Staff Monitoring',       desc: 'View app usage and screen activity',               icon: Activity     },
   { key: 'can_send_reminders',      label: 'Automated Reminders',    desc: 'Trigger email/notification reminders',             icon: Bell         },
   { key: 'can_download_reports',    label: 'Export Data',            desc: 'Download CSV/PDF versions of reports',             icon: Download     },
   { key: 'can_manage_settings',     label: 'System Settings',        desc: 'Modify global system configuration',               icon: Settings     },
   { key: 'can_delete_data',         label: 'Delete Records',         desc: 'Permanently delete data entries',                  icon: Trash2       },
   { key: 'can_delete_tasks',        label: 'Delete Tasks',           desc: 'Delete any task regardless of ownership',          icon: XCircle      },
   { key: 'can_connect_email',       label: 'Connect Email Accounts', desc: 'Link personal email via IMAP integration',         icon: Inbox        },
-  { key: 'can_view_all_visits',     label: 'View All Visits',        desc: 'See client visits logged by any staff member',     icon: MapPin       },
+  { key: 'can_view_all_visits',     label: 'View All Visits',        desc: 'See client visits logged by any user',     icon: MapPin       },
   { key: 'can_edit_visits',         label: 'Edit Visits',            desc: 'Edit and update client visit records',             icon: Edit         },
-  { key: 'can_delete_visits',       label: 'Delete Any Visit',       desc: 'Delete visit records belonging to any staff',      icon: Trash2       },
+  { key: 'can_delete_visits',       label: 'Delete Any Visit',       desc: 'Delete visit records belonging to any user',      icon: Trash2       },
   { key: 'can_delete_own_visits',   label: 'Delete Own Visits',      desc: 'Delete only their own logged visit records',       icon: XCircle      },
 ];
 
@@ -924,7 +924,7 @@ function IdentixAttendanceTab() {
       {/* Info banner */}
       <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '10px 14px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
         <CheckCircle size={15} color={COLORS.mediumBlue} />
-        <span style={{ color: '#1e40af' }}>Machine punches sync directly into the <b>main attendance</b> — staff see them alongside app punch-ins in the Attendance page.</span>
+        <span style={{ color: '#1e40af' }}>Machine punches sync directly into the <b>main attendance</b> — users see them alongside app punch-ins in the Attendance page.</span>
       </div>
 
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -2052,7 +2052,7 @@ export default function Users() {
   const openPermissionsDialog = useCallback(async (userData) => {
     // Manager can only manage permissions for staff
     if (!isAdmin && isManager && userData.role !== 'staff') {
-      toast.error('Managers can only manage permissions for staff members');
+      toast.error('Managers can only manage permissions for users');
       return;
     }
     setSelectedUserForPerms(userData);
@@ -2065,7 +2065,7 @@ export default function Users() {
     if (!canManagePermissions) { toast.error('Only administrators or managers can update permissions'); return; }
     // Managers cannot update permissions for other managers or admins
     if (!isAdmin && isManager && selectedUserForPerms?.role !== 'staff') {
-      toast.error('Managers can only update permissions for staff members');
+      toast.error('Managers can only update permissions for users');
       return;
     }
     setLoading(true);
@@ -2769,15 +2769,7 @@ export default function Users() {
             {activePermTab === 'cross' && (
               <div className="space-y-5">
                 <SectionHeader icon={UsersIcon} title="Cross-User Data Access" color={COLORS.emeraldGreen} />
-                <p className="text-sm text-slate-500 dark:text-slate-400 -mt-2">Select team members whose data this user can view</p>
-                {selectedUserForPerms?.role === 'manager' && (
-                  <div className="flex items-start gap-2.5 rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 px-3.5 py-2.5">
-                    <UsersIcon className="h-4 w-4 mt-0.5 shrink-0 text-violet-500" />
-                    <p className="text-xs text-violet-700 dark:text-violet-300 leading-snug">
-                      <span className="font-semibold">Managers automatically see their entire department team</span> — tasks, attendance, todos, reports, visits, and activity for all same-department staff are visible by default. Use the lists below only to grant access to <span className="font-medium">specific staff outside their department</span>.
-                    </p>
-                  </div>
-                )}
+                <p className="text-sm text-slate-500 dark:text-slate-400 -mt-2">Select users whose data this user can view. Cross-visibility is fully explicit — only users selected below will be visible.</p>
                 {[
                   { key: 'view_other_tasks',      label: 'Tasks',      icon: Layers,      color: '#3B82F6' },
                   { key: 'view_other_attendance', label: 'Attendance', icon: Clock,       color: '#8B5CF6' },
