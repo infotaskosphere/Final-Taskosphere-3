@@ -16,6 +16,8 @@ from backend.dependencies import (
     can_edit_lead,
     can_delete_lead,
     _get_perm,
+    assert_module_permission,
+    check_module_permission,
 )
 
 from backend.notifications import create_notification
@@ -206,7 +208,7 @@ def _build_lead_query(current_user) -> dict:
 # ====================== ROUTES ======================
 
 @router.get("/meta/services", response_model=List[str])
-async def get_unique_services(current_user=Depends(get_current_user)):
+async def get_unique_services(current_user=Depends(check_module_permission("leads", "view"))):
     """Returns distinct services from leads + clients combined."""
     lead_services = await db.leads.distinct("services")
     client_services = await db.clients.distinct("services")
@@ -219,7 +221,7 @@ async def get_unique_services(current_user=Depends(get_current_user)):
 
 
 @router.get("/followups")
-async def get_due_followups(current_user=Depends(get_current_user)):
+async def get_due_followups(current_user=Depends(check_module_permission("leads", "view"))):
     """Returns leads with follow-up dates that are due."""
     now = datetime.now(timezone.utc)
     scope_filter = _build_lead_query(current_user)
@@ -241,7 +243,7 @@ async def get_due_followups(current_user=Depends(get_current_user)):
 @router.post("/import")
 async def import_leads(
     file: UploadFile = File(...),
-    current_user=Depends(get_current_user)
+    current_user=Depends(check_module_permission("leads", "create"))
 ):
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Only CSV files allowed")
@@ -253,7 +255,7 @@ async def import_leads(
 @router.post("", response_model=Lead)
 async def create_lead(
     lead_data: LeadCreate,
-    current_user=Depends(get_current_user),
+    current_user=Depends(check_module_permission("leads", "create")),
 ):
     """Create a new lead."""
     now = datetime.now(timezone.utc)
@@ -284,7 +286,7 @@ async def get_leads(
         "new", "contacted", "meeting", "proposal",
         "negotiation", "on_hold", "qualified", "won", "lost"
     ]] = Query(None, alias="status"),
-    current_user=Depends(get_current_user),
+    current_user=Depends(check_module_permission("leads", "view")),
 ):
     """List leads with permission matrix applied."""
     query = _build_lead_query(current_user)
@@ -297,7 +299,7 @@ async def get_leads(
 
 
 @router.get("/{lead_id}/quotations")
-async def get_lead_quotations(lead_id: str, current_user=Depends(get_current_user)):
+async def get_lead_quotations(lead_id: str, current_user=Depends(check_module_permission("leads", "view"))):
     """
     Returns all quotations linked to a specific lead.
     Powers the Quotations panel inside the Lead card on LeadsPage.
@@ -323,7 +325,7 @@ async def get_lead_quotations(lead_id: str, current_user=Depends(get_current_use
 
 
 @router.get("/{lead_id}/quotation-count")
-async def get_lead_quotation_count(lead_id: str, current_user=Depends(get_current_user)):
+async def get_lead_quotation_count(lead_id: str, current_user=Depends(check_module_permission("leads", "view"))):
     """
     Returns count of quotations linked to a lead.
     Lightweight badge count for lead cards.
@@ -345,7 +347,7 @@ async def get_lead_quotation_count(lead_id: str, current_user=Depends(get_curren
 
 
 @router.get("/{lead_id}", response_model=Lead)
-async def get_lead(lead_id: str, current_user=Depends(get_current_user)):
+async def get_lead(lead_id: str, current_user=Depends(check_module_permission("leads", "view"))):
     """Get a single lead by ID."""
     obj_id = validate_obj_id(lead_id)
 
@@ -353,6 +355,7 @@ async def get_lead(lead_id: str, current_user=Depends(get_current_user)):
     if not raw_lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
+    # Issue #1: visibility check (permission already enforced by Depends above)
     if not can_view_lead(current_user, raw_lead):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -366,7 +369,7 @@ async def get_lead(lead_id: str, current_user=Depends(get_current_user)):
 async def update_lead(
     lead_id: str,
     updates: LeadUpdate,
-    current_user=Depends(get_current_user),
+    current_user=Depends(check_module_permission("leads", "edit")),
 ):
     """Update a lead."""
     obj_id = validate_obj_id(lead_id)
@@ -427,7 +430,7 @@ async def update_lead(
 async def convert_lead_to_client(
     lead_id: str,
     task_request: Optional[OnboardingTaskRequest] = None,
-    current_user=Depends(get_current_user),
+    current_user=Depends(check_module_permission("leads", "edit")),
 ):
     """
     Convert a lead to a client.
@@ -573,13 +576,9 @@ async def convert_lead_to_client(
 
 
 @router.delete("/{lead_id}")
-async def delete_lead(lead_id: str, current_user=Depends(get_current_user)):
-    """Delete a lead permanently. Matrix: Admin OR can_manage_users"""
-    if not can_delete_lead(current_user):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only Admin or users with manage_users permission can delete leads"
-        )
+async def delete_lead(lead_id: str, current_user=Depends(check_module_permission("leads", "delete"))):
+    """Delete a lead permanently. Issue #7: requires leads.delete (can_manage_users flag)."""
+    # can_delete_lead check is already handled by check_module_permission above
 
     obj_id = validate_obj_id(lead_id)
 
@@ -604,7 +603,7 @@ async def delete_lead(lead_id: str, current_user=Depends(get_current_user)):
 @router.post("/{lead_id}/predict_closure")
 async def predict_lead_closure(
     lead_id: str,
-    current_user=Depends(get_current_user),
+    current_user=Depends(check_module_permission("leads", "view")),
 ):
     """Predict closure probability for a lead."""
     obj_id = validate_obj_id(lead_id)
