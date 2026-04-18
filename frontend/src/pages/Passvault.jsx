@@ -14,8 +14,10 @@ import {
   FileUp, Users, LayoutGrid, List, AlertTriangle, Loader2,
   ArrowUpDown, ChevronLeft, ChevronRight, Smartphone, Store,
   Activity, WifiOff, ServerCrash, ShieldAlert, Share2, ChevronDown,
-  CheckSquare, Square, Info,
+  CheckSquare, Square, Info, Sparkles,
 } from 'lucide-react';
+import { detectPasswordDuplicates } from '@/lib/aiDuplicateEngine';
+import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -1252,6 +1254,10 @@ export default function PasswordRepository() {
   const [fClient, setFClient] = useState('ALL');
   const [fHolder, setFHolder] = useState('ALL');
   const [selIds, setSelIds] = useState(new Set());
+  // ── AI Duplicate detection ────────────────────────────────────────────────
+  const [showDupDialog, setShowDupDialog] = useState(false);
+  const [dupGroups,     setDupGroups]     = useState([]);
+  const [detectingDups, setDetectingDups] = useState(false);
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailEntry, setDetailEntry] = useState(null);
@@ -1324,6 +1330,27 @@ export default function PasswordRepository() {
   const clearFilters = () => { setFDept('ALL'); setFType('ALL'); setFClient('ALL'); setFHolder('ALL'); setSearch(''); setPage(1); };
   const toggleSel = id => { const n = new Set(selIds); n.has(id) ? n.delete(id) : n.add(id); setSelIds(n); };
 
+  // ── AI Duplicate Detection ─────────────────────────────────────────────────
+  const handleDetectPasswordDuplicates = () => {
+    if (detectingDups) return;
+    setDetectingDups(true);
+    setTimeout(() => {
+      try {
+        const all = entries || [];
+        const groups = detectPasswordDuplicates(all);
+        setDupGroups(groups);
+        setShowDupDialog(true);
+        if (!groups.length) toast.success(`Scanned ${all.length} entries — no duplicates found ✓`);
+        else toast.info(`Found ${groups.length} duplicate group${groups.length !== 1 ? 's' : ''}`);
+      } catch (e) {
+        toast.error('Duplicate scan failed. Please try again.');
+        console.error('Password duplicate detection error:', e);
+      } finally {
+        setDetectingDups(false);
+      }
+    }, 60);
+  };
+
   const dlTemplate = async () => {
     try {
       const r = await api.get('/passwords/template', { responseType: 'blob' });
@@ -1389,6 +1416,19 @@ export default function PasswordRepository() {
                     style={{ background: 'rgba(255,255,255,0.15)' }}
                     title="Share all credentials of a client via WhatsApp">
                     <Share2 className="h-3.5 w-3.5" /> Share Client
+                  </Button>
+                  {/* ── AI Duplicate Detector ── */}
+                  <Button
+                    onClick={handleDetectPasswordDuplicates}
+                    disabled={detectingDups || !(entries && entries.length > 0)}
+                    size="sm"
+                    className="rounded-xl font-bold h-8 text-xs gap-1.5 transition-all disabled:opacity-40"
+                    style={{ background: 'rgba(139,92,246,0.35)', border: '1px solid rgba(167,139,250,0.6)', color: '#ede9fe' }}
+                    title="Detect duplicate password entries using AI"
+                  >
+                    {detectingDups
+                      ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Scanning…</>
+                      : <><Sparkles className="h-3.5 w-3.5" />AI Duplicates</>}
                   </Button>
                   <Button onClick={() => { setEditEntry(null); setEditOpen(true); }} size="sm"
                     className="rounded-xl font-bold h-8 text-xs gap-1.5 text-white shadow-lg"
@@ -1657,6 +1697,38 @@ export default function PasswordRepository() {
       <WAModal open={shareOpen} onClose={() => setShareOpen(false)} entry={shareEntry} isDark={isDark} />
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} isDark={isDark} onDownloadTemplate={dlTemplate} />
       <ShareClientModal open={shareClientOpen} onClose={() => setShareClientOpen(false)} isDark={isDark} entries={entries} />
+
+      {/* ── AI Duplicate Detection Dialog ─────────────────────────────── */}
+      <AIDuplicateDialog
+        open={showDupDialog}
+        onClose={() => setShowDupDialog(false)}
+        groups={dupGroups}
+        items={entries || []}
+        entityLabel="Password"
+        accentColor="#7c3aed"
+        isDark={isDark}
+        canDelete={canEdit}
+        canEdit={canEdit}
+        getTitle={(e) => e.portal_name || (PM[e.portal_type] ? `${PM[e.portal_type].icon} ${PM[e.portal_type].label}` : e.portal_type) || 'Unknown Portal'}
+        getSubtitle={(e) => [e.client_name || e.company_name, e.username || e.user_id].filter(Boolean).join(' · ') || null}
+        getMeta={(e) => [
+          e.portal_type  ? (PM[e.portal_type]?.label || e.portal_type) : null,
+          e.department   ? e.department.toUpperCase()                   : null,
+          e.pan          ? `PAN: ${e.pan}`                             : null,
+        ].filter(Boolean)}
+        compareFields={(a, b) => [
+          { label: 'Portal',     a: PM[a.portal_type]?.label || a.portal_type, b: PM[b.portal_type]?.label || b.portal_type },
+          { label: 'Client',     a: a.client_name || a.company_name,           b: b.client_name || b.company_name },
+          { label: 'Username',   a: a.username || a.user_id,                   b: b.username || b.user_id },
+          { label: 'PAN',        a: a.pan,                                     b: b.pan },
+          { label: 'Department', a: a.department,                              b: b.department },
+          { label: 'Notes',      a: (a.notes || '—').slice(0, 60),             b: (b.notes || '—').slice(0, 60) },
+          { label: 'Created',    a: a.created_at ? a.created_at.slice(0, 10) : '—', b: b.created_at ? b.created_at.slice(0, 10) : '—' },
+        ]}
+        onEdit={(e) => { setEditEntry(e); setEditOpen(true); setShowDupDialog(false); }}
+        onDelete={(e) => { setDelEntry(e); setDelOpen(true); setShowDupDialog(false); }}
+        onView={(e) => { setDetailEntry(e); setDetailOpen(true); setShowDupDialog(false); }}
+      />
     </motion.div>
   );
 }
