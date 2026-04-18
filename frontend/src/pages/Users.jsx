@@ -115,6 +115,7 @@ const TRANSFER_OPTIONS = [
 
 const DEFAULT_ROLE_PERMISSIONS = {
     admin: {
+      can_view_tasks: true, can_view_clients: true,
       can_view_all_tasks: true, can_view_all_clients: true, can_view_all_dsc: true,
       can_view_documents: true, can_view_all_duedates: true, can_view_reports: true,
       can_manage_users: true, can_assign_tasks: true, can_view_staff_activity: true,
@@ -136,6 +137,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
     // DEFAULT: Only the modules explicitly listed in the Manager permission spec are ON.
     // Everything else is admin-granted only.
     manager: {
+      can_view_tasks: true,           // GATE: access /tasks endpoint (scope handled server-side)
+      can_view_clients: true,         // GATE: access /clients endpoint (scope handled server-side)
       can_view_all_tasks: false,      // scope handled server-side by department query
       can_view_all_clients: false,    // admin-granted only
       can_view_all_dsc: false,        // admin-granted only
@@ -186,6 +189,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
     // DEFAULT: Only the modules explicitly listed in the Staff permission spec are ON.
     // Everything else is admin-granted only.
     staff: {
+      can_view_tasks: true,           // GATE: access /tasks endpoint (own scope enforced server-side)
+      can_view_clients: true,         // GATE: access /clients endpoint (assigned scope enforced server-side)
       can_view_all_tasks: false,      // scope: own only
       can_view_all_clients: false,    // admin-granted only
       can_view_all_dsc: false,        // admin-granted only
@@ -221,8 +226,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_manage_invoices: false,     // admin-granted only
       can_view_passwords: false,      // admin-granted only
       can_edit_passwords: false,      // admin-granted only
-      can_view_compliance: false,     // admin-granted only (Compliance Tracker not in Staff default spec)
-      can_manage_compliance: false,   // admin-granted only
+      can_view_compliance: true,      // Compliance Tracker → VIEW (Own)
+      can_manage_compliance: true,    // Compliance Tracker → CREATE, EDIT, UPDATE (Own)
       can_edit_attendance: true,      // Attendance → EDIT/UPDATE (Own)
       can_view_all_visits: false,     // scope: own visits only (server-side scoped)
       can_edit_visits: true,          // Client Visits → EDIT/UPDATE (Own)
@@ -235,6 +240,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
   }
 
 const EMPTY_PERMISSIONS = {
+  can_view_tasks: false, can_view_clients: false,
   can_view_all_tasks: false, can_view_all_clients: false, can_view_all_dsc: false,
   can_view_documents: false, can_view_all_duedates: false, can_view_reports: false,
   can_manage_users: false, can_assign_tasks: false, can_view_staff_activity: false,
