@@ -1461,7 +1461,7 @@ async def reject_user(user_id: str, current_user: User = Depends(get_current_use
 @api_router.get("/users")
 async def get_users(
     user_id: Optional[str] = None,
-    current_user: User = Depends(check_module_permission("users", "view"))
+    current_user: User = Depends(get_current_user)
 ):
     if current_user.role == "admin":
         query = {}
