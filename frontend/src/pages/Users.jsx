@@ -132,96 +132,100 @@ const DEFAULT_ROLE_PERMISSIONS = {
       view_other_attendance: [], view_other_reports: [], view_other_todos: [],
       view_other_activity: [], view_other_visits: [],
     },
-    // SCOPE: OWN + SAME_DEPARTMENT (Own + Team) | ALL MODULES enabled (permission-based, admin can revoke)
+    // SCOPE: OWN + SAME_DEPARTMENT (Own + Team)
+    // DEFAULT: Only the modules explicitly listed in the Manager permission spec are ON.
+    // Everything else is admin-granted only.
     manager: {
       can_view_all_tasks: false,      // scope handled server-side by department query
-      can_view_all_clients: true,     // default module (assigned + permission-based)
-      can_view_all_dsc: true,         // default module (permission-based)
-      can_view_documents: true,       // default module
-      can_view_all_duedates: true,    // default module (compliance)
-      can_view_reports: true,         // default module (own + team scope)
-      can_view_attendance: true,      // default module (scoped to department server-side)
-      can_view_all_leads: true,       // default module (permission-based)
-      can_edit_tasks: true,           // default module
-      can_edit_clients: true,         // default module (permission-based)
-      can_edit_dsc: true,             // default module (permission-based)
-      can_edit_documents: true,       // default module
-      can_edit_due_dates: true,       // default module
-      can_edit_users: true,           // default module (permission-based)
-      can_download_reports: true,     // default module
-      can_manage_users: true,         // default module (permission-based)
-      can_manage_settings: true,      // default module (general_settings)
-      can_assign_tasks: true,         // default module
-      can_assign_clients: true,       // default module (permission-based)
-      can_view_staff_activity: true,  // default module (own + team scope enforced server-side)
+      can_view_all_clients: false,    // admin-granted only
+      can_view_all_dsc: false,        // admin-granted only
+      can_view_documents: false,      // admin-granted only
+      can_view_all_duedates: true,    // Compliance Calendar → VIEW (Own + Team)
+      can_view_reports: true,         // Reports → VIEW (Own + Team)
+      can_view_attendance: true,      // Attendance → VIEW (Own + Team)
+      can_view_all_leads: false,      // admin-granted only (Leads Pipeline not in default spec)
+      can_edit_tasks: true,           // Tasks → EDIT/UPDATE (Own + Team)
+      can_edit_clients: false,        // admin-granted only
+      can_edit_dsc: false,            // admin-granted only
+      can_edit_documents: false,      // admin-granted only
+      can_edit_due_dates: true,       // Compliance Calendar → EDIT/UPDATE (Own + Team)
+      can_edit_users: false,          // admin-granted only
+      can_download_reports: true,     // Reports → VIEW includes export (Own + Team)
+      can_manage_users: false,        // admin-granted only
+      can_manage_settings: true,      // General Settings → VIEW, UPDATE (Own + Team)
+      can_assign_tasks: false,        // admin-granted only
+      can_assign_clients: false,      // admin-granted only
+      can_view_staff_activity: true,  // Staff Activity → VIEW (Own + Team)
       can_send_reminders: false,      // admin-granted only
-      can_view_user_page: true,       // default module (permission-based)
-      can_view_audit_logs: true,      // default module (permission-based)
-      can_view_selected_users_reports: true,  // default module
-      can_view_todo_dashboard: true,  // default module
-      can_use_chat: true,             // default module
-      can_view_staff_rankings: true,  // default module
+      can_view_user_page: false,      // admin-granted only
+      can_view_audit_logs: false,     // admin-granted only
+      can_view_selected_users_reports: true,  // Reports → VIEW (Team scope)
+      can_view_todo_dashboard: true,  // To Do → VIEW (Own + Team)
+      can_use_chat: false,            // admin-granted only
+      can_view_staff_rankings: false, // admin-granted only
       can_delete_data: false,         // admin-granted only
       can_delete_tasks: false,        // admin-granted only
-      can_connect_email: true,        // default module (email accounts — own + team)
-      can_view_own_data: true,        // default module
-      can_create_quotations: true,    // default module (permission-based)
-      can_manage_invoices: true,      // default module (permission-based)
-      can_view_passwords: true,       // default module (permission-based)
-      can_edit_passwords: true,       // default module (permission-based)
-      can_view_compliance: true,      // DEFAULT ON — Compliance Tracker (own + team scope, dept-scoped server-side)
-      can_manage_compliance: true,    // default module — manager can create/edit compliance masters in own dept
-      can_edit_attendance: false,       // admin-granted only — edit past attendance records
-      can_view_all_visits: false,     // own + dept team visits (server-side scoped via department query)
-      can_edit_visits: true,          // edit own + team visits
+      can_connect_email: true,        // Email Accounts → VIEW, CREATE, EDIT, UPDATE (Own + Team)
+      can_view_own_data: true,        // Dashboard → VIEW
+      can_create_quotations: false,   // admin-granted only (Quotations not in default spec)
+      can_manage_invoices: false,     // admin-granted only
+      can_view_passwords: false,      // admin-granted only
+      can_edit_passwords: false,      // admin-granted only
+      can_view_compliance: true,      // Compliance Tracker → VIEW (Own + Team)
+      can_manage_compliance: true,    // Compliance Tracker → CREATE, EDIT, UPDATE (Own + Team)
+      can_edit_attendance: true,      // Attendance → EDIT/UPDATE (Own + Team)
+      can_view_all_visits: false,     // own + team visits scoped server-side via department query
+      can_edit_visits: true,          // Client Visits → EDIT/UPDATE (Own + Team)
       can_delete_visits: false,       // admin-granted only
       can_delete_own_visits: true,    // always allowed for own records
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [],
       view_other_activity: [], view_other_visits: [],
     },
-    // SCOPE: OWN only | ALL MODULES enabled (permission-based, admin can revoke)
+    // SCOPE: OWN only
+    // DEFAULT: Only the modules explicitly listed in the Staff permission spec are ON.
+    // Everything else is admin-granted only.
     staff: {
       can_view_all_tasks: false,      // scope: own only
-      can_view_all_clients: true,     // default module (assigned + permission-based)
-      can_view_all_dsc: true,         // default module (permission-based)
-      can_view_documents: true,       // default module
-      can_view_all_duedates: true,    // default module (compliance)
-      can_view_reports: true,         // default module (own data only server-side)
-      can_view_attendance: true,      // default module (own data only server-side)
-      can_view_all_leads: true,       // default module (permission-based)
-      can_edit_tasks: true,           // default module (own/assigned tasks)
-      can_edit_clients: true,         // default module (permission-based)
-      can_edit_dsc: true,             // default module (permission-based)
-      can_edit_documents: true,       // default module (permission-based)
-      can_edit_due_dates: true,       // default module (permission-based)
-      can_edit_users: true,           // default module (permission-based)
-      can_download_reports: true,     // default module (own data)
-      can_manage_users: true,         // default module (permission-based)
-      can_manage_settings: true,      // default module (own profile/general settings)
+      can_view_all_clients: false,    // admin-granted only
+      can_view_all_dsc: false,        // admin-granted only
+      can_view_documents: false,      // admin-granted only
+      can_view_all_duedates: true,    // Compliance Calendar → VIEW (Own)
+      can_view_reports: true,         // Reports → VIEW (Own)
+      can_view_attendance: true,      // Attendance → VIEW (Own)
+      can_view_all_leads: false,      // admin-granted only (Leads Pipeline not in default spec)
+      can_edit_tasks: true,           // Tasks → EDIT/UPDATE (Own)
+      can_edit_clients: false,        // admin-granted only
+      can_edit_dsc: false,            // admin-granted only
+      can_edit_documents: false,      // admin-granted only
+      can_edit_due_dates: true,       // Compliance Calendar → EDIT/UPDATE (Own)
+      can_edit_users: false,          // admin-granted only
+      can_download_reports: true,     // Reports → VIEW includes export (Own)
+      can_manage_users: false,        // admin-granted only
+      can_manage_settings: true,      // General Settings → VIEW, UPDATE (Own)
       can_assign_tasks: false,        // admin-granted only
       can_assign_clients: false,      // admin-granted only
-      can_view_staff_activity: true,  // default module (own activity only, server-side scoped)
+      can_view_staff_activity: true,  // Staff Activity → VIEW (Own)
       can_send_reminders: false,      // admin-granted only
-      can_view_user_page: true,       // default module (permission-based)
-      can_view_audit_logs: true,      // default module (permission-based)
-      can_view_selected_users_reports: true,  // default module (own data)
-      can_view_todo_dashboard: true,  // default module
-      can_use_chat: true,             // default module
+      can_view_user_page: false,      // admin-granted only
+      can_view_audit_logs: false,     // admin-granted only
+      can_view_selected_users_reports: false, // admin-granted only (staff sees own reports only)
+      can_view_todo_dashboard: true,  // To Do → VIEW (Own)
+      can_use_chat: false,            // admin-granted only
       can_view_staff_rankings: false, // admin-granted only
       can_delete_data: false,         // admin-granted only
       can_delete_tasks: false,        // admin-granted only
-      can_connect_email: true,        // default module (email accounts)
-      can_view_own_data: true,        // default module
-      can_create_quotations: true,    // default module (permission-based)
-      can_manage_invoices: true,      // default module (permission-based)
-      can_view_passwords: true,       // default module (permission-based)
-      can_edit_passwords: true,       // default module (permission-based)
-      can_view_compliance: false,     // admin-granted only — Compliance Tracker not shown to staff by default
-      can_manage_compliance: false,   // admin-granted only — staff cannot create/edit compliance masters
-      can_edit_attendance: false,       // admin-granted only — edit past attendance records
-      can_view_all_visits: false,     // own visits only (server-side scoped)
-      can_edit_visits: true,          // edit own visits
+      can_connect_email: true,        // Email Accounts → VIEW, CREATE, EDIT, UPDATE (Own)
+      can_view_own_data: true,        // Dashboard → VIEW (Own)
+      can_create_quotations: false,   // admin-granted only (Quotations not in default spec)
+      can_manage_invoices: false,     // admin-granted only
+      can_view_passwords: false,      // admin-granted only
+      can_edit_passwords: false,      // admin-granted only
+      can_view_compliance: false,     // admin-granted only (Compliance Tracker not in Staff default spec)
+      can_manage_compliance: false,   // admin-granted only
+      can_edit_attendance: true,      // Attendance → EDIT/UPDATE (Own)
+      can_view_all_visits: false,     // scope: own visits only (server-side scoped)
+      can_edit_visits: true,          // Client Visits → EDIT/UPDATE (Own)
       can_delete_visits: false,       // admin-granted only
       can_delete_own_visits: true,    // always allowed for own records
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
