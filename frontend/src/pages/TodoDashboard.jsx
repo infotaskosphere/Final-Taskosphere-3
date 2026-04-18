@@ -1086,7 +1086,7 @@ export default function TodoDashboard() {
   // ── Fetch all users ────────────────────────────────────────────────────────
   const { data: allUsers = [] } = useQuery({
     queryKey: ['users'],
-    enabled:  isAdmin || isManager,
+    enabled:  true,
     queryFn:  async () => {
       const res = await api.get('/users');
       return res.data || [];
@@ -1126,14 +1126,15 @@ export default function TodoDashboard() {
         : [];
       if (canSeeEveryone) return allUsers.filter(u => (u.id || u._id) !== selfId);
       if (list.length > 0) return allUsers.filter(u => list.includes(u.id || u._id) && (u.id || u._id) !== selfId);
-      // No explicit cross-vis list and no 'everyone' grant — manager sees self only.
-      // TEAM = CROSS VISIBILITY ON USER (admin-curated view_other_todos).
-      return [];
+      // Fallback: use any users returned by /users API (backend already filtered by cross-vis)
+      return allUsers.filter(u => (u.id || u._id) !== selfId);
     }
     const list = Array.isArray(user?.permissions?.view_other_todos)
       ? user.permissions.view_other_todos.filter(id => id !== 'everyone')
       : [];
-    return allUsers.filter(u => list.includes(u.id || u._id) && (u.id || u._id) !== selfId);
+    if (list.length > 0) return allUsers.filter(u => list.includes(u.id || u._id) && (u.id || u._id) !== selfId);
+    // Fallback for staff with cross-vis: use API-returned users
+    return allUsers.filter(u => (u.id || u._id) !== selfId);
   }, [isAdmin, isManager, allUsers, user, canSeeEveryone]);
 
   const showDropdown = isAdmin || canSeeEveryone || permittedUsers.length > 0;
