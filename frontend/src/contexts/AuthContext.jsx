@@ -140,6 +140,20 @@ export const AuthProvider = ({ children }) => {
         const freshUser = meRes.data;
         freshUser.permissions = normalizePermissions(freshUser.permissions);
 
+        // Back-fill any permission flags that were missing from this user's DB
+        // record (e.g. new flags added to DEFAULT_ROLE_PERMISSIONS after the user
+        // was created). The endpoint writes missing keys to the DB once and returns
+        // the merged permissions object. Non-fatal — _normalize_permissions() in
+        // get_current_user already covers this in-memory for the current request.
+        try {
+          const syncRes = await api.post("/auth/sync-permissions", {}, { _silent: true });
+          if (syncRes?.data?.permissions) {
+            freshUser.permissions = normalizePermissions(syncRes.data.permissions);
+          }
+        } catch (_) {
+          // Non-fatal: in-memory normalisation in get_current_user is the safety net
+        }
+
         const storage = localStorage.getItem("token") ? localStorage : sessionStorage;
         storage.setItem("user", JSON.stringify(freshUser));
 
