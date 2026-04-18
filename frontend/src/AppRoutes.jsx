@@ -20,7 +20,6 @@ const Reports           = lazy(() => import("@/pages/Reports.jsx"));
 const Clients           = lazy(() => import("@/pages/Clients.jsx"));
 const Users             = lazy(() => import("@/pages/Users.jsx"));
 const DueDates          = lazy(() => import("@/pages/DueDates.jsx"));
-const StaffActivity     = lazy(() => import("@/pages/StaffActivity.jsx"));
 const LeadsPage         = lazy(() => import("@/pages/Leads.jsx"));
 const VisitsPage        = lazy(() => import("@/pages/VisitsPage.jsx"));
 const EmailSettings     = lazy(() => import("@/components/EmailSettings.jsx"));
@@ -142,7 +141,6 @@ function AppRoutes() {
       <Route path="/leads"        element={<Permission permission="can_view_all_leads"><PageLoader><LeadsPage /></PageLoader></Permission>} />
       <Route path="/quotations"   element={<Permission permission={["can_create_quotations", "can_manage_invoices"]}><PageLoader><Quotations /></PageLoader></Permission>} />
       <Route path="/invoicing"    element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><Invoicing /></PageLoader></Permission>} />
-      <Route path="/staff-activity" element={<Permission permission="can_view_staff_activity"><PageLoader><StaffActivity /></PageLoader></Permission>} />
       <Route path="/task-audit"   element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
       <Route path="/users"        element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
 
