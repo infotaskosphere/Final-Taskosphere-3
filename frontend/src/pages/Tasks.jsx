@@ -795,8 +795,8 @@ export default function Tasks() {
 
   const hasCrossVisibility = React.useMemo(() => {
     if (isAdmin) return true;
-    // Manager always has Own + Team visibility (scope enforced server-side by department)
-    if (user?.role === 'manager') return true;
+    // Cross-visibility is purely explicit (admin-curated view_other_tasks list).
+    // No automatic dept-team for any role — TEAM = CROSS VISIBILITY ON USER.
     const perms = user?.permissions || {};
     return (perms.view_other_tasks && perms.view_other_tasks.length > 0) || perms.can_view_all_tasks === true;
   }, [isAdmin, user]);
@@ -804,15 +804,6 @@ export default function Tasks() {
   const crossVisibilityUserIds = React.useMemo(() => {
     if (isAdmin) {
       return [...new Set(tasks.map(t => t.assigned_to).filter(id => id && id !== user?.id))];
-    }
-    // Manager: derive team from same-department staff in the users list
-    // (mirrors backend get_same_department_user_ids — same dept, staff role, excluding self)
-    if (user?.role === 'manager') {
-      const myDepts = new Set(user?.departments || []);
-      return users
-        .filter(u => u.id !== user?.id && u.role === 'staff' &&
-          (u.departments || []).some(d => myDepts.has(d)))
-        .map(u => u.id);
     }
     const perms = user?.permissions || {};
     return (perms.view_other_tasks || []).filter(id => id !== user?.id);
@@ -1133,7 +1124,7 @@ export default function Tasks() {
   const handleExportPdf = () => { toast.success('Exporting PDF (stub)'); };
 
   const handleSendReminders = async () => {
-    if (!window.confirm('Send pending task reminder emails to all assigned staff now?')) return;
+    if (!window.confirm('Send pending task reminder emails to all assigned users now?')) return;
     setSendingReminders(true);
     setReminderResult(null);
     try {
@@ -1141,7 +1132,7 @@ export default function Tasks() {
       const { emails_sent = 0, emails_failed = [], total_users = 0 } = res.data || {};
       setReminderResult({ emails_sent, emails_failed, total_users });
       if (emails_sent > 0) {
-        toast.success(`✓ Reminder emails sent to ${emails_sent} of ${total_users} staff member${total_users !== 1 ? 's' : ''}`);
+        toast.success(`✓ Reminder emails sent to ${emails_sent} of ${total_users} user${total_users !== 1 ? 's' : ''}`);
       } else if (total_users === 0) {
         toast.info('No pending tasks found — nothing to remind.');
       } else {
@@ -1621,7 +1612,7 @@ export default function Tasks() {
               ? (isDark ? '#86efac' : '#15803d')
               : (isDark ? '#fca5a5' : '#dc2626') }}>
             {reminderResult.emails_sent > 0
-              ? `✓ Reminder emails sent to ${reminderResult.emails_sent} / ${reminderResult.total_users} staff`
+              ? `✓ Reminder emails sent to ${reminderResult.emails_sent} / ${reminderResult.total_users} users`
               : `Reminder emails failed — check SENDGRID_API_KEY on the server`}
             {reminderResult.emails_failed?.length > 0 && (
               <span className="ml-2 text-xs opacity-70">
