@@ -806,7 +806,11 @@ export default function Tasks() {
       return [...new Set(tasks.map(t => t.assigned_to).filter(id => id && id !== user?.id))];
     }
     const perms = user?.permissions || {};
-    return (perms.view_other_tasks || []).filter(id => id !== user?.id);
+    const explicitList = (perms.view_other_tasks || []).filter(id => id !== user?.id);
+    // Fallback: if /users returned other users (backend already filtered by cross-vis),
+    // use those IDs so dropdowns and name lookups always work.
+    if (explicitList.length > 0) return explicitList;
+    return users.filter(u => u.id !== user?.id).map(u => u.id);
   }, [isAdmin, user, users, tasks]);
 
   const visibleUsers = React.useMemo(() => {
