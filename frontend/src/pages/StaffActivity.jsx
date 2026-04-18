@@ -215,12 +215,13 @@ export default function Reports() {
   const t    = tok(dark);
 
   const isAdmin   = user?.role === 'admin';
+  const isManager = user?.role === 'manager';
   const canDL     = isAdmin || hasPermission('can_download_reports');
 
-  // Cross-visibility: view_other_activity is the ONLY way non-admin users see other users' activity.
-  // Manager has NO automatic team access — must be granted via view_other_activity by admin.
+  // Cross-visibility: Issue #2 — Manager sees own + team (backend already scopes).
+  // Staff: only explicit view_other_reports list (Issue #3).
   const crossVisReports    = user?.permissions?.view_other_reports || [];
-  const hasCrossVisReports = crossVisReports.length > 0;
+  const hasCrossVisReports = isManager || crossVisReports.length > 0;
   const canSwitchUser = isAdmin || hasCrossVisReports;
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -256,8 +257,13 @@ export default function Reports() {
     if (r3.status==='fulfilled') setAttendance(r3.value?.data||[]);
     if (r4.status==='fulfilled') {
       const rawUsers = r4.value?.data || [];
-      // Admin sees all. All other roles (including manager) only see explicit cross-vis users.
-      setAllUsers(isAdmin ? rawUsers : rawUsers.filter(u => crossVisReports.includes(u.id || u._id)));
+      // Admin + Manager: backend scopes team automatically (Issue #2/#8).
+      // Staff: filter to explicit cross-vis list only (Issue #3).
+      setAllUsers(
+        isAdmin || isManager
+          ? rawUsers
+          : rawUsers.filter(u => crossVisReports.includes(u.id || u._id))
+      );
     }
     setLoading(false); setRefreshing(false);
   };
