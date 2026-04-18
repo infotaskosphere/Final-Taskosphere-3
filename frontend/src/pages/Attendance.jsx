@@ -1695,8 +1695,8 @@ export default function Attendance() {
   const isManager = user?.role === 'manager';
   const crossVisAttendance  = user?.permissions?.view_other_attendance || [];
   const hasCrossVisAttendance = crossVisAttendance.length > 0;
-  // canSwitchUser: admin can switch to any user; others only if they have cross-vis
-  const canSwitchUser = isAdmin || hasCrossVisAttendance;
+  // canSwitchUser: admin can switch to any user; others if they have cross-vis OR backend returned other users
+  const canSwitchUser = isAdmin || hasCrossVisAttendance || allUsers.some(u => u.id !== user?.id);
 
   // ── Layout customizer ─────────────────────────────────────────────────────
   const ATT_SECTIONS = ['today_status', 'stat_cards', 'holidays_reminders', 'calendar_area'];
@@ -2077,18 +2077,22 @@ export default function Attendance() {
       }
       if (isAdmin) setPendingHolidays((Array.isArray(allHolidays) ? allHolidays : []).filter(h => h.status === 'pending'));
 
-      if (isAdmin) {
-        try { const usersRes = await api.get('/users'); setAllUsers(usersRes.data || []); } catch {}
-      } else if (hasCrossVisAttendance) {
-        // Non-admin with cross-visibility: always keep permitted user list fresh
-        try {
-          const usersRes = await api.get('/users');
-          const permitted = (usersRes.data || []).filter(u =>
-            crossVisAttendance.includes(u.id || u._id)
-          );
-          setAllUsers(permitted);
-        } catch {}
-      }
+      // Always fetch users — backend already filters by cross-visibility for non-admins
+      try {
+        const usersRes = await api.get('/users');
+        const fetchedUsers = usersRes.data || [];
+        if (isAdmin) {
+          setAllUsers(fetchedUsers);
+        } else if (hasCrossVisAttendance) {
+          // Use explicit list first, fallback to all returned users
+          const permitted = fetchedUsers.filter(u => crossVisAttendance.includes(u.id || u._id));
+          setAllUsers(permitted.length > 0 ? permitted : fetchedUsers.filter(u => (u.id || u._id) !== user?.id));
+        } else {
+          // Fallback: use whoever the backend returned (already cross-vis filtered)
+          const others = fetchedUsers.filter(u => (u.id || u._id) !== user?.id);
+          if (others.length > 0) setAllUsers(others);
+        }
+      } catch {}
 
       const history = historyRes.data || [];
       setAttendanceHistory(Array.isArray(history) ? history : []);
