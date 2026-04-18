@@ -1690,10 +1690,11 @@ export default function Attendance() {
   const canEditAttendance = isAdmin || hasPermission('can_edit_attendance');
 
   // ── Cross-visibility ───────────────────────────────────────────────────────
-  // Manager always has Own + Team visibility; staff need explicit view_other_attendance entries
+  // Cross-visibility is purely explicit — TEAM = CROSS VISIBILITY ON USER.
+  // Every non-admin role (including manager) needs explicit view_other_attendance entries.
   const isManager = user?.role === 'manager';
   const crossVisAttendance  = user?.permissions?.view_other_attendance || [];
-  const hasCrossVisAttendance = isManager || crossVisAttendance.length > 0;
+  const hasCrossVisAttendance = crossVisAttendance.length > 0;
   // canSwitchUser: admin can switch to any user; others only if they have cross-vis
   const canSwitchUser = isAdmin || hasCrossVisAttendance;
 
@@ -2082,22 +2083,9 @@ export default function Attendance() {
         // Non-admin with cross-visibility: always keep permitted user list fresh
         try {
           const usersRes = await api.get('/users');
-          const allFetched = usersRes.data || [];
-          let permitted;
-          if (isManager) {
-            // Manager: same-department staff (mirrors backend get_same_department_user_ids)
-            const myDepts = new Set(user?.departments || []);
-            permitted = allFetched.filter(u =>
-              (u.id || u._id) !== user?.id &&
-              u.role === 'staff' &&
-              (u.departments || []).some(d => myDepts.has(d))
-            );
-          } else {
-            // Staff with explicit cross-visibility list
-            permitted = allFetched.filter(u =>
-              crossVisAttendance.includes(u.id || u._id)
-            );
-          }
+          const permitted = (usersRes.data || []).filter(u =>
+            crossVisAttendance.includes(u.id || u._id)
+          );
           setAllUsers(permitted);
         } catch {}
       }
@@ -2540,7 +2528,7 @@ export default function Attendance() {
       let employeeName;
       if (isAdmin && selectedUserId === 'everyone') employeeName = 'All Employees';
       else if (canSwitchUser && selectedUserId) employeeName = (Array.isArray(allUsers) ? allUsers : []).find(u => u.id === selectedUserId)?.full_name || 'Employee';
-      else employeeName = user?.full_name || 'Staff Member';
+      else employeeName = user?.full_name || 'User';
 
       const doc = new jsPDF();
       doc.setFillColor(13, 59, 102); doc.rect(0, 0, 210, 24, 'F');
@@ -3559,7 +3547,7 @@ export default function Attendance() {
               <CardHeaderRow
                 iconBg={isDark ? 'bg-red-900/40' : 'bg-red-50'}
                 icon={<UserX className="h-4 w-4 text-red-500" />}
-                title={`Absent This Month — ${absentSummary.length} Staff`}
+                title={`Absent This Month — ${absentSummary.length} Users`}
                 subtitle="Auto-marked at 7:00 PM IST"
                 badge={absentSummary.length}
               />
@@ -3597,7 +3585,7 @@ export default function Attendance() {
           variants={itemVariants}
         >
           <StatCard isDark={isDark} icon={Timer}
-            label={isEveryoneView ? 'Total (All Staff)' : 'This Month'}
+            label={isEveryoneView ? 'Total (All Users)' : 'This Month'}
             value={Math.floor(monthTotalMinutes / 60)} unit="hours worked" color={COLORS.deepBlue}
             trend={`${monthDaysPresent} days present`} />
           <StatCard isDark={isDark} icon={CheckCircle2}
