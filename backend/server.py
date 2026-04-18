@@ -82,6 +82,10 @@ from backend.dependencies import (
     get_current_user,
     create_access_token,
     check_permission,
+    check_module_permission,
+    assert_module_permission,
+    assert_record_visibility,
+    check_record_visibility,
     require_admin,
     require_manager_or_admin,
     verify_record_access,
@@ -686,7 +690,7 @@ async def test_email_service(current_user: User = Depends(get_current_user)):
 @api_router.get("/tasks/analytics")
 async def get_task_analytics(
     month: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("tasks", "view"))
 ):
     """ Get task analytics for a specific month (YYYY-MM) """
     query = {}
@@ -1411,7 +1415,7 @@ async def reject_user(user_id: str, current_user: User = Depends(get_current_use
 @api_router.get("/users")
 async def get_users(
     user_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("users", "view"))
 ):
     if current_user.role == "admin":
         query = {}
@@ -1479,7 +1483,7 @@ async def get_users(
 async def update_user(
     user_id: str,
     user_data: dict,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("users", "edit"))
 ):
     is_own     = user_id == current_user.id
     is_admin   = current_user.role.lower() == "admin"
@@ -1540,11 +1544,8 @@ async def update_user(
     return updated_user
 
 @api_router.delete("/users/{user_id}")
-async def delete_user(user_id: str, current_user: User = Depends(get_current_user)):
-    # Per permission matrix: DELETE on Users is Admin-only.
-    # Manager has VIEW/CREATE/EDIT/UPDATE (Permission-based) but NOT DELETE.
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Only administrators can delete users")
+async def delete_user(user_id: str, current_user: User = Depends(check_module_permission("users", "delete"))):
+    # Issue #8: fully permission-based (can_manage_users flag), admin always passes via check_module_permission
     if user_id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot delete yourself")
     existing = await db.users.find_one({"id": user_id}, {"_id": 0})
@@ -2255,12 +2256,8 @@ async def get_my_attendance_summary(
 @api_router.get("/attendance/staff-report")
 async def get_staff_attendance_report(
     month: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("attendance", "view"))
 ):
-    if current_user.role != "admin":
-        permissions = get_user_permissions(current_user)
-        if not permissions.get("can_view_attendance"):
-            raise HTTPException(status_code=403, detail="Not allowed")
     now = datetime.now(IST)
     target_month = month or now.strftime("%Y-%m")
     users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
@@ -2822,7 +2819,7 @@ async def get_top_performers_data(
 @api_router.post("/tasks", response_model=Task)
 async def create_task(
     task_data: TaskCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("tasks", "create"))
 ):
     if (task_data.assigned_to
             and task_data.assigned_to != current_user.id
@@ -2881,7 +2878,7 @@ async def get_task_comments(
 @api_router.post("/tasks/bulk")
 async def create_tasks_bulk(
     payload: BulkTaskCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("tasks", "create"))
 ):
     created_tasks = []
     for task_data in payload.tasks:
@@ -2905,7 +2902,7 @@ async def create_tasks_bulk(
 @api_router.post("/tasks/import")
 async def import_tasks_from_csv(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("tasks", "create"))
 ):
     if file.content_type != "text/csv":
         raise HTTPException(400, "Invalid file type")
@@ -2933,7 +2930,7 @@ async def import_tasks_from_csv(
     return await create_tasks_bulk(payload, current_user)
 
 @api_router.get("/tasks")
-async def get_tasks(current_user: User = Depends(get_current_user)):
+async def get_tasks(current_user: User = Depends(check_module_permission("tasks", "view"))):
     query = {"type": {"$ne": "todo"}}
     if current_user.role == "admin":
         pass
@@ -3034,7 +3031,7 @@ async def get_task_detail(task_id: str, current_user: User = Depends(get_current
     return task
 
 @api_router.get("/tasks/{task_id}", response_model=Task)
-async def get_task(task_id: str, current_user: User = Depends(get_current_user)):
+async def get_task(task_id: str, current_user: User = Depends(check_module_permission("tasks", "view"))):
     task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -3056,7 +3053,7 @@ async def get_task(task_id: str, current_user: User = Depends(get_current_user))
 async def patch_task(
     task_id: str,
     updates: dict,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("tasks", "view"))
 ):
     existing_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not existing_task:
@@ -3096,12 +3093,11 @@ async def delete_task(
     existing = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Task not found")
-    is_admin = current_user.role.lower() == "admin"
-    permissions = get_user_permissions(current_user)
-    is_creator = existing.get("created_by") == current_user.id
-    has_delete_perm = permissions.get("can_edit_tasks", False)
-    if not (is_admin or is_creator or has_delete_perm):
-        raise HTTPException(status_code=403, detail="Only Admin, task creator, or users with explicit permission can delete tasks.")
+    # Issue #7: use can_delete_tasks (not can_edit_tasks)
+    # Issue #1: must also satisfy visibility (own or team)
+    assert_module_permission(current_user, "tasks", "delete")
+    team_ids = await get_team_user_ids(current_user.id) if current_user.role == "manager" else []
+    assert_record_visibility(current_user, existing, team_ids)
     await db.tasks.delete_one({"id": task_id})
     await create_audit_log(
         current_user=current_user,
@@ -3233,7 +3229,7 @@ def _to_iso(val) -> Optional[str]:
 @api_router.post("/dsc", response_model=DSC)
 async def create_dsc(
     dsc_data: DSCCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("dsc_register", "create"))
 ):
     try:
         now = datetime.now(timezone.utc)
@@ -3458,7 +3454,7 @@ async def update_dsc_movement(
     return {"message": "Movement updated successfully", "movement_log": movement_log}
 # DOCUMENT REGISTER ROUTES
 @api_router.post("/documents", response_model=Document)
-async def create_document(document_data: DocumentCreate, current_user: User = Depends(get_current_user)):
+async def create_document(document_data: DocumentCreate, current_user: User = Depends(check_module_permission("document_register", "create"))):
     document = Document(**document_data.model_dump(), created_by=current_user.id)
     doc = document.model_dump()
     doc["created_at"] = doc["created_at"].isoformat()
@@ -4373,7 +4369,7 @@ async def get_leads_services_meta(current_user: User = Depends(get_current_user)
 @api_router.get("/reports/efficiency")
 async def get_efficiency_report(
     user_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("reports", "view"))
 ):
     target_user_id = user_id or current_user.id
     if target_user_id != current_user.id:
@@ -4408,7 +4404,7 @@ async def get_efficiency_report(
 async def export_reports(
     format: str = "csv",
     user_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("reports", "download"))
 ):
     perms = get_user_permissions(current_user)
     if current_user.role != "admin" and not perms.get("can_download_reports", False):
@@ -4478,7 +4474,7 @@ async def export_reports(
 @api_router.get("/reports/performance-rankings", response_model=List[PerformanceMetric])
 async def get_performance_rankings(
     period: str = Query("monthly", enum=["weekly", "monthly", "all_time"]),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("reports", "view"))
 ):
     global rankings_cache, rankings_cache_time
     cache_key = f"rankings_{period}"
@@ -4983,14 +4979,11 @@ async def import_clients_from_csv(
 
 
 @api_router.post("/clients", response_model=Client)
-async def create_client(payload: dict, current_user: User = Depends(get_current_user)):
+async def create_client(payload: dict, current_user: User = Depends(check_module_permission("clients", "create"))):
     """
     Create a new client.
-    Permission matrix (Assigned + Permission model):
-      Admin                        → always allowed
-      can_edit_clients = True      → allowed (default for Manager & Staff)
-      can_view_all_clients = True  → allowed (has directory access)
-    Without either flag (admin-revoked): deny.
+    Issue #5 + #6: requires clients.create permission (can_edit_clients flag).
+    Admin always passes via check_module_permission.
     """
     if current_user.role != "admin":
         perms = get_user_permissions(current_user)
@@ -5052,32 +5045,38 @@ _DEPT_SERVICE_MAP: Dict[str, List[str]] = {
  
  
 @api_router.get("/clients", response_model=List[Client])
-async def get_clients(current_user: User = Depends(get_current_user)):
+async def get_clients(current_user: User = Depends(check_module_permission("clients", "view"))):
 
     permissions = get_user_permissions(current_user)
 
-    # SCOPE: Admin = all; can_view_all_clients = all; else OWN + assigned_clients (same for Manager and Staff)
+    # Issue #2 + #5: Admin=all; can_view_all_clients=all; Manager=assigned+team; Staff=own only
     if current_user.role == "admin" or permissions.get("can_view_all_clients", False):
         query = {}
 
-    else:
-        # SCOPE: OWN + CROSS-VISIBILITY only (same for Manager and Staff when can_view_all_clients is revoked)
-        extra_clients = permissions.get("assigned_clients", [])
+    elif current_user.role == "manager":
+        # Manager sees own + team members' assigned clients (cross_visibility via team)
+        team_ids = await get_team_user_ids(current_user.id)
+        extra_clients = permissions.get("assigned_clients", []) or []
+        or_clauses = [
+            {"assigned_to": current_user.id},
+            {"created_by": current_user.id},
+        ]
+        if team_ids:
+            or_clauses.append({"assigned_to": {"$in": team_ids}})
         if extra_clients:
-            query = {
-                "$or": [
-                    {"assigned_to": current_user.id},
-                    {"created_by": current_user.id},
-                    {"id": {"$in": extra_clients}},
-                ]
-            }
-        else:
-            query = {
-                "$or": [
-                    {"assigned_to": current_user.id},
-                    {"created_by": current_user.id},
-                ]
-            }
+            or_clauses.append({"id": {"$in": extra_clients}})
+        query = {"$or": or_clauses}
+
+    else:
+        # Issue #3: Staff - own only (no cross_visibility)
+        extra_clients = permissions.get("assigned_clients", []) or []
+        or_clauses = [
+            {"assigned_to": current_user.id},
+            {"created_by": current_user.id},
+        ]
+        if extra_clients:
+            or_clauses.append({"id": {"$in": extra_clients}})
+        query = {"$or": or_clauses}
 
     clients = await db.clients.find(query, {"_id": 0}).to_list(1000)
 
@@ -5102,11 +5101,10 @@ async def get_client(client_id: str, current_user: User = Depends(get_current_us
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    # Permission matrix — must mirror GET /clients list scope:
-    #   Admin                        → always allowed
-    #   can_view_all_clients = True  → allowed (same as list returning all)
-    #   assigned_to == user.id       → allowed (assigned user owns this client)
-    #   client_id in assigned_clients → allowed (explicitly granted access)
+    # Issue #5: BOTH permission AND visibility must pass
+    # Permission check (clients.view → can_view_all_clients)
+    assert_module_permission(current_user, "clients", "view")
+    # Visibility check - admin passes inside assert_module_permission
     if current_user.role != "admin":
         permissions = get_user_permissions(current_user)
         can_view_all  = permissions.get("can_view_all_clients", False)
@@ -5114,8 +5112,13 @@ async def get_client(client_id: str, current_user: User = Depends(get_current_us
         is_created_by = client.get("created_by") == current_user.id
         extra_clients = permissions.get("assigned_clients", []) or []
         in_extra_list = client_id in extra_clients
+        # Manager also sees team-assigned clients
+        team_in = False
+        if current_user.role == "manager":
+            team_ids = await get_team_user_ids(current_user.id)
+            team_in = client.get("assigned_to") in team_ids
 
-        if not (can_view_all or is_assigned or is_created_by or in_extra_list):
+        if not (can_view_all or is_assigned or is_created_by or in_extra_list or team_in):
             raise HTTPException(status_code=403, detail="Not authorized to view this client")
 
     if isinstance(client["created_at"], str):
@@ -5128,7 +5131,7 @@ async def get_client(client_id: str, current_user: User = Depends(get_current_us
 async def update_client(
     client_id: str,
     client_data: dict,          # <-- Changed from ClientCreate to dict
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("clients", "edit"))
 ):
     """
     Update an existing client record.
