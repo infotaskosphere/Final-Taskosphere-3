@@ -215,11 +215,10 @@ export default function Reports() {
   const isManager = user?.role === 'manager';
   const canDL     = isAdmin || hasPermission('can_download_reports');
 
-  // Cross-visibility: Issue #2 — Manager sees own + team (all users from backend).
-  // Staff see only explicit view_other_reports list.
+  // Cross-visibility is purely explicit — TEAM = CROSS VISIBILITY ON USER.
   // Backend already scopes data; frontend just determines whether user-switcher is shown.
   const crossVisReports    = user?.permissions?.view_other_reports || [];
-  const hasCrossVisReports = isManager || crossVisReports.length > 0;
+  const hasCrossVisReports = crossVisReports.length > 0;
   const canSwitchUser = isAdmin || hasCrossVisReports;
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -256,7 +255,7 @@ export default function Reports() {
     if (r4.status==='fulfilled') {
       const rawUsers = r4.value?.data || [];
       // Admin + Manager: backend scopes team automatically, show all returned users.
-      // Staff: filter to explicit cross-vis list only (Issue #3).
+      // User: filter to explicit cross-vis list only.
       setAllUsers(
         isAdmin || isManager
           ? rawUsers
@@ -387,7 +386,7 @@ export default function Reports() {
     }
     // Issue #2: Manager (hasCrossVisReports=true) + Admin — aggregate over allUsers
     // allUsers is already team-scoped by backend for managers; admin sees all.
-    // Staff with explicit view_other_reports also uses this path.
+    // User with explicit view_other_reports also uses this path.
     const uMap={};
     if (user?.id) uMap[user.id]={user_id:user.id,user_name:user.full_name||'You',total:0,done:0,pend:0,mins:0,days:0,pct:0};
     allUsers.forEach(u=>{uMap[u.id]={user_id:u.id,user_name:u.full_name,total:0,done:0,pend:0,mins:0,days:0,pct:0};});
