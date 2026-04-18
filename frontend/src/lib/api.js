@@ -1,14 +1,3 @@
-/**
- * lib/api.js
- * ─────────────────────────────────────────────────────────────
- * FINAL VERSION — MATCHED WITH BACKEND (/api prefix)
- *
- * FIX: Ensures BASE_URL always ends with /api, regardless of
- * whether the VITE_API_URL env var includes it or not.
- * All endpoint calls (e.g. "/auth/login") are relative to this
- * base, so they must NOT include "/api" themselves.
- */
-
 import axios from "axios";
 import { useState, useEffect } from "react";
 
@@ -102,15 +91,14 @@ api.interceptors.response.use(
       }
     }
 
-    // 🚫 403 → permission denied — refresh user then go to dashboard
-    //    The next AuthContext session-restore will fetch fresh permissions.
+    // 🚫 403 → permission denied
+    // Per-page components handle 403s with toast messages — do NOT redirect
+    // globally here. A blanket redirect was bouncing users to /dashboard
+    // whenever any secondary call (e.g. GET /users for a dropdown) returned
+    // 403, even if the primary page data loaded successfully.
+    // The custom event lets AuthContext refresh permissions silently.
     if (error.response?.status === 403) {
-      if (!window.location.pathname.startsWith("/login") &&
-          !window.location.pathname.startsWith("/dashboard")) {
-        // Fire a custom event so AuthContext (if listening) can refresh
-        window.dispatchEvent(new CustomEvent("permission-denied"));
-        window.location.href = "/dashboard";
-      }
+      window.dispatchEvent(new CustomEvent("permission-denied"));
     }
 
     // ⚠️ 422 validation
