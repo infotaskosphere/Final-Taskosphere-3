@@ -1330,9 +1330,9 @@ export default function VisitsPage() {
   });
 
   const { data: clients = [] } = useQuery({ queryKey: ["clients"], queryFn: fetchClients });
-  // Cross-visibility is purely explicit — admin curates view_other_visits per user
-  const hasCrossVisibility = !!(user?.permissions?.view_other_visits?.length || user?.permissions?.can_view_all_visits);
-  const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: fetchUsers, enabled: isAdmin || isMgr || hasCrossVisibility });
+  const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: fetchUsers, enabled: true });
+  // Cross-visibility: explicit perms OR backend returned other users (already filtered by cross-vis)
+  const hasCrossVisibility = !!(user?.permissions?.view_other_visits?.length || user?.permissions?.can_view_all_visits || users.some(u => u.id !== user?.id));
   const summary = useMemo(() => {
     const total = visits.length;
     const by_status = {};
@@ -1568,11 +1568,12 @@ export default function VisitsPage() {
           const perms = user?.permissions || {};
           const allowed = perms.view_other_visits || [];
           const canViewAll = !!perms.can_view_all_visits;
-          if (!canViewAll && allowed.length === 0) return null;
-          // When can_view_all_visits=true, show all active users; else show only permitted IDs
+          // Fallback: if backend returned other users (cross-vis), show them
+          const otherUsers = users.filter(u => u.is_active && u.id !== user?.id);
+          if (!canViewAll && allowed.length === 0 && otherUsers.length === 0) return null;
           const permittedUsers = canViewAll
-            ? users.filter(u => u.is_active && u.id !== user?.id)
-            : users.filter(u => u.is_active && allowed.includes(u.id));
+            ? otherUsers
+            : allowed.length > 0 ? users.filter(u => u.is_active && allowed.includes(u.id)) : otherUsers;
           if (permittedUsers.length === 0) return null;
           return (
             <select value={filterUser} onChange={e => setFilterUser(e.target.value)}
