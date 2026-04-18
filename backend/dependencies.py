@@ -696,13 +696,45 @@ async def get_same_department_user_ids(user_id: str, include_managers: bool = Fa
 
 async def get_team_user_ids(manager_id: str) -> List[str]:
     """
-    Returns list of user IDs that belong to the same departments as the manager.
-    Only staff-role users are returned.
+    DEPRECATED auto-team lookup. Per current spec:
+        TEAM = CROSS VISIBILITY ON USER
+    i.e. a manager (or any non-admin) has NO automatic access to
+    same-department colleagues. The "Team" for cross-scope queries
+    is now defined purely by the explicit view_other_* arrays in
+    the user's permissions, which admins curate.
 
-    This is the primary helper used throughout routes for manager-scoped queries.
-    Alias for get_same_department_user_ids(manager_id, include_managers=False).
+    This function now returns [] so every legacy call site that did:
+        team_ids = await get_team_user_ids(current_user.id)
+        allowed_users = list(set(allowed_users + team_ids))
+    continues to compile but stops adding implicit dept members.
     """
-    return await get_same_department_user_ids(manager_id, include_managers=False)
+    return []
+
+
+async def get_cross_visibility_union(user_id: str) -> List[str]:
+    """
+    Returns the UNION of every view_other_* array for this user —
+    i.e. the full set of other users they have cross-visibility to
+    across any module. Used by the /users endpoint to populate
+    assignee dropdowns and generic user pickers for non-admin users.
+
+    Excludes the caller themselves. Admins should bypass this.
+    """
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        return []
+    perms = user.get("permissions", {}) or {}
+    keys = (
+        "view_other_tasks", "view_other_attendance", "view_other_visits",
+        "view_other_todos", "view_other_reports", "view_other_activity",
+    )
+    ids = set()
+    for k in keys:
+        val = perms.get(k) or []
+        if isinstance(val, list):
+            ids.update(val)
+    ids.discard(user_id)
+    return list(ids)
 
 # ==========================================================
 # DEPARTMENT-SCOPED DATA ACCESS RULE ENFORCEMENT
