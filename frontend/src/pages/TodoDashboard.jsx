@@ -26,8 +26,10 @@ import {
   Calendar as CalendarIcon, History, Users, Search, X,
   User as UserIcon, Activity, Layers, CheckSquare, Circle,
   ChevronRight, Briefcase, Clock, FileText, Tag, ArrowUpRight,
-  ArrowRight, Building2, List, LayoutGrid,
+  ArrowRight, Building2, List, LayoutGrid, Loader2,
 } from 'lucide-react';
+import { detectTodoDuplicates } from '@/lib/aiDuplicateEngine';
+import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 
 // ── Brand Colors ──────────────────────────────────────────────────────────────
 const COLORS = {
@@ -1082,6 +1084,10 @@ export default function TodoDashboard() {
 
   // ── Activity log ──────────────────────────────────────────────────────────
   const [todoLog, setTodoLog] = useState([]);
+  // ── AI Duplicate detection ────────────────────────────────────────────────
+  const [showDupDialog, setShowDupDialog] = useState(false);
+  const [dupGroups,     setDupGroups]     = useState([]);
+  const [detectingDups, setDetectingDups] = useState(false);
 
   // ── Fetch all users ────────────────────────────────────────────────────────
   const { data: allUsers = [] } = useQuery({
@@ -1356,6 +1362,27 @@ export default function TodoDashboard() {
     },
     onError: () => toast.error('Failed to delete todo'),
   });
+
+  // ── AI Duplicate Detection ─────────────────────────────────────────────────
+  const handleDetectTodoDuplicates = () => {
+    if (detectingDups) return;
+    setDetectingDups(true);
+    setTimeout(() => {
+      try {
+        const all = todos || [];
+        const groups = detectTodoDuplicates(all);
+        setDupGroups(groups);
+        setShowDupDialog(true);
+        if (!groups.length) toast.success(`Scanned ${all.length} todos — no duplicates found ✓`);
+        else toast.info(`Found ${groups.length} duplicate group${groups.length !== 1 ? 's' : ''}`);
+      } catch (e) {
+        toast.error('Duplicate scan failed. Please try again.');
+        console.error('Todo duplicate detection error:', e);
+      } finally {
+        setDetectingDups(false);
+      }
+    }, 60);
+  };
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleAdd = () => {
@@ -1797,6 +1824,16 @@ export default function TodoDashboard() {
                                 <div className="w-52">
                                   <SearchInput value={search} onChange={setSearch} placeholder="Search todos…" />
                                 </div>
+                                {/* AI Duplicate Detector */}
+                                <button
+                                  onClick={handleDetectTodoDuplicates}
+                                  disabled={detectingDups || (todos || []).length === 0}
+                                  className={`h-8 px-3 text-xs font-semibold rounded-xl border transition-all flex items-center gap-1.5 whitespace-nowrap disabled:opacity-40 ${isDark ? 'bg-violet-900/30 border-violet-700 text-violet-300 hover:bg-violet-900/50' : 'bg-violet-50 border-violet-300 text-violet-700 hover:bg-violet-100'}`}
+                                >
+                                  {detectingDups
+                                    ? <><Loader2 className="h-3 w-3 animate-spin" />Scanning…</>
+                                    : <><Sparkles className="h-3 w-3" />AI Duplicates</>}
+                                </button>
                               </div>
                             </div>
                             <div className="flex items-center gap-2 mt-3 flex-wrap">
@@ -2201,6 +2238,44 @@ export default function TodoDashboard() {
         );
         return null;
       })}
+
+      {/* ── AI Duplicate Detection Dialog ─────────────────────────────── */}
+      <AIDuplicateDialog
+        open={showDupDialog}
+        onClose={() => setShowDupDialog(false)}
+        groups={dupGroups}
+        items={todos || []}
+        entityLabel="Todo"
+        accentColor="#7c3aed"
+        isDark={isDark}
+        canDelete={true}
+        canEdit={true}
+        getTitle={(t) => t.title || 'Untitled'}
+        getSubtitle={(t) => t.due_date ? `Due: ${format(new Date(t.due_date), 'MMM dd, yyyy')}` : null}
+        getMeta={(t) => [
+          t.status ? t.status.replace('_', ' ').toUpperCase() : null,
+          t.priority ? t.priority.toUpperCase() : null,
+          t.due_date && new Date(t.due_date) < new Date() ? '⚠ OVERDUE' : null,
+        ].filter(Boolean)}
+        compareFields={(a, b) => [
+          { label: 'Title',       a: a.title,       b: b.title },
+          { label: 'Description', a: a.description, b: b.description },
+          { label: 'Status',      a: a.status,      b: b.status },
+          { label: 'Priority',    a: a.priority,    b: b.priority },
+          { label: 'Due Date',    a: a.due_date ? format(new Date(a.due_date), 'MMM dd, yyyy') : '—', b: b.due_date ? format(new Date(b.due_date), 'MMM dd, yyyy') : '—' },
+          { label: 'Created',     a: a.created_at ? format(new Date(a.created_at), 'MMM dd, yyyy') : '—', b: b.created_at ? format(new Date(b.created_at), 'MMM dd, yyyy') : '—' },
+        ]}
+        onEdit={(t) => {
+          // Open todo inline for edit — set selected todo
+          setSelectedTodo(t);
+          setShowDupDialog(false);
+        }}
+        onDelete={(t) => {
+          if (!window.confirm(`Delete todo "${t.title}"?`)) return;
+          deleteMutation.mutate(t.id);
+        }}
+        onView={(t) => { setSelectedTodo(t); setShowDupDialog(false); }}
+      />
     </motion.div>
   );
 }
