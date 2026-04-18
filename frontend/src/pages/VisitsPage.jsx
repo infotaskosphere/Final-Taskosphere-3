@@ -1330,7 +1330,8 @@ export default function VisitsPage() {
   });
 
   const { data: clients = [] } = useQuery({ queryKey: ["clients"], queryFn: fetchClients });
-  const hasCrossVisibility = !!(user?.permissions?.view_other_visits?.length || user?.permissions?.can_view_all_visits);
+  // Manager always has Own + Team visibility; staff need explicit view_other_visits entries
+  const hasCrossVisibility = isMgr || !!(user?.permissions?.view_other_visits?.length || user?.permissions?.can_view_all_visits);
   const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: fetchUsers, enabled: isAdmin || isMgr || hasCrossVisibility });
   const summary = useMemo(() => {
     const total = visits.length;
