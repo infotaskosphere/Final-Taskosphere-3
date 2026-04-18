@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, 
 from pydantic import BaseModel, Field, ConfigDict, ValidationError
 import pandas as pd
 import io
-from backend.dependencies import db, get_current_user, require_admin
+from backend.dependencies import db, get_current_user, require_admin, check_module_permission
 from backend.models import User
 
 logger = logging.getLogger(__name__)
@@ -284,7 +284,7 @@ async def _get_all_sheet_tabs(sheet_id: str) -> List[dict]:
 
 # ── STATIC / UTILITY ROUTES ───────────────────────────────────────────────────
 @router.get("/portal-types")
-async def get_portal_types(current_user: User = Depends(get_current_user)):
+async def get_portal_types(current_user: User = Depends(check_module_permission("password_vault", "view"))):
     return {
         "portal_types": PORTAL_TYPES,
         "department_map": DEPARTMENT_MAP,
@@ -292,7 +292,7 @@ async def get_portal_types(current_user: User = Depends(get_current_user)):
     }
 
 @router.get("/clients-list")
-async def get_clients_for_password(current_user: User = Depends(get_current_user)):
+async def get_clients_for_password(current_user: User = Depends(check_module_permission("password_vault", "view"))):
     query = {}
     if current_user.role != "admin":
         perms = _get_user_perms(current_user)
@@ -311,7 +311,7 @@ async def get_clients_for_password(current_user: User = Depends(get_current_user
 
 # ── GOOGLE SHEETS LINK ROUTES ─────────────────────────────────────────────────
 @router.get("/sheet-links")
-async def list_sheet_links(current_user: User = Depends(get_current_user)):
+async def list_sheet_links(current_user: User = Depends(check_module_permission("password_vault", "view"))):
     links = await db.password_sheet_links.find({}, {"_id": 0}).sort("label", 1).to_list(200)
     return links
 
@@ -379,7 +379,7 @@ async def delete_sheet_link(
 @router.post("/sheet-links/{link_id}/preview")
 async def preview_sheet_data(
     link_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("password_vault", "create")),
 ):
     link = await db.password_sheet_links.find_one({"id": link_id}, {"_id": 0})
     if not link:
@@ -437,7 +437,7 @@ async def preview_sheet_data(
 
 # ── TEMPLATE + BULK IMPORT ────────────────────────────────────────────────────
 @router.get("/template", response_class=Response)
-async def download_template(current_user: User = Depends(get_current_user)):
+async def download_template(current_user: User = Depends(check_module_permission("password_vault", "view"))):
     if not _can_edit(current_user):
         raise HTTPException(403, "You do not have permission to download templates")
     template_columns = [
@@ -498,7 +498,7 @@ async def download_template(current_user: User = Depends(get_current_user)):
 @router.post("/bulk-import", response_model=BulkImportResult, status_code=200)
 async def bulk_import_passwords(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("password_vault", "create")),
 ):
     if not _can_edit(current_user):
         raise HTTPException(403, "You do not have permission to bulk import passwords")
@@ -636,7 +636,7 @@ async def get_access_logs(
     return logs
 
 @router.get("/stats")
-async def get_password_stats_user(current_user: User = Depends(get_current_user)):
+async def get_password_stats_user(current_user: User = Depends(check_module_permission("password_vault", "view"))):
     """Stats scoped to the current user's permitted departments."""
     p = getattr(current_user, 'permissions', None) or {}
     can_view = current_user.role == 'admin' or bool(p.get('can_view_passwords'))
@@ -696,7 +696,7 @@ async def list_passwords(
     limit: int = Query(default=100),
     page: int = Query(default=1),
 
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("password_vault", "view")),
 ):
     query: dict = {}
 
@@ -779,7 +779,7 @@ async def list_passwords(
 @router.post("", response_model=PasswordEntry, status_code=201)
 async def create_password(
     data: PasswordEntryCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("password_vault", "create")),
 ):
     if not _can_edit(current_user):
         raise HTTPException(403, "You do not have permission to create passwords")
@@ -845,7 +845,7 @@ async def create_password(
 @router.get("/{entry_id}", response_model=PasswordEntry)
 async def get_password_entry(
     entry_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("password_vault", "view")),
 ):
     doc = await db.passwords.find_one({"id": entry_id}, {"_id": 0})
     if not doc:
@@ -858,7 +858,7 @@ async def get_password_entry(
 @router.get("/{entry_id}/reveal", response_model=PasswordRevealResponse)
 async def reveal_password(
     entry_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("password_vault", "view")),
 ):
     doc = await db.passwords.find_one({"id": entry_id}, {"_id": 0})
     if not doc:
@@ -892,7 +892,7 @@ async def reveal_password(
 async def update_password_entry(
     entry_id: str,
     data: PasswordEntryUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("password_vault", "create")),
 ):
     if not _can_edit(current_user):
         raise HTTPException(403, "You do not have permission to edit passwords")
@@ -958,7 +958,7 @@ async def update_password_entry(
 @router.delete("/{entry_id}")
 async def delete_password_entry(
     entry_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("password_vault", "delete")),
 ):
     if current_user.role != "admin":
         raise HTTPException(403, "Only administrators can delete password entries")
