@@ -1,23 +1,3 @@
-"""
-compliance.py — Universal Compliance Tracker  v1.0
-
-Handles:
-  • Compliance masters  (ROC / GST / ITR / TDS / Audit / PF-ESIC / PT / Other)
-  • Per-client assignments with status tracking
-  • Bulk status updates
-  • Excel / CSV import with column mapping
-  • Dashboard summary stats
-
-Collections used:
-  db.compliance_masters      — one doc per compliance definition
-  db.compliance_assignments  — one doc per (client × compliance) pair
-
-Router prefix:  /compliance
-Register in server.py with:
-    from backend.compliance import router as compliance_router
-    api_router.include_router(compliance_router)
-"""
-
 import io
 import uuid
 import logging
@@ -29,7 +9,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from pydantic import BaseModel, Field, ConfigDict
 
-from backend.dependencies import db, get_current_user
+from backend.dependencies import db, get_current_user, check_module_permission
 from backend.models import User
 
 logger = logging.getLogger(__name__)
@@ -229,7 +209,7 @@ async def _resolve_client_name(client_id: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/common-templates")
-async def get_common_templates(current_user: User = Depends(get_current_user)):
+async def get_common_templates(current_user: User = Depends(check_module_permission("compliance", "view"))):
     """Return pre-built compliance template list for quick creation."""
     return COMMON_COMPLIANCE
 
@@ -238,7 +218,7 @@ async def get_common_templates(current_user: User = Depends(get_current_user)):
 async def list_compliance_masters(
     category: Optional[str] = Query(None),
     fy_year:  Optional[str] = Query(None),
-    current_user: User      = Depends(get_current_user),
+    current_user: User      = Depends(check_module_permission("compliance", "view")),
 ):
     # ── Permission gate ─────────────────────────────────────────────────────
     perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
@@ -275,7 +255,7 @@ async def list_compliance_masters(
 @router.post("")
 async def create_compliance_master(
     data: ComplianceMasterCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("compliance", "create")),
 ):
     # ── Permission gate ─────────────────────────────────────────────────────
     perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
@@ -318,7 +298,7 @@ async def create_compliance_master(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/dashboard/summary")
-async def compliance_dashboard(current_user: User = Depends(get_current_user)):
+async def compliance_dashboard(current_user: User = Depends(check_module_permission("compliance", "view"))):
     # ── Permission gate ─────────────────────────────────────────────────────
     perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
             (current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else {})
@@ -387,7 +367,7 @@ async def compliance_dashboard(current_user: User = Depends(get_current_user)):
 
 @router.post("/sync-from-calendar")
 async def sync_from_calendar(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("compliance", "create")),
 ):
     """
     Sync due_dates collection → compliance_masters.
@@ -456,7 +436,7 @@ async def sync_from_calendar(
 async def update_compliance_master(
     compliance_id: str,
     data: ComplianceMasterUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("compliance", "create")),
 ):
     # ── Permission gate ─────────────────────────────────────────────────────
     perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
@@ -485,7 +465,7 @@ async def update_compliance_master(
 @router.delete("/{compliance_id}")
 async def delete_compliance_master(
     compliance_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("compliance", "delete")),
 ):
     # ── Permission gate — admin only ────────────────────────────────────────
     if current_user.role != "admin":
@@ -507,7 +487,7 @@ async def list_assignments(
     search:  Optional[str] = Query(None),
     page:    int           = Query(1, ge=1),
     limit:   int           = Query(200, le=1000),
-    current_user: User     = Depends(get_current_user),
+    current_user: User     = Depends(check_module_permission("compliance", "view")),
 ):
     # ── Permission gate ─────────────────────────────────────────────────────
     perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
@@ -548,7 +528,7 @@ async def list_assignments(
 async def create_single_assignment(
     compliance_id: str,
     data: AssignmentCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("compliance", "create")),
 ):
     cm = await db.compliance_masters.find_one({"id": compliance_id})
     if not cm:
@@ -582,7 +562,7 @@ async def create_single_assignment(
 async def bulk_assign_clients(
     compliance_id: str,
     data: BulkAssignRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("compliance", "create")),
 ):
     # ── Permission gate ─────────────────────────────────────────────────────
     perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
@@ -681,7 +661,7 @@ async def bulk_assign_clients(
 async def bulk_update_status(
     compliance_id: str,
     data: BulkStatusUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("compliance", "create")),
 ):
     # ── Permission gate ─────────────────────────────────────────────────────
     perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
@@ -722,7 +702,7 @@ async def update_single_assignment(
     compliance_id:  str,
     assignment_id:  str,
     data: AssignmentUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("compliance", "create")),
 ):
     # ── Permission gate ─────────────────────────────────────────────────────
     perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
@@ -766,7 +746,7 @@ async def update_single_assignment(
 async def delete_assignment(
     compliance_id: str,
     assignment_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("compliance", "delete")),
 ):
     await db.compliance_assignments.delete_one(
         {"id": assignment_id, "compliance_id": compliance_id}
@@ -791,7 +771,7 @@ def _read_file(contents: bytes, filename: str) -> pd.DataFrame:
 async def preview_excel(
     compliance_id: str,
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("compliance", "create")),
 ):
     """Return columns + first 10 rows so the frontend can map columns before import."""
     contents = await file.read()
@@ -816,7 +796,7 @@ async def import_from_excel(
     assigned_col:  str          = Form(default=""),
     assigned_to_col: str        = Form(default=""),   # alias from frontend
     default_assigned_to: str    = Form(default=""),   # fallback user id
-    current_user:  User         = Depends(get_current_user),
+    current_user:  User         = Depends(check_module_permission("compliance", "create")),
 ):
     """
     Import client assignments from Excel / CSV.
@@ -977,7 +957,7 @@ async def create_compliance_indexes():
 async def list_comments(
     compliance_id: str,
     client_id:     Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("compliance", "view")),
 ):
     """Get all comments for a compliance, optionally filtered by client."""
     query: dict = {"compliance_id": compliance_id}
@@ -1002,7 +982,7 @@ async def list_comments(
 async def add_comment(
     compliance_id: str,
     data: CommentCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("compliance", "create")),
 ):
     """Add a comment to a compliance (optionally scoped to a client assignment)."""
     # Resolve client name if client_id provided
@@ -1031,7 +1011,7 @@ async def add_comment(
 async def delete_comment(
     compliance_id: str,
     comment_id:    str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("compliance", "delete")),
 ):
     """Delete a comment (author or admin only)."""
     doc = await db.compliance_comments.find_one({"id": comment_id}, {"_id": 0})
@@ -1051,7 +1031,7 @@ async def delete_comment(
 async def monthly_summary(
     compliance_id: str,
     fy_year:       Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("compliance", "view")),
 ):
     """Return per-month breakdown of assignment statuses for a compliance type."""
     import calendar as cal
@@ -1079,7 +1059,7 @@ async def update_monthly_status(
     compliance_id:  str,
     assignment_id:  str,
     data: MonthlyStatusUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_module_permission("compliance", "create")),
 ):
     """Set/update the status for a specific month on an assignment."""
     # ── Permission gate ─────────────────────────────────────────────────────
