@@ -19,7 +19,7 @@ import {
   CheckCircle2, Building2, ChevronDown, ChevronUp,
   LayoutGrid, List, Phone, MapPin, User, FileCheck, Share2,
   Copy, ExternalLink, CheckSquare, Square, MinusSquare,
-  Shield, Download,
+  Shield, Download, UserCheck, AlertCircle,
 } from 'lucide-react';
 import { format, startOfDay, differenceInDays } from 'date-fns';
 import * as XLSX from 'xlsx';
@@ -463,6 +463,333 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                 )}
               </div>
             </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BULK ASSIGN MODAL
+// ═══════════════════════════════════════════════════════════════════════════
+const BulkAssignModal = React.memo(({ open, onClose, filteredClients, users, isDark, onAssignComplete }) => {
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [clientSearch, setClientSearch] = useState('');
+  const [selectedUserId, setSelectedUserId] = useState('');
+  const [selectedServices, setSelectedServices] = useState([]);
+  const [mode, setMode] = useState('add'); // 'add' | 'replace'
+  const [saving, setSaving] = useState(false);
+  const [clientScope, setClientScope] = useState('active');
+
+  const activeClients = useMemo(() => filteredClients.filter(c => (c?.status || 'active') !== 'inactive'), [filteredClients]);
+
+  useEffect(() => {
+    if (open) {
+      setClientScope('active');
+      setSelectedIds(new Set(activeClients.map(c => c.id)));
+      setClientSearch('');
+      setSelectedUserId('');
+      setSelectedServices([]);
+      setMode('add');
+      setSaving(false);
+    }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const displayedClients = useMemo(() => {
+    const q = clientSearch.trim().toLowerCase();
+    const base = filteredClients;
+    if (!q) return base;
+    return base.filter(c =>
+      (c?.company_name || '').toLowerCase().includes(q) ||
+      (c?.phone || '').includes(q) ||
+      (c?.email || '').toLowerCase().includes(q)
+    );
+  }, [filteredClients, clientSearch]);
+
+  const selectedClients = useMemo(() => filteredClients.filter(c => selectedIds.has(c.id)), [filteredClients, selectedIds]);
+
+  const toggleClient = useCallback((id) => {
+    setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }, []);
+
+  const handleScopeChange = useCallback((scope) => {
+    setClientScope(scope);
+    const base = scope === 'active' ? activeClients : filteredClients;
+    setSelectedIds(new Set(base.map(c => c.id)));
+  }, [activeClients, filteredClients]);
+
+  const allDisplayedSelected = displayedClients.length > 0 && displayedClients.every(c => selectedIds.has(c.id));
+  const someDisplayedSelected = displayedClients.some(c => selectedIds.has(c.id));
+
+  const toggleAll = useCallback(() => {
+    if (allDisplayedSelected) {
+      setSelectedIds(prev => { const n = new Set(prev); displayedClients.forEach(c => n.delete(c.id)); return n; });
+    } else {
+      setSelectedIds(prev => { const n = new Set(prev); displayedClients.forEach(c => n.add(c.id)); return n; });
+    }
+  }, [allDisplayedSelected, displayedClients]);
+
+  const toggleService = useCallback((svc) => {
+    setSelectedServices(prev => prev.includes(svc) ? prev.filter(s => s !== svc) : [...prev, svc]);
+  }, []);
+
+  const selectedUser = users.find(u => u.id === selectedUserId);
+
+  const handleAssign = useCallback(async () => {
+    if (!selectedUserId) { return; }
+    if (selectedClients.length === 0) { return; }
+    setSaving(true);
+    let successCount = 0;
+    let failCount = 0;
+    for (const client of selectedClients) {
+      try {
+        let newAssignments;
+        if (mode === 'replace') {
+          newAssignments = [{ user_id: selectedUserId, services: selectedServices }];
+        } else {
+          // 'add' mode — merge, deduplicating by user_id
+          const existing = client.assignments || [];
+          const alreadyAssigned = existing.find(a => a.user_id === selectedUserId);
+          if (alreadyAssigned) {
+            // Merge services
+            const merged = [...new Set([...(alreadyAssigned.services || []), ...selectedServices])];
+            newAssignments = existing.map(a => a.user_id === selectedUserId ? { ...a, services: merged } : a);
+          } else {
+            newAssignments = [...existing, { user_id: selectedUserId, services: selectedServices }];
+          }
+        }
+        await api.put(`/clients/${client.id}`, { assignments: newAssignments });
+        successCount++;
+      } catch {
+        failCount++;
+      }
+    }
+    setSaving(false);
+    if (successCount > 0) {
+      toast.success(`Assigned ${selectedUser?.full_name || selectedUser?.name || 'user'} to ${successCount} client${successCount !== 1 ? 's' : ''}${failCount > 0 ? ` (${failCount} failed)` : ''}`);
+      onAssignComplete();
+    } else {
+      toast.error('Assignment failed. Please try again.');
+    }
+    onClose();
+  }, [selectedUserId, selectedClients, mode, selectedServices, selectedUser, onAssignComplete, onClose]);
+
+  const accentGrad = 'linear-gradient(135deg, #0D3B66, #1F6FB2)';
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-3xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border border-slate-200 shadow-2xl p-0 bg-white">
+        <DialogTitle className="sr-only">Bulk Assign Clients</DialogTitle>
+        {/* Header */}
+        <div className="flex-shrink-0 px-7 py-5 border-b border-slate-100" style={{ background: 'linear-gradient(135deg, #eff6ff, #dbeafe)' }}>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-sm flex-shrink-0" style={{ background: accentGrad }}>
+              <UserCheck className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">Bulk Assign Clients</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Select clients and assign them to a team member in one shot</p>
+            </div>
+            <div className="ml-auto flex-shrink-0">
+              <span className="text-xs font-bold px-3 py-1.5 rounded-full border" style={{ background: '#dbeafe', color: '#1e40af', borderColor: '#bfdbfe' }}>
+                {selectedIds.size} selected
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-1 overflow-hidden">
+          {/* LEFT: Client list */}
+          <div className={`w-72 flex-shrink-0 border-r flex flex-col ${isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-slate-50/40'}`}>
+            {/* Scope toggle */}
+            <div className={`flex items-center gap-1 px-3 pt-3 pb-2 flex-shrink-0`}>
+              {['active', 'all'].map(scope => (
+                <button key={scope} onClick={() => handleScopeChange(scope)}
+                  className="flex-1 h-7 rounded-lg text-[10px] font-bold transition-all capitalize"
+                  style={clientScope === scope ? { background: accentGrad, color: '#fff' } : { background: isDark ? 'rgba(255,255,255,0.07)' : '#f1f5f9', color: isDark ? '#94a3b8' : '#64748b' }}>
+                  {scope === 'active' ? `Active (${activeClients.length})` : `All (${filteredClients.length})`}
+                </button>
+              ))}
+            </div>
+            {/* Search */}
+            <div className={`flex items-center gap-1.5 px-3 py-2.5 border-b flex-shrink-0 ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
+              <Search className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+              <input
+                className={`flex-1 text-xs bg-transparent outline-none placeholder:text-slate-400 ${isDark ? 'text-slate-200' : 'text-slate-700'}`}
+                placeholder="Search clients…"
+                value={clientSearch}
+                onChange={e => setClientSearch(e.target.value)}
+              />
+              {clientSearch && <button onClick={() => setClientSearch('')} className="text-slate-300 hover:text-slate-500"><X className="h-3 w-3" /></button>}
+            </div>
+            {/* Select-all row */}
+            <div className={`flex items-center gap-2 px-3 py-2 border-b text-[10px] font-bold uppercase tracking-widest flex-shrink-0 ${isDark ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-400'}`}>
+              <button onClick={toggleAll} className="flex items-center gap-1.5 hover:text-blue-600 transition-colors">
+                {allDisplayedSelected
+                  ? <CheckSquare className="h-3.5 w-3.5 text-blue-600" />
+                  : someDisplayedSelected
+                    ? <MinusSquare className="h-3.5 w-3.5 text-blue-400" />
+                    : <Square className="h-3.5 w-3.5" />}
+                {allDisplayedSelected ? 'Deselect All' : 'Select All'}
+              </button>
+              <span className="ml-auto">{displayedClients.length} shown</span>
+            </div>
+            {/* Client rows */}
+            <div className="flex-1 overflow-y-auto">
+              {displayedClients.map(c => {
+                const isArchived = (c?.status || 'active') === 'inactive';
+                const checked = selectedIds.has(c.id);
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => toggleClient(c.id)}
+                    className={`flex items-center gap-2.5 px-3 py-2 cursor-pointer transition-colors border-b last:border-0 ${isDark ? 'border-slate-700/60' : 'border-slate-50'} ${checked ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'hover:bg-slate-700/50' : 'hover:bg-slate-50')}`}
+                  >
+                    {checked
+                      ? <CheckSquare className="h-3.5 w-3.5 text-blue-600 flex-shrink-0" />
+                      : <Square className="h-3.5 w-3.5 text-slate-300 flex-shrink-0" />}
+                    <div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                      style={{ background: getAvatarGradient(c.company_name), opacity: isArchived ? 0.5 : 1 }}>
+                      {c.company_name?.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-xs font-semibold truncate leading-tight ${isArchived ? 'text-slate-400' : (isDark ? 'text-slate-200' : 'text-slate-800')}`}>
+                        {c.company_name}
+                        {isArchived && <span className="ml-1 text-[9px] text-amber-500 font-bold">ARCHIVED</span>}
+                      </p>
+                      <p className="text-[10px] text-slate-400 truncate">{c.phone || c.email || '—'}</p>
+                    </div>
+                  </div>
+                );
+              })}
+              {displayedClients.length === 0 && (
+                <div className="flex flex-col items-center justify-center h-24 text-slate-400">
+                  <p className="text-xs">No clients found</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* RIGHT: Assignment config */}
+          <div className="flex-1 flex flex-col overflow-y-auto">
+            <div className="flex-1 p-6 space-y-5">
+              {/* User picker */}
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 block">
+                  Assign To <span className="text-red-400">*</span>
+                </label>
+                <div className="grid grid-cols-1 gap-2 max-h-52 overflow-y-auto pr-1">
+                  {users.length === 0 && (
+                    <p className="text-xs text-slate-400 italic">No team members found.</p>
+                  )}
+                  {users.map(u => {
+                    const isSelected = selectedUserId === u.id;
+                    return (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => setSelectedUserId(u.id)}
+                        className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-all ${isSelected
+                          ? 'border-blue-300 shadow-sm'
+                          : (isDark ? 'border-slate-600 bg-slate-700/40 hover:border-slate-500' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50')
+                        }`}
+                        style={isSelected ? { background: 'linear-gradient(135deg, #eff6ff, #dbeafe)', borderColor: '#93c5fd' } : {}}
+                      >
+                        <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
+                          style={{ background: getAvatarGradient(u.full_name || u.name || u.email) }}>
+                          {(u.full_name || u.name || u.email)?.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                            {u.full_name || u.name || u.email}
+                          </p>
+                          {u.departments?.length > 0 && (
+                            <p className="text-[10px] text-slate-400 truncate">{u.departments.join(', ')}</p>
+                          )}
+                        </div>
+                        {isSelected && <CheckCircle2 className="h-4 w-4 text-blue-600 flex-shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Services (optional) */}
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 block">
+                  Services <span className="text-slate-300 font-normal normal-case">(optional — leave blank for all)</span>
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {SERVICES.map(svc => {
+                    const isSel = selectedServices.includes(svc);
+                    return (
+                      <button key={svc} type="button" onClick={() => toggleService(svc)}
+                        className={`px-3 py-1 text-xs font-semibold rounded-xl border transition-all ${isSel ? 'text-white border-transparent' : (isDark ? 'bg-slate-700 text-slate-300 border-slate-600 hover:border-slate-500' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50')}`}
+                        style={isSel ? { background: accentGrad } : {}}>
+                        {svc}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Mode toggle */}
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 block">Assignment Mode</label>
+                <div className={`flex rounded-xl border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+                  {[
+                    { value: 'add', label: 'Add to existing', desc: 'Keep current assignments + add this user' },
+                    { value: 'replace', label: 'Replace all', desc: 'Remove existing assignments, set only this user' },
+                  ].map((opt, i) => (
+                    <button key={opt.value} type="button" onClick={() => setMode(opt.value)}
+                      className={`flex-1 px-4 py-3 text-left transition-all border-r last:border-r-0 ${isDark ? 'border-slate-600' : 'border-slate-200'}`}
+                      style={mode === opt.value ? { background: accentGrad } : { background: isDark ? 'rgba(255,255,255,0.04)' : '#f8fafc' }}>
+                      <p className={`text-xs font-bold ${mode === opt.value ? 'text-white' : (isDark ? 'text-slate-200' : 'text-slate-700')}`}>{opt.label}</p>
+                      <p className={`text-[10px] mt-0.5 ${mode === opt.value ? 'text-blue-100' : 'text-slate-400'}`}>{opt.desc}</p>
+                    </button>
+                  ))}
+                </div>
+                {mode === 'replace' && (
+                  <div className="flex items-start gap-2 mt-2 px-3 py-2 rounded-xl border border-amber-200 bg-amber-50">
+                    <AlertCircle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0 mt-0.5" />
+                    <p className="text-[10px] text-amber-700 font-medium">This will replace ALL existing assignments for the selected clients with only this user.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Summary */}
+              {selectedUserId && selectedClients.length > 0 && (
+                <div className="rounded-xl border p-4" style={{ background: 'linear-gradient(135deg, #f0fdf4, #dcfce7)', borderColor: '#bbf7d0' }}>
+                  <p className="text-xs font-semibold text-emerald-800">
+                    ✓ Ready to {mode === 'replace' ? 'replace assignments and assign' : 'assign'}{' '}
+                    <strong>{selectedUser?.full_name || selectedUser?.name}</strong>{' '}
+                    to <strong>{selectedClients.length}</strong> client{selectedClients.length !== 1 ? 's' : ''}
+                    {selectedServices.length > 0 && <> for <strong>{selectedServices.join(', ')}</strong></>}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className={`flex-shrink-0 flex items-center justify-between gap-3 px-6 py-4 border-t ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
+          <Button type="button" variant="ghost" onClick={onClose} className="h-10 px-4 text-sm rounded-xl text-slate-500">Cancel</Button>
+          <div className="flex items-center gap-2">
+            {!selectedUserId && <span className="text-xs text-amber-600 font-medium">← Select a team member first</span>}
+            {selectedUserId && selectedClients.length === 0 && <span className="text-xs text-amber-600 font-medium">← Select at least one client</span>}
+            <Button type="button"
+              disabled={!selectedUserId || selectedClients.length === 0 || saving}
+              onClick={handleAssign}
+              className="h-10 px-6 text-sm rounded-xl text-white font-semibold gap-2 shadow-sm disabled:opacity-50"
+              style={{ background: (!selectedUserId || selectedClients.length === 0 || saving) ? '#94a3b8' : accentGrad }}>
+              {saving ? (
+                <><span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" /> Assigning…</>
+              ) : (
+                <><UserCheck className="h-4 w-4" /> Assign {selectedClients.length > 0 ? `(${selectedClients.length})` : ''}</>
+              )}
+            </Button>
           </div>
         </div>
       </DialogContent>
@@ -1273,6 +1600,7 @@ export default function Clients() {
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [bulkMsgOpen, setBulkMsgOpen]   = useState(false);
   const [bulkMsgMode, setBulkMsgMode]   = useState('whatsapp');
+  const [bulkAssignOpen, setBulkAssignOpen] = useState(false);
   const [referrerInput, setReferrerInput]       = useState('');
   const [referrerSelectValue, setReferrerSelectValue] = useState('');
   const [mdsPreviewOpen, setMdsPreviewOpen]     = useState(false);
@@ -2290,6 +2618,19 @@ export default function Clients() {
               <span className="bg-blue-100 text-blue-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full">{filteredClients.length}</span>
             </button>
           </div>
+          {canAssignClients && (
+            <>
+              <div className={`w-px h-6 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
+              <button
+                onClick={() => setBulkAssignOpen(true)}
+                className={`flex items-center gap-1.5 h-9 px-3 rounded-xl border text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all ${isDark ? 'border-slate-600 bg-slate-700 text-slate-200 hover:bg-slate-600 hover:border-slate-500' : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700'}`}
+              >
+                <UserCheck className="h-3.5 w-3.5 flex-shrink-0" />
+                <span>Bulk Assign</span>
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${isDark ? 'bg-slate-600 text-slate-300' : 'bg-blue-100 text-blue-700'}`}>{filteredClients.length}</span>
+              </button>
+            </>
+          )}
           <div className={`w-px h-6 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
           {/* Sort */}
           <div className={`flex items-center border rounded-xl overflow-hidden flex-shrink-0 ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-slate-50'}`}>
@@ -2438,6 +2779,16 @@ export default function Clients() {
 
       {/* BULK MSG */}
       <BulkMessageModal open={bulkMsgOpen} onClose={() => setBulkMsgOpen(false)} mode={bulkMsgMode} filteredClients={sortedClients} isDark={isDark} />
+
+      {/* BULK ASSIGN */}
+      <BulkAssignModal
+        open={bulkAssignOpen}
+        onClose={() => setBulkAssignOpen(false)}
+        filteredClients={sortedClients}
+        users={users}
+        isDark={isDark}
+        onAssignComplete={fetchClients}
+      />
 
       {/* HIDDEN FILE INPUTS */}
       <input type="file" ref={fileInputRef}  accept=".csv"       onChange={handleImportCSV}   className="hidden" />
