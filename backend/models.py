@@ -22,6 +22,8 @@ class UserRole(str, Enum):
 DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
       "admin": {
           # Admin has GLOBAL scope with ALL permissions (VIEW CREATE EDIT DELETE UPDATE)
+          "can_view_tasks": True,            # GATE: access /tasks endpoint
+          "can_view_clients": True,           # GATE: access /clients endpoint
           "can_view_all_tasks": True,
           "can_view_all_clients": True,
           "can_view_all_dsc": True,
@@ -79,6 +81,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           # NO DELETE by default
           # DATA_ACCESS_RULE: resource.department == user.department
           #   AND (resource.user_id == user.id OR resource.user_id IN SAME_DEPARTMENT_USERS)
+          "can_view_tasks": True,            # GATE: access /tasks endpoint (scope handled server-side)
+          "can_view_clients": True,           # GATE: access /clients endpoint (scope handled server-side)
           "can_view_all_tasks": False,      # SCOPE handled server-side by department query
           "can_view_all_clients": True,     # DEFAULT_MODULE (Assigned + Permission-based)
           "can_view_all_dsc": True,         # DEFAULT_MODULE (Permission-based)
@@ -134,6 +138,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           # ALL MODULES: VIEW, CREATE, EDIT, UPDATE (Permission-based — admin can revoke)
           # NO DELETE by default
           # DATA_ACCESS_RULE: resource.department == user.department AND resource.user_id == user.id
+          "can_view_tasks": True,            # GATE: access /tasks endpoint (own scope enforced server-side)
+          "can_view_clients": True,           # GATE: access /clients endpoint (assigned scope enforced server-side)
           "can_view_all_tasks": False,      # SCOPE: own only
           "can_view_all_clients": True,     # DEFAULT_MODULE (Assigned + Permission-based)
           "can_view_all_dsc": True,         # DEFAULT_MODULE (Permission-based)
@@ -190,6 +196,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
 # CORE USER & PERMISSIONS
 # ======================
 class UserPermissions(BaseModel):
+    can_view_tasks: bool = True       # GATE flag — all roles True by default
+    can_view_clients: bool = True      # GATE flag — all roles True by default
     can_view_all_tasks: bool = False
     can_view_all_clients: bool = False
     can_view_all_dsc: bool = False
