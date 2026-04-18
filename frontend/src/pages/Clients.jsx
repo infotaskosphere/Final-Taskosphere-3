@@ -19,8 +19,10 @@ import {
   CheckCircle2, Building2, ChevronDown, ChevronUp,
   LayoutGrid, List, Phone, MapPin, User, FileCheck, Share2,
   Copy, ExternalLink, CheckSquare, Square, MinusSquare,
-  Shield, Download, UserCheck, AlertCircle,
+  Shield, Download, UserCheck, AlertCircle, Sparkles, Loader2,
 } from 'lucide-react';
+import { detectClientDuplicates } from '@/lib/aiDuplicateEngine';
+import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import { format, startOfDay, differenceInDays } from 'date-fns';
 import * as XLSX from 'xlsx';
 
@@ -1593,6 +1595,10 @@ export default function Clients() {
   // ── UI state ────────────────────────────────────────────────────────────
   const [loading, setLoading]           = useState(false);
   const [importLoading, setImportLoading] = useState(false);
+  // ── AI Duplicate detection state ─────────────────────────────────────────
+  const [showDupDialog,    setShowDupDialog]    = useState(false);
+  const [dupGroups,        setDupGroups]        = useState([]);
+  const [detectingDups,    setDetectingDups]    = useState(false);
   const [dialogOpen, setDialogOpen]     = useState(false);
   const [editingClient, setEditingClient] = useState(null);
   const [otherService, setOtherService] = useState('');
@@ -1821,6 +1827,27 @@ export default function Clients() {
     const cleanPhone = phone?.replace(/\D/g, '') || '';
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(`Hello ${name}, this is Manthan Desai's office regarding your services.`)}`, '_blank');
   }, []);
+
+  // ── AI Duplicate Detection ────────────────────────────────────────────────
+  const handleDetectClientDuplicates = useCallback(() => {
+    if (detectingDups) return;
+    setDetectingDups(true);
+    // Run async so spinner renders first
+    setTimeout(() => {
+      try {
+        const groups = detectClientDuplicates(clients);
+        setDupGroups(groups);
+        setShowDupDialog(true);
+        if (!groups.length) toast.success(`Scanned ${clients.length} clients — no duplicates found ✓`);
+        else toast.info(`Found ${groups.length} duplicate group${groups.length !== 1 ? 's' : ''}`);
+      } catch (e) {
+        toast.error('Duplicate scan failed. Please try again.');
+        console.error('Client duplicate detection error:', e);
+      } finally {
+        setDetectingDups(false);
+      }
+    }, 60);
+  }, [clients, detectingDups]);
 
   // ── Export filtered list ──────────────────────────────────────────────────
   const handleExportList = useCallback(() => {
@@ -2236,6 +2263,18 @@ export default function Clients() {
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={downloadTemplate} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm"><FileText className="h-4 w-4" /> CSV Template</Button>
             {canEditClients && <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importLoading} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl backdrop-blur-sm">{importLoading ? 'Importing…' : 'Import CSV'}</Button>}
+            {/* ── AI Duplicate Detector ── */}
+            <Button
+              variant="outline"
+              onClick={handleDetectClientDuplicates}
+              disabled={detectingDups || clients.length === 0}
+              className="h-9 px-4 text-sm rounded-xl gap-2 backdrop-blur-sm font-semibold transition-all disabled:opacity-40"
+              style={{ backgroundColor: 'rgba(139,92,246,0.25)', borderColor: 'rgba(167,139,250,0.6)', color: '#ede9fe' }}
+            >
+              {detectingDups
+                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Scanning…</>
+                : <><Sparkles className="h-3.5 w-3.5" /> AI Duplicates</>}
+            </Button>
             <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
               {canEditClients && (
               <DialogTrigger asChild>
@@ -3046,6 +3085,48 @@ export default function Clients() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ── AI Duplicate Detection Dialog ─────────────────────────────── */}
+      <AIDuplicateDialog
+        open={showDupDialog}
+        onClose={() => setShowDupDialog(false)}
+        groups={dupGroups}
+        items={clients}
+        entityLabel="Client"
+        accentColor="#1F6FB2"
+        isDark={isDark}
+        canDelete={canEditClients}
+        canEdit={canEditClients}
+        getTitle={(c) => c.company_name || 'Unnamed Client'}
+        getSubtitle={(c) => [c.email, c.phone].filter(Boolean).join(' · ') || null}
+        getMeta={(c) => [
+          c.client_type ? c.client_type.toUpperCase() : null,
+          c.gstin ? `GSTIN: ${c.gstin}` : null,
+          c.pan  ? `PAN: ${c.pan}` : null,
+          c.city ? c.city : null,
+        ].filter(Boolean)}
+        compareFields={(a, b) => [
+          { label: 'Company',  a: a.company_name,  b: b.company_name },
+          { label: 'Type',     a: a.client_type,   b: b.client_type },
+          { label: 'GSTIN',    a: a.gstin,         b: b.gstin },
+          { label: 'PAN',      a: a.pan,           b: b.pan },
+          { label: 'Email',    a: a.email,         b: b.email },
+          { label: 'Phone',    a: a.phone,         b: b.phone },
+          { label: 'City',     a: a.city,          b: b.city },
+          { label: 'State',    a: a.state,         b: b.state },
+          { label: 'Services', a: (a.services || []).join(', '), b: (b.services || []).join(', ') },
+        ]}
+        onEdit={(c) => { setEditingClient(c); setDialogOpen(true); setShowDupDialog(false); }}
+        onDelete={async (c) => {
+          if (!window.confirm(`Delete "${c.company_name}"?`)) return;
+          try {
+            await api.delete(`/clients/${c.id}`);
+            setClients((prev) => prev.filter((x) => x.id !== c.id));
+            toast.success('Client deleted');
+          } catch { toast.error('Failed to delete client'); }
+        }}
+        onView={(c) => { setSelectedClient(c); setClientDetailOpen(true); setShowDupDialog(false); }}
+      />
     </div>
   );
 }
