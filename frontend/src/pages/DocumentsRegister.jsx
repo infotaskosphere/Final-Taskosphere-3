@@ -21,7 +21,6 @@ import {
 import { format } from 'date-fns';
 import { detectDocumentDuplicates } from '@/lib/aiDuplicateEngine';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
-import { format } from 'date-fns';
 
 // ─── Print styles ─────────────────────────────────────────────────────────────
 const PRINT_STYLE = `
