@@ -1,43 +1,3 @@
-# =============================================================================
-# email_integration.py  — v9  COMPLETE CORRECTED FILE
-# FastAPI router — IMAP email connection management + AI event extraction
-# Specialized for: CA/CS/Legal Firm (Trademark Hearings, NCLT, GST, ROC)
-# Stack: FastAPI · MongoDB (motor) · Google Gemini 2.0 Flash-Lite · imaplib
-#
-# FIXED IN v9 (bug fixes over v8):
-#
-#  [BUG FIX 1 — DELETE/PATCH 404 on auto-saved reminders]
-#  - _auto_save_event reminder INSERT now generates a UUID string "id" field
-#    before insert_one, so DELETE /reminders/{id} and PATCH /reminders/{id}
-#    can find the document. Previously only manual saves had a string id.
-#
-#  [BUG FIX 2 — DELETE/PATCH 404 on auto-saved todos]
-#  - _auto_save_event todo INSERT now generates a UUID string "id" field
-#    before insert_one, matching the pattern used by save_as_todo route.
-#
-#  [BUG FIX 3 — _doc_to_out empty id for auto-saved records]
-#  - _doc_to_out now falls back to str(_id) when string "id" field is absent,
-#    so cached auto-saved events always expose a usable id to the frontend.
-#
-#  [BUG FIX 4 — GET /reminders serializer drops id for auto-saved docs]
-#  - _reminder_to_dict helper always resolves id = str(doc.get("id") or doc["_id"])
-#    so the frontend resolveId() never receives undefined for email-auto reminders.
-#    This is the root cause of "Cannot delete: reminder ID is missing" toast.
-#  - All reminder GET routes now use _reminder_to_dict for consistent serialization.
-#
-#  [NEW ROUTE — /migrate-fix-ids]
-#  - One-time backfill: sets string "id" = str(_id) on all existing reminders
-#    and todos that were auto-saved without a string id (v8 and earlier).
-#    Safe to call multiple times. Run once after deploying v9.
-#
-#  [v8 RETAINED — all original features unchanged]
-#  - IP India hearing / exam report / reminder-I/II/III / adjournment parsing
-#  - TM app number deduplication for reminders and todos
-#  - HTML→plain text, _clean_text, charset fallback
-#  - Whitelist subdomain matching, junk pre-filter
-#  - All existing API routes unchanged
-# =============================================================================
-
 import imaplib
 import email
 import email.header
@@ -56,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
 from bson import ObjectId
 
-from backend.dependencies import get_current_user, db
+from backend.dependencies import get_current_user, db, check_module_permission, get_team_user_ids
 
 try:
     from cryptography.fernet import Fernet
@@ -1461,14 +1421,27 @@ async def create_email_indexes():
 # =============================================================================
 
 @router.get("/connections")
-async def list_connections(current_user=Depends(get_current_user)):
-    docs = await db[COL_CONNECTIONS].find(
-        {"user_id": str(current_user.id)}, {"app_password_enc": 0, "_id": 0}
-    ).to_list(100)
+async def list_connections(current_user=Depends(check_module_permission("email_accounts", "view"))):
+    # Issue #9: Staff sees own only; Manager sees own + team members' accounts
+    if current_user.role == "admin":
+        docs = await db[COL_CONNECTIONS].find(
+            {}, {"app_password_enc": 0, "_id": 0}
+        ).to_list(500)
+    elif current_user.role == "manager":
+        team_ids = await get_team_user_ids(current_user.id)
+        visible_ids = [str(current_user.id)] + [str(t) for t in team_ids]
+        docs = await db[COL_CONNECTIONS].find(
+            {"user_id": {"$in": visible_ids}}, {"app_password_enc": 0, "_id": 0}
+        ).to_list(200)
+    else:
+        # Staff: own only (Issue #3)
+        docs = await db[COL_CONNECTIONS].find(
+            {"user_id": str(current_user.id)}, {"app_password_enc": 0, "_id": 0}
+        ).to_list(100)
     return {"connections": [_conn_doc_to_out(d) for d in docs]}
 
 @router.post("/connections", status_code=201)
-async def add_connection(body: ConnectionCreateRequest, current_user=Depends(get_current_user)):
+async def add_connection(body: ConnectionCreateRequest, current_user=Depends(check_module_permission("email_accounts", "create"))):
     try:
         host, port, provider = _infer_provider(body.email_address)
         host = body.imap_host or host
@@ -1499,11 +1472,18 @@ async def add_connection(body: ConnectionCreateRequest, current_user=Depends(get
 
 @router.patch("/connections/{email_address}")
 async def update_connection(
-    email_address: str, body: ConnectionUpdateRequest, current_user=Depends(get_current_user)
+    email_address: str, body: ConnectionUpdateRequest, current_user=Depends(check_module_permission("email_accounts", "edit"))
 ):
-    existing = await db[COL_CONNECTIONS].find_one(
-        {"user_id": str(current_user.id), "email_address": email_address}, {"_id": 0}
-    )
+    # Issue #1: visibility — only own account or manager can touch team accounts
+    query_filter = {"email_address": email_address}
+    if current_user.role != "admin":
+        if current_user.role == "manager":
+            team_ids = await get_team_user_ids(current_user.id)
+            visible_ids = [str(current_user.id)] + [str(t) for t in team_ids]
+            query_filter["user_id"] = {"$in": visible_ids}
+        else:
+            query_filter["user_id"] = str(current_user.id)
+    existing = await db[COL_CONNECTIONS].find_one({**query_filter, **{"_id": 0 if False else None}}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Connection not found")
     updates = {k: v for k, v in body.dict().items() if v is not None}
@@ -1519,13 +1499,20 @@ async def update_connection(
     return _conn_doc_to_out(doc)
 
 @router.delete("/connections/{email_address}", status_code=204)
-async def delete_connection(email_address: str, current_user=Depends(get_current_user)):
-    await db[COL_CONNECTIONS].delete_one(
-        {"user_id": str(current_user.id), "email_address": email_address}
-    )
+async def delete_connection(email_address: str, current_user=Depends(check_module_permission("email_accounts", "delete"))):
+    # Issue #7 + #9: enforce delete permission + own-only for staff (Issue #3)
+    if current_user.role == "admin":
+        await db[COL_CONNECTIONS].delete_one({"email_address": email_address})
+    else:
+        # Staff & manager can only delete their own connections
+        result = await db[COL_CONNECTIONS].delete_one(
+            {"user_id": str(current_user.id), "email_address": email_address}
+        )
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Connection not found or not owned by you")
 
 @router.post("/connections/{email_address}/test")
-async def test_connection(email_address: str, current_user=Depends(get_current_user)):
+async def test_connection(email_address: str, current_user=Depends(check_module_permission("email_accounts", "view"))):
     doc = await db[COL_CONNECTIONS].find_one(
         {"user_id": str(current_user.id), "email_address": email_address}, {"_id": 0}
     )
@@ -1553,12 +1540,12 @@ async def test_connection(email_address: str, current_user=Depends(get_current_u
 # =============================================================================
 
 @router.get("/sender-whitelist")
-async def get_sender_whitelist(current_user=Depends(get_current_user)):
+async def get_sender_whitelist(current_user=Depends(check_module_permission("email_accounts", "view"))):
     doc = await db[COL_SENDER_WHITELIST].find_one({"user_id": str(current_user.id)}, {"_id": 0})
     return {"senders": doc.get("senders", []) if doc else []}
 
 @router.post("/sender-whitelist")
-async def add_sender_to_whitelist(body: SenderWhitelistEntry, current_user=Depends(get_current_user)):
+async def add_sender_to_whitelist(body: SenderWhitelistEntry, current_user=Depends(check_module_permission("email_accounts", "create"))):
     clean = body.email_address.strip().lower()
     if not clean or "@" not in clean:
         raise HTTPException(status_code=422, detail="Invalid email address or domain.")
@@ -1577,7 +1564,7 @@ async def add_sender_to_whitelist(body: SenderWhitelistEntry, current_user=Depen
     return {"message": "Sender added", "senders": updated.get("senders", [])}
 
 @router.delete("/sender-whitelist/{email_address}")
-async def remove_sender_from_whitelist(email_address: str, current_user=Depends(get_current_user)):
+async def remove_sender_from_whitelist(email_address: str, current_user=Depends(check_module_permission("email_accounts", "delete"))):
     await db[COL_SENDER_WHITELIST].update_one(
         {"user_id": str(current_user.id)},
         {"$pull": {"senders": {"email_address": email_address.lower()}}}
@@ -1586,7 +1573,7 @@ async def remove_sender_from_whitelist(email_address: str, current_user=Depends(
     return {"message": "Sender removed", "senders": (updated or {}).get("senders", [])}
 
 @router.put("/sender-whitelist")
-async def replace_sender_whitelist(body: SenderWhitelistOut, current_user=Depends(get_current_user)):
+async def replace_sender_whitelist(body: SenderWhitelistOut, current_user=Depends(check_module_permission("email_accounts", "create"))):
     senders = [
         {"email_address": s.get("email_address","").strip().lower(),
          "label": s.get("label", s.get("email_address","")),
@@ -1605,7 +1592,7 @@ async def replace_sender_whitelist(body: SenderWhitelistOut, current_user=Depend
 # =============================================================================
 
 @router.get("/auto-save-prefs", response_model=AutoSavePrefOut)
-async def get_auto_save_prefs(current_user=Depends(get_current_user)):
+async def get_auto_save_prefs(current_user=Depends(check_module_permission("email_accounts", "view"))):
     doc = await db[COL_AUTO_PREFS].find_one({"user_id": str(current_user.id)}, {"_id": 0})
     if not doc:
         return AutoSavePrefOut(
@@ -1627,7 +1614,7 @@ async def get_auto_save_prefs(current_user=Depends(get_current_user)):
     )
 
 @router.post("/auto-save-prefs", response_model=AutoSavePrefOut)
-async def set_auto_save_prefs(body: AutoSavePrefRequest, current_user=Depends(get_current_user)):
+async def set_auto_save_prefs(body: AutoSavePrefRequest, current_user=Depends(check_module_permission("email_accounts", "create"))):
     doc = {
         "user_id": str(current_user.id),
         "auto_save_reminders": body.auto_save_reminders,
@@ -1643,7 +1630,7 @@ async def set_auto_save_prefs(body: AutoSavePrefRequest, current_user=Depends(ge
     return await get_auto_save_prefs(current_user)
 
 @router.get("/auto-save-prefs/exists")
-async def check_prefs_exist(current_user=Depends(get_current_user)):
+async def check_prefs_exist(current_user=Depends(check_module_permission("email_accounts", "view"))):
     doc = await db[COL_AUTO_PREFS].find_one(
         {"user_id": str(current_user.id)}, {"_id": 0, "user_id": 1}
     )
@@ -1655,7 +1642,7 @@ async def check_prefs_exist(current_user=Depends(get_current_user)):
 # =============================================================================
 
 @router.post("/save-as-reminder", status_code=201)
-async def save_as_reminder(body: ManualSaveReminderRequest, current_user=Depends(get_current_user)):
+async def save_as_reminder(body: ManualSaveReminderRequest, current_user=Depends(check_module_permission("email_accounts", "create"))):
     try:
         try:
             remind_dt = datetime.fromisoformat(body.remind_at.replace("Z", "+00:00"))
@@ -1681,7 +1668,7 @@ async def save_as_reminder(body: ManualSaveReminderRequest, current_user=Depends
         raise HTTPException(status_code=500, detail=f"Failed to save reminder: {e}")
 
 @router.post("/save-as-visit", status_code=201)
-async def save_as_visit(body: ManualSaveVisitRequest, current_user=Depends(get_current_user)):
+async def save_as_visit(body: ManualSaveVisitRequest, current_user=Depends(check_module_permission("email_accounts", "create"))):
     try:
         existing = await db["visits"].find_one(
             {"user_id": str(current_user.id), "title": body.title, "visit_date": body.visit_date},
@@ -1703,7 +1690,7 @@ async def save_as_visit(body: ManualSaveVisitRequest, current_user=Depends(get_c
         raise HTTPException(status_code=500, detail=f"Failed to save visit: {e}")
 
 @router.post("/save-as-todo", status_code=201)
-async def save_as_todo(body: ManualSaveReminderRequest, current_user=Depends(get_current_user)):
+async def save_as_todo(body: ManualSaveReminderRequest, current_user=Depends(check_module_permission("email_accounts", "create"))):
     try:
         existing = await db["todos"].find_one(
             {"user_id": str(current_user.id), "title": body.title}, {"_id": 0, "id": 1}
@@ -1735,7 +1722,7 @@ async def save_as_todo(body: ManualSaveReminderRequest, current_user=Depends(get
 
 @router.get("/reminders")
 async def get_reminders(
-    current_user=Depends(get_current_user),
+    current_user=Depends(check_module_permission("email_accounts", "view")),
     user_id: Optional[str] = Query(None),
 ):
     """
@@ -1755,7 +1742,7 @@ async def get_reminders(
 async def update_reminder(
     reminder_id: str,
     body: dict,
-    current_user=Depends(get_current_user),
+    current_user=Depends(check_module_permission("email_accounts", "create")),
 ):
     """
     Update a reminder by its string id (UUID) or MongoDB ObjectId string.
@@ -1796,7 +1783,7 @@ async def update_reminder(
 @router.delete("/reminders/{reminder_id}", status_code=204)
 async def delete_reminder(
     reminder_id: str,
-    current_user=Depends(get_current_user),
+    current_user=Depends(check_module_permission("email_accounts", "delete")),
 ):
     """
     Delete a reminder by its string id (UUID) or MongoDB ObjectId string.
@@ -1826,7 +1813,7 @@ async def delete_reminder(
 
 @router.get("/extract-events", response_model=List[ExtractedEventOut])
 async def extract_events(
-    current_user=Depends(get_current_user),
+    current_user=Depends(check_module_permission("email_accounts", "view")),
     limit: int = Query(30),
     force_refresh: bool = Query(False)
 ):
@@ -1918,13 +1905,13 @@ async def extract_events(
 # NOTE: /events/clear-all MUST be defined before /events/{event_id}
 # otherwise FastAPI matches "clear-all" as an event_id and tries ObjectId("clear-all")
 @router.delete("/events/clear-all", status_code=204)
-async def clear_all_events(current_user=Depends(get_current_user)):
+async def clear_all_events(current_user=Depends(check_module_permission("email_accounts", "delete"))):
     """Clear all cached extracted events — forces fresh scan next time.
     Does NOT delete reminders, visits, or todos already saved."""
     await db[COL_EVENTS].delete_many({"user_id": str(current_user.id)})
 
 @router.delete("/events/{event_id}", status_code=204)
-async def delete_event(event_id: str, current_user=Depends(get_current_user)):
+async def delete_event(event_id: str, current_user=Depends(check_module_permission("email_accounts", "delete"))):
     """Delete a single cached extraction record. Does NOT cascade to reminders/visits/todos."""
     try:
         await db[COL_EVENTS].delete_one(
@@ -1935,7 +1922,7 @@ async def delete_event(event_id: str, current_user=Depends(get_current_user)):
 
 @router.get("/importer/events", response_model=List[ExtractedEventOut])
 async def importer_events(
-    current_user=Depends(get_current_user),
+    current_user=Depends(check_module_permission("email_accounts", "view")),
     limit: int = Query(30),
     force_refresh: bool = Query(False)
 ):
@@ -1953,7 +1940,7 @@ async def importer_events(
 # =============================================================================
 
 @router.post("/scan-now", status_code=202)
-async def trigger_scan_now(current_user=Depends(get_current_user)):
+async def trigger_scan_now(current_user=Depends(check_module_permission("email_accounts", "create"))):
     """
     Manually trigger a full email scan + auto-save for the current user.
     Runs in the background — returns immediately with a confirmation.
@@ -1974,7 +1961,7 @@ async def trigger_scan_now(current_user=Depends(get_current_user)):
 
 
 @router.post("/migrate-clean", status_code=200)
-async def migrate_clean_descriptions(current_user=Depends(get_current_user)):
+async def migrate_clean_descriptions(current_user=Depends(check_module_permission("email_accounts", "create"))):
     """
     One-time migration: strip HTML from any existing description/raw_snippet
     fields saved before v6 (when HTML was stored raw).
@@ -2010,7 +1997,7 @@ async def migrate_clean_descriptions(current_user=Depends(get_current_user)):
 
 
 @router.post("/migrate-fix-ids", status_code=200)
-async def migrate_fix_missing_ids(current_user=Depends(get_current_user)):
+async def migrate_fix_missing_ids(current_user=Depends(check_module_permission("email_accounts", "create"))):
     """
     v9 ONE-TIME MIGRATION — backfill missing string 'id' field.
 
@@ -2043,7 +2030,7 @@ async def migrate_fix_missing_ids(current_user=Depends(get_current_user)):
 
 
 @router.get("/events/by-tm/{tm_app_no}", response_model=List[ExtractedEventOut])
-async def get_events_by_tm_app_no(tm_app_no: str, current_user=Depends(get_current_user)):
+async def get_events_by_tm_app_no(tm_app_no: str, current_user=Depends(check_module_permission("email_accounts", "view"))):
     """
     Fetch all extracted events for a specific TM application number.
     Useful for frontend to show full history of a trademark case.
@@ -2060,7 +2047,7 @@ async def get_events_by_tm_app_no(tm_app_no: str, current_user=Depends(get_curre
 # =============================================================================
 
 @router.get("/attendance/today-summary")
-async def attendance_today_summary(current_user=Depends(get_current_user)):
+async def attendance_today_summary(current_user=Depends(check_module_permission("email_accounts", "view"))):
     try:
         u_id = (
             str(current_user.id) if hasattr(current_user, "id")
@@ -2091,7 +2078,7 @@ async def attendance_today_summary(current_user=Depends(get_current_user)):
                 "visits_today": [], "upcoming_reminders": [], "error": str(e)}
 
 @router.get("/holidays/upcoming")
-async def upcoming_holidays(current_user=Depends(get_current_user)):
+async def upcoming_holidays(current_user=Depends(check_module_permission("email_accounts", "view"))):
     try:
         u_id  = str(current_user.id) if hasattr(current_user, "id") else str(current_user)
         today = datetime.now(IST).strftime("%Y-%m-%d")
