@@ -939,7 +939,14 @@ function AssignClientsModal({compliance,onClose,onAssigned,isDark,allUsers=[]}){
     }
   },[allUsers,compliance.category]);
 
-  useEffect(()=>{api.get('/clients').then(r=>{const all=Array.isArray(r.data)?r.data:(r.data?.clients||[]);setClients(all);}).catch(()=>{}).finally(()=>setLoading(false));},[]);
+  useEffect(()=>{
+    api.get('/clients')
+      .then(r=>{const all=Array.isArray(r.data)?r.data:(r.data?.clients||[]);setClients(all);})
+      .catch(e=>{
+        if(e?.response?.status===403) toast.error("You don't have permission to view clients.");
+      })
+      .finally(()=>setLoading(false));
+  },[]);
   const[clientScope,setClientScope]=useState('active');
   const activeClientsList=useMemo(()=>clients.filter(c=>!c.status||c.status==='active'),[clients]);
   const scopedClients=useMemo(()=>clientScope==='active'?activeClientsList:clients,[clientScope,activeClientsList,clients]);
