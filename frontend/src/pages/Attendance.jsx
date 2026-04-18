@@ -1690,9 +1690,10 @@ export default function Attendance() {
   const canEditAttendance = isAdmin || hasPermission('can_edit_attendance');
 
   // ── Cross-visibility ───────────────────────────────────────────────────────
-  // view_other_attendance is an array of user IDs that this user can view
+  // Manager always has Own + Team visibility; staff need explicit view_other_attendance entries
+  const isManager = user?.role === 'manager';
   const crossVisAttendance  = user?.permissions?.view_other_attendance || [];
-  const hasCrossVisAttendance = crossVisAttendance.length > 0;
+  const hasCrossVisAttendance = isManager || crossVisAttendance.length > 0;
   // canSwitchUser: admin can switch to any user; others only if they have cross-vis
   const canSwitchUser = isAdmin || hasCrossVisAttendance;
 
@@ -2081,9 +2082,22 @@ export default function Attendance() {
         // Non-admin with cross-visibility: always keep permitted user list fresh
         try {
           const usersRes = await api.get('/users');
-          const permitted = (usersRes.data || []).filter(u =>
-            crossVisAttendance.includes(u.id || u._id)
-          );
+          const allFetched = usersRes.data || [];
+          let permitted;
+          if (isManager) {
+            // Manager: same-department staff (mirrors backend get_same_department_user_ids)
+            const myDepts = new Set(user?.departments || []);
+            permitted = allFetched.filter(u =>
+              (u.id || u._id) !== user?.id &&
+              u.role === 'staff' &&
+              (u.departments || []).some(d => myDepts.has(d))
+            );
+          } else {
+            // Staff with explicit cross-visibility list
+            permitted = allFetched.filter(u =>
+              crossVisAttendance.includes(u.id || u._id)
+            );
+          }
           setAllUsers(permitted);
         } catch {}
       }
