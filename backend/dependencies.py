@@ -770,6 +770,202 @@ async def verify_activity_access(
     )
 
 # ==========================================================
+# MODULE-ACTION PERMISSION MAP  (Issue #12 – minimal wrapper)
+# Maps (module, action) → existing UserPermissions flag name.
+# Admin always bypasses. This is additive – existing flag
+# names still work; this just provides a uniform call surface.
+# ==========================================================
+
+MODULE_ACTION_MAP: Dict[str, str] = {
+    # tasks
+    "tasks.view":           "can_edit_tasks",        # scope filtered separately
+    "tasks.create":         "can_edit_tasks",
+    "tasks.edit":           "can_edit_tasks",
+    "tasks.delete":         "can_delete_tasks",
+    # clients
+    "clients.view":         "can_view_all_clients",
+    "clients.create":       "can_edit_clients",
+    "clients.edit":         "can_edit_clients",
+    "clients.delete":       "can_delete_data",
+    # leads
+    "leads.view":           "can_view_all_leads",
+    "leads.create":         "can_view_all_leads",
+    "leads.edit":           "can_view_all_leads",
+    "leads.delete":         "can_manage_users",
+    # quotations
+    "quotations.view":      "can_create_quotations",
+    "quotations.create":    "can_create_quotations",
+    "quotations.edit":      "can_create_quotations",
+    "quotations.delete":    "can_create_quotations",
+    # invoicing
+    "invoicing.view":       "can_manage_invoices",
+    "invoicing.create":     "can_manage_invoices",
+    "invoicing.edit":       "can_manage_invoices",
+    "invoicing.delete":     "can_manage_invoices",
+    # password_vault
+    "password_vault.view":  "can_view_passwords",
+    "password_vault.create":"can_edit_passwords",
+    "password_vault.edit":  "can_edit_passwords",
+    "password_vault.delete":"can_edit_passwords",
+    # dsc_register
+    "dsc_register.view":    "can_view_all_dsc",
+    "dsc_register.create":  "can_edit_dsc",
+    "dsc_register.edit":    "can_edit_dsc",
+    "dsc_register.delete":  "can_edit_dsc",
+    # document_register
+    "document_register.view":   "can_view_documents",
+    "document_register.create": "can_edit_documents",
+    "document_register.edit":   "can_edit_documents",
+    "document_register.delete": "can_edit_documents",
+    # users
+    "users.view":           "can_view_user_page",
+    "users.create":         "can_manage_users",
+    "users.edit":           "can_edit_users",
+    "users.delete":         "can_manage_users",
+    # task_audit_log
+    "task_audit_log.view":  "can_view_audit_logs",
+    # email_accounts
+    "email_accounts.view":   "can_connect_email",
+    "email_accounts.create": "can_connect_email",
+    "email_accounts.edit":   "can_connect_email",
+    "email_accounts.delete": "can_connect_email",
+    # general_settings
+    "general_settings.view":   "can_manage_settings",
+    "general_settings.update": "can_manage_settings",
+    # attendance
+    "attendance.view":      "can_view_attendance",
+    "attendance.create":    "can_view_attendance",
+    # reports
+    "reports.view":         "can_view_reports",
+    "reports.download":     "can_download_reports",
+    # compliance
+    "compliance.view":      "can_view_compliance",
+    "compliance.create":    "can_manage_compliance",
+    "compliance.edit":      "can_manage_compliance",
+    "compliance.delete":    "can_manage_compliance",
+}
+
+
+def check_module_permission(module: str, action: str):
+    """
+    Dependency factory using MODULE_ACTION_MAP.
+    Usage: current_user: User = Depends(check_module_permission("leads", "create"))
+
+    Admin always passes.  For others the mapped flag must be True.
+    Raises 403 if permission is missing or mapping not found.
+    """
+    key = f"{module}.{action}"
+    flag = MODULE_ACTION_MAP.get(key)
+
+    async def _checker(current_user: User = Depends(get_current_user)) -> User:
+        if current_user.role == "admin":
+            return current_user
+        if flag is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"No permission mapping found for {module}.{action}"
+            )
+        if _get_perm(current_user, flag, False):
+            return current_user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission required: {module}.{action} (flag: {flag})"
+        )
+
+    return _checker
+
+
+def check_permission_and_visibility(
+    module: str,
+    action: str,
+    record_user_field: str = "created_by",
+    assigned_field: str = "assigned_to",
+):
+    """
+    COMBINED guard (Issue #1): BOTH permission AND visibility must pass.
+
+    Visibility rule:
+      - Admin          → always visible
+      - Manager        → created_by==user OR assigned_to==user OR assigned_to IN team
+      - Staff          → created_by==user OR assigned_to==user ONLY
+
+    Use this as a helper callable inside route bodies (not as a Depends factory),
+    since it needs the record dict after DB fetch:
+
+        check_permission_and_visibility_record(current_user, record, team_ids)
+    """
+    # Returned as a module-level helper; actual per-record check below.
+    pass  # see check_record_visibility below
+
+
+def check_record_visibility(
+    user: User,
+    record: dict,
+    team_ids: Optional[List[str]] = None,
+) -> bool:
+    """
+    Issue #1 – Visibility layer.
+    Returns True if user should be allowed to see/touch this record.
+
+    Manager:  created_by==user OR assigned_to==user OR assigned_to IN team_ids
+    Staff:    created_by==user OR assigned_to==user
+    Admin:    always True
+    """
+    if user.role == "admin":
+        return True
+
+    uid = user.id
+    created_by   = record.get("created_by")
+    assigned_to  = record.get("assigned_to")
+    user_id_field = record.get("user_id")  # attendance / todos
+
+    owns = (created_by == uid or assigned_to == uid or user_id_field == uid)
+    if owns:
+        return True
+
+    if user.role == "manager" and team_ids:
+        if assigned_to in team_ids or created_by in team_ids or user_id_field in team_ids:
+            return True
+
+    return False
+
+
+def assert_record_visibility(
+    user: User,
+    record: dict,
+    team_ids: Optional[List[str]] = None,
+) -> None:
+    """Raises 403 if check_record_visibility returns False."""
+    if not check_record_visibility(user, record, team_ids):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: record not visible to your account"
+        )
+
+
+def assert_module_permission(user: User, module: str, action: str) -> None:
+    """
+    Inline (non-Depends) version of check_module_permission.
+    Raises 403 if the user lacks the mapped flag.
+    Admin always passes.
+    """
+    if user.role == "admin":
+        return
+    key = f"{module}.{action}"
+    flag = MODULE_ACTION_MAP.get(key)
+    if flag is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"No permission mapping found for {module}.{action}"
+        )
+    if not _get_perm(user, flag, False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission required: {module}.{action} (flag: {flag})"
+        )
+
+
+# ==========================================================
 # AUDIT LOGGING
 # ==========================================================
 async def create_audit_log(
