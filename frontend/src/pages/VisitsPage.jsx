@@ -111,8 +111,14 @@ const WEEK_NUMBERS = [
 
 // ─── API helpers ────────────────────────────────────────────────────────────
 const fetchVisits = (p) => api.get("/visits", { params: p }).then(r => r.data);
-const fetchClients = () => api.get("/clients").then(r => r.data);
-const fetchUsers = () => api.get("/users").then(r => r.data);
+const fetchClients = () => api.get("/clients").then(r => r.data).catch(e => {
+  if (e?.response?.status === 403) return [];   // graceful — dropdown stays empty
+  throw e;
+});
+const fetchUsers = () => api.get("/users").then(r => r.data).catch(e => {
+  if (e?.response?.status === 403) return [];   // graceful — dropdown stays empty
+  throw e;
+});
 const fetchSummary = (uid, month) => api.get("/visits/summary", { params: { user_id: uid, month } }).then(r => r.data);
 
 // ─── Permission helpers ─────────────────────────────────────────────────────
