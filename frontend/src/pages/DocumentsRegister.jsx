@@ -16,8 +16,11 @@ import {
   Plus, Edit, Trash2, ArrowDownCircle, ArrowUpCircle,
   History, Search, ArrowUpDown, Printer,
   CheckSquare, Square, MinusSquare, XCircle,
-  FileText, Clock,
+  FileText, Clock, Sparkles, Loader2,
 } from 'lucide-react';
+import { format } from 'date-fns';
+import { detectDocumentDuplicates } from '@/lib/aiDuplicateEngine';
+import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import { format } from 'date-fns';
 
 // ─── Print styles ─────────────────────────────────────────────────────────────
@@ -252,6 +255,10 @@ export default function DocumentRegister() {
   const [bulkPersonName, setBulkPersonName]     = useState('');
   const [bulkNotes, setBulkNotes]               = useState('');
   const [bulkLoading, setBulkLoading]           = useState(false);
+  // ── AI Duplicate detection ────────────────────────────────────────────────
+  const [showDupDialog, setShowDupDialog] = useState(false);
+  const [dupGroups,     setDupGroups]     = useState([]);
+  const [detectingDups, setDetectingDups] = useState(false);
 
   const [formData, setFormData] = useState({
     holder_name: '', document_type: 'Agreement', document_password: '',
@@ -282,6 +289,26 @@ export default function DocumentRegister() {
   }, []);
 
   const handlePrint = () => window.print();
+
+  // ── AI Duplicate Detection ─────────────────────────────────────────────────
+  const handleDetectDocumentDuplicates = () => {
+    if (detectingDups) return;
+    setDetectingDups(true);
+    setTimeout(() => {
+      try {
+        const groups = detectDocumentDuplicates(documentList);
+        setDupGroups(groups);
+        setShowDupDialog(true);
+        if (!groups.length) toast.success(`Scanned ${documentList.length} documents — no duplicates found ✓`);
+        else toast.info(`Found ${groups.length} duplicate group${groups.length !== 1 ? 's' : ''}`);
+      } catch (e) {
+        toast.error('Duplicate scan failed. Please try again.');
+        console.error('Document duplicate detection error:', e);
+      } finally {
+        setDetectingDups(false);
+      }
+    }, 60);
+  };
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
   const fetchDocuments = async () => {
@@ -587,6 +614,18 @@ export default function DocumentRegister() {
             <Button variant="outline" onClick={handlePrint}
               className="h-9 px-4 gap-2 rounded-xl text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 backdrop-blur-sm">
               <Printer className="h-4 w-4" />Print
+            </Button>
+            {/* ── AI Duplicate Detector ── */}
+            <Button
+              variant="outline"
+              onClick={handleDetectDocumentDuplicates}
+              disabled={detectingDups || documentList.length === 0}
+              className="h-9 px-4 gap-2 rounded-xl text-sm backdrop-blur-sm font-semibold transition-all disabled:opacity-40"
+              style={{ backgroundColor: 'rgba(139,92,246,0.25)', borderColor: 'rgba(167,139,250,0.6)', color: '#ede9fe' }}
+            >
+              {detectingDups
+                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Scanning…</>
+                : <><Sparkles className="h-3.5 w-3.5" />AI Duplicates</>}
             </Button>
             <Dialog open={dialogOpen} onOpenChange={open => { setDialogOpen(open); if (!open) resetForm(); }}>
               <DialogTrigger asChild>
@@ -1109,6 +1148,46 @@ export default function DocumentRegister() {
           <DialogFooter><Button variant="outline" onClick={() => setFullNotesOpen(false)}>Close</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── AI Duplicate Detection Dialog ─────────────────────────────── */}
+      <AIDuplicateDialog
+        open={showDupDialog}
+        onClose={() => setShowDupDialog(false)}
+        groups={dupGroups}
+        items={documentList}
+        entityLabel="Document"
+        accentColor="#0f766e"
+        isDark={isDark}
+        canDelete={true}
+        canEdit={true}
+        getTitle={(d) => d.holder_name || 'Unknown Holder'}
+        getSubtitle={(d) => [d.document_type, d.document_number || d.reference_no].filter(Boolean).join(' · ') || null}
+        getMeta={(d) => [
+          d.document_type ? d.document_type.toUpperCase() : null,
+          d.status        ? d.status.toUpperCase()        : null,
+          d.pan           ? `PAN: ${d.pan}`               : null,
+          d.expiry_date   ? `Exp: ${format(new Date(d.expiry_date), 'MMM yyyy')}` : null,
+        ].filter(Boolean)}
+        compareFields={(a, b) => [
+          { label: 'Holder',       a: a.holder_name,                  b: b.holder_name },
+          { label: 'Doc Type',     a: a.document_type,                b: b.document_type },
+          { label: 'Doc No.',      a: a.document_number || a.reference_no, b: b.document_number || b.reference_no },
+          { label: 'PAN',          a: a.pan,                          b: b.pan },
+          { label: 'Status',       a: a.status,                       b: b.status },
+          { label: 'Expiry',       a: a.expiry_date ? format(new Date(a.expiry_date), 'MMM dd, yyyy') : '—', b: b.expiry_date ? format(new Date(b.expiry_date), 'MMM dd, yyyy') : '—' },
+          { label: 'Notes',        a: (a.notes || '—').slice(0, 60),  b: (b.notes || '—').slice(0, 60) },
+        ]}
+        onEdit={(d) => { setEditingDocument(d); setDialogOpen(true); setShowDupDialog(false); }}
+        onDelete={async (d) => {
+          if (!window.confirm(`Delete document for "${d.holder_name}"?`)) return;
+          try {
+            await api.delete(`/documents/${d.id}`);
+            setDocumentList((prev) => prev.filter((x) => x.id !== d.id));
+            toast.success('Document deleted');
+          } catch { toast.error('Failed to delete document'); }
+        }}
+        onView={(d) => { setSelectedDocument(d); setLogDialogOpen(true); setShowDupDialog(false); }}
+      />
     </div>
   );
 }
