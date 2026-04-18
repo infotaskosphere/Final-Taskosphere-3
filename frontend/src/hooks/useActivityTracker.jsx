@@ -58,8 +58,7 @@ export const useActivityTracker = (enabled = true) => {
       '/duedates': 'Due Dates',
       '/attendance': 'Attendance',
       '/reports': 'Reports',
-      '/users': 'User Management',
-      '/staff-activity': 'Staff Activity Monitor'
+      '/users': 'User Management'
     };
     return pageNames[path] || 'Taskosphere';
   };
