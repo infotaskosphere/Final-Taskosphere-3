@@ -78,7 +78,6 @@ const NAV_GROUPS = [
     id: 'admin',
     dividerLabel: 'Admin',
     items: [
-      { path: '/staff-activity', icon: Activity,  label: 'Staff Activity',  permission: 'can_view_staff_activity' },
       // Reports — <Protected> route, visible to all roles (data scoped server-side)
       { path: '/reports',        icon: BarChart3,  label: 'Reports' },
       { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log',  permission: 'can_view_audit_logs'     },
