@@ -212,12 +212,14 @@ export default function Reports() {
   const t    = tok(dark);
 
   const isAdmin   = user?.role === 'admin';
+  const isManager = user?.role === 'manager';
   const canDL     = isAdmin || hasPermission('can_download_reports');
 
-  // Cross-visibility: view_other_reports is the ONLY way non-admin users see other users' reports.
-  // Manager has NO automatic team access — they must be granted explicit cross-visibility by admin.
+  // Cross-visibility: Issue #2 — Manager sees own + team (all users from backend).
+  // Staff see only explicit view_other_reports list.
+  // Backend already scopes data; frontend just determines whether user-switcher is shown.
   const crossVisReports    = user?.permissions?.view_other_reports || [];
-  const hasCrossVisReports = crossVisReports.length > 0;
+  const hasCrossVisReports = isManager || crossVisReports.length > 0;
   const canSwitchUser = isAdmin || hasCrossVisReports;
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -253,8 +255,13 @@ export default function Reports() {
     if (r3.status==='fulfilled') setAttendance(r3.value?.data||[]);
     if (r4.status==='fulfilled') {
       const rawUsers = r4.value?.data || [];
-      // Admin sees all users. All other roles (including manager) only see explicit cross-vis users.
-      setAllUsers(isAdmin ? rawUsers : rawUsers.filter(u => crossVisReports.includes(u.id || u._id)));
+      // Admin + Manager: backend scopes team automatically, show all returned users.
+      // Staff: filter to explicit cross-vis list only (Issue #3).
+      setAllUsers(
+        isAdmin || isManager
+          ? rawUsers
+          : rawUsers.filter(u => crossVisReports.includes(u.id || u._id))
+      );
     }
     setLoading(false); setRefreshing(false);
   };
@@ -365,7 +372,7 @@ export default function Reports() {
   // ── Efficiency cards — real tasks + real attendance ───────────────────────
   const effCards = useMemo(()=>{
     if (!isAdmin && !hasCrossVisReports) {
-      // Own data only (staff, manager without cross-vis)
+      // Own data only (staff without any cross-vis — Issue #3)
       const myT=tasks.filter(t=>t.assigned_to===user?.id);
       const myA=attendance.filter(a=>a.user_id===user?.id);
       const myM=myA.reduce((s,a)=>s+(a.duration_minutes||0),0);
@@ -378,21 +385,11 @@ export default function Reports() {
         pct:myT.length>0?Math.round((myT.filter(t=>t.status==='completed').length/myT.length)*100):0,
       }];
     }
-    // Non-admin WITH cross-vis (manager or staff with view_other_reports): own + explicitly listed
-    if (!isAdmin && hasCrossVisReports) {
-      const uMap={};
-      if (user?.id) uMap[user.id]={user_id:user.id,user_name:user.full_name||'You',total:0,done:0,pend:0,mins:0,days:0,pct:0};
-      allUsers.forEach(u=>{if(crossVisReports.includes(u.id))uMap[u.id]={user_id:u.id,user_name:u.full_name,total:0,done:0,pend:0,mins:0,days:0,pct:0};});
-      tasks.forEach(t=>{const u=t.assigned_to;if(u&&uMap[u]){uMap[u].total++;t.status==='completed'?uMap[u].done++:uMap[u].pend++;}});
-      attendance.forEach(a=>{const u=a.user_id;if(u&&uMap[u]){uMap[u].mins+=(a.duration_minutes||0);if(a.status==='present')uMap[u].days++;}});
-      Object.values(uMap).forEach(u=>{u.pct=u.total>0?Math.round((u.done/u.total)*100):0;});
-      let cards=Object.values(uMap);
-      if(selUser!=='all'&&selUser!==user?.id) cards=cards.filter(c=>c.user_id===selUser);
-      else if(selUser===user?.id) cards=cards.filter(c=>c.user_id===user?.id);
-      return cards.sort((a,b)=>b.done-a.done);
-    }
-    // Admin: aggregate over all users
+    // Issue #2: Manager (hasCrossVisReports=true) + Admin — aggregate over allUsers
+    // allUsers is already team-scoped by backend for managers; admin sees all.
+    // Staff with explicit view_other_reports also uses this path.
     const uMap={};
+    if (user?.id) uMap[user.id]={user_id:user.id,user_name:user.full_name||'You',total:0,done:0,pend:0,mins:0,days:0,pct:0};
     allUsers.forEach(u=>{uMap[u.id]={user_id:u.id,user_name:u.full_name,total:0,done:0,pend:0,mins:0,days:0,pct:0};});
     tasks.forEach(t=>{const u=t.assigned_to;if(u&&uMap[u]){uMap[u].total++;t.status==='completed'?uMap[u].done++:uMap[u].pend++;}});
     attendance.forEach(a=>{const u=a.user_id;if(u&&uMap[u]){uMap[u].mins+=(a.duration_minutes||0);if(a.status==='present')uMap[u].days++;}});
