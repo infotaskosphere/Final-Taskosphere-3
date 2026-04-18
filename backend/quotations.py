@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from backend.dependencies import db, get_current_user, require_admin
+from backend.dependencies import db, get_current_user, require_admin, check_module_permission
 from backend.models import User
 
 try:
@@ -1057,9 +1057,8 @@ def _send_email_with_pdf(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.post("/companies")
-async def create_company(data: dict, current_user: User = Depends(get_current_user)):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
+async def create_company(data: dict, current_user: User = Depends(check_module_permission("quotations", "create"))):
+    # Issue #6: permission enforced via Depends above (can_create_quotations)
     now = datetime.now(timezone.utc).isoformat()
     doc = {
         "id":                str(uuid.uuid4()),
@@ -1093,9 +1092,7 @@ async def create_company(data: dict, current_user: User = Depends(get_current_us
 
 
 @router.get("/companies")
-async def get_companies(current_user: User = Depends(get_current_user)):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
+async def get_companies(current_user: User = Depends(check_module_permission("quotations", "view"))):
     query = {} if current_user.role == "admin" else {"created_by": current_user.id}
     companies = await db.companies.find(query, {"_id": 0}).to_list(500)
     return companies
@@ -1104,10 +1101,8 @@ async def get_companies(current_user: User = Depends(get_current_user)):
 @router.put("/companies/{company_id}")
 async def update_company(
     company_id: str, data: dict,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("quotations", "edit"))
 ):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
     existing = await db.companies.find_one({"id": company_id}, {"_id": 0})
     if not existing:
         raise HTTPException(404, "Company not found")
@@ -1127,9 +1122,7 @@ async def update_company(
 
 
 @router.delete("/companies/{company_id}")
-async def delete_company(company_id: str, current_user: User = Depends(get_current_user)):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
+async def delete_company(company_id: str, current_user: User = Depends(check_module_permission("quotations", "delete"))):
     existing = await db.companies.find_one({"id": company_id}, {"_id": 0})
     if not existing:
         raise HTTPException(404, "Company not found")
@@ -1144,24 +1137,20 @@ async def delete_company(company_id: str, current_user: User = Depends(get_curre
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/quotations/next-number")
-async def get_next_quotation_number(current_user: User = Depends(get_current_user)):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
+async def get_next_quotation_number(current_user: User = Depends(check_module_permission("quotations", "view"))):
     return {"number": await _next_qtn_number()}
 
 
 @router.get("/quotations/services")
-async def get_services(_: User = Depends(get_current_user)):
+async def get_services(_: User = Depends(check_module_permission("quotations", "view"))):
     return {"services": ALL_SERVICES, "checklists": SERVICE_CHECKLISTS}
 
 
 @router.post("/quotations")
 async def create_quotation(
     data: QuotationCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("quotations", "create"))
 ):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
 
     computed_items = []
     for item in data.items:
@@ -1199,10 +1188,8 @@ async def list_quotations(
     status:  Optional[str] = None,
     service: Optional[str] = None,
     lead_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("quotations", "view"))
 ):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
 
     query: Dict[str, Any] = {}
     if current_user.role != "admin":
@@ -1219,9 +1206,7 @@ async def list_quotations(
 
 
 @router.get("/quotations/{quotation_id}")
-async def get_quotation(quotation_id: str, current_user: User = Depends(get_current_user)):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
+async def get_quotation(quotation_id: str, current_user: User = Depends(check_module_permission("quotations", "view"))):
     q = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
     if not q:
         raise HTTPException(404, "Quotation not found")
@@ -1234,10 +1219,8 @@ async def get_quotation(quotation_id: str, current_user: User = Depends(get_curr
 async def update_quotation(
     quotation_id: str,
     data: dict,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("quotations", "edit"))
 ):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
     existing = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
     if not existing:
         raise HTTPException(404, "Quotation not found")
@@ -1279,9 +1262,7 @@ async def update_quotation(
 
 
 @router.delete("/quotations/{quotation_id}")
-async def delete_quotation(quotation_id: str, current_user: User = Depends(get_current_user)):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
+async def delete_quotation(quotation_id: str, current_user: User = Depends(check_module_permission("quotations", "delete"))):
     existing = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
     if not existing:
         raise HTTPException(404, "Quotation not found")
@@ -1298,10 +1279,8 @@ async def delete_quotation(quotation_id: str, current_user: User = Depends(get_c
 @router.get("/quotations/{quotation_id}/pdf")
 async def export_quotation_pdf(
     quotation_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("quotations", "edit"))
 ):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
 
     q = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
     if not q:
@@ -1340,10 +1319,8 @@ async def export_quotation_pdf(
 @router.get("/quotations/{quotation_id}/checklist-pdf")
 async def export_checklist_pdf(
     quotation_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("quotations", "edit"))
 ):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
 
     q = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
     if not q:
@@ -1386,10 +1363,8 @@ async def export_checklist_pdf(
 async def send_quotation_email(
     quotation_id: str,
     req: EmailSendRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_module_permission("quotations", "edit"))
 ):
-    if not _permission_ok(current_user):
-        raise HTTPException(403, "Quotation module access denied")
 
     q = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
     if not q:
