@@ -63,6 +63,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_compliance": True,       # Compliance Tracker — view all categories
           "can_manage_compliance": True,     # Create / edit / delete compliance masters
           "can_view_all_visits": True,
+          "can_edit_attendance": True,
           "can_edit_visits": True,
           "can_delete_visits": True,
           "can_delete_own_visits": True,
@@ -102,7 +103,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_manage_settings": True,       # General Settings → VIEW, UPDATE (Own + Team)
           "can_assign_tasks": False,         # ADMIN_GRANTED_ONLY
           "can_assign_clients": False,       # ADMIN_GRANTED_ONLY
-          "can_view_staff_activity": True,   # Staff Activity → VIEW (Own + Team)
+          "can_view_staff_activity": False,  # Staff Activity module removed
           "can_send_reminders": False,       # ADMIN_GRANTED_ONLY
           "can_view_user_page": False,       # ADMIN_GRANTED_ONLY
           "can_view_audit_logs": False,      # ADMIN_GRANTED_ONLY
@@ -160,7 +161,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_manage_settings": True,       # General Settings → VIEW, UPDATE (Own)
           "can_assign_tasks": False,         # ADMIN_GRANTED_ONLY
           "can_assign_clients": False,       # ADMIN_GRANTED_ONLY
-          "can_view_staff_activity": True,   # Staff Activity → VIEW (Own)
+          "can_view_staff_activity": False,  # Staff Activity module removed
           "can_send_reminders": False,       # ADMIN_GRANTED_ONLY
           "can_view_user_page": False,       # ADMIN_GRANTED_ONLY
           "can_view_audit_logs": False,      # ADMIN_GRANTED_ONLY
