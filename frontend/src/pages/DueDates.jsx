@@ -21,6 +21,8 @@ import {
 import LayoutCustomizer from '../components/layout/LayoutCustomizer';
 import { usePageLayout } from '../hooks/usePageLayout';
 import { format, differenceInDays } from 'date-fns';
+import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
+import { detectComplianceDuplicates } from '@/lib/aiDuplicateEngine';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // ── Brand Colors ──────────────────────────────────────────────────────────────
@@ -625,6 +627,10 @@ export default function DueDates() {
   const [filterCat, setFilterCat]       = useState('all');
   const [filterMonth, setFilterMonth]   = useState('all');
   const [viewMode, setViewMode]         = useState('list'); // 'list' | 'board'
+  // AI Duplicate Detection
+  const [showDupDialog,  setShowDupDialog]  = useState(false);
+  const [dupGroups,      setDupGroups]      = useState([]);
+  const [detectingDups,  setDetectingDups]  = useState(false);
   const [formData, setFormData]         = useState({
     title:'', description:'', due_date:'', reminder_days:30,
     category:'', department:'', assigned_to:'unassigned', client_id:'no_client', status:'pending',
@@ -667,6 +673,29 @@ export default function DueDates() {
     if (!window.confirm('Delete this due date?')) return;
     try { await api.delete(`/duedates/${id}`); toast.success('Deleted!'); fetchDueDates(); }
     catch { toast.error('Failed to delete'); }
+  };
+
+  const handleDetectDuplicates = () => {
+    if (detectingDups) return;
+    setDetectingDups(true);
+    setTimeout(() => {
+      try {
+        // dueDates items have title, category, due_date, status, department
+        // We adapt them for detectComplianceDuplicates by mapping title->name
+        const adapted = dueDates.map(d => ({ ...d, name: d.title, fy_year: d.fy_year || null, frequency: d.frequency || null }));
+        const groups = detectComplianceDuplicates(adapted);
+        // map item_ids back (ids are same)
+        setDupGroups(groups);
+        setShowDupDialog(true);
+        if (!groups.length) toast.success(`Scanned ${dueDates.length} due dates — no duplicates found ✓`);
+        else toast.info(`Found ${groups.length} duplicate group${groups.length !== 1 ? 's' : ''}`);
+      } catch (e) {
+        toast.error('Duplicate scan failed. Please try again.');
+        console.error('Due date duplicate detection error:', e);
+      } finally {
+        setDetectingDups(false);
+      }
+    }, 60);
   };
 
   const resetForm = () => {
@@ -777,6 +806,17 @@ export default function DueDates() {
                       className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all"
                       style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.18)', color: 'white', backdropFilter: 'blur(8px)' }}>
                       <Sparkles className="h-4 w-4" />Smart Import
+                    </motion.button>
+                    <motion.button
+                      whileHover={{ scale: 1.03, y: -2, transition: springPhysics.card }}
+                      whileTap={{ scale: 0.97, transition: springPhysics.tap }}
+                      onClick={handleDetectDuplicates}
+                      disabled={detectingDups || dueDates.length === 0}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.18)', color: 'white', backdropFilter: 'blur(8px)' }}>
+                      {detectingDups
+                        ? <><Loader2 className="h-4 w-4 animate-spin" />Scanning…</>
+                        : <><Sparkles className="h-4 w-4" />AI Duplicates</>}
                     </motion.button>
                     <Dialog open={dialogOpen} onOpenChange={o=>{setDialogOpen(o);if(!o)resetForm();}}>
                       <DialogTrigger asChild>
@@ -1193,6 +1233,45 @@ export default function DueDates() {
         users={users}
         user={user}
         onImportDone={fetchDueDates}
+      />
+
+      {/* ── AI Duplicate Detection Dialog ── */}
+      <AIDuplicateDialog
+        open={showDupDialog}
+        onClose={() => setShowDupDialog(false)}
+        groups={dupGroups}
+        items={dueDates.map(d => ({ ...d, name: d.title }))}
+        entityLabel="Due Date"
+        accentColor="#1F6FB2"
+        isDark={isDark}
+        canDelete={user?.role === 'admin'}
+        canEdit={user?.role === 'admin' || user?.role === 'manager'}
+        getTitle={(d) => d.title || 'Untitled'}
+        getSubtitle={(d) => [d.category, d.department].filter(Boolean).join(' · ') || null}
+        getMeta={(d) => [
+          d.category   ? d.category   : null,
+          d.department ? d.department : null,
+          d.due_date   ? `Due: ${format(new Date(d.due_date), 'dd MMM yyyy')}` : null,
+          d.status     ? d.status.replace('_', ' ') : null,
+        ].filter(Boolean)}
+        compareFields={(a, b) => [
+          { label: 'Title',       a: a.title,                    b: b.title },
+          { label: 'Category',    a: a.category,                 b: b.category },
+          { label: 'Department',  a: a.department,               b: b.department },
+          { label: 'Due Date',    a: a.due_date ? format(new Date(a.due_date), 'dd MMM yyyy') : '—', b: b.due_date ? format(new Date(b.due_date), 'dd MMM yyyy') : '—' },
+          { label: 'Status',      a: a.status,                   b: b.status },
+          { label: 'Assigned To', a: a.assigned_to,              b: b.assigned_to },
+        ]}
+        onEdit={(d) => { handleEdit(d); setShowDupDialog(false); }}
+        onDelete={user?.role === 'admin' ? async (d) => {
+          if (!window.confirm(`Delete "${d.title}"?`)) return;
+          try {
+            await api.delete(`/duedates/${d.id}`);
+            setDueDates(prev => prev.filter(x => x.id !== d.id));
+            toast.success('Due date deleted');
+          } catch { toast.error('Failed to delete due date'); }
+        } : undefined}
+        onView={(d) => { handleEdit(d); setShowDupDialog(false); }}
       />
     </>
   );
