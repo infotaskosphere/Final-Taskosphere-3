@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import GifLoader, { MiniLoader } from "@/components/ui/GifLoader.jsx";
 import { useDark } from '@/hooks/useDark';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -229,6 +230,10 @@ const DOC_TYPE_OPTIONS = [
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function DocumentRegister() {
   const isDark    = useDark();
+  const { user, hasPermission } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const canDeleteDoc = isAdmin || hasPermission('can_delete_data');
+  const canEditDoc   = isAdmin || hasPermission('can_edit_data');
   const searchRef = useRef(null);
 
   const [documentList, setDocumentList]             = useState([]);
@@ -1157,8 +1162,8 @@ export default function DocumentRegister() {
         entityLabel="Document"
         accentColor="#0f766e"
         isDark={isDark}
-        canDelete={true}
-        canEdit={true}
+        canDelete={canDeleteDoc}
+        canEdit={canEditDoc}
         getTitle={(d) => d.holder_name || 'Unknown Holder'}
         getSubtitle={(d) => [d.document_type, d.document_number || d.reference_no].filter(Boolean).join(' · ') || null}
         getMeta={(d) => [
@@ -1176,7 +1181,7 @@ export default function DocumentRegister() {
           { label: 'Expiry',       a: a.expiry_date ? format(new Date(a.expiry_date), 'MMM dd, yyyy') : '—', b: b.expiry_date ? format(new Date(b.expiry_date), 'MMM dd, yyyy') : '—' },
           { label: 'Notes',        a: (a.notes || '—').slice(0, 60),  b: (b.notes || '—').slice(0, 60) },
         ]}
-        onEdit={(d) => { setEditingDocument(d); setDialogOpen(true); setShowDupDialog(false); }}
+        onEdit={(d) => { handleEdit(d); setShowDupDialog(false); }}
         onDelete={async (d) => {
           if (!window.confirm(`Delete document for "${d.holder_name}"?`)) return;
           try {
