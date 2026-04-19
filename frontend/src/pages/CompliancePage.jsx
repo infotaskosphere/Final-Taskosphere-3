@@ -15,10 +15,12 @@ import {
   FileUp, Zap, Target, Calendar, BookOpen, FolderOpen,
   ArrowLeft, StickyNote, ShieldCheck, AlertTriangle,
   Info, Repeat, LayoutGrid, List, MessageSquare, Send,
-  BarChart3, ChevronLeft, TrendingUp, Settings2,
+  BarChart3, ChevronLeft, TrendingUp, Settings2, Sparkles,
 } from 'lucide-react';
 import LayoutCustomizer from '@/components/layout/LayoutCustomizer';
 import { usePageLayout } from '@/hooks/usePageLayout';
+import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
+import { detectComplianceDuplicates } from '@/lib/aiDuplicateEngine';
 
 const D = {
   bg:'#0f172a',card:'#1e293b',raised:'#263348',border:'#334155',
@@ -1118,6 +1120,9 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
   const[bulkOpen,setBulkOpen]=useState(false);
   const[showImport,setShowImport]=useState(false);
   const[showAssign,setShowAssign]=useState(false);
+  const[showDetailDupDialog,setShowDetailDupDialog]=useState(false);
+  const[detailDupGroups,setDetailDupGroups]=useState([]);
+  const[detectingDetailDups,setDetectingDetailDups]=useState(false);
   const[editingNote,setEditingNote]=useState(null);
   const[refreshKey,setRefreshKey]=useState(0);
   // New tabs
@@ -1439,6 +1444,27 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
           <button onClick={()=>setShowImport(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold border hover:opacity-80"
             style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#374151'}}>
             <Upload className="w-3.5 h-3.5"/>Import Excel
+          </button>
+          <button
+            onClick={()=>{
+              if(detectingDetailDups)return;
+              setDetectingDetailDups(true);
+              setTimeout(()=>{
+                try{
+                  const adapted=items.map(i=>({...i,name:i.client_name||i.client_id||'Unknown',category:compliance.category,fy_year:compliance.fy_year,frequency:compliance.frequency}));
+                  const groups=detectComplianceDuplicates(adapted);
+                  setDetailDupGroups(groups);
+                  setShowDetailDupDialog(true);
+                  if(!groups.length)toast.success('No duplicate client entries found ✓');
+                  else toast.info(`Found ${groups.length} duplicate group${groups.length!==1?'s':''}`);
+                }catch(e){toast.error('Scan failed');}
+                finally{setDetectingDetailDups(false);}
+              },60);
+            }}
+            disabled={detectingDetailDups||items.length===0}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold border hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#374151'}}>
+            {detectingDetailDups?<><Loader2 className="w-3.5 h-3.5 animate-spin"/>Scanning…</>:<><Sparkles className="w-3.5 h-3.5"/>AI Duplicates</>}
           </button>
           <button onClick={()=>setRefreshKey(k=>k+1)} className="p-1.5 rounded-lg hover:opacity-70" style={{color:isDark?D.dimmer:'#94a3b8'}}>
             <RefreshCw className={`w-3.5 h-3.5 ${loading?'animate-spin':''}`}/>
@@ -1884,6 +1910,38 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
       <AnimatePresence>
         {showAssign&&<AssignClientsModal compliance={compliance} isDark={isDark} allUsers={allUsers} onClose={()=>setShowAssign(false)} onAssigned={()=>{setRefreshKey(k=>k+1);setShowAssign(false);}}/>}
       </AnimatePresence>
+
+      {/* AI Duplicate Detection for client assignments in this compliance */}
+      <AIDuplicateDialog
+        open={showDetailDupDialog}
+        onClose={()=>setShowDetailDupDialog(false)}
+        groups={detailDupGroups}
+        items={items.map(i=>({...i,name:i.client_name||i.client_id||'Unknown'}))}
+        entityLabel="Client Entry"
+        accentColor={CATEGORY_CFG[compliance.category]?.color||'#1F6FB2'}
+        isDark={isDark}
+        canDelete={user?.role==='admin'}
+        canEdit={false}
+        getTitle={(i)=>i.client_name||i.client_id||'Unknown Client'}
+        getSubtitle={(i)=>i.assigned_to_name?`Assigned: ${i.assigned_to_name}`:null}
+        getMeta={(i)=>[
+          i.status?STATUS_CFG[i.status]?.label||i.status:null,
+        ].filter(Boolean)}
+        compareFields={(a,b)=>[
+          {label:'Client',      a:a.client_name,       b:b.client_name},
+          {label:'Status',      a:STATUS_CFG[a.status]?.label||a.status, b:STATUS_CFG[b.status]?.label||b.status},
+          {label:'Assigned To', a:a.assigned_to_name,  b:b.assigned_to_name},
+          {label:'Notes',       a:(a.notes||'—').slice(0,60), b:(b.notes||'—').slice(0,60)},
+        ]}
+        onDelete={user?.role==='admin'?async(i)=>{
+          if(!window.confirm(`Remove "${i.client_name}" from this compliance?`))return;
+          try{
+            await api.delete(`/compliance/${compliance.id}/assignments/${i.id}`);
+            setItems(prev=>prev.filter(x=>x.id!==i.id));
+            toast.success('Entry removed');
+          }catch{toast.error('Failed to remove entry');}
+        }:undefined}
+      />
     </motion.div>
   );
 }
@@ -2047,6 +2105,10 @@ export default function CompliancePage(){
   const[detailItem,setDetailItem]=useState(null);
   const[refreshKey,setRefreshKey]=useState(0);
   const[viewMode,setViewMode]=useState('board'); // 'board' | 'list'
+  // AI Duplicate Detection
+  const [showDupDialog,  setShowDupDialog]  = useState(false);
+  const [dupGroups,      setDupGroups]      = useState([]);
+  const [detectingDups,  setDetectingDups]  = useState(false);
 
   const fetchAll=useCallback(async()=>{
     setLoading(true);
@@ -2079,6 +2141,26 @@ export default function CompliancePage(){
     if(!confirm(`Delete "${name}" and all assignments?`))return;
     try{await api.delete(`/compliance/${id}`);toast.success('Deleted');setRefreshKey(k=>k+1);}
     catch(e){toast.error(e?.response?.data?.detail||'Delete failed');}
+  };
+
+  // AI Duplicate handler
+  const handleDetectDuplicates = () => {
+    if (detectingDups) return;
+    setDetectingDups(true);
+    setTimeout(() => {
+      try {
+        const groups = detectComplianceDuplicates(compliance);
+        setDupGroups(groups);
+        setShowDupDialog(true);
+        if (!groups.length) toast.success(`Scanned ${compliance.length} compliance items — no duplicates found ✓`);
+        else toast.info(`Found ${groups.length} duplicate group${groups.length !== 1 ? 's' : ''}`);
+      } catch (e) {
+        toast.error('Duplicate scan failed. Please try again.');
+        console.error('Compliance duplicate detection error:', e);
+      } finally {
+        setDetectingDups(false);
+      }
+    }, 60);
   };
 
   // Only show category tabs the user can access
@@ -2147,6 +2229,14 @@ export default function CompliancePage(){
                         <Plus className="w-4 h-4"/>Add Compliance
                       </button>
                     )}
+                    <button
+                      onClick={handleDetectDuplicates}
+                      disabled={detectingDups || compliance.length === 0}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white border border-white/30 hover:bg-white/15 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                      {detectingDups
+                        ? <><Loader2 className="w-4 h-4 animate-spin"/>Scanning…</>
+                        : <><Sparkles className="w-4 h-4"/>AI Duplicates</>}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -2332,6 +2422,43 @@ export default function CompliancePage(){
             onSave={()=>{setShowAddModal(false);setEditingItem(null);setRefreshKey(k=>k+1);}}/>
         )}
       </AnimatePresence>
+
+      {/* ── AI Duplicate Detection Dialog ── */}
+      <AIDuplicateDialog
+        open={showDupDialog}
+        onClose={() => setShowDupDialog(false)}
+        groups={dupGroups}
+        items={compliance}
+        entityLabel="Compliance"
+        accentColor="#1F6FB2"
+        isDark={isDark}
+        canDelete={isAdmin}
+        canEdit={canManage}
+        getTitle={(c) => c.name || 'Unnamed Compliance'}
+        getSubtitle={(c) => [CATEGORY_CFG[c.category]?.label, c.fy_year].filter(Boolean).join(' · ') || null}
+        getMeta={(c) => [
+          c.category ? (CATEGORY_CFG[c.category]?.label || c.category) : null,
+          c.fy_year  ? `FY ${c.fy_year}` : null,
+          c.frequency ? c.frequency.replace('_', '-') : null,
+        ].filter(Boolean)}
+        compareFields={(a, b) => [
+          { label: 'Name',      a: a.name,                       b: b.name },
+          { label: 'Category',  a: CATEGORY_CFG[a.category]?.label || a.category, b: CATEGORY_CFG[b.category]?.label || b.category },
+          { label: 'FY Year',   a: a.fy_year,                    b: b.fy_year },
+          { label: 'Frequency', a: a.frequency,                  b: b.frequency },
+          { label: 'Due Date',  a: a.due_date,                   b: b.due_date },
+        ]}
+        onEdit={(c) => { setEditingItem(c); setShowDupDialog(false); }}
+        onDelete={isAdmin ? async (c) => {
+          if (!window.confirm(`Delete "${c.name}" and all its assignments?`)) return;
+          try {
+            await api.delete(`/compliance/${c.id}`);
+            setRefreshKey(k => k + 1);
+            toast.success('Compliance deleted');
+          } catch { toast.error('Failed to delete compliance'); }
+        } : undefined}
+        onView={(c) => { setDetailItem(c); setShowDupDialog(false); }}
+      />
     </div>
     </>
   );
