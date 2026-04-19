@@ -753,3 +753,45 @@ export const detectDocumentDuplicates = (docs) =>
     },
     60
   );
+
+// ─── Compliance Duplicate Detector ───────────────────────────────────────────
+// Detects duplicate compliance items: same name + same category (+ optional FY)
+export const detectComplianceDuplicates = (items) =>
+  groupDuplicates(
+    items,
+    (a, b) => {
+      let score = 0;
+      const reasons = [];
+
+      const nameA = norm(a.name || '');
+      const nameB = norm(b.name || '');
+      if (!nameA || !nameB) return { score: 0, reasons: [], exact: false };
+
+      // Name similarity — primary signal
+      const nameSim = Math.max(trigramSim(nameA, nameB), jaccardSim(nameA, nameB));
+      const exactName = nameA === nameB;
+      if (exactName) { score += 50; reasons.push('Exact compliance name'); }
+      else if (nameSim >= 0.80) { score += Math.round(nameSim * 40); reasons.push(`Name ${Math.round(nameSim * 100)}% similar`); }
+      else if (nameSim >= 0.55) { score += Math.round(nameSim * 25); reasons.push(`Name partially similar`); }
+      else return { score: 0, reasons: [], exact: false };
+
+      // Category must match — GST vs ITR are different compliance types
+      const sameCategory = a.category && b.category &&
+        norm(a.category) === norm(b.category);
+      if (!sameCategory) return { score: 0, reasons: [], exact: false };
+      score += 25; reasons.push(`Same category (${a.category})`);
+
+      // Same FY year
+      if (a.fy_year && b.fy_year && a.fy_year === b.fy_year) {
+        score += 15; reasons.push('Same financial year');
+      }
+
+      // Same frequency
+      if (a.frequency && b.frequency && a.frequency === b.frequency) {
+        score += 10; reasons.push('Same frequency');
+      }
+
+      return { score, reasons, exact: exactName && sameCategory };
+    },
+    55
+  );
