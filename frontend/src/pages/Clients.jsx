@@ -3095,7 +3095,7 @@ export default function Clients() {
         entityLabel="Client"
         accentColor="#1F6FB2"
         isDark={isDark}
-        canDelete={canEditClients}
+        canDelete={isAdmin || canDeleteData}
         canEdit={canEditClients}
         getTitle={(c) => c.company_name || 'Unnamed Client'}
         getSubtitle={(c) => [c.email, c.phone].filter(Boolean).join(' · ') || null}
@@ -3116,7 +3116,7 @@ export default function Clients() {
           { label: 'State',    a: a.state,         b: b.state },
           { label: 'Services', a: (a.services || []).join(', '), b: (b.services || []).join(', ') },
         ]}
-        onEdit={(c) => { setEditingClient(c); setDialogOpen(true); setShowDupDialog(false); }}
+        onEdit={(c) => { handleEdit(c); setShowDupDialog(false); }}
         onDelete={async (c) => {
           if (!window.confirm(`Delete "${c.company_name}"?`)) return;
           try {
