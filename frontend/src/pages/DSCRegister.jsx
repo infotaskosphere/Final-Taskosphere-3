@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import GifLoader, { MiniLoader } from "@/components/ui/GifLoader.jsx";
 import { useDark } from '@/hooks/useDark';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -195,6 +196,10 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function DSCRegister() {
   const isDark    = useDark();
+  const { user, hasPermission } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const canDeleteDSC = isAdmin || hasPermission('can_delete_data');
+  const canEditDSC   = isAdmin || hasPermission('can_edit_data');
   const searchRef = useRef(null);
 
   const [dscList, setDscList]                       = useState([]);
@@ -1129,8 +1134,8 @@ export default function DSCRegister() {
         entityLabel="DSC"
         accentColor="#4f46e5"
         isDark={isDark}
-        canDelete={true}
-        canEdit={true}
+        canDelete={canDeleteDSC}
+        canEdit={canEditDSC}
         getTitle={(d) => d.holder_name || 'Unknown Holder'}
         getSubtitle={(d) => [d.pan ? `PAN: ${d.pan}` : null, d.email].filter(Boolean).join(' · ') || null}
         getMeta={(d) => [
@@ -1150,7 +1155,7 @@ export default function DSCRegister() {
           { label: 'Expiry',        a: a.expiry_date ? format(new Date(a.expiry_date), 'MMM dd, yyyy') : '—', b: b.expiry_date ? format(new Date(b.expiry_date), 'MMM dd, yyyy') : '—' },
           { label: 'Associated',    a: a.associated_with, b: b.associated_with },
         ]}
-        onEdit={(d) => { setEditingDSC(d); setDialogOpen(true); setShowDupDialog(false); }}
+        onEdit={(d) => { handleEdit(d); setShowDupDialog(false); }}
         onDelete={async (d) => {
           if (!window.confirm(`Delete DSC for "${d.holder_name}"?`)) return;
           try {
