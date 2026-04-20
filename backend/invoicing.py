@@ -2352,36 +2352,65 @@ async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(c
     ex = await db.invoices.find_one({"id": inv_id})
     if not ex: raise HTTPException(404, "Invoice not found")
 
-    # ── Handle invoice_no update separately ──────────────────────────────────
-    new_invoice_no = data.get("invoice_no", "").strip() if data.get("invoice_no") else ""
+    old_company_id  = (ex.get("company_id") or "").strip()
+    new_company_id  = (data.get("company_id") or old_company_id).strip()
+    company_changed = bool(new_company_id and new_company_id != old_company_id)
+
+    # -- Handle invoice_no when company changes ----------------------------------
+    new_invoice_no = (data.get("invoice_no") or "").strip()
     old_invoice_no = ex.get("invoice_no", "")
-    if new_invoice_no and new_invoice_no != old_invoice_no:
-        # Check for duplicate: reject if another invoice already has this number (scoped to same company)
-        dup_filter = {
-            "invoice_no": new_invoice_no,
-            "id": {"$ne": inv_id}
-        }
-        company_id = ex.get("company_id")
-        if company_id:
-            dup_filter["company_id"] = company_id
+
+    if company_changed:
+        # Company changed: always assign next sequential number for the NEW company.
+        # The old company's number must not be carried over because it would break
+        # the sequence of BOTH companies.
+        invoice_type = (data.get("invoice_type") or ex.get("invoice_type") or "tax_invoice")
+        prefix_map = {"proforma": "PRO", "estimate": "EST", "credit_note": "CN", "debit_note": "DN"}
+        prefix = prefix_map.get(invoice_type, "INV")
+        auto_no = await _next_invoice_no(prefix, new_company_id)
+
+        if new_invoice_no and new_invoice_no != old_invoice_no:
+            # Frontend sent a new explicit number (pre-fetched from /next-number).
+            # Verify it is not already taken in the new company.
+            dup_filter = {"invoice_no": new_invoice_no, "id": {"$ne": inv_id}, "company_id": new_company_id}
+            conflict = await db.invoices.find_one(dup_filter)
+            if conflict:
+                new_invoice_no = auto_no  # fall back to server-generated number
+        else:
+            # Frontend sent old number or nothing -- override with next-in-sequence.
+            new_invoice_no = auto_no
+
+        data["invoice_no"] = new_invoice_no
+        logger.info(
+            f"UPDATE invoice {inv_id}: company changed {old_company_id!r} -> {new_company_id!r}, "
+            f"invoice_no reassigned {old_invoice_no!r} -> {new_invoice_no!r}"
+        )
+    elif new_invoice_no and new_invoice_no != old_invoice_no:
+        # Same company, user manually changed the number -- duplicate check within same company.
+        dup_filter = {"invoice_no": new_invoice_no, "id": {"$ne": inv_id}}
+        if new_company_id:
+            dup_filter["company_id"] = new_company_id
         conflict = await db.invoices.find_one(dup_filter)
         if conflict:
             raise HTTPException(400, f"Invoice number '{new_invoice_no}' is already in use by another invoice")
-        # Allow the update — will be included in the $set below
+        # Allow the update -- will be included in the $set below
     elif not new_invoice_no:
         # If empty string sent, keep the original number
         data["invoice_no"] = old_invoice_no
 
-    # ── Strip truly immutable fields ─────────────────────────────────────────
+    # -- Strip truly immutable fields -------------------------------------------
     for f in ("id", "created_by", "created_at", "amount_paid", "pdf_drive_link"):
         data.pop(f, None)
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     data = _compute_invoice_totals(data)
     data["amount_due"] = round(data["grand_total"] - ex.get("amount_paid", 0), 2)
-    logger.info(f"UPDATE invoice {inv_id}: $set keys = {list(data.keys())}, invoice_no in payload = {'invoice_no' in data}, invoice_no value = {data.get('invoice_no', 'NOT PRESENT')}")
+    logger.info(
+        f"UPDATE invoice {inv_id}: $set keys = {list(data.keys())}, "
+        f"invoice_no = {data.get('invoice_no', 'NOT PRESENT')!r}, "
+        f"company_id = {data.get('company_id', 'NOT PRESENT')!r}"
+    )
     await db.invoices.update_one({"id": inv_id}, {"$set": data})
     return await db.invoices.find_one({"id": inv_id}, {"_id": 0})
-
 
 @router.delete("/invoices/bulk-delete")
 async def bulk_delete_invoices(ids: List[str], current_user: User = Depends(check_module_permission("invoicing", "delete"))):
