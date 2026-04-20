@@ -3109,7 +3109,14 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                 <div><p className="text-white/50 text-[10px] uppercase tracking-widest">{editingInv?.id ? `Edit · ${editingInv.invoice_no}` : editingInv ? 'Duplicate Document' : 'New Document'}</p><h2 className="text-white font-bold text-xl">{editingInv?.id ? 'Edit Invoice' : editingInv ? 'Duplicate Invoice' : 'Create Invoice / Estimate'}</h2></div>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
-                <Select value={form.invoice_type} onValueChange={async v => { setField('invoice_type', v); if (form.company_id && !editingInv?.id) { const n = await fetchNextInvoiceNo(form.company_id, v); if (n) setField('invoice_no', n); } }}>
+                <Select value={form.invoice_type} onValueChange={async v => {
+                  setField('invoice_type', v);
+                  if (form.company_id) {
+                    // Always refresh when type changes: for new invoices, or if company was changed during this edit session
+                    const n = await fetchNextInvoiceNo(form.company_id, v);
+                    if (n) setField('invoice_no', n);
+                  }
+                }}>
                   <SelectTrigger className="w-44 h-9 rounded-xl border-white/20 bg-white/10 text-white text-xs font-semibold"><SelectValue /></SelectTrigger>
                   <SelectContent>{INV_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
                 </Select>
@@ -3166,11 +3173,20 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                       <Select value={form.company_id} onValueChange={async v => {
                         const s = getInvSettings(v);
                         const co = (companies || []).find(c => c.id === v);
-                        const nextNo = !editingInv?.id ? (await fetchNextInvoiceNo(v, form.invoice_type) || '') : '';
+                        const prevCompanyId = form.company_id;
+                        const companyChanged = prevCompanyId && prevCompanyId !== v;
+                        // Fetch next invoice number when:
+                        //   1. Creating a new invoice and no number yet, OR
+                        //   2. Editing an existing invoice and the company changed
+                        const shouldFetchNextNo = (!editingInv?.id && !form.invoice_no) || companyChanged;
+                        const nextNo = shouldFetchNextNo ? (await fetchNextInvoiceNo(v, form.invoice_type) || '') : '';
+                        if (companyChanged && nextNo) {
+                          toast.info(`Invoice number updated to ${nextNo} for the new company`, { duration: 3000 });
+                        }
                         setForm(p => ({
                           ...p,
                           company_id: v,
-                          invoice_no: (!editingInv?.id && !p.invoice_no) ? nextNo : p.invoice_no,
+                          invoice_no: shouldFetchNextNo ? nextNo : p.invoice_no,
                           supply_state:        s.supply_state        || p.supply_state,
                           notes:               s.default_notes       || p.notes,
                           terms_conditions:    s.default_terms       || p.terms_conditions,
