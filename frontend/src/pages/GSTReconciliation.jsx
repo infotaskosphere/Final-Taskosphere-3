@@ -965,7 +965,6 @@ const TABS = [
   { id:'mismatch',   label:'Amount Mismatch',icon:AlertTriangle, color:{ activeBg:'bg-amber-50 dark:bg-amber-900/20',   activeBorder:'border-amber-400',   activeText:'text-amber-700 dark:text-amber-300',   badge:'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'   }, desc:'Invoice number matches but invoice value or tax differs between Portal and Books.' },
   { id:'portalOnly', label:'In Portal Only', icon:Globe,         color:{ activeBg:'bg-blue-50 dark:bg-blue-900/20',     activeBorder:'border-blue-400',     activeText:'text-blue-700 dark:text-blue-300',     badge:'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'     }, desc:'Vendor uploaded to GST Portal but NOT in Books. Book these to avail ITC.' },
   { id:'booksOnly',  label:'In Books Only',  icon:BookOpen,      color:{ activeBg:'bg-rose-50 dark:bg-rose-900/20',     activeBorder:'border-rose-400',     activeText:'text-rose-700 dark:text-rose-300',     badge:'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'     }, desc:'In Books but vendor NOT filed on portal. ITC at risk — follow up with vendor.' },
-  { id:'checkOne',   label:'Check One',      icon:ArrowUpDown,   color:{ activeBg:'bg-violet-50 dark:bg-violet-900/20', activeBorder:'border-violet-400',   activeText:'text-violet-700 dark:text-violet-300', badge:'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300' }, desc:'Invoices where only the invoice prefix differs. Compare Portal vs Books side-by-side. Matching ones are moved to Matched (yellow); non-matching routed to their original category.' },
   { id:'checkOnce',  label:'Check Once',     icon:ScanSearch,    color:{ activeBg:'bg-orange-50 dark:bg-orange-900/20', activeBorder:'border-orange-400',   activeText:'text-orange-700 dark:text-orange-300', badge:'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300' }, desc:'⚠ Invoices where 3 or more parameters differ between Portal and Books. These require careful manual review — compare both sides, verify with the supplier, and correct discrepancies before filing.' },
   { id:'search',     label:'Search',         icon:ScanSearch,    color:{ activeBg:'bg-purple-50 dark:bg-purple-900/20', activeBorder:'border-purple-400',   activeText:'text-purple-700 dark:text-purple-300', badge:'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' }, desc:'Search across all invoices — matched, mismatched, portal-only and books-only — in one place.' },
 ];
@@ -1028,31 +1027,32 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched }) => {
 
   return (
     <div>
-      <div className="flex flex-wrap gap-4 mb-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 text-sm">
-        <span className="text-slate-500">Records: <strong className="text-slate-700 dark:text-slate-200">{records.length}</strong></span>
-        <span className="text-slate-500">Total Value: <strong className="text-slate-700 dark:text-slate-200">₹{fmt(totalValue)}</strong></span>
-        <span className="text-slate-500">Total Tax: <strong className="text-slate-700 dark:text-slate-200">₹{fmt(totalTax)}</strong></span>
+      <div className="flex flex-wrap gap-x-4 gap-y-2 mb-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 text-sm">
+        <span className="text-slate-500 whitespace-nowrap">Records: <strong className="text-slate-700 dark:text-slate-200">{records.length}</strong></span>
+        <span className="text-slate-500 whitespace-nowrap">Total Value: <strong className="text-slate-700 dark:text-slate-200">₹{fmt(totalValue)}</strong></span>
+        <span className="text-slate-500 whitespace-nowrap">Total Tax: <strong className="text-slate-700 dark:text-slate-200">₹{fmt(totalTax)}</strong></span>
         {tabId === 'matched' && (
-          <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 text-xs">
-            <span className="w-3 h-3 rounded-sm bg-yellow-200 dark:bg-yellow-700 inline-block border border-yellow-400"/>
-            Yellow rows = prefix-only difference (values match) — can delete
+          <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 text-xs whitespace-nowrap">
+            <span className="w-3 h-3 rounded-sm bg-yellow-200 dark:bg-yellow-700 inline-block border border-yellow-400 flex-shrink-0"/>
+            Yellow = prefix differs, values match
           </span>
         )}
         {tabId === 'matched' && records.some(r => r.normalizedMatch) && (
-          <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 text-xs">
-            <span className="w-3 h-3 rounded-full bg-indigo-200 dark:bg-indigo-700 inline-block border border-indigo-400"/>
-            <span className="font-semibold">auto-matched ✓</span> = portal &amp; books invoice numbers differ in format (e.g. T1326 ↔ 1326) but are the same invoice
+          <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 text-xs whitespace-nowrap">
+            <span className="w-3 h-3 rounded-full bg-indigo-200 dark:bg-indigo-700 inline-block border border-indigo-400 flex-shrink-0"/>
+            <strong>auto-matched ✓</strong> = portal &amp; books numbers differ in format (e.g. T1326 ↔ 1326)
           </span>
         )}
         {tabId === 'matched' && records.some(r => r.manualMatch) && (
-          <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 text-xs">
-            <span className="w-3 h-3 rounded-full bg-indigo-200 dark:bg-indigo-700 inline-block border border-indigo-400"/>
-            <span className="font-semibold">✓ Manual</span> = manually confirmed matched
+          <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 text-xs whitespace-nowrap">
+            <span className="w-3 h-3 rounded-full bg-indigo-200 dark:bg-indigo-700 inline-block border border-indigo-400 flex-shrink-0"/>
+            <strong>✓ Manual</strong> = manually confirmed matched
           </span>
         )}
-          <span className="flex items-center gap-1 text-violet-600 dark:text-violet-400 text-xs">
-            <span className="w-3 h-3 rounded-full bg-violet-200 dark:bg-violet-700 inline-block border border-violet-400"/>
-            <span className="font-semibold">RCM</span> badge = Reverse Charge flag differs in portal vs books (financially matched)
+        {tabId === 'matched' && records.some(r => r.rcMismatch) && (
+          <span className="flex items-center gap-1 text-violet-600 dark:text-violet-400 text-xs whitespace-nowrap">
+            <span className="w-3 h-3 rounded-full bg-violet-200 dark:bg-violet-700 inline-block border border-violet-400 flex-shrink-0"/>
+            <strong>RCM</strong> = Reverse Charge flag differs (financially matched)
           </span>
         )}
       </div>
@@ -2456,7 +2456,7 @@ export default function GSTReconciliation() {
 
   const handleReset = () => { setPortalFile(null); setBooksFile(null); setResults(null); setPeriod(''); };
 
-  const activeRecords = results && activeTab !== 'search' && activeTab !== 'checkOne' && activeTab !== 'checkOnce'
+  const activeRecords = results && activeTab !== 'search' && activeTab !== 'checkOnce'
     ? { matched:results.matched, mismatch:results.mismatch, portalOnly:results.portalOnly, booksOnly:results.booksOnly }[activeTab] || []
     : [];
   const activeTabMeta = TABS.find(t => t.id === activeTab);
@@ -2688,13 +2688,11 @@ export default function GSTReconciliation() {
                 );
               })()}
 
-              {/* Summary cards */}
+              {/* Summary cards — 5 non-search tabs: Matched, Mismatch, Portal Only, Books Only, Check Once */}
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
                 {TABS.filter(t => t.id !== 'search').map(tab => {
                   const count = results[tab.id]?.length || 0;
-                  const val = tab.id === 'checkOne'
-                    ? (results.checkOne||[]).reduce((s,r) => s+(r.portal?.invoiceValue||0), 0)
-                    : (results[tab.id]||[]).reduce((s,r) => s+((tab.id==='booksOnly'?r.books:r.portal)?.invoiceValue||0), 0);
+                  const val = (results[tab.id]||[]).reduce((s,r) => s+((tab.id==='booksOnly'?r.books:r.portal)?.invoiceValue||0), 0);
                   const isActive = activeTab === tab.id;
                   return (
                     <motion.div key={tab.id} whileHover={{y:-2}} onClick={()=>setActiveTab(tab.id)}
@@ -2718,13 +2716,9 @@ export default function GSTReconciliation() {
               <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
                 <div className="flex overflow-x-auto border-b border-slate-200 dark:border-slate-700 px-2 pt-2">
                   {TABS.map(tab => {
-                    const isSearch  = tab.id === 'search';
-                    const isCheckOne = tab.id === 'checkOne';
-                    const count = isSearch
-                      ? (results.matched.length + results.mismatch.length + results.portalOnly.length + results.booksOnly.length + (results.checkOne?.length||0))
-                      : isCheckOne
-                        ? (results.checkOne?.length || 0)
-                        : results[tab.id]?.length || 0;
+                    const count = tab.id === 'search'
+                      ? (results.matched.length + results.mismatch.length + results.portalOnly.length + results.booksOnly.length + (results.checkOnce?.length||0))
+                      : results[tab.id]?.length || 0;
                     const isActive = activeTab === tab.id;
                     return (
                       <button key={tab.id} onClick={()=>setActiveTab(tab.id)}
@@ -2743,16 +2737,14 @@ export default function GSTReconciliation() {
                   </div>
                   {activeTab === 'search'
                     ? <GlobalSearchTab key="search" results={results}/>
-                    : activeTab === 'checkOne'
-                      ? <CheckOneTab key="checkOne" records={results.checkOne||[]}/>
-                      : activeTab === 'checkOnce'
-                        ? <CheckOnceTab key="checkOnce" records={results.checkOnce||[]}/>
-                        : <ResultTable
-                            key={activeTab}
-                            tabId={activeTab}
-                            records={activeRecords}
-                            onMarkMatched={['mismatch','portalOnly','booksOnly'].includes(activeTab) ? (r) => handleMarkMatched(r, activeTab) : undefined}
-                          />
+                    : activeTab === 'checkOnce'
+                      ? <CheckOnceTab key="checkOnce" records={results.checkOnce||[]}/>
+                      : <ResultTable
+                          key={activeTab}
+                          tabId={activeTab}
+                          records={activeRecords}
+                          onMarkMatched={['mismatch','portalOnly','booksOnly'].includes(activeTab) ? (r) => handleMarkMatched(r, activeTab) : undefined}
+                        />
                   }
                 </div>
               </div>
