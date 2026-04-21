@@ -1712,6 +1712,118 @@ const GlobalSearchTab = ({ results }) => {
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   CHECK ONCE TAB — 3+ parameter mismatches requiring careful manual review
+═══════════════════════════════════════════════════════════════════════════ */
+const CheckOnceTab = ({ records }) => {
+  const [search, setSearch] = useState('');
+  const [page, setPage]     = useState(1);
+
+  const filtered = records.filter(r => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      (r.portal?.gstin||'').toLowerCase().includes(q) ||
+      (r.portal?.invoiceNoRaw||'').toLowerCase().includes(q) ||
+      (r.books?.invoiceNoRaw||'').toLowerCase().includes(q) ||
+      (r.portal?.tradeOrLegalName||'').toLowerCase().includes(q)
+    );
+  });
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paged      = filtered.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE);
+
+  if (records.length === 0) return (
+    <div className="flex flex-col items-center py-16 text-slate-400">
+      <CheckCircle2 className="h-12 w-12 mb-3 text-slate-300"/>
+      <p className="font-medium text-slate-500">No major multi-field mismatches</p>
+      <p className="text-xs mt-1">All invoices have fewer than 3 differing parameters.</p>
+    </div>
+  );
+
+  return (
+    <div>
+      <div className="flex items-start gap-2 p-3 mb-4 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl text-xs text-orange-700 dark:text-orange-300">
+        <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0"/>
+        <span><strong>Check Once:</strong> These invoices differ in <strong>3 or more parameters</strong> between Portal and Books. Each needs careful manual verification — compare with the original supplier invoice before taking action.</span>
+      </div>
+      <div className="flex flex-wrap gap-4 mb-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 text-sm">
+        <span className="text-slate-500">Records: <strong className="text-slate-700 dark:text-slate-200">{records.length}</strong></span>
+        <span className="text-slate-500">Total Value (Portal): <strong className="text-slate-700 dark:text-slate-200">₹{fmt(records.reduce((s,r)=>s+(r.portal?.invoiceValue||0),0))}</strong></span>
+      </div>
+      <div className="relative mb-3">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400"/>
+        <input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Search GSTIN, Invoice No, Party Name…" className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+      </div>
+      <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+        <table className="w-full text-xs min-w-[1100px]">
+          <thead>
+            <tr className="bg-orange-50 dark:bg-orange-900/20 border-b border-orange-200 dark:border-orange-800">
+              <th className="px-3 py-2.5 text-left font-semibold text-slate-600">#</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-slate-600">GSTIN</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-slate-600">Party Name</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-blue-600">Portal Invoice</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-violet-600">Books Invoice</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-slate-600">Date</th>
+              <th className="px-3 py-2.5 text-right font-semibold text-blue-600">Portal Value</th>
+              <th className="px-3 py-2.5 text-right font-semibold text-violet-600">Books Value</th>
+              <th className="px-3 py-2.5 text-right font-semibold text-orange-600">Diff (₹)</th>
+              <th className="px-3 py-2.5 text-right font-semibold text-blue-600">Portal Tax</th>
+              <th className="px-3 py-2.5 text-right font-semibold text-violet-600">Books Tax</th>
+              <th className="px-3 py-2.5 text-right font-semibold text-orange-600">Tax Diff</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-orange-600">Mismatch Fields</th>
+            </tr>
+          </thead>
+          <tbody>
+            {paged.length === 0 && (
+              <tr><td colSpan={13} className="py-12 text-center text-slate-400 text-sm">No records found</td></tr>
+            )}
+            {paged.map((r, idx) => {
+              const p = r.portal, b = r.books;
+              const n = (page-1)*PAGE_SIZE + idx + 1;
+              return (
+                <tr key={r.key||idx} className="border-b border-slate-100 dark:border-slate-700/50 bg-orange-50/40 dark:bg-orange-900/10 hover:bg-orange-50 dark:hover:bg-orange-900/20">
+                  <td className="px-3 py-2.5 text-slate-400">{n}</td>
+                  <td className="px-3 py-2.5 font-mono text-[11px] text-slate-600 dark:text-slate-300">{p?.gstin || b?.gstin}</td>
+                  <td className="px-3 py-2.5 text-slate-700 dark:text-slate-200 max-w-[120px] truncate">{p?.tradeOrLegalName || '—'}</td>
+                  <td className="px-3 py-2.5 font-mono font-semibold text-blue-600 dark:text-blue-400">{p?.invoiceNoRaw || '—'}</td>
+                  <td className="px-3 py-2.5 font-mono font-semibold text-violet-600 dark:text-violet-400">{b?.invoiceNoRaw || '—'}</td>
+                  <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{p?.invoiceDate || b?.invoiceDate}</td>
+                  <td className="px-3 py-2.5 text-right text-blue-700 dark:text-blue-300 font-medium">₹{fmt(p?.invoiceValue)}</td>
+                  <td className="px-3 py-2.5 text-right text-violet-700 dark:text-violet-300 font-medium">₹{fmt(b?.invoiceValue)}</td>
+                  <td className={`px-3 py-2.5 text-right font-bold ${r.valueDiff > 0 ? 'text-blue-600' : 'text-rose-600'}`}>
+                    {r.valueDiff > 0 ? '+' : ''}{fmt(r.valueDiff)}
+                  </td>
+                  <td className="px-3 py-2.5 text-right text-blue-600 dark:text-blue-400">₹{fmt((p?.igst||0)+(p?.cgst||0)+(p?.sgst||0))}</td>
+                  <td className="px-3 py-2.5 text-right text-violet-600 dark:text-violet-400">₹{fmt((b?.igst||0)+(b?.cgst||0)+(b?.sgst||0))}</td>
+                  <td className={`px-3 py-2.5 text-right font-bold ${r.taxDiff > 0 ? 'text-blue-600' : 'text-rose-600'}`}>
+                    {r.taxDiff > 0 ? '+' : ''}{fmt(r.taxDiff)}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {(r.mismatchFields||[]).map(f => (
+                      <span key={f} className="inline-block mr-1 mb-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300 whitespace-nowrap">{f}</span>
+                    ))}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between mt-3 text-xs">
+          <span className="text-slate-500">Showing {(page-1)*PAGE_SIZE+1}–{Math.min(page*PAGE_SIZE, filtered.length)} of {filtered.length}</span>
+          <div className="flex gap-2">
+            <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1} className="px-3 py-1.5 rounded-lg border text-xs disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800">Prev</button>
+            <span className="py-1.5 text-slate-500">Page {page}/{totalPages}</span>
+            <button onClick={()=>setPage(p=>Math.min(totalPages,p+1))} disabled={page===totalPages} className="px-3 py-1.5 rounded-lg border text-xs disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800">Next</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
    CLIENT SELECTOR — searchable dropdown linked to the clients DB
 ═══════════════════════════════════════════════════════════════════════════ */
 const ClientSelector = ({ clients, selectedId, onSelect }) => {
@@ -2056,7 +2168,7 @@ export default function GSTReconciliation() {
 
   const handleReset = () => { setPortalFile(null); setBooksFile(null); setResults(null); setPeriod(''); };
 
-  const activeRecords = results && activeTab !== 'search' && activeTab !== 'checkOne'
+  const activeRecords = results && activeTab !== 'search' && activeTab !== 'checkOne' && activeTab !== 'checkOnce'
     ? { matched:results.matched, mismatch:results.mismatch, portalOnly:results.portalOnly, booksOnly:results.booksOnly }[activeTab] || []
     : [];
   const activeTabMeta = TABS.find(t => t.id === activeTab);
@@ -2241,6 +2353,44 @@ export default function GSTReconciliation() {
                 </div>
               )}
 
+              {/* ITC Summary Banner */}
+              {results && (() => {
+                const itcEligible = results.matched.reduce((s,r) => {
+                  const inv = r.portal;
+                  if (!inv) return s;
+                  return s + (inv.igst||0) + (inv.cgst||0) + (inv.sgst||0);
+                }, 0);
+                const itcAtRisk = results.booksOnly.reduce((s,r) => {
+                  const inv = r.books;
+                  if (!inv) return s;
+                  return s + (inv.igst||0) + (inv.cgst||0) + (inv.sgst||0);
+                }, 0);
+                const itcPending = results.portalOnly.reduce((s,r) => {
+                  const inv = r.portal;
+                  if (!inv) return s;
+                  return s + (inv.igst||0) + (inv.cgst||0) + (inv.sgst||0);
+                }, 0);
+                return (
+                  <div className="grid grid-cols-3 gap-3 mb-4">
+                    <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl border border-emerald-200 dark:border-emerald-800 p-3">
+                      <p className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">ITC Claimable</p>
+                      <p className="text-lg font-bold text-emerald-700 dark:text-emerald-300 mt-0.5">₹{fmt(itcEligible)}</p>
+                      <p className="text-[10px] text-emerald-600 dark:text-emerald-400">From {results.matched.length} matched invoices</p>
+                    </div>
+                    <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800 p-3">
+                      <p className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">ITC to Book</p>
+                      <p className="text-lg font-bold text-blue-700 dark:text-blue-300 mt-0.5">₹{fmt(itcPending)}</p>
+                      <p className="text-[10px] text-blue-600 dark:text-blue-400">From {results.portalOnly.length} portal-only invoices</p>
+                    </div>
+                    <div className="bg-rose-50 dark:bg-rose-900/20 rounded-xl border border-rose-200 dark:border-rose-800 p-3">
+                      <p className="text-[10px] font-semibold text-rose-600 dark:text-rose-400 uppercase tracking-wide">ITC at Risk</p>
+                      <p className="text-lg font-bold text-rose-700 dark:text-rose-300 mt-0.5">₹{fmt(itcAtRisk)}</p>
+                      <p className="text-[10px] text-rose-600 dark:text-rose-400">From {results.booksOnly.length} books-only invoices</p>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Summary cards */}
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
                 {TABS.filter(t => t.id !== 'search').map(tab => {
@@ -2298,7 +2448,9 @@ export default function GSTReconciliation() {
                     ? <GlobalSearchTab key="search" results={results}/>
                     : activeTab === 'checkOne'
                       ? <CheckOneTab key="checkOne" records={results.checkOne||[]}/>
-                      : <ResultTable key={activeTab} tabId={activeTab} records={activeRecords}/>
+                      : activeTab === 'checkOnce'
+                        ? <CheckOnceTab key="checkOnce" records={results.checkOnce||[]}/>
+                        : <ResultTable key={activeTab} tabId={activeTab} records={activeRecords}/>
                   }
                 </div>
               </div>
