@@ -7,7 +7,7 @@ import {
   Users, LogOut, Menu, Calendar, Activity, ChevronDown,
   PanelLeftClose, PanelLeftOpen, Target, Sun, Moon, MapPin,
   Settings, Mail, Receipt, X, KeyRound,
-  CreditCard, Fingerprint, Bell, ShieldCheck,
+  CreditCard, Fingerprint, Bell, ShieldCheck, ArrowLeftRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -40,10 +40,17 @@ const NAV_GROUPS = [
       { path: '/tasks',      icon: CheckSquare,     label: 'Tasks' },
       { path: '/todos',      icon: CheckSquare,     label: 'To Do' },
       { path: '/attendance', icon: Clock,           label: 'Attendance' },
-      { path: '/reminders', icon: Bell,            label: 'Reminders' },
-      { path: '/duedates',   icon: Calendar,      label: 'Compliance Calendar' },
-      { path: '/compliance', icon: ShieldCheck,   label: 'Compliance Tracker', permission: 'can_view_compliance' },
-      { path: '/visits',     icon: MapPin,        label: 'Client Visits' },
+      { path: '/reminders',  icon: Bell,            label: 'Reminders' },
+      { path: '/visits',     icon: MapPin,          label: 'Client Visits' },
+    ],
+  },
+  {
+    id: 'compliance',
+    dividerLabel: 'Compliance',
+    items: [
+      { path: '/duedates',           icon: Calendar,       label: 'Compliance Calendar' },
+      { path: '/compliance',         icon: ShieldCheck,    label: 'Compliance Tracker',  permission: 'can_view_compliance' },
+      { path: '/gst-reconciliation', icon: ArrowLeftRight, label: 'GST Reconciliation' },
     ],
   },
   {
@@ -80,8 +87,8 @@ const NAV_GROUPS = [
     items: [
       // Reports — <Protected> route, visible to all roles (data scoped server-side)
       { path: '/reports',        icon: BarChart3,  label: 'Reports' },
-      { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log',  permission: 'can_view_audit_logs'     },
-      { path: '/users',          icon: Users,      label: 'Users',           permission: 'can_view_user_page'      },
+      { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log',  permission: 'can_view_audit_logs'  },
+      { path: '/users',          icon: Users,      label: 'Users',           permission: 'can_view_user_page'   },
     ],
   },
   {
@@ -89,7 +96,7 @@ const NAV_GROUPS = [
     dividerLabel: 'Settings',
     items: [
       // Settings — <Protected> routes, visible to all roles
-      { path: '/settings/email', icon: Mail,     label: 'Email Accounts'   },
+      { path: '/settings/email',   icon: Mail,     label: 'Email Accounts'   },
       { path: '/settings/general', icon: Settings, label: 'General Settings' },
     ],
   },
