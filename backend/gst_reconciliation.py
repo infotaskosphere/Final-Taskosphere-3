@@ -58,10 +58,26 @@ def _to_num(val: Any) -> float:
 
 
 def _normalise_invoice(val: Any) -> str:
-    """Strip leading zeros from purely numeric invoice numbers; else uppercase+trim."""
+    """
+    Normalise an invoice number for matching:
+      - Purely numeric → strip leading zeros  (e.g. "0060134" → "60134")
+      - ALPHA_PREFIX + separator + NUMBER      (e.g. "SW-60134", "INV/60134")
+        → strip the alphabetic prefix and treat as numeric  → "60134"
+      - Anything else → uppercase + trim (exact match required)
+
+    This handles the common case where the GST portal stores the vendor's
+    full invoice number (e.g. "SW-60134") while the purchase register
+    stores only the numeric part ("60134").
+    """
     s = _to_str(val).upper().replace(" ", "")
     if s.isdigit():
         return s.lstrip("0") or "0"
+    # Handle "ALPHA-NUMBER" or "ALPHA/NUMBER" patterns (e.g. SW-60134, INV/1234)
+    for sep in ("-", "/"):
+        if sep in s:
+            prefix, _, suffix = s.partition(sep)
+            if prefix.isalpha() and suffix.isdigit():
+                return suffix.lstrip("0") or "0"
     return s
 
 
