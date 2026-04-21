@@ -264,7 +264,7 @@ function reconcile(portalData, booksData) {
   portalData.forEach(inv => { const k = `${inv.gstin}__${inv.invoiceNo}`; if (!pm.has(k)) pm.set(k, inv); });
   booksData.forEach(inv  => { const k = `${inv.gstin}__${inv.invoiceNo}`; if (!bm.has(k)) bm.set(k, inv); });
 
-  const matched = [], mismatch = [], portalOnly = [], booksOnly = [], checkOne = [], checkOnce = [];
+  const matched = [], mismatch = [], portalOnly = [], booksOnly = [], checkOne = [];
 
   // Track which books keys have been consumed
   const bUsed = new Set();
@@ -274,21 +274,11 @@ function reconcile(portalData, booksData) {
       bUsed.add(key);
       const b = bm.get(key);
       const { count, fields, rcMismatch } = countMismatchFields(p, b);
-      // Flag if raw invoice numbers differ (e.g. portal "T1326" matched books "1326" via normalisation)
       const normalizedMatch = p.invoiceNoRaw !== b.invoiceNoRaw;
       if (count === 0) {
         matched.push({ portal: p, books: b, key, rcMismatch, normalizedMatch });
-      } else if (count >= 3) {
-        // 3+ parameter differences → Check Once (needs manual review)
-        checkOnce.push({
-          portal: p, books: b, key,
-          mismatchFields: fields,
-          mismatchCount: count,
-          rcMismatch, normalizedMatch,
-          valueDiff: p.invoiceValue - b.invoiceValue,
-          taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst),
-        });
       } else {
+        // All mismatches (1 field or 10 fields) go to Amount Mismatch
         mismatch.push({
           portal: p, books: b, key,
           mismatchFields: fields,
@@ -299,7 +289,6 @@ function reconcile(portalData, booksData) {
         });
       }
     } else {
-      // Not matched by normalised invoice no → try prefix-only match against unmatched books
       portalOnly.push({ portal: p, key });
     }
   });
@@ -307,7 +296,6 @@ function reconcile(portalData, booksData) {
   bm.forEach((b, key) => { if (!pm.has(key)) booksOnly.push({ books: b, key }); });
 
   // ── PREFIX-ONLY MATCH PASS ──────────────────────────────────────────────
-  // For each portal-only invoice, scan books-only for a prefix-only match
   const portalOnlyFinal = [];
   const booksOnlyUsed   = new Set();
 
@@ -323,32 +311,17 @@ function reconcile(portalData, booksData) {
       const { count, fields, rcMismatch } = countMismatchFields(p, b);
       const allMatch = count === 0 &&
         (!p.invoiceDate || !b.invoiceDate || p.invoiceDate === b.invoiceDate);
-
-      if (count >= 3) {
-        // Prefix differs AND 3+ value mismatches → Check Once
-        checkOnce.push({
-          portal: p, books: b, key: po.key,
-          prefixMismatch: true, allOtherMatch: false,
-          portalInvRaw: p.invoiceNoRaw, booksInvRaw: b.invoiceNoRaw,
-          mismatchFields: ['Invoice No (prefix)', ...fields],
-          mismatchCount: count + 1,
-          rcMismatch,
-          valueDiff: p.invoiceValue - b.invoiceValue,
-          taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst),
-        });
-      } else {
-        checkOne.push({
-          portal: p, books: b, key: po.key,
-          prefixMismatch: true,
-          portalInvRaw: p.invoiceNoRaw, booksInvRaw: b.invoiceNoRaw,
-          allOtherMatch: allMatch,
-          rcMismatch,
-          mismatchFields: allMatch ? ['Invoice No (prefix only)'] : ['Invoice No (prefix)', ...fields],
-          mismatchCount: allMatch ? 1 : count + 1,
-          valueDiff: p.invoiceValue - b.invoiceValue,
-          taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst),
-        });
-      }
+      checkOne.push({
+        portal: p, books: b, key: po.key,
+        prefixMismatch: true,
+        portalInvRaw: p.invoiceNoRaw, booksInvRaw: b.invoiceNoRaw,
+        allOtherMatch: allMatch,
+        rcMismatch,
+        mismatchFields: allMatch ? ['Invoice No (prefix only)'] : ['Invoice No (prefix)', ...fields],
+        mismatchCount: allMatch ? 1 : count + 1,
+        valueDiff: p.invoiceValue - b.invoiceValue,
+        taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst),
+      });
     } else {
       portalOnlyFinal.push(po);
     }
@@ -356,19 +329,22 @@ function reconcile(portalData, booksData) {
 
   const booksOnlyFinal = booksOnly.filter(bo => !booksOnlyUsed.has(bo.key));
 
-  // checkOne records where allOtherMatch=true → also add to matched (yellow-highlighted, deletable)
+  // Prefix-matched with all values matching → goes to Matched (yellow row)
   const matchedFinal = [
     ...matched,
     ...checkOne.filter(c => c.allOtherMatch).map(c => ({ ...c, prefixMismatch: true })),
   ];
+  // Prefix-matched with value diffs → goes to Amount Mismatch
+  const mismatchFinal = [
+    ...mismatch,
+    ...checkOne.filter(c => !c.allOtherMatch),
+  ];
 
   return {
     matched:    matchedFinal,
-    mismatch,
+    mismatch:   mismatchFinal,
     portalOnly: portalOnlyFinal,
     booksOnly:  booksOnlyFinal,
-    checkOne,
-    checkOnce,   // NEW: 3+ parameter mismatches
   };
 }
 
@@ -968,12 +944,11 @@ function exportExcel(results, company, period) {
    UI CONSTANTS
 ═══════════════════════════════════════════════════════════════════════════ */
 const TABS = [
-  { id:'matched',    label:'Matched',        icon:CheckCircle2, color:{ activeBg:'bg-emerald-50 dark:bg-emerald-900/20', activeBorder:'border-emerald-400', activeText:'text-emerald-700 dark:text-emerald-300', badge:'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' }, desc:'Invoices present in both GSTR-2B and Books with matching amounts. No action required. Yellow-highlighted rows have invoice prefix differences but all values match.' },
-  { id:'mismatch',   label:'Amount Mismatch',icon:AlertTriangle, color:{ activeBg:'bg-amber-50 dark:bg-amber-900/20',   activeBorder:'border-amber-400',   activeText:'text-amber-700 dark:text-amber-300',   badge:'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'   }, desc:'Invoice number matches but invoice value or tax differs between Portal and Books.' },
-  { id:'portalOnly', label:'In Portal Only', icon:Globe,         color:{ activeBg:'bg-blue-50 dark:bg-blue-900/20',     activeBorder:'border-blue-400',     activeText:'text-blue-700 dark:text-blue-300',     badge:'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'     }, desc:'Vendor uploaded to GST Portal but NOT in Books. Book these to avail ITC.' },
-  { id:'booksOnly',  label:'In Books Only',  icon:BookOpen,      color:{ activeBg:'bg-rose-50 dark:bg-rose-900/20',     activeBorder:'border-rose-400',     activeText:'text-rose-700 dark:text-rose-300',     badge:'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'     }, desc:'In Books but vendor NOT filed on portal. ITC at risk — follow up with vendor.' },
-  { id:'checkOnce',  label:'Check Once',     icon:ScanSearch,    color:{ activeBg:'bg-orange-50 dark:bg-orange-900/20', activeBorder:'border-orange-400',   activeText:'text-orange-700 dark:text-orange-300', badge:'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300' }, desc:'⚠ Invoices where 3 or more parameters differ between Portal and Books. These require careful manual review — compare both sides, verify with the supplier, and correct discrepancies before filing.' },
-  { id:'search',     label:'Search',         icon:ScanSearch,    color:{ activeBg:'bg-purple-50 dark:bg-purple-900/20', activeBorder:'border-purple-400',   activeText:'text-purple-700 dark:text-purple-300', badge:'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' }, desc:'Search across all invoices — matched, mismatched, portal-only and books-only — in one place.' },
+  { id:'matched',    label:'Matched',        icon:CheckCircle2,  color:{ activeBg:'bg-emerald-50 dark:bg-emerald-900/20', activeBorder:'border-emerald-400', activeText:'text-emerald-700 dark:text-emerald-300', badge:'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' }, desc:'Invoices present in both GSTR-2B and Books with matching amounts. No action required.' },
+  { id:'mismatch',   label:'Amount Mismatch',icon:AlertTriangle,  color:{ activeBg:'bg-amber-50 dark:bg-amber-900/20',   activeBorder:'border-amber-400',   activeText:'text-amber-700 dark:text-amber-300',   badge:'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'   }, desc:'Invoice number matches but invoice value or tax differs between Portal and Books.' },
+  { id:'portalOnly', label:'In Portal Only', icon:Globe,          color:{ activeBg:'bg-blue-50 dark:bg-blue-900/20',     activeBorder:'border-blue-400',     activeText:'text-blue-700 dark:text-blue-300',     badge:'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'     }, desc:'Vendor uploaded to GST Portal but NOT in Books. Book these to avail ITC.' },
+  { id:'booksOnly',  label:'In Books Only',  icon:BookOpen,       color:{ activeBg:'bg-rose-50 dark:bg-rose-900/20',     activeBorder:'border-rose-400',     activeText:'text-rose-700 dark:text-rose-300',     badge:'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'     }, desc:'In Books but vendor NOT filed on portal. ITC at risk — follow up with vendor.' },
+  { id:'search',     label:'Search',         icon:ScanSearch,     color:{ activeBg:'bg-purple-50 dark:bg-purple-900/20', activeBorder:'border-purple-400',   activeText:'text-purple-700 dark:text-purple-300', badge:'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' }, desc:'Search across all invoices in one place.' },
 ];
 const PAGE_SIZE = 50;
 
@@ -1071,31 +1046,31 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched }) => {
         <table className="w-full text-xs min-w-[860px]">
           <thead>
             <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700">
-              <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300">#</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap w-8">#</th>
               <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">GSTIN</th>
-              {tabId !== 'booksOnly' && <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300">Party Name</th>}
+              {tabId !== 'booksOnly' && <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Party Name</th>}
               <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Invoice No</th>
-              <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300">Date</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Date</th>
               {tabId === 'mismatch' ? <>
-                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">Portal Value</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">Books Value</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-amber-600">Diff (₹)</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">Portal Tax</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">Books Tax</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-amber-600">Tax Diff (₹)</th>
-                <th className="px-3 py-2.5 text-left font-semibold text-amber-600">Diff Fields</th>
+                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Portal ₹</th>
+                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Books ₹</th>
+                <th className="px-3 py-2.5 text-right font-semibold text-amber-600 whitespace-nowrap">Diff ₹</th>
+                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">P.Tax</th>
+                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">B.Tax</th>
+                <th className="px-3 py-2.5 text-right font-semibold text-amber-600 whitespace-nowrap">Tax Diff</th>
+                <th className="px-3 py-2.5 text-left font-semibold text-amber-600 whitespace-nowrap">Fields</th>
               </> : <>
-                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">Invoice Value</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">Taxable</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">IGST</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">CGST</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">SGST</th>
-                {tabId === 'portalOnly' && <th className="px-3 py-2.5 text-center font-semibold text-slate-600 dark:text-slate-300">ITC</th>}
+                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Value</th>
+                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Taxable</th>
+                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">IGST</th>
+                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">CGST</th>
+                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">SGST</th>
+                {tabId === 'portalOnly' && <th className="px-3 py-2.5 text-center font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">ITC</th>}
               </>}
               {(tabId === 'mismatch' || tabId === 'portalOnly' || tabId === 'booksOnly') && (
                 <th className="px-3 py-2.5 text-center font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Status</th>
               )}
-              {onDelete && <th className="px-3 py-2.5 text-center font-semibold text-slate-400">Action</th>}
+              {onDelete && <th className="px-3 py-2.5 text-center font-semibold text-slate-400 whitespace-nowrap">Del</th>}
             </tr>
           </thead>
           <tbody>
@@ -1161,19 +1136,19 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched }) => {
                   </>}
                   {/* Per-row Matching / Not Matching status toggle */}
                   {(tabId === 'mismatch' || tabId === 'portalOnly' || tabId === 'booksOnly') && (
-                    <td className="px-3 py-2 text-center">
+                    <td className="px-2 py-2 text-center">
                       <div className="flex items-center justify-center gap-1">
                         {onMarkMatched ? (
                           <button
                             onClick={() => onMarkMatched(r)}
-                            title="Mark this invoice as manually matched"
-                            className="flex items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border border-emerald-200 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40 dark:text-emerald-400 dark:border-emerald-800 transition-colors whitespace-nowrap"
+                            title="Mark as matched"
+                            className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border border-emerald-200 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40 dark:text-emerald-400 dark:border-emerald-800 transition-colors whitespace-nowrap"
                           >
-                            <CheckCircle2 className="h-3 w-3"/> Matching
+                            <CheckCircle2 className="h-2.5 w-2.5 flex-shrink-0"/> Match
                           </button>
                         ) : null}
-                        <span className="flex items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-bold bg-rose-50 text-rose-500 border border-rose-200 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-800 whitespace-nowrap">
-                          <X className="h-3 w-3"/> Not Matching
+                        <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-500 border border-rose-200 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-800 whitespace-nowrap">
+                          <X className="h-2.5 w-2.5 flex-shrink-0"/> No
                         </span>
                       </div>
                     </td>
@@ -1797,117 +1772,6 @@ const GlobalSearchTab = ({ results }) => {
 };
 
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   CHECK ONCE TAB — 3+ parameter mismatches requiring careful manual review
-═══════════════════════════════════════════════════════════════════════════ */
-const CheckOnceTab = ({ records }) => {
-  const [search, setSearch] = useState('');
-  const [page, setPage]     = useState(1);
-
-  const filtered = records.filter(r => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    return (
-      (r.portal?.gstin||'').toLowerCase().includes(q) ||
-      (r.portal?.invoiceNoRaw||'').toLowerCase().includes(q) ||
-      (r.books?.invoiceNoRaw||'').toLowerCase().includes(q) ||
-      (r.portal?.tradeOrLegalName||'').toLowerCase().includes(q)
-    );
-  });
-
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const paged      = filtered.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE);
-
-  if (records.length === 0) return (
-    <div className="flex flex-col items-center py-16 text-slate-400">
-      <CheckCircle2 className="h-12 w-12 mb-3 text-slate-300"/>
-      <p className="font-medium text-slate-500">No major multi-field mismatches</p>
-      <p className="text-xs mt-1">All invoices have fewer than 3 differing parameters.</p>
-    </div>
-  );
-
-  return (
-    <div>
-      <div className="flex items-start gap-2 p-3 mb-4 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl text-xs text-orange-700 dark:text-orange-300">
-        <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0"/>
-        <span><strong>Check Once:</strong> These invoices differ in <strong>3 or more parameters</strong> between Portal and Books. Each needs careful manual verification — compare with the original supplier invoice before taking action.</span>
-      </div>
-      <div className="flex flex-wrap gap-4 mb-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 text-sm">
-        <span className="text-slate-500">Records: <strong className="text-slate-700 dark:text-slate-200">{records.length}</strong></span>
-        <span className="text-slate-500">Total Value (Portal): <strong className="text-slate-700 dark:text-slate-200">₹{fmt(records.reduce((s,r)=>s+(r.portal?.invoiceValue||0),0))}</strong></span>
-      </div>
-      <div className="relative mb-3">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400"/>
-        <input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Search GSTIN, Invoice No, Party Name…" className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500"/>
-      </div>
-      <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
-        <table className="w-full text-xs min-w-[1100px]">
-          <thead>
-            <tr className="bg-orange-50 dark:bg-orange-900/20 border-b border-orange-200 dark:border-orange-800">
-              <th className="px-3 py-2.5 text-left font-semibold text-slate-600">#</th>
-              <th className="px-3 py-2.5 text-left font-semibold text-slate-600">GSTIN</th>
-              <th className="px-3 py-2.5 text-left font-semibold text-slate-600">Party Name</th>
-              <th className="px-3 py-2.5 text-left font-semibold text-blue-600">Portal Invoice</th>
-              <th className="px-3 py-2.5 text-left font-semibold text-violet-600">Books Invoice</th>
-              <th className="px-3 py-2.5 text-left font-semibold text-slate-600">Date</th>
-              <th className="px-3 py-2.5 text-right font-semibold text-blue-600">Portal Value</th>
-              <th className="px-3 py-2.5 text-right font-semibold text-violet-600">Books Value</th>
-              <th className="px-3 py-2.5 text-right font-semibold text-orange-600">Diff (₹)</th>
-              <th className="px-3 py-2.5 text-right font-semibold text-blue-600">Portal Tax</th>
-              <th className="px-3 py-2.5 text-right font-semibold text-violet-600">Books Tax</th>
-              <th className="px-3 py-2.5 text-right font-semibold text-orange-600">Tax Diff</th>
-              <th className="px-3 py-2.5 text-left font-semibold text-orange-600">Mismatch Fields</th>
-            </tr>
-          </thead>
-          <tbody>
-            {paged.length === 0 && (
-              <tr><td colSpan={13} className="py-12 text-center text-slate-400 text-sm">No records found</td></tr>
-            )}
-            {paged.map((r, idx) => {
-              const p = r.portal, b = r.books;
-              const n = (page-1)*PAGE_SIZE + idx + 1;
-              return (
-                <tr key={r.key||idx} className="border-b border-slate-100 dark:border-slate-700/50 bg-orange-50/40 dark:bg-orange-900/10 hover:bg-orange-50 dark:hover:bg-orange-900/20">
-                  <td className="px-3 py-2.5 text-slate-400">{n}</td>
-                  <td className="px-3 py-2.5 font-mono text-[11px] text-slate-600 dark:text-slate-300">{p?.gstin || b?.gstin}</td>
-                  <td className="px-3 py-2.5 text-slate-700 dark:text-slate-200 max-w-[120px] truncate">{p?.tradeOrLegalName || '—'}</td>
-                  <td className="px-3 py-2.5 font-mono font-semibold text-blue-600 dark:text-blue-400">{p?.invoiceNoRaw || '—'}</td>
-                  <td className="px-3 py-2.5 font-mono font-semibold text-violet-600 dark:text-violet-400">{b?.invoiceNoRaw || '—'}</td>
-                  <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{p?.invoiceDate || b?.invoiceDate}</td>
-                  <td className="px-3 py-2.5 text-right text-blue-700 dark:text-blue-300 font-medium">₹{fmt(p?.invoiceValue)}</td>
-                  <td className="px-3 py-2.5 text-right text-violet-700 dark:text-violet-300 font-medium">₹{fmt(b?.invoiceValue)}</td>
-                  <td className={`px-3 py-2.5 text-right font-bold ${r.valueDiff > 0 ? 'text-blue-600' : 'text-rose-600'}`}>
-                    {r.valueDiff > 0 ? '+' : ''}{fmt(r.valueDiff)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right text-blue-600 dark:text-blue-400">₹{fmt((p?.igst||0)+(p?.cgst||0)+(p?.sgst||0))}</td>
-                  <td className="px-3 py-2.5 text-right text-violet-600 dark:text-violet-400">₹{fmt((b?.igst||0)+(b?.cgst||0)+(b?.sgst||0))}</td>
-                  <td className={`px-3 py-2.5 text-right font-bold ${r.taxDiff > 0 ? 'text-blue-600' : 'text-rose-600'}`}>
-                    {r.taxDiff > 0 ? '+' : ''}{fmt(r.taxDiff)}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    {(r.mismatchFields||[]).map(f => (
-                      <span key={f} className="inline-block mr-1 mb-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300 whitespace-nowrap">{f}</span>
-                    ))}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-3 text-xs">
-          <span className="text-slate-500">Showing {(page-1)*PAGE_SIZE+1}–{Math.min(page*PAGE_SIZE, filtered.length)} of {filtered.length}</span>
-          <div className="flex gap-2">
-            <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1} className="px-3 py-1.5 rounded-lg border text-xs disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800">Prev</button>
-            <span className="py-1.5 text-slate-500">Page {page}/{totalPages}</span>
-            <button onClick={()=>setPage(p=>Math.min(totalPages,p+1))} disabled={page===totalPages} className="px-3 py-1.5 rounded-lg border text-xs disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800">Next</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
 
 /* ═══════════════════════════════════════════════════════════════════════════
    CLIENT SELECTOR — searchable dropdown linked to the clients DB
@@ -2345,248 +2209,219 @@ const ITCDetailModal = ({ type, results, onClose }) => {
 /* ═══════════════════════════════════════════════════════════════════════════
    SIDE-BY-SIDE COMPARE — Portal Only vs Books Only with smart pairing
 ═══════════════════════════════════════════════════════════════════════════ */
-const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) => {
-  const [search, setSearch]         = useState('');
-  const [gstinFilter, setGstinFilter] = useState('');
-  const [gstinNames, setGstinNames] = useState({});   // gstin → name from lookup
-  const [lookingUp, setLookingUp]   = useState({});
+const CONF_COLOR = { high:'bg-emerald-100 text-emerald-700 border-emerald-200', medium:'bg-amber-100 text-amber-700 border-amber-200', low:'bg-orange-100 text-orange-700 border-orange-200', none:'bg-slate-100 text-slate-400 border-slate-200' };
+const CONF_LABEL = { high:'✓ Match', medium:'≈ Near', low:'~ Possible', none:'—' };
 
-  /* ── Build a name map from portal data (free, no API needed) ── */
+const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) => {
+  const [search, setSearch]             = useState('');
+  const [gstinFilter, setGstinFilter]   = useState('');
+  const [gstinNames, setGstinNames]     = useState({});
+  const [lookingUp, setLookingUp]       = useState({});
+  const [confirmed, setConfirmed]       = useState(new Set());
+
+  /* Portal name map — free lookup from already-loaded data */
   const portalNameMap = React.useMemo(() => {
     const m = {};
-    portalOnly.forEach(r => {
-      if (r.portal?.gstin && r.portal?.tradeOrLegalName)
-        m[r.portal.gstin] = r.portal.tradeOrLegalName;
-    });
+    portalOnly.forEach(r => { if (r.portal?.gstin && r.portal?.tradeOrLegalName) m[r.portal.gstin] = r.portal.tradeOrLegalName; });
     return m;
   }, [portalOnly]);
 
-  /* ── Smart pairing: for each books-only, find best portal-only match ── */
+  /* Smart pairing */
   const pairs = React.useMemo(() => {
-    const portalLeft  = [...portalOnly];
-    const booksLeft   = [...booksOnly];
-    const paired      = [];
-    const portalUsed  = new Set();
-    const booksUsed   = new Set();
+    const portalUsed = new Set(), booksUsed = new Set(), result = [];
 
-    // Pass 1: exact normalised invoice match within same GSTIN
-    booksLeft.forEach(bo => {
-      const bNum = normaliseInvoice(bo.books?.invoiceNoRaw || bo.books?.invoiceNo || '');
-      const bGst = bo.books?.gstin;
-      for (const po of portalLeft) {
+    // Pass 1: exact normalised invoice + same GSTIN
+    booksOnly.forEach(bo => {
+      const bNum = normaliseInvoice(bo.books?.invoiceNoRaw || '');
+      booksOnly; // lint
+      for (const po of portalOnly) {
         if (portalUsed.has(po.key)) continue;
-        const pNum = normaliseInvoice(po.portal?.invoiceNoRaw || po.portal?.invoiceNo || '');
-        if (pNum === bNum && bNum && po.portal?.gstin === bGst) {
-          const valueDiff = Math.abs((po.portal?.invoiceValue||0) - (bo.books?.invoiceValue||0));
-          const taxDiff   = Math.abs(
-            ((po.portal?.igst||0)+(po.portal?.cgst||0)+(po.portal?.sgst||0)) -
-            ((bo.books?.igst||0) +(bo.books?.cgst||0) +(bo.books?.sgst||0))
-          );
-          paired.push({ portal: po, books: bo, confidence: valueDiff <= 1.01 && taxDiff <= 1.01 ? 'high' : 'medium', valueDiff, taxDiff });
-          portalUsed.add(po.key);
-          booksUsed.add(bo.key);
-          break;
+        const pNum = normaliseInvoice(po.portal?.invoiceNoRaw || '');
+        if (pNum === bNum && bNum && po.portal?.gstin === bo.books?.gstin) {
+          const vd = Math.abs((po.portal?.invoiceValue||0) - (bo.books?.invoiceValue||0));
+          const td = Math.abs(((po.portal?.igst||0)+(po.portal?.cgst||0)+(po.portal?.sgst||0)) - ((bo.books?.igst||0)+(bo.books?.cgst||0)+(bo.books?.sgst||0)));
+          result.push({ portal:po, books:bo, confidence: vd<=1.01&&td<=1.01?'high':'medium', valueDiff:vd, taxDiff:td });
+          portalUsed.add(po.key); booksUsed.add(bo.key); break;
         }
       }
     });
-
-    // Pass 2: close-value match within same GSTIN (amount within 2%)
-    booksLeft.forEach(bo => {
+    // Pass 2: same GSTIN, value within 2%
+    booksOnly.forEach(bo => {
       if (booksUsed.has(bo.key)) return;
-      const bVal = bo.books?.invoiceValue || 0;
-      const bGst = bo.books?.gstin;
-      let best = null, bestDiff = Infinity;
-      for (const po of portalLeft) {
-        if (portalUsed.has(po.key)) continue;
-        if (po.portal?.gstin !== bGst) continue;
-        const diff = Math.abs((po.portal?.invoiceValue||0) - bVal);
-        if (diff < bestDiff && diff / (bVal || 1) < 0.02) {
-          best = po; bestDiff = diff;
-        }
+      const bVal = bo.books?.invoiceValue||0;
+      let best=null, bestDiff=Infinity;
+      for (const po of portalOnly) {
+        if (portalUsed.has(po.key) || po.portal?.gstin !== bo.books?.gstin) continue;
+        const d = Math.abs((po.portal?.invoiceValue||0)-bVal);
+        if (d<bestDiff && d/(bVal||1)<0.02) { best=po; bestDiff=d; }
       }
-      if (best) {
-        paired.push({ portal: best, books: bo, confidence: 'low', valueDiff: bestDiff, taxDiff: 0 });
-        portalUsed.add(best.key);
-        booksUsed.add(bo.key);
-      }
+      if (best) { result.push({ portal:best, books:bo, confidence:'low', valueDiff:bestDiff, taxDiff:0 }); portalUsed.add(best.key); booksUsed.add(bo.key); }
     });
-
-    // Remaining unmatched
-    const unpairedPortal = portalLeft.filter(po => !portalUsed.has(po.key)).map(po => ({ portal: po, books: null, confidence: 'none' }));
-    const unpairedBooks  = booksLeft.filter(bo  => !booksUsed.has(bo.key) ).map(bo => ({ portal: null, books: bo,  confidence: 'none' }));
-
-    return [...paired, ...unpairedPortal, ...unpairedBooks];
+    // Unpaired
+    portalOnly.forEach(po => { if (!portalUsed.has(po.key)) result.push({ portal:po, books:null, confidence:'none' }); });
+    booksOnly.forEach(bo  => { if (!booksUsed.has(bo.key))  result.push({ portal:null, books:bo,  confidence:'none' }); });
+    return result;
   }, [portalOnly, booksOnly]);
 
-  /* ── GSTIN name lookup via backend API ── */
-  const lookupName = async (gstin) => {
-    if (gstinNames[gstin] || lookingUp[gstin]) return;
-    setLookingUp(p => ({ ...p, [gstin]: true }));
-    try {
-      const r = await api.get(`/gst-reconciliation/gstin-lookup/${gstin}`);
-      const name = r.data?.trade_name || r.data?.legal_name || '';
-      if (name) setGstinNames(p => ({ ...p, [gstin]: name }));
-    } catch (_) {}
-    setLookingUp(p => ({ ...p, [gstin]: false }));
-  };
-
-  /* ── All unique GSTINs for the filter dropdown ── */
   const allGstins = React.useMemo(() => {
-    const s = new Set();
-    pairs.forEach(p => {
-      if (p.portal?.portal?.gstin) s.add(p.portal.portal.gstin);
-      if (p.books?.books?.gstin)   s.add(p.books.books.gstin);
-    });
+    const s=new Set();
+    pairs.forEach(p=>{ if(p.portal?.portal?.gstin) s.add(p.portal.portal.gstin); if(p.books?.books?.gstin) s.add(p.books.books.gstin); });
     return [...s].sort();
   }, [pairs]);
 
+  const lookupName = async (gstin) => {
+    if (!gstin || gstinNames[gstin] || lookingUp[gstin]) return;
+    setLookingUp(p=>({...p,[gstin]:true}));
+    try {
+      const r = await api.get(`/gst-reconciliation/gstin-lookup/${gstin}`);
+      const name = r.data?.trade_name || r.data?.legal_name || '';
+      if (name) setGstinNames(p=>({...p,[gstin]:name}));
+    } catch(_) {}
+    setLookingUp(p=>({...p,[gstin]:false}));
+  };
+
   const filtered = pairs.filter(p => {
-    const pInv  = p.portal?.portal?.invoiceNoRaw || '';
-    const bInv  = p.books?.books?.invoiceNoRaw || '';
-    const pGst  = p.portal?.portal?.gstin || p.books?.books?.gstin || '';
-    const name  = p.portal?.portal?.tradeOrLegalName || portalNameMap[pGst] || gstinNames[pGst] || '';
-    if (gstinFilter && pGst !== gstinFilter) return false;
+    const g = p.portal?.portal?.gstin || p.books?.books?.gstin || '';
+    if (gstinFilter && g !== gstinFilter) return false;
     if (!search.trim()) return true;
     const q = search.toLowerCase();
-    return pGst.toLowerCase().includes(q) || pInv.toLowerCase().includes(q) ||
-           bInv.toLowerCase().includes(q) || name.toLowerCase().includes(q);
+    const pInv=(p.portal?.portal?.invoiceNoRaw||'').toLowerCase();
+    const bInv=(p.books?.books?.invoiceNoRaw||'').toLowerCase();
+    const name=(p.portal?.portal?.tradeOrLegalName||portalNameMap[g]||gstinNames[g]||'').toLowerCase();
+    return g.toLowerCase().includes(q)||pInv.includes(q)||bInv.includes(q)||name.includes(q);
   });
 
-  const confColor = { high: 'bg-emerald-100 text-emerald-700', medium: 'bg-amber-100 text-amber-700', low: 'bg-orange-100 text-orange-700', none: 'bg-slate-100 text-slate-400' };
-  const confLabel = { high: '✓ Match', medium: '≈ Near', low: '~ Possible', none: '—' };
+  const stats = { high:0, medium:0, low:0, confirmed:confirmed.size };
+  filtered.forEach(p => { if(p.portal&&p.books) stats[p.confidence]=(stats[p.confidence]||0)+1; });
+
+  const handleConfirm = (pair, idx) => {
+    onConfirmMatch(pair);
+    setConfirmed(s => new Set([...s, `${pair.portal?.key}__${pair.books?.key}`]));
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}/>
       <motion.div
-        initial={{ opacity:0, scale:0.95, y:16 }}
-        animate={{ opacity:1, scale:1,    y:0  }}
-        exit={{    opacity:0, scale:0.95, y:16 }}
-        className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-7xl max-h-[92vh] flex flex-col overflow-hidden"
+        initial={{opacity:0,scale:0.96,y:12}} animate={{opacity:1,scale:1,y:0}} exit={{opacity:0,scale:0.96,y:12}}
+        className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-indigo-600 to-violet-600 flex-shrink-0">
+        <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-violet-600 to-indigo-600 flex-shrink-0">
           <div>
-            <h2 className="text-lg font-bold text-white flex items-center gap-2"><ArrowLeftRight className="h-5 w-5"/>Portal Only vs Books Only — Side-by-Side Compare</h2>
-            <p className="text-xs text-white/80 mt-0.5">Smart-paired by invoice number and value. Confirm matches to move them to Matched.</p>
+            <h2 className="text-sm font-bold text-white flex items-center gap-2"><ArrowLeftRight className="h-4 w-4"/>Portal Only vs Books Only — Smart Compare</h2>
+            <p className="text-[11px] text-white/75 mt-0.5">Auto-paired by invoice number &amp; value. Click Confirm to move matched pairs into Matched.</p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-xl bg-white/20 hover:bg-white/30 text-white"><X className="h-5 w-5"/></button>
+          <button onClick={onClose} className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white"><X className="h-4 w-4"/></button>
         </div>
 
-        {/* Controls */}
-        <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 flex-shrink-0">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400"/>
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search invoice no, GSTIN, party…"
-              className="w-full pl-9 pr-4 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+        {/* Filters bar */}
+        <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 flex-shrink-0">
+          <div className="relative min-w-[180px] flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400"/>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search invoice, GSTIN…"
+              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-400"/>
           </div>
-          <select value={gstinFilter} onChange={e => setGstinFilter(e.target.value)}
-            className="px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-400">
+          <select value={gstinFilter} onChange={e=>setGstinFilter(e.target.value)}
+            className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-400 max-w-[200px]">
             <option value="">All GSTINs ({allGstins.length})</option>
-            {allGstins.map(g => <option key={g} value={g}>{g}</option>)}
+            {allGstins.map(g=><option key={g} value={g}>{g}</option>)}
           </select>
-          <div className="flex items-center gap-3 text-xs text-slate-500">
-            <span className="flex items-center gap-1"><span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold text-[10px]">✓ Match</span> = exact invoice+value</span>
-            <span className="flex items-center gap-1"><span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold text-[10px]">≈ Near</span> = same number, tiny value diff</span>
-            <span className="flex items-center gap-1"><span className="px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-bold text-[10px]">~ Possible</span> = same GSTIN, similar amount</span>
+          <div className="flex items-center gap-2 ml-auto text-[11px]">
+            <span className={`px-1.5 py-0.5 rounded border font-bold ${CONF_COLOR.high}`}>✓ {stats.high} exact</span>
+            <span className={`px-1.5 py-0.5 rounded border font-bold ${CONF_COLOR.medium}`}>≈ {stats.medium} near</span>
+            <span className={`px-1.5 py-0.5 rounded border font-bold ${CONF_COLOR.low}`}>~ {stats.low} possible</span>
+            <span className="text-slate-400">|</span>
+            <span className="text-slate-500">P:<strong className="text-blue-600">{portalOnly.length}</strong> B:<strong className="text-violet-600">{booksOnly.length}</strong></span>
           </div>
         </div>
 
         {/* Table */}
         <div className="overflow-auto flex-1">
           <table className="w-full text-xs">
-            <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800/90 z-10">
+            <thead className="sticky top-0 z-10">
               <tr>
-                <th className="px-3 py-2.5 text-center font-semibold text-slate-500 w-16">Pair</th>
-                {/* Portal side */}
-                <th className="px-3 py-2.5 text-left font-semibold text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10">Portal Invoice No</th>
-                <th className="px-3 py-2.5 text-left font-semibold text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10">GSTIN / Party</th>
-                <th className="px-3 py-2.5 text-left font-semibold text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10">Date</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10">Value</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10">Tax</th>
-                {/* Middle */}
-                <th className="px-2 py-2.5 text-center font-semibold text-slate-400 w-20">Status</th>
-                {/* Books side */}
-                <th className="px-3 py-2.5 text-left font-semibold text-violet-600 dark:text-violet-400 bg-violet-50/50 dark:bg-violet-900/10">Books Invoice No</th>
-                <th className="px-3 py-2.5 text-left font-semibold text-violet-600 dark:text-violet-400 bg-violet-50/50 dark:bg-violet-900/10">GSTIN / Party</th>
-                <th className="px-3 py-2.5 text-left font-semibold text-violet-600 dark:text-violet-400 bg-violet-50/50 dark:bg-violet-900/10">Date</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-violet-600 dark:text-violet-400 bg-violet-50/50 dark:bg-violet-900/10">Value</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-violet-600 dark:text-violet-400 bg-violet-50/50 dark:bg-violet-900/10">Tax</th>
-                <th className="px-3 py-2.5 text-center font-semibold text-slate-500 w-24">Action</th>
+                <th className="px-2 py-2 text-center font-semibold text-slate-400 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 w-8">#</th>
+                {/* Portal */}
+                <th className="px-2 py-2 text-left font-semibold text-blue-600 bg-blue-50/80 dark:bg-blue-900/20 border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">Portal Invoice</th>
+                <th className="px-2 py-2 text-left font-semibold text-blue-500 bg-blue-50/80 dark:bg-blue-900/20 border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">GSTIN / Party</th>
+                <th className="px-2 py-2 text-left font-semibold text-blue-500 bg-blue-50/80 dark:bg-blue-900/20 border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">Date</th>
+                <th className="px-2 py-2 text-right font-semibold text-blue-500 bg-blue-50/80 dark:bg-blue-900/20 border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">Value</th>
+                <th className="px-2 py-2 text-right font-semibold text-blue-500 bg-blue-50/80 dark:bg-blue-900/20 border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">Tax</th>
+                {/* Status */}
+                <th className="px-1 py-2 text-center font-semibold text-slate-400 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 w-14">Status</th>
+                {/* Books */}
+                <th className="px-2 py-2 text-left font-semibold text-violet-600 bg-violet-50/80 dark:bg-violet-900/20 border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">Books Invoice</th>
+                <th className="px-2 py-2 text-left font-semibold text-violet-500 bg-violet-50/80 dark:bg-violet-900/20 border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">GSTIN / Party</th>
+                <th className="px-2 py-2 text-left font-semibold text-violet-500 bg-violet-50/80 dark:bg-violet-900/20 border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">Date</th>
+                <th className="px-2 py-2 text-right font-semibold text-violet-500 bg-violet-50/80 dark:bg-violet-900/20 border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">Value</th>
+                <th className="px-2 py-2 text-right font-semibold text-violet-500 bg-violet-50/80 dark:bg-violet-900/20 border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">Tax</th>
+                <th className="px-2 py-2 text-center font-semibold text-slate-400 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 w-16">Action</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={13} className="px-4 py-16 text-center text-slate-400">No records match your filters</td></tr>
+                <tr><td colSpan={13} className="px-4 py-12 text-center text-slate-400 text-sm">No records match your filters</td></tr>
               )}
               {filtered.map((pair, i) => {
-                const po    = pair.portal?.portal;
-                const bo    = pair.books?.books;
-                const gstin = po?.gstin || bo?.gstin || '';
-                const partyPortal = po?.tradeOrLegalName || portalNameMap[gstin] || gstinNames[gstin] || '';
-                const partyBooks  = portalNameMap[bo?.gstin] || gstinNames[bo?.gstin] || '—';
-                const pTax  = po ? (po.igst||0)+(po.cgst||0)+(po.sgst||0) : 0;
-                const bTax  = bo ? (bo.igst||0)+(bo.cgst||0)+(bo.sgst||0) : 0;
-                const isCanConfirm = pair.portal && pair.books;
-                const rowBg = pair.confidence === 'high'   ? 'bg-emerald-50/30 dark:bg-emerald-900/10'
-                            : pair.confidence === 'medium' ? 'bg-amber-50/30 dark:bg-amber-900/10'
-                            : pair.confidence === 'low'    ? 'bg-orange-50/30 dark:bg-orange-900/10'
-                            : '';
+                const po  = pair.portal?.portal;
+                const bo  = pair.books?.books;
+                const g   = po?.gstin || bo?.gstin || '';
+                const pName = po?.tradeOrLegalName || portalNameMap[g] || gstinNames[g] || '';
+                const bName = portalNameMap[bo?.gstin] || gstinNames[bo?.gstin] || pName;
+                const pTax  = po ? (po.igst||0)+(po.cgst||0)+(po.sgst||0) : null;
+                const bTax  = bo ? (bo.igst||0)+(bo.cgst||0)+(bo.sgst||0) : null;
+                const pairKey = `${pair.portal?.key}__${pair.books?.key}`;
+                const isConfirmed = confirmed.has(pairKey);
+                const rowBg = isConfirmed ? 'opacity-40' :
+                              pair.confidence==='high'   ? 'bg-emerald-50/20 dark:bg-emerald-900/5'  :
+                              pair.confidence==='medium' ? 'bg-amber-50/20 dark:bg-amber-900/5'      :
+                              pair.confidence==='low'    ? 'bg-orange-50/20 dark:bg-orange-900/5'    : '';
                 return (
-                  <tr key={i} className={`border-b border-slate-100 dark:border-slate-700/50 ${rowBg}`}>
-                    <td className="px-3 py-2 text-center text-slate-400">{i+1}</td>
+                  <tr key={i} className={`border-b border-slate-100 dark:border-slate-700/50 transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-700/20 ${rowBg}`}>
+                    <td className="px-2 py-1.5 text-center text-slate-300 text-[11px]">{i+1}</td>
                     {/* Portal side */}
-                    <td className="px-3 py-2 font-mono font-semibold text-blue-700 dark:text-blue-300">{po?.invoiceNoRaw || <span className="text-slate-300">—</span>}</td>
-                    <td className="px-3 py-2">
-                      <div className="font-mono text-[11px] text-slate-600 dark:text-slate-300">{po?.gstin || '—'}</div>
-                      <div className="text-slate-500 truncate max-w-[130px]" title={partyPortal}>{partyPortal || (
-                        <button onClick={() => lookupName(po?.gstin)} disabled={lookingUp[po?.gstin]}
-                          className="flex items-center gap-1 text-indigo-500 hover:text-indigo-700 text-[10px]">
-                          {lookingUp[po?.gstin] ? <Loader2 className="h-3 w-3 animate-spin"/> : <Search className="h-3 w-3"/>}
-                          Lookup name
+                    <td className="px-2 py-1.5 font-mono font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap">{po?.invoiceNoRaw||<span className="text-slate-200">—</span>}</td>
+                    <td className="px-2 py-1.5 max-w-[120px]">
+                      <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400 truncate">{po?.gstin||'—'}</div>
+                      <div className="text-[11px] text-slate-600 dark:text-slate-300 truncate" title={pName}>{pName||(!isConfirmed&&po?.gstin?(
+                        <button onClick={()=>lookupName(po.gstin)} disabled={lookingUp[po.gstin]} className="text-indigo-400 hover:text-indigo-600 flex items-center gap-0.5">
+                          {lookingUp[po.gstin]?<Loader2 className="h-2.5 w-2.5 animate-spin"/>:<Search className="h-2.5 w-2.5"/>}lookup
                         </button>
-                      )}</div>
+                      ):'—')}</div>
                     </td>
-                    <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{po?.invoiceDate || '—'}</td>
-                    <td className="px-3 py-2 text-right font-medium text-blue-700 dark:text-blue-300">{po ? `₹${fmt(po.invoiceValue)}` : '—'}</td>
-                    <td className="px-3 py-2 text-right text-blue-500">{po ? `₹${fmt(pTax)}` : '—'}</td>
-                    {/* Confidence badge */}
-                    <td className="px-2 py-2 text-center">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${confColor[pair.confidence]}`}>
-                        {confLabel[pair.confidence]}
-                      </span>
-                      {pair.valueDiff > 0 && pair.confidence !== 'none' && (
-                        <div className="text-[9px] text-slate-400 mt-0.5">Δ₹{pair.valueDiff.toFixed(2)}</div>
-                      )}
+                    <td className="px-2 py-1.5 text-slate-400 whitespace-nowrap text-[11px]">{po?.invoiceDate||'—'}</td>
+                    <td className="px-2 py-1.5 text-right font-medium text-blue-700 dark:text-blue-300 whitespace-nowrap">₹{po?fmt(po.invoiceValue):'—'}</td>
+                    <td className="px-2 py-1.5 text-right text-blue-500 whitespace-nowrap">₹{pTax!=null?fmt(pTax):'—'}</td>
+                    {/* Confidence */}
+                    <td className="px-1 py-1.5 text-center">
+                      <span className={`px-1 py-0.5 rounded border text-[9px] font-bold ${CONF_COLOR[pair.confidence]}`}>{CONF_LABEL[pair.confidence]}</span>
+                      {pair.valueDiff>0&&pair.confidence!=='none'&&<div className="text-[9px] text-slate-300 mt-0.5">Δ{pair.valueDiff.toFixed(1)}</div>}
                     </td>
                     {/* Books side */}
-                    <td className="px-3 py-2 font-mono font-semibold text-violet-700 dark:text-violet-300">{bo?.invoiceNoRaw || <span className="text-slate-300">—</span>}</td>
-                    <td className="px-3 py-2">
-                      <div className="font-mono text-[11px] text-slate-600 dark:text-slate-300">{bo?.gstin || '—'}</div>
-                      <div className="text-slate-500 truncate max-w-[130px]" title={partyBooks}>
-                        {partyBooks !== '—' ? partyBooks : (
-                          bo?.gstin ? (
-                            <button onClick={() => lookupName(bo.gstin)} disabled={lookingUp[bo.gstin]}
-                              className="flex items-center gap-1 text-indigo-500 hover:text-indigo-700 text-[10px]">
-                              {lookingUp[bo.gstin] ? <Loader2 className="h-3 w-3 animate-spin"/> : <Search className="h-3 w-3"/>}
-                              Lookup name
-                            </button>
-                          ) : '—'
-                        )}
-                      </div>
+                    <td className="px-2 py-1.5 font-mono font-semibold text-violet-700 dark:text-violet-300 whitespace-nowrap">{bo?.invoiceNoRaw||<span className="text-slate-200">—</span>}</td>
+                    <td className="px-2 py-1.5 max-w-[120px]">
+                      <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400 truncate">{bo?.gstin||'—'}</div>
+                      <div className="text-[11px] text-slate-600 dark:text-slate-300 truncate" title={bName}>{bName||(!isConfirmed&&bo?.gstin?(
+                        <button onClick={()=>lookupName(bo.gstin)} disabled={lookingUp[bo.gstin]} className="text-indigo-400 hover:text-indigo-600 flex items-center gap-0.5">
+                          {lookingUp[bo.gstin]?<Loader2 className="h-2.5 w-2.5 animate-spin"/>:<Search className="h-2.5 w-2.5"/>}lookup
+                        </button>
+                      ):'—')}</div>
                     </td>
-                    <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{bo?.invoiceDate || '—'}</td>
-                    <td className="px-3 py-2 text-right font-medium text-violet-700 dark:text-violet-300">{bo ? `₹${fmt(bo.invoiceValue)}` : '—'}</td>
-                    <td className="px-3 py-2 text-right text-violet-500">{bo ? `₹${fmt(bTax)}` : '—'}</td>
+                    <td className="px-2 py-1.5 text-slate-400 whitespace-nowrap text-[11px]">{bo?.invoiceDate||'—'}</td>
+                    <td className="px-2 py-1.5 text-right font-medium text-violet-700 dark:text-violet-300 whitespace-nowrap">₹{bo?fmt(bo.invoiceValue):'—'}</td>
+                    <td className="px-2 py-1.5 text-right text-violet-500 whitespace-nowrap">₹{bTax!=null?fmt(bTax):'—'}</td>
                     {/* Action */}
-                    <td className="px-3 py-2 text-center">
-                      {isCanConfirm ? (
-                        <button onClick={() => onConfirmMatch(pair)}
-                          className="flex items-center gap-1 mx-auto px-2.5 py-1.5 rounded-lg text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors">
-                          <CheckCircle2 className="h-3 w-3"/> Confirm
+                    <td className="px-2 py-1.5 text-center">
+                      {isConfirmed ? (
+                        <span className="text-[10px] text-emerald-500 font-bold">✓ Done</span>
+                      ) : pair.portal && pair.books ? (
+                        <button onClick={()=>handleConfirm(pair,i)}
+                          className="px-2 py-1 rounded text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors whitespace-nowrap">
+                          Confirm
                         </button>
                       ) : (
-                        <span className="text-slate-300 text-[10px]">No pair</span>
+                        <span className="text-slate-200 text-[10px]">—</span>
                       )}
                     </td>
                   </tr>
@@ -2596,11 +2431,11 @@ const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) =
           </table>
         </div>
 
-        {/* Footer summary */}
-        <div className="flex flex-wrap items-center gap-4 px-6 py-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30 flex-shrink-0 text-xs text-slate-500">
-          <span>Showing <strong className="text-slate-700 dark:text-slate-200">{filtered.length}</strong> rows</span>
-          <span>Paired: <strong className="text-emerald-600">{filtered.filter(p=>p.confidence==='high').length}</strong> exact, <strong className="text-amber-600">{filtered.filter(p=>p.confidence==='medium').length}</strong> near, <strong className="text-orange-500">{filtered.filter(p=>p.confidence==='low').length}</strong> possible</span>
-          <span>Portal Only: <strong className="text-blue-600">{portalOnly.length}</strong> | Books Only: <strong className="text-violet-600">{booksOnly.length}</strong></span>
+        {/* Footer */}
+        <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30 flex-shrink-0 text-[11px] text-slate-500">
+          <span>{filtered.length} rows shown</span>
+          <span className="text-emerald-600 font-medium">{stats.confirmed} confirmed this session</span>
+          <span className="ml-auto">Portal: <strong className="text-blue-600">{portalOnly.length}</strong> unmatched | Books: <strong className="text-violet-600">{booksOnly.length}</strong> unmatched</span>
         </div>
       </motion.div>
     </div>
@@ -2748,7 +2583,7 @@ export default function GSTReconciliation() {
 
   const handleReset = () => { setPortalFile(null); setBooksFile(null); setResults(null); setPeriod(''); };
 
-  const activeRecords = results && activeTab !== 'search' && activeTab !== 'checkOnce'
+  const activeRecords = results && activeTab !== 'search'
     ? { matched:results.matched, mismatch:results.mismatch, portalOnly:results.portalOnly, booksOnly:results.booksOnly }[activeTab] || []
     : [];
   const activeTabMeta = TABS.find(t => t.id === activeTab);
@@ -2778,9 +2613,6 @@ export default function GSTReconciliation() {
               </button>
               <button onClick={()=>exportExcel(results, company, period)} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-xl shadow-sm transition-colors">
                 <FileSpreadsheet className="h-4 w-4"/> Excel
-              </button>
-              <button onClick={() => setShowCompare(true)} className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium rounded-xl shadow-sm transition-colors">
-                <ArrowLeftRight className="h-4 w-4"/> Compare Portal vs Books
               </button>
               <button onClick={handleReset} className="flex items-center gap-2 px-3 py-2 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm font-medium rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
                 <RefreshCw className="h-4 w-4"/> Reset
@@ -2983,8 +2815,8 @@ export default function GSTReconciliation() {
                 );
               })()}
 
-              {/* Summary cards — 5 non-search tabs: Matched, Mismatch, Portal Only, Books Only, Check Once */}
-              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
+              {/* Summary cards — 4 data tabs */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
                 {TABS.filter(t => t.id !== 'search').map(tab => {
                   const count = results[tab.id]?.length || 0;
                   const val = (results[tab.id]||[]).reduce((s,r) => s+((tab.id==='booksOnly'?r.books:r.portal)?.invoiceValue||0), 0);
@@ -3009,37 +2841,43 @@ export default function GSTReconciliation() {
 
               {/* Tab panel */}
               <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
-                <div className="flex overflow-x-auto border-b border-slate-200 dark:border-slate-700 px-2 pt-2">
+                {/* Tab bar — tabs + Compare action button at the end */}
+                <div className="flex items-center overflow-x-auto border-b border-slate-200 dark:border-slate-700 px-2 pt-2 gap-0">
                   {TABS.map(tab => {
                     const count = tab.id === 'search'
-                      ? (results.matched.length + results.mismatch.length + results.portalOnly.length + results.booksOnly.length + (results.checkOnce?.length||0))
+                      ? (results.matched.length + results.mismatch.length + results.portalOnly.length + results.booksOnly.length)
                       : results[tab.id]?.length || 0;
                     const isActive = activeTab === tab.id;
                     return (
                       <button key={tab.id} onClick={()=>setActiveTab(tab.id)}
-                        className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-t-xl whitespace-nowrap transition-all border-b-2 mr-1 ${isActive ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-900/20' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
-                        <tab.icon className="h-4 w-4"/>
+                        className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium rounded-t-xl whitespace-nowrap transition-all border-b-2 mr-1 ${isActive ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-900/20' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
+                        <tab.icon className="h-3.5 w-3.5"/>
                         {tab.label}
-                        <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${tab.color.badge}`}>{count}</span>
+                        <span className={`ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${tab.color.badge}`}>{count}</span>
                       </button>
                     );
                   })}
+                  {/* Compare action button in tab row */}
+                  <button
+                    onClick={() => setShowCompare(true)}
+                    className="flex items-center gap-1.5 ml-auto mr-1 mb-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-600 hover:bg-violet-700 text-white whitespace-nowrap transition-colors shadow-sm flex-shrink-0"
+                  >
+                    <ArrowLeftRight className="h-3.5 w-3.5"/> Compare P vs B
+                  </button>
                 </div>
-                <div className="p-5">
-                  <div className="flex items-start gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 mb-4 text-xs">
-                    <Info className="h-4 w-4 mt-0.5 flex-shrink-0 text-slate-400"/>
+                <div className="p-4">
+                  <div className="flex items-start gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 mb-3 text-xs">
+                    <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0 text-slate-400"/>
                     <span className="text-slate-600 dark:text-slate-400">{activeTabMeta?.desc}</span>
                   </div>
                   {activeTab === 'search'
                     ? <GlobalSearchTab key="search" results={results}/>
-                    : activeTab === 'checkOnce'
-                      ? <CheckOnceTab key="checkOnce" records={results.checkOnce||[]}/>
-                      : <ResultTable
-                          key={activeTab}
-                          tabId={activeTab}
-                          records={activeRecords}
-                          onMarkMatched={['mismatch','portalOnly','booksOnly'].includes(activeTab) ? (r) => handleMarkMatched(r, activeTab) : undefined}
-                        />
+                    : <ResultTable
+                        key={activeTab}
+                        tabId={activeTab}
+                        records={activeRecords}
+                        onMarkMatched={['mismatch','portalOnly','booksOnly'].includes(activeTab) ? (r) => handleMarkMatched(r, activeTab) : undefined}
+                      />
                   }
                 </div>
               </div>
