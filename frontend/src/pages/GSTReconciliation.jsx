@@ -23,14 +23,16 @@ function normaliseInvoice(val) {
   const s = String(val).trim().toUpperCase().replace(/\s+/g, '');
   // Purely numeric → strip leading zeros
   if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
-  // Handle "ALPHA-NUMBER" or "ALPHA/NUMBER" patterns (e.g. "SW-60134", "INV/1234")
-  // so that portal invoice "SW-60134" matches books invoice "60134"
+  // "ALPHA-NUMBER" or "ALPHA/NUMBER" with explicit separator (e.g. "SW-60134", "INV/1234")
   const m = s.match(/^([A-Z]+)[-\/](\d+)$/);
   if (m) return m[2].replace(/^0+/, '') || '0';
-  // Handle "NUM/NUM" or "NUM-NUM" patterns (e.g. portal "12/0033902" vs books "0033902")
-  // Indian GST portal often stores as "SerialNo/InvoiceNo" while books keep just the number
+  // "NUM/NUM" or "NUM-NUM" — Indian portal SerialNo/InvoiceNo (e.g. "12/0033902" → "33902")
   const m2 = s.match(/^\d{1,4}[\/\-](\d+)$/);
   if (m2) return m2[1].replace(/^0+/, '') || '0';
+  // ALPHA prefix directly attached (NO separator) — e.g. "T1326" → "1326", "INV1234" → "1234"
+  // Portal often stores series letter "T" while books store the plain number "1326"
+  const m3 = s.match(/^([A-Z]+)(\d+)$/);
+  if (m3) return m3[2].replace(/^0+/, '') || '0';
   return s;
 }
 function normaliseGSTIN(val) {
@@ -184,14 +186,17 @@ const TOLERANCE = 1.01;
 function extractNumericSuffix(invNo) {
   if (!invNo) return '';
   const s = String(invNo).trim().toUpperCase().replace(/\s+/g, '');
-  // If purely numeric already
+  // Purely numeric
   if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
-  // ALPHA PREFIX-NUM or PREFIX/NUM (e.g. "SW-60134", "INV/1234")
-  const m = s.match(/^[A-Z0-9][-\/](\d+)$/) || s.match(/^[A-Z]+[-\/]?(\d+)$/);
+  // ALPHA with separator (e.g. "SW-60134") — single or multi-char alpha prefix
+  const m = s.match(/^[A-Z0-9][-\/](\d+)$/) || s.match(/^[A-Z]+[-\/](\d+)$/);
   if (m) return m[1].replace(/^0+/, '') || '0';
-  // NUM/NUM pattern: portal "12/0033902" → extract "33902"
+  // NUM/NUM pattern (e.g. "12/0033902" → "33902")
   const m2 = s.match(/^\d{1,4}[\/\-](\d+)$/);
   if (m2) return m2[1].replace(/^0+/, '') || '0';
+  // ALPHA directly attached without separator (e.g. "T1326" → "1326")
+  const m3 = s.match(/^([A-Z]+)(\d+)$/);
+  if (m3) return m3[2].replace(/^0+/, '') || '0';
   return s;
 }
 
@@ -207,17 +212,15 @@ function isPrefixOnlyMismatch(p, b) {
   if (p.gstin !== b.gstin) return false;
   // All financial fields must match within tolerance
   const vd = Math.abs(p.invoiceValue - b.invoiceValue);
-  const igstD = Math.abs(p.igst - b.igst);
-  const cgstD = Math.abs(p.cgst - b.cgst);
-  const sgstD = Math.abs(p.sgst - b.sgst);
   const taxD  = Math.abs((p.igst+p.cgst+p.sgst) - (b.igst+b.cgst+b.sgst));
   const taxableD = Math.abs(p.taxableValue - b.taxableValue);
   if (vd > TOLERANCE || taxD > TOLERANCE || taxableD > TOLERANCE) return false;
   // Date must match (if both present)
   if (p.invoiceDate && b.invoiceDate && p.invoiceDate !== b.invoiceDate) return false;
-  // Place of supply match (if both present)
-  const ps1 = p.placeOfSupply ? String(p.placeOfSupply).trim().toUpperCase() : '';
-  const ps2 = b.placeOfSupply ? String(b.placeOfSupply).trim().toUpperCase() : '';
+  // Place of supply: normalise by stripping leading state-code prefix (e.g. "24-Gujarat" → "GUJARAT")
+  // so portal "Gujarat" matches books "24-Gujarat"
+  const ps1 = (p.placeOfSupply||'').trim().toUpperCase().replace(/^\d{1,2}-/, '');
+  const ps2 = (b.placeOfSupply||'').trim().toUpperCase().replace(/^\d{1,2}-/, '');
   if (ps1 && ps2 && ps1 !== ps2) return false;
   return true;
 }
@@ -264,15 +267,17 @@ function reconcile(portalData, booksData) {
       bUsed.add(key);
       const b = bm.get(key);
       const { count, fields, rcMismatch } = countMismatchFields(p, b);
+      // Flag if raw invoice numbers differ (e.g. portal "T1326" matched books "1326" via normalisation)
+      const normalizedMatch = p.invoiceNoRaw !== b.invoiceNoRaw;
       if (count === 0) {
-        matched.push({ portal: p, books: b, key, rcMismatch });
+        matched.push({ portal: p, books: b, key, rcMismatch, normalizedMatch });
       } else if (count >= 3) {
         // 3+ parameter differences → Check Once (needs manual review)
         checkOnce.push({
           portal: p, books: b, key,
           mismatchFields: fields,
           mismatchCount: count,
-          rcMismatch,
+          rcMismatch, normalizedMatch,
           valueDiff: p.invoiceValue - b.invoiceValue,
           taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst),
         });
@@ -281,7 +286,7 @@ function reconcile(portalData, booksData) {
           portal: p, books: b, key,
           mismatchFields: fields,
           mismatchCount: count,
-          rcMismatch,
+          rcMismatch, normalizedMatch,
           valueDiff: p.invoiceValue - b.invoiceValue,
           taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst),
         });
@@ -1033,6 +1038,12 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched }) => {
             Yellow rows = prefix-only difference (values match) — can delete
           </span>
         )}
+        {tabId === 'matched' && records.some(r => r.normalizedMatch) && (
+          <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 text-xs">
+            <span className="w-3 h-3 rounded-full bg-indigo-200 dark:bg-indigo-700 inline-block border border-indigo-400"/>
+            <span className="font-semibold">auto-matched ✓</span> = portal &amp; books invoice numbers differ in format (e.g. T1326 ↔ 1326) but are the same invoice
+          </span>
+        )}
         {tabId === 'matched' && records.some(r => r.manualMatch) && (
           <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 text-xs">
             <span className="w-3 h-3 rounded-full bg-indigo-200 dark:bg-indigo-700 inline-block border border-indigo-400"/>
@@ -1096,6 +1107,12 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched }) => {
                         <span className="text-blue-600 dark:text-blue-400 text-[10px] font-mono">{r.portal?.invoiceNoRaw}</span>
                         <span className="text-violet-600 dark:text-violet-400 text-[10px] font-mono">{r.books?.invoiceNoRaw}</span>
                         <span className="text-[9px] text-yellow-600 dark:text-yellow-400 font-semibold">prefix differs</span>
+                      </span>
+                    ) : r.normalizedMatch ? (
+                      <span className="flex flex-col gap-0.5">
+                        <span className="text-blue-600 dark:text-blue-400 text-[10px] font-mono">{r.portal?.invoiceNoRaw}</span>
+                        <span className="text-violet-600 dark:text-violet-400 text-[10px] font-mono">{r.books?.invoiceNoRaw}</span>
+                        <span className="text-[9px] text-indigo-500 dark:text-indigo-400 font-semibold">auto-matched ✓</span>
                       </span>
                     ) : (
                       <span className="flex items-center gap-1.5">
