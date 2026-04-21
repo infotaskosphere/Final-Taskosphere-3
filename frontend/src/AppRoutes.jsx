@@ -28,7 +28,8 @@ const GeneralSettings   = lazy(() => import("@/pages/GeneralSettings.jsx"));
 const Passvault         = lazy(() => import("@/pages/Passvault.jsx"));
 const Invoicing         = lazy(() => import("@/pages/Invoicing.jsx"));
 const Reminders         = lazy(() => import("@/pages/Reminders.jsx"));
-const CompliancePage    = lazy(() => import("@/pages/CompliancePage.jsx")); // ← NEW
+const CompliancePage    = lazy(() => import("@/pages/CompliancePage.jsx"));
+const GSTReconciliation = lazy(() => import("@/pages/GSTReconciliation.jsx")); // ← NEW
 
 /* ── Route Guards ───────────────────────────────────────────────────────── */
 
@@ -117,13 +118,14 @@ function AppRoutes() {
       <Route path="/tasks"      element={<Protected><PageLoader><Tasks /></PageLoader></Protected>} />
       <Route path="/todos"      element={<Protected><PageLoader><TodoDashboard /></PageLoader></Protected>} />
       <Route path="/attendance" element={<Protected><PageLoader><Attendance /></PageLoader></Protected>} />
-      <Route path="/reminders" element={<Protected><PageLoader><Reminders /></PageLoader></Protected>} />
+      <Route path="/reminders"  element={<Protected><PageLoader><Reminders /></PageLoader></Protected>} />
       <Route path="/visits"     element={<Protected><PageLoader><VisitsPage /></PageLoader></Protected>} />
-      <Route path="/duedates"   element={<Protected><PageLoader><DueDates /></PageLoader></Protected>} />
       <Route path="/reports"    element={<Protected><PageLoader><Reports /></PageLoader></Protected>} />
 
-      {/* Compliance Tracker — permission-gated, dept-scoped server-side */}
-      <Route path="/compliance" element={<Permission permission="can_view_compliance"><PageLoader><CompliancePage /></PageLoader></Permission>} />
+      {/* ── COMPLIANCE GROUP ── */}
+      <Route path="/duedates"           element={<Protected><PageLoader><DueDates /></PageLoader></Protected>} />
+      <Route path="/compliance"         element={<Permission permission="can_view_compliance"><PageLoader><CompliancePage /></PageLoader></Permission>} />
+      <Route path="/gst-reconciliation" element={<Protected><PageLoader><GSTReconciliation /></PageLoader></Protected>} />
 
       {/* Settings — all roles */}
       <Route path="/settings/general" element={<Protected><PageLoader><GeneralSettings /></PageLoader></Protected>} />
@@ -131,18 +133,18 @@ function AppRoutes() {
       <Route path="/settings"         element={<Navigate to="/settings/general" replace />} />
 
       {/* PERMISSION-BASED MODULES */}
-      <Route path="/documents"    element={<Permission permission="can_view_documents"><PageLoader><DocumentsRegister /></PageLoader></Permission>} />
+      <Route path="/documents"  element={<Permission permission="can_view_documents"><PageLoader><DocumentsRegister /></PageLoader></Permission>} />
       {/* Clients — Protected (not Permission-gated).
            can_view_all_clients controls DATA scope server-side (all vs assigned),
            not page access. All authenticated users can visit /clients. */}
-      <Route path="/clients"      element={<Protected><PageLoader><Clients /></PageLoader></Protected>} />
-      <Route path="/passwords"    element={<Permission permission="can_view_passwords"><PageLoader><Passvault /></PageLoader></Permission>} />
-      <Route path="/dsc"          element={<Permission permission="can_view_all_dsc"><PageLoader><DSCRegister /></PageLoader></Permission>} />
-      <Route path="/leads"        element={<Permission permission="can_view_all_leads"><PageLoader><LeadsPage /></PageLoader></Permission>} />
-      <Route path="/quotations"   element={<Permission permission={["can_create_quotations", "can_manage_invoices"]}><PageLoader><Quotations /></PageLoader></Permission>} />
-      <Route path="/invoicing"    element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><Invoicing /></PageLoader></Permission>} />
-      <Route path="/task-audit"   element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
-      <Route path="/users"        element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
+      <Route path="/clients"    element={<Protected><PageLoader><Clients /></PageLoader></Protected>} />
+      <Route path="/passwords"  element={<Permission permission="can_view_passwords"><PageLoader><Passvault /></PageLoader></Permission>} />
+      <Route path="/dsc"        element={<Permission permission="can_view_all_dsc"><PageLoader><DSCRegister /></PageLoader></Permission>} />
+      <Route path="/leads"      element={<Permission permission="can_view_all_leads"><PageLoader><LeadsPage /></PageLoader></Permission>} />
+      <Route path="/quotations" element={<Permission permission={["can_create_quotations", "can_manage_invoices"]}><PageLoader><Quotations /></PageLoader></Permission>} />
+      <Route path="/invoicing"  element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><Invoicing /></PageLoader></Permission>} />
+      <Route path="/task-audit" element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
+      <Route path="/users"      element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
 
       {/* Fallback */}
       <Route path="*" element={<Navigate to="/login" replace />} />
