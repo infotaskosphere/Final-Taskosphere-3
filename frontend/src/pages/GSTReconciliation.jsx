@@ -11,7 +11,7 @@ import {
   FileText, FileSpreadsheet, Building2, Hash, MapPin,
   Phone, Mail, Calendar, ChevronRight, ScanSearch,
   Filter, Tag, ArrowUpDown, ChevronsUpDown,
-  History, Clock, Trash2, ChevronDown, User, Loader2,
+  History, Clock, Trash2, ChevronDown, User, Loader2, FolderOpen, Edit3,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -1065,7 +1065,7 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched }) => {
                 <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">IGST</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">CGST</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">SGST</th>
-                {tabId === 'portalOnly' && <th className="px-3 py-2.5 text-center font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">ITC</th>}
+                {tabId === 'portalOnly' && <th className="px-3 py-2.5 text-center font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap min-w-[64px]">ITC</th>}
               </>}
               {(tabId === 'mismatch' || tabId === 'portalOnly' || tabId === 'booksOnly') && (
                 <th className="px-3 py-2.5 text-center font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Status</th>
@@ -1130,8 +1130,8 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched }) => {
                     <td className="px-3 py-2 text-right text-slate-500">{fmt(inv?.igst)}</td>
                     <td className="px-3 py-2 text-right text-slate-500">{fmt(inv?.cgst)}</td>
                     <td className="px-3 py-2 text-right text-slate-500">{fmt(inv?.sgst)}</td>
-                    {tabId === 'portalOnly' && <td className="px-3 py-2 text-center">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${inv?.itcAvailability?.toLowerCase()==='yes'?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-500'}`}>{inv?.itcAvailability||'—'}</span>
+                    {tabId === 'portalOnly' && <td className="px-3 py-2 text-center min-w-[64px]">
+                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap ${inv?.itcAvailability?.toLowerCase()==='yes'?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-500'}`}>{inv?.itcAvailability||'—'}</span>
                     </td>}
                   </>}
                   {/* Per-row Matching / Not Matching status toggle */}
@@ -1862,11 +1862,41 @@ const ClientSelector = ({ clients, selectedId, onSelect }) => {
 /* ═══════════════════════════════════════════════════════════════════════════
    HISTORY VIEW — past reconciliation sessions
 ═══════════════════════════════════════════════════════════════════════════ */
-const HistoryView = () => {
+const HistoryView = ({ onOpenSession }) => {
   const [sessions,  setSessions]  = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [deleting,  setDeleting]  = useState(null);
+  const [opening,   setOpening]   = useState(null);
   const [expanded,  setExpanded]  = useState(null);
+
+  const handleOpen = async (id) => {
+    setOpening(id);
+    try {
+      const r = await api.get(`/gst-reconciliation/history/${id}`);
+      const sess = r.data || {};
+      const full = sess.full_result || sess.fullResult;
+      if (!full || (!full.matched && !full.mismatch && !full.portalOnly && !full.booksOnly)) {
+        toast.error('This older session was saved without full data — re-run the reconciliation to view & edit.');
+        setOpening(null);
+        return;
+      }
+      onOpenSession?.({
+        result: full,
+        company: sess.company || {},
+        period: sess.period || '',
+        portalFilename: sess.portal_filename || '',
+        booksFilename: sess.books_filename || '',
+        sessionId: sess.id,
+        clientName: sess.client_name || '',
+        clientGstin: sess.client_gstin || '',
+      });
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to open session');
+    } finally {
+      setOpening(null);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1970,6 +2000,15 @@ const HistoryView = () => {
                     )}
                   </div>
                   <button
+                    onClick={e => { e.stopPropagation(); handleOpen(s.id); }}
+                    disabled={opening === s.id}
+                    title="Open full reconciliation — view, edit & generate reports"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 text-xs font-semibold border border-indigo-200 dark:border-indigo-800 transition-colors"
+                  >
+                    {opening === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FolderOpen className="h-3.5 w-3.5" />}
+                    Open
+                  </button>
+                  <button
                     onClick={e => { e.stopPropagation(); handleDelete(s.id); }}
                     disabled={deleting === s.id}
                     className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20 text-slate-300 hover:text-rose-500 transition-colors"
@@ -2009,7 +2048,65 @@ const HistoryView = () => {
               </AnimatePresence>
             </motion.div>
           );
-        })}
+        }        {/* Baseline snapshot confirmation modal */}
+        <AnimatePresence>
+          {snapshotPrompt && (
+            <motion.div
+              initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
+              className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+            >
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !snapshotSaving && setSnapshotPrompt(null)}/>
+              <motion.div
+                initial={{scale:0.95,opacity:0,y:10}} animate={{scale:1,opacity:1,y:0}} exit={{scale:0.95,opacity:0,y:10}}
+                className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+              >
+                <div className="flex items-start gap-3 px-5 py-4 bg-gradient-to-r from-amber-500 to-orange-500">
+                  <div className="p-2 rounded-lg bg-white/20 flex-shrink-0">
+                    <AlertTriangle className="h-5 w-5 text-white"/>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Save baseline snapshot before editing?</h3>
+                    <p className="text-[11px] text-white/85 mt-0.5">We'll save the original (unedited) reconciliation as a separate history entry first, so your edits never overwrite it.</p>
+                  </div>
+                </div>
+                <div className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300 space-y-2">
+                  <p>This is a one-time prompt for this opened session. After confirming, all subsequent edits apply immediately.</p>
+                  <ul className="text-[12px] text-slate-500 dark:text-slate-400 list-disc pl-5 space-y-0.5">
+                    <li>Original session: <strong>{baselineSnapshot?.clientName || baselineSnapshot?.portalFilename || 'Opened reconciliation'}</strong></li>
+                    <li>Snapshot will be tagged <code className="px-1 bg-slate-100 dark:bg-slate-700 rounded text-[11px]">[snapshot]</code> in history.</li>
+                  </ul>
+                </div>
+                <div className="flex items-center justify-end gap-2 px-5 py-3 bg-slate-50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-700">
+                  <button
+                    disabled={snapshotSaving}
+                    onClick={() => setSnapshotPrompt(null)}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    disabled={snapshotSaving}
+                    onClick={async () => {
+                      const ok = await saveBaselineSnapshot();
+                      if (ok) {
+                        const fn = snapshotPrompt?.pendingEdit;
+                        setSnapshotPrompt(null);
+                        if (typeof fn === 'function') fn();
+                      }
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-60"
+                  >
+                    {snapshotSaving
+                      ? <><Loader2 className="h-3.5 w-3.5 animate-spin"/> Saving snapshot…</>
+                      : <><CheckCircle2 className="h-3.5 w-3.5"/> Save snapshot &amp; continue</>}
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+)}
       </div>
     </div>
   );
@@ -2280,6 +2377,20 @@ const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) =
     setLookingUp(p=>({...p,[gstin]:false}));
   };
 
+  // Auto-fetch names for all unique GSTINs without a name (batched)
+  React.useEffect(() => {
+    const need = new Set();
+    pairs.forEach(p => {
+      const pg = p.portal?.portal?.gstin;
+      const bg = p.books?.books?.gstin;
+      if (pg && !p.portal?.portal?.tradeOrLegalName && !portalNameMap[pg]) need.add(pg);
+      if (bg && !portalNameMap[bg]) need.add(bg);
+    });
+    const todo = [...need].filter(g => !gstinNames[g] && !lookingUp[g]).slice(0, 8);
+    todo.forEach(g => lookupName(g));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pairs]);
+
   const filtered = pairs.filter(p => {
     const g = p.portal?.portal?.gstin || p.books?.books?.gstin || '';
     if (gstinFilter && g !== gstinFilter) return false;
@@ -2304,7 +2415,7 @@ const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) =
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}/>
       <motion.div
         initial={{opacity:0,scale:0.96,y:12}} animate={{opacity:1,scale:1,y:0}} exit={{opacity:0,scale:0.96,y:12}}
-        className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden"
+        className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-[97vw] max-h-[92vh] flex flex-col overflow-hidden"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-violet-600 to-indigo-600 flex-shrink-0">
@@ -2349,7 +2460,7 @@ const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) =
                 <th className="px-2 py-2 text-right font-semibold text-blue-500 bg-blue-50/80 dark:bg-blue-900/20 border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">Value</th>
                 <th className="px-2 py-2 text-right font-semibold text-blue-500 bg-blue-50/80 dark:bg-blue-900/20 border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">Tax</th>
                 {/* Status */}
-                <th className="px-1 py-2 text-center font-semibold text-slate-400 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 w-14">Status</th>
+                <th className="px-2 py-2 text-center font-semibold text-slate-500 bg-slate-100 dark:bg-slate-700/50 border-b border-l-2 border-r-2 border-slate-300 dark:border-slate-600 w-20">Match</th>
                 {/* Books */}
                 <th className="px-2 py-2 text-left font-semibold text-violet-600 bg-violet-50/80 dark:bg-violet-900/20 border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">Books Invoice</th>
                 <th className="px-2 py-2 text-left font-semibold text-violet-500 bg-violet-50/80 dark:bg-violet-900/20 border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">GSTIN / Party</th>
@@ -2382,11 +2493,11 @@ const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) =
                     <td className="px-2 py-1.5 text-center text-slate-300 text-[11px]">{i+1}</td>
                     {/* Portal side */}
                     <td className="px-2 py-1.5 font-mono font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap">{po?.invoiceNoRaw||<span className="text-slate-200">—</span>}</td>
-                    <td className="px-2 py-1.5 max-w-[120px]">
-                      <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400 truncate">{po?.gstin||'—'}</div>
-                      <div className="text-[11px] text-slate-600 dark:text-slate-300 truncate" title={pName}>{pName||(!isConfirmed&&po?.gstin?(
-                        <button onClick={()=>lookupName(po.gstin)} disabled={lookingUp[po.gstin]} className="text-indigo-400 hover:text-indigo-600 flex items-center gap-0.5">
-                          {lookingUp[po.gstin]?<Loader2 className="h-2.5 w-2.5 animate-spin"/>:<Search className="h-2.5 w-2.5"/>}lookup
+                    <td className="px-3 py-2 min-w-[220px] max-w-[260px]">
+                      <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400">{po?.gstin||'—'}</div>
+                      <div className="text-[11px] font-medium text-slate-700 dark:text-slate-200 leading-tight mt-0.5" title={pName}>{pName||(!isConfirmed&&po?.gstin?(
+                        <button onClick={()=>lookupName(po.gstin)} disabled={lookingUp[po.gstin]} className="text-indigo-500 hover:text-indigo-700 inline-flex items-center gap-0.5 underline-offset-2 hover:underline">
+                          {lookingUp[po.gstin]?<Loader2 className="h-2.5 w-2.5 animate-spin"/>:<Search className="h-2.5 w-2.5"/>}lookup name
                         </button>
                       ):'—')}</div>
                     </td>
@@ -2394,17 +2505,17 @@ const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) =
                     <td className="px-2 py-1.5 text-right font-medium text-blue-700 dark:text-blue-300 whitespace-nowrap">₹{po?fmt(po.invoiceValue):'—'}</td>
                     <td className="px-2 py-1.5 text-right text-blue-500 whitespace-nowrap">₹{pTax!=null?fmt(pTax):'—'}</td>
                     {/* Confidence */}
-                    <td className="px-1 py-1.5 text-center">
+                    <td className="px-2 py-2 text-center bg-slate-50/40 dark:bg-slate-700/20 border-l-2 border-r-2 border-slate-200 dark:border-slate-600">
                       <span className={`px-1 py-0.5 rounded border text-[9px] font-bold ${CONF_COLOR[pair.confidence]}`}>{CONF_LABEL[pair.confidence]}</span>
                       {pair.valueDiff>0&&pair.confidence!=='none'&&<div className="text-[9px] text-slate-300 mt-0.5">Δ{pair.valueDiff.toFixed(1)}</div>}
                     </td>
                     {/* Books side */}
                     <td className="px-2 py-1.5 font-mono font-semibold text-violet-700 dark:text-violet-300 whitespace-nowrap">{bo?.invoiceNoRaw||<span className="text-slate-200">—</span>}</td>
-                    <td className="px-2 py-1.5 max-w-[120px]">
-                      <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400 truncate">{bo?.gstin||'—'}</div>
-                      <div className="text-[11px] text-slate-600 dark:text-slate-300 truncate" title={bName}>{bName||(!isConfirmed&&bo?.gstin?(
-                        <button onClick={()=>lookupName(bo.gstin)} disabled={lookingUp[bo.gstin]} className="text-indigo-400 hover:text-indigo-600 flex items-center gap-0.5">
-                          {lookingUp[bo.gstin]?<Loader2 className="h-2.5 w-2.5 animate-spin"/>:<Search className="h-2.5 w-2.5"/>}lookup
+                    <td className="px-3 py-2 min-w-[220px] max-w-[260px]">
+                      <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400">{bo?.gstin||'—'}</div>
+                      <div className="text-[11px] font-medium text-slate-700 dark:text-slate-200 leading-tight mt-0.5" title={bName}>{bName||(!isConfirmed&&bo?.gstin?(
+                        <button onClick={()=>lookupName(bo.gstin)} disabled={lookingUp[bo.gstin]} className="text-indigo-500 hover:text-indigo-700 inline-flex items-center gap-0.5 underline-offset-2 hover:underline">
+                          {lookingUp[bo.gstin]?<Loader2 className="h-2.5 w-2.5 animate-spin"/>:<Search className="h-2.5 w-2.5"/>}lookup name
                         </button>
                       ):'—')}</div>
                     </td>
@@ -2458,6 +2569,11 @@ export default function GSTReconciliation() {
   const [showCo,          setShowCo]           = useState(true);
   const [itcModal,        setItcModal]         = useState(null); // null | 'claimable' | 'toBook' | 'atRisk'
   const [showCompare,     setShowCompare]      = useState(false);
+  const [loadedSessionId, setLoadedSessionId]  = useState(null);  // when user opens a saved session
+  const [baselineSnapshot, setBaselineSnapshot] = useState(null); // immutable copy of opened session
+  const [snapshotSaved,    setSnapshotSaved]    = useState(false); // becomes true after baseline auto-save
+  const [snapshotSaving,   setSnapshotSaving]   = useState(false);
+  const [snapshotPrompt,   setSnapshotPrompt]   = useState(null); // {pendingEdit: () => void} | null
 
   // Client integration
   const [clients,         setClients]          = useState([]);
@@ -2466,9 +2582,66 @@ export default function GSTReconciliation() {
 
   const setCo = (k, v) => setCompany(p => ({ ...p, [k]: v }));
 
+  // Auto-save the original (pre-edit) baseline of an opened history session.
+  // Returns a Promise that resolves when the snapshot is safely persisted.
+  const saveBaselineSnapshot = useCallback(async () => {
+    if (!baselineSnapshot || snapshotSaved) return true;
+    setSnapshotSaving(true);
+    try {
+      const snap = baselineSnapshot;
+      const sm = {
+        total_portal:       (snap.result?.matched?.length || 0) + (snap.result?.mismatch?.length || 0) + (snap.result?.portalOnly?.length || 0),
+        total_books:        (snap.result?.matched?.length || 0) + (snap.result?.mismatch?.length || 0) + (snap.result?.booksOnly?.length || 0),
+        matched_count:      snap.result?.matched?.length     || 0,
+        mismatch_count:     snap.result?.mismatch?.length    || 0,
+        portal_only_count:  snap.result?.portalOnly?.length  || 0,
+        books_only_count:   snap.result?.booksOnly?.length   || 0,
+        matched_value:      sumVal(snap.result?.matched || [], 'portal'),
+        mismatch_value:     sumVal(snap.result?.mismatch || [], 'portal'),
+        portal_only_value:  sumVal(snap.result?.portalOnly || [], 'portal'),
+        books_only_value:   sumVal(snap.result?.booksOnly || [], 'books'),
+        is_baseline_snapshot: true,
+        original_session_id:  snap.sessionId || null,
+      };
+      const r = await api.post('/gst-reconciliation/save-session', {
+        period:          snap.period || period,
+        client_id:       selectedClient?.id || null,
+        client_name:     (snap.company?.name) || company.name || `[Snapshot] ${snap.clientName || 'Reconciliation'}`,
+        client_gstin:    (snap.company?.gstin) || company.gstin || snap.clientGstin || null,
+        portal_filename: `[snapshot] ${snap.portalFilename || ''}`,
+        books_filename:  `[snapshot] ${snap.booksFilename || ''}`,
+        summary:         sm,
+        full_result:     snap.result,
+        company:         snap.company || {},
+      });
+      setSnapshotSaved(true);
+      toast.success('Baseline snapshot saved to history — your original is safe.', {
+        description: r?.data?.session_id ? `Snapshot ID: ${r.data.session_id.slice(0,8)}…` : undefined,
+      });
+      return true;
+    } catch (e) {
+      console.error(e);
+      toast.error('Could not save snapshot. Edit cancelled — please try again.');
+      return false;
+    } finally {
+      setSnapshotSaving(false);
+    }
+  }, [baselineSnapshot, snapshotSaved, period, selectedClient, company]);
+
+  // Wrap any edit action: if we are inside an opened history session and have not
+  // yet saved a baseline snapshot, prompt the user to confirm. Once confirmed and
+  // the snapshot is persisted, run the edit. If no baseline (fresh run), run immediately.
+  const guardEdit = useCallback((editFn) => {
+    if (!baselineSnapshot || snapshotSaved) {
+      editFn();
+      return;
+    }
+    setSnapshotPrompt({ pendingEdit: editFn });
+  }, [baselineSnapshot, snapshotSaved]);
+
   // Mark an invoice from mismatch/portalOnly/booksOnly as manually matched
   const handleMarkMatched = useCallback((record, tabId) => {
-    setResults(prev => {
+    guardEdit(() => setResults(prev => {
       if (!prev) return prev;
       const updated = { ...prev };
       // Remove from source tab
@@ -2480,13 +2653,13 @@ export default function GSTReconciliation() {
       const books  = record.books  || record.portal;
       updated.matched = [...prev.matched, { ...record, portal, books, manualMatch: true }];
       return updated;
-    });
+    }));
     toast.success('Invoice marked as Matched');
-  }, []);
+  }, [guardEdit]);
 
   // Confirm a pair from Side-by-Side Compare as manually matched
   const handleConfirmMatch = useCallback((pair) => {
-    setResults(prev => {
+    guardEdit(() => setResults(prev => {
       if (!prev) return prev;
       const updated = { ...prev };
       updated.portalOnly = prev.portalOnly.filter(r => r.key !== pair.portal?.key);
@@ -2499,9 +2672,9 @@ export default function GSTReconciliation() {
         normalizedMatch: (pair.portal?.portal?.invoiceNoRaw || '') !== (pair.books?.books?.invoiceNoRaw || ''),
       }];
       return updated;
-    });
+    }));
     toast.success(`Matched: ${pair.portal?.portal?.invoiceNoRaw} ↔ ${pair.books?.books?.invoiceNoRaw}`);
-  }, []);
+  }, [guardEdit]);
 
   // Fetch clients on mount
   useEffect(() => {
@@ -2574,14 +2747,18 @@ export default function GSTReconciliation() {
         portal_filename: portalFile.name,
         books_filename:  booksFile.name,
         summary,
-      }).catch(() => {}); // fire-and-forget; don't fail reconciliation if save fails
+        full_result: res,                  // full reconciliation payload — enables re-open + edit
+        company,                            // company details for header restoration
+      }).then(r => {
+        if (r?.data?.session_id) setLoadedSessionId(r.data.session_id);
+      }).catch(() => {}); // fire-and-forget
 
     } catch (err) {
       console.error(err); toast.error(`Failed: ${err.message}`);
     } finally { setLoading(false); }
   };
 
-  const handleReset = () => { setPortalFile(null); setBooksFile(null); setResults(null); setPeriod(''); };
+  const handleReset = () => { setPortalFile(null); setBooksFile(null); setResults(null); setPeriod(''); setLoadedSessionId(null); setBaselineSnapshot(null); setSnapshotSaved(false); setSnapshotPrompt(null); };
 
   const activeRecords = results && activeTab !== 'search'
     ? { matched:results.matched, mismatch:results.mismatch, portalOnly:results.portalOnly, booksOnly:results.booksOnly }[activeTab] || []
@@ -2650,8 +2827,35 @@ export default function GSTReconciliation() {
             <div className="flex items-center gap-3 mb-5">
               <History className="h-5 w-5 text-indigo-500" />
               <h2 className="font-semibold text-slate-800 dark:text-slate-100">Reconciliation History</h2>
+              <span className="ml-auto text-[11px] text-slate-400">Click <strong className="text-indigo-500">Open</strong> on any entry to reload the full reconciliation, edit it, and re-generate reports.</span>
             </div>
-            <HistoryView />
+            <HistoryView onOpenSession={(payload) => {
+              // Restore full reconciliation into the active workspace
+              setResults(payload.result);
+              setActiveTab('matched');
+              setPeriod(payload.period || '');
+              if (payload.company && Object.keys(payload.company).length) {
+                setCompany(prev => ({ ...prev, ...payload.company }));
+              } else if (payload.clientName || payload.clientGstin) {
+                setCompany(prev => ({ ...prev, name: payload.clientName || prev.name, gstin: payload.clientGstin || prev.gstin }));
+              }
+              setLoadedSessionId(payload.sessionId || null);
+              // Capture an immutable baseline snapshot — used to confirm-save before the first edit
+              setBaselineSnapshot({
+                result:         JSON.parse(JSON.stringify(payload.result)),
+                company:        payload.company || {},
+                period:         payload.period || '',
+                portalFilename: payload.portalFilename || '',
+                booksFilename:  payload.booksFilename  || '',
+                sessionId:      payload.sessionId || null,
+                clientName:     payload.clientName || '',
+                clientGstin:    payload.clientGstin || '',
+                openedAt:       new Date().toISOString(),
+              });
+              setSnapshotSaved(false);
+              setPageView('new');
+              toast.success('Reconciliation loaded — fully editable. Your first edit will be confirmed before changes apply.');
+            }} />
           </div>
         )}
 
@@ -2897,6 +3101,16 @@ export default function GSTReconciliation() {
                 <button onClick={() => { handleReset(); setPageView('history'); }} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 text-xs transition-colors border border-indigo-200 dark:border-indigo-800 rounded-lg font-medium">
                   <History className="h-3.5 w-3.5" /> View History
                 </button>
+                {baselineSnapshot && (
+                  <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border ${snapshotSaved
+                    ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                    : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'}`}
+                    title={snapshotSaved ? 'Original baseline already saved as a separate session.' : 'Your first edit will prompt to save a baseline snapshot before applying changes.'}>
+                    {snapshotSaved
+                      ? <><CheckCircle2 className="h-3.5 w-3.5" /> Baseline snapshot saved</>
+                      : <><AlertTriangle className="h-3.5 w-3.5" /> Editing opened session — snapshot pending</>}
+                  </span>
+                )}
                 <button onClick={handleReset} className="flex items-center gap-1.5 px-3 py-1.5 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-xs transition-colors">
                   <RefreshCw className="h-3.5 w-3.5"/> New Reconciliation
                 </button>
