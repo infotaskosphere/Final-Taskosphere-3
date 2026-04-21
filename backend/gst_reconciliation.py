@@ -24,7 +24,7 @@ import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from pydantic import BaseModel, Field, ConfigDict
 
-from backend.dependencies import db, get_current_user
+from backend.dependencies import db, get_current_user, build_client_query
 from backend.models import User
 
 logger = logging.getLogger(__name__)
@@ -60,14 +60,10 @@ def _to_num(val: Any) -> float:
 def _normalise_invoice(val: Any) -> str:
     """
     Normalise an invoice number for matching:
-      - Purely numeric → strip leading zeros  (e.g. "0060134" → "60134")
+      - Purely numeric → strip leading zeros  (e.g. "060134" → "60134")
       - ALPHA_PREFIX + separator + NUMBER      (e.g. "SW-60134", "INV/60134")
-        → strip the alphabetic prefix and treat as numeric  → "60134"
+        → strip the alphabetic prefix → "60134"
       - Anything else → uppercase + trim (exact match required)
-
-    This handles the common case where the GST portal stores the vendor's
-    full invoice number (e.g. "SW-60134") while the purchase register
-    stores only the numeric part ("60134").
     """
     s = _to_str(val).upper().replace(" ", "")
     if s.isdigit():
@@ -432,11 +428,88 @@ class ReconciliationSession(BaseModel):
     summary:         Dict[str, Any] = Field(default_factory=dict)
 
 
+class SessionSaveBody(BaseModel):
+    """Body for saving a client-side reconciliation result to history."""
+    model_config = ConfigDict(extra="ignore")
+
+    period:           Optional[str] = None
+    client_id:        Optional[str] = None
+    client_name:      Optional[str] = None
+    client_gstin:     Optional[str] = None
+    portal_filename:  str = ""
+    books_filename:   str = ""
+    summary:          Dict[str, Any] = Field(default_factory=dict)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ENDPOINTS
 # ─────────────────────────────────────────────────────────────────────────────
 
+@router.get("/clients")
+async def list_clients_for_gst(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return a lightweight list of clients (id, name, GSTIN, contact) for the
+    GST-Reconciliation client-selector dropdown.  Respects the same permission
+    filter as the main /clients endpoint (admin sees all; staff see assigned).
+    """
+    query = build_client_query(current_user)
+    # Only fetch clients that have a GSTIN (relevant for GST work)
+    docs = await db.clients.find(
+        {**query},
+        {"_id": 0, "id": 1, "company_name": 1, "gstin": 1,
+         "phone": 1, "email": 1, "address": 1, "city": 1, "state": 1,
+         "pan": 1, "gst_treatment": 1, "contact_persons": 1},
+    ).sort("company_name", 1).to_list(2000)
+
+    return {"clients": docs}
+
+
+@router.post("/save-session")
+async def save_session_from_frontend(
+    body: SessionSaveBody,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Persist a reconciliation session that was run entirely in the browser.
+    The frontend sends the summary counts + metadata; we store it for history.
+    """
+    # If client_id is provided but client_name/gstin are missing, look them up.
+    client_name  = body.client_name  or ""
+    client_gstin = body.client_gstin or ""
+
+    if body.client_id and (not client_name or not client_gstin):
+        client_doc = await db.clients.find_one(
+            {"id": body.client_id},
+            {"_id": 0, "company_name": 1, "gstin": 1},
+        )
+        if client_doc:
+            client_name  = client_name  or client_doc.get("company_name", "")
+            client_gstin = client_gstin or client_doc.get("gstin", "")
+
+    session_id = str(uuid.uuid4())
+    session_doc = {
+        "_id":             session_id,
+        "id":              session_id,
+        "period":          body.period,
+        "client_id":       body.client_id,
+        "client_name":     client_name,
+        "client_gstin":    client_gstin,
+        "portal_filename": body.portal_filename,
+        "books_filename":  body.books_filename,
+        "created_at":      _now(),
+        "created_by":      current_user.id,
+        "created_by_name": getattr(current_user, "full_name", ""),
+        "summary":         body.summary,
+    }
+    await db.gst_reconciliation_sessions.insert_one(session_doc)
+    logger.info("Saved GST reconciliation session %s (client: %s)", session_id, client_name)
+    return {"session_id": session_id, "created_at": session_doc["created_at"]}
+
+
 @router.post("/reconcile")
+
 async def reconcile_files(
     portal_file: UploadFile = File(..., description="GSTR-2B Excel downloaded from GST Portal"),
     books_file:  UploadFile = File(..., description="Purchase Register (GSTR-2 offline tool b2b sheet)"),
