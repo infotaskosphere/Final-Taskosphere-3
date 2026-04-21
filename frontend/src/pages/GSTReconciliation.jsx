@@ -27,6 +27,10 @@ function normaliseInvoice(val) {
   // so that portal invoice "SW-60134" matches books invoice "60134"
   const m = s.match(/^([A-Z]+)[-\/](\d+)$/);
   if (m) return m[2].replace(/^0+/, '') || '0';
+  // Handle "NUM/NUM" or "NUM-NUM" patterns (e.g. portal "12/0033902" vs books "0033902")
+  // Indian GST portal often stores as "SerialNo/InvoiceNo" while books keep just the number
+  const m2 = s.match(/^\d{1,4}[\/\-](\d+)$/);
+  if (m2) return m2[1].replace(/^0+/, '') || '0';
   return s;
 }
 function normaliseGSTIN(val) {
@@ -182,9 +186,12 @@ function extractNumericSuffix(invNo) {
   const s = String(invNo).trim().toUpperCase().replace(/\s+/g, '');
   // If purely numeric already
   if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
-  // PREFIX-NUM or PREFIX/NUM
+  // ALPHA PREFIX-NUM or PREFIX/NUM (e.g. "SW-60134", "INV/1234")
   const m = s.match(/^[A-Z0-9][-\/](\d+)$/) || s.match(/^[A-Z]+[-\/]?(\d+)$/);
   if (m) return m[1].replace(/^0+/, '') || '0';
+  // NUM/NUM pattern: portal "12/0033902" → extract "33902"
+  const m2 = s.match(/^\d{1,4}[\/\-](\d+)$/);
+  if (m2) return m2[1].replace(/^0+/, '') || '0';
   return s;
 }
 
@@ -233,8 +240,13 @@ function countMismatchFields(p, b) {
   const ps = (p.placeOfSupply||'').trim().toUpperCase().replace(/^\d+-/,'');
   const bs = (b.placeOfSupply||'').trim().toUpperCase().replace(/^\d+-/,'');
   if (ps && bs && ps !== bs)                                   fields.push('Place of Supply');
-  if (p.reverseCharge && b.reverseCharge && p.reverseCharge.toUpperCase() !== b.reverseCharge.toUpperCase()) fields.push('Reverse Charge');
-  return { count: fields.length, fields };
+  // Reverse charge: intentionally NOT counted as a financial mismatch.
+  // It's a metadata flag — invoices where only RC flag differs are still considered matched.
+  const rcMismatch = !!(
+    p.reverseCharge && b.reverseCharge &&
+    p.reverseCharge.toUpperCase() !== b.reverseCharge.toUpperCase()
+  );
+  return { count: fields.length, fields, rcMismatch };
 }
 
 function reconcile(portalData, booksData) {
@@ -251,15 +263,16 @@ function reconcile(portalData, booksData) {
     if (bm.has(key)) {
       bUsed.add(key);
       const b = bm.get(key);
-      const { count, fields } = countMismatchFields(p, b);
+      const { count, fields, rcMismatch } = countMismatchFields(p, b);
       if (count === 0) {
-        matched.push({ portal: p, books: b, key });
+        matched.push({ portal: p, books: b, key, rcMismatch });
       } else if (count >= 3) {
         // 3+ parameter differences → Check Once (needs manual review)
         checkOnce.push({
           portal: p, books: b, key,
           mismatchFields: fields,
           mismatchCount: count,
+          rcMismatch,
           valueDiff: p.invoiceValue - b.invoiceValue,
           taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst),
         });
@@ -268,6 +281,7 @@ function reconcile(portalData, booksData) {
           portal: p, books: b, key,
           mismatchFields: fields,
           mismatchCount: count,
+          rcMismatch,
           valueDiff: p.invoiceValue - b.invoiceValue,
           taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst),
         });
@@ -294,7 +308,7 @@ function reconcile(portalData, booksData) {
     if (found) {
       booksOnlyUsed.add(found.key);
       const p = po.portal, b = found.books;
-      const { count, fields } = countMismatchFields(p, b);
+      const { count, fields, rcMismatch } = countMismatchFields(p, b);
       const allMatch = count === 0 &&
         (!p.invoiceDate || !b.invoiceDate || p.invoiceDate === b.invoiceDate);
 
@@ -306,6 +320,7 @@ function reconcile(portalData, booksData) {
           portalInvRaw: p.invoiceNoRaw, booksInvRaw: b.invoiceNoRaw,
           mismatchFields: ['Invoice No (prefix)', ...fields],
           mismatchCount: count + 1,
+          rcMismatch,
           valueDiff: p.invoiceValue - b.invoiceValue,
           taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst),
         });
@@ -315,6 +330,7 @@ function reconcile(portalData, booksData) {
           prefixMismatch: true,
           portalInvRaw: p.invoiceNoRaw, booksInvRaw: b.invoiceNoRaw,
           allOtherMatch: allMatch,
+          rcMismatch,
           mismatchFields: allMatch ? ['Invoice No (prefix only)'] : ['Invoice No (prefix)', ...fields],
           mismatchCount: allMatch ? 1 : count + 1,
           valueDiff: p.invoiceValue - b.invoiceValue,
@@ -984,7 +1000,7 @@ const DropZone = ({ label, icon:Icon, colors, file, onFile, onClear, hint }) => 
 /* ═══════════════════════════════════════════════════════════════════════════
    RESULT TABLE COMPONENT
 ═══════════════════════════════════════════════════════════════════════════ */
-const ResultTable = ({ tabId, records, onDelete }) => {
+const ResultTable = ({ tabId, records, onDelete, onMarkMatched }) => {
   const [search, setSearch] = useState('');
   const [page, setPage]     = useState(1);
   const filtered = records.filter(r => {
@@ -1017,6 +1033,17 @@ const ResultTable = ({ tabId, records, onDelete }) => {
             Yellow rows = prefix-only difference (values match) — can delete
           </span>
         )}
+        {tabId === 'matched' && records.some(r => r.manualMatch) && (
+          <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 text-xs">
+            <span className="w-3 h-3 rounded-full bg-indigo-200 dark:bg-indigo-700 inline-block border border-indigo-400"/>
+            <span className="font-semibold">✓ Manual</span> = manually confirmed matched
+          </span>
+        )}
+          <span className="flex items-center gap-1 text-violet-600 dark:text-violet-400 text-xs">
+            <span className="w-3 h-3 rounded-full bg-violet-200 dark:bg-violet-700 inline-block border border-violet-400"/>
+            <span className="font-semibold">RCM</span> badge = Reverse Charge flag differs in portal vs books (financially matched)
+          </span>
+        )}
       </div>
       <div className="relative mb-3">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400"/>
@@ -1047,6 +1074,9 @@ const ResultTable = ({ tabId, records, onDelete }) => {
                 <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">SGST</th>
                 {tabId === 'portalOnly' && <th className="px-3 py-2.5 text-center font-semibold text-slate-600 dark:text-slate-300">ITC</th>}
               </>}
+              {(tabId === 'mismatch' || tabId === 'portalOnly' || tabId === 'booksOnly') && (
+                <th className="px-3 py-2.5 text-center font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Status</th>
+              )}
               {onDelete && <th className="px-3 py-2.5 text-center font-semibold text-slate-400">Action</th>}
             </tr>
           </thead>
@@ -1067,7 +1097,17 @@ const ResultTable = ({ tabId, records, onDelete }) => {
                         <span className="text-violet-600 dark:text-violet-400 text-[10px] font-mono">{r.books?.invoiceNoRaw}</span>
                         <span className="text-[9px] text-yellow-600 dark:text-yellow-400 font-semibold">prefix differs</span>
                       </span>
-                    ) : inv?.invoiceNoRaw}
+                    ) : (
+                      <span className="flex items-center gap-1.5">
+                        <span>{inv?.invoiceNoRaw}</span>
+                        {r.rcMismatch && (
+                          <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 border border-violet-200 dark:border-violet-800">RCM</span>
+                        )}
+                        {r.manualMatch && (
+                          <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">✓ Manual</span>
+                        )}
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{inv?.invoiceDate}</td>
                   {tabId === 'mismatch' ? <>
@@ -1081,6 +1121,9 @@ const ResultTable = ({ tabId, records, onDelete }) => {
                       {(r.mismatchFields||[]).map(f => (
                         <span key={f} className="inline-block mr-1 mb-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 whitespace-nowrap">{f}</span>
                       ))}
+                      {r.rcMismatch && (
+                        <span className="inline-block mr-1 mb-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 whitespace-nowrap">RCM flag</span>
+                      )}
                     </td>
                   </> : <>
                     <td className="px-3 py-2 text-right text-slate-700 dark:text-slate-200">₹{fmt(inv?.invoiceValue)}</td>
@@ -1092,6 +1135,25 @@ const ResultTable = ({ tabId, records, onDelete }) => {
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${inv?.itcAvailability?.toLowerCase()==='yes'?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-500'}`}>{inv?.itcAvailability||'—'}</span>
                     </td>}
                   </>}
+                  {/* Per-row Matching / Not Matching status toggle */}
+                  {(tabId === 'mismatch' || tabId === 'portalOnly' || tabId === 'booksOnly') && (
+                    <td className="px-3 py-2 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        {onMarkMatched ? (
+                          <button
+                            onClick={() => onMarkMatched(r)}
+                            title="Mark this invoice as manually matched"
+                            className="flex items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border border-emerald-200 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40 dark:text-emerald-400 dark:border-emerald-800 transition-colors whitespace-nowrap"
+                          >
+                            <CheckCircle2 className="h-3 w-3"/> Matching
+                          </button>
+                        ) : null}
+                        <span className="flex items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-bold bg-rose-50 text-rose-500 border border-rose-200 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-800 whitespace-nowrap">
+                          <X className="h-3 w-3"/> Not Matching
+                        </span>
+                      </div>
+                    </td>
+                  )}
                   {onDelete && (
                     <td className="px-3 py-2 text-center">
                       <button
@@ -2066,6 +2128,196 @@ const HistoryView = () => {
 };
 
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   ITC DETAIL MODAL — full invoice list for ITC Claimable / ITC to Book / ITC at Risk
+═══════════════════════════════════════════════════════════════════════════ */
+const ITC_MODAL_META = {
+  claimable: {
+    title: 'ITC Claimable',
+    desc: 'Tax from invoices present in both portal and books (matched). These can be claimed in GSTR-3B.',
+    color: 'emerald',
+    headerBg: 'bg-emerald-600',
+  },
+  toBook: {
+    title: 'ITC to Book',
+    desc: 'Tax from portal-only invoices not yet entered in books. Book these entries to avail ITC.',
+    color: 'blue',
+    headerBg: 'bg-blue-600',
+  },
+  atRisk: {
+    title: 'ITC at Risk',
+    desc: 'Tax from books-only invoices where vendor has NOT filed on portal. Follow up with vendor or reverse ITC.',
+    color: 'rose',
+    headerBg: 'bg-rose-600',
+  },
+};
+
+const ITCDetailModal = ({ type, results, onClose }) => {
+  const [search, setSearch] = useState('');
+  const meta = ITC_MODAL_META[type];
+  if (!meta) return null;
+
+  let invoices = [];
+  if (type === 'claimable') {
+    invoices = (results.matched || []).map(r => ({
+      gstin: r.portal?.gstin,
+      partyName: r.portal?.tradeOrLegalName || '—',
+      invoiceNo: r.portal?.invoiceNoRaw,
+      date: r.portal?.invoiceDate,
+      value: r.portal?.invoiceValue,
+      igst: r.portal?.igst, cgst: r.portal?.cgst, sgst: r.portal?.sgst,
+      tax: (r.portal?.igst||0)+(r.portal?.cgst||0)+(r.portal?.sgst||0),
+      rcm: r.rcMismatch,
+    }));
+  } else if (type === 'toBook') {
+    invoices = (results.portalOnly || []).map(r => ({
+      gstin: r.portal?.gstin,
+      partyName: r.portal?.tradeOrLegalName || '—',
+      invoiceNo: r.portal?.invoiceNoRaw,
+      date: r.portal?.invoiceDate,
+      value: r.portal?.invoiceValue,
+      igst: r.portal?.igst, cgst: r.portal?.cgst, sgst: r.portal?.sgst,
+      tax: (r.portal?.igst||0)+(r.portal?.cgst||0)+(r.portal?.sgst||0),
+      itc: r.portal?.itcAvailability,
+    }));
+  } else {
+    invoices = (results.booksOnly || []).map(r => ({
+      gstin: r.books?.gstin,
+      partyName: '—',
+      invoiceNo: r.books?.invoiceNoRaw,
+      date: r.books?.invoiceDate,
+      value: r.books?.invoiceValue,
+      igst: r.books?.igst, cgst: r.books?.cgst, sgst: r.books?.sgst,
+      tax: (r.books?.igst||0)+(r.books?.cgst||0)+(r.books?.sgst||0),
+    }));
+  }
+
+  const filtered = search.trim()
+    ? invoices.filter(inv => {
+        const q = search.toLowerCase();
+        return (inv.gstin||'').toLowerCase().includes(q) ||
+               (inv.invoiceNo||'').toLowerCase().includes(q) ||
+               (inv.partyName||'').toLowerCase().includes(q);
+      })
+    : invoices;
+
+  const totalTaxAmt = filtered.reduce((s, inv) => s + (inv.tax || 0), 0);
+  const totalVal = filtered.reduce((s, inv) => s + (inv.value || 0), 0);
+
+  const colorMap = {
+    emerald: { badge:'bg-emerald-100 text-emerald-700', row:'hover:bg-emerald-50 dark:hover:bg-emerald-900/10', ring:'focus:ring-emerald-400 border-emerald-200' },
+    blue:    { badge:'bg-blue-100 text-blue-700',       row:'hover:bg-blue-50 dark:hover:bg-blue-900/10',       ring:'focus:ring-blue-400 border-blue-200' },
+    rose:    { badge:'bg-rose-100 text-rose-700',       row:'hover:bg-rose-50 dark:hover:bg-rose-900/10',       ring:'focus:ring-rose-400 border-rose-200' },
+  };
+  const c = colorMap[meta.color];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}/>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 20 }}
+        className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[85vh] flex flex-col overflow-hidden"
+      >
+        {/* Header */}
+        <div className={`${meta.headerBg} px-6 py-4 flex items-center justify-between flex-shrink-0`}>
+          <div>
+            <h2 className="text-lg font-bold text-white">{meta.title}</h2>
+            <p className="text-xs text-white/80 mt-0.5">{meta.desc}</p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl bg-white/20 hover:bg-white/30 text-white transition-colors">
+            <X className="h-5 w-5"/>
+          </button>
+        </div>
+
+        {/* Summary bar */}
+        <div className="flex flex-wrap gap-4 px-6 py-3 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 flex-shrink-0 text-sm">
+          <span className="text-slate-500">Invoices: <strong className="text-slate-800 dark:text-slate-100">{filtered.length}</strong></span>
+          <span className="text-slate-500">Total Value: <strong className="text-slate-800 dark:text-slate-100">₹{fmt(totalVal)}</strong></span>
+          <span className="text-slate-500">Total Tax: <strong className="text-slate-800 dark:text-slate-100">₹{fmt(totalTaxAmt)}</strong></span>
+        </div>
+
+        {/* Search */}
+        <div className="px-6 py-3 flex-shrink-0 border-b border-slate-200 dark:border-slate-700">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400"/>
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search GSTIN, Invoice No, Party Name…"
+              className={`w-full pl-9 pr-4 py-2 text-sm rounded-xl border bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 ${c.ring} dark:border-slate-700`}
+            />
+          </div>
+        </div>
+
+        {/* Table */}
+        <div className="overflow-auto flex-1">
+          <table className="w-full text-xs min-w-[700px]">
+            <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700">
+              <tr>
+                <th className="px-4 py-2.5 text-left font-semibold text-slate-500">#</th>
+                <th className="px-4 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300">GSTIN</th>
+                {type !== 'atRisk' && <th className="px-4 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300">Party Name</th>}
+                <th className="px-4 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300">Invoice No</th>
+                <th className="px-4 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300">Date</th>
+                <th className="px-4 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">Invoice Value</th>
+                <th className="px-4 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">IGST</th>
+                <th className="px-4 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">CGST</th>
+                <th className="px-4 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">SGST</th>
+                <th className="px-4 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">Total Tax</th>
+                {type === 'claimable' && <th className="px-4 py-2.5 text-center font-semibold text-slate-500">Flag</th>}
+                {type === 'toBook'    && <th className="px-4 py-2.5 text-center font-semibold text-slate-500">ITC Avail</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr><td colSpan={10} className="px-4 py-16 text-center text-slate-400">No invoices found</td></tr>
+              ) : filtered.map((inv, i) => (
+                <tr key={i} className={`border-b border-slate-100 dark:border-slate-700/50 ${c.row} transition-colors`}>
+                  <td className="px-4 py-2 text-slate-400">{i + 1}</td>
+                  <td className="px-4 py-2 font-mono text-[11px] text-slate-600 dark:text-slate-300">{inv.gstin}</td>
+                  {type !== 'atRisk' && <td className="px-4 py-2 text-slate-700 dark:text-slate-200 max-w-[140px] truncate" title={inv.partyName}>{inv.partyName}</td>}
+                  <td className="px-4 py-2 font-medium text-slate-700 dark:text-slate-200">{inv.invoiceNo}</td>
+                  <td className="px-4 py-2 text-slate-500 whitespace-nowrap">{inv.date}</td>
+                  <td className="px-4 py-2 text-right text-slate-700 dark:text-slate-200">₹{fmt(inv.value)}</td>
+                  <td className="px-4 py-2 text-right text-slate-500">{fmt(inv.igst)}</td>
+                  <td className="px-4 py-2 text-right text-slate-500">{fmt(inv.cgst)}</td>
+                  <td className="px-4 py-2 text-right text-slate-500">{fmt(inv.sgst)}</td>
+                  <td className={`px-4 py-2 text-right font-semibold ${c.badge.split(' ')[1]}`}>₹{fmt(inv.tax)}</td>
+                  {type === 'claimable' && (
+                    <td className="px-4 py-2 text-center">
+                      {inv.rcm && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">RCM</span>}
+                    </td>
+                  )}
+                  {type === 'toBook' && (
+                    <td className="px-4 py-2 text-center">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${inv.itc?.toLowerCase()==='yes'?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-500'}`}>{inv.itc||'—'}</span>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+            {filtered.length > 0 && (
+              <tfoot className="bg-slate-50 dark:bg-slate-800/80 border-t-2 border-slate-200 dark:border-slate-700 sticky bottom-0">
+                <tr>
+                  <td colSpan={type === 'atRisk' ? 5 : 6} className="px-4 py-2.5 font-bold text-slate-700 dark:text-slate-200 text-xs">TOTAL ({filtered.length} invoices)</td>
+                  <td className="px-4 py-2.5 text-right font-bold text-slate-700 dark:text-slate-200">₹{fmt(totalVal)}</td>
+                  <td className="px-4 py-2.5 text-right font-semibold text-slate-500">{fmt(filtered.reduce((s,r)=>s+(r.igst||0),0))}</td>
+                  <td className="px-4 py-2.5 text-right font-semibold text-slate-500">{fmt(filtered.reduce((s,r)=>s+(r.cgst||0),0))}</td>
+                  <td className="px-4 py-2.5 text-right font-semibold text-slate-500">{fmt(filtered.reduce((s,r)=>s+(r.sgst||0),0))}</td>
+                  <td className={`px-4 py-2.5 text-right font-bold text-lg ${meta.color==='emerald'?'text-emerald-700 dark:text-emerald-300':meta.color==='blue'?'text-blue-700 dark:text-blue-300':'text-rose-700 dark:text-rose-300'}`}>₹{fmt(totalTaxAmt)}</td>
+                  {(type === 'claimable' || type === 'toBook') && <td/>}
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 const EMPTY_COMPANY = {
   name: '', gstin: '', pan: '', address: '', phone: '', email: '', fy: '',
 };
@@ -2080,6 +2332,7 @@ export default function GSTReconciliation() {
   const [results,         setResults]          = useState(null);
   const [activeTab,       setActiveTab]        = useState('matched');
   const [showCo,          setShowCo]           = useState(true);
+  const [itcModal,        setItcModal]         = useState(null); // null | 'claimable' | 'toBook' | 'atRisk'
 
   // Client integration
   const [clients,         setClients]          = useState([]);
@@ -2087,6 +2340,24 @@ export default function GSTReconciliation() {
   const [clientsLoading,  setClientsLoading]   = useState(false);
 
   const setCo = (k, v) => setCompany(p => ({ ...p, [k]: v }));
+
+  // Mark an invoice from mismatch/portalOnly/booksOnly as manually matched
+  const handleMarkMatched = useCallback((record, tabId) => {
+    setResults(prev => {
+      if (!prev) return prev;
+      const updated = { ...prev };
+      // Remove from source tab
+      if (tabId === 'mismatch')    updated.mismatch    = prev.mismatch.filter(r => r.key !== record.key);
+      if (tabId === 'portalOnly')  updated.portalOnly  = prev.portalOnly.filter(r => r.key !== record.key);
+      if (tabId === 'booksOnly')   updated.booksOnly   = prev.booksOnly.filter(r => r.key !== record.key);
+      // Add to matched as manually confirmed
+      const portal = record.portal || record.books;
+      const books  = record.books  || record.portal;
+      updated.matched = [...prev.matched, { ...record, portal, books, manualMatch: true }];
+      return updated;
+    });
+    toast.success('Invoice marked as Matched');
+  }, []);
 
   // Fetch clients on mount
   useEffect(() => {
@@ -2372,21 +2643,30 @@ export default function GSTReconciliation() {
                 }, 0);
                 return (
                   <div className="grid grid-cols-3 gap-3 mb-4">
-                    <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl border border-emerald-200 dark:border-emerald-800 p-3">
-                      <p className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">ITC Claimable</p>
+                    <button
+                      onClick={() => setItcModal('claimable')}
+                      className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl border border-emerald-200 dark:border-emerald-800 p-3 text-left hover:shadow-md hover:border-emerald-400 dark:hover:border-emerald-600 transition-all group cursor-pointer"
+                    >
+                      <p className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide flex items-center gap-1">ITC Claimable <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity"/></p>
                       <p className="text-lg font-bold text-emerald-700 dark:text-emerald-300 mt-0.5">₹{fmt(itcEligible)}</p>
                       <p className="text-[10px] text-emerald-600 dark:text-emerald-400">From {results.matched.length} matched invoices</p>
-                    </div>
-                    <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800 p-3">
-                      <p className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">ITC to Book</p>
+                    </button>
+                    <button
+                      onClick={() => setItcModal('toBook')}
+                      className="bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800 p-3 text-left hover:shadow-md hover:border-blue-400 dark:hover:border-blue-600 transition-all group cursor-pointer"
+                    >
+                      <p className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide flex items-center gap-1">ITC to Book <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity"/></p>
                       <p className="text-lg font-bold text-blue-700 dark:text-blue-300 mt-0.5">₹{fmt(itcPending)}</p>
                       <p className="text-[10px] text-blue-600 dark:text-blue-400">From {results.portalOnly.length} portal-only invoices</p>
-                    </div>
-                    <div className="bg-rose-50 dark:bg-rose-900/20 rounded-xl border border-rose-200 dark:border-rose-800 p-3">
-                      <p className="text-[10px] font-semibold text-rose-600 dark:text-rose-400 uppercase tracking-wide">ITC at Risk</p>
+                    </button>
+                    <button
+                      onClick={() => setItcModal('atRisk')}
+                      className="bg-rose-50 dark:bg-rose-900/20 rounded-xl border border-rose-200 dark:border-rose-800 p-3 text-left hover:shadow-md hover:border-rose-400 dark:hover:border-rose-600 transition-all group cursor-pointer"
+                    >
+                      <p className="text-[10px] font-semibold text-rose-600 dark:text-rose-400 uppercase tracking-wide flex items-center gap-1">ITC at Risk <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity"/></p>
                       <p className="text-lg font-bold text-rose-700 dark:text-rose-300 mt-0.5">₹{fmt(itcAtRisk)}</p>
                       <p className="text-[10px] text-rose-600 dark:text-rose-400">From {results.booksOnly.length} books-only invoices</p>
-                    </div>
+                    </button>
                   </div>
                 );
               })()}
@@ -2450,7 +2730,12 @@ export default function GSTReconciliation() {
                       ? <CheckOneTab key="checkOne" records={results.checkOne||[]}/>
                       : activeTab === 'checkOnce'
                         ? <CheckOnceTab key="checkOnce" records={results.checkOnce||[]}/>
-                        : <ResultTable key={activeTab} tabId={activeTab} records={activeRecords}/>
+                        : <ResultTable
+                            key={activeTab}
+                            tabId={activeTab}
+                            records={activeRecords}
+                            onMarkMatched={['mismatch','portalOnly','booksOnly'].includes(activeTab) ? (r) => handleMarkMatched(r, activeTab) : undefined}
+                          />
                   }
                 </div>
               </div>
@@ -2479,6 +2764,18 @@ export default function GSTReconciliation() {
         </AnimatePresence>
 
       </div>
+
+      {/* ── ITC Detail Modal ── */}
+      <AnimatePresence>
+        {itcModal && results && (
+          <ITCDetailModal
+            type={itcModal}
+            results={results}
+            onClose={() => setItcModal(null)}
+          />
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }
