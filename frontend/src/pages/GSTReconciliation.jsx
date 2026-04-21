@@ -1,15 +1,17 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { saveAs } from 'file-saver';
 import { motion, AnimatePresence } from 'framer-motion';
+import api from '@/lib/api';
 import {
   Upload, CheckCircle2, AlertTriangle, Download, Search,
   RefreshCw, ArrowLeftRight, Info, X, Globe, BookOpen,
   FileText, FileSpreadsheet, Building2, Hash, MapPin,
   Phone, Mail, Calendar, ChevronRight, ScanSearch,
   Filter, Tag, ArrowUpDown, ChevronsUpDown,
+  History, Clock, Trash2, ChevronDown, User, Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -1355,19 +1357,293 @@ const GlobalSearchTab = ({ results }) => {
 };
 
 
-const EMPTY_COMPANY = { name:'', gstin:'', pan:'', address:'', city:'', state:'', phone:'', email:'', fy:'' };
+/* ═══════════════════════════════════════════════════════════════════════════
+   CLIENT SELECTOR — searchable dropdown linked to the clients DB
+═══════════════════════════════════════════════════════════════════════════ */
+const ClientSelector = ({ clients, selectedId, onSelect }) => {
+  const [open,   setOpen]   = useState(false);
+  const [search, setSearch] = useState('');
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handleClick = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const selected = clients.find(c => c.id === selectedId);
+  const filtered = clients.filter(c =>
+    !search.trim() ||
+    c.company_name.toLowerCase().includes(search.toLowerCase()) ||
+    (c.gstin || '').toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-2 pl-3 pr-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-left hover:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+      >
+        <User className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+        <span className={`flex-1 truncate ${selected ? 'text-slate-700 dark:text-slate-200' : 'text-slate-400'}`}>
+          {selected ? `${selected.company_name}${selected.gstin ? ` — ${selected.gstin}` : ''}` : 'Select a client (optional)'}
+        </span>
+        {selected && (
+          <span onClick={e => { e.stopPropagation(); onSelect(null); setSearch(''); }}
+            className="p-0.5 rounded hover:bg-slate-100 dark:hover:bg-slate-700">
+            <X className="h-3.5 w-3.5 text-slate-400" />
+          </span>
+        )}
+        <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+            className="absolute z-50 mt-1 w-full bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-xl overflow-hidden"
+          >
+            <div className="p-2 border-b border-slate-100 dark:border-slate-700">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <input
+                  autoFocus
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Search by name or GSTIN…"
+                  className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                />
+              </div>
+            </div>
+            <div className="max-h-56 overflow-y-auto">
+              {filtered.length === 0 ? (
+                <p className="py-6 text-center text-xs text-slate-400">No clients found</p>
+              ) : filtered.map(c => (
+                <button
+                  key={c.id} type="button"
+                  onClick={() => { onSelect(c); setOpen(false); setSearch(''); }}
+                  className={`w-full text-left px-3 py-2.5 text-xs hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors flex items-center gap-2 ${c.id === selectedId ? 'bg-indigo-50 dark:bg-indigo-900/20' : ''}`}
+                >
+                  <div className="w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
+                    <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400">{c.company_name[0]}</span>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-700 dark:text-slate-200 truncate">{c.company_name}</p>
+                    {c.gstin && <p className="text-[10px] font-mono text-slate-400">{c.gstin}</p>}
+                  </div>
+                  {c.id === selectedId && <CheckCircle2 className="h-3.5 w-3.5 text-indigo-500 ml-auto flex-shrink-0" />}
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HISTORY VIEW — past reconciliation sessions
+═══════════════════════════════════════════════════════════════════════════ */
+const HistoryView = () => {
+  const [sessions,  setSessions]  = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [deleting,  setDeleting]  = useState(null);
+  const [expanded,  setExpanded]  = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await api.get('/gst-reconciliation/history?limit=100');
+      setSessions(r.data.sessions || []);
+    } catch { toast.error('Failed to load history'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this reconciliation history entry?')) return;
+    setDeleting(id);
+    try {
+      await api.delete(`/gst-reconciliation/history/${id}`);
+      setSessions(prev => prev.filter(s => s.id !== id));
+      toast.success('Deleted');
+    } catch { toast.error('Could not delete session'); }
+    finally { setDeleting(null); }
+  };
+
+  const fmtDate = (d) => {
+    if (!d) return '—';
+    try {
+      return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch { return d; }
+  };
+
+  const StatPill = ({ label, val, bg, text }) => (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${bg} ${text}`}>
+      {label}: {val}
+    </span>
+  );
+
+  if (loading) return (
+    <div className="flex flex-col items-center py-20 text-slate-400">
+      <Loader2 className="h-8 w-8 animate-spin mb-3 text-indigo-400" />
+      <p className="text-sm">Loading history…</p>
+    </div>
+  );
+
+  if (sessions.length === 0) return (
+    <div className="flex flex-col items-center py-20 text-slate-400">
+      <History className="h-14 w-14 mb-3 text-slate-200 dark:text-slate-700" />
+      <p className="font-medium text-slate-500 text-base">No reconciliation history yet</p>
+      <p className="text-sm mt-1 text-slate-400">Run a reconciliation and it will appear here.</p>
+    </div>
+  );
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-sm text-slate-500">{sessions.length} reconciliation{sessions.length !== 1 ? 's' : ''} saved</p>
+        <button onClick={load} className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-indigo-600 transition-colors">
+          <RefreshCw className="h-3.5 w-3.5" /> Refresh
+        </button>
+      </div>
+      <div className="space-y-3">
+        {sessions.map(s => {
+          const sm = s.summary || {};
+          const isExp = expanded === s.id;
+          return (
+            <motion.div key={s.id} layout className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+              {/* Header row */}
+              <div className="flex items-center gap-3 p-4 cursor-pointer" onClick={() => setExpanded(isExp ? null : s.id)}>
+                <div className="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 flex-shrink-0">
+                  <ArrowLeftRight className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-semibold text-sm text-slate-800 dark:text-slate-100 truncate">
+                      {s.client_name || 'Unknown Client'}
+                    </p>
+                    {s.client_gstin && (
+                      <span className="font-mono text-[10px] bg-slate-100 dark:bg-slate-700 text-slate-500 px-1.5 py-0.5 rounded">
+                        {s.client_gstin}
+                      </span>
+                    )}
+                    {s.period && (
+                      <span className="text-[10px] bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-full font-medium">
+                        {s.period}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                    <StatPill label="✓" val={sm.matched_count ?? 0}     bg="bg-emerald-100 dark:bg-emerald-900/30" text="text-emerald-700 dark:text-emerald-300" />
+                    <StatPill label="⚠" val={sm.mismatch_count ?? 0}    bg="bg-amber-100 dark:bg-amber-900/30"    text="text-amber-700 dark:text-amber-300" />
+                    <StatPill label="🌐" val={sm.portal_only_count ?? 0} bg="bg-blue-100 dark:bg-blue-900/30"      text="text-blue-700 dark:text-blue-300" />
+                    <StatPill label="📒" val={sm.books_only_count ?? 0}  bg="bg-rose-100 dark:bg-rose-900/30"      text="text-rose-700 dark:text-rose-300" />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="text-right hidden sm:block">
+                    <p className="text-[11px] text-slate-400 flex items-center gap-1 justify-end">
+                      <Clock className="h-3 w-3" /> {fmtDate(s.created_at)}
+                    </p>
+                    {s.created_by_name && (
+                      <p className="text-[10px] text-slate-400 mt-0.5">by {s.created_by_name}</p>
+                    )}
+                  </div>
+                  <button
+                    onClick={e => { e.stopPropagation(); handleDelete(s.id); }}
+                    disabled={deleting === s.id}
+                    className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20 text-slate-300 hover:text-rose-500 transition-colors"
+                  >
+                    {deleting === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                  </button>
+                  <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isExp ? 'rotate-180' : ''}`} />
+                </div>
+              </div>
+
+              {/* Expanded details */}
+              <AnimatePresence>
+                {isExp && (
+                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                    <div className="border-t border-slate-100 dark:border-slate-700 p-4 bg-slate-50/50 dark:bg-slate-900/30">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                        {[
+                          { label: 'Portal Invoices',  val: sm.total_portal ?? '—',          color: 'text-slate-700 dark:text-slate-200' },
+                          { label: 'Books Invoices',   val: sm.total_books  ?? '—',           color: 'text-slate-700 dark:text-slate-200' },
+                          { label: 'Matched Value',    val: sm.matched_value != null ? `₹${fmt(sm.matched_value)}` : '—',     color: 'text-emerald-700 dark:text-emerald-300' },
+                          { label: 'Books Only Value', val: sm.books_only_value != null ? `₹${fmt(sm.books_only_value)}` : '—', color: 'text-rose-700 dark:text-rose-300' },
+                        ].map(item => (
+                          <div key={item.label} className="bg-white dark:bg-slate-800 rounded-lg p-3 border border-slate-100 dark:border-slate-700">
+                            <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wide mb-1">{item.label}</p>
+                            <p className={`text-sm font-bold ${item.color}`}>{item.val}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap gap-3 text-xs text-slate-500">
+                        {s.portal_filename && <span>🌐 Portal file: <strong>{s.portal_filename}</strong></span>}
+                        {s.books_filename  && <span>📒 Books file: <strong>{s.books_filename}</strong></span>}
+                        <span className="sm:hidden flex items-center gap-1"><Clock className="h-3 w-3" /> {fmtDate(s.created_at)}</span>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 
 export default function GSTReconciliation() {
-  const [portalFile, setPortalFile]   = useState(null);
-  const [booksFile,  setBooksFile]    = useState(null);
-  const [period,     setPeriod]       = useState('');
-  const [company,    setCompany]      = useState(EMPTY_COMPANY);
-  const [loading,    setLoading]      = useState(false);
-  const [results,    setResults]      = useState(null);
-  const [activeTab,  setActiveTab]    = useState('matched');
-  const [showCo,     setShowCo]       = useState(true);
+  const [pageView,        setPageView]        = useState('new');   // 'new' | 'history'
+  const [portalFile,      setPortalFile]       = useState(null);
+  const [booksFile,       setBooksFile]        = useState(null);
+  const [period,          setPeriod]           = useState('');
+  const [company,         setCompany]          = useState(EMPTY_COMPANY);
+  const [loading,         setLoading]          = useState(false);
+  const [results,         setResults]          = useState(null);
+  const [activeTab,       setActiveTab]        = useState('matched');
+  const [showCo,          setShowCo]           = useState(true);
+
+  // Client integration
+  const [clients,         setClients]          = useState([]);
+  const [selectedClient,  setSelectedClient]   = useState(null);
+  const [clientsLoading,  setClientsLoading]   = useState(false);
 
   const setCo = (k, v) => setCompany(p => ({ ...p, [k]: v }));
+
+  // Fetch clients on mount
+  useEffect(() => {
+    setClientsLoading(true);
+    api.get('/gst-reconciliation/clients')
+      .then(r => setClients(r.data.clients || []))
+      .catch(() => {})
+      .finally(() => setClientsLoading(false));
+  }, []);
+
+  // When client is selected, auto-fill company form
+  const handleClientSelect = (client) => {
+    setSelectedClient(client);
+    if (!client) return;
+    const address = [client.address, client.city, client.state].filter(Boolean).join(', ');
+    const email   = client.email || client.contact_persons?.[0]?.email || '';
+    const phone   = client.phone || client.contact_persons?.[0]?.phone || '';
+    setCompany(prev => ({
+      ...prev,
+      name:    client.company_name || prev.name,
+      gstin:   client.gstin        || prev.gstin,
+      pan:     client.pan          || prev.pan,
+      address: address             || prev.address,
+      phone:   phone               || prev.phone,
+      email:   email               || prev.email,
+    }));
+  };
 
   const readWorkbook = file => new Promise((res, rej) => {
     const reader = new FileReader();
@@ -1387,6 +1663,34 @@ export default function GSTReconciliation() {
       const res = reconcile(portalData, booksData);
       setResults(res); setActiveTab('matched');
       toast.success(`Reconciliation complete — ${portalData.length} portal + ${booksData.length} books invoices.`);
+
+      // Auto-save session to history
+      const summary = {
+        total_portal:       portalData.length,
+        total_books:        booksData.length,
+        matched_count:      res.matched.length,
+        mismatch_count:     res.mismatch.length,
+        portal_only_count:  res.portalOnly.length,
+        books_only_count:   res.booksOnly.length,
+        matched_value:      sumVal(res.matched, 'portal'),
+        mismatch_value:     sumVal(res.mismatch, 'portal'),
+        portal_only_value:  sumVal(res.portalOnly, 'portal'),
+        books_only_value:   sumVal(res.booksOnly, 'books'),
+        matched_tax:        sumTax(res.matched, 'portal'),
+        mismatch_tax:       sumTax(res.mismatch, 'portal'),
+        portal_only_tax:    sumTax(res.portalOnly, 'portal'),
+        books_only_tax:     sumTax(res.booksOnly, 'books'),
+      };
+      api.post('/gst-reconciliation/save-session', {
+        period,
+        client_id:       selectedClient?.id       || null,
+        client_name:     company.name              || selectedClient?.company_name || null,
+        client_gstin:    company.gstin             || selectedClient?.gstin || null,
+        portal_filename: portalFile.name,
+        books_filename:  booksFile.name,
+        summary,
+      }).catch(() => {}); // fire-and-forget; don't fail reconciliation if save fails
+
     } catch (err) {
       console.error(err); toast.error(`Failed: ${err.message}`);
     } finally { setLoading(false); }
@@ -1416,7 +1720,6 @@ export default function GSTReconciliation() {
           </div>
           {results && (
             <div className="flex flex-wrap items-center gap-2">
-              {/* Export buttons */}
               <button onClick={()=>exportPDF(results, company, period)} className="flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-medium rounded-xl shadow-sm transition-colors">
                 <FileText className="h-4 w-4"/> PDF Report
               </button>
@@ -1433,9 +1736,62 @@ export default function GSTReconciliation() {
           )}
         </div>
 
-        {/* ── Upload + Company Details Section ── */}
+        {/* ── Page View Switcher ── */}
         {!results && (
+          <div className="flex gap-1 p-1 bg-slate-200 dark:bg-slate-700 rounded-xl mb-5 w-fit">
+            {[
+              { id: 'new',     label: 'New Reconciliation', icon: ArrowLeftRight },
+              { id: 'history', label: 'History',            icon: History },
+            ].map(v => (
+              <button
+                key={v.id}
+                onClick={() => setPageView(v.id)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  pageView === v.id
+                    ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                }`}
+              >
+                <v.icon className="h-4 w-4" />
+                {v.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* ── History View ── */}
+        {pageView === 'history' && !results && (
+          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+            <div className="flex items-center gap-3 mb-5">
+              <History className="h-5 w-5 text-indigo-500" />
+              <h2 className="font-semibold text-slate-800 dark:text-slate-100">Reconciliation History</h2>
+            </div>
+            <HistoryView />
+          </div>
+        )}
+
+        {/* ── Upload + Company Details Section ── */}
+        {pageView === 'new' && !results && (
           <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 mb-6 shadow-sm">
+
+            {/* Client Selector */}
+            <div className="mb-5">
+              <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                <User className="h-3.5 w-3.5" /> Link to Client
+                {clientsLoading && <Loader2 className="h-3 w-3 animate-spin ml-1" />}
+              </label>
+              <ClientSelector
+                clients={clients}
+                selectedId={selectedClient?.id}
+                onSelect={handleClientSelect}
+              />
+              {selectedClient && (
+                <p className="text-[11px] text-indigo-600 dark:text-indigo-400 mt-1.5 flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3" />
+                  Company details auto-filled from client record
+                </p>
+              )}
+            </div>
 
             {/* Company Details */}
             <div className="mb-6">
@@ -1498,7 +1854,7 @@ export default function GSTReconciliation() {
 
             <div className="flex items-start gap-3 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800 mb-5 text-xs text-amber-700 dark:text-amber-300">
               <Info className="h-4 w-4 mt-0.5 flex-shrink-0"/>
-              <span><strong>Supported: </strong>GSTR-2B Excel from GST portal (.xlsx) and GSTR-2 offline tool (.xls/.xlsx) with b2b sheet. PDF and Word reports will include the company details entered above.</span>
+              <span><strong>Supported: </strong>GSTR-2B Excel from GST portal (.xlsx) and GSTR-2 offline tool (.xls/.xlsx) with b2b sheet. Each reconciliation is saved to history automatically.</span>
             </div>
 
             <button onClick={handleReconcile} disabled={!portalFile||!booksFile||loading}
@@ -1521,6 +1877,9 @@ export default function GSTReconciliation() {
                   {company.gstin && <span>GSTIN: {company.gstin}</span>}
                   {period        && <span>Period: {period}</span>}
                   {company.fy    && <span>FY: {company.fy}</span>}
+                  <span className="ml-auto flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Saved to history
+                  </span>
                 </div>
               )}
 
@@ -1591,7 +1950,10 @@ export default function GSTReconciliation() {
                 <button onClick={()=>exportExcel(results, company, period)} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg transition-colors">
                   <FileSpreadsheet className="h-3.5 w-3.5"/> Excel
                 </button>
-                <button onClick={handleReset} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-xs transition-colors">
+                <button onClick={() => { handleReset(); setPageView('history'); }} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 text-xs transition-colors border border-indigo-200 dark:border-indigo-800 rounded-lg font-medium">
+                  <History className="h-3.5 w-3.5" /> View History
+                </button>
+                <button onClick={handleReset} className="flex items-center gap-1.5 px-3 py-1.5 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-xs transition-colors">
                   <RefreshCw className="h-3.5 w-3.5"/> New Reconciliation
                 </button>
               </div>
