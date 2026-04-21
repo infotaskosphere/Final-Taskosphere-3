@@ -18,6 +18,8 @@ from datetime import datetime, date, timezone, timedelta
 # --- FIXED ROUTER IMPORTS ---
 # Added 'backend.' to invoicing to match the others
 from backend.compliance import router as compliance_router
+from backend.gst_reconciliation import router as gst_reconciliation_router
+from backend.gst_reconciliation import create_gst_reconciliation_indexes
 # reminders routes are inlined directly below (no separate router file needed)
 from backend.quotations import router as quotation_router
 from backend.attendance_identix import identix_router
@@ -256,6 +258,7 @@ async def startup_event():
     try:
         await db.tasks.create_index("assigned_to")
         await create_compliance_indexes()  # import it too
+        await create_gst_reconciliation_indexes()
         await db.tasks.create_index("created_by")
         await db.tasks.create_index("due_date")
         await db.users.create_index("email")
@@ -6575,6 +6578,7 @@ async def universal_exception_handler(request: Request, exc: Exception):
 # Api Router
 api_router.include_router(invoicing_router)
 api_router.include_router(compliance_router)
+api_router.include_router(gst_reconciliation_router)
 api_router.include_router(identix_router, prefix="/identix")
 api_router.include_router(passwords_router)
 api_router.include_router(visits_router)
