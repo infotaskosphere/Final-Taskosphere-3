@@ -2022,7 +2022,12 @@ const HistoryView = ({ onOpenSession }) => {
               {/* Expanded details */}
               <AnimatePresence>
                 {isExp && (
-                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                  <motion.div 
+                    initial={{ height: 0, opacity: 0 }} 
+                    animate={{ height: 'auto', opacity: 1 }} 
+                    exit={{ height: 0, opacity: 0 }} 
+                    className="overflow-hidden"
+                  >
                     <div className="border-t border-slate-100 dark:border-slate-700 p-4 bg-slate-50/50 dark:bg-slate-900/30">
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
                         {[
@@ -2048,71 +2053,73 @@ const HistoryView = ({ onOpenSession }) => {
               </AnimatePresence>
             </motion.div>
           );
-        }        {/* Baseline snapshot confirmation modal */}
-        <AnimatePresence>
-          {snapshotPrompt && (
-            <motion.div
-              initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
-              className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-            >
-              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !snapshotSaving && setSnapshotPrompt(null)}/>
-              <motion.div
-                initial={{scale:0.95,opacity:0,y:10}} animate={{scale:1,opacity:1,y:0}} exit={{scale:0.95,opacity:0,y:10}}
-                className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
-              >
-                <div className="flex items-start gap-3 px-5 py-4 bg-gradient-to-r from-amber-500 to-orange-500">
-                  <div className="p-2 rounded-lg bg-white/20 flex-shrink-0">
-                    <AlertTriangle className="h-5 w-5 text-white"/>
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white">Save baseline snapshot before editing?</h3>
-                    <p className="text-[11px] text-white/85 mt-0.5">We'll save the original (unedited) reconciliation as a separate history entry first, so your edits never overwrite it.</p>
-                  </div>
-                </div>
-                <div className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300 space-y-2">
-                  <p>This is a one-time prompt for this opened session. After confirming, all subsequent edits apply immediately.</p>
-                  <ul className="text-[12px] text-slate-500 dark:text-slate-400 list-disc pl-5 space-y-0.5">
-                    <li>Original session: <strong>{baselineSnapshot?.clientName || baselineSnapshot?.portalFilename || 'Opened reconciliation'}</strong></li>
-                    <li>Snapshot will be tagged <code className="px-1 bg-slate-100 dark:bg-slate-700 rounded text-[11px]">[snapshot]</code> in history.</li>
-                  </ul>
-                </div>
-                <div className="flex items-center justify-end gap-2 px-5 py-3 bg-slate-50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-700">
-                  <button
-                    disabled={snapshotSaving}
-                    onClick={() => setSnapshotPrompt(null)}
-                    className="px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    disabled={snapshotSaving}
-                    onClick={async () => {
-                      const ok = await saveBaselineSnapshot();
-                      if (ok) {
-                        const fn = snapshotPrompt?.pendingEdit;
-                        setSnapshotPrompt(null);
-                        if (typeof fn === 'function') fn();
-                      }
-                    }}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-60"
-                  >
-                    {snapshotSaving
-                      ? <><Loader2 className="h-3.5 w-3.5 animate-spin"/> Saving snapshot…</>
-                      : <><CheckCircle2 className="h-3.5 w-3.5"/> Save snapshot &amp; continue</>}
-                  </button>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-)}
+        })}
       </div>
+
+      {/* Baseline snapshot confirmation modal */}
+      <AnimatePresence>
+        {snapshotPrompt && (
+          <motion.div
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+          >
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !snapshotSaving && setSnapshotPrompt(null)}/>
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 10 }} 
+              animate={{ scale: 1, opacity: 1, y: 0 }} 
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+            >
+              <div className="flex items-start gap-3 px-5 py-4 bg-gradient-to-r from-amber-500 to-orange-500">
+                <div className="p-2 rounded-lg bg-white/20 flex-shrink-0">
+                  <AlertTriangle className="h-5 w-5 text-white"/>
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Save baseline snapshot before editing?</h3>
+                  <p className="text-[11px] text-white/85 mt-0.5">We'll save the original (unedited) reconciliation as a separate history entry first, so your edits never overwrite it.</p>
+                </div>
+              </div>
+              <div className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300 space-y-2">
+                <p>This is a one-time prompt for this opened session. After confirming, all subsequent edits apply immediately.</p>
+                <ul className="text-[12px] text-slate-500 dark:text-slate-400 list-disc pl-5 space-y-0.5">
+                  <li>Original session: <strong>{baselineSnapshot?.clientName || baselineSnapshot?.portalFilename || 'Opened reconciliation'}</strong></li>
+                  <li>Snapshot will be tagged <code className="px-1 bg-slate-100 dark:bg-slate-700 rounded text-[11px]">[snapshot]</code> in history.</li>
+                </ul>
+              </div>
+              <div className="flex items-center justify-end gap-2 px-5 py-3 bg-slate-50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-700">
+                <button
+                  disabled={snapshotSaving}
+                  onClick={() => setSnapshotPrompt(null)}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={snapshotSaving}
+                  onClick={async () => {
+                    const ok = await saveBaselineSnapshot();
+                    if (ok) {
+                      const fn = snapshotPrompt?.pendingEdit;
+                      setSnapshotPrompt(null);
+                      if (typeof fn === 'function') fn();
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-60"
+                >
+                  {snapshotSaving
+                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin"/> Saving...</>
+                    : <><CheckCircle2 className="h-3.5 w-3.5"/> Save & continue</>}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
-
-
 /* ═══════════════════════════════════════════════════════════════════════════
    ITC DETAIL MODAL — full invoice list for ITC Claimable / ITC to Book / ITC at Risk
 ═══════════════════════════════════════════════════════════════════════════ */
