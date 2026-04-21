@@ -56,18 +56,33 @@ def _to_num(val):
         return 0.0
 
 def _normalise_invoice(val):
+    """Normalise an invoice number to its pure numeric core for matching.
+
+    Handles:
+      - Purely numeric: "001234" → "1234"
+      - ALPHA-NUM with separator: "SW-60134" → "60134", "INV/1234" → "1234"
+      - NUM/NUM (portal serial/invoice): "12/0033902" → "33902"
+      - ALPHA directly attached (no separator): "T1326" → "1326", "INV1234" → "1234"
+        Portal often uses a series letter prefix that books omit entirely.
+    """
+    import re as _re
     s = _to_str(val).upper().replace(" ", "")
+    # Purely numeric
     if s.isdigit():
         return s.lstrip("0") or "0"
+    # ALPHA/NUM or ALPHA-NUM with separator
     for sep in ("-", "/"):
         if sep in s:
             prefix, _, suffix = s.partition(sep)
-            # ALPHA prefix (e.g. "SW-60134", "INV/1234")
             if prefix.isalpha() and suffix.isdigit():
                 return suffix.lstrip("0") or "0"
-            # SHORT NUMERIC prefix (e.g. "12/0033902" → portal SerialNo/InvoiceNo format)
+            # Short numeric prefix (portal SerialNo/InvoiceNo), e.g. "12/0033902"
             if prefix.isdigit() and len(prefix) <= 4 and suffix.isdigit():
                 return suffix.lstrip("0") or "0"
+    # ALPHA directly attached to number — no separator (e.g. "T1326" → "1326")
+    m = _re.match(r'^([A-Z]+)(\d+)$', s)
+    if m:
+        return m.group(2).lstrip("0") or "0"
     return s
 
 def _normalise_gstin(val):
