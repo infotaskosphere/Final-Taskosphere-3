@@ -18,21 +18,41 @@ import { toast } from 'sonner';
 /* ═══════════════════════════════════════════════════════════════════════════
    PARSING UTILITIES
 ═══════════════════════════════════════════════════════════════════════════ */
+/**
+ * normaliseInvoice — extract the canonical invoice serial for matching.
+ *
+ * Strategy: the actual invoice number is always the LAST purely-numeric
+ * segment after any / or - separator. If no separator exists, strip any
+ * leading alpha series prefix.
+ *
+ *   "4930"       → "4930"
+ *   "DB-T/4930"  → "4930"   ← complex multi-part prefix
+ *   "DB-T/4812"  → "4812"
+ *   "SW-60134"   → "60134"
+ *   "INV/1234"   → "1234"
+ *   "12/0033902" → "33902"
+ *   "T1326"      → "1326"   ← alpha directly attached
+ *   "INV1234"    → "1234"
+ */
 function normaliseInvoice(val) {
   if (val === null || val === undefined) return '';
   const s = String(val).trim().toUpperCase().replace(/\s+/g, '');
-  // Purely numeric → strip leading zeros
+  if (!s) return '';
+  // Purely numeric
   if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
-  // "ALPHA-NUMBER" or "ALPHA/NUMBER" with explicit separator (e.g. "SW-60134", "INV/1234")
-  const m = s.match(/^([A-Z]+)[-\/](\d+)$/);
-  if (m) return m[2].replace(/^0+/, '') || '0';
-  // "NUM/NUM" or "NUM-NUM" — Indian portal SerialNo/InvoiceNo (e.g. "12/0033902" → "33902")
-  const m2 = s.match(/^\d{1,4}[\/\-](\d+)$/);
-  if (m2) return m2[1].replace(/^0+/, '') || '0';
-  // ALPHA prefix directly attached (NO separator) — e.g. "T1326" → "1326", "INV1234" → "1234"
-  // Portal often stores series letter "T" while books store the plain number "1326"
-  const m3 = s.match(/^([A-Z]+)(\d+)$/);
-  if (m3) return m3[2].replace(/^0+/, '') || '0';
+  // Last separator strategy: find last / or - and check if trailing part is numeric
+  const lastSlash = s.lastIndexOf('/');
+  const lastDash  = s.lastIndexOf('-');
+  const lastSepIdx = Math.max(lastSlash, lastDash);
+  if (lastSepIdx >= 0) {
+    const afterSep = s.substring(lastSepIdx + 1);
+    if (afterSep && /^\d+$/.test(afterSep)) {
+      return afterSep.replace(/^0+/, '') || '0';
+    }
+  }
+  // Alpha prefix directly attached without separator: "T1326" → "1326"
+  const m = s.match(/^[A-Z]+(\d+)$/);
+  if (m) return m[1].replace(/^0+/, '') || '0';
   return s;
 }
 function normaliseGSTIN(val) {
@@ -180,24 +200,11 @@ function parseGSTPortalFile(workbook) {
 const TOLERANCE = 1.01;
 
 /**
- * Extract the numeric suffix from an invoice number.
- * "DB-T/5057" → "5057", "INV-5057" → "5057", "5057" → "5057"
+ * extractNumericSuffix — delegates to normaliseInvoice (same logic).
+ * Used by the secondary prefix-match pass.
  */
 function extractNumericSuffix(invNo) {
-  if (!invNo) return '';
-  const s = String(invNo).trim().toUpperCase().replace(/\s+/g, '');
-  // Purely numeric
-  if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
-  // ALPHA with separator (e.g. "SW-60134") — single or multi-char alpha prefix
-  const m = s.match(/^[A-Z0-9][-\/](\d+)$/) || s.match(/^[A-Z]+[-\/](\d+)$/);
-  if (m) return m[1].replace(/^0+/, '') || '0';
-  // NUM/NUM pattern (e.g. "12/0033902" → "33902")
-  const m2 = s.match(/^\d{1,4}[\/\-](\d+)$/);
-  if (m2) return m2[1].replace(/^0+/, '') || '0';
-  // ALPHA directly attached without separator (e.g. "T1326" → "1326")
-  const m3 = s.match(/^([A-Z]+)(\d+)$/);
-  if (m3) return m3[2].replace(/^0+/, '') || '0';
-  return s;
+  return normaliseInvoice(invNo);
 }
 
 /**
@@ -2335,6 +2342,271 @@ const ITCDetailModal = ({ type, results, onClose }) => {
   );
 };
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   SIDE-BY-SIDE COMPARE — Portal Only vs Books Only with smart pairing
+═══════════════════════════════════════════════════════════════════════════ */
+const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) => {
+  const [search, setSearch]         = useState('');
+  const [gstinFilter, setGstinFilter] = useState('');
+  const [gstinNames, setGstinNames] = useState({});   // gstin → name from lookup
+  const [lookingUp, setLookingUp]   = useState({});
+
+  /* ── Build a name map from portal data (free, no API needed) ── */
+  const portalNameMap = React.useMemo(() => {
+    const m = {};
+    portalOnly.forEach(r => {
+      if (r.portal?.gstin && r.portal?.tradeOrLegalName)
+        m[r.portal.gstin] = r.portal.tradeOrLegalName;
+    });
+    return m;
+  }, [portalOnly]);
+
+  /* ── Smart pairing: for each books-only, find best portal-only match ── */
+  const pairs = React.useMemo(() => {
+    const portalLeft  = [...portalOnly];
+    const booksLeft   = [...booksOnly];
+    const paired      = [];
+    const portalUsed  = new Set();
+    const booksUsed   = new Set();
+
+    // Pass 1: exact normalised invoice match within same GSTIN
+    booksLeft.forEach(bo => {
+      const bNum = normaliseInvoice(bo.books?.invoiceNoRaw || bo.books?.invoiceNo || '');
+      const bGst = bo.books?.gstin;
+      for (const po of portalLeft) {
+        if (portalUsed.has(po.key)) continue;
+        const pNum = normaliseInvoice(po.portal?.invoiceNoRaw || po.portal?.invoiceNo || '');
+        if (pNum === bNum && bNum && po.portal?.gstin === bGst) {
+          const valueDiff = Math.abs((po.portal?.invoiceValue||0) - (bo.books?.invoiceValue||0));
+          const taxDiff   = Math.abs(
+            ((po.portal?.igst||0)+(po.portal?.cgst||0)+(po.portal?.sgst||0)) -
+            ((bo.books?.igst||0) +(bo.books?.cgst||0) +(bo.books?.sgst||0))
+          );
+          paired.push({ portal: po, books: bo, confidence: valueDiff <= 1.01 && taxDiff <= 1.01 ? 'high' : 'medium', valueDiff, taxDiff });
+          portalUsed.add(po.key);
+          booksUsed.add(bo.key);
+          break;
+        }
+      }
+    });
+
+    // Pass 2: close-value match within same GSTIN (amount within 2%)
+    booksLeft.forEach(bo => {
+      if (booksUsed.has(bo.key)) return;
+      const bVal = bo.books?.invoiceValue || 0;
+      const bGst = bo.books?.gstin;
+      let best = null, bestDiff = Infinity;
+      for (const po of portalLeft) {
+        if (portalUsed.has(po.key)) continue;
+        if (po.portal?.gstin !== bGst) continue;
+        const diff = Math.abs((po.portal?.invoiceValue||0) - bVal);
+        if (diff < bestDiff && diff / (bVal || 1) < 0.02) {
+          best = po; bestDiff = diff;
+        }
+      }
+      if (best) {
+        paired.push({ portal: best, books: bo, confidence: 'low', valueDiff: bestDiff, taxDiff: 0 });
+        portalUsed.add(best.key);
+        booksUsed.add(bo.key);
+      }
+    });
+
+    // Remaining unmatched
+    const unpairedPortal = portalLeft.filter(po => !portalUsed.has(po.key)).map(po => ({ portal: po, books: null, confidence: 'none' }));
+    const unpairedBooks  = booksLeft.filter(bo  => !booksUsed.has(bo.key) ).map(bo => ({ portal: null, books: bo,  confidence: 'none' }));
+
+    return [...paired, ...unpairedPortal, ...unpairedBooks];
+  }, [portalOnly, booksOnly]);
+
+  /* ── GSTIN name lookup via backend API ── */
+  const lookupName = async (gstin) => {
+    if (gstinNames[gstin] || lookingUp[gstin]) return;
+    setLookingUp(p => ({ ...p, [gstin]: true }));
+    try {
+      const r = await api.get(`/gst-reconciliation/gstin-lookup/${gstin}`);
+      const name = r.data?.trade_name || r.data?.legal_name || '';
+      if (name) setGstinNames(p => ({ ...p, [gstin]: name }));
+    } catch (_) {}
+    setLookingUp(p => ({ ...p, [gstin]: false }));
+  };
+
+  /* ── All unique GSTINs for the filter dropdown ── */
+  const allGstins = React.useMemo(() => {
+    const s = new Set();
+    pairs.forEach(p => {
+      if (p.portal?.portal?.gstin) s.add(p.portal.portal.gstin);
+      if (p.books?.books?.gstin)   s.add(p.books.books.gstin);
+    });
+    return [...s].sort();
+  }, [pairs]);
+
+  const filtered = pairs.filter(p => {
+    const pInv  = p.portal?.portal?.invoiceNoRaw || '';
+    const bInv  = p.books?.books?.invoiceNoRaw || '';
+    const pGst  = p.portal?.portal?.gstin || p.books?.books?.gstin || '';
+    const name  = p.portal?.portal?.tradeOrLegalName || portalNameMap[pGst] || gstinNames[pGst] || '';
+    if (gstinFilter && pGst !== gstinFilter) return false;
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return pGst.toLowerCase().includes(q) || pInv.toLowerCase().includes(q) ||
+           bInv.toLowerCase().includes(q) || name.toLowerCase().includes(q);
+  });
+
+  const confColor = { high: 'bg-emerald-100 text-emerald-700', medium: 'bg-amber-100 text-amber-700', low: 'bg-orange-100 text-orange-700', none: 'bg-slate-100 text-slate-400' };
+  const confLabel = { high: '✓ Match', medium: '≈ Near', low: '~ Possible', none: '—' };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}/>
+      <motion.div
+        initial={{ opacity:0, scale:0.95, y:16 }}
+        animate={{ opacity:1, scale:1,    y:0  }}
+        exit={{    opacity:0, scale:0.95, y:16 }}
+        className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-7xl max-h-[92vh] flex flex-col overflow-hidden"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-indigo-600 to-violet-600 flex-shrink-0">
+          <div>
+            <h2 className="text-lg font-bold text-white flex items-center gap-2"><ArrowLeftRight className="h-5 w-5"/>Portal Only vs Books Only — Side-by-Side Compare</h2>
+            <p className="text-xs text-white/80 mt-0.5">Smart-paired by invoice number and value. Confirm matches to move them to Matched.</p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl bg-white/20 hover:bg-white/30 text-white"><X className="h-5 w-5"/></button>
+        </div>
+
+        {/* Controls */}
+        <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 flex-shrink-0">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400"/>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search invoice no, GSTIN, party…"
+              className="w-full pl-9 pr-4 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+          </div>
+          <select value={gstinFilter} onChange={e => setGstinFilter(e.target.value)}
+            className="px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-400">
+            <option value="">All GSTINs ({allGstins.length})</option>
+            {allGstins.map(g => <option key={g} value={g}>{g}</option>)}
+          </select>
+          <div className="flex items-center gap-3 text-xs text-slate-500">
+            <span className="flex items-center gap-1"><span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold text-[10px]">✓ Match</span> = exact invoice+value</span>
+            <span className="flex items-center gap-1"><span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold text-[10px]">≈ Near</span> = same number, tiny value diff</span>
+            <span className="flex items-center gap-1"><span className="px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-bold text-[10px]">~ Possible</span> = same GSTIN, similar amount</span>
+          </div>
+        </div>
+
+        {/* Table */}
+        <div className="overflow-auto flex-1">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800/90 z-10">
+              <tr>
+                <th className="px-3 py-2.5 text-center font-semibold text-slate-500 w-16">Pair</th>
+                {/* Portal side */}
+                <th className="px-3 py-2.5 text-left font-semibold text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10">Portal Invoice No</th>
+                <th className="px-3 py-2.5 text-left font-semibold text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10">GSTIN / Party</th>
+                <th className="px-3 py-2.5 text-left font-semibold text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10">Date</th>
+                <th className="px-3 py-2.5 text-right font-semibold text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10">Value</th>
+                <th className="px-3 py-2.5 text-right font-semibold text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10">Tax</th>
+                {/* Middle */}
+                <th className="px-2 py-2.5 text-center font-semibold text-slate-400 w-20">Status</th>
+                {/* Books side */}
+                <th className="px-3 py-2.5 text-left font-semibold text-violet-600 dark:text-violet-400 bg-violet-50/50 dark:bg-violet-900/10">Books Invoice No</th>
+                <th className="px-3 py-2.5 text-left font-semibold text-violet-600 dark:text-violet-400 bg-violet-50/50 dark:bg-violet-900/10">GSTIN / Party</th>
+                <th className="px-3 py-2.5 text-left font-semibold text-violet-600 dark:text-violet-400 bg-violet-50/50 dark:bg-violet-900/10">Date</th>
+                <th className="px-3 py-2.5 text-right font-semibold text-violet-600 dark:text-violet-400 bg-violet-50/50 dark:bg-violet-900/10">Value</th>
+                <th className="px-3 py-2.5 text-right font-semibold text-violet-600 dark:text-violet-400 bg-violet-50/50 dark:bg-violet-900/10">Tax</th>
+                <th className="px-3 py-2.5 text-center font-semibold text-slate-500 w-24">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 && (
+                <tr><td colSpan={13} className="px-4 py-16 text-center text-slate-400">No records match your filters</td></tr>
+              )}
+              {filtered.map((pair, i) => {
+                const po    = pair.portal?.portal;
+                const bo    = pair.books?.books;
+                const gstin = po?.gstin || bo?.gstin || '';
+                const partyPortal = po?.tradeOrLegalName || portalNameMap[gstin] || gstinNames[gstin] || '';
+                const partyBooks  = portalNameMap[bo?.gstin] || gstinNames[bo?.gstin] || '—';
+                const pTax  = po ? (po.igst||0)+(po.cgst||0)+(po.sgst||0) : 0;
+                const bTax  = bo ? (bo.igst||0)+(bo.cgst||0)+(bo.sgst||0) : 0;
+                const isCanConfirm = pair.portal && pair.books;
+                const rowBg = pair.confidence === 'high'   ? 'bg-emerald-50/30 dark:bg-emerald-900/10'
+                            : pair.confidence === 'medium' ? 'bg-amber-50/30 dark:bg-amber-900/10'
+                            : pair.confidence === 'low'    ? 'bg-orange-50/30 dark:bg-orange-900/10'
+                            : '';
+                return (
+                  <tr key={i} className={`border-b border-slate-100 dark:border-slate-700/50 ${rowBg}`}>
+                    <td className="px-3 py-2 text-center text-slate-400">{i+1}</td>
+                    {/* Portal side */}
+                    <td className="px-3 py-2 font-mono font-semibold text-blue-700 dark:text-blue-300">{po?.invoiceNoRaw || <span className="text-slate-300">—</span>}</td>
+                    <td className="px-3 py-2">
+                      <div className="font-mono text-[11px] text-slate-600 dark:text-slate-300">{po?.gstin || '—'}</div>
+                      <div className="text-slate-500 truncate max-w-[130px]" title={partyPortal}>{partyPortal || (
+                        <button onClick={() => lookupName(po?.gstin)} disabled={lookingUp[po?.gstin]}
+                          className="flex items-center gap-1 text-indigo-500 hover:text-indigo-700 text-[10px]">
+                          {lookingUp[po?.gstin] ? <Loader2 className="h-3 w-3 animate-spin"/> : <Search className="h-3 w-3"/>}
+                          Lookup name
+                        </button>
+                      )}</div>
+                    </td>
+                    <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{po?.invoiceDate || '—'}</td>
+                    <td className="px-3 py-2 text-right font-medium text-blue-700 dark:text-blue-300">{po ? `₹${fmt(po.invoiceValue)}` : '—'}</td>
+                    <td className="px-3 py-2 text-right text-blue-500">{po ? `₹${fmt(pTax)}` : '—'}</td>
+                    {/* Confidence badge */}
+                    <td className="px-2 py-2 text-center">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${confColor[pair.confidence]}`}>
+                        {confLabel[pair.confidence]}
+                      </span>
+                      {pair.valueDiff > 0 && pair.confidence !== 'none' && (
+                        <div className="text-[9px] text-slate-400 mt-0.5">Δ₹{pair.valueDiff.toFixed(2)}</div>
+                      )}
+                    </td>
+                    {/* Books side */}
+                    <td className="px-3 py-2 font-mono font-semibold text-violet-700 dark:text-violet-300">{bo?.invoiceNoRaw || <span className="text-slate-300">—</span>}</td>
+                    <td className="px-3 py-2">
+                      <div className="font-mono text-[11px] text-slate-600 dark:text-slate-300">{bo?.gstin || '—'}</div>
+                      <div className="text-slate-500 truncate max-w-[130px]" title={partyBooks}>
+                        {partyBooks !== '—' ? partyBooks : (
+                          bo?.gstin ? (
+                            <button onClick={() => lookupName(bo.gstin)} disabled={lookingUp[bo.gstin]}
+                              className="flex items-center gap-1 text-indigo-500 hover:text-indigo-700 text-[10px]">
+                              {lookingUp[bo.gstin] ? <Loader2 className="h-3 w-3 animate-spin"/> : <Search className="h-3 w-3"/>}
+                              Lookup name
+                            </button>
+                          ) : '—'
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{bo?.invoiceDate || '—'}</td>
+                    <td className="px-3 py-2 text-right font-medium text-violet-700 dark:text-violet-300">{bo ? `₹${fmt(bo.invoiceValue)}` : '—'}</td>
+                    <td className="px-3 py-2 text-right text-violet-500">{bo ? `₹${fmt(bTax)}` : '—'}</td>
+                    {/* Action */}
+                    <td className="px-3 py-2 text-center">
+                      {isCanConfirm ? (
+                        <button onClick={() => onConfirmMatch(pair)}
+                          className="flex items-center gap-1 mx-auto px-2.5 py-1.5 rounded-lg text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors">
+                          <CheckCircle2 className="h-3 w-3"/> Confirm
+                        </button>
+                      ) : (
+                        <span className="text-slate-300 text-[10px]">No pair</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Footer summary */}
+        <div className="flex flex-wrap items-center gap-4 px-6 py-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30 flex-shrink-0 text-xs text-slate-500">
+          <span>Showing <strong className="text-slate-700 dark:text-slate-200">{filtered.length}</strong> rows</span>
+          <span>Paired: <strong className="text-emerald-600">{filtered.filter(p=>p.confidence==='high').length}</strong> exact, <strong className="text-amber-600">{filtered.filter(p=>p.confidence==='medium').length}</strong> near, <strong className="text-orange-500">{filtered.filter(p=>p.confidence==='low').length}</strong> possible</span>
+          <span>Portal Only: <strong className="text-blue-600">{portalOnly.length}</strong> | Books Only: <strong className="text-violet-600">{booksOnly.length}</strong></span>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 const EMPTY_COMPANY = {
   name: '', gstin: '', pan: '', address: '', phone: '', email: '', fy: '',
 };
@@ -2350,6 +2622,7 @@ export default function GSTReconciliation() {
   const [activeTab,       setActiveTab]        = useState('matched');
   const [showCo,          setShowCo]           = useState(true);
   const [itcModal,        setItcModal]         = useState(null); // null | 'claimable' | 'toBook' | 'atRisk'
+  const [showCompare,     setShowCompare]      = useState(false);
 
   // Client integration
   const [clients,         setClients]          = useState([]);
@@ -2374,6 +2647,25 @@ export default function GSTReconciliation() {
       return updated;
     });
     toast.success('Invoice marked as Matched');
+  }, []);
+
+  // Confirm a pair from Side-by-Side Compare as manually matched
+  const handleConfirmMatch = useCallback((pair) => {
+    setResults(prev => {
+      if (!prev) return prev;
+      const updated = { ...prev };
+      updated.portalOnly = prev.portalOnly.filter(r => r.key !== pair.portal?.key);
+      updated.booksOnly  = prev.booksOnly.filter(r  => r.key !== pair.books?.key);
+      updated.matched = [...prev.matched, {
+        portal: pair.portal?.portal,
+        books:  pair.books?.books,
+        key:    pair.portal?.key || pair.books?.key,
+        manualMatch: true,
+        normalizedMatch: (pair.portal?.portal?.invoiceNoRaw || '') !== (pair.books?.books?.invoiceNoRaw || ''),
+      }];
+      return updated;
+    });
+    toast.success(`Matched: ${pair.portal?.portal?.invoiceNoRaw} ↔ ${pair.books?.books?.invoiceNoRaw}`);
   }, []);
 
   // Fetch clients on mount
@@ -2486,6 +2778,9 @@ export default function GSTReconciliation() {
               </button>
               <button onClick={()=>exportExcel(results, company, period)} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-xl shadow-sm transition-colors">
                 <FileSpreadsheet className="h-4 w-4"/> Excel
+              </button>
+              <button onClick={() => setShowCompare(true)} className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium rounded-xl shadow-sm transition-colors">
+                <ArrowLeftRight className="h-4 w-4"/> Compare Portal vs Books
               </button>
               <button onClick={handleReset} className="flex items-center gap-2 px-3 py-2 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm font-medium rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
                 <RefreshCw className="h-4 w-4"/> Reset
@@ -2773,6 +3068,18 @@ export default function GSTReconciliation() {
         </AnimatePresence>
 
       </div>
+
+      {/* ── Side-by-Side Compare Modal ── */}
+      <AnimatePresence>
+        {showCompare && results && (
+          <SideBySideCompare
+            portalOnly={results.portalOnly || []}
+            booksOnly={results.booksOnly   || []}
+            onConfirmMatch={handleConfirmMatch}
+            onClose={() => setShowCompare(false)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* ── ITC Detail Modal ── */}
       <AnimatePresence>
