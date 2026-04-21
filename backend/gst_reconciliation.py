@@ -516,6 +516,8 @@ class SessionSaveBody(BaseModel):
     client_name: Optional[str]=None; client_gstin: Optional[str]=None
     portal_filename: str=""; books_filename: str=""
     summary: Dict[str,Any]=Field(default_factory=dict)
+    full_result: Optional[Dict[str,Any]]=None
+    company: Optional[Dict[str,Any]]=None
 
 class GSTR3BBody(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -560,7 +562,10 @@ async def save_session_from_frontend(body: SessionSaveBody, current_user: User=D
            "client_name":client_name,"client_gstin":client_gstin,
            "portal_filename":body.portal_filename,"books_filename":body.books_filename,
            "created_at":_now(),"created_by":current_user.id,
-           "created_by_name":getattr(current_user,"full_name",""),"summary":body.summary}
+           "created_by_name":getattr(current_user,"full_name",""),
+           "summary":body.summary,
+           "full_result": body.full_result or {},
+           "company": body.company or {}}
     await db.gst_reconciliation_sessions.insert_one(doc)
     await _log_audit("save_session", current_user, {"session_id":sid,"client":client_name})
     return {"session_id":sid,"created_at":doc["created_at"]}
@@ -584,6 +589,11 @@ async def reconcile_files(
             raise HTTPException(400, f"File '{name}' exceeds 20 MB limit.")
     portal_df = _parse_portal(pb, portal_file.filename or "portal.xlsx")
     books_df  = _parse_books( bb, books_file.filename  or "books.xls")
+    # Auto-fetch business names from GST portal for books rows missing trade_name
+    try:
+        books_df = await _enrich_books_with_names(books_df)
+    except Exception as _exc:
+        logger.warning("Books name enrichment failed: %s", _exc)
     result    = _reconcile(portal_df, books_df,
                            tolerance=tolerance, enable_fuzzy=enable_fuzzy, fuzzy_threshold=fuzzy_threshold)
     if save_session:
@@ -592,7 +602,9 @@ async def reconcile_files(
             "_id":sid,"id":sid,"period":period,
             "portal_filename":portal_file.filename or "","books_filename":books_file.filename or "",
             "created_at":_now(),"created_by":current_user.id,
-            "created_by_name":getattr(current_user,"full_name",""),"summary":result["summary"]})
+            "created_by_name":getattr(current_user,"full_name",""),
+            "summary":result["summary"],
+            "full_result":result})
         result["session_id"] = sid
     background_tasks.add_task(_log_audit,"reconcile",current_user,
         {"period":period,"portal":portal_file.filename,"books":books_file.filename,"summary":result["summary"]})
@@ -702,40 +714,177 @@ Regards,
     return {"template":template,"gstin":body.gstin,"vendor":vendor_name}
 
 
+
+# ─── GSTIN NAME SCRAPER (own multi-source API) ───────────────────────────────
+# In-memory cache: { gstin: {trade_name, legal_name, state, status, ts} }
+_GSTIN_CACHE: Dict[str, Dict[str, Any]] = {}
+_GSTIN_CACHE_TTL_SEC = 60 * 60 * 24 * 7  # 7 days
+
+def _cache_get(gstin: str) -> Optional[Dict[str, Any]]:
+    rec = _GSTIN_CACHE.get(gstin)
+    if not rec: return None
+    if (datetime.now(timezone.utc).timestamp() - rec.get("ts", 0)) > _GSTIN_CACHE_TTL_SEC:
+        _GSTIN_CACHE.pop(gstin, None)
+        return None
+    return rec
+
+def _cache_set(gstin: str, data: Dict[str, Any]):
+    data["ts"] = datetime.now(timezone.utc).timestamp()
+    _GSTIN_CACHE[gstin] = data
+
+GSTIN_REGEX = re.compile(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$")
+
+def _is_valid_gstin(g: str) -> bool:
+    return bool(g) and bool(GSTIN_REGEX.match(g.upper().strip()))
+
+async def _scrape_gstin_name(gstin: str) -> Dict[str, Any]:
+    """
+    Fetch trade/legal name for a GSTIN from multiple public sources.
+    Tries (in order):
+      1. GST portal public API     (services.gst.gov.in/services/api/public/gstin)
+      2. GST search taxpayer       (services.gst.gov.in/services/api/search/taxpayerDetails)
+      3. KnowYourGST public scrape (knowyourgst.com/gst-number-search/{gstin})
+    Returns dict with trade_name, legal_name, state, status, source. Always returns a dict
+    (never raises) — empty strings if all sources fail.
+    """
+    gstin = gstin.upper().strip()
+    if not _is_valid_gstin(gstin):
+        return {"gstin": gstin, "trade_name": "", "legal_name": "", "error": "invalid_gstin"}
+
+    cached = _cache_get(gstin)
+    if cached:
+        return {**cached, "gstin": gstin, "source": cached.get("source", "cache") + "+cache"}
+
+    import httpx as _httpx
+    headers_json = {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://services.gst.gov.in/services/searchtp",
+    }
+    headers_html = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+    }
+
+    # Source 1 — public GSTIN endpoint
+    try:
+        async with _httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
+            r = await client.get(
+                f"https://services.gst.gov.in/services/api/public/gstin?gstin={gstin}",
+                headers=headers_json,
+            )
+        if r.status_code == 200:
+            d = r.json() or {}
+            tn = (d.get("tradeNam") or d.get("tradeName") or "").strip()
+            ln = (d.get("lgnm") or d.get("legalName") or "").strip()
+            if tn or ln:
+                out = {"gstin": gstin, "trade_name": tn, "legal_name": ln,
+                       "state": (d.get("stj") or "").strip(), "status": (d.get("sts") or "").strip(),
+                       "source": "gst_public_api"}
+                _cache_set(gstin, out); return out
+    except Exception as exc:
+        logger.debug("GSTIN src1 failed %s: %s", gstin, exc)
+
+    # Source 2 — taxpayer details
+    try:
+        async with _httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
+            r = await client.get(
+                f"https://services.gst.gov.in/services/api/search/taxpayerDetails?gstin={gstin}",
+                headers=headers_json,
+            )
+        if r.status_code == 200:
+            d = r.json() or {}
+            tn = (d.get("tradeNam") or "").strip()
+            ln = (d.get("lgnm") or "").strip()
+            if tn or ln:
+                out = {"gstin": gstin, "trade_name": tn, "legal_name": ln,
+                       "state": (d.get("pradr", {}) or {}).get("addr", {}).get("stcd", "") if isinstance(d.get("pradr"), dict) else "",
+                       "status": (d.get("sts") or "").strip(),
+                       "source": "gst_taxpayer_api"}
+                _cache_set(gstin, out); return out
+    except Exception as exc:
+        logger.debug("GSTIN src2 failed %s: %s", gstin, exc)
+
+    # Source 3 — knowyourgst public page (regex scrape; brittle but useful fallback)
+    try:
+        async with _httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            r = await client.get(f"https://www.knowyourgst.com/gst-number-search/{gstin}/", headers=headers_html)
+        if r.status_code == 200 and r.text:
+            html = r.text
+            tn = ""; ln = ""
+            m = re.search(r"Trade Name[^<]*</[^>]+>\s*<[^>]+>\s*([^<]+)", html, re.I)
+            if m: tn = m.group(1).strip()
+            m = re.search(r"Legal Name[^<]*</[^>]+>\s*<[^>]+>\s*([^<]+)", html, re.I)
+            if m: ln = m.group(1).strip()
+            if not tn and not ln:
+                m = re.search(r"<title>([^<]+)</title>", html, re.I)
+                if m:
+                    title = m.group(1).strip()
+                    title = re.sub(r"\s*[\|\-]\s*KnowYourGST.*$", "", title, flags=re.I).strip()
+                    if title and gstin not in title.upper():
+                        tn = title
+            if tn or ln:
+                out = {"gstin": gstin, "trade_name": tn, "legal_name": ln,
+                       "state": "", "status": "", "source": "knowyourgst_scrape"}
+                _cache_set(gstin, out); return out
+    except Exception as exc:
+        logger.debug("GSTIN src3 failed %s: %s", gstin, exc)
+
+    out = {"gstin": gstin, "trade_name": "", "legal_name": "", "state": "", "status": "",
+           "source": "none", "error": "all_sources_failed"}
+    return out
+
+async def _enrich_books_with_names(books_df) -> "pd.DataFrame":
+    """Best-effort enrich the books DataFrame with `trade_name` for GSTINs missing names.
+    Limits to 30 unique lookups per call to stay snappy."""
+    if books_df is None or books_df.empty or "trade_name" not in books_df.columns:
+        return books_df
+    missing = books_df[(books_df["trade_name"].fillna("") == "")]["gstin"].dropna().unique().tolist()
+    missing = [g for g in missing if _is_valid_gstin(g)][:30]
+    if not missing:
+        return books_df
+    import asyncio as _asyncio
+    results = await _asyncio.gather(*[_scrape_gstin_name(g) for g in missing], return_exceptions=True)
+    name_map = {}
+    for res in results:
+        if isinstance(res, dict) and (res.get("trade_name") or res.get("legal_name")):
+            name_map[res["gstin"]] = res.get("trade_name") or res.get("legal_name")
+    if name_map:
+        books_df["trade_name"] = books_df.apply(
+            lambda row: row["trade_name"] if row.get("trade_name") else name_map.get(row.get("gstin"), ""),
+            axis=1,
+        )
+        logger.info("Books enriched with %d trade names from GST scraper", len(name_map))
+    return books_df
+
+
 # ─── GSTIN NAME LOOKUP (NEW) ─────────────────────────────────────────────────
 
 @router.get("/gstin-lookup/{gstin}")
 async def gstin_name_lookup(gstin: str, current_user: User = Depends(get_current_user)):
-    """Fetch trade/legal name for a GSTIN from the public GST portal API."""
+    """Fetch trade/legal name for a GSTIN. Uses our own multi-source scraper with cache."""
     gstin = gstin.upper().strip()
     if len(gstin) != 15:
         raise HTTPException(400, "Invalid GSTIN length — must be 15 characters.")
-    try:
-        import httpx as _httpx
-        url = f"https://services.gst.gov.in/services/api/public/gstin?gstin={gstin}"
-        async with _httpx.AsyncClient(timeout=8) as client:
-            resp = await client.get(url, headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "User-Agent": "Mozilla/5.0",
-            })
-        if resp.status_code == 200:
-            data = resp.json()
-            return {
-                "gstin":       gstin,
-                "trade_name":  data.get("tradeNam", ""),
-                "legal_name":  data.get("lgnm", ""),
-                "state":       data.get("stj", ""),
-                "status":      data.get("sts", ""),
-                "biz_type":    data.get("ctb", ""),
-                "reg_date":    data.get("rgdt", ""),
-                "source":      "gst_portal",
-            }
-        # Fallback: return empty with a note
-        return {"gstin": gstin, "trade_name": "", "legal_name": "", "error": f"Portal returned {resp.status_code}"}
-    except Exception as exc:
-        logger.warning("GSTIN lookup failed for %s: %s", gstin, exc)
-        return {"gstin": gstin, "trade_name": "", "legal_name": "", "error": str(exc)}
+    return await _scrape_gstin_name(gstin)
+
+
+class GSTINBatchBody(BaseModel):
+    gstins: List[str] = Field(default_factory=list)
+
+@router.post("/gstin-lookup-batch")
+async def gstin_name_lookup_batch(body: GSTINBatchBody, current_user: User = Depends(get_current_user)):
+    """Batch GSTIN lookup. Returns {gstin: {trade_name, legal_name, ...}} for up to 50 GSTINs."""
+    items = [g.upper().strip() for g in (body.gstins or []) if g and len(g.strip()) == 15][:50]
+    if not items:
+        return {"results": {}, "count": 0}
+    import asyncio as _asyncio
+    out = await _asyncio.gather(*[_scrape_gstin_name(g) for g in items], return_exceptions=True)
+    results = {}
+    for r in out:
+        if isinstance(r, dict) and r.get("gstin"):
+            results[r["gstin"]] = r
+    return {"results": results, "count": len(results)}
 
 
 # ─── HISTORY (v1 preserved) ───────────────────────────────────────────────────
