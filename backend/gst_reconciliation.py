@@ -56,30 +56,36 @@ def _to_num(val):
         return 0.0
 
 def _normalise_invoice(val):
-    """Normalise an invoice number to its pure numeric core for matching.
+    """Normalise invoice number to canonical serial for matching.
 
-    Handles:
-      - Purely numeric: "001234" → "1234"
-      - ALPHA-NUM with separator: "SW-60134" → "60134", "INV/1234" → "1234"
-      - NUM/NUM (portal serial/invoice): "12/0033902" → "33902"
-      - ALPHA directly attached (no separator): "T1326" → "1326", "INV1234" → "1234"
-        Portal often uses a series letter prefix that books omit entirely.
+    Strategy: the actual invoice serial is the LAST purely-numeric segment
+    after any / or - separator. If no separator, strip leading alpha prefix.
+
+      "4930"       → "4930"
+      "DB-T/4930"  → "4930"   (complex multi-part prefix)
+      "DB-T/4812"  → "4812"
+      "SW-60134"   → "60134"
+      "INV/1234"   → "1234"
+      "12/0033902" → "33902"
+      "T1326"      → "1326"   (alpha directly attached)
+      "INV1234"    → "1234"
     """
     import re as _re
     s = _to_str(val).upper().replace(" ", "")
+    if not s:
+        return ""
     # Purely numeric
     if s.isdigit():
         return s.lstrip("0") or "0"
-    # ALPHA/NUM or ALPHA-NUM with separator
-    for sep in ("-", "/"):
-        if sep in s:
-            prefix, _, suffix = s.partition(sep)
-            if prefix.isalpha() and suffix.isdigit():
-                return suffix.lstrip("0") or "0"
-            # Short numeric prefix (portal SerialNo/InvoiceNo), e.g. "12/0033902"
-            if prefix.isdigit() and len(prefix) <= 4 and suffix.isdigit():
-                return suffix.lstrip("0") or "0"
-    # ALPHA directly attached to number — no separator (e.g. "T1326" → "1326")
+    # Last-separator strategy: find last / or - and check if trailing part is numeric
+    last_slash = s.rfind("/")
+    last_dash  = s.rfind("-")
+    last_sep   = max(last_slash, last_dash)
+    if last_sep >= 0:
+        after_sep = s[last_sep + 1:]
+        if after_sep and after_sep.isdigit():
+            return after_sep.lstrip("0") or "0"
+    # Alpha directly attached (no separator): "T1326" → "1326"
     m = _re.match(r'^([A-Z]+)(\d+)$', s)
     if m:
         return m.group(2).lstrip("0") or "0"
@@ -694,6 +700,42 @@ Regards,
 ==========================================
 """
     return {"template":template,"gstin":body.gstin,"vendor":vendor_name}
+
+
+# ─── GSTIN NAME LOOKUP (NEW) ─────────────────────────────────────────────────
+
+@router.get("/gstin-lookup/{gstin}")
+async def gstin_name_lookup(gstin: str, current_user: User = Depends(get_current_user)):
+    """Fetch trade/legal name for a GSTIN from the public GST portal API."""
+    gstin = gstin.upper().strip()
+    if len(gstin) != 15:
+        raise HTTPException(400, "Invalid GSTIN length — must be 15 characters.")
+    try:
+        import httpx as _httpx
+        url = f"https://services.gst.gov.in/services/api/public/gstin?gstin={gstin}"
+        async with _httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(url, headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "Mozilla/5.0",
+            })
+        if resp.status_code == 200:
+            data = resp.json()
+            return {
+                "gstin":       gstin,
+                "trade_name":  data.get("tradeNam", ""),
+                "legal_name":  data.get("lgnm", ""),
+                "state":       data.get("stj", ""),
+                "status":      data.get("sts", ""),
+                "biz_type":    data.get("ctb", ""),
+                "reg_date":    data.get("rgdt", ""),
+                "source":      "gst_portal",
+            }
+        # Fallback: return empty with a note
+        return {"gstin": gstin, "trade_name": "", "legal_name": "", "error": f"Portal returned {resp.status_code}"}
+    except Exception as exc:
+        logger.warning("GSTIN lookup failed for %s: %s", gstin, exc)
+        return {"gstin": gstin, "trade_name": "", "legal_name": "", "error": str(exc)}
 
 
 # ─── HISTORY (v1 preserved) ───────────────────────────────────────────────────
