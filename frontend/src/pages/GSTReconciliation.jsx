@@ -215,12 +215,34 @@ function isPrefixOnlyMismatch(p, b) {
   return true;
 }
 
+/**
+ * Count how many fields differ between a portal and books invoice pair.
+ * Returns { count, fields[] } so callers can decide routing.
+ */
+function countMismatchFields(p, b) {
+  const fields = [];
+  if (Math.abs(p.invoiceValue - b.invoiceValue) > TOLERANCE)  fields.push('Invoice Value');
+  const ptax = p.igst + p.cgst + p.sgst;
+  const btax = b.igst + b.cgst + b.sgst;
+  if (Math.abs(ptax - btax) > TOLERANCE)                       fields.push('Total Tax');
+  if (Math.abs(p.igst - b.igst) > TOLERANCE)                  fields.push('IGST');
+  if (Math.abs(p.cgst - b.cgst) > TOLERANCE)                  fields.push('CGST');
+  if (Math.abs(p.sgst - b.sgst) > TOLERANCE)                  fields.push('SGST');
+  if (Math.abs(p.taxableValue - b.taxableValue) > TOLERANCE)  fields.push('Taxable Value');
+  if (p.invoiceDate && b.invoiceDate && p.invoiceDate !== b.invoiceDate) fields.push('Invoice Date');
+  const ps = (p.placeOfSupply||'').trim().toUpperCase().replace(/^\d+-/,'');
+  const bs = (b.placeOfSupply||'').trim().toUpperCase().replace(/^\d+-/,'');
+  if (ps && bs && ps !== bs)                                   fields.push('Place of Supply');
+  if (p.reverseCharge && b.reverseCharge && p.reverseCharge.toUpperCase() !== b.reverseCharge.toUpperCase()) fields.push('Reverse Charge');
+  return { count: fields.length, fields };
+}
+
 function reconcile(portalData, booksData) {
   const pm = new Map(), bm = new Map();
   portalData.forEach(inv => { const k = `${inv.gstin}__${inv.invoiceNo}`; if (!pm.has(k)) pm.set(k, inv); });
   booksData.forEach(inv  => { const k = `${inv.gstin}__${inv.invoiceNo}`; if (!bm.has(k)) bm.set(k, inv); });
 
-  const matched = [], mismatch = [], portalOnly = [], booksOnly = [], checkOne = [];
+  const matched = [], mismatch = [], portalOnly = [], booksOnly = [], checkOne = [], checkOnce = [];
 
   // Track which books keys have been consumed
   const bUsed = new Set();
@@ -229,10 +251,27 @@ function reconcile(portalData, booksData) {
     if (bm.has(key)) {
       bUsed.add(key);
       const b = bm.get(key);
-      const vd = Math.abs(p.invoiceValue - b.invoiceValue);
-      const td = Math.abs((p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst));
-      if (vd <= TOLERANCE && td <= TOLERANCE) matched.push({ portal: p, books: b, key });
-      else mismatch.push({ portal: p, books: b, key, valueDiff: p.invoiceValue - b.invoiceValue, taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst) });
+      const { count, fields } = countMismatchFields(p, b);
+      if (count === 0) {
+        matched.push({ portal: p, books: b, key });
+      } else if (count >= 3) {
+        // 3+ parameter differences → Check Once (needs manual review)
+        checkOnce.push({
+          portal: p, books: b, key,
+          mismatchFields: fields,
+          mismatchCount: count,
+          valueDiff: p.invoiceValue - b.invoiceValue,
+          taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst),
+        });
+      } else {
+        mismatch.push({
+          portal: p, books: b, key,
+          mismatchFields: fields,
+          mismatchCount: count,
+          valueDiff: p.invoiceValue - b.invoiceValue,
+          taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst),
+        });
+      }
     } else {
       // Not matched by normalised invoice no → try prefix-only match against unmatched books
       portalOnly.push({ portal: p, key });
@@ -254,22 +293,34 @@ function reconcile(portalData, booksData) {
     }
     if (found) {
       booksOnlyUsed.add(found.key);
-      // Determine if all OTHER fields (amounts, date, place) truly match
       const p = po.portal, b = found.books;
-      const vd = Math.abs(p.invoiceValue - b.invoiceValue);
-      const td = Math.abs((p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst));
-      const allMatch = vd <= TOLERANCE && td <= TOLERANCE &&
+      const { count, fields } = countMismatchFields(p, b);
+      const allMatch = count === 0 &&
         (!p.invoiceDate || !b.invoiceDate || p.invoiceDate === b.invoiceDate);
-      checkOne.push({
-        portal: p, books: b,
-        key: po.key,
-        prefixMismatch: true,
-        portalInvRaw: p.invoiceNoRaw,
-        booksInvRaw:  b.invoiceNoRaw,
-        allOtherMatch: allMatch,
-        valueDiff: p.invoiceValue - b.invoiceValue,
-        taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst),
-      });
+
+      if (count >= 3) {
+        // Prefix differs AND 3+ value mismatches → Check Once
+        checkOnce.push({
+          portal: p, books: b, key: po.key,
+          prefixMismatch: true, allOtherMatch: false,
+          portalInvRaw: p.invoiceNoRaw, booksInvRaw: b.invoiceNoRaw,
+          mismatchFields: ['Invoice No (prefix)', ...fields],
+          mismatchCount: count + 1,
+          valueDiff: p.invoiceValue - b.invoiceValue,
+          taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst),
+        });
+      } else {
+        checkOne.push({
+          portal: p, books: b, key: po.key,
+          prefixMismatch: true,
+          portalInvRaw: p.invoiceNoRaw, booksInvRaw: b.invoiceNoRaw,
+          allOtherMatch: allMatch,
+          mismatchFields: allMatch ? ['Invoice No (prefix only)'] : ['Invoice No (prefix)', ...fields],
+          mismatchCount: allMatch ? 1 : count + 1,
+          valueDiff: p.invoiceValue - b.invoiceValue,
+          taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst),
+        });
+      }
     } else {
       portalOnlyFinal.push(po);
     }
@@ -277,7 +328,7 @@ function reconcile(portalData, booksData) {
 
   const booksOnlyFinal = booksOnly.filter(bo => !booksOnlyUsed.has(bo.key));
 
-  // checkOne records where allOtherMatch=true → also add to matched (yellow-highlighted)
+  // checkOne records where allOtherMatch=true → also add to matched (yellow-highlighted, deletable)
   const matchedFinal = [
     ...matched,
     ...checkOne.filter(c => c.allOtherMatch).map(c => ({ ...c, prefixMismatch: true })),
@@ -289,6 +340,7 @@ function reconcile(portalData, booksData) {
     portalOnly: portalOnlyFinal,
     booksOnly:  booksOnlyFinal,
     checkOne,
+    checkOnce,   // NEW: 3+ parameter mismatches
   };
 }
 
@@ -893,6 +945,7 @@ const TABS = [
   { id:'portalOnly', label:'In Portal Only', icon:Globe,         color:{ activeBg:'bg-blue-50 dark:bg-blue-900/20',     activeBorder:'border-blue-400',     activeText:'text-blue-700 dark:text-blue-300',     badge:'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'     }, desc:'Vendor uploaded to GST Portal but NOT in Books. Book these to avail ITC.' },
   { id:'booksOnly',  label:'In Books Only',  icon:BookOpen,      color:{ activeBg:'bg-rose-50 dark:bg-rose-900/20',     activeBorder:'border-rose-400',     activeText:'text-rose-700 dark:text-rose-300',     badge:'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'     }, desc:'In Books but vendor NOT filed on portal. ITC at risk — follow up with vendor.' },
   { id:'checkOne',   label:'Check One',      icon:ArrowUpDown,   color:{ activeBg:'bg-violet-50 dark:bg-violet-900/20', activeBorder:'border-violet-400',   activeText:'text-violet-700 dark:text-violet-300', badge:'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300' }, desc:'Invoices where only the invoice prefix differs. Compare Portal vs Books side-by-side. Matching ones are moved to Matched (yellow); non-matching routed to their original category.' },
+  { id:'checkOnce',  label:'Check Once',     icon:ScanSearch,    color:{ activeBg:'bg-orange-50 dark:bg-orange-900/20', activeBorder:'border-orange-400',   activeText:'text-orange-700 dark:text-orange-300', badge:'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300' }, desc:'⚠ Invoices where 3 or more parameters differ between Portal and Books. These require careful manual review — compare both sides, verify with the supplier, and correct discrepancies before filing.' },
   { id:'search',     label:'Search',         icon:ScanSearch,    color:{ activeBg:'bg-purple-50 dark:bg-purple-900/20', activeBorder:'border-purple-400',   activeText:'text-purple-700 dark:text-purple-300', badge:'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' }, desc:'Search across all invoices — matched, mismatched, portal-only and books-only — in one place.' },
 ];
 const PAGE_SIZE = 50;
@@ -931,7 +984,7 @@ const DropZone = ({ label, icon:Icon, colors, file, onFile, onClear, hint }) => 
 /* ═══════════════════════════════════════════════════════════════════════════
    RESULT TABLE COMPONENT
 ═══════════════════════════════════════════════════════════════════════════ */
-const ResultTable = ({ tabId, records }) => {
+const ResultTable = ({ tabId, records, onDelete }) => {
   const [search, setSearch] = useState('');
   const [page, setPage]     = useState(1);
   const filtered = records.filter(r => {
@@ -958,6 +1011,12 @@ const ResultTable = ({ tabId, records }) => {
         <span className="text-slate-500">Records: <strong className="text-slate-700 dark:text-slate-200">{records.length}</strong></span>
         <span className="text-slate-500">Total Value: <strong className="text-slate-700 dark:text-slate-200">₹{fmt(totalValue)}</strong></span>
         <span className="text-slate-500">Total Tax: <strong className="text-slate-700 dark:text-slate-200">₹{fmt(totalTax)}</strong></span>
+        {tabId === 'matched' && (
+          <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 text-xs">
+            <span className="w-3 h-3 rounded-sm bg-yellow-200 dark:bg-yellow-700 inline-block border border-yellow-400"/>
+            Yellow rows = prefix-only difference (values match) — can delete
+          </span>
+        )}
       </div>
       <div className="relative mb-3">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400"/>
@@ -979,6 +1038,7 @@ const ResultTable = ({ tabId, records }) => {
                 <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">Portal Tax</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">Books Tax</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-amber-600">Tax Diff (₹)</th>
+                <th className="px-3 py-2.5 text-left font-semibold text-amber-600">Diff Fields</th>
               </> : <>
                 <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">Invoice Value</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">Taxable</th>
@@ -987,6 +1047,7 @@ const ResultTable = ({ tabId, records }) => {
                 <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">SGST</th>
                 {tabId === 'portalOnly' && <th className="px-3 py-2.5 text-center font-semibold text-slate-600 dark:text-slate-300">ITC</th>}
               </>}
+              {onDelete && <th className="px-3 py-2.5 text-center font-semibold text-slate-400">Action</th>}
             </tr>
           </thead>
           <tbody>
@@ -995,7 +1056,7 @@ const ResultTable = ({ tabId, records }) => {
               const n = (page-1)*PAGE_SIZE + idx + 1;
               const isPrefixRow = r.prefixMismatch === true;
               return (
-                <tr key={r.key||idx} className={`border-b border-slate-100 dark:border-slate-700/50 hover:bg-yellow-50 dark:hover:bg-yellow-900/10 ${isPrefixRow ? 'bg-yellow-50 dark:bg-yellow-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'}`}>
+                <tr key={r.key||idx} className={`border-b border-slate-100 dark:border-slate-700/50 ${isPrefixRow ? 'bg-yellow-50 dark:bg-yellow-900/20 hover:bg-yellow-100 dark:hover:bg-yellow-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'}`}>
                   <td className="px-3 py-2 text-slate-400">{n}</td>
                   <td className="px-3 py-2 font-mono text-[11px] text-slate-600 dark:text-slate-300">{inv?.gstin}</td>
                   {tabId !== 'booksOnly' && <td className="px-3 py-2 text-slate-700 dark:text-slate-200 max-w-[140px] truncate" title={inv?.tradeOrLegalName}>{inv?.tradeOrLegalName||'—'}</td>}
@@ -1016,6 +1077,11 @@ const ResultTable = ({ tabId, records }) => {
                     <td className="px-3 py-2 text-right text-slate-500">₹{fmt(r.portal.igst+r.portal.cgst+r.portal.sgst)}</td>
                     <td className="px-3 py-2 text-right text-slate-500">₹{fmt(r.books.igst+r.books.cgst+r.books.sgst)}</td>
                     <td className={`px-3 py-2 text-right font-bold ${r.taxDiff>0?'text-blue-600':'text-rose-600'}`}>{r.taxDiff>0?'+':''}{fmt(r.taxDiff)}</td>
+                    <td className="px-3 py-2">
+                      {(r.mismatchFields||[]).map(f => (
+                        <span key={f} className="inline-block mr-1 mb-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 whitespace-nowrap">{f}</span>
+                      ))}
+                    </td>
                   </> : <>
                     <td className="px-3 py-2 text-right text-slate-700 dark:text-slate-200">₹{fmt(inv?.invoiceValue)}</td>
                     <td className="px-3 py-2 text-right text-slate-500">₹{fmt(inv?.taxableValue)}</td>
@@ -1026,6 +1092,17 @@ const ResultTable = ({ tabId, records }) => {
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${inv?.itcAvailability?.toLowerCase()==='yes'?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-500'}`}>{inv?.itcAvailability||'—'}</span>
                     </td>}
                   </>}
+                  {onDelete && (
+                    <td className="px-3 py-2 text-center">
+                      <button
+                        onClick={() => onDelete(r)}
+                        title="Remove this entry from reconciliation"
+                        className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20 text-slate-300 hover:text-rose-500 transition-colors"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </td>
+                  )}
                 </tr>
               );
             })}
