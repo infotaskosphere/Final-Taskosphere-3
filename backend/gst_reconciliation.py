@@ -62,7 +62,11 @@ def _normalise_invoice(val):
     for sep in ("-", "/"):
         if sep in s:
             prefix, _, suffix = s.partition(sep)
+            # ALPHA prefix (e.g. "SW-60134", "INV/1234")
             if prefix.isalpha() and suffix.isdigit():
+                return suffix.lstrip("0") or "0"
+            # SHORT NUMERIC prefix (e.g. "12/0033902" → portal SerialNo/InvoiceNo format)
+            if prefix.isdigit() and len(prefix) <= 4 and suffix.isdigit():
                 return suffix.lstrip("0") or "0"
     return s
 
@@ -105,10 +109,12 @@ def _detect_mismatch_reason(portal, books, tolerance=TOLERANCE):
     pos_b = _to_str(books.get("place_of_supply",  ""))
     if pos_p and pos_b and pos_p != pos_b:
         reasons.append(f"Place of supply mismatch ({pos_p} vs {pos_b})")
+    # NOTE: Reverse charge flag difference is intentionally NOT counted as a financial mismatch.
+    # Invoices that differ only in the RC flag are treated as matched — the flag is metadata, not a value.
     rc_p = _to_str(portal.get("reverse_charge", "")).upper()
     rc_b = _to_str(books.get("reverse_charge",  "")).upper()
     if rc_p and rc_b and rc_p != rc_b:
-        reasons.append("Reverse charge flag mismatch")
+        reasons.append("Reverse charge flag differs (note only — not a financial mismatch)")
     return "; ".join(reasons) if reasons else "Other discrepancy"
 
 def _itc_eligibility(record):
@@ -377,14 +383,22 @@ def _reconcile(portal_df, books_df, tolerance=TOLERANCE, fuzzy_threshold=0.80, e
             books_matched_keys.add(key)
             val_diff = abs(p["invoice_value"] - b["invoice_value"])
             tax_diff = abs((p["igst"]+p["cgst"]+p["sgst"])-(b["igst"]+b["cgst"]+b["sgst"]))
+            taxable_diff = abs(p.get("taxable_value",0) - b.get("taxable_value",0))
+            # Check reverse charge flag difference (metadata, not financial)
+            rc_p = _to_str(p.get("reverse_charge","")).upper()
+            rc_b = _to_str(b.get("reverse_charge","")).upper()
+            rc_mismatch = bool(rc_p and rc_b and rc_p != rc_b)
             if val_diff <= tolerance and tax_diff <= tolerance:
+                # Financially matched — even if RC flag differs, route to matched
                 matched.append({"portal":p,"books":b,"key":key,"status":"matched",
+                                "rc_mismatch": rc_mismatch,
                                 "itc_eligibility":_itc_eligibility(p),
                                 "is_amended":p.get("is_amended",False)})
             else:
                 partial.append({"portal":p,"books":b,"key":key,"status":"mismatch",
                                 "value_diff": round(p["invoice_value"]-b["invoice_value"],2),
                                 "tax_diff":   round((p["igst"]+p["cgst"]+p["sgst"])-(b["igst"]+b["cgst"]+b["sgst"]),2),
+                                "rc_mismatch": rc_mismatch,
                                 "mismatch_reason":  _detect_mismatch_reason(p,b,tolerance),
                                 "suggested_action": _suggest_correction(p,b),
                                 "itc_eligibility":  _itc_eligibility(p)})
