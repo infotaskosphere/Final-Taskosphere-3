@@ -19,7 +19,12 @@ import { toast } from 'sonner';
 function normaliseInvoice(val) {
   if (val === null || val === undefined) return '';
   const s = String(val).trim().toUpperCase().replace(/\s+/g, '');
+  // Purely numeric → strip leading zeros
   if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
+  // Handle "ALPHA-NUMBER" or "ALPHA/NUMBER" patterns (e.g. "SW-60134", "INV/1234")
+  // so that portal invoice "SW-60134" matches books invoice "60134"
+  const m = s.match(/^([A-Z]+)[-\/](\d+)$/);
+  if (m) return m[2].replace(/^0+/, '') || '0';
   return s;
 }
 function normaliseGSTIN(val) {
