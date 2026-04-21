@@ -1877,6 +1877,10 @@ const HistoryView = () => {
 };
 
 
+const EMPTY_COMPANY = {
+  name: '', gstin: '', pan: '', address: '', phone: '', email: '', fy: '',
+};
+
 export default function GSTReconciliation() {
   const [pageView,        setPageView]        = useState('new');   // 'new' | 'history'
   const [portalFile,      setPortalFile]       = useState(null);
