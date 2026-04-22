@@ -1154,13 +1154,25 @@ async def gstin_name_lookup_batch(body: GSTINBatchBody, current_user: User = Dep
 # ─── HISTORY (v1 preserved) ───────────────────────────────────────────────────
 
 @router.get("/history")
-async def get_history(skip:int=Query(0,ge=0), limit:int=Query(20,ge=1,le=100),
-    current_user: User=Depends(get_current_user)):
-    """Return saved reconciliation sessions (most recent first)."""
-    query={"type":{"$exists":False}}
-    sessions = await db.gst_reconciliation_sessions.find(query,{"_id":0}).sort("created_at",-1).skip(skip).limit(limit).to_list(limit)
-    total    = await db.gst_reconciliation_sessions.count_documents(query)
-    return {"sessions":sessions,"total":total}
+async def get_history(
+    skip:        int            = Query(0,  ge=0),
+    limit:       int            = Query(20, ge=1, le=200),
+    client_id:   Optional[str] = Query(None),
+    client_name: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+):
+    """Return saved reconciliation sessions (most recent first).
+    Optional filters: client_id, client_name (substring, case-insensitive)."""
+    query: Dict[str, Any] = {"type": {"$exists": False}}
+    if client_id:
+        query["client_id"] = client_id
+    elif client_name:
+        query["client_name"] = {"$regex": client_name.strip(), "$options": "i"}
+    sessions = await db.gst_reconciliation_sessions.find(
+        query, {"_id": 0, "full_result": 0}   # exclude full_result for listing (large)
+    ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    total = await db.gst_reconciliation_sessions.count_documents(query)
+    return {"sessions": sessions, "total": total}
 
 
 @router.get("/history/{session_id}")
