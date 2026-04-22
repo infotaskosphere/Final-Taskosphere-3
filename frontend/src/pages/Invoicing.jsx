@@ -3560,6 +3560,77 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
 // ════════════════════════════════════════════════════════════════════════════════
 // INVOICE DETAIL PANEL
 // ════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════════
+// EMAIL PREVIEW MODAL
+// ════════════════════════════════════════════════════════════════════════════════
+const InvoicePreviewModal = ({ open, onClose, invoice, previewHtml, isDark }) => {
+  if (!invoice) return null;
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent
+        hideClose
+        className={`max-w-2xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 [&>button.absolute]:hidden ${
+          isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
+        }`}
+      >
+        <DialogTitle className="sr-only">Invoice Preview</DialogTitle>
+        <DialogDescription className="sr-only">Preview invoice</DialogDescription>
+
+        {/* HEADER */}
+        <div
+          className="px-7 py-5 relative overflow-hidden flex-shrink-0"
+          style={{ background: 'linear-gradient(135deg, #0D3B66, #1565C0)' }}
+        >
+          <div className="relative flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center">
+                <Eye className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <p className="text-white font-bold text-lg">Invoice Preview</p>
+                <p className="text-white/60 text-sm mt-0.5">{invoice.invoice_no} · {invoice.client_name}</p>
+                <p className="text-white/40 text-xs mt-0.5">{invoice.invoice_date}</p>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center"
+            >
+              <X className="w-4 h-4 text-white" />
+            </button>
+          </div>
+        </div>
+
+        {/* PREVIEW LABEL */}
+        <div className={`px-7 py-2.5 flex-shrink-0 border-b text-xs font-semibold uppercase tracking-widest ${
+          isDark ? 'bg-slate-700/50 border-slate-700 text-slate-400' : 'bg-slate-50 border-slate-100 text-slate-500'
+        }`}>
+          Invoice Preview
+        </div>
+
+        {/* INVOICE IFRAME */}
+        <div className="flex-1 overflow-hidden">
+          <iframe
+            srcDoc={previewHtml}
+            title="Invoice Preview"
+            className="w-full h-full border-0"
+            style={{ minHeight: '420px' }}
+          />
+        </div>
+
+        {/* FOOTER */}
+        <div className={`flex-shrink-0 flex items-center justify-end gap-3 px-7 py-4 border-t ${
+          isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'
+        }`}>
+          <Button variant="outline" size="sm" onClick={onClose} className="rounded-xl h-9 px-4 text-xs">
+            Close
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 const InvoiceDetailPanel = ({
   invoice,
   open,
@@ -3569,6 +3640,7 @@ const InvoiceDetailPanel = ({
   onDelete,
   onDownloadPdf,
   onSendEmail,
+  onPreview,
   onDuplicate,
   onSaleReturn,
   isDark,
@@ -3829,6 +3901,15 @@ const InvoiceDetailPanel = ({
             invoice={invoice}
             companies={companies}
           />
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onPreview?.(invoice)}
+            className="rounded-xl text-xs h-9 gap-1.5"
+          >
+            <Eye className="h-3.5 w-3.5" /> Preview
+          </Button>
 
           {invoice.client_email && (
             <Button
@@ -4287,6 +4368,41 @@ const fetchAll = useCallback(async () => {
   const handleStatusChange = useCallback((invId, newStatus) => {
     setInvoices(prev => prev.map(i => i.id === invId ? { ...i, status: newStatus } : i));
   }, []);
+
+  const [invoicePreviewOpen, setInvoicePreviewOpen] = useState(false);
+  const [invoicePreviewInv, setInvoicePreviewInv]   = useState(null);
+  const [invoicePreviewHtml, setInvoicePreviewHtml] = useState('');
+
+  const buildPreviewHtml = useCallback((inv) => {
+    const baseCompany = (companies || []).find(c => c.id === inv.company_id) || {};
+    const invSettings = getInvSettings(inv.company_id);
+    const previewCompany = {
+      ...baseCompany,
+      bank_name:       baseCompany.bank_name       || invSettings.bank_name       || '',
+      bank_account_no: baseCompany.bank_account_no || invSettings.bank_account_no || '',
+      bank_account:    baseCompany.bank_account    || invSettings.bank_account_no || '',
+      bank_ifsc:       baseCompany.bank_ifsc       || invSettings.bank_ifsc       || '',
+      upi_id:          baseCompany.upi_id          || invSettings.upi_id          || '',
+      show_qr_code:    invSettings.show_qr_code    ?? true,
+      invoice_title:   invSettings.invoice_title   || 'Tax Invoice',
+      signatory_name:  invSettings.signatory_name  || '',
+      footer_line:     invSettings.footer_line     || '',
+      logo_url:        baseCompany.logo_url        || baseCompany.logo            || '',
+      logo_base64:     baseCompany.logo_base64     || '',
+    };
+    return generateInvoiceHTML(inv, {
+      company:     previewCompany,
+      template:    inv.invoice_template     || invSettings.template     || 'classic',
+      theme:       inv.invoice_theme        || invSettings.theme        || 'classic_blue',
+      customColor: inv.invoice_custom_color || invSettings.custom_color || '#0D3B66',
+    });
+  }, [companies, getInvSettings]);
+
+  const handlePreviewInvoice = useCallback((inv) => {
+    setInvoicePreviewInv(inv);
+    setInvoicePreviewHtml(buildPreviewHtml(inv));
+    setInvoicePreviewOpen(true);
+  }, [buildPreviewHtml]);
 
   const handleSendEmail = useCallback(async (inv) => {
     if (!inv.client_email) { toast.error('Client email address is missing'); return; }
@@ -4803,6 +4919,7 @@ const fetchAll = useCallback(async () => {
         onDelete={handleDelete}
         onDownloadPdf={handleDownloadPdf}
         onSendEmail={handleSendEmail}
+        onPreview={handlePreviewInvoice}
         onDuplicate={handleDuplicateInv}
         onSaleReturn={handleSaleReturn}
         isDark={isDark}
@@ -4817,6 +4934,13 @@ const fetchAll = useCallback(async () => {
       />
       <ProductModal open={catOpen} onClose={() => setCatOpen(false)} isDark={isDark} onSaved={fetchAll} />
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} isDark={isDark} companies={companies} onImportComplete={fetchAll} />
+      <InvoicePreviewModal
+        open={invoicePreviewOpen}
+        onClose={() => setInvoicePreviewOpen(false)}
+        invoice={invoicePreviewInv}
+        previewHtml={invoicePreviewHtml}
+        isDark={isDark}
+      />
       <GSTReportsModal open={gstOpen} onClose={() => setGstOpen(false)} invoices={invoices} companies={companies} isDark={isDark} />
       {settingsOpen && <InvoiceSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} companies={companies} isDark={isDark} />}
       {ledgerOpen && <PartyLedger open={ledgerOpen} onClose={() => setLedgerOpen(false)} invoices={invoices} clients={clients} companies={companies} isDark={isDark} initialClient={ledgerClient} />}
