@@ -387,8 +387,6 @@ async function clientGstinLookup(gstin) {
  * table header.  Layout varies slightly across FY/portal versions, so we scan
  * every cell in rows 0-12 rather than hard-coding row indices.
  */
-const GSTIN_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
-
 function _parsePeriodString(raw) {
   if (!raw) return '';
   const s = String(raw).trim();
