@@ -125,7 +125,7 @@ function AppRoutes() {
       {/* ── COMPLIANCE GROUP ── */}
       <Route path="/duedates"           element={<Protected><PageLoader><DueDates /></PageLoader></Protected>} />
       <Route path="/compliance"         element={<Permission permission="can_view_compliance"><PageLoader><CompliancePage /></PageLoader></Permission>} />
-      <Route path="/gst-reconciliation" element={<Protected><PageLoader><GSTReconciliation /></PageLoader></Protected>} />
+      <Route path="/gst-reconciliation" element={<Permission permission="can_view_gst_reconciliation"><PageLoader><GSTReconciliation /></PageLoader></Permission>} />
 
       {/* Settings — all roles */}
       <Route path="/settings/general" element={<Protected><PageLoader><GeneralSettings /></PageLoader></Protected>} />
