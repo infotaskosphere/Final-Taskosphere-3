@@ -20,6 +20,7 @@ import {
   LayoutGrid, List, Phone, MapPin, User, FileCheck, Share2,
   Copy, ExternalLink, CheckSquare, Square, MinusSquare,
   Shield, Download, UserCheck, AlertCircle, Sparkles, Loader2,
+  ArrowLeftRight, RefreshCw,
 } from 'lucide-react';
 import { detectClientDuplicates } from '@/lib/aiDuplicateEngine';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
@@ -1092,11 +1093,19 @@ const GST_TREATMENT_LABELS = { regular: 'Regular Taxpayer', composition: 'Compos
 const INV_STATUS_COLORS = { paid: { bg: '#f0fdf4', text: '#166534', border: '#bbf7d0' }, sent: { bg: '#eff6ff', text: '#1e40af', border: '#bfdbfe' }, draft: { bg: '#f8fafc', text: '#475569', border: '#e2e8f0' }, overdue: { bg: '#fef2f2', text: '#dc2626', border: '#fecaca' }, partially_paid: { bg: '#fefce8', text: '#92400e', border: '#fde68a' }, cancelled: { bg: '#fafafa', text: '#9ca3af', border: '#e5e7eb' } };
 
 const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDetailDialogOpen, isDark, users, getClientAssignments, openWhatsApp, handleEdit, canEditClients }) => {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+
   const [activeTab, setActiveTab] = React.useState('details');
   const [clientInvoices, setClientInvoices] = React.useState([]);
   const [invoicesLoading, setInvoicesLoading] = React.useState(false);
 
-  React.useEffect(() => { setActiveTab('details'); setClientInvoices([]); }, [selectedClient?.id]);
+  // GST Reconciliation sessions for this client
+  const [gstSessions,    setGstSessions]    = React.useState([]);
+  const [gstLoading,     setGstLoading]     = React.useState(false);
+  const [gstDeleting,    setGstDeleting]    = React.useState(null);
+
+  React.useEffect(() => { setActiveTab('details'); setClientInvoices([]); setGstSessions([]); }, [selectedClient?.id]);
 
   React.useEffect(() => {
     if (activeTab !== 'invoices' || !selectedClient) return;
@@ -1112,6 +1121,56 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
       .catch(() => {})
       .finally(() => setInvoicesLoading(false));
   }, [activeTab, selectedClient]);
+
+  // Fetch GST reconciliation sessions for this client
+  React.useEffect(() => {
+    if (activeTab !== 'reconciliation' || !selectedClient) return;
+    setGstLoading(true);
+    const params = selectedClient.id
+      ? { client_id: selectedClient.id, limit: 50 }
+      : { client_name: selectedClient.company_name, limit: 50 };
+    api.get('/gst-reconciliation/history', { params })
+      .then(r => setGstSessions(r.data?.sessions || []))
+      .catch(() => setGstSessions([]))
+      .finally(() => setGstLoading(false));
+  }, [activeTab, selectedClient]);
+
+  const handleDeleteGstSession = async (sessionId) => {
+    if (!window.confirm('Delete this reconciliation record?')) return;
+    setGstDeleting(sessionId);
+    try {
+      await api.delete(`/gst-reconciliation/history/${sessionId}`);
+      setGstSessions(prev => prev.filter(s => s.id !== sessionId));
+    } catch { /* silent */ }
+    setGstDeleting(null);
+  };
+
+  const downloadGstSummary = (session) => {
+    const sm = session.summary || {};
+    const rows = [
+      ['GST Reconciliation Summary'],
+      ['Client', session.client_name || '—'],
+      ['GSTIN', session.client_gstin || '—'],
+      ['Period', session.period || '—'],
+      ['Date', session.created_at ? new Date(session.created_at).toLocaleDateString('en-IN') : '—'],
+      ['Portal File', session.portal_filename || '—'],
+      ['Books File', session.books_filename || '—'],
+      [],
+      ['Category', 'Count', 'Value (₹)'],
+      ['Matched',     sm.matched_count ?? 0,     sm.matched_value ?? 0],
+      ['Mismatch',    sm.mismatch_count ?? 0,    sm.mismatch_value ?? 0],
+      ['Portal Only', sm.portal_only_count ?? 0, sm.portal_only_value ?? 0],
+      ['Books Only',  sm.books_only_count ?? 0,  sm.books_only_value ?? 0],
+      [],
+      ['Total Portal Invoices', sm.total_portal ?? 0],
+      ['Total Books Invoices',  sm.total_books  ?? 0],
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Summary');
+    const period = (session.period || 'report').replace(/\s+/g, '_');
+    const client = (session.client_name || 'client').replace(/\s+/g, '_').slice(0, 20);
+    XLSX.writeFile(wb, `GST_Recon_${client}_${period}.xlsx`);
+  };
 
   if (!selectedClient) return null;
   const cfg = TYPE_CONFIG[selectedClient.client_type] || TYPE_CONFIG.proprietor;
@@ -1147,8 +1206,9 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
         {/* ── Tab Bar ── */}
         <div className={`flex items-center gap-1 px-8 py-2.5 border-b flex-shrink-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           {[
-            { key: 'details', label: 'Details', icon: <User className="h-3.5 w-3.5" /> },
-            { key: 'invoices', label: 'Invoices', icon: <FileText className="h-3.5 w-3.5" /> },
+            { key: 'details',        label: 'Details',     icon: <User className="h-3.5 w-3.5" /> },
+            { key: 'invoices',       label: 'Invoices',    icon: <FileText className="h-3.5 w-3.5" /> },
+            { key: 'reconciliation', label: 'GST Recon',   icon: <ArrowLeftRight className="h-3.5 w-3.5" /> },
           ].map(tab => (
             <button
               key={tab.key}
@@ -1164,6 +1224,11 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
               {tab.key === 'invoices' && clientInvoices.length > 0 && (
                 <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ background: activeTab === 'invoices' ? 'rgba(255,255,255,0.25)' : '#e2e8f0', color: activeTab === 'invoices' ? '#fff' : '#64748b' }}>
                   {clientInvoices.length}
+                </span>
+              )}
+              {tab.key === 'reconciliation' && gstSessions.length > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ background: activeTab === 'reconciliation' ? 'rgba(255,255,255,0.25)' : '#e2e8f0', color: activeTab === 'reconciliation' ? '#fff' : '#64748b' }}>
+                  {gstSessions.length}
                 </span>
               )}
             </button>
@@ -1244,6 +1309,123 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                     )}
                   </div>
                 </>
+              )}
+            </div>
+          )}
+
+          {/* ════════════════ GST RECONCILIATION TAB ════════════════ */}
+          {activeTab === 'reconciliation' && (
+            <div className="p-6 space-y-4">
+              {/* Header row */}
+              <div className="flex items-center justify-between">
+                <p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                  Reconciliation History
+                </p>
+                <button
+                  onClick={() => {
+                    setGstLoading(true);
+                    const params = selectedClient.id
+                      ? { client_id: selectedClient.id, limit: 50 }
+                      : { client_name: selectedClient.company_name, limit: 50 };
+                    api.get('/gst-reconciliation/history', { params })
+                      .then(r => setGstSessions(r.data?.sessions || []))
+                      .catch(() => {})
+                      .finally(() => setGstLoading(false));
+                  }}
+                  className="flex items-center gap-1 text-xs text-slate-400 hover:text-indigo-600 transition-colors"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${gstLoading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+              </div>
+
+              {gstLoading ? (
+                <MiniLoader height={120} />
+              ) : gstSessions.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+                  <ArrowLeftRight className="h-10 w-10 mb-3 opacity-25" />
+                  <p className="text-sm font-medium">No reconciliation records</p>
+                  <p className="text-xs mt-1 text-slate-300">
+                    Run a GST reconciliation and link it to this client to see it here
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {gstSessions.map(session => {
+                    const sm = session.summary || {};
+                    const dateStr = session.created_at
+                      ? new Date(session.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                      : '—';
+                    return (
+                      <div
+                        key={session.id}
+                        className={`rounded-xl border p-4 ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-white border-slate-200'}`}
+                      >
+                        {/* Row 1: period + date + actions */}
+                        <div className="flex items-start justify-between gap-2 mb-3">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {session.period && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300">
+                                {session.period}
+                              </span>
+                            )}
+                            <span className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                              {dateStr}
+                            </span>
+                            {session.created_by_name && (
+                              <span className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                                by {session.created_by_name}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <button
+                              onClick={() => downloadGstSummary(session)}
+                              title="Download Excel summary"
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 transition-colors"
+                            >
+                              <Download className="h-3 w-3" /> Excel
+                            </button>
+                            {isAdmin && (
+                              <button
+                                onClick={() => handleDeleteGstSession(session.id)}
+                                disabled={gstDeleting === session.id}
+                                title="Delete this record (admin only)"
+                                className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20 text-slate-300 hover:text-rose-500 transition-colors"
+                              >
+                                {gstDeleting === session.id
+                                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  : <Trash2 className="h-3.5 w-3.5" />}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Row 2: stat pills */}
+                        <div className="flex flex-wrap gap-1.5">
+                          {[
+                            { label: '✓ Matched',     val: sm.matched_count ?? 0,     bg: 'bg-emerald-100 dark:bg-emerald-900/30', text: 'text-emerald-700 dark:text-emerald-300' },
+                            { label: '⚠ Mismatch',    val: sm.mismatch_count ?? 0,    bg: 'bg-amber-100 dark:bg-amber-900/30',    text: 'text-amber-700 dark:text-amber-300'   },
+                            { label: '🌐 Portal Only', val: sm.portal_only_count ?? 0, bg: 'bg-blue-100 dark:bg-blue-900/30',      text: 'text-blue-700 dark:text-blue-300'     },
+                            { label: '📒 Books Only',  val: sm.books_only_count ?? 0,  bg: 'bg-rose-100 dark:bg-rose-900/30',      text: 'text-rose-700 dark:text-rose-300'     },
+                          ].map(p => (
+                            <span key={p.label} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${p.bg} ${p.text}`}>
+                              {p.label}: {p.val}
+                            </span>
+                          ))}
+                        </div>
+
+                        {/* Row 3: filenames */}
+                        {(session.portal_filename || session.books_filename) && (
+                          <div className={`mt-2 flex flex-wrap gap-3 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                            {session.portal_filename && <span>🌐 {session.portal_filename}</span>}
+                            {session.books_filename  && <span>📒 {session.books_filename}</span>}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           )}
