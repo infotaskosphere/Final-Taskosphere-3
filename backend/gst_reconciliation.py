@@ -102,7 +102,28 @@ def _find_header_row(df_raw):
                 return i
     return -1
 
-# ─── FUZZY MATCHING (NEW) ─────────────────────────────────────────────────────
+# ─── SMART TOLERANCE & DATE NORMALISATION ───────────────────────────────────
+
+def _smart_tolerance(v1: float, v2: float = 0.0) -> float:
+    """Max of ₹1.01 floor and 0.1% of the larger value — prevents false
+    mismatches on large invoices caused by ERP rounding differences."""
+    return max(TOLERANCE, max(abs(v1), abs(v2), 1.0) * 0.001)
+
+_DATE_FMTS = ["%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%y", "%d-%m-%y"]
+
+def _normalise_date(raw: str) -> str:
+    """Convert various Indian date formats to ISO YYYY-MM-DD for comparison."""
+    s = _to_str(raw).strip()
+    if not s or s in ("0", "nan"):
+        return ""
+    for fmt in _DATE_FMTS:
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return s   # return as-is if unrecognised
+
+# ─── FUZZY MATCHING ──────────────────────────────────────────────────────────
 
 def _fuzzy_similarity(a, b):
     if not a or not b:
@@ -114,29 +135,64 @@ def _fuzzy_invoice_match(inv_a, inv_b, threshold=0.80):
         return True
     return _fuzzy_similarity(inv_a, inv_b) >= threshold
 
-# ─── AI INSIGHTS / RULE ENGINE (NEW) ─────────────────────────────────────────
+def _levenshtein(a: str, b: str) -> int:
+    """Character edit distance — used for near-GSTIN typo detection."""
+    if a == b: return 0
+    if not a: return len(b)
+    if not b: return len(a)
+    dp = list(range(len(b) + 1))
+    for i, ca in enumerate(a):
+        prev, dp[0] = dp[0], i + 1
+        for j, cb in enumerate(b):
+            prev, dp[j+1] = dp[j+1], prev if ca == cb else min(prev, dp[j], dp[j+1]) + 1
+    return dp[len(b)]
 
-def _detect_mismatch_reason(portal, books, tolerance=TOLERANCE):
-    reasons = []
-    val_diff = abs(portal.get("invoice_value", 0) - books.get("invoice_value", 0))
-    if val_diff > tolerance:
-        reasons.append(f"Invoice value difference Rs.{round(val_diff, 2)}")
-    tax_p = portal.get("igst", 0) + portal.get("cgst", 0) + portal.get("sgst", 0)
-    tax_b = books.get("igst",  0) + books.get("cgst",  0) + books.get("sgst",  0)
+# ─── AI INSIGHTS / RULE ENGINE ───────────────────────────────────────────────
+
+def _detect_mismatch_reason(portal: dict, books: dict, tolerance: float = TOLERANCE) -> str:
+    """Human-readable mismatch diagnosis + suggested action."""
+    tol      = _smart_tolerance(portal.get("invoice_value", 0), books.get("invoice_value", 0))
+    val_diff = portal.get("invoice_value", 0) - books.get("invoice_value", 0)
+    tax_p    = portal.get("igst",0)+portal.get("cgst",0)+portal.get("sgst",0)
+    tax_b    = books.get("igst",0)+books.get("cgst",0)+books.get("sgst",0)
     tax_diff = abs(tax_p - tax_b)
-    if tax_diff > tolerance:
-        reasons.append(f"Tax difference Rs.{round(tax_diff, 2)}")
-    pos_p = _to_str(portal.get("place_of_supply", ""))
-    pos_b = _to_str(books.get("place_of_supply",  ""))
+    p_inv    = max(portal.get("invoice_value", 1), 1)
+    p_rate   = tax_p / p_inv * 100
+    b_inv    = max(books.get("invoice_value",  1), 1)
+    b_rate   = tax_b / b_inv * 100
+
+    if abs(val_diff) < tol and tax_diff < tol:
+        pd = _normalise_date(portal.get("invoice_date",""))
+        bd = _normalise_date(books.get("invoice_date",""))
+        if pd and bd and pd != bd:
+            return f"Date mismatch: portal {pd} vs books {bd}. Verify original invoice date."
+        return "Minor rounding difference — likely safe to accept."
+
+    if abs(p_rate - b_rate) > 1.5:
+        return (f"GST rate differs: portal ~{p_rate:.0f}% vs books ~{b_rate:.0f}%. "
+                "Check HSN/SAC and correct tax rate in books.")
+
+    if abs(val_diff) > tol and tax_diff < tol:
+        return (f"Invoice value differs by Rs.{abs(val_diff):.2f} but tax matches. "
+                "Possible GST-exclusive vs GST-inclusive entry difference.")
+
+    if val_diff > tol:
+        return (f"Portal value Rs.{abs(val_diff):.2f} higher than books. "
+                "Supplier may have filed amended invoice — update books or request GSTR-1 amendment.")
+    if val_diff < -tol:
+        return (f"Books value Rs.{abs(val_diff):.2f} higher than portal. "
+                "Vendor may have understated — request credit note or amendment.")
+
+    reasons = []
+    if abs(val_diff) > tol:
+        reasons.append(f"value diff Rs.{round(abs(val_diff),2)}")
+    if tax_diff > tol:
+        reasons.append(f"tax diff Rs.{round(tax_diff,2)}")
+    pos_p = _to_str(portal.get("place_of_supply",""))
+    pos_b = _to_str(books.get("place_of_supply",""))
     if pos_p and pos_b and pos_p != pos_b:
-        reasons.append(f"Place of supply mismatch ({pos_p} vs {pos_b})")
-    # NOTE: Reverse charge flag difference is intentionally NOT counted as a financial mismatch.
-    # Invoices that differ only in the RC flag are treated as matched — the flag is metadata, not a value.
-    rc_p = _to_str(portal.get("reverse_charge", "")).upper()
-    rc_b = _to_str(books.get("reverse_charge",  "")).upper()
-    if rc_p and rc_b and rc_p != rc_b:
-        reasons.append("Reverse charge flag differs (note only — not a financial mismatch)")
-    return "; ".join(reasons) if reasons else "Other discrepancy"
+        reasons.append(f"place of supply ({pos_p} vs {pos_b})")
+    return ("Multiple mismatches: " + "; ".join(reasons)) if reasons else "Other discrepancy"
 
 def _itc_eligibility(record):
     itc_avail = _to_str(record.get("itc_availability", "")).upper()
@@ -525,26 +581,42 @@ def _reconcile(portal_df, books_df, tolerance=TOLERANCE, fuzzy_threshold=0.80, e
         if in_portal and in_books:
             p = portal_map[key]; b = books_map[key]
             books_matched_keys.add(key)
+            tol      = _smart_tolerance(p["invoice_value"], b["invoice_value"])
             val_diff = abs(p["invoice_value"] - b["invoice_value"])
             tax_diff = abs((p["igst"]+p["cgst"]+p["sgst"])-(b["igst"]+b["cgst"]+b["sgst"]))
-            taxable_diff = abs(p.get("taxable_value",0) - b.get("taxable_value",0))
-            # Check reverse charge flag difference (metadata, not financial)
+            # Taxable value: only compare when both rows have it (books often omit)
+            has_taxable = p.get("taxable_value",0) > 0 and b.get("taxable_value",0) > 0
+            taxable_diff = abs(p.get("taxable_value",0)-b.get("taxable_value",0)) if has_taxable else 0
+            # Dates: normalise to ISO before comparing
+            p_date = _normalise_date(p.get("invoice_date",""))
+            b_date = _normalise_date(b.get("invoice_date",""))
+            date_mismatch = bool(p_date and b_date and p_date != b_date)
             rc_p = _to_str(p.get("reverse_charge","")).upper()
             rc_b = _to_str(b.get("reverse_charge","")).upper()
             rc_mismatch = bool(rc_p and rc_b and rc_p != rc_b)
-            if val_diff <= tolerance and tax_diff <= tolerance:
-                # Financially matched — even if RC flag differs, route to matched
+            is_credit_note = p["invoice_value"] < 0
+
+            if val_diff <= tol and tax_diff <= tol:
                 matched.append({"portal":p,"books":b,"key":key,"status":"matched",
-                                "rc_mismatch": rc_mismatch,
+                                "rc_mismatch": rc_mismatch, "date_mismatch": date_mismatch,
+                                "is_credit_note": is_credit_note,
                                 "itc_eligibility":_itc_eligibility(p),
                                 "is_amended":p.get("is_amended",False)})
             else:
+                reason  = _detect_mismatch_reason(p, b, tol)
+                suggest = _suggest_correction(p, b)
+                # Severity
+                pv = max(p["invoice_value"], 1)
+                diff_pct = val_diff / pv * 100
+                severity = "high" if diff_pct > 5 or tax_diff > tol * 5 else ("medium" if diff_pct > 1 else "low")
                 partial.append({"portal":p,"books":b,"key":key,"status":"mismatch",
                                 "value_diff": round(p["invoice_value"]-b["invoice_value"],2),
                                 "tax_diff":   round((p["igst"]+p["cgst"]+p["sgst"])-(b["igst"]+b["cgst"]+b["sgst"]),2),
-                                "rc_mismatch": rc_mismatch,
-                                "mismatch_reason":  _detect_mismatch_reason(p,b,tolerance),
-                                "suggested_action": _suggest_correction(p,b),
+                                "rc_mismatch": rc_mismatch, "date_mismatch": date_mismatch,
+                                "is_credit_note": is_credit_note,
+                                "mismatch_reason":  reason,
+                                "suggested_action": suggest,
+                                "severity": severity,
                                 "itc_eligibility":  _itc_eligibility(p)})
 
         elif in_portal:
@@ -562,16 +634,61 @@ def _reconcile(portal_df, books_df, tolerance=TOLERANCE, fuzzy_threshold=0.80, e
                                       "note":"Invoice numbers differ slightly - verify manually"})
             else:
                 portal_only.append({"portal":p,"key":key,"status":"missing_in_books",
+                                    "is_credit_note": p["invoice_value"] < 0,
                                     "itc_eligibility":_itc_eligibility(p)})
         else:
             b = books_map[key]
             if key not in books_matched_keys:
+                # Near-GSTIN typo detection: flag if a portal-only has 1-char GSTIN diff + same invoice + value
                 books_only.append({"books":b,"key":key,"status":"missing_in_gst",
+                                   "is_credit_note": b["invoice_value"] < 0,
                                    "alert":"Vendor may be non-filer or invoice not in GSTR-1"})
+
+    # ── VALUE+GSTIN secondary pass (same GSTIN, value within tolerance, no inv-no match) ──
+    portal_only_idx: Dict[str, list] = {}
+    for po in portal_only:
+        portal_only_idx.setdefault(po["portal"]["gstin"], []).append(po)
+    bo_used_value_pass = set()
+    portal_only_final  = []
+    for po in portal_only:
+        if po["key"] in books_matched_keys: continue
+        p = po["portal"]
+        candidates = [bo for bo in books_only
+                      if bo["books"]["gstin"] == p["gstin"]
+                      and bo["key"] not in bo_used_value_pass]
+        best = None; best_diff = float("inf")
+        for bo in candidates:
+            b   = bo["books"]
+            tol = _smart_tolerance(p["invoice_value"], b["invoice_value"])
+            vd  = abs(p["invoice_value"] - b["invoice_value"])
+            if vd > tol: continue
+            tax_d = abs((p["igst"]+p["cgst"]+p["sgst"])-(b["igst"]+b["cgst"]+b["sgst"]))
+            pd    = _normalise_date(p.get("invoice_date",""))
+            bd    = _normalise_date(b.get("invoice_date",""))
+            if tax_d > tol and not (pd and bd and pd == bd): continue
+            if vd < best_diff: best = bo; best_diff = vd
+        if best:
+            bo_used_value_pass.add(best["key"])
+            books_matched_keys.add(best["key"])
+            b = best["books"]
+            reason  = _detect_mismatch_reason(p, b)
+            partial.append({"portal":p,"books":b,"key":po["key"],"status":"mismatch",
+                            "value_gstin_match": True,
+                            "value_diff": round(p["invoice_value"]-b["invoice_value"],2),
+                            "tax_diff":   round((p["igst"]+p["cgst"]+p["sgst"])-(b["igst"]+b["cgst"]+b["sgst"]),2),
+                            "rc_mismatch": False,
+                            "mismatch_reason": "Invoice numbers differ — matched by GSTIN + value",
+                            "suggested_action": "Confirm this is the same invoice. Invoice number format may differ between portal and books.",
+                            "severity": "low",
+                            "itc_eligibility": _itc_eligibility(p)})
+        else:
+            portal_only_final.append(po)
+
+    books_only_final = [bo for bo in books_only if bo["key"] not in bo_used_value_pass]
 
     # Vendor risk aggregation
     vendor_map: Dict[str,list] = {}
-    for item in matched+partial+portal_only+books_only+fuzzy_matched:
+    for item in matched+partial+portal_only_final+books_only_final+fuzzy_matched:
         src   = item.get("portal") or item.get("books") or {}
         gstin = src.get("gstin","UNKNOWN")
         vendor_map.setdefault(gstin,[]).append({"gstin":gstin,
@@ -587,7 +704,7 @@ def _reconcile(portal_df, books_df, tolerance=TOLERANCE, fuzzy_threshold=0.80, e
     # ITC totals
     itc_eligible = sum((i.get("itc_eligibility") or {}).get("itc_total",0) for i in matched
                        if (i.get("itc_eligibility") or {}).get("eligible"))
-    itc_at_risk  = sum((i.get("itc_eligibility") or {}).get("itc_total",0) for i in portal_only
+    itc_at_risk  = sum((i.get("itc_eligibility") or {}).get("itc_total",0) for i in portal_only_final
                        if (i.get("itc_eligibility") or {}).get("eligible"))
 
     def _sv(items,src): return round(sum((i.get(src) or {}).get("invoice_value",0) for i in items),2)
@@ -596,19 +713,19 @@ def _reconcile(portal_df, books_df, tolerance=TOLERANCE, fuzzy_threshold=0.80, e
     summary = {
         "total_portal":len(portal_map),"total_books":len(books_map),
         "matched_count":len(matched),"mismatch_count":len(partial),
-        "portal_only_count":len(portal_only),"books_only_count":len(books_only),
+        "portal_only_count":len(portal_only_final),"books_only_count":len(books_only_final),
         "fuzzy_matched_count":len(fuzzy_matched),
         "duplicate_portal":len(dup_portal),"duplicate_books":len(dup_books),
         "high_risk_vendors":len(high_risk),
         "matched_value":_sv(matched,"portal"),"mismatch_value":_sv(partial,"portal"),
-        "portal_only_value":_sv(portal_only,"portal"),"books_only_value":_sv(books_only,"books"),
+        "portal_only_value":_sv(portal_only_final,"portal"),"books_only_value":_sv(books_only_final,"books"),
         "matched_tax":_st(matched,"portal"),"mismatch_tax":_st(partial,"portal"),
-        "portal_only_tax":_st(portal_only,"portal"),"books_only_tax":_st(books_only,"books"),
+        "portal_only_tax":_st(portal_only_final,"portal"),"books_only_tax":_st(books_only_final,"books"),
         "itc_eligible_total":round(itc_eligible,2),"itc_at_risk_total":round(itc_at_risk,2),
         "tolerance_used":tolerance,"fuzzy_enabled":enable_fuzzy,"fuzzy_threshold":fuzzy_threshold,
     }
     return {"summary":summary,"matched":matched,"mismatch":partial,
-            "portal_only":portal_only,"books_only":books_only,
+            "portal_only":portal_only_final,"books_only":books_only_final,
             "fuzzy_matched":fuzzy_matched,"vendor_risk":vendor_risk,
             "high_risk_vendors":high_risk,
             "duplicate_invoices":{"portal":dup_portal,"books":dup_books}}
