@@ -3301,6 +3301,7 @@ export default function GSTReconciliation() {
   }, [results?.booksOnly]);
 
 
+  const [gstinLookupLoading, setGstinLookupLoading] = useState(false);
   const gstinLookupTimer = useRef(null);
 
   const setCo = (k, v) => {
