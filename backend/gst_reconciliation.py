@@ -276,6 +276,129 @@ def _parse_books(file_bytes, filename):
     logger.info("Books: parsed %d invoices (%d duplicates)", len(records), sum(1 for r in records if r["is_duplicate"]))
     return pd.DataFrame(records)
 
+# ─── PORTAL METADATA EXTRACTION ─────────────────────────────────────────────
+
+_MONTHS_MAP = {
+    "january":1,"february":2,"march":3,"april":4,"may":5,"june":6,
+    "july":7,"august":8,"september":9,"october":10,"november":11,"december":12,
+    "jan":1,"feb":2,"mar":3,"apr":4,"jun":6,"jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12,
+}
+_GSTIN_RE = re.compile(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$")
+
+def _fmt_period(mm: int, yyyy: str) -> str:
+    names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    return f"{names[mm-1]}-{yyyy[2:]}"
+
+def _parse_period_str(raw: str) -> str:
+    """Convert raw period text → 'Mon-YY' format.  Returns '' if unrecognised."""
+    s = raw.strip()
+    # Numeric: "102024" or "01 2025"
+    m = re.match(r"^(0[1-9]|1[0-2])\s*(\d{4})$", s)
+    if m:
+        return _fmt_period(int(m.group(1)), m.group(2))
+    # Named: "October 2024", "Oct-24", "oct 2024"
+    m = re.match(r"([a-zA-Z]+)[^a-zA-Z0-9]*(\d{4})", s)
+    if m:
+        mon = _MONTHS_MAP.get(m.group(1).lower()[:9])
+        if mon:
+            return _fmt_period(mon, m.group(2))
+    return s or ""
+
+def _extract_portal_metadata(file_bytes: bytes, filename: str) -> Dict[str, str]:
+    """Scan the pre-header rows of a GSTR-2B Excel to extract:
+        period, taxpayer_gstin, trade_name
+    Returns a dict with those keys (empty string if not found)."""
+    ext    = filename.rsplit(".", 1)[-1].lower()
+    engine = "xlrd" if ext == "xls" else "openpyxl"
+    try:
+        xl  = pd.ExcelFile(io.BytesIO(file_bytes), engine=engine)
+        sheet = next((s for s in xl.sheet_names if s.strip().upper() == "B2B"), None) or xl.sheet_names[0]
+        raw = pd.read_excel(xl, sheet_name=sheet, header=None, dtype=str)
+    except Exception:
+        return {"period": "", "taxpayer_gstin": "", "trade_name": ""}
+
+    period = ""; taxpayer_gstin = ""; trade_name = ""
+
+    # Only scan up to row 13 (before the column header row)
+    for i in range(min(13, len(raw))):
+        for j in range(min(10, len(raw.columns))):
+            cell = _to_str(raw.iloc[i, j])
+            if not cell:
+                continue
+            lo = cell.lower()
+
+            # GSTIN of taxpayer
+            if not taxpayer_gstin:
+                gm = re.search(r"gstin\s*[:\-]\s*([A-Z0-9]{15})", cell, re.I)
+                if gm and _GSTIN_RE.match(gm.group(1).upper()):
+                    taxpayer_gstin = gm.group(1).upper()
+                elif _GSTIN_RE.match(cell.upper().replace(" ", "")):
+                    # standalone GSTIN cell — check neighbour says "gstin"
+                    prev = _to_str(raw.iloc[i, j-1]) if j > 0 else ""
+                    if "gstin" in prev.lower() or i < 6:
+                        taxpayer_gstin = cell.upper().replace(" ", "")
+
+            # Return / Tax period
+            if not period:
+                if "return period" in lo or "tax period" in lo or "filing period" in lo:
+                    pm = re.search(r"period\s*[:\-]\s*(.+)", cell, re.I)
+                    if pm:
+                        period = _parse_period_str(pm.group(1).strip())
+                    elif j + 1 < len(raw.columns):
+                        nxt = _to_str(raw.iloc[i, j+1])
+                        if nxt:
+                            period = _parse_period_str(nxt)
+                # Standalone "period" label
+                if not period and lo.startswith("period"):
+                    pm = re.search(r"period\s*[:\-]\s*(.+)", cell, re.I)
+                    if pm:
+                        period = _parse_period_str(pm.group(1).strip())
+                    elif j + 1 < len(raw.columns):
+                        nxt = _to_str(raw.iloc[i, j+1])
+                        if nxt:
+                            period = _parse_period_str(nxt)
+                # Raw 6-digit e.g. "102024"
+                if not period and re.match(r"^(0[1-9]|1[0-2])\d{4}$", cell):
+                    period = _parse_period_str(cell)
+
+            # Trade / legal name
+            if not trade_name:
+                if "trade name" in lo or "legal name" in lo or "trade/legal" in lo:
+                    nm = re.search(r"(?:trade|legal)\s*(?:name)?\s*[:\-]\s*(.+)", cell, re.I)
+                    if nm and len(nm.group(1).strip()) > 1:
+                        trade_name = nm.group(1).strip()
+                    elif j + 1 < len(raw.columns):
+                        nxt = _to_str(raw.iloc[i, j+1])
+                        if nxt and len(nxt) > 1 and not _GSTIN_RE.match(nxt.upper()):
+                            trade_name = nxt
+
+        if period and taxpayer_gstin and trade_name:
+            break
+
+    return {"period": period, "taxpayer_gstin": taxpayer_gstin, "trade_name": trade_name}
+
+
+@router.post("/extract-metadata")
+async def extract_portal_metadata(
+    portal_file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Extract period, taxpayer GSTIN, and trade name from a GSTR-2B Excel header.
+    Used by the frontend to auto-populate the reconciliation form."""
+    pb   = await portal_file.read()
+    meta = _extract_portal_metadata(pb, portal_file.filename or "portal.xlsx")
+
+    # If we got a GSTIN but no name, try a live lookup
+    if meta["taxpayer_gstin"] and not meta["trade_name"]:
+        try:
+            info = await _scrape_gstin_name(meta["taxpayer_gstin"])
+            meta["trade_name"] = info.get("trade_name") or info.get("legal_name") or ""
+        except Exception:
+            pass
+
+    return {**meta, "filename": portal_file.filename or ""}
+
+
 # ─── PARSE PORTAL (v1 preserved + duplicate + amendment flags) ───────────────
 
 def _parse_portal(file_bytes, filename):
@@ -587,6 +710,10 @@ async def reconcile_files(
     for name,data in [(portal_file.filename,pb),(books_file.filename,bb)]:
         if len(data) > 20*1024*1024:
             raise HTTPException(400, f"File '{name}' exceeds 20 MB limit.")
+    # Extract metadata from portal file header (period, taxpayer GSTIN, trade name)
+    portal_meta = _extract_portal_metadata(pb, portal_file.filename or "portal.xlsx")
+    # Use auto-detected period if not supplied explicitly by caller
+    effective_period = period or portal_meta.get("period") or ""
     portal_df = _parse_portal(pb, portal_file.filename or "portal.xlsx")
     books_df  = _parse_books( bb, books_file.filename  or "books.xls")
     # Auto-fetch business names from GST portal for books rows missing trade_name
@@ -599,15 +726,17 @@ async def reconcile_files(
     if save_session:
         sid = str(uuid.uuid4())
         await db.gst_reconciliation_sessions.insert_one({
-            "_id":sid,"id":sid,"period":period,
+            "_id":sid,"id":sid,"period":effective_period,
             "portal_filename":portal_file.filename or "","books_filename":books_file.filename or "",
             "created_at":_now(),"created_by":current_user.id,
             "created_by_name":getattr(current_user,"full_name",""),
             "summary":result["summary"],
             "full_result":result})
         result["session_id"] = sid
+    result["portal_metadata"] = portal_meta
+    result["detected_period"]  = effective_period
     background_tasks.add_task(_log_audit,"reconcile",current_user,
-        {"period":period,"portal":portal_file.filename,"books":books_file.filename,"summary":result["summary"]})
+        {"period":effective_period,"portal":portal_file.filename,"books":books_file.filename,"summary":result["summary"]})
     return result
 
 
