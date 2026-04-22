@@ -1251,7 +1251,8 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
       body: results.booksOnly.map((r, i) => {
         const rowKey = r.key || `${r.books.gstin}__${r.books.invoiceNo}`;
         const comment = invoiceComments?.[rowKey] || '';
-        const name = r.books.tradeOrLegalName || manualTradeNames?.[r.books.gstin] || '—';
+        const bgstin = (r.books.gstin || '').toUpperCase();
+        const name = r.books.tradeOrLegalName || manualTradeNames?.[bgstin] || manualTradeNames?.[r.books.gstin] || '—';
         return [
           i + 1, r.books.gstin, name,
           r.books.invoiceNoRaw, r.books.invoiceDate,
@@ -1386,7 +1387,8 @@ function exportWord(results, company, period, manualTradeNames = {}, invoiceComm
       ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Place','Notes'],
       results.booksOnly.map((r, i) => {
         const rk = r.key||`${r.books.gstin}__${r.books.invoiceNo}`;
-        const nm = r.books.tradeOrLegalName||manualTradeNames?.[r.books.gstin]||'—';
+        const bgstin = (r.books.gstin || '').toUpperCase();
+        const nm = r.books.tradeOrLegalName||manualTradeNames?.[bgstin]||manualTradeNames?.[r.books.gstin]||'—';
         return [i+1, r.books.gstin, nm,
           r.books.invoiceNoRaw, r.books.invoiceDate,
           fmt(r.books.invoiceValue), fmt(r.books.taxableValue),
@@ -1617,7 +1619,8 @@ function exportExcel(results, company, period, manualTradeNames = {}, invoiceCom
     ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value','Taxable','IGST','CGST','SGST','Cess','Place','Type','Rate','Notes'],
     ...results.booksOnly.map((r,i)=>{
       const rk=r.key||`${r.books.gstin}__${r.books.invoiceNo}`;
-      const nm=r.books.tradeOrLegalName||manualTradeNames?.[r.books.gstin]||'';
+      const bgstin=(r.books.gstin||'').toUpperCase();
+      const nm=r.books.tradeOrLegalName||manualTradeNames?.[bgstin]||manualTradeNames?.[r.books.gstin]||'';
       return [i+1,r.books.gstin,nm,r.books.invoiceNoRaw,r.books.invoiceDate,r.books.invoiceValue,r.books.taxableValue,r.books.igst,r.books.cgst,r.books.sgst,r.books.cess,r.books.placeOfSupply,r.books.invoiceType,r.books.rate,invoiceComments?.[rk]||''];
     })
   ]), 'In Books Only');
@@ -1748,6 +1751,7 @@ const TradeNameCell = React.memo(({ gstin, manualTradeNames, onSave }) => {
             value={draft}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={handleKeyDown}
+            onBlur={handleSave}
             placeholder={busy ? 'Fetching…' : 'Enter party name…'}
             disabled={busy}
             className="w-full px-2 py-1 text-xs rounded border border-indigo-400 dark:border-indigo-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500 pr-6"
@@ -1988,16 +1992,16 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
                   </td>
                   <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{inv?.invoiceDate}</td>
                   {tabId === 'mismatch' ? <>
-                    <td className="px-3 py-2 text-right text-slate-700 dark:text-slate-200">
+                    <td className="px-3 py-2 text-right text-slate-700 dark:text-slate-200 whitespace-nowrap">
                       ₹{fmt(r.portal.invoiceValue)}
                       {r.isCreditNote && <span className="ml-1 px-1 py-0.5 rounded text-[8px] font-bold bg-slate-100 text-slate-500 dark:bg-slate-700">CN</span>}
                     </td>
-                    <td className="px-3 py-2 text-right text-slate-700 dark:text-slate-200">₹{fmt(r.books.invoiceValue)}</td>
-                    <td className={`px-3 py-2 text-right font-bold ${r.valueDiff>0?'text-blue-600':'text-rose-600'}`}>{r.valueDiff>0?'+':''}{fmt(r.valueDiff)}</td>
-                    <td className="px-3 py-2 text-right text-slate-500">₹{fmt(r.portal.igst+r.portal.cgst+r.portal.sgst)}</td>
-                    <td className="px-3 py-2 text-right text-slate-500">₹{fmt(r.books.igst+r.books.cgst+r.books.sgst)}</td>
-                    <td className={`px-3 py-2 text-right font-bold ${r.taxDiff>0?'text-blue-600':'text-rose-600'}`}>{r.taxDiff>0?'+':''}{fmt(r.taxDiff)}</td>
-                    <td className="px-3 py-2 min-w-[180px]">
+                    <td className="px-3 py-2 text-right text-slate-700 dark:text-slate-200 whitespace-nowrap">₹{fmt(r.books.invoiceValue)}</td>
+                    <td className={`px-3 py-2 text-right font-bold whitespace-nowrap ${r.valueDiff>0?'text-blue-600':'text-rose-600'}`}>{r.valueDiff>0?'+':''}{fmt(r.valueDiff)}</td>
+                    <td className="px-3 py-2 text-right text-slate-500 whitespace-nowrap">₹{fmt(r.portal.igst+r.portal.cgst+r.portal.sgst)}</td>
+                    <td className="px-3 py-2 text-right text-slate-500 whitespace-nowrap">₹{fmt(r.books.igst+r.books.cgst+r.books.sgst)}</td>
+                    <td className={`px-3 py-2 text-right font-bold whitespace-nowrap ${r.taxDiff>0?'text-blue-600':'text-rose-600'}`}>{r.taxDiff>0?'+':''}{fmt(r.taxDiff)}</td>
+                    <td className="px-3 py-2 min-w-[200px] max-w-[260px]">
                       {/* Severity badge */}
                       {r.severity && (
                         <span className={`inline-block mb-1 px-1.5 py-0.5 rounded text-[9px] font-bold whitespace-nowrap mr-1
@@ -2008,21 +2012,23 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
                         </span>
                       )}
                       {/* Mismatch field tags */}
-                      {(r.mismatchFields||[]).map(f => (
-                        <span key={f} className="inline-block mr-1 mb-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 whitespace-nowrap">{f}</span>
-                      ))}
-                      {r.rcMismatch && (
-                        <span className="inline-block mr-1 mb-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 whitespace-nowrap">RCM flag</span>
-                      )}
-                      {r.valueGstinMatch && (
-                        <span className="inline-block mr-1 mb-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 whitespace-nowrap">Value-matched</span>
-                      )}
+                      <div className="flex flex-wrap gap-0.5 mb-0.5">
+                        {(r.mismatchFields||[]).map(f => (
+                          <span key={f} className="inline-block px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 whitespace-nowrap">{f}</span>
+                        ))}
+                        {r.rcMismatch && (
+                          <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 whitespace-nowrap">RCM flag</span>
+                        )}
+                        {r.valueGstinMatch && (
+                          <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 whitespace-nowrap">Value-matched</span>
+                        )}
+                      </div>
                       {/* Human-readable reason */}
                       {r.mismatchReason && (
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">{r.mismatchReason}</p>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug break-words">{r.mismatchReason}</p>
                       )}
                       {r.suggestedAction && (
-                        <p className="text-[10px] text-indigo-600 dark:text-indigo-400 mt-0.5 leading-snug italic">→ {r.suggestedAction}</p>
+                        <p className="text-[10px] text-indigo-600 dark:text-indigo-400 mt-0.5 leading-snug italic break-words">→ {r.suggestedAction}</p>
                       )}
                     </td>
                   </> : <>
@@ -2093,22 +2099,22 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
               <td className="px-3 py-2.5"/>
               <td className="px-3 py-2.5"/>
               {tabId === 'mismatch' ? <>
-                <td className="px-3 py-2.5 text-right">
+                <td className="px-3 py-2.5 text-right whitespace-nowrap">
                   ₹{fmt(records.reduce((s,r)=>s+(r.portal?.invoiceValue||0),0))}
                 </td>
-                <td className="px-3 py-2.5 text-right">
+                <td className="px-3 py-2.5 text-right whitespace-nowrap">
                   ₹{fmt(records.reduce((s,r)=>s+(r.books?.invoiceValue||0),0))}
                 </td>
-                <td className={`px-3 py-2.5 text-right ${records.reduce((s,r)=>s+(r.valueDiff||0),0)>=0?'text-blue-700 dark:text-blue-400':'text-rose-700 dark:text-rose-400'}`}>
+                <td className={`px-3 py-2.5 text-right whitespace-nowrap ${records.reduce((s,r)=>s+(r.valueDiff||0),0)>=0?'text-blue-700 dark:text-blue-400':'text-rose-700 dark:text-rose-400'}`}>
                   ₹{fmt(records.reduce((s,r)=>s+(r.valueDiff||0),0))}
                 </td>
-                <td className="px-3 py-2.5 text-right">
+                <td className="px-3 py-2.5 text-right whitespace-nowrap">
                   ₹{fmt(records.reduce((s,r)=>s+((r.portal?.igst||0)+(r.portal?.cgst||0)+(r.portal?.sgst||0)),0))}
                 </td>
-                <td className="px-3 py-2.5 text-right">
+                <td className="px-3 py-2.5 text-right whitespace-nowrap">
                   ₹{fmt(records.reduce((s,r)=>s+((r.books?.igst||0)+(r.books?.cgst||0)+(r.books?.sgst||0)),0))}
                 </td>
-                <td className={`px-3 py-2.5 text-right ${records.reduce((s,r)=>s+(r.taxDiff||0),0)>=0?'text-blue-700 dark:text-blue-400':'text-rose-700 dark:text-rose-400'}`}>
+                <td className={`px-3 py-2.5 text-right whitespace-nowrap ${records.reduce((s,r)=>s+(r.taxDiff||0),0)>=0?'text-blue-700 dark:text-blue-400':'text-rose-700 dark:text-rose-400'}`}>
                   ₹{fmt(records.reduce((s,r)=>s+(r.taxDiff||0),0))}
                 </td>
                 <td className="px-3 py-2.5"/>
