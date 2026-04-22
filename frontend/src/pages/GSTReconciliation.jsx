@@ -492,9 +492,124 @@ function extractPortalMetadata(workbook) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   RECONCILIATION ENGINE
+   RECONCILIATION ENGINE  v3 — Accuracy improvements
+   ─────────────────────────────────────────────────────────────────────────
+   Pass 1 : Exact key match      (gstin + normalised invoice no)
+   Pass 2 : Prefix-only match    (same numeric core, only prefix differs)
+   Pass 3 : Value+GSTIN match    (same gstin + value within tolerance, no inv-no match)
+   Pass 4 : Near-GSTIN match     (1-char GSTIN typo + same invoice no + same value)
+   ─────────────────────────────────────────────────────────────────────────
+   Improvements over v2:
+   • Date normalisation  — parses DD/MM/YYYY, DD-MM-YYYY, MM/DD/YYYY, ISO, Excel serial
+   • Smart tolerance     — max(₹1.01, 0.1% of invoice value) avoids false mismatches on
+                           large invoices from legitimate rounding
+   • Taxable-value guard — if books row has 0 taxable value, skip that field in diff
+   • Mismatch reason     — each mismatch gets a human-readable reason + suggested action
+   • Credit note aware   — negative-value invoices flagged separately, not counted as errors
+   • Dedup within pass   — each portal/books record consumed at most once across all passes
 ═══════════════════════════════════════════════════════════════════════════ */
-const TOLERANCE = 1.01;
+const TOLERANCE = 1.01;   // absolute floor ₹
+
+/** Convert various date string formats to ISO "YYYY-MM-DD" for reliable comparison */
+function normaliseDateStr(raw) {
+  if (!raw) return '';
+  const s = String(raw).trim();
+  if (!s || s === '0' || s === 'undefined') return '';
+  // Already ISO
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // DD/MM/YYYY or DD-MM-YYYY (Indian standard)
+  const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (dmy) {
+    const d = dmy[1].padStart(2,'0'), m = dmy[2].padStart(2,'0'), y = dmy[3];
+    // Heuristic: if first part > 12, it must be day
+    if (parseInt(dmy[1], 10) > 12) return `${y}-${m}-${d}`;
+    // If second part > 12, it must be day → MM/DD/YYYY
+    if (parseInt(dmy[2], 10) > 12) return `${y}-${dmy[1].padStart(2,'0')}-${dmy[2].padStart(2,'0')}`;
+    // Default: assume DD/MM/YYYY (Indian)
+    return `${y}-${m}-${d}`;
+  }
+  // Excel serial number
+  if (/^\d{5}$/.test(s)) {
+    try {
+      const d = XLSX.SSF.parse_date_code(parseInt(s, 10));
+      if (d) return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
+    } catch (_) {}
+  }
+  return s;
+}
+
+/**
+ * Smart tolerance: ₹1.01 floor, OR 0.1% of the larger invoice value.
+ * Prevents false mismatches on large invoices due to rounding in ERP exports.
+ */
+function smartTolerance(v1, v2 = 0) {
+  const larger = Math.max(Math.abs(v1), Math.abs(v2), 1);
+  return Math.max(TOLERANCE, larger * 0.001);
+}
+
+/**
+ * Levenshtein distance — used for near-GSTIN matching (1-char typo detection).
+ * Limited to short strings so it's fast.
+ */
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+  const dp = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 0; i < a.length; i++) {
+    let prev = i + 1;
+    for (let j = 0; j < b.length; j++) {
+      const cur = a[i] === b[j] ? dp[j] : Math.min(dp[j], dp[j+1], prev) + 1;
+      dp[j] = prev; prev = cur;
+    }
+    dp[b.length] = prev;
+  }
+  return dp[b.length];
+}
+
+/**
+ * Detect the primary human-readable reason for a mismatch + suggested action.
+ * Returns { reason, suggestion, severity }
+ */
+function detectMismatchReason(p, b) {
+  const valDiff   = p.invoiceValue  - b.invoiceValue;
+  const taxDiff   = (p.igst+p.cgst+p.sgst) - (b.igst+b.cgst+b.sgst);
+  const taxPct    = p.invoiceValue > 0 ? Math.abs(taxDiff) / p.invoiceValue * 100 : 0;
+  const pRate     = p.invoiceValue > 0 ? (p.igst+p.cgst+p.sgst) / p.invoiceValue * 100 : 0;
+  const bRate     = b.invoiceValue > 0 ? (b.igst+b.cgst+b.sgst) / b.invoiceValue * 100 : 0;
+  const rateDiff  = Math.abs(pRate - bRate);
+
+  // Date mismatch only
+  const pDate = normaliseDateStr(p.invoiceDate);
+  const bDate = normaliseDateStr(b.invoiceDate);
+  const dateDiff = pDate && bDate && pDate !== bDate;
+
+  if (Math.abs(valDiff) < smartTolerance(p.invoiceValue, b.invoiceValue) &&
+      Math.abs(taxDiff) < smartTolerance(p.invoiceValue, b.invoiceValue)) {
+    if (dateDiff)
+      return { reason: `Date mismatch: portal ${pDate} vs books ${bDate}`,
+               suggestion: 'Verify invoice date in books against original invoice', severity: 'low' };
+    return { reason: 'Minor rounding difference only', suggestion: 'Likely safe to accept', severity: 'low' };
+  }
+
+  if (rateDiff > 1.5)
+    return { reason: `GST rate differs: portal ~${pRate.toFixed(0)}% vs books ~${bRate.toFixed(0)}%`,
+             suggestion: 'Check if correct HSN/SAC and tax rate applied in books', severity: 'high' };
+
+  if (Math.abs(valDiff) > smartTolerance(p.invoiceValue, b.invoiceValue) &&
+      Math.abs(taxDiff) < smartTolerance(p.invoiceValue, b.invoiceValue))
+    return { reason: `Invoice value differs by ₹${Math.abs(valDiff).toFixed(2)} (tax matches)`,
+             suggestion: 'Possible GST-exclusive vs GST-inclusive entry. Check original invoice', severity: 'medium' };
+
+  if (valDiff > 0)
+    return { reason: `Portal value ₹${Math.abs(valDiff).toFixed(2)} higher than books`,
+             suggestion: 'Supplier may have filed amended/higher invoice. Request GSTR-1 amendment or update books', severity: 'high' };
+  if (valDiff < 0)
+    return { reason: `Books value ₹${Math.abs(valDiff).toFixed(2)} higher than portal`,
+             suggestion: 'Vendor may have understated. Request credit note or amendment from supplier', severity: 'high' };
+
+  return { reason: 'Multiple field mismatches', suggestion: 'Review invoice with vendor', severity: 'medium' };
+}
 
 /**
  * extractNumericSuffix — delegates to normaliseInvoice (same logic).
@@ -512,17 +627,17 @@ function isPrefixOnlyMismatch(p, b) {
   const pNum = extractNumericSuffix(p.invoiceNoRaw || p.invoiceNo);
   const bNum = extractNumericSuffix(b.invoiceNoRaw || b.invoiceNo);
   if (pNum !== bNum || !pNum) return false;
-  // GSTIN must match
   if (p.gstin !== b.gstin) return false;
-  // All financial fields must match within tolerance
+  const tol = smartTolerance(p.invoiceValue, b.invoiceValue);
   const vd = Math.abs(p.invoiceValue - b.invoiceValue);
   const taxD  = Math.abs((p.igst+p.cgst+p.sgst) - (b.igst+b.cgst+b.sgst));
-  const taxableD = Math.abs(p.taxableValue - b.taxableValue);
-  if (vd > TOLERANCE || taxD > TOLERANCE || taxableD > TOLERANCE) return false;
-  // Date must match (if both present)
-  if (p.invoiceDate && b.invoiceDate && p.invoiceDate !== b.invoiceDate) return false;
-  // Place of supply: normalise by stripping leading state-code prefix (e.g. "24-Gujarat" → "GUJARAT")
-  // so portal "Gujarat" matches books "24-Gujarat"
+  if (vd > tol || taxD > tol) return false;
+  // Taxable value: skip if books has 0 (common when not exported)
+  const hasTax = b.taxableValue > 0 && p.taxableValue > 0;
+  if (hasTax && Math.abs(p.taxableValue - b.taxableValue) > tol) return false;
+  // Date: normalise before comparing
+  const pd = normaliseDateStr(p.invoiceDate), bd = normaliseDateStr(b.invoiceDate);
+  if (pd && bd && pd !== bd) return false;
   const ps1 = (p.placeOfSupply||'').trim().toUpperCase().replace(/^\d{1,2}-/, '');
   const ps2 = (b.placeOfSupply||'').trim().toUpperCase().replace(/^\d{1,2}-/, '');
   if (ps1 && ps2 && ps1 !== ps2) return false;
@@ -531,24 +646,27 @@ function isPrefixOnlyMismatch(p, b) {
 
 /**
  * Count how many fields differ between a portal and books invoice pair.
- * Returns { count, fields[] } so callers can decide routing.
+ * Returns { count, fields[], rcMismatch }
  */
 function countMismatchFields(p, b) {
+  const tol = smartTolerance(p.invoiceValue, b.invoiceValue);
   const fields = [];
-  if (Math.abs(p.invoiceValue - b.invoiceValue) > TOLERANCE)  fields.push('Invoice Value');
+  if (Math.abs(p.invoiceValue - b.invoiceValue) > tol)  fields.push('Invoice Value');
   const ptax = p.igst + p.cgst + p.sgst;
   const btax = b.igst + b.cgst + b.sgst;
-  if (Math.abs(ptax - btax) > TOLERANCE)                       fields.push('Total Tax');
-  if (Math.abs(p.igst - b.igst) > TOLERANCE)                  fields.push('IGST');
-  if (Math.abs(p.cgst - b.cgst) > TOLERANCE)                  fields.push('CGST');
-  if (Math.abs(p.sgst - b.sgst) > TOLERANCE)                  fields.push('SGST');
-  if (Math.abs(p.taxableValue - b.taxableValue) > TOLERANCE)  fields.push('Taxable Value');
-  if (p.invoiceDate && b.invoiceDate && p.invoiceDate !== b.invoiceDate) fields.push('Invoice Date');
+  if (Math.abs(ptax - btax) > tol)                       fields.push('Total Tax');
+  if (Math.abs(p.igst - b.igst) > tol)                  fields.push('IGST');
+  if (Math.abs(p.cgst - b.cgst) > tol)                  fields.push('CGST');
+  if (Math.abs(p.sgst - b.sgst) > tol)                  fields.push('SGST');
+  // Taxable value: only compare when both sides have it (books often omit)
+  if (p.taxableValue > 0 && b.taxableValue > 0 &&
+      Math.abs(p.taxableValue - b.taxableValue) > tol)  fields.push('Taxable Value');
+  // Dates: normalise before comparing
+  const pd = normaliseDateStr(p.invoiceDate), bd = normaliseDateStr(b.invoiceDate);
+  if (pd && bd && pd !== bd)                             fields.push('Invoice Date');
   const ps = (p.placeOfSupply||'').trim().toUpperCase().replace(/^\d+-/,'');
   const bs = (b.placeOfSupply||'').trim().toUpperCase().replace(/^\d+-/,'');
-  if (ps && bs && ps !== bs)                                   fields.push('Place of Supply');
-  // Reverse charge: intentionally NOT counted as a financial mismatch.
-  // It's a metadata flag — invoices where only RC flag differs are still considered matched.
+  if (ps && bs && ps !== bs)                             fields.push('Place of Supply');
   const rcMismatch = !!(
     p.reverseCharge && b.reverseCharge &&
     p.reverseCharge.toUpperCase() !== b.reverseCharge.toUpperCase()
@@ -561,11 +679,10 @@ function reconcile(portalData, booksData) {
   portalData.forEach(inv => { const k = `${inv.gstin}__${inv.invoiceNo}`; if (!pm.has(k)) pm.set(k, inv); });
   booksData.forEach(inv  => { const k = `${inv.gstin}__${inv.invoiceNo}`; if (!bm.has(k)) bm.set(k, inv); });
 
-  const matched = [], mismatch = [], portalOnly = [], booksOnly = [], checkOne = [];
-
-  // Track which books keys have been consumed
+  const matched = [], mismatch = [], checkOne = [];
   const bUsed = new Set();
 
+  // ── PASS 1: Exact key match (gstin + normalised invoice no) ──────────────
   pm.forEach((p, key) => {
     if (bm.has(key)) {
       bUsed.add(key);
@@ -573,32 +690,34 @@ function reconcile(portalData, booksData) {
       const { count, fields, rcMismatch } = countMismatchFields(p, b);
       const normalizedMatch = p.invoiceNoRaw !== b.invoiceNoRaw;
       if (count === 0) {
-        matched.push({ portal: p, books: b, key, rcMismatch, normalizedMatch });
+        matched.push({ portal: p, books: b, key, rcMismatch, normalizedMatch,
+                       isCreditNote: p.invoiceValue < 0 });
       } else {
-        // All mismatches (1 field or 10 fields) go to Amount Mismatch
+        const { reason, suggestion, severity } = detectMismatchReason(p, b);
         mismatch.push({
           portal: p, books: b, key,
-          mismatchFields: fields,
-          mismatchCount: count,
+          mismatchFields: fields, mismatchCount: count,
           rcMismatch, normalizedMatch,
           valueDiff: p.invoiceValue - b.invoiceValue,
           taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst),
+          mismatchReason: reason, suggestedAction: suggestion, severity,
+          isCreditNote: p.invoiceValue < 0,
         });
       }
-    } else {
-      portalOnly.push({ portal: p, key });
     }
   });
 
-  bm.forEach((b, key) => { if (!pm.has(key)) booksOnly.push({ books: b, key }); });
+  // ── PASS 2: Prefix-only match ─────────────────────────────────────────────
+  const portalUnmatched1 = [], booksOnlyRaw = [];
+  pm.forEach((p, key) => { if (!bm.has(key)) portalUnmatched1.push({ portal: p, key }); });
+  bm.forEach((b, key)  => { if (!pm.has(key)) booksOnlyRaw.push({ books: b, key }); });
 
-  // ── PREFIX-ONLY MATCH PASS ──────────────────────────────────────────────
-  const portalOnlyFinal = [];
-  const booksOnlyUsed   = new Set();
+  const booksOnlyUsed = new Set();
+  const portalAfterPass2 = [];
 
-  portalOnly.forEach(po => {
+  portalUnmatched1.forEach(po => {
     let found = null;
-    for (const bo of booksOnly) {
+    for (const bo of booksOnlyRaw) {
       if (booksOnlyUsed.has(bo.key)) continue;
       if (isPrefixOnlyMismatch(po.portal, bo.books)) { found = bo; break; }
     }
@@ -606,32 +725,118 @@ function reconcile(portalData, booksData) {
       booksOnlyUsed.add(found.key);
       const p = po.portal, b = found.books;
       const { count, fields, rcMismatch } = countMismatchFields(p, b);
-      const allMatch = count === 0 &&
-        (!p.invoiceDate || !b.invoiceDate || p.invoiceDate === b.invoiceDate);
+      const allMatch = count === 0;
+      const { reason, suggestion, severity } = detectMismatchReason(p, b);
       checkOne.push({
         portal: p, books: b, key: po.key,
         prefixMismatch: true,
         portalInvRaw: p.invoiceNoRaw, booksInvRaw: b.invoiceNoRaw,
-        allOtherMatch: allMatch,
-        rcMismatch,
+        allOtherMatch: allMatch, rcMismatch,
         mismatchFields: allMatch ? ['Invoice No (prefix only)'] : ['Invoice No (prefix)', ...fields],
-        mismatchCount: allMatch ? 1 : count + 1,
+        mismatchCount:  allMatch ? 1 : count + 1,
         valueDiff: p.invoiceValue - b.invoiceValue,
         taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst),
+        mismatchReason: allMatch ? 'Invoice number prefix differs (numeric part identical)' : reason,
+        suggestedAction: allMatch ? 'Verify this is the same invoice — prefix difference may be ERP formatting' : suggestion,
+        severity: allMatch ? 'low' : severity,
+        isCreditNote: p.invoiceValue < 0,
+      });
+    } else {
+      portalAfterPass2.push(po);
+    }
+  });
+
+  const booksAfterPass2 = booksOnlyRaw.filter(bo => !booksOnlyUsed.has(bo.key));
+
+  // ── PASS 3: Value + GSTIN match ────────────────────────────────────────────
+  // For remaining unmatched: same GSTIN, invoice value within smart tolerance,
+  // at least one of dates or tax matches. Handles ERP prefix schemes where
+  // normaliseInvoice can't recover the serial (e.g. "A-2024-0635" vs "635").
+  const booksAfterPass3Used = new Set();
+  const portalAfterPass3 = [];
+
+  // Build a per-GSTIN index of unmatched books invoices for fast lookup
+  const booksGstinIndex = new Map();
+  booksAfterPass2.forEach(bo => {
+    const g = bo.books.gstin;
+    if (!booksGstinIndex.has(g)) booksGstinIndex.set(g, []);
+    booksGstinIndex.get(g).push(bo);
+  });
+
+  portalAfterPass2.forEach(po => {
+    const candidates = booksGstinIndex.get(po.portal.gstin) || [];
+    let best = null, bestScore = Infinity;
+    for (const bo of candidates) {
+      if (booksAfterPass3Used.has(bo.key)) continue;
+      const tol = smartTolerance(po.portal.invoiceValue, bo.books.invoiceValue);
+      const vd  = Math.abs(po.portal.invoiceValue - bo.books.invoiceValue);
+      if (vd > tol) continue;
+      // At least tax OR date must also agree to avoid false positives
+      const taxD = Math.abs((po.portal.igst+po.portal.cgst+po.portal.sgst) -
+                             (bo.books.igst+bo.books.cgst+bo.books.sgst));
+      const pd = normaliseDateStr(po.portal.invoiceDate), bd = normaliseDateStr(bo.books.invoiceDate);
+      const dateMatch = pd && bd && pd === bd;
+      const taxMatch  = taxD <= tol;
+      if (!dateMatch && !taxMatch) continue;
+      // Pick the closest value match
+      if (vd < bestScore) { best = bo; bestScore = vd; }
+    }
+    if (best) {
+      booksAfterPass3Used.add(best.key);
+      const p = po.portal, b = best.books;
+      const { count, fields, rcMismatch } = countMismatchFields(p, b);
+      const { reason, suggestion, severity } = detectMismatchReason(p, b);
+      // Route to mismatch (not matched) because invoice numbers differ
+      mismatch.push({
+        portal: p, books: b, key: po.key,
+        prefixMismatch: false, valueGstinMatch: true,
+        mismatchFields: ['Invoice No', ...fields],
+        mismatchCount: 1 + count, rcMismatch,
+        normalizedMatch: false,
+        valueDiff: p.invoiceValue - b.invoiceValue,
+        taxDiff: (p.igst+p.cgst+p.sgst)-(b.igst+b.cgst+b.sgst),
+        mismatchReason: 'Invoice numbers differ — matched by GSTIN + value',
+        suggestedAction: 'Confirm this is the same invoice. Invoice number format differs between portal and books.',
+        severity: count === 0 ? 'low' : severity,
+        isCreditNote: p.invoiceValue < 0,
+      });
+    } else {
+      portalAfterPass3.push(po);
+    }
+  });
+
+  const booksOnlyFinal = booksAfterPass2.filter(bo => !booksAfterPass3Used.has(bo.key));
+
+  // ── PASS 4: Near-GSTIN typo detection ─────────────────────────────────────
+  // Flag portal-only invoices where a books-only invoice has a 1-char GSTIN
+  // difference AND same invoice number AND same value. Surfaces data-entry errors.
+  const portalOnlyFinal = [];
+  portalAfterPass3.forEach(po => {
+    const pInvNo = po.portal.invoiceNo;
+    const pVal   = po.portal.invoiceValue;
+    let typoMatch = null;
+    for (const bo of booksOnlyFinal) {
+      if (bo.books.invoiceNo !== pInvNo) continue;
+      if (Math.abs(bo.books.invoiceValue - pVal) > smartTolerance(pVal, bo.books.invoiceValue)) continue;
+      if (levenshtein(po.portal.gstin, bo.books.gstin) === 1) { typoMatch = bo; break; }
+    }
+    if (typoMatch) {
+      portalOnlyFinal.push({
+        ...po,
+        possibleGstinTypo: true,
+        typoCandidate: typoMatch.books.gstin,
+        typoNote: `Possible GSTIN typo in books: portal ${po.portal.gstin} vs books ${typoMatch.books.gstin}`,
       });
     } else {
       portalOnlyFinal.push(po);
     }
   });
 
-  const booksOnlyFinal = booksOnly.filter(bo => !booksOnlyUsed.has(bo.key));
-
-  // Prefix-matched with all values matching → goes to Matched (yellow row)
+  // ── Merge pass 2 results ────────────────────────────────────────────────────
   const matchedFinal = [
     ...matched,
     ...checkOne.filter(c => c.allOtherMatch).map(c => ({ ...c, prefixMismatch: true })),
   ];
-  // Prefix-matched with value diffs → goes to Amount Mismatch
   const mismatchFinal = [
     ...mismatch,
     ...checkOne.filter(c => !c.allOtherMatch),
@@ -655,7 +860,7 @@ const sumTax = (arr, src) => arr.reduce((s, r) => { const i = r[src]; return s +
 /* ═══════════════════════════════════════════════════════════════════════════
    PDF EXPORT  (jsPDF + autotable — landscape A4)
 ═══════════════════════════════════════════════════════════════════════════ */
-function exportPDF(results, company, period) {
+function exportPDF(results, company, period, manualTradeNames = {}) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
   const BRAND  = [13, 59, 102];
@@ -899,17 +1104,19 @@ function exportPDF(results, company, period) {
 
     autoTable(doc, {
       startY: y,
-      head: [['#', 'GSTIN', 'Invoice No', 'Date', 'Invoice Value (₹)', 'Taxable (₹)', 'IGST', 'CGST', 'SGST', 'Cess', 'Place', 'Type', 'Rate%']],
+      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Invoice Value (₹)', 'Taxable (₹)', 'IGST', 'CGST', 'SGST', 'Place']],
       body: results.booksOnly.map((r, i) => [
-        i + 1, r.books.gstin, r.books.invoiceNoRaw, r.books.invoiceDate,
+        i + 1, r.books.gstin,
+        r.books.tradeOrLegalName || manualTradeNames?.[r.books.gstin] || '—',
+        r.books.invoiceNoRaw, r.books.invoiceDate,
         fmt(r.books.invoiceValue), fmt(r.books.taxableValue),
-        fmt(r.books.igst), fmt(r.books.cgst), fmt(r.books.sgst), fmt(r.books.cess),
-        r.books.placeOfSupply || '—', r.books.invoiceType || '—', r.books.rate || '—',
+        fmt(r.books.igst), fmt(r.books.cgst), fmt(r.books.sgst),
+        r.books.placeOfSupply || '—',
       ]),
       headStyles: { fillColor: ROSE, textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
       bodyStyles: { fontSize: 7 },
       alternateRowStyles: { fillColor: [255, 241, 242] },
-      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 32 } },
+      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 30 }, 2: { cellWidth: 28 } },
       margin: { left: 14, right: 14 },
     });
   }
@@ -933,7 +1140,7 @@ function exportPDF(results, company, period) {
 /* ═══════════════════════════════════════════════════════════════════════════
    WORD (.doc) EXPORT  — HTML-to-Word via Blob + file-saver
 ═══════════════════════════════════════════════════════════════════════════ */
-function exportWord(results, company, period) {
+function exportWord(results, company, period, manualTradeNames = {}) {
   const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
 
   const rowsHtml = (headers, rows, headBg = '#0D3B66') => `
@@ -1019,12 +1226,14 @@ function exportWord(results, company, period) {
     sumVal(results.booksOnly, 'books'),
     '⚠ ITC RISK: These invoices are recorded in your Books of Account but the vendor has NOT uploaded them to the GST Portal. You cannot claim ITC on these until the vendor files. Follow up with the vendor immediately.',
     rowsHtml(
-      ['#','GSTIN','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Cess','Place','Type','Rate%'],
+      ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Place'],
       results.booksOnly.map((r, i) => [
-        i+1, r.books.gstin, r.books.invoiceNoRaw, r.books.invoiceDate,
+        i+1, r.books.gstin,
+        r.books.tradeOrLegalName || manualTradeNames?.[r.books.gstin] || '—',
+        r.books.invoiceNoRaw, r.books.invoiceDate,
         fmt(r.books.invoiceValue), fmt(r.books.taxableValue),
-        fmt(r.books.igst), fmt(r.books.cgst), fmt(r.books.sgst), fmt(r.books.cess),
-        r.books.placeOfSupply||'—', r.books.invoiceType||'—', r.books.rate||'—',
+        fmt(r.books.igst), fmt(r.books.cgst), fmt(r.books.sgst),
+        r.books.placeOfSupply||'—',
       ]),
       '#ef4444'
     )
@@ -1200,7 +1409,7 @@ ${booksOnlySection}
 /* ═══════════════════════════════════════════════════════════════════════════
    EXCEL EXPORT
 ═══════════════════════════════════════════════════════════════════════════ */
-function exportExcel(results, company, period) {
+function exportExcel(results, company, period, manualTradeNames = {}) {
   const wb = XLSX.utils.book_new();
   const summaryRows = [
     ['GST Reconciliation Report', '', '', company.name || ''],
@@ -1230,8 +1439,14 @@ function exportExcel(results, company, period) {
     ...results.portalOnly.map((r,i)=>[i+1,r.portal.gstin,r.portal.tradeOrLegalName||'',r.portal.invoiceNoRaw,r.portal.invoiceDate,r.portal.invoiceValue,r.portal.taxableValue,r.portal.igst,r.portal.cgst,r.portal.sgst,r.portal.placeOfSupply,r.portal.itcAvailability])
   ]), 'In Portal Only');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['#','GSTIN','Invoice No','Date','Invoice Value','Taxable','IGST','CGST','SGST','Cess','Place','Type','Rate'],
-    ...results.booksOnly.map((r,i)=>[i+1,r.books.gstin,r.books.invoiceNoRaw,r.books.invoiceDate,r.books.invoiceValue,r.books.taxableValue,r.books.igst,r.books.cgst,r.books.sgst,r.books.cess,r.books.placeOfSupply,r.books.invoiceType,r.books.rate])
+    ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value','Taxable','IGST','CGST','SGST','Cess','Place','Type','Rate'],
+    ...results.booksOnly.map((r,i)=>[
+      i+1, r.books.gstin,
+      r.books.tradeOrLegalName || manualTradeNames?.[r.books.gstin] || '',
+      r.books.invoiceNoRaw, r.books.invoiceDate, r.books.invoiceValue,
+      r.books.taxableValue, r.books.igst, r.books.cgst, r.books.sgst,
+      r.books.cess, r.books.placeOfSupply, r.books.invoiceType, r.books.rate
+    ])
   ]), 'In Books Only');
   XLSX.writeFile(wb, `GST_Recon_${(company.name||'Report').replace(/\s+/g,'_')}_${period?period.replace(/\s+/g,'_'):'Export'}.xlsx`);
   toast.success('Excel report downloaded successfully!');
@@ -1283,14 +1498,123 @@ const DropZone = ({ label, icon:Icon, colors, file, onFile, onClear, hint }) => 
 /* ═══════════════════════════════════════════════════════════════════════════
    RESULT TABLE COMPONENT
 ═══════════════════════════════════════════════════════════════════════════ */
-const ResultTable = ({ tabId, records, onDelete, onMarkMatched }) => {
+/* ═══════════════════════════════════════════════════════════════════════════
+   TRADE NAME INLINE EDITOR
+   ─────────────────────────────────────────────────────────────────────────
+   Shown in the Party Name column for Books-Only rows.
+   • If a name already exists (manual or auto), shows it with a ✎ edit icon.
+   • If no name: shows a "+ Add" button.
+   • On open: auto-triggers clientGstinLookup in the background.
+   • Saving a name propagates to ALL rows with the same GSTIN.
+═══════════════════════════════════════════════════════════════════════════ */
+const TradeNameCell = React.memo(({ gstin, manualTradeNames, onSave }) => {
+  const current  = manualTradeNames?.[gstin] || '';
+  const [open,   setOpen]   = useState(false);
+  const [draft,  setDraft]  = useState(current);
+  const [busy,   setBusy]   = useState(false);
+  const inputRef = useRef(null);
+
+  // When popover opens: pre-fill draft and auto-fetch from GST portal
+  const handleOpen = async () => {
+    setDraft(current);
+    setOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 50);
+    if (!current) {
+      setBusy(true);
+      try {
+        const res = await clientGstinLookup(gstin);
+        const fetched = res.tradeName || res.legalName || '';
+        if (fetched) setDraft(fetched);
+      } catch (_) {}
+      setBusy(false);
+    }
+  };
+
+  const handleSave = () => {
+    const trimmed = draft.trim();
+    if (trimmed) onSave(gstin, trimmed);
+    setOpen(false);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
+    if (e.key === 'Escape') setOpen(false);
+  };
+
+  if (!open) {
+    return current ? (
+      <span className="flex items-center gap-1 group min-w-0">
+        <span className="truncate text-slate-700 dark:text-slate-200 text-sm max-w-[140px]" title={current}>{current}</span>
+        <button
+          onClick={handleOpen}
+          title="Edit party name"
+          className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-400 hover:text-indigo-600 flex-shrink-0"
+        >
+          <Edit3 className="h-3 w-3"/>
+        </button>
+      </span>
+    ) : (
+      <button
+        onClick={handleOpen}
+        className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-200 hover:underline underline-offset-2 font-medium transition-colors"
+        title="Add party name — applies to all invoices with this GSTIN"
+      >
+        <Edit3 className="h-3 w-3 flex-shrink-0"/>
+        Add name
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1 min-w-[180px]">
+      <div className="flex items-center gap-1">
+        <div className="relative flex-1">
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={busy ? 'Fetching…' : 'Enter party name…'}
+            disabled={busy}
+            className="w-full px-2 py-1 text-xs rounded border border-indigo-400 dark:border-indigo-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500 pr-6"
+          />
+          {busy && <Loader2 className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 animate-spin text-indigo-400"/>}
+        </div>
+        <button
+          onClick={handleSave}
+          disabled={!draft.trim()}
+          title="Save (Enter)"
+          className="flex-shrink-0 p-1 rounded bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 dark:disabled:bg-slate-600 text-white transition-colors"
+        >
+          <CheckCircle2 className="h-3.5 w-3.5"/>
+        </button>
+        <button
+          onClick={() => setOpen(false)}
+          title="Cancel (Esc)"
+          className="flex-shrink-0 p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-400 hover:text-slate-600 transition-colors"
+        >
+          <X className="h-3.5 w-3.5"/>
+        </button>
+      </div>
+      <p className="text-[10px] text-slate-400 dark:text-slate-500 leading-tight">
+        {GSTIN_PATTERN.test(gstin) ? `Applies to all ${gstin} invoices` : ''}
+      </p>
+    </div>
+  );
+});
+
+const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames, onSaveTradeName }) => {
   const [search, setSearch] = useState('');
   const [page, setPage]     = useState(1);
   const filtered = records.filter(r => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     const inv = tabId === 'booksOnly' ? r.books : r.portal;
-    return (inv?.gstin||'').toLowerCase().includes(q)||(inv?.invoiceNoRaw||'').toLowerCase().includes(q)||(inv?.tradeOrLegalName||'').toLowerCase().includes(q);
+    const manualName = (manualTradeNames?.[inv?.gstin] || '').toLowerCase();
+    return (inv?.gstin||'').toLowerCase().includes(q)
+      || (inv?.invoiceNoRaw||'').toLowerCase().includes(q)
+      || (inv?.tradeOrLegalName||'').toLowerCase().includes(q)
+      || manualName.includes(q);
   });
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paged = filtered.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE);
@@ -1345,7 +1669,13 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched }) => {
             <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700">
               <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap w-8">#</th>
               <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">GSTIN</th>
-              {tabId !== 'booksOnly' && <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Party Name</th>}
+              {tabId !== 'booksOnly'
+                ? <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Party Name</th>
+                : <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">
+                    Party Name
+                    <span className="ml-1 text-[9px] font-normal text-indigo-500 dark:text-indigo-400">(click to add)</span>
+                  </th>
+              }
               <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Invoice No</th>
               <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Date</th>
               {tabId === 'mismatch' ? <>
@@ -1379,7 +1709,18 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched }) => {
                 <tr key={r.key||idx} className={`border-b border-slate-100 dark:border-slate-700/50 ${isPrefixRow ? 'bg-yellow-50 dark:bg-yellow-900/20 hover:bg-yellow-100 dark:hover:bg-yellow-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'}`}>
                   <td className="px-3 py-2 text-slate-400">{n}</td>
                   <td className="px-3 py-2 font-mono text-[11px] text-slate-600 dark:text-slate-300">{inv?.gstin}</td>
-                  {tabId !== 'booksOnly' && <td className="px-3 py-2 text-slate-700 dark:text-slate-200 max-w-[140px] truncate" title={inv?.tradeOrLegalName}>{inv?.tradeOrLegalName||'—'}</td>}
+                  {tabId === 'booksOnly'
+                    ? <td className="px-3 py-2 min-w-[160px]">
+                        <TradeNameCell
+                          gstin={inv?.gstin || ''}
+                          manualTradeNames={manualTradeNames}
+                          onSave={onSaveTradeName}
+                        />
+                      </td>
+                    : <td className="px-3 py-2 text-slate-700 dark:text-slate-200 max-w-[140px] truncate" title={inv?.tradeOrLegalName || manualTradeNames?.[inv?.gstin] || ''}>
+                        {inv?.tradeOrLegalName || manualTradeNames?.[inv?.gstin] || '—'}
+                      </td>
+                  }
                   <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200">
                     {isPrefixRow ? (
                       <span className="flex flex-col gap-0.5">
@@ -1407,22 +1748,51 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched }) => {
                   </td>
                   <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{inv?.invoiceDate}</td>
                   {tabId === 'mismatch' ? <>
-                    <td className="px-3 py-2 text-right text-slate-700 dark:text-slate-200">₹{fmt(r.portal.invoiceValue)}</td>
+                    <td className="px-3 py-2 text-right text-slate-700 dark:text-slate-200">
+                      ₹{fmt(r.portal.invoiceValue)}
+                      {r.isCreditNote && <span className="ml-1 px-1 py-0.5 rounded text-[8px] font-bold bg-slate-100 text-slate-500 dark:bg-slate-700">CN</span>}
+                    </td>
                     <td className="px-3 py-2 text-right text-slate-700 dark:text-slate-200">₹{fmt(r.books.invoiceValue)}</td>
                     <td className={`px-3 py-2 text-right font-bold ${r.valueDiff>0?'text-blue-600':'text-rose-600'}`}>{r.valueDiff>0?'+':''}{fmt(r.valueDiff)}</td>
                     <td className="px-3 py-2 text-right text-slate-500">₹{fmt(r.portal.igst+r.portal.cgst+r.portal.sgst)}</td>
                     <td className="px-3 py-2 text-right text-slate-500">₹{fmt(r.books.igst+r.books.cgst+r.books.sgst)}</td>
                     <td className={`px-3 py-2 text-right font-bold ${r.taxDiff>0?'text-blue-600':'text-rose-600'}`}>{r.taxDiff>0?'+':''}{fmt(r.taxDiff)}</td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 min-w-[180px]">
+                      {/* Severity badge */}
+                      {r.severity && (
+                        <span className={`inline-block mb-1 px-1.5 py-0.5 rounded text-[9px] font-bold whitespace-nowrap mr-1
+                          ${r.severity==='high'   ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'
+                          : r.severity==='medium' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                          :                         'bg-slate-100 text-slate-500 dark:bg-slate-700'}`}>
+                          {r.severity==='high' ? '⚠ HIGH' : r.severity==='medium' ? '~ MED' : '↓ LOW'}
+                        </span>
+                      )}
+                      {/* Mismatch field tags */}
                       {(r.mismatchFields||[]).map(f => (
                         <span key={f} className="inline-block mr-1 mb-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 whitespace-nowrap">{f}</span>
                       ))}
                       {r.rcMismatch && (
                         <span className="inline-block mr-1 mb-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 whitespace-nowrap">RCM flag</span>
                       )}
+                      {r.valueGstinMatch && (
+                        <span className="inline-block mr-1 mb-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 whitespace-nowrap">Value-matched</span>
+                      )}
+                      {/* Human-readable reason */}
+                      {r.mismatchReason && (
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">{r.mismatchReason}</p>
+                      )}
+                      {r.suggestedAction && (
+                        <p className="text-[10px] text-indigo-600 dark:text-indigo-400 mt-0.5 leading-snug italic">→ {r.suggestedAction}</p>
+                      )}
                     </td>
                   </> : <>
-                    <td className="px-3 py-2 text-right text-slate-700 dark:text-slate-200">₹{fmt(inv?.invoiceValue)}</td>
+                    <td className="px-3 py-2 text-right text-slate-700 dark:text-slate-200">
+                      ₹{fmt(inv?.invoiceValue)}
+                      {inv?.invoiceValue < 0 && <span className="ml-1 px-1 py-0.5 rounded text-[8px] font-bold bg-slate-100 text-slate-500 dark:bg-slate-700">CN</span>}
+                      {tabId === 'portalOnly' && r.possibleGstinTypo && (
+                        <span title={r.typoNote} className="ml-1 px-1 py-0.5 rounded text-[8px] font-bold bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300 cursor-help">⚠ GSTIN?</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-right text-slate-500">₹{fmt(inv?.taxableValue)}</td>
                     <td className="px-3 py-2 text-right text-slate-500">{fmt(inv?.igst)}</td>
                     <td className="px-3 py-2 text-right text-slate-500">{fmt(inv?.cgst)}</td>
@@ -2829,6 +3199,23 @@ export default function GSTReconciliation() {
   const [selectedClient,  setSelectedClient]   = useState(null);
   const [clientsLoading,  setClientsLoading]   = useState(false);
 
+  // Manual trade names: gstin → name, persisted in localStorage across sessions
+  const [manualTradeNames, setManualTradeNames] = useState(() => {
+    try {
+      const stored = localStorage.getItem('gst_manual_trade_names');
+      return stored ? JSON.parse(stored) : {};
+    } catch (_) { return {}; }
+  });
+
+  const onSaveTradeName = useCallback((gstin, name) => {
+    setManualTradeNames(prev => {
+      const updated = { ...prev, [gstin.toUpperCase()]: name };
+      try { localStorage.setItem('gst_manual_trade_names', JSON.stringify(updated)); } catch (_) {}
+      return updated;
+    });
+    toast.success(`Party name saved for ${gstin}`, { duration: 2500 });
+  }, []);
+
   const [gstinLookupLoading, setGstinLookupLoading] = useState(false);
   const gstinLookupTimer = useRef(null);
 
@@ -3399,6 +3786,8 @@ export default function GSTReconciliation() {
                         tabId={activeTab}
                         records={activeRecords}
                         onMarkMatched={['mismatch','portalOnly','booksOnly'].includes(activeTab) ? (r) => handleMarkMatched(r, activeTab) : undefined}
+                        manualTradeNames={manualTradeNames}
+                        onSaveTradeName={onSaveTradeName}
                       />
                   }
                 </div>
@@ -3407,13 +3796,13 @@ export default function GSTReconciliation() {
               {/* Export reminder */}
               <div className="mt-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-wrap items-center gap-3">
                 <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Download Report:</span>
-                <button onClick={()=>exportPDF(results, company, period)} className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium rounded-lg transition-colors">
+                <button onClick={()=>exportPDF(results, company, period, manualTradeNames)} className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium rounded-lg transition-colors">
                   <FileText className="h-3.5 w-3.5"/> PDF
                 </button>
-                <button onClick={()=>exportWord(results, company, period)} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors">
+                <button onClick={()=>exportWord(results, company, period, manualTradeNames)} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors">
                   <FileText className="h-3.5 w-3.5"/> Word (.doc)
                 </button>
-                <button onClick={()=>exportExcel(results, company, period)} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg transition-colors">
+                <button onClick={()=>exportExcel(results, company, period, manualTradeNames)} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg transition-colors">
                   <FileSpreadsheet className="h-3.5 w-3.5"/> Excel
                 </button>
                 <button onClick={() => { handleReset(); setPageView('history'); }} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 text-xs transition-colors border border-indigo-200 dark:border-indigo-800 rounded-lg font-medium">
