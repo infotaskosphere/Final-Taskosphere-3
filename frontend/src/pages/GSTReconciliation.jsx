@@ -194,6 +194,120 @@ function parseGSTPortalFile(workbook) {
   return data;
 }
 
+/**
+ * extractPortalMetadata — reads the GSTR-2B Excel header rows (0-9) to pull:
+ *   • period     e.g. "Oct-24"  (from "Return Period : 102024" or "October 2024")
+ *   • gstin      e.g. "24XXXXX…" (the taxpayer's own GSTIN in the header)
+ *   • tradeName  e.g. "MED 7 PHARMACY"
+ *
+ * GSTR-2B files from GST portal always embed these in rows before the data
+ * table header.  Layout varies slightly across FY/portal versions, so we scan
+ * every cell in rows 0-12 rather than hard-coding row indices.
+ */
+const GSTIN_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+
+function _parsePeriodString(raw) {
+  if (!raw) return '';
+  const s = String(raw).trim();
+  // "102024" or "012025"
+  const m1 = s.match(/^(0[1-9]|1[0-2])(\d{4})$/);
+  if (m1) return _fmtPeriod(m1[1], m1[2]);
+  // "October 2024" / "Oct-2024"
+  const MONTHS = ['january','february','march','april','may','june',
+                  'july','august','september','october','november','december'];
+  const m2 = s.match(/([a-z]{3,})[^a-z]*(\d{4})/i);
+  if (m2) {
+    const idx = MONTHS.findIndex(mo => mo.startsWith(m2[1].toLowerCase().slice(0,3)));
+    if (idx >= 0) return _fmtPeriod(String(idx + 1).padStart(2,'0'), m2[2]);
+  }
+  return s; // Return as-is when unrecognised
+}
+function _fmtPeriod(mm, yyyy) {
+  const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${names[parseInt(mm,10)-1]}-${yyyy.slice(2)}`;
+}
+
+function extractPortalMetadata(workbook) {
+  // Use B2B sheet if present, else first sheet
+  const sheetName =
+    workbook.SheetNames.find(n => n.trim().toUpperCase() === 'B2B') ||
+    workbook.SheetNames[0];
+  const ws   = workbook.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+  let period = '', gstin = '', tradeName = '';
+
+  for (let i = 0; i < Math.min(rows.length, 13); i++) {
+    const row = rows[i];
+    if (!row) continue;
+    for (let c = 0; c < row.length; c++) {
+      const cell = String(row[c] ?? '').trim();
+      if (!cell) continue;
+      const lo = cell.toLowerCase();
+
+      // ── GSTIN of taxpayer ──────────────────────────────────────────────
+      if (!gstin) {
+        // Pattern: "GSTIN : 24XXXXX" in one cell
+        const gm = cell.match(/gstin\s*[:\-]\s*([A-Z0-9]{15})/i);
+        if (gm && GSTIN_PATTERN.test(gm[1].toUpperCase())) {
+          gstin = gm[1].toUpperCase();
+        }
+        // Previous/current cell is "GSTIN" and this cell is the value
+        if (!gstin && GSTIN_PATTERN.test(cell.toUpperCase().replace(/\s/g,''))) {
+          const prev = String(row[c-1] ?? '').toLowerCase();
+          if (prev.includes('gstin') || i < 6) {
+            gstin = cell.toUpperCase().replace(/\s/g,'');
+          }
+        }
+      }
+
+      // ── Return period ───────────────────────────────────────────────────
+      if (!period) {
+        if (lo.includes('return period') || lo.includes('tax period') || lo.includes('filing period')) {
+          // "Return Period : 102024" — value may be in next cell or same cell
+          const inCell = cell.match(/period\s*[:\-]\s*(.+)/i);
+          if (inCell) { period = _parsePeriodString(inCell[1].trim()); }
+          else {
+            const next = String(row[c+1] ?? '').trim();
+            if (next) period = _parsePeriodString(next);
+          }
+        }
+        // "Period : 102024" standalone label in col 0
+        if (!period && lo.startsWith('period')) {
+          const vm = cell.match(/period\s*[:\-]\s*(.+)/i);
+          if (vm) period = _parsePeriodString(vm[1].trim());
+          else {
+            const next = String(row[c+1] ?? '').trim();
+            if (next) period = _parsePeriodString(next);
+          }
+        }
+        // Raw 6-digit numeric period e.g. "102024" sitting alone in a cell
+        if (!period && /^(0[1-9]|1[0-2])\d{4}$/.test(cell)) {
+          period = _parsePeriodString(cell);
+        }
+      }
+
+      // ── Trade / Legal name ──────────────────────────────────────────────
+      if (!tradeName) {
+        if (lo.includes('trade name') || lo.includes('legal name') || lo.includes('trade/legal')) {
+          const nm = cell.match(/(?:trade|legal)\s*(?:name)?\s*[:\-]\s*(.+)/i);
+          if (nm && nm[1].trim().length > 1) { tradeName = nm[1].trim(); }
+          else {
+            const next = String(row[c+1] ?? '').trim();
+            if (next && next.length > 1 && !GSTIN_PATTERN.test(next.toUpperCase()))
+              tradeName = next;
+          }
+        }
+      }
+
+      if (period && gstin && tradeName) break;
+    }
+    if (period && gstin && tradeName) break;
+  }
+
+  return { period, gstin, tradeName };
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    RECONCILIATION ENGINE
 ═══════════════════════════════════════════════════════════════════════════ */
@@ -2056,67 +2170,6 @@ const HistoryView = ({ onOpenSession }) => {
         })}
       </div>
 
-      {/* Baseline snapshot confirmation modal */}
-      <AnimatePresence>
-        {snapshotPrompt && (
-          <motion.div
-            initial={{ opacity: 0 }} 
-            animate={{ opacity: 1 }} 
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-          >
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !snapshotSaving && setSnapshotPrompt(null)}/>
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 10 }} 
-              animate={{ scale: 1, opacity: 1, y: 0 }} 
-              exit={{ scale: 0.95, opacity: 0, y: 10 }}
-              className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
-            >
-              <div className="flex items-start gap-3 px-5 py-4 bg-gradient-to-r from-amber-500 to-orange-500">
-                <div className="p-2 rounded-lg bg-white/20 flex-shrink-0">
-                  <AlertTriangle className="h-5 w-5 text-white"/>
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">Save baseline snapshot before editing?</h3>
-                  <p className="text-[11px] text-white/85 mt-0.5">We'll save the original (unedited) reconciliation as a separate history entry first, so your edits never overwrite it.</p>
-                </div>
-              </div>
-              <div className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300 space-y-2">
-                <p>This is a one-time prompt for this opened session. After confirming, all subsequent edits apply immediately.</p>
-                <ul className="text-[12px] text-slate-500 dark:text-slate-400 list-disc pl-5 space-y-0.5">
-                  <li>Original session: <strong>{baselineSnapshot?.clientName || baselineSnapshot?.portalFilename || 'Opened reconciliation'}</strong></li>
-                  <li>Snapshot will be tagged <code className="px-1 bg-slate-100 dark:bg-slate-700 rounded text-[11px]">[snapshot]</code> in history.</li>
-                </ul>
-              </div>
-              <div className="flex items-center justify-end gap-2 px-5 py-3 bg-slate-50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-700">
-                <button
-                  disabled={snapshotSaving}
-                  onClick={() => setSnapshotPrompt(null)}
-                  className="px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  disabled={snapshotSaving}
-                  onClick={async () => {
-                    const ok = await saveBaselineSnapshot();
-                    if (ok) {
-                      const fn = snapshotPrompt?.pendingEdit;
-                      setSnapshotPrompt(null);
-                      if (typeof fn === 'function') fn();
-                    }
-                  }}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-60"
-                >
-                  {snapshotSaving
-                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin"/> Saving...</>
-                    : <><CheckCircle2 className="h-3.5 w-3.5"/> Save & continue</>}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 };
@@ -2587,7 +2640,34 @@ export default function GSTReconciliation() {
   const [selectedClient,  setSelectedClient]   = useState(null);
   const [clientsLoading,  setClientsLoading]   = useState(false);
 
-  const setCo = (k, v) => setCompany(p => ({ ...p, [k]: v }));
+  const [gstinLookupLoading, setGstinLookupLoading] = useState(false);
+  const gstinLookupTimer = useRef(null);
+
+  const setCo = (k, v) => {
+    setCompany(p => ({ ...p, [k]: v }));
+    // Auto-fetch company name from GST portal when a valid GSTIN is typed
+    if (k === 'gstin') {
+      const g = v.trim().toUpperCase();
+      clearTimeout(gstinLookupTimer.current);
+      if (GSTIN_PATTERN.test(g)) {
+        gstinLookupTimer.current = setTimeout(async () => {
+          setGstinLookupLoading(true);
+          try {
+            const r = await api.get(`/gst-reconciliation/gstin-lookup/${g}`);
+            const name = r?.data?.trade_name || r?.data?.legal_name || '';
+            if (name) {
+              setCompany(prev => ({
+                ...prev,
+                name: prev.name || name,
+              }));
+              toast.success(`Company name fetched: ${name}`, { duration: 3000 });
+            }
+          } catch (_) { /* silent – lookup is best-effort */ }
+          finally { setGstinLookupLoading(false); }
+        }, 800);
+      }
+    }
+  };
 
   // Auto-save the original (pre-edit) baseline of an opened history session.
   // Returns a Promise that resolves when the snapshot is safely persisted.
@@ -2708,6 +2788,34 @@ export default function GSTReconciliation() {
       phone:   phone               || prev.phone,
       email:   email               || prev.email,
     }));
+  };
+
+  const handlePortalFile = async (file) => {
+    setPortalFile(file);
+    if (!file) return;
+    try {
+      const wb = await readWorkbook(file);
+      const meta = extractPortalMetadata(wb);
+      // Auto-fill period only if user hasn't typed one yet
+      if (meta.period) setPeriod(prev => prev || meta.period);
+      // Auto-fill company fields from the portal header
+      setCompany(prev => ({
+        ...prev,
+        name:  prev.name  || meta.tradeName || '',
+        gstin: prev.gstin || meta.gstin     || '',
+      }));
+      if (meta.period || meta.tradeName || meta.gstin) {
+        toast.success('Period & company auto-detected from GSTR-2B file', { duration: 3000 });
+      }
+      // If we got a GSTIN and no name yet, trigger GSTIN portal lookup
+      if (meta.gstin && !meta.tradeName) {
+        try {
+          const r = await api.get(`/gst-reconciliation/gstin-lookup/${meta.gstin}`);
+          const name = r?.data?.trade_name || r?.data?.legal_name || '';
+          if (name) setCompany(prev => ({ ...prev, name: prev.name || name }));
+        } catch (_) { /* best-effort */ }
+      }
+    } catch (_) { /* If metadata extraction fails, silently continue */ }
   };
 
   const readWorkbook = file => new Promise((res, rej) => {
@@ -2911,7 +3019,15 @@ export default function GSTReconciliation() {
                         { k:'fy',      label:'Financial Year',        icon:Calendar,   ph:'e.g. 2025-26' },
                       ].map(f => (
                         <div key={f.k}>
-                          <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">{f.label}</label>
+                          <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1">
+                            {f.label}
+                            {f.k === 'gstin' && gstinLookupLoading && (
+                              <Loader2 className="h-3 w-3 animate-spin text-indigo-500 ml-1" />
+                            )}
+                            {f.k === 'gstin' && !gstinLookupLoading && GSTIN_PATTERN.test((company.gstin||'').trim().toUpperCase()) && (
+                              <CheckCircle2 className="h-3 w-3 text-emerald-500 ml-1" title="GSTIN validated" />
+                            )}
+                          </label>
                           <div className="relative">
                             <f.icon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400"/>
                             <input
@@ -2931,7 +3047,14 @@ export default function GSTReconciliation() {
 
             {/* Period */}
             <div className="mb-5">
-              <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Tax Period *</label>
+              <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
+                Tax Period *
+                {portalFile && period && (
+                  <span className="ml-2 text-emerald-600 dark:text-emerald-400 font-normal normal-case">
+                    ✓ auto-detected from file
+                  </span>
+                )}
+              </label>
               <div className="relative w-full sm:w-64">
                 <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400"/>
                 <input value={period} onChange={e=>setPeriod(e.target.value)} placeholder="e.g. March 2026"
@@ -2944,7 +3067,7 @@ export default function GSTReconciliation() {
               <Upload className="h-4 w-4 text-indigo-600 dark:text-indigo-400"/> Upload Files
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
-              <DropZone label="GSTR-2B (GST Portal)" icon={Globe}   hint="Download GSTR-2B Excel from GST portal"        file={portalFile} onFile={setPortalFile} onClear={()=>setPortalFile(null)} colors={{ done:'bg-blue-50 dark:bg-blue-900/20 border-blue-400', drag:'bg-blue-50 dark:bg-blue-900/10 border-blue-400', iconBg:'bg-blue-100 dark:bg-blue-900/40', iconColor:'text-blue-600 dark:text-blue-300', btn:'bg-blue-600 hover:bg-blue-700 text-white' }}/>
+              <DropZone label="GSTR-2B (GST Portal)" icon={Globe}   hint="Download GSTR-2B Excel from GST portal"        file={portalFile} onFile={handlePortalFile} onClear={()=>{ setPortalFile(null); }} colors={{ done:'bg-blue-50 dark:bg-blue-900/20 border-blue-400', drag:'bg-blue-50 dark:bg-blue-900/10 border-blue-400', iconBg:'bg-blue-100 dark:bg-blue-900/40', iconColor:'text-blue-600 dark:text-blue-300', btn:'bg-blue-600 hover:bg-blue-700 text-white' }}/>
               <DropZone label="Purchase Register (Books)" icon={BookOpen} hint="Export b2b sheet from your accounting software" file={booksFile}  onFile={setBooksFile}  onClear={()=>setBooksFile(null)}  colors={{ done:'bg-violet-50 dark:bg-violet-900/20 border-violet-400', drag:'bg-violet-50 dark:bg-violet-900/10 border-violet-400', iconBg:'bg-violet-100 dark:bg-violet-900/40', iconColor:'text-violet-600 dark:text-violet-300', btn:'bg-violet-600 hover:bg-violet-700 text-white' }}/>
             </div>
 
@@ -3148,6 +3271,68 @@ export default function GSTReconciliation() {
             results={results}
             onClose={() => setItcModal(null)}
           />
+        )}
+      </AnimatePresence>
+
+      {/* ── Baseline Snapshot Confirmation Modal ── */}
+      <AnimatePresence>
+        {snapshotPrompt && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+          >
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !snapshotSaving && setSnapshotPrompt(null)}/>
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+            >
+              <div className="flex items-start gap-3 px-5 py-4 bg-gradient-to-r from-amber-500 to-orange-500">
+                <div className="p-2 rounded-lg bg-white/20 flex-shrink-0">
+                  <AlertTriangle className="h-5 w-5 text-white"/>
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Save baseline snapshot before editing?</h3>
+                  <p className="text-[11px] text-white/85 mt-0.5">We'll save the original (unedited) reconciliation as a separate history entry first, so your edits never overwrite it.</p>
+                </div>
+              </div>
+              <div className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300 space-y-2">
+                <p>This is a one-time prompt for this opened session. After confirming, all subsequent edits apply immediately.</p>
+                <ul className="text-[12px] text-slate-500 dark:text-slate-400 list-disc pl-5 space-y-0.5">
+                  <li>Original session: <strong>{baselineSnapshot?.clientName || baselineSnapshot?.portalFilename || 'Opened reconciliation'}</strong></li>
+                  <li>Snapshot will be tagged <code className="px-1 bg-slate-100 dark:bg-slate-700 rounded text-[11px]">[snapshot]</code> in history.</li>
+                </ul>
+              </div>
+              <div className="flex items-center justify-end gap-2 px-5 py-3 bg-slate-50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-700">
+                <button
+                  disabled={snapshotSaving}
+                  onClick={() => setSnapshotPrompt(null)}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={snapshotSaving}
+                  onClick={async () => {
+                    const ok = await saveBaselineSnapshot();
+                    if (ok) {
+                      const fn = snapshotPrompt?.pendingEdit;
+                      setSnapshotPrompt(null);
+                      if (typeof fn === 'function') fn();
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-60"
+                >
+                  {snapshotSaving
+                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin"/> Saving...</>
+                    : <><CheckCircle2 className="h-3.5 w-3.5"/> Save & continue</>}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
 
