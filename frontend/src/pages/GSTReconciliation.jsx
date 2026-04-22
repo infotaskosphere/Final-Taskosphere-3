@@ -1833,6 +1833,56 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
               );
             })}
           </tbody>
+          {/* ── Totals footer ─────────────────────────────────────────────── */}
+          <tfoot>
+            <tr className="bg-slate-100 dark:bg-slate-800/80 border-t-2 border-slate-300 dark:border-slate-600 font-bold text-slate-700 dark:text-slate-200 text-xs">
+              <td className="px-3 py-2.5 text-slate-500 dark:text-slate-400 whitespace-nowrap">TOTAL</td>
+              <td className="px-3 py-2.5 text-[10px] text-slate-400">{filtered.length} rows</td>
+              <td className="px-3 py-2.5"/>
+              <td className="px-3 py-2.5"/>
+              <td className="px-3 py-2.5"/>
+              {tabId === 'mismatch' ? <>
+                <td className="px-3 py-2.5 text-right">
+                  ₹{fmt(records.reduce((s,r)=>s+(r.portal?.invoiceValue||0),0))}
+                </td>
+                <td className="px-3 py-2.5 text-right">
+                  ₹{fmt(records.reduce((s,r)=>s+(r.books?.invoiceValue||0),0))}
+                </td>
+                <td className={`px-3 py-2.5 text-right ${records.reduce((s,r)=>s+(r.valueDiff||0),0)>=0?'text-blue-700 dark:text-blue-400':'text-rose-700 dark:text-rose-400'}`}>
+                  ₹{fmt(records.reduce((s,r)=>s+(r.valueDiff||0),0))}
+                </td>
+                <td className="px-3 py-2.5 text-right">
+                  ₹{fmt(records.reduce((s,r)=>s+((r.portal?.igst||0)+(r.portal?.cgst||0)+(r.portal?.sgst||0)),0))}
+                </td>
+                <td className="px-3 py-2.5 text-right">
+                  ₹{fmt(records.reduce((s,r)=>s+((r.books?.igst||0)+(r.books?.cgst||0)+(r.books?.sgst||0)),0))}
+                </td>
+                <td className={`px-3 py-2.5 text-right ${records.reduce((s,r)=>s+(r.taxDiff||0),0)>=0?'text-blue-700 dark:text-blue-400':'text-rose-700 dark:text-rose-400'}`}>
+                  ₹{fmt(records.reduce((s,r)=>s+(r.taxDiff||0),0))}
+                </td>
+                <td className="px-3 py-2.5"/>
+              </> : <>
+                <td className="px-3 py-2.5 text-right">
+                  ₹{fmt(records.reduce((s,r)=>{const inv=tabId==='booksOnly'?r.books:r.portal;return s+(inv?.invoiceValue||0);},0))}
+                </td>
+                <td className="px-3 py-2.5 text-right">
+                  ₹{fmt(records.reduce((s,r)=>{const inv=tabId==='booksOnly'?r.books:r.portal;return s+(inv?.taxableValue||0);},0))}
+                </td>
+                <td className="px-3 py-2.5 text-right">
+                  ₹{fmt(records.reduce((s,r)=>{const inv=tabId==='booksOnly'?r.books:r.portal;return s+(inv?.igst||0);},0))}
+                </td>
+                <td className="px-3 py-2.5 text-right">
+                  ₹{fmt(records.reduce((s,r)=>{const inv=tabId==='booksOnly'?r.books:r.portal;return s+(inv?.cgst||0);},0))}
+                </td>
+                <td className="px-3 py-2.5 text-right">
+                  ₹{fmt(records.reduce((s,r)=>{const inv=tabId==='booksOnly'?r.books:r.portal;return s+(inv?.sgst||0);},0))}
+                </td>
+                {tabId==='portalOnly' && <td className="px-3 py-2.5"/>}
+              </>}
+              {(tabId==='mismatch'||tabId==='portalOnly'||tabId==='booksOnly') && <td className="px-3 py-2.5"/>}
+              {onDelete && <td className="px-3 py-2.5"/>}
+            </tr>
+          </tfoot>
         </table>
       </div>
       {totalPages > 1 && (
@@ -3214,7 +3264,43 @@ export default function GSTReconciliation() {
     toast.success(`Party name saved for ${gstin}`, { duration: 2500 });
   }, []);
 
-  const [gstinLookupLoading, setGstinLookupLoading] = useState(false);
+  // Auto-fetch trade names for all Books Only GSTINs after reconciliation
+  // Uses the same clientGstinLookup engine (no backend needed) with gentle rate-limiting
+  useEffect(() => {
+    if (!results?.booksOnly?.length) return;
+    const unique = [...new Set(
+      results.booksOnly.map(r => r.books?.gstin).filter(g => g && GSTIN_PATTERN.test(g))
+    )];
+    // Skip GSTINs already known (from this session or localStorage)
+    const toFetch = unique.filter(g => !manualTradeNames[g.toUpperCase()]);
+    if (!toFetch.length) return;
+
+    let cancelled = false;
+    (async () => {
+      for (const g of toFetch.slice(0, 30)) {
+        if (cancelled) break;
+        try {
+          const res = await clientGstinLookup(g);
+          const name = res.tradeName || res.legalName || '';
+          if (name && !cancelled) {
+            // Use functional update so we never overwrite a name the user just typed
+            setManualTradeNames(prev => {
+              if (prev[g.toUpperCase()]) return prev;  // already set — don't overwrite
+              const updated = { ...prev, [g.toUpperCase()]: name };
+              try { localStorage.setItem('gst_manual_trade_names', JSON.stringify(updated)); } catch (_) {}
+              return updated;
+            });
+          }
+        } catch (_) { /* silent */ }
+        // 350 ms between requests to avoid hammering public APIs
+        await new Promise(r => setTimeout(r, 350));
+      }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [results?.booksOnly]);
+
+
   const gstinLookupTimer = useRef(null);
 
   const setCo = (k, v) => {
