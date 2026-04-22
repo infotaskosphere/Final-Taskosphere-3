@@ -2701,7 +2701,7 @@ export default function Users() {
 
       {/* ════ CREATE / EDIT DIALOG ════ */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto users-slim rounded-2xl p-0 border-0 shadow-2xl gap-0">
+        <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto users-slim rounded-2xl p-0 border-0 shadow-2xl gap-0">
           <DialogHeader className="sr-only">
             <DialogTitle>{selectedUser ? `Edit Member — ${selectedUser.full_name}` : 'Add New Team Member'}</DialogTitle>
             <DialogDescription>{selectedUser ? 'Update user profile and settings.' : 'Register a new team member.'}</DialogDescription>
@@ -2833,7 +2833,7 @@ export default function Users() {
 
       {/* ════ PERMISSIONS DIALOG ════ */}
       <Dialog open={permDialogOpen} onOpenChange={setPermDialogOpen}>
-        <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto users-slim rounded-2xl p-0 border-0 shadow-2xl gap-0">
+        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto users-slim rounded-2xl p-0 border-0 shadow-2xl gap-0">
           <DialogHeader className="sr-only">
             <DialogTitle>{`Permissions — ${selectedUserForPerms?.full_name || 'User'}`}</DialogTitle>
             <DialogDescription>Configure access levels and module permissions for this user.</DialogDescription>
