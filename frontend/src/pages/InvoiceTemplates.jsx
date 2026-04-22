@@ -176,7 +176,7 @@ function getLogoHTML(company, theme, size, shape, variant) {
 function buildUpiUrl(company, inv) {
   if (!company || !company.upi_id) return '';
   const pendingAmount = parseFloat((inv && inv.amount_due != null ? inv.amount_due : (inv && inv.grand_total)) || 0);
-  const name = encodeURIComponent((company && company.name) || 'Merchant');
+  const name = encodeURIComponent((company && (company.company_name || company.name)) || 'Merchant');
   const pa   = encodeURIComponent(company.upi_id);
   const tn   = encodeURIComponent('Invoice ' + ((inv && inv.invoice_no) || ''));
   const am   = pendingAmount > 0 ? '&am=' + pendingAmount.toFixed(2) : '';
@@ -312,6 +312,9 @@ function bankQrHTML(company, inv) {
   }
   var bankHtml = '<div style="flex:1">'
     + '<div style="font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#9E9E9E;margin-bottom:5px">Bank Details</div>';
+  if (company.company_name || company.name) {
+    bankHtml += '<div style="font-size:10.5px;margin-bottom:4px"><span style="color:#9E9E9E;min-width:62px;display:inline-block">Name</span><strong>' + (company.company_name || company.name) + '</strong></div>';
+  }
   if (company.bank_name) {
     bankHtml += '<div style="font-size:10.5px;margin-bottom:2px"><span style="color:#9E9E9E;min-width:62px;display:inline-block">Bank</span><strong>' + company.bank_name + '</strong></div>';
   }
