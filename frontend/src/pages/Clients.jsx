@@ -20,12 +20,15 @@ import {
   LayoutGrid, List, Phone, MapPin, User, FileCheck, Share2,
   Copy, ExternalLink, CheckSquare, Square, MinusSquare,
   Shield, Download, UserCheck, AlertCircle, Sparkles, Loader2,
-  ArrowLeftRight, RefreshCw,
+  ArrowLeftRight, RefreshCw, FileSpreadsheet, ExternalLink as ExternalLinkIcon,
 } from 'lucide-react';
 import { detectClientDuplicates } from '@/lib/aiDuplicateEngine';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import { format, startOfDay, differenceInDays } from 'date-fns';
 import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { saveAs } from 'file-saver';
 
 const FixedSizeList = ({ children, height, itemCount, itemSize, width, itemData }) =>
   React.createElement(
@@ -1087,12 +1090,235 @@ const ModernClientCard = React.memo(({
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
+// GST RECONCILIATION EXPORT HELPERS (same format as GSTReconciliation page)
+// ═══════════════════════════════════════════════════════════════════════════
+const _fmt = n => new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n || 0);
+const _sumVal = (arr, src) => arr.reduce((s, r) => s + (r[src]?.invoiceValue || 0), 0);
+const _sumTax = (arr, src) => arr.reduce((s, r) => { const i = r[src]; return s + (i ? i.igst + i.cgst + i.sgst : 0); }, 0);
+
+function gstExportPDF(results, company, period) {
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const W = doc.internal.pageSize.getWidth();
+  const BRAND  = [13, 59, 102];
+  const BRAND2 = [31, 111, 178];
+  const GREEN  = [16, 185, 129];
+  const AMBER  = [245, 158, 11];
+  const BLUE   = [59, 130, 246];
+  const ROSE   = [239, 68, 68];
+  const LGRAY  = [248, 250, 252];
+  const GRAY   = [100, 116, 139];
+  const DGRAY  = [30, 41, 59];
+  const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
+
+  function addPageHeader(title, pageColor) {
+    doc.setFillColor(...(pageColor || BRAND));
+    doc.rect(0, 0, W, 18, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+    doc.text('GST RECONCILIATION REPORT', 14, 7);
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+    doc.text(company.name || '', 14, 13);
+    doc.text(`${period || ''} | Generated: ${dateStr}`, W - 14, 7, { align: 'right' });
+    doc.text(`GSTIN: ${company.gstin || ''}`, W - 14, 13, { align: 'right' });
+    doc.setTextColor(...DGRAY);
+  }
+
+  function sectionHeading(y, text, color, count, value) {
+    doc.setFillColor(...(color || BRAND));
+    doc.roundedRect(14, y, W - 28, 9, 2, 2, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+    doc.text(text, 18, y + 6);
+    if (count !== undefined) {
+      doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+      doc.text(`${count} invoices  |  ₹${_fmt(value)}`, W - 18, y + 6, { align: 'right' });
+    }
+    doc.setTextColor(...DGRAY);
+    return y + 12;
+  }
+
+  // PAGE 1 — COVER + SUMMARY
+  doc.setFillColor(...BRAND);
+  doc.rect(0, 0, W, 55, 'F');
+  doc.setFillColor(...BRAND2);
+  doc.triangle(W - 80, 0, W, 0, W, 55, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(22); doc.setFont('helvetica', 'bold');
+  doc.text('GST Reconciliation Report', 14, 22);
+  doc.setFontSize(11); doc.setFont('helvetica', 'normal');
+  doc.text(company.name || 'Company Name', 14, 32);
+  doc.setFontSize(9);
+  const subtitle = [company.gstin ? `GSTIN: ${company.gstin}` : null, period ? `Period: ${period}` : null].filter(Boolean).join('   •   ');
+  doc.text(subtitle, 14, 40);
+  doc.text(`Generated on ${dateStr}`, 14, 48);
+
+  const cards = [
+    { label: 'Total Portal Invoices', val: results.matched.length + results.mismatch.length + results.portalOnly.length, color: BRAND },
+    { label: 'Total Books Invoices',  val: results.matched.length + results.mismatch.length + results.booksOnly.length,  color: BRAND2 },
+    { label: 'Matched',               val: results.matched.length,    sub: `₹${_fmt(_sumVal(results.matched,'portal'))}`,    color: GREEN },
+    { label: 'Amount Mismatch',       val: results.mismatch.length,   sub: `₹${_fmt(_sumVal(results.mismatch,'portal'))}`,   color: AMBER },
+    { label: 'In Portal Only',        val: results.portalOnly.length, sub: `₹${_fmt(_sumVal(results.portalOnly,'portal'))}`, color: BLUE  },
+    { label: 'In Books Only',         val: results.booksOnly.length,  sub: `₹${_fmt(_sumVal(results.booksOnly,'books'))}`,   color: ROSE  },
+  ];
+  const cardW = (W - 28 - 10) / 6;
+  cards.forEach((card, i) => {
+    const x = 14 + i * (cardW + 2); const y = 62;
+    doc.setFillColor(...card.color);
+    doc.roundedRect(x, y, cardW, 22, 2, 2, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(15); doc.setFont('helvetica', 'bold');
+    doc.text(String(card.val), x + cardW / 2, y + 10, { align: 'center' });
+    doc.setFontSize(6); doc.setFont('helvetica', 'normal');
+    doc.text(card.label, x + cardW / 2, y + 15, { align: 'center' });
+    if (card.sub) doc.text(card.sub, x + cardW / 2, y + 19.5, { align: 'center' });
+  });
+
+  doc.setTextColor(...DGRAY);
+  doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+  doc.text('Tax Summary', 14, 96);
+  autoTable(doc, {
+    startY: 99,
+    head: [['Category', 'Invoices', 'Invoice Value (₹)', 'Taxable Value (₹)', 'IGST (₹)', 'CGST (₹)', 'SGST (₹)', 'Total Tax (₹)']],
+    body: [
+      ['Matched', results.matched.length, _fmt(_sumVal(results.matched,'portal')), _fmt(results.matched.reduce((s,r)=>s+r.portal.taxableValue,0)), _fmt(results.matched.reduce((s,r)=>s+r.portal.igst,0)), _fmt(results.matched.reduce((s,r)=>s+r.portal.cgst,0)), _fmt(results.matched.reduce((s,r)=>s+r.portal.sgst,0)), _fmt(_sumTax(results.matched,'portal'))],
+      ['Amount Mismatch', results.mismatch.length, _fmt(_sumVal(results.mismatch,'portal')), _fmt(results.mismatch.reduce((s,r)=>s+r.portal.taxableValue,0)), _fmt(results.mismatch.reduce((s,r)=>s+r.portal.igst,0)), _fmt(results.mismatch.reduce((s,r)=>s+r.portal.cgst,0)), _fmt(results.mismatch.reduce((s,r)=>s+r.portal.sgst,0)), _fmt(_sumTax(results.mismatch,'portal'))],
+      ['In Portal Only (Not in Books)', results.portalOnly.length, _fmt(_sumVal(results.portalOnly,'portal')), _fmt(results.portalOnly.reduce((s,r)=>s+r.portal.taxableValue,0)), _fmt(results.portalOnly.reduce((s,r)=>s+r.portal.igst,0)), _fmt(results.portalOnly.reduce((s,r)=>s+r.portal.cgst,0)), _fmt(results.portalOnly.reduce((s,r)=>s+r.portal.sgst,0)), _fmt(_sumTax(results.portalOnly,'portal'))],
+      ['In Books Only (ITC Risk)', results.booksOnly.length, _fmt(_sumVal(results.booksOnly,'books')), _fmt(results.booksOnly.reduce((s,r)=>s+r.books.taxableValue,0)), _fmt(results.booksOnly.reduce((s,r)=>s+r.books.igst,0)), _fmt(results.booksOnly.reduce((s,r)=>s+r.books.cgst,0)), _fmt(results.booksOnly.reduce((s,r)=>s+r.books.sgst,0)), _fmt(_sumTax(results.booksOnly,'books'))],
+    ],
+    headStyles: { fillColor: BRAND, textColor: 255, fontStyle: 'bold', fontSize: 8 },
+    bodyStyles: { fontSize: 8 },
+    alternateRowStyles: { fillColor: LGRAY },
+    columnStyles: { 0: { fontStyle: 'bold' } },
+    margin: { left: 14, right: 14 },
+  });
+
+  if (results.matched.length > 0) {
+    doc.addPage(); addPageHeader('Matched Invoices', GREEN);
+    let y = sectionHeading(22, '✓  Matched Invoices — Present in both GST Portal and Books with matching amounts', GREEN, results.matched.length, _sumVal(results.matched,'portal'));
+    autoTable(doc, { startY: y, head: [['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable Value (₹)','IGST (₹)','CGST (₹)','SGST (₹)','Cess (₹)']],
+      body: results.matched.map((r,i) => [i+1,r.portal.gstin,r.portal.tradeOrLegalName||r.books?.tradeOrLegalName||'—',r.portal.invoiceNoRaw,r.portal.invoiceDate,_fmt(r.portal.invoiceValue),_fmt(r.portal.taxableValue),_fmt(r.portal.igst),_fmt(r.portal.cgst),_fmt(r.portal.sgst),_fmt(r.portal.cess)]),
+      headStyles: { fillColor: GREEN, textColor: 255, fontStyle: 'bold', fontSize: 7.5 }, bodyStyles: { fontSize: 7 }, alternateRowStyles: { fillColor: [240,253,244] },
+      columnStyles: { 0:{cellWidth:8}, 1:{cellWidth:32}, 2:{cellWidth:36}, 3:{cellWidth:20} }, margin: { left:14, right:14 } });
+  }
+
+  if (results.mismatch.length > 0) {
+    doc.addPage(); addPageHeader('Amount Mismatch', AMBER);
+    let y = sectionHeading(22, '⚠  Amount Mismatch — Invoice found in both but amounts differ', AMBER, results.mismatch.length, _sumVal(results.mismatch,'portal'));
+    autoTable(doc, { startY: y, head: [['#','GSTIN','Party Name','Inv No','Date','Portal Value','Books Value','Diff (₹)','Portal Tax','Books Tax','Tax Diff (₹)']],
+      body: results.mismatch.map((r,i) => [i+1,r.portal.gstin,r.portal.tradeOrLegalName||r.books?.tradeOrLegalName||'—',r.portal.invoiceNoRaw,r.portal.invoiceDate,_fmt(r.portal.invoiceValue),_fmt(r.books.invoiceValue),{content:(r.valueDiff>0?'+':'')+_fmt(r.valueDiff),styles:{textColor:r.valueDiff>0?[37,99,235]:[220,38,38],fontStyle:'bold'}},_fmt(r.portal.igst+r.portal.cgst+r.portal.sgst),_fmt(r.books.igst+r.books.cgst+r.books.sgst),{content:(r.taxDiff>0?'+':'')+_fmt(r.taxDiff),styles:{textColor:r.taxDiff>0?[37,99,235]:[220,38,38],fontStyle:'bold'}}]),
+      headStyles: { fillColor: AMBER, textColor: 255, fontStyle: 'bold', fontSize: 7.5 }, bodyStyles: { fontSize: 7 }, alternateRowStyles: { fillColor: [255,251,235] },
+      columnStyles: { 0:{cellWidth:8}, 1:{cellWidth:30}, 2:{cellWidth:30} }, margin: { left:14, right:14 } });
+  }
+
+  if (results.portalOnly.length > 0) {
+    doc.addPage(); addPageHeader('In Portal Only', BLUE);
+    let y = sectionHeading(22, '🌐  In GST Portal Only — Vendor uploaded but NOT recorded in Books.', BLUE, results.portalOnly.length, _sumVal(results.portalOnly,'portal'));
+    autoTable(doc, { startY: y, head: [['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Place','ITC']],
+      body: results.portalOnly.map((r,i) => [i+1,r.portal.gstin,r.portal.tradeOrLegalName||'—',r.portal.invoiceNoRaw,r.portal.invoiceDate,_fmt(r.portal.invoiceValue),_fmt(r.portal.taxableValue),_fmt(r.portal.igst),_fmt(r.portal.cgst),_fmt(r.portal.sgst),r.portal.placeOfSupply||'—',{content:r.portal.itcAvailability||'—',styles:{textColor:r.portal.itcAvailability?.toLowerCase()==='yes'?[5,150,105]:[100,116,139],fontStyle:'bold'}}]),
+      headStyles: { fillColor: BLUE, textColor: 255, fontStyle: 'bold', fontSize: 7.5 }, bodyStyles: { fontSize: 7 }, alternateRowStyles: { fillColor: [239,246,255] },
+      columnStyles: { 0:{cellWidth:8}, 1:{cellWidth:30}, 2:{cellWidth:30} }, margin: { left:14, right:14 } });
+  }
+
+  if (results.booksOnly.length > 0) {
+    doc.addPage(); addPageHeader('In Books Only', ROSE);
+    let y = sectionHeading(22, '📒  In Books Only — Recorded in Books but vendor has NOT uploaded to GST Portal. ITC at risk!', ROSE, results.booksOnly.length, _sumVal(results.booksOnly,'books'));
+    doc.setFillColor(255,241,242); doc.setDrawColor(...ROSE);
+    doc.roundedRect(14, y, W-28, 10, 2, 2, 'FD');
+    doc.setTextColor(...ROSE); doc.setFontSize(8); doc.setFont('helvetica','bold');
+    doc.text('⚠ ITC RISK: These invoices are in your books but the vendor has not filed them on the GST portal.', 18, y+6.5, { maxWidth: W-36 });
+    doc.setTextColor(...DGRAY); y += 14;
+    autoTable(doc, { startY: y, head: [['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Place']],
+      body: results.booksOnly.map((r,i) => [i+1,r.books.gstin,r.books.tradeOrLegalName||'—',r.books.invoiceNoRaw,r.books.invoiceDate,_fmt(r.books.invoiceValue),_fmt(r.books.taxableValue),_fmt(r.books.igst),_fmt(r.books.cgst),_fmt(r.books.sgst),r.books.placeOfSupply||'—']),
+      headStyles: { fillColor: ROSE, textColor: 255, fontStyle: 'bold', fontSize: 7.5 }, bodyStyles: { fontSize: 7 }, alternateRowStyles: { fillColor: [255,241,242] },
+      columnStyles: { 0:{cellWidth:8}, 1:{cellWidth:30}, 2:{cellWidth:28} }, margin: { left:14, right:14 } });
+  }
+
+  const totalPages = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p); doc.setFontSize(7); doc.setFont('helvetica','normal'); doc.setTextColor(...GRAY);
+    doc.text(`Page ${p} of ${totalPages}`, W/2, doc.internal.pageSize.getHeight()-5, { align:'center' });
+    doc.text('Confidential — GST Reconciliation Report', 14, doc.internal.pageSize.getHeight()-5);
+    doc.text(company.name||'', W-14, doc.internal.pageSize.getHeight()-5, { align:'right' });
+  }
+  const fname = `GST_Recon_${(company.name||'Report').replace(/\s+/g,'_')}_${period?period.replace(/\s+/g,'_'):'Export'}.pdf`;
+  doc.save(fname);
+  toast.success('PDF report downloaded successfully!');
+}
+
+function gstExportWord(results, company, period) {
+  const dateStr = new Date().toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' });
+  const rowsHtml = (headers, rows, headBg='#0D3B66') => `
+    <table style="border-collapse:collapse;width:100%;font-size:9pt;margin-bottom:14pt;">
+      <thead><tr>${headers.map(h=>`<th style="background:${headBg};color:#fff;padding:5pt 7pt;border:1px solid #cbd5e1;text-align:left;font-weight:bold;white-space:nowrap;">${h}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map((row,ri)=>`<tr style="background:${ri%2===0?'#f8fafc':'#fff'};"><br>${row.map(cell=>{const val=typeof cell==='object'?cell.v:cell;const style=typeof cell==='object'?`color:${cell.c};font-weight:bold;`:'';return`<td style="padding:4pt 7pt;border:1px solid #e2e8f0;${style}">${val??''}</td>`}).join('')}</tr>`).join('')}</tbody>
+    </table>`;
+  const section=(title,badgeBg,rows,total,description,tableHtml)=>`
+    <div style="page-break-before:always;">
+      <div style="background:${badgeBg};color:#fff;padding:10pt 14pt;border-radius:4pt;margin-bottom:10pt;">
+        <span style="font-size:13pt;font-weight:bold;">${title}</span>
+        <span style="float:right;font-size:10pt;">${rows.length} invoices &nbsp;|&nbsp; ₹${_fmt(total)}</span>
+      </div>
+      ${description?`<p style="background:#f1f5f9;border-left:4pt solid ${badgeBg};padding:8pt 12pt;font-size:9pt;color:#475569;margin-bottom:10pt;">${description}</p>`:''}
+      ${tableHtml}
+    </div>`;
+
+  const matchedSec = results.matched.length===0?'':section('✓  Matched Invoices','#10b981',results.matched,_sumVal(results.matched,'portal'),'Present in both GST Portal and Books with matching amounts.',rowsHtml(['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Cess'],results.matched.map((r,i)=>[i+1,r.portal.gstin,r.portal.tradeOrLegalName||r.books?.tradeOrLegalName||'—',r.portal.invoiceNoRaw,r.portal.invoiceDate,_fmt(r.portal.invoiceValue),_fmt(r.portal.taxableValue),_fmt(r.portal.igst),_fmt(r.portal.cgst),_fmt(r.portal.sgst),_fmt(r.portal.cess)]),'#10b981'));
+  const mismatchSec = results.mismatch.length===0?'':section('⚠  Amount Mismatch','#f59e0b',results.mismatch,_sumVal(results.mismatch,'portal'),'Invoice numbers match but amounts differ. Please verify and correct.',rowsHtml(['#','GSTIN','Party Name','Invoice No','Date','Portal Value','Books Value','Diff (₹)','Portal Tax','Books Tax','Tax Diff (₹)'],results.mismatch.map((r,i)=>[i+1,r.portal.gstin,r.portal.tradeOrLegalName||r.books?.tradeOrLegalName||'—',r.portal.invoiceNoRaw,r.portal.invoiceDate,_fmt(r.portal.invoiceValue),_fmt(r.books.invoiceValue),{v:(r.valueDiff>0?'+':'')+_fmt(r.valueDiff),c:r.valueDiff>0?'#1d4ed8':'#dc2626'},_fmt(r.portal.igst+r.portal.cgst+r.portal.sgst),_fmt(r.books.igst+r.books.cgst+r.books.sgst),{v:(r.taxDiff>0?'+':'')+_fmt(r.taxDiff),c:r.taxDiff>0?'#1d4ed8':'#dc2626'}]),'#f59e0b'));
+  const portalSec = results.portalOnly.length===0?'':section('🌐  In GST Portal Only','#3b82f6',results.portalOnly,_sumVal(results.portalOnly,'portal'),'Vendor filed on portal but NOT in Books. Book these to avail ITC.',rowsHtml(['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Place','ITC'],results.portalOnly.map((r,i)=>[i+1,r.portal.gstin,r.portal.tradeOrLegalName||'—',r.portal.invoiceNoRaw,r.portal.invoiceDate,_fmt(r.portal.invoiceValue),_fmt(r.portal.taxableValue),_fmt(r.portal.igst),_fmt(r.portal.cgst),_fmt(r.portal.sgst),r.portal.placeOfSupply||'—',{v:r.portal.itcAvailability||'—',c:r.portal.itcAvailability?.toLowerCase()==='yes'?'#059669':'#64748b'}]),'#3b82f6'));
+  const booksSec = results.booksOnly.length===0?'':section('📒  In Books Only (ITC Risk)','#ef4444',results.booksOnly,_sumVal(results.booksOnly,'books'),'⚠ ITC RISK: In Books but vendor has NOT uploaded to GST Portal. Follow up immediately.',rowsHtml(['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Place'],results.booksOnly.map((r,i)=>[i+1,r.books.gstin,r.books.tradeOrLegalName||'—',r.books.invoiceNoRaw,r.books.invoiceDate,_fmt(r.books.invoiceValue),_fmt(r.books.taxableValue),_fmt(r.books.igst),_fmt(r.books.cgst),_fmt(r.books.sgst),r.books.placeOfSupply||'—']),'#ef4444'));
+
+  const totalPortal = results.matched.length+results.mismatch.length+results.portalOnly.length;
+  const totalBooks  = results.matched.length+results.mismatch.length+results.booksOnly.length;
+  const html = `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><title>GST Reconciliation Report</title><style>@page{size:A4 landscape;margin:2cm 1.5cm;}body{font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#1e293b;margin:0;}h1{font-size:22pt;color:#0D3B66;margin-bottom:4pt;}h2{font-size:14pt;color:#0D3B66;margin:16pt 0 8pt;}table{border-collapse:collapse;width:100%;font-size:9pt;margin-bottom:14pt;}th{background:#0D3B66;color:#fff;padding:5pt 7pt;border:1px solid #cbd5e1;text-align:left;font-weight:bold;}td{padding:4pt 7pt;border:1px solid #e2e8f0;}</style></head><body>
+  <div style="background:#0D3B66;color:#fff;padding:20pt 24pt;margin-bottom:20pt;"><h1 style="color:#fff;margin:0 0 6pt;">GST Reconciliation Report</h1><p style="margin:0;font-size:12pt;">${company.name||''}</p><p style="margin:4pt 0 0;font-size:9pt;opacity:0.85;">${company.gstin?`GSTIN: ${company.gstin}  |  `:''} ${period?`Period: ${period}  |  `:''} Generated: ${dateStr}</p></div>
+  <h2>Summary</h2>
+  <table><thead><tr><th>Category</th><th>Invoices</th><th>Invoice Value (₹)</th><th>Taxable Value (₹)</th><th>IGST (₹)</th><th>CGST (₹)</th><th>SGST (₹)</th><th>Total Tax (₹)</th></tr></thead>
+  <tbody>
+  <tr style="background:#f0fdf4;"><td style="font-weight:bold;color:#059669;">✓ Matched</td><td style="text-align:center;">${results.matched.length}</td><td>₹${_fmt(_sumVal(results.matched,'portal'))}</td><td>₹${_fmt(results.matched.reduce((s,r)=>s+r.portal.taxableValue,0))}</td><td>₹${_fmt(results.matched.reduce((s,r)=>s+r.portal.igst,0))}</td><td>₹${_fmt(results.matched.reduce((s,r)=>s+r.portal.cgst,0))}</td><td>₹${_fmt(results.matched.reduce((s,r)=>s+r.portal.sgst,0))}</td><td style="font-weight:bold;">₹${_fmt(_sumTax(results.matched,'portal'))}</td></tr>
+  <tr style="background:#fffbeb;"><td style="font-weight:bold;color:#d97706;">⚠ Amount Mismatch</td><td style="text-align:center;">${results.mismatch.length}</td><td>₹${_fmt(_sumVal(results.mismatch,'portal'))}</td><td>₹${_fmt(results.mismatch.reduce((s,r)=>s+r.portal.taxableValue,0))}</td><td>₹${_fmt(results.mismatch.reduce((s,r)=>s+r.portal.igst,0))}</td><td>₹${_fmt(results.mismatch.reduce((s,r)=>s+r.portal.cgst,0))}</td><td>₹${_fmt(results.mismatch.reduce((s,r)=>s+r.portal.sgst,0))}</td><td style="font-weight:bold;">₹${_fmt(_sumTax(results.mismatch,'portal'))}</td></tr>
+  <tr style="background:#eff6ff;"><td style="font-weight:bold;color:#2563eb;">🌐 In Portal Only</td><td style="text-align:center;">${results.portalOnly.length}</td><td>₹${_fmt(_sumVal(results.portalOnly,'portal'))}</td><td>₹${_fmt(results.portalOnly.reduce((s,r)=>s+r.portal.taxableValue,0))}</td><td>₹${_fmt(results.portalOnly.reduce((s,r)=>s+r.portal.igst,0))}</td><td>₹${_fmt(results.portalOnly.reduce((s,r)=>s+r.portal.cgst,0))}</td><td>₹${_fmt(results.portalOnly.reduce((s,r)=>s+r.portal.sgst,0))}</td><td style="font-weight:bold;">₹${_fmt(_sumTax(results.portalOnly,'portal'))}</td></tr>
+  <tr style="background:#fff1f2;"><td style="font-weight:bold;color:#dc2626;">📒 In Books Only</td><td style="text-align:center;">${results.booksOnly.length}</td><td>₹${_fmt(_sumVal(results.booksOnly,'books'))}</td><td>₹${_fmt(results.booksOnly.reduce((s,r)=>s+r.books.taxableValue,0))}</td><td>₹${_fmt(results.booksOnly.reduce((s,r)=>s+r.books.igst,0))}</td><td>₹${_fmt(results.booksOnly.reduce((s,r)=>s+r.books.cgst,0))}</td><td>₹${_fmt(results.booksOnly.reduce((s,r)=>s+r.books.sgst,0))}</td><td style="font-weight:bold;">₹${_fmt(_sumTax(results.booksOnly,'books'))}</td></tr>
+  </tbody></table>
+  <p style="font-size:8pt;color:#64748b;">Total Portal: <strong>${totalPortal}</strong> &nbsp;|&nbsp; Total Books: <strong>${totalBooks}</strong></p>
+  ${matchedSec}${mismatchSec}${portalSec}${booksSec}
+  <div style="margin-top:20pt;border-top:1px solid #e2e8f0;padding-top:8pt;font-size:8pt;color:#64748b;"><p>Report generated by TaskOsphere | ${dateStr} | ${company.name||''} | GSTIN: ${company.gstin||''}</p></div>
+  </body></html>`;
+  const blob = new Blob(['\ufeff', html], { type:'application/msword;charset=utf-8' });
+  const fname = `GST_Recon_${(company.name||'Report').replace(/\s+/g,'_')}_${period?period.replace(/\s+/g,'_'):'Export'}.doc`;
+  saveAs(blob, fname);
+  toast.success('Word document downloaded successfully!');
+}
+
+function gstExportExcel(results, company, period) {
+  const wb = XLSX.utils.book_new();
+  const summaryRows = [
+    ['GST Reconciliation Report','','',company.name||''],
+    ['GSTIN',company.gstin||'','PAN',company.pan||''],
+    ['Period',period||'','FY',company.fy||''],
+    ['Generated On',new Date().toLocaleDateString('en-IN')],
+    [],
+    ['Category','Count','Invoice Value (₹)','Total Tax (₹)'],
+    ['Matched',          results.matched.length,    _sumVal(results.matched,'portal').toFixed(2),    _sumTax(results.matched,'portal').toFixed(2)],
+    ['Amount Mismatch',  results.mismatch.length,   _sumVal(results.mismatch,'portal').toFixed(2),   _sumTax(results.mismatch,'portal').toFixed(2)],
+    ['In Portal Only',   results.portalOnly.length, _sumVal(results.portalOnly,'portal').toFixed(2), _sumTax(results.portalOnly,'portal').toFixed(2)],
+    ['In Books Only',    results.booksOnly.length,  _sumVal(results.booksOnly,'books').toFixed(2),   _sumTax(results.booksOnly,'books').toFixed(2)],
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), 'Summary');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Cess'],...results.matched.map((r,i)=>[i+1,r.portal.gstin,r.portal.tradeOrLegalName||r.books?.tradeOrLegalName||'',r.portal.invoiceNoRaw,r.portal.invoiceDate,r.portal.invoiceValue,r.portal.taxableValue,r.portal.igst,r.portal.cgst,r.portal.sgst,r.portal.cess])]), 'Matched');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['#','GSTIN','Party Name','Invoice No','Date','Portal Value','Books Value','Value Diff','Portal Tax','Books Tax','Tax Diff'],...results.mismatch.map((r,i)=>[i+1,r.portal.gstin,r.portal.tradeOrLegalName||r.books?.tradeOrLegalName||'',r.portal.invoiceNoRaw,r.portal.invoiceDate,r.portal.invoiceValue,r.books.invoiceValue,r.valueDiff.toFixed(2),(r.portal.igst+r.portal.cgst+r.portal.sgst).toFixed(2),(r.books.igst+r.books.cgst+r.books.sgst).toFixed(2),r.taxDiff.toFixed(2)])]), 'Mismatch');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['#','GSTIN','Party Name','Invoice No','Date','Invoice Value','Taxable','IGST','CGST','SGST','Place','ITC'],...results.portalOnly.map((r,i)=>[i+1,r.portal.gstin,r.portal.tradeOrLegalName||'',r.portal.invoiceNoRaw,r.portal.invoiceDate,r.portal.invoiceValue,r.portal.taxableValue,r.portal.igst,r.portal.cgst,r.portal.sgst,r.portal.placeOfSupply,r.portal.itcAvailability])]), 'In Portal Only');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['#','GSTIN','Party Name','Invoice No','Date','Invoice Value','Taxable','IGST','CGST','SGST','Cess','Place'],...results.booksOnly.map((r,i)=>[i+1,r.books.gstin,r.books.tradeOrLegalName||'',r.books.invoiceNoRaw,r.books.invoiceDate,r.books.invoiceValue,r.books.taxableValue,r.books.igst,r.books.cgst,r.books.sgst,r.books.cess,r.books.placeOfSupply])]), 'In Books Only');
+  XLSX.writeFile(wb, `GST_Recon_${(company.name||'Report').replace(/\s+/g,'_')}_${period?period.replace(/\s+/g,'_'):'Export'}.xlsx`);
+  toast.success('Excel report downloaded successfully!');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // CLIENT DETAIL POPUP — lifted outside so it never re-creates on render
 // ═══════════════════════════════════════════════════════════════════════════
 const GST_TREATMENT_LABELS = { regular: 'Regular Taxpayer', composition: 'Composition Scheme', unregistered: 'Unregistered', consumer: 'Consumer (B2C)', overseas: 'Overseas / SEZ' };
 const INV_STATUS_COLORS = { paid: { bg: '#f0fdf4', text: '#166534', border: '#bbf7d0' }, sent: { bg: '#eff6ff', text: '#1e40af', border: '#bfdbfe' }, draft: { bg: '#f8fafc', text: '#475569', border: '#e2e8f0' }, overdue: { bg: '#fef2f2', text: '#dc2626', border: '#fecaca' }, partially_paid: { bg: '#fefce8', text: '#92400e', border: '#fde68a' }, cancelled: { bg: '#fafafa', text: '#9ca3af', border: '#e5e7eb' } };
 
-const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDetailDialogOpen, isDark, users, getClientAssignments, openWhatsApp, handleEdit, canEditClients }) => {
+const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDetailDialogOpen, isDark, users, getClientAssignments, openWhatsApp, handleEdit, canEditClients, navigate }) => {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
 
@@ -1104,6 +1330,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
   const [gstSessions,    setGstSessions]    = React.useState([]);
   const [gstLoading,     setGstLoading]     = React.useState(false);
   const [gstDeleting,    setGstDeleting]    = React.useState(null);
+  const [gstDownloading, setGstDownloading] = React.useState(null); // sessionId + format
 
   React.useEffect(() => { setActiveTab('details'); setClientInvoices([]); setGstSessions([]); }, [selectedClient?.id]);
 
@@ -1145,31 +1372,32 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
     setGstDeleting(null);
   };
 
-  const downloadGstSummary = (session) => {
-    const sm = session.summary || {};
-    const rows = [
-      ['GST Reconciliation Summary'],
-      ['Client', session.client_name || '—'],
-      ['GSTIN', session.client_gstin || '—'],
-      ['Period', session.period || '—'],
-      ['Date', session.created_at ? new Date(session.created_at).toLocaleDateString('en-IN') : '—'],
-      ['Portal File', session.portal_filename || '—'],
-      ['Books File', session.books_filename || '—'],
-      [],
-      ['Category', 'Count', 'Value (₹)'],
-      ['Matched',     sm.matched_count ?? 0,     sm.matched_value ?? 0],
-      ['Mismatch',    sm.mismatch_count ?? 0,    sm.mismatch_value ?? 0],
-      ['Portal Only', sm.portal_only_count ?? 0, sm.portal_only_value ?? 0],
-      ['Books Only',  sm.books_only_count ?? 0,  sm.books_only_value ?? 0],
-      [],
-      ['Total Portal Invoices', sm.total_portal ?? 0],
-      ['Total Books Invoices',  sm.total_books  ?? 0],
-    ];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Summary');
-    const period = (session.period || 'report').replace(/\s+/g, '_');
-    const client = (session.client_name || 'client').replace(/\s+/g, '_').slice(0, 20);
-    XLSX.writeFile(wb, `GST_Recon_${client}_${period}.xlsx`);
+  const downloadGstFull = async (session, format) => {
+    const key = `${session.id}_${format}`;
+    setGstDownloading(key);
+    try {
+      // Fetch full session data (includes matched/mismatch/portalOnly/booksOnly arrays)
+      const r = await api.get(`/gst-reconciliation/history/${session.id}`);
+      const full = r.data;
+      const results = {
+        matched:    full.matched    || full.full_result?.matched    || [],
+        mismatch:   full.mismatch   || full.full_result?.mismatch   || [],
+        portalOnly: full.portal_only|| full.full_result?.portal_only|| [],
+        booksOnly:  full.books_only || full.full_result?.books_only || [],
+      };
+      const company = {
+        name:  full.client_name  || session.client_name  || '',
+        gstin: full.client_gstin || session.client_gstin || '',
+      };
+      const period = full.period || session.period || '';
+      if (format === 'pdf')   gstExportPDF(results, company, period);
+      if (format === 'word')  gstExportWord(results, company, period);
+      if (format === 'excel') gstExportExcel(results, company, period);
+    } catch (err) {
+      toast.error('Failed to fetch full report data. Please try again.');
+    } finally {
+      setGstDownloading(null);
+    }
   };
 
   if (!selectedClient) return null;
@@ -1182,7 +1410,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
 
   return (
     <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
-      <DialogContent className={`max-w-2xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+      <DialogContent className={`max-w-4xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <DialogTitle className="sr-only">Client Details</DialogTitle>
         <DialogDescription className="sr-only">View complete client information</DialogDescription>
 
@@ -1380,11 +1608,28 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
                             <button
-                              onClick={() => downloadGstSummary(session)}
-                              title="Download Excel summary"
-                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 transition-colors"
+                              onClick={() => downloadGstFull(session, 'pdf')}
+                              disabled={!!gstDownloading}
+                              title="Download PDF report"
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-rose-50 hover:bg-rose-100 dark:bg-rose-900/20 dark:hover:bg-rose-900/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 transition-colors disabled:opacity-50"
                             >
-                              <Download className="h-3 w-3" /> Excel
+                              {gstDownloading === `${session.id}_pdf` ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />} PDF
+                            </button>
+                            <button
+                              onClick={() => downloadGstFull(session, 'word')}
+                              disabled={!!gstDownloading}
+                              title="Download Word report"
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 transition-colors disabled:opacity-50"
+                            >
+                              {gstDownloading === `${session.id}_word` ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />} Word
+                            </button>
+                            <button
+                              onClick={() => downloadGstFull(session, 'excel')}
+                              disabled={!!gstDownloading}
+                              title="Download Excel report"
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 transition-colors disabled:opacity-50"
+                            >
+                              {gstDownloading === `${session.id}_excel` ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileSpreadsheet className="h-3 w-3" />} Excel
                             </button>
                             {isAdmin && (
                               <button
@@ -1690,6 +1935,13 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
         <div className={`sticky bottom-0 flex items-center justify-between gap-2 p-6 border-t flex-shrink-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           <Button type="button" variant="ghost" onClick={() => setDetailDialogOpen(false)} className="h-10 px-5 text-sm rounded-xl text-slate-500">Close</Button>
           <div className="flex gap-2">
+            <Button
+              onClick={() => { setDetailDialogOpen(false); navigate('/gst-reconciliation'); }}
+              className="h-10 px-4 text-sm rounded-xl text-white gap-2"
+              style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }}
+            >
+              <ArrowLeftRight className="h-4 w-4" /> GST Recon
+            </Button>
             <Button onClick={() => { setDetailDialogOpen(false); openWhatsApp(selectedClient.phone, selectedClient.company_name); }} className="h-10 px-4 text-sm rounded-xl text-white gap-2" style={{ background: '#25D366' }}>
               <MessageCircle className="h-4 w-4" /> WhatsApp
             </Button>
@@ -2995,7 +3247,7 @@ export default function Clients() {
         selectedClient={selectedClient} detailDialogOpen={detailDialogOpen}
         setDetailDialogOpen={setDetailDialogOpen} isDark={isDark} users={users}
         getClientAssignments={getClientAssignments} openWhatsApp={openWhatsApp}
-        handleEdit={handleEdit} canEditClients={canEditClients}
+        handleEdit={handleEdit} canEditClients={canEditClients} navigate={navigate}
       />
 
       {/* BULK MSG */}
