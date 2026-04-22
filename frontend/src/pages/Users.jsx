@@ -129,6 +129,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_connect_email: true, can_view_own_data: true, can_create_quotations: true,
       can_manage_invoices: true, can_view_passwords: true, can_edit_passwords: true,
       can_edit_attendance: true, can_view_compliance: true, can_manage_compliance: true,
+      can_view_gst_reconciliation: true,
       can_view_all_visits: true, can_edit_visits: true, can_delete_visits: true, can_delete_own_visits: true,
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [],
@@ -178,6 +179,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_view_compliance: true,      // Compliance Tracker → VIEW (Own + Team)
       can_manage_compliance: true,    // Compliance Tracker → CREATE, EDIT, UPDATE (Own + Team)
       can_edit_attendance: true,      // Attendance → EDIT/UPDATE (Own + Team)
+      can_view_gst_reconciliation: false, // admin-granted only (GST dept users)
       can_view_all_visits: false,     // own + team visits scoped server-side via department query
       can_edit_visits: true,          // Client Visits → EDIT/UPDATE (Own + Team)
       can_delete_visits: false,       // admin-granted only
@@ -230,6 +232,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_view_compliance: true,      // Compliance Tracker → VIEW (Own)
       can_manage_compliance: true,    // Compliance Tracker → CREATE, EDIT, UPDATE (Own)
       can_edit_attendance: true,      // Attendance → EDIT/UPDATE (Own)
+      can_view_gst_reconciliation: false, // admin-granted only (GST dept users)
       can_view_all_visits: false,     // scope: own visits only (server-side scoped)
       can_edit_visits: true,          // Client Visits → EDIT/UPDATE (Own)
       can_delete_visits: false,       // admin-granted only
@@ -255,6 +258,7 @@ const EMPTY_PERMISSIONS = {
   can_connect_email: false, can_view_own_data: false, can_create_quotations: false,
   can_manage_invoices: false, can_view_passwords: false, can_edit_passwords: false,
   can_edit_attendance: false, can_view_compliance: false, can_manage_compliance: false,
+  can_view_gst_reconciliation: false,
   can_view_all_visits: false, can_edit_visits: false,
   can_delete_visits: false, can_delete_own_visits: true,
   view_password_departments: [], assigned_clients: [], view_other_tasks: [],
@@ -276,6 +280,8 @@ const GLOBAL_PERMS = [
   { key: 'can_view_selected_users_reports', label: 'Team Reports Access',         desc: 'View reports for selected users',                        icon: Eye         },
   { key: 'can_view_staff_rankings',         label: 'Staff Rankings',               desc: 'View performance leaderboard',                           icon: Star        },
   { key: 'can_view_own_data',               label: 'View Own Data',                desc: 'Access own attendance, tasks and reports',               icon: UserIcon    },
+  { key: 'can_view_compliance',             label: 'Compliance Tracker',           desc: 'Access the Compliance Tracker page',                     icon: ShieldCheck },
+  { key: 'can_view_gst_reconciliation',     label: 'GST Reconciliation',           desc: 'Access the GST Reconciliation module (GST dept users)',  icon: FileText    },
   { key: 'can_create_quotations',           label: 'Quotations Module',            desc: 'Create, edit, export and share quotations',              icon: Receipt     },
 ];
 
@@ -448,7 +454,7 @@ const ModuleAccessBadges = ({ userData }) => {
 
 const PermissionMatrixSummary = ({ permissions }) => {
   // Include module-level perms (managed from the Modules tab) so coverage % is accurate
-  const MODULE_PERM_KEYS = ['can_manage_invoices', 'can_view_passwords', 'can_edit_passwords'];
+  const MODULE_PERM_KEYS = ['can_manage_invoices', 'can_view_passwords', 'can_edit_passwords', 'can_view_gst_reconciliation'];
   const allPerms = [...GLOBAL_PERMS, ...OPS_PERMS, ...EDIT_PERMS];
   const granted  = allPerms.filter(p => permissions[p.key]).length
                  + MODULE_PERM_KEYS.filter(k => permissions[k]).length;
@@ -2846,6 +2852,15 @@ export default function Users() {
                 </p>
               </div>
             )}
+            {/* Stale-permissions notice — shown for non-admin targets */}
+            {isAdmin && selectedUserForPerms?.role !== 'admin' && (
+              <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
+                <AlertCircle className="h-4 w-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
+                  <strong>Tip:</strong> If this user can't access pages their permissions allow, use <strong>Quick Reset → {selectedUserForPerms?.role} Template</strong> then re-apply any custom grants and Save. This fixes stale or missing permission flags from older accounts.
+                </p>
+              </div>
+            )}
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Quick Reset:</span>
               {(isAdmin ? ['staff', 'manager', 'admin'] : ['staff']).map(role => {
@@ -2957,6 +2972,18 @@ export default function Users() {
                       />
                     </div>
                   )}
+
+                  {/* ── GST Reconciliation ──────────────────────────────── */}
+                  <ModuleAccessCard
+                    icon={FileText}
+                    title="GST Reconciliation"
+                    desc="Access the GST Reconciliation module. Grant to GST department users only."
+                    permKey="can_view_gst_reconciliation"
+                    permissions={permissions}
+                    setPermissions={setPermissions}
+                    accentColor="#065f46"
+                    badge={permissions.can_view_gst_reconciliation ? 'GST Access' : undefined}
+                  />
                 </div>
               </div>
             )}
