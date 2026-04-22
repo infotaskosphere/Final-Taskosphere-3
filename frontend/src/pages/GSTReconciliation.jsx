@@ -831,6 +831,131 @@ function reconcile(portalData, booksData) {
     }
   });
 
+  // ── PASS 5: Cross-GSTIN Detection ─────────────────────────────────────────
+  // Finds invoices where normalised invoice number + value match between portal
+  // and books, but GSTINs are COMPLETELY different.
+  //
+  // Strategy:
+  //   1. Build an invoice-number → books[] index for O(1) lookup.
+  //   2. For each remaining portal-only item, find the best-scoring books-only
+  //      partner (same invoice number + value within tolerance; prefer tax match).
+  //   3. Mark both partners with crossGstinCandidate so the Compare tab can pair
+  //      them, and collect them into a dedicated crossGstin[] array.
+  //   4. Items REMAIN in portalOnly / booksOnly (not removed) because the GSTIN
+  //      mismatch is still an actionable discrepancy that needs resolution.
+  //   5. Additionally add them to the mismatch array with crossGstinMismatch flag
+  //      so they surface in the main reconciliation view with a high-severity badge.
+  // ─────────────────────────────────────────────────────────────────────────────
+  const cgPortalUsed = new Set();
+  const cgBooksUsed  = new Set();
+  const crossGstinPairs = [];
+
+  // Build per-invoice-number index of all booksOnly items for fast lookup
+  const booksInvNumIdx = new Map();
+  booksOnlyFinal.forEach(bo => {
+    // Index both normalised and raw to catch prefix variations
+    const num = bo.books.invoiceNo;
+    if (!num) return;
+    if (!booksInvNumIdx.has(num)) booksInvNumIdx.set(num, []);
+    booksInvNumIdx.get(num).push(bo);
+  });
+
+  // Also build a value-keyed index for secondary matching
+  const booksValIdx = new Map();
+  booksOnlyFinal.forEach(bo => {
+    // Round to avoid float key issues — use integer paise
+    const key = Math.round((bo.books.invoiceValue || 0) * 100);
+    if (!booksValIdx.has(key)) booksValIdx.set(key, []);
+    booksValIdx.get(key).push(bo);
+  });
+
+  portalOnlyFinal.forEach(po => {
+    if (cgPortalUsed.has(po.key)) return;
+    const pNum = po.portal.invoiceNo;
+    const pVal = po.portal.invoiceValue || 0;
+    const pTax = (po.portal.igst||0) + (po.portal.cgst||0) + (po.portal.sgst||0);
+
+    let bestMatch = null;
+    let bestScore = Infinity;
+
+    // Primary: same normalised invoice number, any GSTIN
+    const numCandidates = booksInvNumIdx.get(pNum) || [];
+    for (const bo of numCandidates) {
+      if (cgBooksUsed.has(bo.key)) continue;
+      if (bo.books.gstin === po.portal.gstin) continue; // exact-GSTIN handled earlier
+      const bVal = bo.books.invoiceValue || 0;
+      const tol  = smartTolerance(pVal, bVal);
+      const vd   = Math.abs(pVal - bVal);
+      if (vd > tol) continue;                           // value must match
+      const bTax = (bo.books.igst||0) + (bo.books.cgst||0) + (bo.books.sgst||0);
+      const taxD = Math.abs(pTax - bTax);
+      const score = vd * 10 + taxD;                     // weight value diff more
+      if (score < bestScore) { bestMatch = bo; bestScore = score; }
+    }
+
+    // Secondary: same value (within 0.5%), different invoice number allowed
+    // Only if primary found nothing — this catches ERP invoice format differences
+    if (!bestMatch) {
+      const pKey = Math.round(pVal * 100);
+      // Check a ±1 paise window to handle rounding
+      for (const delta of [0, 1, -1, 2, -2]) {
+        const candidates = booksValIdx.get(pKey + delta) || [];
+        for (const bo of candidates) {
+          if (cgBooksUsed.has(bo.key)) continue;
+          if (bo.books.gstin === po.portal.gstin) continue;
+          const bVal = bo.books.invoiceValue || 0;
+          const tol  = smartTolerance(pVal, bVal);
+          if (Math.abs(pVal - bVal) > tol) continue;
+          const bTax = (bo.books.igst||0) + (bo.books.cgst||0) + (bo.books.sgst||0);
+          const taxD = Math.abs(pTax - bTax);
+          if (taxD > tol) continue;                     // secondary: tax MUST also match
+          // Date must also match as a tie-breaker for safety
+          const pd = normaliseDateStr(po.portal.invoiceDate);
+          const bd = normaliseDateStr(bo.books.invoiceDate);
+          if (pd && bd && pd !== bd) continue;
+          const score = taxD * 10 + 1000;               // penalty for no invoice-no match
+          if (score < bestScore) { bestMatch = bo; bestScore = score; }
+        }
+        if (bestMatch) break;
+      }
+    }
+
+    if (!bestMatch) return;
+
+    cgPortalUsed.add(po.key);
+    cgBooksUsed.add(bestMatch.key);
+
+    // Annotate both wrapper objects so ResultTable can show warning badges
+    po.crossGstinCandidate       = true;
+    po.crossGstinPartnerGstin    = bestMatch.books.gstin;
+    po.crossGstinPartnerInv      = bestMatch.books.invoiceNoRaw || bestMatch.books.invoiceNo;
+    bestMatch.crossGstinCandidate    = true;
+    bestMatch.crossGstinPartnerGstin = po.portal.gstin;
+    bestMatch.crossGstinPartnerInv   = po.portal.invoiceNoRaw || po.portal.invoiceNo;
+
+    const vd  = Math.abs(pVal - (bestMatch.books.invoiceValue || 0));
+    const pTaxF = (po.portal.igst||0) + (po.portal.cgst||0) + (po.portal.sgst||0);
+    const bTaxF = (bestMatch.books.igst||0) + (bestMatch.books.cgst||0) + (bestMatch.books.sgst||0);
+    const taxDf = Math.abs(pTaxF - bTaxF);
+    const valuesIdentical = vd < 0.01 && taxDf < 0.01;
+
+    crossGstinPairs.push({
+      portal:            po,        // full wrapper { portal:{...}, key:'...' }
+      books:             bestMatch, // full wrapper { books:{...}, key:'...' }
+      key:               po.key,
+      crossGstinMismatch: true,
+      portalGstin:       po.portal.gstin,
+      booksGstin:        bestMatch.books.gstin,
+      valueDiff:         vd,
+      taxDiff:           taxDf,
+      valuesIdentical,
+      status:            'gstin_mismatch',
+      mismatchReason:    `GSTIN mismatch: Portal GSTIN ${po.portal.gstin} ≠ Books GSTIN ${bestMatch.books.gstin}. Invoice number and value ${valuesIdentical ? 'are identical' : 'match within tolerance'} — very likely the same bill.`,
+      suggestedAction:   'Check with vendor which GSTIN is correct. Update books if portal GSTIN is right. This directly affects ITC eligibility.',
+      severity:          'high',
+    });
+  });
+
   // ── Merge pass 2 results ────────────────────────────────────────────────────
   const matchedFinal = [
     ...matched,
@@ -846,6 +971,7 @@ function reconcile(portalData, booksData) {
     mismatch:   mismatchFinal,
     portalOnly: portalOnlyFinal,
     booksOnly:  booksOnlyFinal,
+    crossGstin: crossGstinPairs,   // ← NEW: cross-GSTIN conflict pairs
   };
 }
 
@@ -1507,6 +1633,7 @@ const TABS = [
   { id:'mismatch',   label:'Amount Mismatch',icon:AlertTriangle,  color:{ activeBg:'bg-amber-50 dark:bg-amber-900/20',   activeBorder:'border-amber-400',   activeText:'text-amber-700 dark:text-amber-300',   badge:'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'   }, desc:'Invoice number matches but invoice value or tax differs between Portal and Books.' },
   { id:'portalOnly', label:'In Portal Only', icon:Globe,          color:{ activeBg:'bg-blue-50 dark:bg-blue-900/20',     activeBorder:'border-blue-400',     activeText:'text-blue-700 dark:text-blue-300',     badge:'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'     }, desc:'Vendor uploaded to GST Portal but NOT in Books. Book these to avail ITC.' },
   { id:'booksOnly',  label:'In Books Only',  icon:BookOpen,       color:{ activeBg:'bg-rose-50 dark:bg-rose-900/20',     activeBorder:'border-rose-400',     activeText:'text-rose-700 dark:text-rose-300',     badge:'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'     }, desc:'In Books but vendor NOT filed on portal. ITC at risk — follow up with vendor.' },
+  { id:'crossGstin', label:'GSTIN Conflict', icon:AlertTriangle,  color:{ activeBg:'bg-orange-50 dark:bg-orange-900/20', activeBorder:'border-orange-500',   activeText:'text-orange-700 dark:text-orange-300', badge:'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300' }, desc:'Same invoice & value found in BOTH Portal and Books — but under DIFFERENT GSTINs. Verify correct GSTIN with vendor. Critical for ITC.' },
   { id:'search',     label:'Search',         icon:ScanSearch,     color:{ activeBg:'bg-purple-50 dark:bg-purple-900/20', activeBorder:'border-purple-400',   activeText:'text-purple-700 dark:text-purple-300', badge:'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' }, desc:'Search across all invoices in one place.' },
 ];
 const PAGE_SIZE = 50;
@@ -1713,7 +1840,7 @@ const CommentCell = React.memo(({ rowKey, comments, onSave }) => {
   );
 });
 
-const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames, onSaveTradeName, comments, onSaveComment }) => {
+const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames, onSaveTradeName, comments, onSaveComment, onRowClick }) => {
   const [search, setSearch] = useState('');
   const [page, setPage]     = useState(1);
   const filtered = records.filter(r => {
@@ -1817,7 +1944,9 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
               const n = (page-1)*PAGE_SIZE + idx + 1;
               const isPrefixRow = r.prefixMismatch === true;
               return (
-                <tr key={r.key||idx} className={`border-b border-slate-100 dark:border-slate-700/50 ${isPrefixRow ? 'bg-yellow-50 dark:bg-yellow-900/20 hover:bg-yellow-100 dark:hover:bg-yellow-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'}`}>
+                <tr key={r.key||idx}
+                  onClick={() => onRowClick && onRowClick(r)}
+                  className={`border-b border-slate-100 dark:border-slate-700/50 ${onRowClick ? 'cursor-pointer' : ''} ${isPrefixRow ? 'bg-yellow-50 dark:bg-yellow-900/20 hover:bg-yellow-100 dark:hover:bg-yellow-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'}`}>
                   <td className="px-3 py-2 text-slate-400">{n}</td>
                   <td className="px-3 py-2 font-mono text-[11px] text-slate-600 dark:text-slate-300">{inv?.gstin}</td>
                   {tabId === 'booksOnly'
@@ -1914,7 +2043,7 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
                   </>}
                   {/* Per-row Matching / Not Matching status toggle */}
                   {(tabId === 'mismatch' || tabId === 'portalOnly' || tabId === 'booksOnly') && (
-                    <td className="px-2 py-2 text-center">
+                    <td className="px-2 py-2 text-center" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center justify-center gap-1">
                         {onMarkMatched ? (
                           <button
@@ -1932,7 +2061,7 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
                     </td>
                   )}
                   {onDelete && (
-                    <td className="px-3 py-2 text-center">
+                    <td className="px-3 py-2 text-center" onClick={e => e.stopPropagation()}>
                       <button
                         onClick={() => onDelete(r)}
                         title="Remove this entry from reconciliation"
@@ -1943,7 +2072,7 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
                     </td>
                   )}
                   {onSaveComment && (
-                    <td className="px-2 py-2 text-center min-w-[36px]">
+                    <td className="px-2 py-2 text-center min-w-[36px]" onClick={e => e.stopPropagation()}>
                       <CommentCell
                         rowKey={r.key || `${inv?.gstin}__${inv?.invoiceNo || inv?.invoiceNoRaw}`}
                         comments={comments}
@@ -2188,15 +2317,351 @@ const CheckOneTab = ({ records }) => {
 };
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   INVOICE DETAIL MODAL — click any row to see full invoice details
+   Shows all fields for both portal and books side by side (for pairs)
+═══════════════════════════════════════════════════════════════════════════ */
+const InvoiceDetailModal = ({ record, tabId, manualTradeNames, comments, onClose }) => {
+  if (!record) return null;
+
+  // Normalise: extract portal/books invoice objects regardless of tab
+  const p = record.portal?.portal || record.portal || null;
+  const b = record.books?.books   || record.books  || null;
+  const inv = tabId === 'booksOnly' ? b : (p || b);
+  const isPair = !!(p && b);
+
+  const Field = ({ label, pVal, bVal, highlight: hl }) => {
+    const differs = isPair && pVal != null && bVal != null && String(pVal) !== String(bVal);
+    return (
+      <div className={`flex flex-col gap-0.5 p-2 rounded-lg ${differs ? 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800' : 'bg-slate-50 dark:bg-slate-800/50'}`}>
+        <span className="text-[9px] font-bold uppercase tracking-wide text-slate-400">{label}</span>
+        {isPair ? (
+          <div className="flex gap-2">
+            <span className={`flex-1 text-xs font-medium truncate ${differs ? 'text-blue-700 dark:text-blue-300' : 'text-slate-700 dark:text-slate-200'}`} title={pVal}>
+              {pVal ?? '—'}
+            </span>
+            <span className="text-slate-300 text-xs">|</span>
+            <span className={`flex-1 text-xs font-medium truncate ${differs ? 'text-violet-700 dark:text-violet-300' : 'text-slate-700 dark:text-slate-200'}`} title={bVal}>
+              {bVal ?? '—'}
+            </span>
+          </div>
+        ) : (
+          <span className={`text-xs font-medium truncate ${hl ? 'text-indigo-700 dark:text-indigo-300 font-bold' : 'text-slate-700 dark:text-slate-200'}`}>{pVal ?? bVal ?? '—'}</span>
+        )}
+        {differs && <span className="text-[9px] text-red-500 font-semibold">⚠ Differs</span>}
+      </div>
+    );
+  };
+
+  const MoneyField = ({ label, pVal, bVal }) => {
+    const pN = parseFloat(pVal)||0, bN = parseFloat(bVal)||0;
+    const differs = isPair && Math.abs(pN - bN) > 0.5;
+    return (
+      <div className={`flex flex-col gap-0.5 p-2 rounded-lg ${differs ? 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800' : 'bg-slate-50 dark:bg-slate-800/50'}`}>
+        <span className="text-[9px] font-bold uppercase tracking-wide text-slate-400">{label}</span>
+        {isPair ? (
+          <div className="flex gap-2">
+            <span className={`flex-1 text-xs font-semibold ${differs ? 'text-blue-700 dark:text-blue-300' : 'text-slate-600 dark:text-slate-300'}`}>₹{fmt(pN)}</span>
+            <span className="text-slate-300 text-xs">|</span>
+            <span className={`flex-1 text-xs font-semibold ${differs ? 'text-violet-700 dark:text-violet-300' : 'text-slate-600 dark:text-slate-300'}`}>₹{fmt(bN)}</span>
+          </div>
+        ) : (
+          <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">₹{fmt(pN || bN)}</span>
+        )}
+        {differs && <span className="text-[9px] text-red-500 font-semibold">Diff: ₹{fmt(Math.abs(pN-bN))}</span>}
+      </div>
+    );
+  };
+
+  const pName = p?.tradeOrLegalName || manualTradeNames?.[p?.gstin] || '';
+  const bName = b?.tradeOrLegalName || manualTradeNames?.[b?.gstin] || '';
+  const rowKey = record.key || `${(p||b)?.gstin}__${(p||b)?.invoiceNo}`;
+  const comment = comments?.[rowKey] || '';
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}/>
+      <motion.div
+        initial={{opacity:0,scale:0.96,y:12}} animate={{opacity:1,scale:1,y:0}} exit={{opacity:0,scale:0.96,y:12}}
+        className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-auto"
+      >
+        {/* Header */}
+        <div className={`flex items-center justify-between px-5 py-3 ${isPair ? 'bg-gradient-to-r from-blue-600 via-violet-600 to-indigo-600' : 'bg-gradient-to-r from-indigo-600 to-blue-600'}`}>
+          <div>
+            <h2 className="text-sm font-bold text-white">Invoice Details</h2>
+            <p className="text-[11px] text-white/75 mt-0.5">
+              {isPair ? `Portal: ${p?.gstin} ↔ Books: ${b?.gstin}` : `${inv?.gstin} — ${inv?.invoiceNoRaw || inv?.invoiceNo}`}
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white"><X className="h-4 w-4"/></button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* Pair label row */}
+          {isPair && (
+            <div className="flex gap-3 text-xs font-bold">
+              <div className="flex-1 flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 rounded-lg text-blue-700 dark:text-blue-300 border border-blue-200">
+                <Globe className="h-3 w-3"/> Portal (GSTR-2B)
+              </div>
+              <div className="flex-1 flex items-center gap-1.5 px-3 py-1.5 bg-violet-50 dark:bg-violet-900/30 rounded-lg text-violet-700 dark:text-violet-300 border border-violet-200">
+                <BookOpen className="h-3 w-3"/> Books (Purchase Register)
+              </div>
+            </div>
+          )}
+
+          {/* Core identity */}
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">Identity</p>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="GSTIN" pVal={p?.gstin} bVal={b?.gstin}/>
+              <Field label="Party Name" pVal={pName||p?.tradeOrLegalName||'—'} bVal={bName||b?.tradeOrLegalName||'—'}/>
+              <Field label="Invoice No" pVal={p?.invoiceNoRaw||p?.invoiceNo} bVal={b?.invoiceNoRaw||b?.invoiceNo}/>
+              <Field label="Invoice Date" pVal={p?.invoiceDate} bVal={b?.invoiceDate}/>
+              <Field label="Invoice Type" pVal={p?.invoiceType||'B2B'} bVal={b?.invoiceType||'B2B'}/>
+              <Field label="Place of Supply" pVal={p?.placeOfSupply} bVal={b?.placeOfSupply}/>
+            </div>
+          </div>
+
+          {/* Financial */}
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">Financial Values</p>
+            <div className="grid grid-cols-3 gap-2">
+              <MoneyField label="Invoice Value"  pVal={p?.invoiceValue}  bVal={b?.invoiceValue}/>
+              <MoneyField label="Taxable Value"  pVal={p?.taxableValue}  bVal={b?.taxableValue}/>
+              <MoneyField label="IGST"           pVal={p?.igst}          bVal={b?.igst}/>
+              <MoneyField label="CGST"           pVal={p?.cgst}          bVal={b?.cgst}/>
+              <MoneyField label="SGST"           pVal={p?.sgst}          bVal={b?.sgst}/>
+              <MoneyField label="Cess"           pVal={p?.cess}          bVal={b?.cess}/>
+            </div>
+          </div>
+
+          {/* Additional */}
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">Additional Info</p>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Reverse Charge"   pVal={p?.reverseCharge||'N'} bVal={b?.reverseCharge||'N'}/>
+              <Field label="ITC Availability" pVal={p?.itcAvailability||'—'} bVal={b?.itcAvailability||'—'}/>
+              <Field label="Filing Date"      pVal={p?.filingDate||'—'}   bVal={b?.filingDate||'—'}/>
+              <Field label="GST Rate"         pVal={p?.rate ? `${p.rate}%` : '—'} bVal={b?.rate ? `${b.rate}%` : '—'}/>
+            </div>
+          </div>
+
+          {/* Mismatch reason (if any) */}
+          {record.mismatchReason && (
+            <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-700">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-amber-600 mb-1">AI Analysis</p>
+              <p className="text-xs text-amber-800 dark:text-amber-300">{record.mismatchReason}</p>
+              {record.suggestedAction && <p className="text-xs text-amber-700 dark:text-amber-400 mt-1 italic">→ {record.suggestedAction}</p>}
+            </div>
+          )}
+
+          {/* Comment */}
+          {comment && (
+            <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-amber-600 mb-1">💬 Comment</p>
+              <p className="text-xs text-amber-800 dark:text-amber-300 whitespace-pre-wrap">{comment}</p>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CROSS-GSTIN TABLE — dedicated view for GSTIN-conflict invoice pairs
+   Shows portal vs books side by side with full diff highlighting
+═══════════════════════════════════════════════════════════════════════════ */
+const CrossGstinTable = ({ records, manualTradeNames, onSaveTradeName, comments, onSaveComment, onConfirmMatch, onRowClick }) => {
+  const [search, setSearch] = useState('');
+  const [page,   setPage]   = useState(1);
+
+  const filtered = records.filter(r => {
+    if (!search.trim()) return true;
+    const q  = search.toLowerCase();
+    const p  = r.portal?.portal || r.portal;
+    const b  = r.books?.books   || r.books;
+    const pN = (p?.tradeOrLegalName || manualTradeNames?.[p?.gstin] || '').toLowerCase();
+    const bN = (b?.tradeOrLegalName || manualTradeNames?.[b?.gstin] || '').toLowerCase();
+    return (p?.gstin||'').toLowerCase().includes(q) ||
+           (b?.gstin||'').toLowerCase().includes(q) ||
+           (p?.invoiceNoRaw||p?.invoiceNo||'').toLowerCase().includes(q) ||
+           (b?.invoiceNoRaw||b?.invoiceNo||'').toLowerCase().includes(q) ||
+           pN.includes(q) || bN.includes(q);
+  });
+
+  const totalPages   = Math.ceil(filtered.length / PAGE_SIZE);
+  const paged        = filtered.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE);
+  const totalPortal  = records.reduce((s,r) => s+((r.portal?.portal||r.portal)?.invoiceValue||0), 0);
+  const totalBooks   = records.reduce((s,r) => s+((r.books?.books||r.books)?.invoiceValue||0), 0);
+
+  if (records.length === 0) return (
+    <div className="flex flex-col items-center py-16 text-slate-400">
+      <CheckCircle2 className="h-12 w-12 mb-3 text-emerald-300"/>
+      <p className="font-semibold text-slate-500 text-base">No GSTIN Conflicts Found!</p>
+      <p className="text-sm mt-1">All invoices matched with consistent GSTINs across Portal and Books.</p>
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Critical warning */}
+      <div className="flex items-start gap-3 p-3 bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-300 dark:border-red-700 mb-4 text-xs text-red-800 dark:text-red-300">
+        <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5 text-red-600"/>
+        <div>
+          <strong className="text-red-700 dark:text-red-300">⚡ CRITICAL — GSTIN Conflict Detected:</strong>
+          {' '}{records.length} invoice pair(s) have matching invoice numbers &amp; values in Portal and Books, but under <strong>DIFFERENT GSTINs</strong>.
+          ITC claim may be <strong>invalid</strong> if the wrong GSTIN is in books. Verify each pair with the vendor and correct books before filing GSTR-3B.
+        </div>
+      </div>
+
+      {/* Stats bar */}
+      <div className="flex flex-wrap gap-x-4 gap-y-2 mb-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 text-sm">
+        <span className="text-slate-500">Conflicts: <strong className="text-red-600 dark:text-red-400">{records.length}</strong></span>
+        <span className="text-slate-500">Portal Value: <strong className="text-blue-700 dark:text-blue-300">₹{fmt(totalPortal)}</strong></span>
+        <span className="text-slate-500">Books Value: <strong className="text-violet-700 dark:text-violet-300">₹{fmt(totalBooks)}</strong></span>
+        <span className="ml-auto text-[10px] px-2 py-1 rounded-full bg-red-100 text-red-700 border border-red-200 font-bold">HIGH SEVERITY — Review Before Filing</span>
+      </div>
+
+      {/* Search */}
+      <div className="relative mb-3">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400"/>
+        <input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Search GSTIN, Invoice No, Party Name…"
+          className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border border-orange-200 dark:border-orange-800">
+        <table className="w-full text-xs min-w-[1100px]">
+          <thead>
+            {/* Section headers */}
+            <tr>
+              <th className="px-2 py-1.5 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 w-8"/>
+              <th colSpan={5} className="px-3 py-1.5 text-center font-bold text-blue-700 bg-blue-50 dark:bg-blue-900/30 border-b border-slate-200 dark:border-slate-700">
+                🌐 GST Portal (GSTR-2B)
+              </th>
+              <th className="px-2 py-1.5 text-center font-bold text-orange-600 bg-orange-50 dark:bg-orange-900/20 border-b border-slate-200 dark:border-slate-700 w-14">Status</th>
+              <th colSpan={5} className="px-3 py-1.5 text-center font-bold text-violet-700 bg-violet-50 dark:bg-violet-900/30 border-b border-slate-200 dark:border-slate-700">
+                📒 Books (Purchase Register)
+              </th>
+              <th className="px-2 py-1.5 text-center font-bold text-slate-500 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700" colSpan={2}>Actions</th>
+            </tr>
+            {/* Column headers */}
+            <tr className="bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
+              <th className="px-2 py-2 text-slate-400 font-semibold text-center">#</th>
+              <th className="px-3 py-2 text-blue-600 font-semibold whitespace-nowrap">GSTIN</th>
+              <th className="px-3 py-2 text-blue-600 font-semibold whitespace-nowrap">Party</th>
+              <th className="px-3 py-2 text-blue-600 font-semibold whitespace-nowrap">Invoice No</th>
+              <th className="px-3 py-2 text-blue-600 font-semibold whitespace-nowrap">Date</th>
+              <th className="px-3 py-2 text-right text-blue-600 font-semibold whitespace-nowrap">Value ₹</th>
+              <th className="px-2 py-2 text-center text-orange-500 font-semibold bg-orange-50/50 dark:bg-orange-900/10">⚡</th>
+              <th className="px-3 py-2 text-violet-600 font-semibold whitespace-nowrap">GSTIN</th>
+              <th className="px-3 py-2 text-violet-600 font-semibold whitespace-nowrap">Party</th>
+              <th className="px-3 py-2 text-violet-600 font-semibold whitespace-nowrap">Invoice No</th>
+              <th className="px-3 py-2 text-violet-600 font-semibold whitespace-nowrap">Date</th>
+              <th className="px-3 py-2 text-right text-violet-600 font-semibold whitespace-nowrap">Value ₹</th>
+              <th className="px-2 py-2 text-center text-slate-500 font-semibold whitespace-nowrap">💬</th>
+              <th className="px-2 py-2 text-center text-slate-500 font-semibold whitespace-nowrap">Resolve</th>
+            </tr>
+          </thead>
+          <tbody>
+            {paged.map((r, idx) => {
+              const p     = r.portal?.portal || r.portal;
+              const b     = r.books?.books   || r.books;
+              const pName = p?.tradeOrLegalName || manualTradeNames?.[p?.gstin] || '—';
+              const bName = b?.tradeOrLegalName || manualTradeNames?.[b?.gstin] || '—';
+              const rowKey = r.key || `cg_${idx}`;
+              const valDiff  = Math.abs((p?.invoiceValue||0) - (b?.invoiceValue||0));
+              const dateDiff = p?.invoiceDate && b?.invoiceDate &&
+                               normaliseDateStr(p.invoiceDate) !== normaliseDateStr(b.invoiceDate);
+              return (
+                <tr key={idx}
+                  className="border-b border-orange-100 dark:border-orange-900/30 hover:bg-orange-50/40 dark:hover:bg-orange-900/10 cursor-pointer transition-colors"
+                  onClick={() => onRowClick && onRowClick(r)}
+                >
+                  <td className="px-2 py-2 text-center text-slate-400">{(page-1)*PAGE_SIZE+idx+1}</td>
+                  {/* Portal side */}
+                  <td className="px-3 py-2">
+                    <span className="font-mono text-[10px] text-blue-700 dark:text-blue-400 font-bold">{p?.gstin||'—'}</span>
+                  </td>
+                  <td className="px-3 py-2 max-w-[120px] truncate text-slate-700 dark:text-slate-200" title={pName}>{pName}</td>
+                  <td className="px-3 py-2 font-mono font-bold text-blue-700 dark:text-blue-300 whitespace-nowrap">{p?.invoiceNoRaw||p?.invoiceNo||'—'}</td>
+                  <td className={`px-3 py-2 whitespace-nowrap text-[11px] ${dateDiff?'text-red-500 font-semibold':'text-slate-500'}`}>{p?.invoiceDate||'—'}</td>
+                  <td className="px-3 py-2 text-right font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap">₹{fmt(p?.invoiceValue||0)}</td>
+                  {/* Status */}
+                  <td className="px-2 py-2 text-center bg-orange-50/40 dark:bg-orange-900/10 border-l border-r border-orange-200 dark:border-orange-800">
+                    <div className="flex flex-col items-center gap-0.5">
+                      <span className="text-[8px] font-bold text-red-600 bg-red-100 px-1 py-0.5 rounded border border-red-200">GSTIN≠</span>
+                      {r.valuesIdentical && <span className="text-[8px] text-emerald-600 font-bold">val ✓</span>}
+                      {valDiff > 0.01 && <span className="text-[8px] text-amber-600">Δ{fmt(valDiff)}</span>}
+                      {dateDiff && <span className="text-[8px] text-orange-600 font-bold">date≠</span>}
+                    </div>
+                  </td>
+                  {/* Books side */}
+                  <td className="px-3 py-2">
+                    <span className="font-mono text-[10px] text-violet-700 dark:text-violet-400 font-bold">{b?.gstin||'—'}</span>
+                  </td>
+                  <td className="px-3 py-2 min-w-[120px]" onClick={e=>e.stopPropagation()}>
+                    <TradeNameCell gstin={b?.gstin||''} manualTradeNames={manualTradeNames} onSave={onSaveTradeName}/>
+                  </td>
+                  <td className="px-3 py-2 font-mono font-bold text-violet-700 dark:text-violet-300 whitespace-nowrap">{b?.invoiceNoRaw||b?.invoiceNo||'—'}</td>
+                  <td className={`px-3 py-2 whitespace-nowrap text-[11px] ${dateDiff?'text-red-500 font-semibold':'text-slate-500'}`}>{b?.invoiceDate||'—'}</td>
+                  <td className="px-3 py-2 text-right font-semibold text-violet-700 dark:text-violet-300 whitespace-nowrap">₹{fmt(b?.invoiceValue||0)}</td>
+                  {/* Comment */}
+                  <td className="px-2 py-2 text-center" onClick={e=>e.stopPropagation()}>
+                    {onSaveComment && <CommentCell rowKey={rowKey} comments={comments} onSave={onSaveComment}/>}
+                  </td>
+                  {/* Resolve action */}
+                  <td className="px-2 py-2 text-center" onClick={e=>e.stopPropagation()}>
+                    <button
+                      onClick={() => onConfirmMatch && onConfirmMatch(r)}
+                      title="Confirm these are the same invoice — moves to Matched"
+                      className="px-2 py-1 rounded text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors whitespace-nowrap"
+                    >
+                      Resolve ✓
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          {/* Totals footer */}
+          <tfoot>
+            <tr className="bg-slate-100 dark:bg-slate-800 border-t-2 border-orange-200 dark:border-orange-800 font-bold text-xs">
+              <td className="px-3 py-2.5 text-slate-500">TOTAL</td>
+              <td className="px-3 py-2.5 text-[10px] text-slate-400" colSpan={4}>{filtered.length} conflicts</td>
+              <td className="px-3 py-2.5 text-right text-blue-700 dark:text-blue-300">₹{fmt(totalPortal)}</td>
+              <td className="px-3 py-2.5"/>
+              <td className="px-3 py-2.5" colSpan={4}/>
+              <td className="px-3 py-2.5 text-right text-violet-700 dark:text-violet-300">₹{fmt(totalBooks)}</td>
+              <td colSpan={2}/>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between mt-3 text-xs">
+          <span className="text-slate-500">Showing {(page-1)*PAGE_SIZE+1}–{Math.min(page*PAGE_SIZE,filtered.length)} of {filtered.length}</span>
+          <div className="flex gap-2">
+            <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1} className="px-3 py-1.5 rounded-lg border text-xs disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800">Prev</button>
+            <span className="py-1.5 text-slate-500">Page {page}/{totalPages}</span>
+            <button onClick={()=>setPage(p=>Math.min(totalPages,p+1))} disabled={page===totalPages} className="px-3 py-1.5 rounded-lg border text-xs disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800">Next</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
    GLOBAL SEARCH TAB  — search across ALL categories simultaneously
 ═══════════════════════════════════════════════════════════════════════════ */
 
 // Category metadata used in the search tab
 const CAT_META = {
-  matched:    { label: 'Matched',         short: 'Matched',     bg: 'bg-emerald-100 dark:bg-emerald-900/40', text: 'text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-500' },
-  mismatch:   { label: 'Amount Mismatch', short: 'Mismatch',    bg: 'bg-amber-100 dark:bg-amber-900/40',    text: 'text-amber-700 dark:text-amber-300',    dot: 'bg-amber-500'   },
-  portalOnly: { label: 'In Portal Only',  short: 'Portal Only', bg: 'bg-blue-100 dark:bg-blue-900/40',      text: 'text-blue-700 dark:text-blue-300',      dot: 'bg-blue-500'    },
-  booksOnly:  { label: 'In Books Only',   short: 'Books Only',  bg: 'bg-rose-100 dark:bg-rose-900/40',      text: 'text-rose-700 dark:text-rose-300',      dot: 'bg-rose-500'    },
+  matched:     { label: 'Matched',         short: 'Matched',     bg: 'bg-emerald-100 dark:bg-emerald-900/40', text: 'text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-500' },
+  mismatch:    { label: 'Amount Mismatch', short: 'Mismatch',    bg: 'bg-amber-100 dark:bg-amber-900/40',    text: 'text-amber-700 dark:text-amber-300',    dot: 'bg-amber-500'   },
+  portalOnly:  { label: 'In Portal Only',  short: 'Portal Only', bg: 'bg-blue-100 dark:bg-blue-900/40',      text: 'text-blue-700 dark:text-blue-300',      dot: 'bg-blue-500'    },
+  booksOnly:   { label: 'In Books Only',   short: 'Books Only',  bg: 'bg-rose-100 dark:bg-rose-900/40',      text: 'text-rose-700 dark:text-rose-300',      dot: 'bg-rose-500'    },
+  crossGstin:  { label: 'GSTIN Conflict',  short: 'GSTIN≠',     bg: 'bg-orange-100 dark:bg-orange-900/40',  text: 'text-orange-700 dark:text-orange-300',   dot: 'bg-orange-500'  },
 };
 
 const SORT_COLS = [
@@ -2226,7 +2691,7 @@ function highlight(text, query) {
 
 const GlobalSearchTab = ({ results }) => {
   const [query,       setQuery]       = useState('');
-  const [catFilter,   setCatFilter]   = useState(['matched','mismatch','portalOnly','booksOnly']);
+  const [catFilter,   setCatFilter]   = useState(['matched','mismatch','portalOnly','booksOnly','crossGstin']);
   const [minVal,      setMinVal]      = useState('');
   const [maxVal,      setMaxVal]      = useState('');
   const [dateFrom,    setDateFrom]    = useState('');
@@ -2272,6 +2737,31 @@ const GlobalSearchTab = ({ results }) => {
       _valueDiff: r => r.valueDiff, _taxDiff: r => r.taxDiff });
     push(results.portalOnly, 'portalOnly', r => r.portal);
     push(results.booksOnly,  'booksOnly',  r => r.books);
+    // Cross-GSTIN pairs — index by portal invoice
+    (results.crossGstin||[]).forEach(r => {
+      const p = r.portal?.portal || r.portal;
+      const b = r.books?.books   || r.books;
+      if (!p) return;
+      flat.push({
+        catId: 'crossGstin',
+        gstin:        p.gstin         || '',
+        partyName:    p.tradeOrLegalName || '',
+        invoiceNo:    p.invoiceNo     || '',
+        invoiceNoRaw: p.invoiceNoRaw  || '',
+        invoiceDate:  p.invoiceDate   || '',
+        invoiceValue: p.invoiceValue  || 0,
+        taxableValue: p.taxableValue  || 0,
+        igst:         p.igst          || 0,
+        cgst:         p.cgst          || 0,
+        sgst:         p.sgst          || 0,
+        cess:         p.cess          || 0,
+        totalTax:    (p.igst||0) + (p.cgst||0) + (p.sgst||0),
+        placeOfSupply: p.placeOfSupply || '',
+        // Extra for search display
+        booksGstin:  b?.gstin         || '',
+        _raw: r,
+      });
+    });
 
     // Re-attach mismatch diffs
     flat.forEach(item => {
@@ -2562,9 +3052,15 @@ const GlobalSearchTab = ({ results }) => {
                           {r.valueDiff > 0 ? '▲' : '▼'}₹{Math.abs(r.valueDiff).toFixed(0)}
                         </span>
                       )}
+                      {r.catId === 'crossGstin' && (
+                        <span className="ml-1 text-[9px] font-bold text-red-600">⚡GSTIN≠</span>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 font-mono text-[11px] text-slate-600 dark:text-slate-300">
                       {highlight(r.gstin, query)}
+                      {r.booksGstin && r.booksGstin !== r.gstin && (
+                        <div className="text-[9px] text-violet-500 font-semibold">Books: {r.booksGstin}</div>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 text-slate-700 dark:text-slate-200 max-w-[130px] truncate" title={r.partyName}>
                       {highlight(r.partyName || '—', query)}
@@ -3395,6 +3891,7 @@ export default function GSTReconciliation() {
   const [snapshotSaved,    setSnapshotSaved]    = useState(false); // becomes true after baseline auto-save
   const [snapshotSaving,   setSnapshotSaving]   = useState(false);
   const [snapshotPrompt,   setSnapshotPrompt]   = useState(null); // {pendingEdit: () => void} | null
+  const [invoiceDetail,    setInvoiceDetail]    = useState(null); // { record, tabId } | null
 
   // Client integration
   const [clients,         setClients]          = useState([]);
@@ -3584,18 +4081,25 @@ export default function GSTReconciliation() {
     guardEdit(() => setResults(prev => {
       if (!prev) return prev;
       const updated = { ...prev };
-      updated.portalOnly = prev.portalOnly.filter(r => r.key !== pair.portal?.key);
-      updated.booksOnly  = prev.booksOnly.filter(r  => r.key !== pair.books?.key);
+      // Remove from portalOnly/booksOnly and crossGstin
+      updated.portalOnly  = prev.portalOnly.filter(r => r.key !== pair.portal?.key);
+      updated.booksOnly   = prev.booksOnly.filter(r  => r.key !== pair.books?.key);
+      updated.crossGstin  = (prev.crossGstin||[]).filter(r => r.key !== pair.key && r.key !== pair.portal?.key);
+      const pInv = pair.portal?.portal || pair.portal;
+      const bInv = pair.books?.books   || pair.books;
       updated.matched = [...prev.matched, {
-        portal: pair.portal?.portal,
-        books:  pair.books?.books,
-        key:    pair.portal?.key || pair.books?.key,
+        portal: pInv,
+        books:  bInv,
+        key:    pair.portal?.key || pair.books?.key || pair.key,
         manualMatch: true,
-        normalizedMatch: (pair.portal?.portal?.invoiceNoRaw || '') !== (pair.books?.books?.invoiceNoRaw || ''),
+        gstinMismatchResolved: true,
+        normalizedMatch: (pInv?.invoiceNoRaw || '') !== (bInv?.invoiceNoRaw || ''),
       }];
       return updated;
     }));
-    toast.success(`Matched: ${pair.portal?.portal?.invoiceNoRaw} ↔ ${pair.books?.books?.invoiceNoRaw}`);
+    const pInv = pair.portal?.portal || pair.portal;
+    const bInv = pair.books?.books   || pair.books;
+    toast.success(`GSTIN Conflict Resolved: ${pInv?.invoiceNoRaw} ↔ ${bInv?.invoiceNoRaw}`);
   }, [guardEdit]);
 
   // Fetch clients on mount
@@ -3711,7 +4215,7 @@ export default function GSTReconciliation() {
   const handleReset = () => { setPortalFile(null); setBooksFile(null); setResults(null); setPeriod(''); setLoadedSessionId(null); setBaselineSnapshot(null); setSnapshotSaved(false); setSnapshotPrompt(null); };
 
   const activeRecords = results && activeTab !== 'search'
-    ? { matched:results.matched, mismatch:results.mismatch, portalOnly:results.portalOnly, booksOnly:results.booksOnly }[activeTab] || []
+    ? { matched:results.matched, mismatch:results.mismatch, portalOnly:results.portalOnly, booksOnly:results.booksOnly, crossGstin: results.crossGstin||[] }[activeTab] || []
     : [];
   const activeTabMeta = TABS.find(t => t.id === activeTab);
 
@@ -3984,11 +4488,13 @@ export default function GSTReconciliation() {
                 );
               })()}
 
-              {/* Summary cards — 4 data tabs */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+              {/* Summary cards — all data tabs */}
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
                 {TABS.filter(t => t.id !== 'search').map(tab => {
                   const count = results[tab.id]?.length || 0;
-                  const val = (results[tab.id]||[]).reduce((s,r) => s+((tab.id==='booksOnly'?r.books:r.portal)?.invoiceValue||0), 0);
+                  const val = tab.id === 'crossGstin'
+                    ? (results[tab.id]||[]).reduce((s,r) => s+(r.portal?.portal?.invoiceValue||0), 0)
+                    : (results[tab.id]||[]).reduce((s,r) => s+((tab.id==='booksOnly'?r.books:r.portal)?.invoiceValue||0), 0);
                   const isActive = activeTab === tab.id;
                   return (
                     <motion.div key={tab.id} whileHover={{y:-2}} onClick={()=>setActiveTab(tab.id)}
@@ -4014,7 +4520,7 @@ export default function GSTReconciliation() {
                 <div className="flex items-center overflow-x-auto border-b border-slate-200 dark:border-slate-700 px-2 pt-2 gap-0">
                   {TABS.map(tab => {
                     const count = tab.id === 'search'
-                      ? (results.matched.length + results.mismatch.length + results.portalOnly.length + results.booksOnly.length)
+                      ? (results.matched.length + results.mismatch.length + results.portalOnly.length + results.booksOnly.length + (results.crossGstin||[]).length)
                       : results[tab.id]?.length || 0;
                     const isActive = activeTab === tab.id;
                     return (
@@ -4041,6 +4547,17 @@ export default function GSTReconciliation() {
                   </div>
                   {activeTab === 'search'
                     ? <GlobalSearchTab key="search" results={results}/>
+                    : activeTab === 'crossGstin'
+                    ? <CrossGstinTable
+                        key="crossGstin"
+                        records={activeRecords}
+                        manualTradeNames={manualTradeNames}
+                        onSaveTradeName={onSaveTradeName}
+                        comments={invoiceComments}
+                        onSaveComment={onSaveComment}
+                        onConfirmMatch={handleConfirmMatch}
+                        onRowClick={record => setInvoiceDetail({ record, tabId: 'crossGstin' })}
+                      />
                     : <ResultTable
                         key={activeTab}
                         tabId={activeTab}
@@ -4050,6 +4567,7 @@ export default function GSTReconciliation() {
                         onSaveTradeName={onSaveTradeName}
                         comments={invoiceComments}
                         onSaveComment={onSaveComment}
+                        onRowClick={record => setInvoiceDetail({ record, tabId: activeTab })}
                       />
                   }
                 </div>
@@ -4098,6 +4616,19 @@ export default function GSTReconciliation() {
             booksOnly={results.booksOnly   || []}
             onConfirmMatch={handleConfirmMatch}
             onClose={() => setShowCompare(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Invoice Detail Modal ── */}
+      <AnimatePresence>
+        {invoiceDetail && (
+          <InvoiceDetailModal
+            record={invoiceDetail.record}
+            tabId={invoiceDetail.tabId}
+            manualTradeNames={manualTradeNames}
+            comments={invoiceComments}
+            onClose={() => setInvoiceDetail(null)}
           />
         )}
       </AnimatePresence>
