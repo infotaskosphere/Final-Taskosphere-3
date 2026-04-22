@@ -133,18 +133,25 @@ app = FastAPI(title="Taskosphere Backend", redirect_slashes=False)
 # headers at all — the browser shows "No Access-Control-Allow-Origin". This is
 # NOT a CORS misconfiguration; it is a cold-start timing issue. Keeping CORS
 # registered first ensures that once the server wakes, the headers are correct.
+#
+# allow_origin_regex also covers any Render preview-deploy URL
+# (*.onrender.com) so staging branches don't need separate config updates.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://final-taskosphere-frontend.onrender.com",
         "http://localhost:3000",
         "http://localhost:5173",
+        "http://localhost:5174",
         "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
         "http://127.0.0.1:3000",
     ],
+    allow_origin_regex=r"https://.*\.onrender\.com",  # covers all Render preview URLs
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With",
+                   "Cache-Control", "X-CSRF-Token"],
     expose_headers=["*"],
     max_age=3600,
 )
@@ -6549,27 +6556,32 @@ async def extract_trademark_notice(
 async def universal_exception_handler(request: Request, exc: Exception):
     logger.error(f"Critical Error on {request.url.path}: {str(exc)}")
     logger.error(traceback.format_exc())
-    # Determine the correct origin to echo back (support localhost dev too)
+    # Echo back the request origin when it's a known safe origin.
+    # Also accept any *.onrender.com preview URL so staging branches work.
+    import re as _re
     origin = request.headers.get("origin", "")
     allowed_origins = [
         "https://final-taskosphere-frontend.onrender.com",
         "http://localhost:3000",
         "http://localhost:5173",
+        "http://localhost:5174",
         "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
         "http://127.0.0.1:3000",
     ]
-    cors_origin = origin if origin in allowed_origins else "https://final-taskosphere-frontend.onrender.com"
+    is_allowed = (origin in allowed_origins) or bool(_re.match(r"https://.*\.onrender\.com$", origin))
+    cors_origin = origin if is_allowed else "https://final-taskosphere-frontend.onrender.com"
     headers = {
         "Access-Control-Allow-Origin": cors_origin,
         "Access-Control-Allow-Credentials": "true",
         "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, X-Requested-With",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, X-Requested-With, Cache-Control",
     }
     return JSONResponse(
         status_code=500,
         content={
             "error": "InternalServerError",
-            "message": "A database or logic error occurred.",
+            "message": "A server error occurred. Please try again.",
             "path": request.url.path
         },
         headers=headers,
