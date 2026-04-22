@@ -194,6 +194,189 @@ function parseGSTPortalFile(workbook) {
   return data;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   CLIENT-SIDE GSTIN LOOKUP ENGINE
+   ─────────────────────────────────────────────────────────────────────────
+   Runs entirely in the browser — no backend round-trip required.
+   Avoids the Render-backend CORS failures caused by the backend's own
+   outbound HTTP calls to GST portal being blocked on Render's free tier.
+
+   Strategy (tried in order, first success wins):
+     1. GST Portal public JSON API  (services.gst.gov.in/services/api/public/gstin)
+     2. GST taxpayer-details API    (services.gst.gov.in/services/api/search/taxpayerDetails)
+     3. CORS proxy → knowyourgst.com  (allorigins.win free proxy, HTML scrape)
+     4. Backend API fallback        (kept for completeness when proxy is down)
+   Each source has a hard 6-second abort signal so a dead host can't stall UI.
+   Results are cached in module-scope Map so repeated lookups are instant.
+═══════════════════════════════════════════════════════════════════════════ */
+
+const GST_STATE_CODES = {
+  '01':'Jammu & Kashmir','02':'Himachal Pradesh','03':'Punjab','04':'Chandigarh',
+  '05':'Uttarakhand','06':'Haryana','07':'Delhi','08':'Rajasthan','09':'Uttar Pradesh',
+  '10':'Bihar','11':'Sikkim','12':'Arunachal Pradesh','13':'Nagaland','14':'Manipur',
+  '15':'Mizoram','16':'Tripura','17':'Meghalaya','18':'Assam','19':'West Bengal',
+  '20':'Jharkhand','21':'Odisha','22':'Chhattisgarh','23':'Madhya Pradesh',
+  '24':'Gujarat','25':'Daman & Diu','26':'Dadra & Nagar Haveli','27':'Maharashtra',
+  '28':'Andhra Pradesh','29':'Karnataka','30':'Goa','31':'Lakshadweep','32':'Kerala',
+  '33':'Tamil Nadu','34':'Puducherry','35':'Andaman & Nicobar','36':'Telangana',
+  '37':'Andhra Pradesh','38':'Ladakh','97':'Other Territory',
+};
+
+/** Decode static info from the GSTIN structure itself — no network call needed */
+function decodeGstin(gstin) {
+  const g = (gstin || '').toUpperCase().trim();
+  const stateCode = g.slice(0, 2);
+  const pan       = g.slice(2, 12);
+  const entityCode = g[12] || '';
+  // Entity-type letter is the 6th char of the embedded PAN (pos 7 in GSTIN = index 6)
+  // P=Individual, C=Company, H=HUF, F=Firm, A=AOP, B=BOI, G=Govt, L=LLP, J=AJP, T=Trust
+  const entityTypes = { P:'Individual',C:'Company',H:'HUF',F:'Firm',A:'AOP/BOI',
+                        B:'BOI',G:'Government',L:'LLP',J:'AJP',T:'Trust' };
+  const entityLetter = pan[4] || '';
+  return {
+    stateCode,
+    state:  GST_STATE_CODES[stateCode] || '',
+    pan,
+    entityType: entityTypes[entityLetter] || 'Regular',
+    regNumber: entityCode,
+  };
+}
+
+/** Module-scope cache: gstin → { tradeName, legalName, state, source } */
+const _gstinCache = new Map();
+/** In-flight promise cache to avoid parallel duplicate fetches */
+const _gstinInFlight = new Map();
+
+const GSTIN_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+
+/**
+ * Main entry point. Returns { tradeName, legalName, state, stateCode, entityType, source }.
+ * Always resolves (never rejects). Falls through all sources silently.
+ */
+async function clientGstinLookup(gstin) {
+  const g = (gstin || '').toUpperCase().trim();
+  if (!GSTIN_PATTERN.test(g)) return { tradeName:'', legalName:'', state:'', source:'invalid' };
+
+  // Return cached result immediately
+  if (_gstinCache.has(g)) return _gstinCache.get(g);
+
+  // Deduplicate concurrent calls for the same GSTIN
+  if (_gstinInFlight.has(g)) return _gstinInFlight.get(g);
+
+  const staticInfo = decodeGstin(g);
+
+  const promise = (async () => {
+    // ── Source 1: GST portal public JSON API ──────────────────────────────
+    try {
+      const ctrl = new AbortController();
+      const tid  = setTimeout(() => ctrl.abort(), 6000);
+      const r = await fetch(
+        `https://services.gst.gov.in/services/api/public/gstin?gstin=${g}`,
+        { signal: ctrl.signal, headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' } }
+      );
+      clearTimeout(tid);
+      if (r.ok) {
+        const d = await r.json();
+        const tn = ((d.tradeNam || d.tradeName || '')).trim();
+        const ln = ((d.lgnm    || d.legalName  || '')).trim();
+        if (tn || ln) {
+          const out = { tradeName:tn, legalName:ln, state:staticInfo.state,
+                        stateCode:staticInfo.stateCode, entityType:staticInfo.entityType,
+                        source:'gst_public_api' };
+          _gstinCache.set(g, out); _gstinInFlight.delete(g); return out;
+        }
+      }
+    } catch (_) { /* timed-out or CORS-blocked — continue */ }
+
+    // ── Source 2: GST taxpayer-details search API ─────────────────────────
+    try {
+      const ctrl = new AbortController();
+      const tid  = setTimeout(() => ctrl.abort(), 6000);
+      const r = await fetch(
+        `https://services.gst.gov.in/services/api/search/taxpayerDetails?gstin=${g}`,
+        { signal: ctrl.signal, headers: { Accept: 'application/json' } }
+      );
+      clearTimeout(tid);
+      if (r.ok) {
+        const d = await r.json();
+        const tn = (d.tradeNam || '').trim();
+        const ln = (d.lgnm     || '').trim();
+        if (tn || ln) {
+          const out = { tradeName:tn, legalName:ln, state:staticInfo.state,
+                        stateCode:staticInfo.stateCode, entityType:staticInfo.entityType,
+                        source:'gst_taxpayer_api' };
+          _gstinCache.set(g, out); _gstinInFlight.delete(g); return out;
+        }
+      }
+    } catch (_) { /* continue */ }
+
+    // ── Source 3: CORS proxy → knowyourgst.com (HTML scrape) ─────────────
+    try {
+      const target   = `https://www.knowyourgst.com/gst-number-search/${g}/`;
+      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`;
+      const ctrl = new AbortController();
+      const tid  = setTimeout(() => ctrl.abort(), 8000);
+      const r = await fetch(proxyUrl, { signal: ctrl.signal });
+      clearTimeout(tid);
+      if (r.ok) {
+        const d = await r.json();
+        const html = d.contents || '';
+        let tn = '', ln = '';
+        // knowyourgst HTML pattern: label cell → value cell
+        const tmMatch = html.match(/Trade\s*Name[^<]*<\/[^>]+>\s*<[^>]+>\s*([^<]{3,80})/i);
+        if (tmMatch) tn = tmMatch[1].trim();
+        const lnMatch = html.match(/Legal\s*Name[^<]*<\/[^>]+>\s*<[^>]+>\s*([^<]{3,80})/i);
+        if (lnMatch) ln = lnMatch[1].trim();
+        // Fallback: title tag (knowyourgst includes business name in title)
+        if (!tn && !ln) {
+          const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+          if (titleMatch) {
+            let t = titleMatch[1].replace(/[\|\-].*KnowYourGST.*/i, '').trim();
+            if (t && !t.toUpperCase().includes(g)) tn = t;
+          }
+        }
+        if (tn || ln) {
+          const out = { tradeName:tn, legalName:ln, state:staticInfo.state,
+                        stateCode:staticInfo.stateCode, entityType:staticInfo.entityType,
+                        source:'knowyourgst_proxy' };
+          _gstinCache.set(g, out); _gstinInFlight.delete(g); return out;
+        }
+      }
+    } catch (_) { /* proxy down — continue */ }
+
+    // ── Source 4: Backend API (last resort, keeps old behaviour) ──────────
+    try {
+      const ctrl = new AbortController();
+      const tid  = setTimeout(() => ctrl.abort(), 8000);
+      const r = await fetch(`/api/gst-reconciliation/gstin-lookup/${g}`, {
+        signal: ctrl.signal,
+        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}`, Accept: 'application/json' },
+      });
+      clearTimeout(tid);
+      if (r.ok) {
+        const d = await r.json();
+        const tn = (d.trade_name || '').trim();
+        const ln = (d.legal_name || '').trim();
+        if (tn || ln) {
+          const out = { tradeName:tn, legalName:ln, state:staticInfo.state,
+                        stateCode:staticInfo.stateCode, entityType:staticInfo.entityType,
+                        source:'backend_api' };
+          _gstinCache.set(g, out); _gstinInFlight.delete(g); return out;
+        }
+      }
+    } catch (_) { /* backend unreachable — return static info */ }
+
+    // All sources failed — return static info decoded from GSTIN itself
+    const out = { tradeName:'', legalName:'', ...staticInfo, source:'static_decode_only' };
+    _gstinCache.set(g, out);
+    _gstinInFlight.delete(g);
+    return out;
+  })();
+
+  _gstinInFlight.set(g, promise);
+  return promise;
+}
+
 /**
  * extractPortalMetadata — reads the GSTR-2B Excel header rows (0-9) to pull:
  *   • period     e.g. "Oct-24"  (from "Return Period : 102024" or "October 2024")
@@ -2427,14 +2610,20 @@ const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) =
   }, [pairs]);
 
   const lookupName = async (gstin) => {
-    if (!gstin || gstinNames[gstin] || lookingUp[gstin]) return;
-    setLookingUp(p=>({...p,[gstin]:true}));
+    if (!gstin || lookingUp[gstin]) return;
+    // Skip if we already have a name from portal data or a previous lookup
+    if (gstinNames[gstin] || portalNameMap[gstin]) return;
+    setLookingUp(p => ({ ...p, [gstin]: true }));
     try {
-      const r = await api.get(`/gst-reconciliation/gstin-lookup/${gstin}`);
-      const name = r.data?.trade_name || r.data?.legal_name || '';
-      if (name) setGstinNames(p=>({...p,[gstin]:name}));
-    } catch(_) {}
-    setLookingUp(p=>({...p,[gstin]:false}));
+      const result = await clientGstinLookup(gstin);
+      const name = result.tradeName || result.legalName || '';
+      // Even if no name found, cache static state info so we show state tooltip
+      setGstinNames(p => ({
+        ...p,
+        [gstin]: name || (result.state ? `[${result.state}]` : ''),
+      }));
+    } catch (_) { /* clientGstinLookup never rejects, but guard anyway */ }
+    setLookingUp(p => ({ ...p, [gstin]: false }));
   };
 
   // Auto-fetch names for all unique GSTINs without a name (batched)
@@ -2653,16 +2842,15 @@ export default function GSTReconciliation() {
         gstinLookupTimer.current = setTimeout(async () => {
           setGstinLookupLoading(true);
           try {
-            const r = await api.get(`/gst-reconciliation/gstin-lookup/${g}`);
-            const name = r?.data?.trade_name || r?.data?.legal_name || '';
+            const result = await clientGstinLookup(g);
+            const name = result.tradeName || result.legalName || '';
             if (name) {
-              setCompany(prev => ({
-                ...prev,
-                name: prev.name || name,
-              }));
+              setCompany(prev => ({ ...prev, name: prev.name || name }));
               toast.success(`Company name fetched: ${name}`, { duration: 3000 });
+            } else if (result.state) {
+              toast.info(`GSTIN valid — ${result.entityType}, ${result.state}`, { duration: 2500 });
             }
-          } catch (_) { /* silent – lookup is best-effort */ }
+          } catch (_) { /* silent */ }
           finally { setGstinLookupLoading(false); }
         }, 800);
       }
@@ -2807,11 +2995,11 @@ export default function GSTReconciliation() {
       if (meta.period || meta.tradeName || meta.gstin) {
         toast.success('Period & company auto-detected from GSTR-2B file', { duration: 3000 });
       }
-      // If we got a GSTIN and no name yet, trigger GSTIN portal lookup
+      // If we got a GSTIN and no name yet, trigger client-side GSTIN lookup
       if (meta.gstin && !meta.tradeName) {
         try {
-          const r = await api.get(`/gst-reconciliation/gstin-lookup/${meta.gstin}`);
-          const name = r?.data?.trade_name || r?.data?.legal_name || '';
+          const result = await clientGstinLookup(meta.gstin);
+          const name = result.tradeName || result.legalName || '';
           if (name) setCompany(prev => ({ ...prev, name: prev.name || name }));
         } catch (_) { /* best-effort */ }
       }
