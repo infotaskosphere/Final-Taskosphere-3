@@ -12,6 +12,7 @@ import {
   Phone, Mail, Calendar, ChevronRight, ScanSearch,
   Filter, Tag, ArrowUpDown, ChevronsUpDown,
   History, Clock, Trash2, ChevronDown, User, Loader2, FolderOpen, Edit3,
+  MessageSquare,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -858,7 +859,7 @@ const sumTax = (arr, src) => arr.reduce((s, r) => { const i = r[src]; return s +
 /* ═══════════════════════════════════════════════════════════════════════════
    PDF EXPORT  (jsPDF + autotable — landscape A4)
 ═══════════════════════════════════════════════════════════════════════════ */
-function exportPDF(results, company, period, manualTradeNames = {}) {
+function exportPDF(results, company, period, manualTradeNames = {}, invoiceComments = {}) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
   const BRAND  = [13, 59, 102];
@@ -1016,16 +1017,22 @@ function exportPDF(results, company, period, manualTradeNames = {}) {
     let y = sectionHeading(22, '✓  Matched Invoices — Present in both GST Portal and Books with matching amounts', GREEN, results.matched.length, sumVal(results.matched, 'portal'));
     autoTable(doc, {
       startY: y,
-      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Invoice Value (₹)', 'Taxable Value (₹)', 'IGST (₹)', 'CGST (₹)', 'SGST (₹)', 'Cess (₹)']],
-      body: results.matched.map((r, i) => [
-        i + 1, r.portal.gstin, r.portal.tradeOrLegalName || '—', r.portal.invoiceNoRaw,
-        r.portal.invoiceDate, fmt(r.portal.invoiceValue), fmt(r.portal.taxableValue),
-        fmt(r.portal.igst), fmt(r.portal.cgst), fmt(r.portal.sgst), fmt(r.portal.cess),
-      ]),
+      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Invoice Value (₹)', 'Taxable Value (₹)', 'IGST (₹)', 'CGST (₹)', 'SGST (₹)', 'Cess (₹)', 'Notes']],
+      body: results.matched.map((r, i) => {
+        const rowKey = r.key || `${r.portal.gstin}__${r.portal.invoiceNo}`;
+        const comment = invoiceComments?.[rowKey] || '';
+        const name = r.portal.tradeOrLegalName || manualTradeNames?.[r.portal.gstin] || r.books?.tradeOrLegalName || manualTradeNames?.[r.books?.gstin] || '—';
+        return [
+          i + 1, r.portal.gstin, name, r.portal.invoiceNoRaw,
+          r.portal.invoiceDate, fmt(r.portal.invoiceValue), fmt(r.portal.taxableValue),
+          fmt(r.portal.igst), fmt(r.portal.cgst), fmt(r.portal.sgst), fmt(r.portal.cess),
+          comment || '',
+        ];
+      }),
       headStyles: { fillColor: GREEN, textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
       bodyStyles: { fontSize: 7 },
       alternateRowStyles: { fillColor: [240, 253, 244] },
-      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 32 }, 2: { cellWidth: 38 }, 3: { cellWidth: 22 } },
+      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 32 }, 2: { cellWidth: 36 }, 3: { cellWidth: 20 }, 11: { cellWidth: 28, fontStyle: 'italic', textColor: [146, 64, 14] } },
       margin: { left: 14, right: 14 },
     });
   }
@@ -1039,20 +1046,26 @@ function exportPDF(results, company, period, manualTradeNames = {}) {
     let y = sectionHeading(22, '⚠  Amount Mismatch — Invoice found in both but amounts differ', AMBER, results.mismatch.length, sumVal(results.mismatch, 'portal'));
     autoTable(doc, {
       startY: y,
-      head: [['#', 'GSTIN', 'Party Name', 'Inv No', 'Date', 'Portal Value', 'Books Value', 'Diff (₹)', 'Portal Tax', 'Books Tax', 'Tax Diff (₹)']],
-      body: results.mismatch.map((r, i) => [
-        i + 1, r.portal.gstin, r.portal.tradeOrLegalName || '—', r.portal.invoiceNoRaw,
-        r.portal.invoiceDate,
-        fmt(r.portal.invoiceValue), fmt(r.books.invoiceValue),
-        { content: (r.valueDiff > 0 ? '+' : '') + fmt(r.valueDiff), styles: { textColor: r.valueDiff > 0 ? [37,99,235] : [220,38,38], fontStyle: 'bold' }},
-        fmt(r.portal.igst + r.portal.cgst + r.portal.sgst),
-        fmt(r.books.igst + r.books.cgst + r.books.sgst),
-        { content: (r.taxDiff > 0 ? '+' : '') + fmt(r.taxDiff), styles: { textColor: r.taxDiff > 0 ? [37,99,235] : [220,38,38], fontStyle: 'bold' }},
-      ]),
+      head: [['#', 'GSTIN', 'Party Name', 'Inv No', 'Date', 'Portal Value', 'Books Value', 'Diff (₹)', 'Portal Tax', 'Books Tax', 'Tax Diff (₹)', 'Notes']],
+      body: results.mismatch.map((r, i) => {
+        const rowKey = r.key || `${r.portal.gstin}__${r.portal.invoiceNo}`;
+        const comment = invoiceComments?.[rowKey] || '';
+        const name = r.portal.tradeOrLegalName || manualTradeNames?.[r.portal.gstin] || r.books?.tradeOrLegalName || manualTradeNames?.[r.books?.gstin] || '—';
+        return [
+          i + 1, r.portal.gstin, name, r.portal.invoiceNoRaw,
+          r.portal.invoiceDate,
+          fmt(r.portal.invoiceValue), fmt(r.books.invoiceValue),
+          { content: (r.valueDiff > 0 ? '+' : '') + fmt(r.valueDiff), styles: { textColor: r.valueDiff > 0 ? [37,99,235] : [220,38,38], fontStyle: 'bold' }},
+          fmt(r.portal.igst + r.portal.cgst + r.portal.sgst),
+          fmt(r.books.igst + r.books.cgst + r.books.sgst),
+          { content: (r.taxDiff > 0 ? '+' : '') + fmt(r.taxDiff), styles: { textColor: r.taxDiff > 0 ? [37,99,235] : [220,38,38], fontStyle: 'bold' }},
+          comment || '',
+        ];
+      }),
       headStyles: { fillColor: AMBER, textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
       bodyStyles: { fontSize: 7 },
       alternateRowStyles: { fillColor: [255, 251, 235] },
-      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 32 }, 2: { cellWidth: 36 } },
+      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 30 }, 2: { cellWidth: 30 }, 11: { cellWidth: 28, fontStyle: 'italic', textColor: [146, 64, 14] } },
       margin: { left: 14, right: 14 },
     });
   }
@@ -1066,18 +1079,24 @@ function exportPDF(results, company, period, manualTradeNames = {}) {
     let y = sectionHeading(22, '🌐  In GST Portal Only — Vendor uploaded but NOT recorded in Books. Action required.', BLUE, results.portalOnly.length, sumVal(results.portalOnly, 'portal'));
     autoTable(doc, {
       startY: y,
-      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Invoice Value (₹)', 'Taxable (₹)', 'IGST', 'CGST', 'SGST', 'Place', 'ITC']],
-      body: results.portalOnly.map((r, i) => [
-        i + 1, r.portal.gstin, r.portal.tradeOrLegalName || '—', r.portal.invoiceNoRaw,
-        r.portal.invoiceDate, fmt(r.portal.invoiceValue), fmt(r.portal.taxableValue),
-        fmt(r.portal.igst), fmt(r.portal.cgst), fmt(r.portal.sgst),
-        r.portal.placeOfSupply || '—',
-        { content: r.portal.itcAvailability || '—', styles: { textColor: r.portal.itcAvailability?.toLowerCase() === 'yes' ? [5,150,105] : [100,116,139], fontStyle: 'bold' }},
-      ]),
+      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Invoice Value (₹)', 'Taxable (₹)', 'IGST', 'CGST', 'SGST', 'Place', 'ITC', 'Notes']],
+      body: results.portalOnly.map((r, i) => {
+        const rowKey = r.key || `${r.portal.gstin}__${r.portal.invoiceNo}`;
+        const comment = invoiceComments?.[rowKey] || '';
+        const name = r.portal.tradeOrLegalName || manualTradeNames?.[r.portal.gstin] || '—';
+        return [
+          i + 1, r.portal.gstin, name, r.portal.invoiceNoRaw,
+          r.portal.invoiceDate, fmt(r.portal.invoiceValue), fmt(r.portal.taxableValue),
+          fmt(r.portal.igst), fmt(r.portal.cgst), fmt(r.portal.sgst),
+          r.portal.placeOfSupply || '—',
+          { content: r.portal.itcAvailability || '—', styles: { textColor: r.portal.itcAvailability?.toLowerCase() === 'yes' ? [5,150,105] : [100,116,139], fontStyle: 'bold' }},
+          comment || '',
+        ];
+      }),
       headStyles: { fillColor: BLUE, textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
       bodyStyles: { fontSize: 7 },
       alternateRowStyles: { fillColor: [239, 246, 255] },
-      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 32 }, 2: { cellWidth: 36 } },
+      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 30 }, 2: { cellWidth: 30 }, 12: { cellWidth: 28, fontStyle: 'italic', textColor: [146, 64, 14] } },
       margin: { left: 14, right: 14 },
     });
   }
@@ -1102,19 +1121,24 @@ function exportPDF(results, company, period, manualTradeNames = {}) {
 
     autoTable(doc, {
       startY: y,
-      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Invoice Value (₹)', 'Taxable (₹)', 'IGST', 'CGST', 'SGST', 'Place']],
-      body: results.booksOnly.map((r, i) => [
-        i + 1, r.books.gstin,
-        r.books.tradeOrLegalName || manualTradeNames?.[r.books.gstin] || '—',
-        r.books.invoiceNoRaw, r.books.invoiceDate,
-        fmt(r.books.invoiceValue), fmt(r.books.taxableValue),
-        fmt(r.books.igst), fmt(r.books.cgst), fmt(r.books.sgst),
-        r.books.placeOfSupply || '—',
-      ]),
+      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Invoice Value (₹)', 'Taxable (₹)', 'IGST', 'CGST', 'SGST', 'Place', 'Notes']],
+      body: results.booksOnly.map((r, i) => {
+        const rowKey = r.key || `${r.books.gstin}__${r.books.invoiceNo}`;
+        const comment = invoiceComments?.[rowKey] || '';
+        const name = r.books.tradeOrLegalName || manualTradeNames?.[r.books.gstin] || '—';
+        return [
+          i + 1, r.books.gstin, name,
+          r.books.invoiceNoRaw, r.books.invoiceDate,
+          fmt(r.books.invoiceValue), fmt(r.books.taxableValue),
+          fmt(r.books.igst), fmt(r.books.cgst), fmt(r.books.sgst),
+          r.books.placeOfSupply || '—',
+          comment || '',
+        ];
+      }),
       headStyles: { fillColor: ROSE, textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
       bodyStyles: { fontSize: 7 },
       alternateRowStyles: { fillColor: [255, 241, 242] },
-      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 30 }, 2: { cellWidth: 28 } },
+      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 30 }, 2: { cellWidth: 28 }, 11: { cellWidth: 28, fontStyle: 'italic', textColor: [146, 64, 14] } },
       margin: { left: 14, right: 14 },
     });
   }
@@ -1138,7 +1162,7 @@ function exportPDF(results, company, period, manualTradeNames = {}) {
 /* ═══════════════════════════════════════════════════════════════════════════
    WORD (.doc) EXPORT  — HTML-to-Word via Blob + file-saver
 ═══════════════════════════════════════════════════════════════════════════ */
-function exportWord(results, company, period, manualTradeNames = {}) {
+function exportWord(results, company, period, manualTradeNames = {}, invoiceComments = {}) {
   const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
 
   const rowsHtml = (headers, rows, headBg = '#0D3B66') => `
@@ -1173,12 +1197,15 @@ function exportWord(results, company, period, manualTradeNames = {}) {
     sumVal(results.matched, 'portal'),
     'These invoices are present in both the GST Portal (GSTR-2B) and your Books of Account with matching amounts. No action required.',
     rowsHtml(
-      ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable Value (₹)','IGST (₹)','CGST (₹)','SGST (₹)','Cess (₹)'],
-      results.matched.map((r, i) => [
-        i+1, r.portal.gstin, r.portal.tradeOrLegalName||'—', r.portal.invoiceNoRaw,
-        r.portal.invoiceDate, fmt(r.portal.invoiceValue), fmt(r.portal.taxableValue),
-        fmt(r.portal.igst), fmt(r.portal.cgst), fmt(r.portal.sgst), fmt(r.portal.cess),
-      ]),
+      ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable Value (₹)','IGST (₹)','CGST (₹)','SGST (₹)','Cess (₹)','Notes'],
+      results.matched.map((r, i) => {
+        const rk = r.key||`${r.portal.gstin}__${r.portal.invoiceNo}`;
+        const nm = r.portal.tradeOrLegalName||manualTradeNames?.[r.portal.gstin]||r.books?.tradeOrLegalName||manualTradeNames?.[r.books?.gstin]||'—';
+        return [i+1, r.portal.gstin, nm, r.portal.invoiceNoRaw,
+          r.portal.invoiceDate, fmt(r.portal.invoiceValue), fmt(r.portal.taxableValue),
+          fmt(r.portal.igst), fmt(r.portal.cgst), fmt(r.portal.sgst), fmt(r.portal.cess),
+          invoiceComments?.[rk]||''];
+      }),
       '#10b981'
     )
   );
@@ -1188,16 +1215,19 @@ function exportWord(results, company, period, manualTradeNames = {}) {
     sumVal(results.mismatch, 'portal'),
     'Invoice numbers match but the invoice value or tax amount differs between the GST Portal and Books. Please verify and correct the entries.',
     rowsHtml(
-      ['#','GSTIN','Party Name','Invoice No','Date','Portal Value','Books Value','Diff (₹)','Portal Tax','Books Tax','Tax Diff (₹)'],
-      results.mismatch.map((r, i) => [
-        i+1, r.portal.gstin, r.portal.tradeOrLegalName||'—', r.portal.invoiceNoRaw,
-        r.portal.invoiceDate,
-        fmt(r.portal.invoiceValue), fmt(r.books.invoiceValue),
-        { v: (r.valueDiff>0?'+':'')+fmt(r.valueDiff), c: r.valueDiff>0?'#1d4ed8':'#dc2626' },
-        fmt(r.portal.igst+r.portal.cgst+r.portal.sgst),
-        fmt(r.books.igst+r.books.cgst+r.books.sgst),
-        { v: (r.taxDiff>0?'+':'')+fmt(r.taxDiff), c: r.taxDiff>0?'#1d4ed8':'#dc2626' },
-      ]),
+      ['#','GSTIN','Party Name','Invoice No','Date','Portal Value','Books Value','Diff (₹)','Portal Tax','Books Tax','Tax Diff (₹)','Notes'],
+      results.mismatch.map((r, i) => {
+        const rk = r.key||`${r.portal.gstin}__${r.portal.invoiceNo}`;
+        const nm = r.portal.tradeOrLegalName||manualTradeNames?.[r.portal.gstin]||r.books?.tradeOrLegalName||manualTradeNames?.[r.books?.gstin]||'—';
+        return [i+1, r.portal.gstin, nm, r.portal.invoiceNoRaw,
+          r.portal.invoiceDate,
+          fmt(r.portal.invoiceValue), fmt(r.books.invoiceValue),
+          { v: (r.valueDiff>0?'+':'')+fmt(r.valueDiff), c: r.valueDiff>0?'#1d4ed8':'#dc2626' },
+          fmt(r.portal.igst+r.portal.cgst+r.portal.sgst),
+          fmt(r.books.igst+r.books.cgst+r.books.sgst),
+          { v: (r.taxDiff>0?'+':'')+fmt(r.taxDiff), c: r.taxDiff>0?'#1d4ed8':'#dc2626' },
+          invoiceComments?.[rk]||''];
+      }),
       '#f59e0b'
     )
   );
@@ -1207,14 +1237,17 @@ function exportWord(results, company, period, manualTradeNames = {}) {
     sumVal(results.portalOnly, 'portal'),
     'Vendor has filed these invoices on the GST Portal but they are NOT recorded in your Books of Account. These must be booked to avail ITC.',
     rowsHtml(
-      ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Place of Supply','ITC Available'],
-      results.portalOnly.map((r, i) => [
-        i+1, r.portal.gstin, r.portal.tradeOrLegalName||'—', r.portal.invoiceNoRaw,
-        r.portal.invoiceDate, fmt(r.portal.invoiceValue), fmt(r.portal.taxableValue),
-        fmt(r.portal.igst), fmt(r.portal.cgst), fmt(r.portal.sgst),
-        r.portal.placeOfSupply||'—',
-        { v: r.portal.itcAvailability||'—', c: r.portal.itcAvailability?.toLowerCase()==='yes'?'#059669':'#64748b' },
-      ]),
+      ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Place of Supply','ITC Available','Notes'],
+      results.portalOnly.map((r, i) => {
+        const rk = r.key||`${r.portal.gstin}__${r.portal.invoiceNo}`;
+        const nm = r.portal.tradeOrLegalName||manualTradeNames?.[r.portal.gstin]||'—';
+        return [i+1, r.portal.gstin, nm, r.portal.invoiceNoRaw,
+          r.portal.invoiceDate, fmt(r.portal.invoiceValue), fmt(r.portal.taxableValue),
+          fmt(r.portal.igst), fmt(r.portal.cgst), fmt(r.portal.sgst),
+          r.portal.placeOfSupply||'—',
+          { v: r.portal.itcAvailability||'—', c: r.portal.itcAvailability?.toLowerCase()==='yes'?'#059669':'#64748b' },
+          invoiceComments?.[rk]||''];
+      }),
       '#3b82f6'
     )
   );
@@ -1224,15 +1257,17 @@ function exportWord(results, company, period, manualTradeNames = {}) {
     sumVal(results.booksOnly, 'books'),
     '⚠ ITC RISK: These invoices are recorded in your Books of Account but the vendor has NOT uploaded them to the GST Portal. You cannot claim ITC on these until the vendor files. Follow up with the vendor immediately.',
     rowsHtml(
-      ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Place'],
-      results.booksOnly.map((r, i) => [
-        i+1, r.books.gstin,
-        r.books.tradeOrLegalName || manualTradeNames?.[r.books.gstin] || '—',
-        r.books.invoiceNoRaw, r.books.invoiceDate,
-        fmt(r.books.invoiceValue), fmt(r.books.taxableValue),
-        fmt(r.books.igst), fmt(r.books.cgst), fmt(r.books.sgst),
-        r.books.placeOfSupply||'—',
-      ]),
+      ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Place','Notes'],
+      results.booksOnly.map((r, i) => {
+        const rk = r.key||`${r.books.gstin}__${r.books.invoiceNo}`;
+        const nm = r.books.tradeOrLegalName||manualTradeNames?.[r.books.gstin]||'—';
+        return [i+1, r.books.gstin, nm,
+          r.books.invoiceNoRaw, r.books.invoiceDate,
+          fmt(r.books.invoiceValue), fmt(r.books.taxableValue),
+          fmt(r.books.igst), fmt(r.books.cgst), fmt(r.books.sgst),
+          r.books.placeOfSupply||'—',
+          invoiceComments?.[rk]||''];
+      }),
       '#ef4444'
     )
   );
@@ -1407,7 +1442,7 @@ ${booksOnlySection}
 /* ═══════════════════════════════════════════════════════════════════════════
    EXCEL EXPORT
 ═══════════════════════════════════════════════════════════════════════════ */
-function exportExcel(results, company, period, manualTradeNames = {}) {
+function exportExcel(results, company, period, manualTradeNames = {}, invoiceComments = {}) {
   const wb = XLSX.utils.book_new();
   const summaryRows = [
     ['GST Reconciliation Report', '', '', company.name || ''],
@@ -1424,27 +1459,41 @@ function exportExcel(results, company, period, manualTradeNames = {}) {
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), 'Summary');
   const mH = ['GSTIN','Party Name','Invoice No','Date','Portal Value','Books Value','Value Diff','Portal Tax','Books Tax','Tax Diff'];
+  // Matched
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Cess'],
-    ...results.matched.map((r,i)=>[i+1,r.portal.gstin,r.portal.tradeOrLegalName||'',r.portal.invoiceNoRaw,r.portal.invoiceDate,r.portal.invoiceValue,r.portal.taxableValue,r.portal.igst,r.portal.cgst,r.portal.sgst,r.portal.cess])
+    ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Cess','Notes'],
+    ...results.matched.map((r,i)=>{
+      const rk=r.key||`${r.portal.gstin}__${r.portal.invoiceNo}`;
+      const nm=r.portal.tradeOrLegalName||manualTradeNames?.[r.portal.gstin]||r.books?.tradeOrLegalName||manualTradeNames?.[r.books?.gstin]||'';
+      return [i+1,r.portal.gstin,nm,r.portal.invoiceNoRaw,r.portal.invoiceDate,r.portal.invoiceValue,r.portal.taxableValue,r.portal.igst,r.portal.cgst,r.portal.sgst,r.portal.cess,invoiceComments?.[rk]||''];
+    })
   ]), 'Matched');
+  // Mismatch
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['#',...mH],
-    ...results.mismatch.map((r,i)=>[i+1,r.portal.gstin,r.portal.tradeOrLegalName||'',r.portal.invoiceNoRaw,r.portal.invoiceDate,r.portal.invoiceValue,r.books.invoiceValue,r.valueDiff.toFixed(2),(r.portal.igst+r.portal.cgst+r.portal.sgst).toFixed(2),(r.books.igst+r.books.cgst+r.books.sgst).toFixed(2),r.taxDiff.toFixed(2)])
+    ['#',...mH,'Notes'],
+    ...results.mismatch.map((r,i)=>{
+      const rk=r.key||`${r.portal.gstin}__${r.portal.invoiceNo}`;
+      const nm=r.portal.tradeOrLegalName||manualTradeNames?.[r.portal.gstin]||r.books?.tradeOrLegalName||manualTradeNames?.[r.books?.gstin]||'';
+      return [i+1,r.portal.gstin,nm,r.portal.invoiceNoRaw,r.portal.invoiceDate,r.portal.invoiceValue,r.books.invoiceValue,r.valueDiff.toFixed(2),(r.portal.igst+r.portal.cgst+r.portal.sgst).toFixed(2),(r.books.igst+r.books.cgst+r.books.sgst).toFixed(2),r.taxDiff.toFixed(2),invoiceComments?.[rk]||''];
+    })
   ]), 'Mismatch');
+  // Portal Only
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value','Taxable','IGST','CGST','SGST','Place','ITC'],
-    ...results.portalOnly.map((r,i)=>[i+1,r.portal.gstin,r.portal.tradeOrLegalName||'',r.portal.invoiceNoRaw,r.portal.invoiceDate,r.portal.invoiceValue,r.portal.taxableValue,r.portal.igst,r.portal.cgst,r.portal.sgst,r.portal.placeOfSupply,r.portal.itcAvailability])
+    ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value','Taxable','IGST','CGST','SGST','Place','ITC','Notes'],
+    ...results.portalOnly.map((r,i)=>{
+      const rk=r.key||`${r.portal.gstin}__${r.portal.invoiceNo}`;
+      const nm=r.portal.tradeOrLegalName||manualTradeNames?.[r.portal.gstin]||'';
+      return [i+1,r.portal.gstin,nm,r.portal.invoiceNoRaw,r.portal.invoiceDate,r.portal.invoiceValue,r.portal.taxableValue,r.portal.igst,r.portal.cgst,r.portal.sgst,r.portal.placeOfSupply,r.portal.itcAvailability,invoiceComments?.[rk]||''];
+    })
   ]), 'In Portal Only');
+  // Books Only
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value','Taxable','IGST','CGST','SGST','Cess','Place','Type','Rate'],
-    ...results.booksOnly.map((r,i)=>[
-      i+1, r.books.gstin,
-      r.books.tradeOrLegalName || manualTradeNames?.[r.books.gstin] || '',
-      r.books.invoiceNoRaw, r.books.invoiceDate, r.books.invoiceValue,
-      r.books.taxableValue, r.books.igst, r.books.cgst, r.books.sgst,
-      r.books.cess, r.books.placeOfSupply, r.books.invoiceType, r.books.rate
-    ])
+    ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value','Taxable','IGST','CGST','SGST','Cess','Place','Type','Rate','Notes'],
+    ...results.booksOnly.map((r,i)=>{
+      const rk=r.key||`${r.books.gstin}__${r.books.invoiceNo}`;
+      const nm=r.books.tradeOrLegalName||manualTradeNames?.[r.books.gstin]||'';
+      return [i+1,r.books.gstin,nm,r.books.invoiceNoRaw,r.books.invoiceDate,r.books.invoiceValue,r.books.taxableValue,r.books.igst,r.books.cgst,r.books.sgst,r.books.cess,r.books.placeOfSupply,r.books.invoiceType,r.books.rate,invoiceComments?.[rk]||''];
+    })
   ]), 'In Books Only');
   XLSX.writeFile(wb, `GST_Recon_${(company.name||'Report').replace(/\s+/g,'_')}_${period?period.replace(/\s+/g,'_'):'Export'}.xlsx`);
   toast.success('Excel report downloaded successfully!');
@@ -1601,7 +1650,70 @@ const TradeNameCell = React.memo(({ gstin, manualTradeNames, onSave }) => {
   );
 });
 
-const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames, onSaveTradeName }) => {
+/* ═══════════════════════════════════════════════════════════════════════════
+   COMMENT CELL — add/edit inline comment on any invoice row
+   ─────────────────────────────────────────────────────────────────────────
+   Shown as a small 💬 icon in every row. Clicking opens an inline textarea.
+   Saved comments persist in localStorage and appear in exported reports.
+═══════════════════════════════════════════════════════════════════════════ */
+const CommentCell = React.memo(({ rowKey, comments, onSave }) => {
+  const current  = comments?.[rowKey] || '';
+  const [open,   setOpen]  = useState(false);
+  const [draft,  setDraft] = useState(current);
+  const inputRef = useRef(null);
+
+  const handleOpen  = () => { setDraft(current); setOpen(true); setTimeout(() => inputRef.current?.focus(), 50); };
+  const handleSave  = () => { onSave(rowKey, draft); setOpen(false); };
+  const handleClear = () => { onSave(rowKey, ''); setOpen(false); };
+  const handleKey   = e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSave(); }
+    if (e.key === 'Escape') setOpen(false);
+  };
+
+  if (!open) {
+    return current ? (
+      <span className="flex items-center gap-1 group min-w-0 max-w-[120px]">
+        <MessageSquare className="h-3 w-3 text-amber-500 flex-shrink-0"/>
+        <span className="truncate text-amber-700 dark:text-amber-300 text-[10px] italic" title={current}>{current}</span>
+        <button onClick={handleOpen} title="Edit comment"
+          className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-amber-400 hover:text-amber-600 flex-shrink-0">
+          <Edit3 className="h-2.5 w-2.5"/>
+        </button>
+      </span>
+    ) : (
+      <button onClick={handleOpen} title="Add comment"
+        className="p-0.5 rounded text-slate-300 hover:text-amber-500 dark:hover:text-amber-400 transition-colors">
+        <MessageSquare className="h-3 w-3"/>
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1 min-w-[160px] z-10 relative">
+      <textarea
+        ref={inputRef}
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onKeyDown={handleKey}
+        placeholder="Add comment… (Enter to save, Shift+Enter for newline)"
+        rows={2}
+        className="w-full px-2 py-1 text-[10px] rounded border border-amber-400 dark:border-amber-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-amber-500 resize-none"
+      />
+      <div className="flex items-center gap-1">
+        <button onClick={handleSave}
+          className="flex-1 py-0.5 rounded bg-amber-500 hover:bg-amber-600 text-white text-[9px] font-bold transition-colors">Save</button>
+        <button onClick={handleClear}
+          className="py-0.5 px-1.5 rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-[9px] text-slate-400 transition-colors">Clear</button>
+        <button onClick={() => setOpen(false)}
+          className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-400 transition-colors">
+          <X className="h-3 w-3"/>
+        </button>
+      </div>
+    </div>
+  );
+});
+
+const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames, onSaveTradeName, comments, onSaveComment }) => {
   const [search, setSearch] = useState('');
   const [page, setPage]     = useState(1);
   const filtered = records.filter(r => {
@@ -1696,6 +1808,7 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
                 <th className="px-3 py-2.5 text-center font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Status</th>
               )}
               {onDelete && <th className="px-3 py-2.5 text-center font-semibold text-slate-400 whitespace-nowrap">Del</th>}
+              {onSaveComment && <th className="px-3 py-2.5 text-center font-semibold text-amber-500 whitespace-nowrap w-8" title="Add comment to this invoice"><MessageSquare className="h-3 w-3 inline"/></th>}
             </tr>
           </thead>
           <tbody>
@@ -1829,6 +1942,15 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
                       </button>
                     </td>
                   )}
+                  {onSaveComment && (
+                    <td className="px-2 py-2 text-center min-w-[36px]">
+                      <CommentCell
+                        rowKey={r.key || `${inv?.gstin}__${inv?.invoiceNo || inv?.invoiceNoRaw}`}
+                        comments={comments}
+                        onSave={onSaveComment}
+                      />
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -1881,6 +2003,7 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
               </>}
               {(tabId==='mismatch'||tabId==='portalOnly'||tabId==='booksOnly') && <td className="px-3 py-2.5"/>}
               {onDelete && <td className="px-3 py-2.5"/>}
+              {onSaveComment && <td className="px-3 py-2.5"/>}
             </tr>
           </tfoot>
         </table>
@@ -2967,8 +3090,8 @@ const ITCDetailModal = ({ type, results, onClose }) => {
 /* ═══════════════════════════════════════════════════════════════════════════
    SIDE-BY-SIDE COMPARE — Portal Only vs Books Only with smart pairing
 ═══════════════════════════════════════════════════════════════════════════ */
-const CONF_COLOR = { high:'bg-emerald-100 text-emerald-700 border-emerald-200', medium:'bg-amber-100 text-amber-700 border-amber-200', low:'bg-orange-100 text-orange-700 border-orange-200', none:'bg-slate-100 text-slate-400 border-slate-200' };
-const CONF_LABEL = { high:'✓ Match', medium:'≈ Near', low:'~ Possible', none:'—' };
+const CONF_COLOR = { high:'bg-emerald-100 text-emerald-700 border-emerald-200', medium:'bg-amber-100 text-amber-700 border-amber-200', low:'bg-orange-100 text-orange-700 border-orange-200', gstin_diff:'bg-red-100 text-red-700 border-red-200', none:'bg-slate-100 text-slate-400 border-slate-200' };
+const CONF_LABEL = { high:'✓ Match', medium:'≈ Near', low:'~ Possible', gstin_diff:'⚡ GSTIN≠', none:'—' };
 
 const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) => {
   const [search, setSearch]             = useState('');
@@ -3014,6 +3137,27 @@ const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) =
         if (d<bestDiff && d/(bVal||1)<0.02) { best=po; bestDiff=d; }
       }
       if (best) { result.push({ portal:best, books:bo, confidence:'low', valueDiff:bestDiff, taxDiff:0 }); portalUsed.add(best.key); booksUsed.add(bo.key); }
+    });
+    // Pass 3: Different GSTIN but same invoice number (normalised) + value within tolerance
+    // — catches GSTIN typos or supplier registered under a different GST number in books
+    booksOnly.forEach(bo => {
+      if (booksUsed.has(bo.key)) return;
+      const bNum = normaliseInvoice(bo.books?.invoiceNoRaw || bo.books?.invoiceNo || '');
+      const bVal = bo.books?.invoiceValue || 0;
+      if (!bNum) return;
+      for (const po of portalOnly) {
+        if (portalUsed.has(po.key)) continue;
+        if (po.portal?.gstin === bo.books?.gstin) continue; // same GSTIN already handled above
+        const pNum = normaliseInvoice(po.portal?.invoiceNoRaw || po.portal?.invoiceNo || '');
+        const pVal = po.portal?.invoiceValue || 0;
+        const tol = smartTolerance(pVal, bVal);
+        if (pNum === bNum && Math.abs(pVal - bVal) <= tol) {
+          const vd = Math.abs(pVal - bVal);
+          const td = Math.abs(((po.portal?.igst||0)+(po.portal?.cgst||0)+(po.portal?.sgst||0)) - ((bo.books?.igst||0)+(bo.books?.cgst||0)+(bo.books?.sgst||0)));
+          result.push({ portal:po, books:bo, confidence:'gstin_diff', valueDiff:vd, taxDiff:td, gstinMismatch:true });
+          portalUsed.add(po.key); booksUsed.add(bo.key); break;
+        }
+      }
     });
     // Unpaired
     portalOnly.forEach(po => { if (!portalUsed.has(po.key)) result.push({ portal:po, books:null, confidence:'none' }); });
@@ -3069,7 +3213,7 @@ const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) =
     return g.toLowerCase().includes(q)||pInv.includes(q)||bInv.includes(q)||name.includes(q);
   });
 
-  const stats = { high:0, medium:0, low:0, confirmed:confirmed.size };
+  const stats = { high:0, medium:0, low:0, gstin_diff:0, confirmed:confirmed.size };
   filtered.forEach(p => { if(p.portal&&p.books) stats[p.confidence]=(stats[p.confidence]||0)+1; });
 
   const handleConfirm = (pair, idx) => {
@@ -3088,7 +3232,7 @@ const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) =
         <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-violet-600 to-indigo-600 flex-shrink-0">
           <div>
             <h2 className="text-sm font-bold text-white flex items-center gap-2"><ArrowLeftRight className="h-4 w-4"/>Portal Only vs Books Only — Smart Compare</h2>
-            <p className="text-[11px] text-white/75 mt-0.5">Auto-paired by invoice number &amp; value. Click Confirm to move matched pairs into Matched.</p>
+            <p className="text-[11px] text-white/75 mt-0.5">Auto-paired by invoice number &amp; value — including cross-GSTIN matches. Click Confirm to move matched pairs into Matched.</p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white"><X className="h-4 w-4"/></button>
         </div>
@@ -3105,10 +3249,11 @@ const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) =
             <option value="">All GSTINs ({allGstins.length})</option>
             {allGstins.map(g=><option key={g} value={g}>{g}</option>)}
           </select>
-          <div className="flex items-center gap-2 ml-auto text-[11px]">
+          <div className="flex items-center gap-2 ml-auto text-[11px] flex-wrap">
             <span className={`px-1.5 py-0.5 rounded border font-bold ${CONF_COLOR.high}`}>✓ {stats.high} exact</span>
             <span className={`px-1.5 py-0.5 rounded border font-bold ${CONF_COLOR.medium}`}>≈ {stats.medium} near</span>
             <span className={`px-1.5 py-0.5 rounded border font-bold ${CONF_COLOR.low}`}>~ {stats.low} possible</span>
+            {stats.gstin_diff > 0 && <span className={`px-1.5 py-0.5 rounded border font-bold ${CONF_COLOR.gstin_diff}`}>⚡ {stats.gstin_diff} GSTIN≠</span>}
             <span className="text-slate-400">|</span>
             <span className="text-slate-500">P:<strong className="text-blue-600">{portalOnly.length}</strong> B:<strong className="text-violet-600">{booksOnly.length}</strong></span>
           </div>
@@ -3152,16 +3297,21 @@ const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) =
                 const pairKey = `${pair.portal?.key}__${pair.books?.key}`;
                 const isConfirmed = confirmed.has(pairKey);
                 const rowBg = isConfirmed ? 'opacity-40' :
-                              pair.confidence==='high'   ? 'bg-emerald-50/20 dark:bg-emerald-900/5'  :
-                              pair.confidence==='medium' ? 'bg-amber-50/20 dark:bg-amber-900/5'      :
-                              pair.confidence==='low'    ? 'bg-orange-50/20 dark:bg-orange-900/5'    : '';
+                              pair.confidence==='high'       ? 'bg-emerald-50/20 dark:bg-emerald-900/5'  :
+                              pair.confidence==='medium'     ? 'bg-amber-50/20 dark:bg-amber-900/5'      :
+                              pair.confidence==='low'        ? 'bg-orange-50/20 dark:bg-orange-900/5'    :
+                              pair.confidence==='gstin_diff' ? 'bg-red-50/30 dark:bg-red-900/10'         : '';
+                const gstinsDiffer = pair.gstinMismatch && po?.gstin && bo?.gstin && po.gstin !== bo.gstin;
                 return (
                   <tr key={i} className={`border-b border-slate-100 dark:border-slate-700/50 transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-700/20 ${rowBg}`}>
                     <td className="px-2 py-1.5 text-center text-slate-300 text-[11px]">{i+1}</td>
                     {/* Portal side */}
                     <td className="px-2 py-1.5 font-mono font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap">{po?.invoiceNoRaw||<span className="text-slate-200">—</span>}</td>
                     <td className="px-3 py-2 min-w-[220px] max-w-[260px]">
-                      <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400">{po?.gstin||'—'}</div>
+                      <div className={`font-mono text-[10px] ${gstinsDiffer ? 'text-red-600 dark:text-red-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}>
+                        {po?.gstin||'—'}
+                        {gstinsDiffer && <span className="ml-1 text-[8px] bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 px-1 py-0.5 rounded border border-red-200">Portal GSTIN</span>}
+                      </div>
                       <div className="text-[11px] font-medium text-slate-700 dark:text-slate-200 leading-tight mt-0.5" title={pName}>{pName||(!isConfirmed&&po?.gstin?(
                         <button onClick={()=>lookupName(po.gstin)} disabled={lookingUp[po.gstin]} className="text-indigo-500 hover:text-indigo-700 inline-flex items-center gap-0.5 underline-offset-2 hover:underline">
                           {lookingUp[po.gstin]?<Loader2 className="h-2.5 w-2.5 animate-spin"/>:<Search className="h-2.5 w-2.5"/>}lookup name
@@ -3173,13 +3323,17 @@ const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) =
                     <td className="px-2 py-1.5 text-right text-blue-500 whitespace-nowrap">₹{pTax!=null?fmt(pTax):'—'}</td>
                     {/* Confidence */}
                     <td className="px-2 py-2 text-center bg-slate-50/40 dark:bg-slate-700/20 border-l-2 border-r-2 border-slate-200 dark:border-slate-600">
-                      <span className={`px-1 py-0.5 rounded border text-[9px] font-bold ${CONF_COLOR[pair.confidence]}`}>{CONF_LABEL[pair.confidence]}</span>
-                      {pair.valueDiff>0&&pair.confidence!=='none'&&<div className="text-[9px] text-slate-300 mt-0.5">Δ{pair.valueDiff.toFixed(1)}</div>}
+                      <span className={`px-1 py-0.5 rounded border text-[9px] font-bold ${CONF_COLOR[pair.confidence] || CONF_COLOR.none}`}>{CONF_LABEL[pair.confidence] || '—'}</span>
+                      {pair.gstinMismatch && <div className="text-[8px] text-red-500 mt-0.5 font-semibold">GSTINs differ!</div>}
+                      {pair.valueDiff>0&&pair.confidence!=='none'&&!pair.gstinMismatch&&<div className="text-[9px] text-slate-300 mt-0.5">Δ{pair.valueDiff.toFixed(1)}</div>}
                     </td>
                     {/* Books side */}
                     <td className="px-2 py-1.5 font-mono font-semibold text-violet-700 dark:text-violet-300 whitespace-nowrap">{bo?.invoiceNoRaw||<span className="text-slate-200">—</span>}</td>
                     <td className="px-3 py-2 min-w-[220px] max-w-[260px]">
-                      <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400">{bo?.gstin||'—'}</div>
+                      <div className={`font-mono text-[10px] ${gstinsDiffer ? 'text-red-600 dark:text-red-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}>
+                        {bo?.gstin||'—'}
+                        {gstinsDiffer && <span className="ml-1 text-[8px] bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 px-1 py-0.5 rounded border border-red-200">Books GSTIN</span>}
+                      </div>
                       <div className="text-[11px] font-medium text-slate-700 dark:text-slate-200 leading-tight mt-0.5" title={bName}>{bName||(!isConfirmed&&bo?.gstin?(
                         <button onClick={()=>lookupName(bo.gstin)} disabled={lookingUp[bo.gstin]} className="text-indigo-500 hover:text-indigo-700 inline-flex items-center gap-0.5 underline-offset-2 hover:underline">
                           {lookingUp[bo.gstin]?<Loader2 className="h-2.5 w-2.5 animate-spin"/>:<Search className="h-2.5 w-2.5"/>}lookup name
@@ -3254,6 +3408,27 @@ export default function GSTReconciliation() {
       return stored ? JSON.parse(stored) : {};
     } catch (_) { return {}; }
   });
+
+  // Invoice comments: rowKey → comment string, persisted in localStorage
+  const [invoiceComments, setInvoiceComments] = useState(() => {
+    try {
+      const stored = localStorage.getItem('gst_invoice_comments');
+      return stored ? JSON.parse(stored) : {};
+    } catch (_) { return {}; }
+  });
+
+  const onSaveComment = useCallback((key, comment) => {
+    setInvoiceComments(prev => {
+      const updated = { ...prev };
+      if (comment && comment.trim()) {
+        updated[key] = comment.trim();
+      } else {
+        delete updated[key];
+      }
+      try { localStorage.setItem('gst_invoice_comments', JSON.stringify(updated)); } catch (_) {}
+      return updated;
+    });
+  }, []);
 
   const onSaveTradeName = useCallback((gstin, name) => {
     setManualTradeNames(prev => {
@@ -3873,6 +4048,8 @@ export default function GSTReconciliation() {
                         onMarkMatched={['mismatch','portalOnly','booksOnly'].includes(activeTab) ? (r) => handleMarkMatched(r, activeTab) : undefined}
                         manualTradeNames={manualTradeNames}
                         onSaveTradeName={onSaveTradeName}
+                        comments={invoiceComments}
+                        onSaveComment={onSaveComment}
                       />
                   }
                 </div>
@@ -3881,13 +4058,13 @@ export default function GSTReconciliation() {
               {/* Export reminder */}
               <div className="mt-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-wrap items-center gap-3">
                 <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Download Report:</span>
-                <button onClick={()=>exportPDF(results, company, period, manualTradeNames)} className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium rounded-lg transition-colors">
+                <button onClick={()=>exportPDF(results, company, period, manualTradeNames, invoiceComments)} className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium rounded-lg transition-colors">
                   <FileText className="h-3.5 w-3.5"/> PDF
                 </button>
-                <button onClick={()=>exportWord(results, company, period, manualTradeNames)} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors">
+                <button onClick={()=>exportWord(results, company, period, manualTradeNames, invoiceComments)} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors">
                   <FileText className="h-3.5 w-3.5"/> Word (.doc)
                 </button>
-                <button onClick={()=>exportExcel(results, company, period, manualTradeNames)} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg transition-colors">
+                <button onClick={()=>exportExcel(results, company, period, manualTradeNames, invoiceComments)} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg transition-colors">
                   <FileSpreadsheet className="h-3.5 w-3.5"/> Excel
                 </button>
                 <button onClick={() => { handleReset(); setPageView('history'); }} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 text-xs transition-colors border border-indigo-200 dark:border-indigo-800 rounded-lg font-medium">
