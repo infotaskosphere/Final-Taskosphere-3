@@ -987,15 +987,33 @@ async def _enrich_books_with_names(books_df) -> "pd.DataFrame":
     return books_df
 
 
-# ─── GSTIN NAME LOOKUP (NEW) ─────────────────────────────────────────────────
+# ─── GSTIN NAME LOOKUP ────────────────────────────────────────────────────────
 
 @router.get("/gstin-lookup/{gstin}")
 async def gstin_name_lookup(gstin: str, current_user: User = Depends(get_current_user)):
-    """Fetch trade/legal name for a GSTIN. Uses our own multi-source scraper with cache."""
-    gstin = gstin.upper().strip()
-    if len(gstin) != 15:
-        raise HTTPException(400, "Invalid GSTIN length — must be 15 characters.")
-    return await _scrape_gstin_name(gstin)
+    """Fetch trade/legal name for a GSTIN.
+    IMPORTANT: This endpoint must NEVER raise an unhandled exception — an
+    unhandled 500 loses CORS headers and the browser shows a misleading
+    CORS error instead of the real error. Always return a JSON dict."""
+    gstin = (gstin or "").upper().strip()
+    if not _is_valid_gstin(gstin):
+        # Return graceful empty — not a 400, so CORS headers are kept
+        return {"gstin": gstin, "trade_name": "", "legal_name": "",
+                "state": "", "status": "", "source": "invalid_gstin"}
+    try:
+        import asyncio as _asyncio
+        result = await _asyncio.wait_for(_scrape_gstin_name(gstin), timeout=12.0)
+        return result
+    except _asyncio.TimeoutError:
+        logger.warning("GSTIN lookup timed out for %s", gstin)
+        return {"gstin": gstin, "trade_name": "", "legal_name": "",
+                "state": "", "status": "", "source": "timeout",
+                "error": "lookup_timed_out"}
+    except Exception as exc:
+        logger.error("GSTIN lookup error for %s: %s", gstin, exc)
+        return {"gstin": gstin, "trade_name": "", "legal_name": "",
+                "state": "", "status": "", "source": "error",
+                "error": str(exc)[:120]}
 
 
 class GSTINBatchBody(BaseModel):
