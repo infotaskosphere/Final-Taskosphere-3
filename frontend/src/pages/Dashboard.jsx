@@ -4,12 +4,10 @@ import api from '../lib/api';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { useNavigate } from 'react-router-dom';
 import useDark from '../hooks/useDark';
-
 import { motion, AnimatePresence } from 'framer-motion';
 import { format, parseISO, isToday, isTomorrow, startOfDay } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
 import { toast } from 'sonner';
-
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -17,7 +15,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popove
 import { Calendar as CalendarComponent } from '../components/ui/calendar';
 import LayoutCustomizer from '../components/layout/LayoutCustomizer';
 import { usePageLayout } from '../hooks/usePageLayout';
-
 
 import {
   CheckSquare,
@@ -1525,6 +1522,20 @@ export default function Dashboard() {
                         <span className="text-white/60 text-[10px] font-semibold uppercase tracking-widest mt-1">
                           Total Tasks
                         </span>
+                        <div className="mt-1.5 flex flex-col gap-0.5 w-full">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-white/50 text-[9px] font-semibold">Pending</span>
+                            <span className="text-white/90 text-[9px] font-black tabular-nums">
+                              {Math.max(0, (stats?.total_tasks ?? tasks.length) - (stats?.completed_tasks ?? 0))}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-white/50 text-[9px] font-semibold">Completed</span>
+                            <span style={{ color: '#5CCB5F' }} className="text-[9px] font-black tabular-nums">
+                              {stats?.completed_tasks ?? 0}
+                            </span>
+                          </div>
+                        </div>
                         <span
                           className="mt-1.5 flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full"
                           style={{ background: 'rgba(31,175,90,0.25)', color: '#5CCB5F' }}
