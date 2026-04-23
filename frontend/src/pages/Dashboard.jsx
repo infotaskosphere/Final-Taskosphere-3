@@ -4,10 +4,12 @@ import api from '../lib/api';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { useNavigate } from 'react-router-dom';
 import useDark from '../hooks/useDark';
+
 import { motion, AnimatePresence } from 'framer-motion';
 import { format, parseISO, isToday, isTomorrow, startOfDay } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
 import { toast } from 'sonner';
+
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -15,6 +17,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popove
 import { Calendar as CalendarComponent } from '../components/ui/calendar';
 import LayoutCustomizer from '../components/layout/LayoutCustomizer';
 import { usePageLayout } from '../hooks/usePageLayout';
+
 
 import {
   CheckSquare,
@@ -1578,42 +1581,7 @@ export default function Dashboard() {
                 )}
               </div>
 
-              {sortedDueDates.length > 0 && (
-                <div className="mt-4 flex items-center gap-2 flex-wrap">
-                  {sortedDueDates.slice(0, 4).map(due => {
-                    const dl = due.days_remaining ?? 0;
-                    return (
-                      <motion.button
-                        key={due.id}
-                        whileHover={{ scale: 1.04, y: -1, transition: springPhysics.card }}
-                        whileTap={{ scale: 0.97 }}
-                        onClick={() => setSelectedDeadline(due)}
-                        className="flex items-center gap-2.5 px-3.5 py-2 rounded-xl transition-all"
-                        style={{
-                          background: dl <= 0 ? 'rgba(255,107,107,0.18)' : dl <= 7 ? 'rgba(234,88,12,0.18)' : 'rgba(255,255,255,0.1)',
-                          border: dl <= 0 ? '1px solid rgba(255,107,107,0.35)' : dl <= 7 ? '1px solid rgba(234,88,12,0.35)' : '1px solid rgba(255,255,255,0.18)',
-                          backdropFilter: 'blur(6px)',
-                        }}
-                      >
-                        <div className="p-1.5 rounded-lg"
-                          style={{ background: dl <= 0 ? 'rgba(255,107,107,0.25)' : dl <= 7 ? 'rgba(234,88,12,0.2)' : 'rgba(255,255,255,0.12)' }}>
-                          <CalendarIcon className="h-3.5 w-3.5 text-white" />
-                        </div>
-                        <div className="text-left">
-                          <p className="text-[9px] font-semibold uppercase tracking-wider"
-                            style={{ color: dl <= 0 ? '#fca5a5' : dl <= 7 ? '#fdba74' : 'rgba(255,255,255,0.5)' }}>
-                            {dl < 0 ? `${Math.abs(dl)}d overdue` : dl === 0 ? 'Due today' : `Due in ${dl}d`}
-                          </p>
-                          <p className="text-sm font-bold text-white leading-none mt-0.5 max-w-[160px] truncate">
-                            {due.title?.slice(0, 22) || 'Deadline'}
-                          </p>
-                        </div>
-                        <ChevronRight className="h-3.5 w-3.5 text-white/40 flex-shrink-0" />
-                      </motion.button>
-                    );
-                  })}
-                </div>
-              )}
+
             </div>
           </div>
         </motion.div>
