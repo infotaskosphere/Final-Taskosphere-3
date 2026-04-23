@@ -784,11 +784,11 @@ async def sync_attendance(
                     user_id      = user["id"]
 
                     if punch_type == "in":
-                        # Determine if late
+                        # Determine if late — uses this user's own punch_in_time + grace_time
                         is_late = False
                         try:
                             pit_str       = user.get("punch_in_time", "10:30")
-                            gt_str        = user.get("grace_time",    "00:15")
+                            gt_str        = user.get("grace_time",    "00:10")
                             pit           = datetime.strptime(pit_str, "%H:%M")
                             gt            = datetime.strptime(gt_str,  "%H:%M")
                             grace_minutes = gt.hour * 60 + gt.minute
