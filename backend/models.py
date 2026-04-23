@@ -285,7 +285,7 @@ class User(BaseModel):
     birthday: Optional[Any] = None
     profile_picture: Optional[str] = None
     punch_in_time: Optional[str] = "10:30"
-    grace_time: Optional[str] = "00:15"
+    grace_time: Optional[str] = "00:10"
     punch_out_time: Optional[str] = "19:00"
     telegram_id: Optional[int] = None
     permissions: UserPermissions = Field(default_factory=UserPermissions)
@@ -313,7 +313,7 @@ class UserCreate(BaseModel):
     birthday: Optional[Any] = None
     telegram_id: Optional[int] = None
     punch_in_time: Optional[str] = "10:30"
-    grace_time: Optional[str] = "00:15"
+    grace_time: Optional[str] = "00:10"
     punch_out_time: Optional[str] = "19:00"
     profile_picture: Optional[str] = None
     is_active: bool = True
