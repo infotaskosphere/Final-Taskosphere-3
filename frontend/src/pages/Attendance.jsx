@@ -104,7 +104,7 @@ const ATT_COLORS = {
   holiday:      { fg: '#1e3a8a', bg: '#eff6ff',         bgDark: 'rgba(30,58,138,0.18)',  border: '#bfdbfe', borderDark: '#1e40af' },
   late:         { fg: '#ea580c', bg: '#fff7ed',         bgDark: 'rgba(234,88,12,0.12)',  border: '#fed7aa', borderDark: '#7c2d12' },
   absent:       { fg: '#dc2626', bg: '#fef2f2',         bgDark: 'rgba(220,38,38,0.10)',  border: '#fecaca', borderDark: '#7f1d1d' },
-  leave:        { fg: '#F97316', bg: '#fff7ed',         bgDark: 'rgba(249,115,22,0.08)', border: '#fed7aa', borderDark: '#7c2d12' },
+  leave:        { fg: '#dc2626', bg: '#fef2f2',         bgDark: 'rgba(220,38,38,0.10)',  border: '#fecaca', borderDark: '#7f1d1d' },
   ongoing:      { fg: '#F59E0B', bg: '#fffbeb',         bgDark: 'rgba(245,158,11,0.10)', border: '#fde68a', borderDark: '#92400e' },
 };
 
@@ -412,8 +412,8 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
   const holiday  = (Array.isArray(holidays) ? holidays : []).find(h => h.date === dateStr);
 
   let ringColor = null, bgColor = null, isSpecial = false;
-  if (holiday)                                        { ringColor = ATT_COLORS.holiday.fg; bgColor = `${ATT_COLORS.holiday.fg}18`; isSpecial = true; }
-  else if (dayRecord?.status === 'leave')             { ringColor = ATT_COLORS.leave.fg;   bgColor = `${ATT_COLORS.leave.fg}10`;   isSpecial = true; }
+  if (holiday)                                        { ringColor = '#1e3a8a'; bgColor = 'rgba(30, 58, 138, 0.15)'; isSpecial = true; }
+  else if (dayRecord?.status === 'leave')             { ringColor = ATT_COLORS.absent.fg;  bgColor = `${ATT_COLORS.absent.fg}18`;  isSpecial = true; }
   else if (dayRecord?.status === 'absent')            { ringColor = ATT_COLORS.absent.fg;  bgColor = `${ATT_COLORS.absent.fg}18`;  isSpecial = true; }
   else if (dayRecord?.punch_in && dayRecord?.is_late) { ringColor = ATT_COLORS.late.fg;    bgColor = `${ATT_COLORS.late.fg}14`;    isSpecial = true; }
   else if (dayRecord?.punch_in)                       { ringColor = ATT_COLORS.present.fg; bgColor = `${ATT_COLORS.present.fg}12`; }
@@ -3673,8 +3673,8 @@ export default function Attendance() {
             {/* HOLIDAYS CARD */}
             <SectionCard className="flex flex-col" style={{ minHeight: 420 }}>
               <CardHeaderRow
-                iconBg={isDark ? 'bg-amber-900/40' : 'bg-amber-50'}
-                icon={<CalendarIcon className="h-4 w-4 text-amber-500" />}
+                iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
+                icon={<CalendarIcon className="h-4 w-4 text-blue-500" />}
                 title={`Holidays — ${format(selectedDate, 'MMM yyyy')}`}
                 subtitle={`${monthHolidaysGrid.length} holiday${monthHolidaysGrid.length !== 1 ? 's' : ''} this month`}
                 badge={monthHolidaysGrid.length}
@@ -3723,6 +3723,7 @@ export default function Attendance() {
                     whileHover={{ backgroundColor: isDark ? 'rgba(245,158,11,0.12)' : `${COLORS.amber}10`, y: -1 }}
                     onClick={() => setSelectedHolidayDetail(h)}
                   >
+                    <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.deepBlue }} />
                     <div className="w-9 h-9 rounded-lg flex flex-col items-center justify-center flex-shrink-0 text-white shadow-sm"
                       style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
                       <span className="text-[7px] leading-none uppercase">{safeFormatDate(h.date, 'MMM', '')}</span>
@@ -4207,6 +4208,12 @@ export default function Attendance() {
                                     color: record.duration_minutes > 0 ? ATT_COLORS.present.fg : isDark ? D.muted : COLORS.deepBlue,
                                   }}>
                                   {formatDuration(record.duration_minutes)}
+                                </span>
+                              )}
+                              {record.location_verified === false && !isAbsent && !isLeave && (
+                                <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded"
+                                  style={{ color: '#92400e', backgroundColor: isDark ? 'rgba(251,191,36,0.15)' : '#fef3c7', border: '1px solid ' + (isDark ? 'rgba(251,191,36,0.3)' : '#fcd34d') }}>
+                                  📍 Remote
                                 </span>
                               )}
                               {record.is_late && !isAbsent && (
