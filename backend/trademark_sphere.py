@@ -1,17 +1,4 @@
-"""
-trademark_sphere.py — Trademark Sphere Backend Router
-======================================================
-Drop into: backend/trademark_sphere.py
-
-Scraping uses ONLY:  curl_cffi + beautifulsoup4 + lxml
-  pip install curl_cffi beautifulsoup4 lxml
-  (No Playwright, no browser install, no paid service — completely free)
-
-⚠️  Run the backend on a local / residential IP.
-    IP India blocks data-centre/cloud IPs for ALL HTTP clients.
-"""
-
-import uuid, logging, asyncio, re, time
+import os, uuid, logging, asyncio, re, time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Any, Dict
@@ -30,8 +17,10 @@ router = APIRouter(prefix="/trademark-sphere", tags=["trademark-sphere"])
 IST    = ZoneInfo("Asia/Kolkata")
 _pool  = ThreadPoolExecutor(max_workers=4)
 
-EREGISTER_URL  = "https://tmrsearch.ipindia.gov.in/eregister/eregister.aspx"
+EREGISTER_URL    = "https://tmrsearch.ipindia.gov.in/eregister/eregister.aspx"
 AGENT_SEARCH_URL = "https://tmrsearch.ipindia.gov.in/eregister/Agent_Search.aspx"
+DOC_INDEX_BASE   = "https://tmrsearch.ipindia.gov.in/eregister/Document_Index.aspx"
+
 TM_STATUSES    = [
     "Registered", "Pending", "Objected", "Opposed", "Refused", "Abandoned",
     "Withdrawn", "Under Examination", "Advertised Before Acceptance",
@@ -40,17 +29,28 @@ TM_STATUSES    = [
 NICE_CLASSES  = [str(i) for i in range(1, 46)]
 REMINDER_DAYS = [365, 180, 90, 60, 30, 15, 7]
 
+# ── ScraperAPI config ─────────────────────────────────────────────────────────
+
+def _get_scraperapi_key() -> Optional[str]:
+    return os.environ.get("SCRAPERAPI_KEY")
+
+
+def _make_proxy_url(api_key: str) -> str:
+    """Build ScraperAPI proxy URL with India country code."""
+    return f"http://scraperapi.country_code=in:{api_key}@proxy-server.scraperapi.com:8001"
+
+
 # ── Pydantic models ───────────────────────────────────────────────────────────
 
 class TrademarkAddRequest(BaseModel):
     application_number: str
-    class_number:       Optional[str]           = None
-    client_id:          Optional[str]           = None
-    client_name:        Optional[str]           = None
-    attorney:           Optional[str]           = None
-    notes:              Optional[str]           = None
-    reminder_emails:    List[str]               = Field(default_factory=list)
-    reminders_enabled:  bool                    = True
+    class_number:       Optional[str]            = None
+    client_id:          Optional[str]            = None
+    client_name:        Optional[str]            = None
+    attorney:           Optional[str]            = None
+    notes:              Optional[str]            = None
+    reminder_emails:    List[str]                = Field(default_factory=list)
+    reminders_enabled:  bool                     = True
     manual_data:        Optional[Dict[str, Any]] = None
 
 
@@ -107,44 +107,49 @@ class TrademarkHearing(BaseModel):
     officer: Optional[str] = None
 
 
-# ── Headers (enhanced with Sec-Ch-Ua fields) ─────────────────────────────────
+# ── Headers ───────────────────────────────────────────────────────────────────
 
 _HEADERS = {
-    "User-Agent":               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept":                   "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language":          "en-IN,en;q=0.9",
-    "Accept-Encoding":          "gzip, deflate, br",
-    "Connection":               "keep-alive",
-    "Upgrade-Insecure-Requests":"1",
-    "Sec-Ch-Ua":                '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-    "Sec-Ch-Ua-Mobile":         "?0",
-    "Sec-Ch-Ua-Platform":       '"Windows"',
-    "Origin":                   "https://tmrsearch.ipindia.gov.in",
+    "User-Agent":                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language":           "en-IN,en;q=0.9",
+    "Accept-Encoding":           "gzip, deflate, br",
+    "Connection":                "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Ch-Ua":                 '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "Sec-Ch-Ua-Mobile":          "?0",
+    "Sec-Ch-Ua-Platform":        '"Windows"',
+    "Origin":                    "https://tmrsearch.ipindia.gov.in",
 }
 
 _ALIASES = {
-    "application_no":       "application_number",
-    "appl_no":              "application_number",
-    "tm_applied_for":       "word_mark",
-    "trade_mark":           "word_mark",
-    "proprietor_s_name":    "proprietor",
-    "proprietors_name":     "proprietor",
-    "applicant_s_name":     "applicant_name",
-    "applicants_name":      "applicant_name",
-    "date_of_application":  "filing_date",
-    "class_no":             "class_number",
-    "nice_class":           "class_number",
-    "class":                "class_number",
-    "status":               "tm_status",
-    "date_of_registration": "registration_date",
-    "date_of_expiry":       "valid_upto",
-    "renewal_date":         "valid_upto",
-    "date_of_advertisement":"publication_date",
+    "application_no":        "application_number",
+    "appl_no":               "application_number",
+    "tm_applied_for":        "word_mark",
+    "trade_mark":            "word_mark",
+    "proprietor_s_name":     "proprietor",
+    "proprietors_name":      "proprietor",
+    "applicant_s_name":      "applicant_name",
+    "applicants_name":       "applicant_name",
+    "date_of_application":   "filing_date",
+    "class_no":              "class_number",
+    "nice_class":            "class_number",
+    "class":                 "class_number",
+    "status":                "tm_status",
+    "date_of_registration":  "registration_date",
+    "date_of_expiry":        "valid_upto",
+    "renewal_date":          "valid_upto",
+    "date_of_advertisement": "publication_date",
 }
 
-# Document labels to look for in the Document Index table
+# Document labels to capture from Document_Index.aspx
 _DOC_LABELS = {
-    "examination report", "opposition", "counter statement", "hearing notice",
+    "examination report",
+    "objection",
+    "opposition",
+    "counter statement",
+    "hearing notice",
+    "show cause notice",
 }
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -176,12 +181,13 @@ def _parse_tables(soup: BeautifulSoup) -> Dict[str, Any]:
 
 
 def _collect_hidden(soup: BeautifulSoup) -> Dict[str, str]:
-    """Extract all hidden form inputs including ViewState and EventValidation."""
-    return {
-        inp["name"]: inp.get("value", "")
-        for inp in soup.find_all("input", type="hidden")
-        if inp.get("name")
-    }
+    """Extract ALL hidden form inputs: ViewState, EventValidation, VIEWSTATEGENERATOR, etc."""
+    hidden = {}
+    for inp in soup.find_all("input", type="hidden"):
+        name = inp.get("name")
+        if name:
+            hidden[name] = inp.get("value", "")
+    return hidden
 
 
 # ── Math captcha solver ───────────────────────────────────────────────────────
@@ -194,18 +200,12 @@ _OP_MAP = {"x": "*", "×": "*", "÷": "/"}
 
 
 def _solve_math_captcha(text: str) -> Optional[str]:
-    """
-    Identify and solve simple arithmetic captchas embedded in page text.
-    e.g. "5 + 2", "8 × 3", "12 - 4".
-    Returns the string result or None if no captcha found.
-    """
     m = _MATH_CAPTCHA_RE.search(text or "")
     if not m:
         return None
     a, op, b = m.group(1), m.group(2), m.group(3)
     op = _OP_MAP.get(op, op)
     try:
-        # safe: only operates on two integers with a basic arithmetic operator
         result = eval(f"{a}{op}{b}", {"__builtins__": {}})   # noqa: S307
         return str(int(result))
     except Exception:
@@ -213,17 +213,12 @@ def _solve_math_captcha(text: str) -> Optional[str]:
 
 
 def _find_and_fill_captcha(soup: BeautifulSoup, payload: Dict[str, str]) -> bool:
-    """
-    Search the page for a math captcha input; if found, compute and inject the answer.
-    Returns True if a captcha was detected (regardless of whether it was solved).
-    """
     for el in soup.find_all(["label", "span", "td", "div"]):
         text = _clean(el.get_text(" ", strip=True))
         if text and _MATH_CAPTCHA_RE.search(text):
             answer = _solve_math_captcha(text)
             if answer is None:
-                return True  # captcha found but unsolvable (non-math)
-            # Find the nearest text/number input to inject the answer
+                return True
             parent = el.find_parent(["tr", "div", "form"]) or el
             for inp in parent.find_all("input", type=["text", "number", None]):
                 name = inp.get("name") or inp.get("id")
@@ -231,7 +226,6 @@ def _find_and_fill_captcha(soup: BeautifulSoup, payload: Dict[str, str]) -> bool
                     payload[name] = answer
                     logger.info(f"Math captcha solved: '{text}' → {answer}")
                     return True
-            # fallback: inject into first unnamed text input near the label
             for inp in parent.find_all("input"):
                 name = inp.get("name") or inp.get("id")
                 if name:
@@ -240,12 +234,29 @@ def _find_and_fill_captcha(soup: BeautifulSoup, payload: Dict[str, str]) -> bool
     return False
 
 
-# ── curl_cffi session factory ─────────────────────────────────────────────────
+# ── curl_cffi session factory (ScraperAPI-powered) ────────────────────────────
 
 def _make_session() -> curlex.Session:
-    """Return a curl_cffi session impersonating Chrome 124."""
+    """
+    Return a curl_cffi session impersonating Chrome 124.
+    If SCRAPERAPI_KEY is set, routes all traffic through ScraperAPI's
+    residential proxy network (India) to bypass IP India blocks.
+    """
+    api_key = _get_scraperapi_key()
     session = curlex.Session(impersonate="chrome124")
     session.headers.update(_HEADERS)
+
+    if api_key:
+        proxy_url = _make_proxy_url(api_key)
+        session.proxies = {"http": proxy_url, "https": proxy_url}
+        session.verify = False          # ScraperAPI uses its own TLS termination
+        logger.debug("ScraperAPI proxy enabled (country_code=in)")
+    else:
+        logger.warning(
+            "SCRAPERAPI_KEY not set — scraping directly. "
+            "Expect 403s on cloud/VPS IPs. Set SCRAPERAPI_KEY or run locally."
+        )
+
     return session
 
 
@@ -262,32 +273,32 @@ def _scrape_sync(
     r1 = None
     for attempt in range(1, max_retries + 1):
         try:
-            r1 = session.get(EREGISTER_URL, timeout=20)
+            r1 = session.get(EREGISTER_URL, timeout=30)
             if r1.status_code == 403:
-                logger.warning(f"403 on GET attempt {attempt}/{max_retries}; retrying in 2s…")
-                time.sleep(2)
+                logger.warning(f"403 on GET attempt {attempt}/{max_retries}; retrying in 3s…")
+                time.sleep(3)
                 continue
             break
         except curlex.exceptions.ConnectionError:
             if attempt == max_retries:
                 raise HTTPException(503, "Cannot reach IP India portal.")
-            time.sleep(2)
+            time.sleep(3)
         except curlex.exceptions.Timeout:
             if attempt == max_retries:
                 raise HTTPException(504, "IP India portal timed out.")
-            time.sleep(2)
+            time.sleep(3)
 
     if r1 is None or r1.status_code == 403:
         raise HTTPException(
             403,
-            "IP India returned 403 after retries. This typically happens on "
-            "cloud/VPS IPs. Run the backend locally, or use 'Add Manually'.",
+            "IP India returned 403 after retries. "
+            "Ensure SCRAPERAPI_KEY is configured correctly.",
         )
     if r1.status_code != 200:
         raise HTTPException(502, f"IP India returned HTTP {r1.status_code}.")
 
     soup1 = BeautifulSoup(r1.text, "lxml")
-    hidden = _collect_hidden(soup1)   # ViewState, EventValidation, __VIEWSTATEGENERATOR …
+    hidden = _collect_hidden(soup1)   # Captures __VIEWSTATE, __EVENTVALIDATION, __VIEWSTATEGENERATOR …
 
     # Locate application-number input field
     app_field = next(
@@ -322,7 +333,7 @@ def _scrape_sync(
     submit_name  = submit_btn.get("name")             if submit_btn else None
     submit_value = submit_btn.get("value", "View")    if submit_btn else "View"
 
-    # Build POST payload
+    # Build POST payload (includes all ASP.NET hidden fields)
     payload: Dict[str, str] = {**hidden, app_field: app_number.strip()}
     if class_field and class_number:
         payload[class_field] = class_number.strip()
@@ -339,7 +350,7 @@ def _scrape_sync(
             r2 = session.post(
                 EREGISTER_URL,
                 data=payload,
-                timeout=25,
+                timeout=30,
                 headers={
                     **_HEADERS,
                     "Content-Type": "application/x-www-form-urlencoded",
@@ -347,21 +358,21 @@ def _scrape_sync(
                 },
             )
             if r2.status_code == 403:
-                logger.warning(f"403 on POST attempt {attempt}/{max_retries}; retrying in 2s…")
-                time.sleep(2)
+                logger.warning(f"403 on POST attempt {attempt}/{max_retries}; retrying in 3s…")
+                time.sleep(3)
                 continue
             break
         except curlex.exceptions.Timeout:
             if attempt == max_retries:
                 raise HTTPException(504, "IP India timed out on form submit.")
-            time.sleep(2)
+            time.sleep(3)
         except curlex.exceptions.RequestException as exc:
             raise HTTPException(502, f"Network error: {exc}")
 
     if r2 is None or r2.status_code == 403:
         raise HTTPException(
             403,
-            "IP India returned 403 after retries. Run backend locally or add manually.",
+            "IP India returned 403 after retries. Check SCRAPERAPI_KEY or add manually.",
         )
 
     soup2 = BeautifulSoup(r2.text, "lxml")
@@ -375,7 +386,7 @@ def _scrape_sync(
             if submit_name:
                 captcha_payload[submit_name] = submit_value
             try:
-                r2 = session.post(EREGISTER_URL, data=captcha_payload, timeout=25,
+                r2 = session.post(EREGISTER_URL, data=captcha_payload, timeout=30,
                                   headers={**_HEADERS, "Content-Type": "application/x-www-form-urlencoded",
                                            "Referer": EREGISTER_URL})
                 soup2 = BeautifulSoup(r2.text, "lxml")
@@ -426,79 +437,139 @@ def _scrape_sync(
     return data
 
 
-# ── Document Index scraper (used inside refresh_tm) ───────────────────────────
+# ── Document Index scraper — targets Document_Index.aspx ─────────────────────
 
 def _scrape_documents_sync(
     app_number: str,
     class_number: Optional[str] = None,
 ) -> tuple[List[Dict], Optional[Dict]]:
     """
-    Piggyback on the same E-Register result page to extract:
-      - documents: list of {name, pdf_link} for targeted labels
-      - hearing:   {date, officer} if a Hearing Notice is found
+    Fetch the Document_Index.aspx page for the given application number and extract:
+      - documents : list of {name, pdf_link} for hearing notices & examination reports
+      - hearing   : {date, officer} extracted from Hearing Notice rows
+
     Returns (documents, hearing).
     """
-    try:
-        raw = _scrape_sync(app_number, class_number)
-    except HTTPException:
-        return [], None
-
-    # We need the actual soup; re-fetch for document parsing
     session = _make_session()
+    base    = "https://tmrsearch.ipindia.gov.in"
+
+    # ── Step 1: GET Document_Index.aspx ───────────────────────────────────
     try:
-        r1 = session.get(EREGISTER_URL, timeout=20)
-        soup1 = BeautifulSoup(r1.text, "lxml")
-        hidden = _collect_hidden(soup1)
-        app_field = next(
-            (inp.get("name") or inp.get("id")
-             for inp in soup1.find_all("input", type="text")
-             if any(k in (inp.get("name", "") + inp.get("id", "")).lower()
-                    for k in ["appno", "appnum", "applicationno", "txtapp"])),
-            "txtApplicationNo",
-        )
-        submit_btn   = soup1.find("input", type="submit") or soup1.find("button", type="submit")
-        submit_name  = submit_btn.get("name")          if submit_btn else None
-        submit_value = submit_btn.get("value", "View") if submit_btn else "View"
-        payload = {**hidden, app_field: app_number.strip()}
-        if submit_name:
-            payload[submit_name] = submit_value
-        r2 = session.post(EREGISTER_URL, data=payload, timeout=25,
-                          headers={**_HEADERS, "Content-Type": "application/x-www-form-urlencoded",
-                                   "Referer": EREGISTER_URL})
-        soup2 = BeautifulSoup(r2.text, "lxml")
+        r1 = session.get(DOC_INDEX_BASE, timeout=30)
+        if r1.status_code != 200:
+            logger.warning(f"Document_Index.aspx GET returned {r1.status_code} for {app_number}")
+            return [], None
     except Exception as exc:
-        logger.warning(f"Document scrape network error for {app_number}: {exc}")
+        logger.warning(f"Cannot reach Document_Index.aspx for {app_number}: {exc}")
         return [], None
 
-    documents: List[Dict] = []
+    soup1  = BeautifulSoup(r1.text, "lxml")
+    hidden = _collect_hidden(soup1)   # __VIEWSTATE, __EVENTVALIDATION, etc.
+
+    # Locate the application-number input
+    app_field = next(
+        (
+            (inp.get("name") or inp.get("id"))
+            for inp in soup1.find_all("input", type="text")
+            if any(k in (inp.get("name", "") + inp.get("id", "")).lower()
+                   for k in ["appno", "appnum", "applicationno", "txtapp"])
+        ),
+        None,
+    )
+    if not app_field:
+        all_txt  = soup1.find_all("input", type="text")
+        app_field = (all_txt[0].get("name") or all_txt[0].get("id")) if all_txt else "txtApplicationNo"
+
+    submit_btn   = soup1.find("input", type="submit") or soup1.find("button", type="submit")
+    submit_name  = submit_btn.get("name")            if submit_btn else None
+    submit_value = submit_btn.get("value", "Search") if submit_btn else "Search"
+
+    payload: Dict[str, str] = {**hidden, app_field: app_number.strip()}
+    if submit_name:
+        payload[submit_name] = submit_value
+    _find_and_fill_captcha(soup1, payload)
+
+    # ── Step 2: POST to retrieve document list ─────────────────────────────
+    try:
+        r2 = session.post(
+            DOC_INDEX_BASE,
+            data=payload,
+            timeout=30,
+            headers={**_HEADERS, "Content-Type": "application/x-www-form-urlencoded",
+                     "Referer": DOC_INDEX_BASE},
+        )
+    except Exception as exc:
+        logger.warning(f"Document_Index POST failed for {app_number}: {exc}")
+        return [], None
+
+    soup2 = BeautifulSoup(r2.text, "lxml")
+
+    # Handle captcha on result page
+    if "captcha" in r2.text.lower():
+        cap_payload = {**_collect_hidden(soup2)}
+        solved = _find_and_fill_captcha(soup2, cap_payload)
+        if solved:
+            if submit_name:
+                cap_payload[submit_name] = submit_value
+            try:
+                r2    = session.post(DOC_INDEX_BASE, data=cap_payload, timeout=30,
+                                     headers={**_HEADERS, "Content-Type": "application/x-www-form-urlencoded",
+                                              "Referer": DOC_INDEX_BASE})
+                soup2 = BeautifulSoup(r2.text, "lxml")
+            except Exception as exc:
+                logger.warning(f"Captcha re-submit failed on Document_Index for {app_number}: {exc}")
+                return [], None
+
+    # ── Step 3: Parse the document table ──────────────────────────────────
+    documents: List[Dict]  = []
     hearing:   Optional[Dict] = None
-    base = "https://tmrsearch.ipindia.gov.in"
 
     for table in soup2.find_all("table"):
-        headers = [_clean(th.get_text(" ", strip=True)) for th in table.find_all("th")]
-        if not any(h and "document" in h.lower() for h in headers):
+        header_texts = [_clean(th.get_text(" ", strip=True)) or "" for th in table.find_all("th")]
+        header_lower = " ".join(header_texts).lower()
+
+        # Look for tables that mention document / index / description in their headers
+        if not any(k in header_lower for k in ["document", "description", "type", "index"]):
             continue
-        for row in table.find_all("tr")[1:]:          # skip header row
+
+        for row in table.find_all("tr")[1:]:   # skip header row
             cells = row.find_all("td")
-            if not cells:
+            if len(cells) < 1:
                 continue
+
+            # Try to grab the document name from the first or second cell
             doc_name = _clean(cells[0].get_text(" ", strip=True)) or ""
-            if not any(lbl in doc_name.lower() for lbl in _DOC_LABELS):
+            if not doc_name and len(cells) > 1:
+                doc_name = _clean(cells[1].get_text(" ", strip=True)) or ""
+
+            doc_lower = doc_name.lower()
+
+            # Filter: only capture targeted document types
+            if not any(lbl in doc_lower for lbl in _DOC_LABELS):
                 continue
+
+            # Find PDF link in the row
             pdf_link = None
-            anchor = row.find("a", href=True)
+            anchor   = row.find("a", href=True)
             if anchor:
-                href = anchor["href"]
+                href     = anchor["href"]
                 pdf_link = href if href.startswith("http") else f"{base}/{href.lstrip('/')}"
+
             entry = {"name": doc_name, "pdf_link": pdf_link}
             documents.append(entry)
 
-            # Extract hearing details from Hearing Notice rows
-            if "hearing notice" in doc_name.lower():
+            # Extract hearing date / officer for Hearing Notice rows
+            if "hearing notice" in doc_lower or "show cause notice" in doc_lower:
+                # Common column layout: [doc_name, date, officer/remarks, ...]
                 h_date    = _clean(cells[1].get_text(" ", strip=True)) if len(cells) > 1 else None
                 h_officer = _clean(cells[2].get_text(" ", strip=True)) if len(cells) > 2 else None
+                # Prefer the latest hearing entry (overwrite)
                 hearing = {"date": h_date, "officer": h_officer}
 
+    logger.info(
+        f"Document_Index for {app_number}: "
+        f"{len(documents)} docs captured, hearing={'yes' if hearing else 'no'}"
+    )
     return documents, hearing
 
 
@@ -508,25 +579,31 @@ def _scrape_by_attorney_sync(agent_code: str) -> List[str]:
     """
     Submit `agent_code` to the Agent Search page and return all
     application numbers found in `app_no=` query-string links.
+    Uses ScraperAPI proxy; handles ASP.NET hidden fields (__VIEWSTATE etc.).
     """
     session = _make_session()
 
-    # GET the search page
-    try:
-        r1 = session.get(AGENT_SEARCH_URL, timeout=20)
-    except curlex.exceptions.RequestException as exc:
-        raise HTTPException(502, f"Cannot reach Agent Search page: {exc}")
+    # ── GET the Agent Search page ──────────────────────────────────────────
+    for attempt in range(1, 4):
+        try:
+            r1 = session.get(AGENT_SEARCH_URL, timeout=30)
+            if r1.status_code == 403:
+                logger.warning(f"403 on Agent Search GET attempt {attempt}; retrying in 3s…")
+                time.sleep(3)
+                continue
+            break
+        except curlex.exceptions.RequestException as exc:
+            if attempt == 3:
+                raise HTTPException(502, f"Cannot reach Agent Search page: {exc}")
+            time.sleep(3)
+    else:
+        raise HTTPException(403, "IP India returned 403 on Agent Search. Check SCRAPERAPI_KEY.")
 
-    if r1.status_code == 403:
-        raise HTTPException(
-            403,
-            "IP India returned 403. Run the backend on a local/residential IP.",
-        )
     if r1.status_code != 200:
         raise HTTPException(502, f"Agent Search page returned HTTP {r1.status_code}.")
 
-    soup1 = BeautifulSoup(r1.text, "lxml")
-    hidden = _collect_hidden(soup1)
+    soup1  = BeautifulSoup(r1.text, "lxml")
+    hidden = _collect_hidden(soup1)   # All ASP.NET hidden fields including __VIEWSTATE
 
     # Locate agent-code input field
     agent_field = next(
@@ -539,25 +616,26 @@ def _scrape_by_attorney_sync(agent_code: str) -> List[str]:
         None,
     )
     if not agent_field:
-        all_txt = soup1.find_all("input", type="text")
+        all_txt     = soup1.find_all("input", type="text")
         agent_field = (all_txt[0].get("name") or all_txt[0].get("id")) if all_txt else "txtAgentCode"
 
     submit_btn   = soup1.find("input", type="submit") or soup1.find("button", type="submit")
-    submit_name  = submit_btn.get("name")          if submit_btn else None
-    submit_value = submit_btn.get("value", "Search") if submit_btn else "Search"
+    submit_name  = submit_btn.get("name")             if submit_btn else None
+    submit_value = submit_btn.get("value", "Search")  if submit_btn else "Search"
 
-    payload = {**hidden, agent_field: agent_code.strip()}
+    # Build payload with all hidden ASP.NET fields + agent code
+    payload: Dict[str, str] = {**hidden, agent_field: agent_code.strip()}
     if submit_name:
         payload[submit_name] = submit_value
 
     _find_and_fill_captcha(soup1, payload)
 
-    # POST
+    # ── POST ───────────────────────────────────────────────────────────────
     try:
         r2 = session.post(
             AGENT_SEARCH_URL,
             data=payload,
-            timeout=25,
+            timeout=30,
             headers={
                 **_HEADERS,
                 "Content-Type": "application/x-www-form-urlencoded",
@@ -569,41 +647,42 @@ def _scrape_by_attorney_sync(agent_code: str) -> List[str]:
 
     soup2 = BeautifulSoup(r2.text, "lxml")
 
-    # Handle math captcha on result page
+    # Handle captcha on result page
     if "captcha" in r2.text.lower():
         cap_payload = {**_collect_hidden(soup2)}
-        solved = _find_and_fill_captcha(soup2, cap_payload)
+        solved      = _find_and_fill_captcha(soup2, cap_payload)
         if solved:
             if submit_name:
                 cap_payload[submit_name] = submit_value
             try:
-                r2 = session.post(AGENT_SEARCH_URL, data=cap_payload, timeout=25,
-                                  headers={**_HEADERS, "Content-Type": "application/x-www-form-urlencoded",
-                                           "Referer": AGENT_SEARCH_URL})
+                r2    = session.post(AGENT_SEARCH_URL, data=cap_payload, timeout=30,
+                                     headers={**_HEADERS, "Content-Type": "application/x-www-form-urlencoded",
+                                              "Referer": AGENT_SEARCH_URL})
                 soup2 = BeautifulSoup(r2.text, "lxml")
             except Exception as exc:
                 logger.warning(f"Captcha re-submit failed for agent search: {exc}")
         else:
             raise HTTPException(503, "CAPTCHA on agent search page could not be solved automatically.")
 
-    # Parse all application numbers from links like href="...app_no=1234567&..."
+    # ── Parse application numbers from result links ─────────────────────────
     app_numbers: List[str] = []
     seen: set = set()
+
+    # Primary: extract from href query params like ?app_no=1234567
     for a in soup2.find_all("a", href=True):
         href = a["href"]
-        m = re.search(r"[?&]app_no=(\d+)", href, re.IGNORECASE)
+        m    = re.search(r"[?&]app_no=(\d+)", href, re.IGNORECASE)
         if m:
             num = m.group(1)
             if num not in seen:
                 seen.add(num)
                 app_numbers.append(num)
 
-    # Fallback: look for bare application numbers in table cells
+    # Fallback: bare 7+ digit numbers in table cells
     if not app_numbers:
         for table in soup2.find_all("table"):
             for row in table.find_all("tr")[1:]:
-                cells = row.find_all("td")
-                for cell in cells:
+                for cell in row.find_all("td"):
                     text = _clean(cell.get_text(" ", strip=True)) or ""
                     if re.fullmatch(r"\d{7,}", text) and text not in seen:
                         seen.add(text)
@@ -612,6 +691,8 @@ def _scrape_by_attorney_sync(agent_code: str) -> List[str]:
     logger.info(f"Attorney {agent_code}: found {len(app_numbers)} application numbers.")
     return app_numbers
 
+
+# ── Async wrappers ────────────────────────────────────────────────────────────
 
 async def scrape_trademark(app_number: str, class_number: Optional[str] = None) -> Dict[str, Any]:
     loop = asyncio.get_event_loop()
@@ -644,7 +725,7 @@ def _parse_date(s: Any) -> Optional[date]:
 def _compute_deadlines(tm: Dict[str, Any]) -> Dict[str, Any]:
     now = date.today()
     dl: Dict[str, Any] = {}
-    rd = _parse_date(tm.get("valid_upto") or tm.get("renewal_date"))
+    rd  = _parse_date(tm.get("valid_upto") or tm.get("renewal_date"))
     if not rd:
         reg = _parse_date(tm.get("registration_date"))
         if reg:
@@ -667,17 +748,17 @@ def _compute_deadlines(tm: Dict[str, Any]) -> Dict[str, Any]:
         d2 = (od - now).days
         if d2 >= 0:
             dl.update(
-                opposition_deadline    = od.strftime("%Y-%m-%d"),
-                days_until_opposition  = d2,
+                opposition_deadline   = od.strftime("%Y-%m-%d"),
+                days_until_opposition = d2,
             )
     return dl
 
 
 async def _gen_reminders(tm_id: str, tm: Dict[str, Any]) -> None:
     await db.trademark_sphere_reminders.delete_many({"trademark_id": tm_id, "auto_generated": True})
-    now = datetime.now(IST)
+    now       = datetime.now(IST)
     reminders = []
-    rd_str = tm.get("renewal_date")
+    rd_str    = tm.get("renewal_date")
     if rd_str:
         rd = _parse_date(rd_str)
         if rd and rd > date.today():
@@ -685,18 +766,18 @@ async def _gen_reminders(tm_id: str, tm: Dict[str, Any]) -> None:
                 ron = rd - timedelta(days=days)
                 if ron >= date.today():
                     r = {
-                        "id":                  str(uuid.uuid4()),
-                        "trademark_id":        tm_id,
-                        "application_number":  tm.get("application_number"),
-                        "word_mark":           tm.get("word_mark"),
-                        "type":                "renewal",
-                        "label":               f"Renewal due in {days} days",
-                        "remind_on":           ron.strftime("%Y-%m-%d"),
-                        "renewal_date":        rd_str,
-                        "days_before":         days,
-                        "sent":                False,
-                        "auto_generated":      True,
-                        "created_at":          now.isoformat(),
+                        "id":                 str(uuid.uuid4()),
+                        "trademark_id":       tm_id,
+                        "application_number": tm.get("application_number"),
+                        "word_mark":          tm.get("word_mark"),
+                        "type":               "renewal",
+                        "label":              f"Renewal due in {days} days",
+                        "remind_on":          ron.strftime("%Y-%m-%d"),
+                        "renewal_date":       rd_str,
+                        "days_before":        days,
+                        "sent":               False,
+                        "auto_generated":     True,
+                        "created_at":         now.isoformat(),
                     }
                     reminders.append(r)
     if reminders:
@@ -707,17 +788,18 @@ async def _gen_reminders(tm_id: str, tm: Dict[str, Any]) -> None:
 # ── Background task: import attorney portfolio ────────────────────────────────
 
 async def _import_attorney_bg(
-    agent_code: str,
-    created_by: str,
-    attorney: Optional[str],
-    client_id: Optional[str],
-    client_name: Optional[str],
-    reminder_emails: List[str],
+    agent_code:        str,
+    created_by:        str,
+    attorney:          Optional[str],
+    client_id:         Optional[str],
+    client_name:       Optional[str],
+    reminder_emails:   List[str],
     reminders_enabled: bool,
 ) -> None:
     """
     Background task: scrape every application number for the given agent_code,
     then add each one to the database (skipping duplicates).
+    Also fetches Document_Index.aspx for hearing/examination report data.
     """
     try:
         app_numbers = await scrape_by_attorney_code(agent_code)
@@ -731,50 +813,56 @@ async def _import_attorney_bg(
         if existing:
             logger.info(f"Attorney import: {app_num} already tracked, skipping.")
             continue
+
         try:
             raw = await scrape_trademark(app_num)
         except HTTPException as exc:
             logger.warning(f"Attorney import: could not scrape {app_num} — {exc.detail}")
             continue
 
+        # Also fetch document index for this trademark
+        try:
+            documents, hearing = await scrape_documents(app_num, raw.get("class_number"))
+        except Exception:
+            documents, hearing = [], None
+
         dl  = _compute_deadlines(raw)
         now = datetime.now(IST)
         tid = str(uuid.uuid4())
         doc = {
-            "id":                 tid,
-            "application_number": app_num,
-            "word_mark":          raw.get("word_mark", ""),
-            "class_number":       raw.get("class_number", ""),
-            "tm_status":          raw.get("tm_status", "Unknown"),
-            "proprietor":         raw.get("proprietor") or raw.get("applicant_name", ""),
-            "applicant_name":     raw.get("applicant_name", ""),
-            "filing_date":        raw.get("filing_date", ""),
-            "registration_date":  raw.get("registration_date", ""),
-            "valid_upto":         raw.get("valid_upto", ""),
-            "goods_and_services": raw.get("goods_and_services", ""),
-            "trademark_image_url":raw.get("trademark_image_url", ""),
-            "address":            raw.get("address", ""),
-            "attorney":           attorney or "",
-            "notes":              f"Imported via attorney portfolio ({agent_code})",
-            "client_id":          client_id  or "",
-            "client_name":        client_name or "",
-            "reminder_emails":    reminder_emails,
-            "reminders_enabled":  reminders_enabled,
-            "last_fetched":       now.isoformat(),
-            "created_at":         now.isoformat(),
-            "updated_at":         now.isoformat(),
-            "created_by":         created_by,
-            "raw_data":           raw,
-            "scrape_source":      "attorney_import",
-            "documents":          [],
-            "hearings":           None,
+            "id":                  tid,
+            "application_number":  app_num,
+            "word_mark":           raw.get("word_mark", ""),
+            "class_number":        raw.get("class_number", ""),
+            "tm_status":           raw.get("tm_status", "Unknown"),
+            "proprietor":          raw.get("proprietor") or raw.get("applicant_name", ""),
+            "applicant_name":      raw.get("applicant_name", ""),
+            "filing_date":         raw.get("filing_date", ""),
+            "registration_date":   raw.get("registration_date", ""),
+            "valid_upto":          raw.get("valid_upto", ""),
+            "goods_and_services":  raw.get("goods_and_services", ""),
+            "trademark_image_url": raw.get("trademark_image_url", ""),
+            "address":             raw.get("address", ""),
+            "attorney":            attorney or "",
+            "notes":               f"Imported via attorney portfolio ({agent_code})",
+            "client_id":           client_id  or "",
+            "client_name":         client_name or "",
+            "reminder_emails":     reminder_emails,
+            "reminders_enabled":   reminders_enabled,
+            "last_fetched":        now.isoformat(),
+            "created_at":          now.isoformat(),
+            "updated_at":          now.isoformat(),
+            "created_by":          created_by,
+            "raw_data":            raw,
+            "scrape_source":       "attorney_import",
+            "documents":           documents,
+            "hearings":            hearing,
             **dl,
         }
         await db.trademark_sphere.insert_one({**doc, "_id": tid})
         await _gen_reminders(tid, doc)
         added += 1
-        # small delay to be polite to the portal
-        await asyncio.sleep(1)
+        await asyncio.sleep(1.5)   # be polite to the portal
 
     logger.info(f"Attorney import ({agent_code}): {added}/{len(app_numbers)} trademarks added.")
 
@@ -798,13 +886,13 @@ async def get_stats(user: User = Depends(get_current_user)):
 
 @router.get("/list")
 async def list_trademarks(
-    search:       str = Query(None),
-    tm_status:    str = Query(None),
-    class_number: str = Query(None),
-    client_id:    str = Query(None),
-    renewal_alert:str = Query(None),
-    skip:         int = Query(0,  ge=0),
-    limit:        int = Query(50, ge=1, le=200),
+    search:        str = Query(None),
+    tm_status:     str = Query(None),
+    class_number:  str = Query(None),
+    client_id:     str = Query(None),
+    renewal_alert: str = Query(None),
+    skip:          int = Query(0,   ge=0),
+    limit:         int = Query(50,  ge=1, le=200),
     user: User = Depends(get_current_user),
 ):
     q: Dict[str, Any] = {}
@@ -888,33 +976,33 @@ async def add_trademark(body: TrademarkAddRequest, bg: BackgroundTasks, user: Us
     now = datetime.now(IST)
     tid = str(uuid.uuid4())
     doc = {
-        "id":                 tid,
-        "application_number": body.application_number.strip(),
-        "word_mark":          raw.get("word_mark", ""),
-        "class_number":       raw.get("class_number") or body.class_number or "",
-        "tm_status":          raw.get("tm_status", "Unknown"),
-        "proprietor":         raw.get("proprietor") or raw.get("applicant_name", ""),
-        "applicant_name":     raw.get("applicant_name", ""),
-        "filing_date":        raw.get("filing_date", ""),
-        "registration_date":  raw.get("registration_date", ""),
-        "valid_upto":         raw.get("valid_upto", ""),
-        "goods_and_services": raw.get("goods_and_services", ""),
-        "trademark_image_url":raw.get("trademark_image_url", ""),
-        "address":            raw.get("address", ""),
-        "attorney":           body.attorney or "",
-        "notes":              body.notes    or "",
-        "client_id":          body.client_id   or "",
-        "client_name":        body.client_name or "",
-        "reminder_emails":    body.reminder_emails,
-        "reminders_enabled":  body.reminders_enabled,
-        "last_fetched":       now.isoformat(),
-        "created_at":         now.isoformat(),
-        "updated_at":         now.isoformat(),
-        "created_by":         user.id,
-        "raw_data":           raw,
-        "scrape_source":      "auto",
-        "documents":          [],
-        "hearings":           None,
+        "id":                  tid,
+        "application_number":  body.application_number.strip(),
+        "word_mark":           raw.get("word_mark", ""),
+        "class_number":        raw.get("class_number") or body.class_number or "",
+        "tm_status":           raw.get("tm_status", "Unknown"),
+        "proprietor":          raw.get("proprietor") or raw.get("applicant_name", ""),
+        "applicant_name":      raw.get("applicant_name", ""),
+        "filing_date":         raw.get("filing_date", ""),
+        "registration_date":   raw.get("registration_date", ""),
+        "valid_upto":          raw.get("valid_upto", ""),
+        "goods_and_services":  raw.get("goods_and_services", ""),
+        "trademark_image_url": raw.get("trademark_image_url", ""),
+        "address":             raw.get("address", ""),
+        "attorney":            body.attorney or "",
+        "notes":               body.notes    or "",
+        "client_id":           body.client_id   or "",
+        "client_name":         body.client_name or "",
+        "reminder_emails":     body.reminder_emails,
+        "reminders_enabled":   body.reminders_enabled,
+        "last_fetched":        now.isoformat(),
+        "created_at":          now.isoformat(),
+        "updated_at":          now.isoformat(),
+        "created_by":          user.id,
+        "raw_data":            raw,
+        "scrape_source":       "auto",
+        "documents":           [],
+        "hearings":            None,
         **dl,
     }
     await db.trademark_sphere.insert_one({**doc, "_id": tid})
@@ -956,8 +1044,9 @@ async def import_attorney(
 ):
     """
     Kick off a background import of all trademarks associated with an attorney/agent code.
-    The background task scrapes the Agent Search page, extracts all application numbers,
-    then fetches and stores each one (skipping duplicates).
+    The background task scrapes the Agent Search page (with full ASP.NET hidden field support
+    and ScraperAPI proxy), extracts all application numbers, then fetches and stores each one
+    (skipping duplicates). Document_Index.aspx is also queried for hearing/examination data.
     """
     bg.add_task(
         _import_attorney_bg,
@@ -972,7 +1061,7 @@ async def import_attorney(
     return {
         "message": (
             f"Attorney portfolio import started for agent code '{body.agent_code}'. "
-            "Trademarks will appear in the list as they are processed."
+            "Trademarks will appear in the list as they are processed (typically 2-5 minutes)."
         ),
         "agent_code": body.agent_code,
     }
@@ -1005,7 +1094,7 @@ async def refresh_tm(tm_id: str, bg: BackgroundTasks, user: User = Depends(get_c
     dl  = _compute_deadlines(nd)
     now = datetime.now(IST)
 
-    # Refresh documents and hearings
+    # Refresh documents and hearings from Document_Index.aspx
     documents, hearing = await scrape_documents(doc["application_number"], doc.get("class_number"))
 
     updates = {
