@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import useDark from '../hooks/useDark';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -722,6 +723,7 @@ export default function Tasks() {
   // ── Auth from AuthContext (single source of truth) ───────────────────
   const { user: authUser, hasPermission } = useAuth();
   const user = authUser || { id: '', full_name: 'User', role: 'staff', permissions: { view_other_tasks: [], can_view_all_tasks: false } };
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const apiFetch = React.useCallback(async (endpoint) => {
     try {
@@ -862,6 +864,16 @@ export default function Tasks() {
     };
     loadAll();
   }, [apiFetch]);
+
+  // ── Auto-open new task dialog from URL param (?newTask=1) ─────────────
+  useEffect(() => {
+    if (searchParams.get('newTask') === '1') {
+      setEditingTask(null);
+      setFormData({ ...EMPTY_FORM });
+      setDialogOpen(true);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const parseChecklist = (description) => {
@@ -1451,36 +1463,59 @@ export default function Tasks() {
                     </Button>
                   </DialogTrigger>
 
-                  {/* Dialog form — unchanged */}
-                  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                    <DialogHeader>
-                      <DialogTitle className="text-xl font-bold" style={{ color: COLORS.deepBlue }}>
-                        {editingTask ? 'Edit Task' : 'Create New Task'}
-                      </DialogTitle>
-                      <DialogDescription className="text-sm text-slate-500 flex items-center gap-3 flex-wrap">
-                        <span>{editingTask ? 'Update task details below.' : 'Fill in the details to create a new task.'}</span>
-                        {editingTask?.created_at && (
-                          <span className="flex items-center gap-1 text-[11px] font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full border border-slate-200">
-                            <Clock className="h-3 w-3" />
-                            Created: {format(new Date(editingTask.created_at), 'MMM dd, yyyy · hh:mm a')}
-                          </span>
-                        )}
-                      </DialogDescription>
-                    </DialogHeader>
-                    <form onSubmit={handleSubmit} className="space-y-4 mt-2">
+                  {/* Dialog form — redesigned wider layout */}
+                  <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto p-0 gap-0">
+                    {/* Header with gradient */}
+                    <div className="px-7 pt-6 pb-5 border-b border-slate-100" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}>
+                      <DialogHeader>
+                        <DialogTitle className="text-2xl font-bold text-white flex items-center gap-2.5">
+                          {editingTask ? <Edit className="h-5 w-5 opacity-80" /> : <Plus className="h-5 w-5 opacity-80" />}
+                          {editingTask ? 'Edit Task' : 'Create New Task'}
+                        </DialogTitle>
+                        <DialogDescription className="text-white/60 text-sm flex items-center gap-3 flex-wrap mt-1">
+                          <span>{editingTask ? 'Update task details below.' : 'Fill in the details to create a new task.'}</span>
+                          {editingTask?.created_at && (
+                            <span className="flex items-center gap-1 text-[11px] font-medium bg-white/15 text-white/80 px-2.5 py-0.5 rounded-full">
+                              <Clock className="h-3 w-3" />
+                              Created: {format(new Date(editingTask.created_at), 'MMM dd, yyyy · hh:mm a')}
+                            </span>
+                          )}
+                        </DialogDescription>
+                      </DialogHeader>
+                    </div>
+                    <form onSubmit={handleSubmit} className="space-y-5 p-7">
+                      {/* Title — full width */}
                       <div className="space-y-1.5">
                         <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Task Title <span className="text-red-500">*</span></Label>
-                        <Input placeholder="Enter task title" value={formData.title} onChange={(e) => setFormData(p => ({ ...p, title: e.target.value }))} required className="h-9 text-sm border-slate-300" />
+                        <Input placeholder="Enter task title" value={formData.title} onChange={(e) => setFormData(p => ({ ...p, title: e.target.value }))} required className="h-10 text-sm border-slate-300 focus:ring-2 focus:ring-blue-200" />
                       </div>
+                      {/* Description — full width */}
                       <div className="space-y-1.5">
                         <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Description</Label>
-                        <Textarea placeholder="Describe the task (use - for checklist items)…" value={formData.description} onChange={(e) => setFormData(p => ({ ...p, description: e.target.value }))} rows={3} className="text-sm border-slate-300 resize-none" />
+                        <Textarea placeholder="Describe the task (use - for checklist items)…" value={formData.description} onChange={(e) => setFormData(p => ({ ...p, description: e.target.value }))} rows={3} className="text-sm border-slate-300 resize-none focus:ring-2 focus:ring-blue-200" />
                       </div>
-                      <div className="grid grid-cols-2 gap-3">
+                      {/* Client + Due Date — 2 col */}
+                      <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Client</Label>
-                          <Select value={formData.client_id || 'no_client'} onValueChange={(v) => setFormData(p => ({ ...p, client_id: v === 'no_client' ? '' : v }))}>
-                            <SelectTrigger className="h-9 text-sm border-slate-300"><SelectValue placeholder="No Client" /></SelectTrigger>
+                          <Select value={formData.client_id || 'no_client'} onValueChange={(v) => {
+                            const clientId = v === 'no_client' ? '' : v;
+                            if (clientId && !editingTask) {
+                              const selectedClient = clients.find(c => c.id === clientId);
+                              // Determine assigned user from assignments array or legacy assigned_to
+                              const assignedUserId = selectedClient?.assignments?.length > 0
+                                ? selectedClient.assignments[0].user_id
+                                : selectedClient?.assigned_to || null;
+                              setFormData(p => ({
+                                ...p,
+                                client_id: clientId,
+                                assigned_to: assignedUserId || p.assigned_to,
+                              }));
+                            } else {
+                              setFormData(p => ({ ...p, client_id: clientId }));
+                            }
+                          }}>
+                            <SelectTrigger className="h-10 text-sm border-slate-300"><SelectValue placeholder="No Client" /></SelectTrigger>
                             <SelectContent className="max-h-52 overflow-y-auto">
                               <SelectItem value="no_client">No Client</SelectItem>
                               {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.company_name}</SelectItem>)}
@@ -1489,15 +1524,22 @@ export default function Tasks() {
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Due Date</Label>
-                          <Input type="date" value={formData.due_date} onChange={(e) => setFormData(p => ({ ...p, due_date: e.target.value }))} className="h-9 text-sm border-slate-300" />
+                          <Input type="date" value={formData.due_date} onChange={(e) => setFormData(p => ({ ...p, due_date: e.target.value }))} className="h-10 text-sm border-slate-300 focus:ring-2 focus:ring-blue-200" />
                         </div>
                       </div>
                       {canAssignTasks && (
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-1.5">
-                            <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Assignee</Label>
+                            <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500 flex items-center gap-1.5">
+                              Assignee
+                              {formData.client_id && formData.assigned_to !== 'unassigned' && (
+                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: `${COLORS.emeraldGreen}18`, color: COLORS.emeraldGreen }}>
+                                  Auto-assigned
+                                </span>
+                              )}
+                            </Label>
                             <Select value={formData.assigned_to} onValueChange={(v) => setFormData(p => ({ ...p, assigned_to: v }))}>
-                              <SelectTrigger className="h-9 text-sm border-slate-300"><SelectValue /></SelectTrigger>
+                              <SelectTrigger className="h-10 text-sm border-slate-300"><SelectValue /></SelectTrigger>
                               <SelectContent className="max-h-52 overflow-y-auto">
                                 <SelectItem value="unassigned">Unassigned</SelectItem>
                                 {users.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
@@ -1508,7 +1550,7 @@ export default function Tasks() {
                             <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Co-assignees</Label>
                             <Popover>
                               <PopoverTrigger asChild>
-                                <Button variant="outline" className="w-full h-9 text-sm justify-between border-slate-300">
+                                <Button variant="outline" className="w-full h-10 text-sm justify-between border-slate-300">
                                   {formData.sub_assignees.length > 0 ? `${formData.sub_assignees.length} selected` : 'Select…'}
                                 </Button>
                               </PopoverTrigger>
@@ -1531,34 +1573,36 @@ export default function Tasks() {
                         <div className="flex flex-wrap gap-1.5">
                           {DEPARTMENTS.map(dept => (
                             <button key={dept.value} type="button" onClick={() => setFormData(p => ({ ...p, category: dept.value }))}
-                              className={`h-7 px-3 rounded-lg text-xs font-semibold transition-all ${formData.category === dept.value ? 'bg-blue-700 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                              className={`h-7 px-3 rounded-lg text-xs font-semibold transition-all ${formData.category === dept.value ? 'shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                              style={formData.category === dept.value ? { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`, color: 'white' } : {}}>
                               {dept.label}
                             </button>
                           ))}
                         </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-3">
+                      {/* Priority + Status — 3 col with better spacing */}
+                      <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Priority</Label>
                           <Select value={formData.priority} onValueChange={(v) => setFormData(p => ({ ...p, priority: v }))}>
-                            <SelectTrigger className="h-9 text-sm border-slate-300"><SelectValue /></SelectTrigger>
+                            <SelectTrigger className="h-10 text-sm border-slate-300"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="low">Low</SelectItem><SelectItem value="medium">Medium</SelectItem>
-                              <SelectItem value="high">High</SelectItem><SelectItem value="critical">Critical</SelectItem>
+                              <SelectItem value="low">🟢 Low</SelectItem><SelectItem value="medium">🟡 Medium</SelectItem>
+                              <SelectItem value="high">🔴 High</SelectItem><SelectItem value="critical">🚨 Critical</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</Label>
                           <Select value={formData.status} onValueChange={(v) => setFormData(p => ({ ...p, status: v }))}>
-                            <SelectTrigger className="h-9 text-sm border-slate-300"><SelectValue /></SelectTrigger>
+                            <SelectTrigger className="h-10 text-sm border-slate-300"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="pending">To Do</SelectItem><SelectItem value="in_progress">In Progress</SelectItem><SelectItem value="completed">Completed</SelectItem>
+                              <SelectItem value="pending">📋 To Do</SelectItem><SelectItem value="in_progress">⚡ In Progress</SelectItem><SelectItem value="completed">✅ Completed</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
                       </div>
-                      <div className={`border rounded-xl p-4 space-y-3 ${isDark ? 'border-slate-600 bg-slate-700/40' : 'border-slate-200 bg-slate-50'}`}>
+                      <div className={`border rounded-xl p-4 space-y-3 ${isDark ? 'border-slate-600 bg-slate-700/40' : 'border-blue-50 bg-slate-50'}`} style={{ borderColor: formData.is_recurring ? COLORS.mediumBlue + '40' : undefined }}>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2"><Repeat className="h-4 w-4 text-slate-500" /><Label className="font-semibold text-sm">Recurring Task</Label></div>
                           <Switch checked={formData.is_recurring} onCheckedChange={(c) => setFormData(p => ({ ...p, is_recurring: c }))} />
@@ -1582,9 +1626,10 @@ export default function Tasks() {
                           </div>
                         )}
                       </div>
-                      <DialogFooter className={`pt-3 border-t ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
-                        <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }} className="h-9 text-sm rounded-lg">Cancel</Button>
-                        <Button type="submit" disabled={loading} className="h-9 text-sm rounded-lg bg-blue-700 hover:bg-blue-800">
+                      <DialogFooter className={`pt-4 border-t ${isDark ? 'border-slate-600' : 'border-slate-200'} flex gap-2`}>
+                        <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }} className="h-10 px-5 text-sm rounded-xl">Cancel</Button>
+                        <Button type="submit" disabled={loading} className="h-10 px-6 text-sm rounded-xl font-semibold"
+                          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`, color: 'white' }}>
                           {loading ? 'Saving…' : editingTask ? 'Update Task' : 'Create Task'}
                         </Button>
                       </DialogFooter>
