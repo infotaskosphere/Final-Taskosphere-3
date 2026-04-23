@@ -7,7 +7,7 @@ import {
   Users, LogOut, Menu, Calendar, Activity, ChevronDown,
   PanelLeftClose, PanelLeftOpen, Target, Sun, Moon, MapPin,
   Settings, Mail, Receipt, X, KeyRound,
-  CreditCard, Fingerprint, Bell, ShieldCheck, ArrowLeftRight,
+  CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
