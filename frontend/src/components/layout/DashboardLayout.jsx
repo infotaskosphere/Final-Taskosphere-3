@@ -51,6 +51,7 @@ const NAV_GROUPS = [
       { path: '/duedates',           icon: Calendar,       label: 'Compliance Calendar' },
       { path: '/compliance',         icon: ShieldCheck,    label: 'Compliance Tracker',  permission: 'can_view_compliance' },
       { path: '/gst-reconciliation', icon: ArrowLeftRight, label: 'GST Reconciliation', permission: 'can_view_gst_reconciliation' },
+      { path: '/trademark-sphere', icon: Shield, label: 'Trademark Sphere', permission: 'can_view_compliance' },
     ],
   },
   {
