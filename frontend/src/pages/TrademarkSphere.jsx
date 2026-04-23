@@ -1,33 +1,69 @@
-// TrademarkSphere.jsx — Trademark Management Module for Taskosphere
+// TrademarkSphere.jsx — Redesigned to match Dashboard design language
 // Drop into: frontend/src/pages/TrademarkSphere.jsx
-// Add route in AppRoutes.jsx + nav item in DashboardLayout.jsx (see README)
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { format, parseISO, differenceInDays, addDays } from 'date-fns';
+import { format } from 'date-fns';
+import useDark from '../hooks/useDark';
 import {
   Shield, Plus, Search, RefreshCw, Trash2, Edit2, Eye,
   Calendar, AlertTriangle, CheckCircle2, Clock, X,
-  ChevronDown, ChevronRight, ExternalLink, Loader2,
-  FileText, StickyNote, Bell, Download, BarChart3,
-  TrendingUp, AlertCircle, Info, Sparkles, BookOpen,
-  Filter, Tag, Building2, Hash, ShieldCheck, Zap,
-  ArrowUpRight, CircleDot, MoreHorizontal, Upload,
+  ChevronRight, ExternalLink, Loader2,
+  Bell, Download, BarChart3,
+  AlertCircle, Filter, Tag, Hash, Zap,
+  ArrowUpRight, MoreHorizontal, FileText,
+  ShieldCheck, TrendingUp, Activity, Settings2,
+  ChevronDown, Info,
 } from 'lucide-react';
 
-// ─── Design tokens (match CompliancePage dark theme) ─────────────────────────
-const D = {
-  bg:     '#0f172a',
-  card:   '#1e293b',
-  raised: '#263348',
-  border: '#334155',
-  text:   '#f1f5f9',
-  muted:  '#94a3b8',
-  dimmer: '#64748b',
+// ─── Design tokens (mirrors Dashboard) ───────────────────────────────────────
+const COLORS = {
+  deepBlue:     '#0D3B66',
+  mediumBlue:   '#1F6FB2',
+  emeraldGreen: '#1FAF5A',
+  lightGreen:   '#5CCB5F',
+  coral:        '#FF6B6B',
+  amber:        '#F59E0B',
+  violet:       '#7C3AED',
+};
+
+const slimScroll = {
+  overflowY: 'auto',
+  scrollbarWidth: 'thin',
+  scrollbarColor: '#cbd5e1 transparent',
+};
+
+if (typeof document !== 'undefined' && !document.getElementById('tm-slim-scroll')) {
+  const s = document.createElement('style');
+  s.id = 'tm-slim-scroll';
+  s.textContent = `
+    .slim-scroll::-webkit-scrollbar { width: 3px; }
+    .slim-scroll::-webkit-scrollbar-track { background: transparent; }
+    .slim-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+    .dark .slim-scroll::-webkit-scrollbar-thumb { background: #475569; }
+    @keyframes tm-spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+    @keyframes tm-pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.8)} }
+  `;
+  document.head.appendChild(s);
+}
+
+const springPhysics = {
+  card:   { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
+  lift:   { type: 'spring', stiffness: 320, damping: 24, mass: 0.9  },
+  button: { type: 'spring', stiffness: 400, damping: 28 },
+};
+
+const containerVariants = {
+  hidden:  { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
+};
+const itemVariants = {
+  hidden:  { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.23, 1, 0.32, 1] } },
 };
 
 // ─── TM Status config ─────────────────────────────────────────────────────────
@@ -45,13 +81,12 @@ const STATUS_CFG = {
   'Unknown':                       { color: '#94a3b8', bg: 'rgba(148,163,184,0.08)', border: 'rgba(148,163,184,0.2)', dot: '#cbd5e1' },
 };
 
-// ─── Renewal urgency config ───────────────────────────────────────────────────
 const RENEWAL_CFG = {
-  overdue:  { color: '#EF4444', bg: 'rgba(239,68,68,0.15)',   label: 'Overdue',      icon: '🔴' },
-  critical: { color: '#EF4444', bg: 'rgba(239,68,68,0.12)',   label: '≤30 days',     icon: '🔴' },
-  warning:  { color: '#F59E0B', bg: 'rgba(245,158,11,0.12)',  label: '≤90 days',     icon: '🟡' },
-  upcoming: { color: '#3B82F6', bg: 'rgba(59,130,246,0.12)',  label: '≤180 days',    icon: '🔵' },
-  ok:       { color: '#1FAF5A', bg: 'rgba(31,175,90,0.08)',   label: 'OK',           icon: '🟢' },
+  overdue:  { color: '#EF4444', bg: 'rgba(239,68,68,0.15)',   label: 'Overdue' },
+  critical: { color: '#EF4444', bg: 'rgba(239,68,68,0.12)',   label: '≤30 days' },
+  warning:  { color: '#F59E0B', bg: 'rgba(245,158,11,0.12)',  label: '≤90 days' },
+  upcoming: { color: '#3B82F6', bg: 'rgba(59,130,246,0.12)',  label: '≤180 days' },
+  ok:       { color: '#1FAF5A', bg: 'rgba(31,175,90,0.08)',   label: 'OK' },
 };
 
 const NICE_CLASSES = Array.from({ length: 45 }, (_, i) => String(i + 1));
@@ -61,21 +96,49 @@ const TM_STATUSES = [
   'Refused','Abandoned','Withdrawn','Unknown',
 ];
 
-// ─── Utility helpers ──────────────────────────────────────────────────────────
-const getStatusCfg = (s) => STATUS_CFG[s] || STATUS_CFG['Unknown'];
+const getStatusCfg  = (s) => STATUS_CFG[s]  || STATUS_CFG['Unknown'];
 const getRenewalCfg = (s) => RENEWAL_CFG[s] || RENEWAL_CFG['ok'];
+const cn = (...c) => c.filter(Boolean).join(' ');
 
-function StatusBadge({ status, size = 'sm' }) {
+// ─── Reusable primitives (mirroring Dashboard) ───────────────────────────────
+
+function SectionCard({ children, className = '' }) {
+  return (
+    <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm min-w-0 w-full ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
+  return (
+    <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700 min-w-0 gap-2">
+      <div className="flex items-center gap-2.5">
+        <div className={`p-1.5 rounded-lg ${iconBg}`}>{icon}</div>
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">{title}</h3>
+            {badge !== undefined && badge > 0 && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500 text-white leading-none">{badge}</span>
+            )}
+          </div>
+          <p className="text-xs text-slate-400 dark:text-slate-500">{subtitle}</p>
+        </div>
+      </div>
+      {action && <div className="flex items-center gap-1">{action}</div>}
+    </div>
+  );
+}
+
+function StatusBadge({ status }) {
   const cfg = getStatusCfg(status);
-  const px = size === 'sm' ? '6px 10px' : '4px 8px';
-  const fs = size === 'sm' ? '0.72rem' : '0.65rem';
   return (
     <span style={{
       background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`,
-      borderRadius: 6, padding: px, fontSize: fs, fontWeight: 600,
+      borderRadius: 6, padding: '3px 8px', fontSize: '0.68rem', fontWeight: 600,
       display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap',
     }}>
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: cfg.dot, flexShrink: 0 }} />
+      <span style={{ width: 5, height: 5, borderRadius: '50%', background: cfg.dot, flexShrink: 0 }} />
       {status}
     </span>
   );
@@ -87,7 +150,7 @@ function RenewalBadge({ status, daysLeft }) {
   return (
     <span style={{
       background: cfg.bg, color: cfg.color,
-      borderRadius: 6, padding: '3px 8px', fontSize: '0.68rem', fontWeight: 600,
+      borderRadius: 6, padding: '2px 7px', fontSize: '0.67rem', fontWeight: 600,
       display: 'inline-block', whiteSpace: 'nowrap',
     }}>
       {status === 'overdue'
@@ -97,109 +160,49 @@ function RenewalBadge({ status, daysLeft }) {
   );
 }
 
-function StatCard({ icon: Icon, label, value, color, sub }) {
+// ─── Metric Card (matches dashboard style) ───────────────────────────────────
+function MetricCard({ icon: Icon, label, value, color, sub, onClick, isDark, urgent }) {
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-      style={{
-        background: D.card, border: `1px solid ${D.border}`, borderRadius: 12,
-        padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 6,
-        position: 'relative', overflow: 'hidden',
-      }}>
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-        background: color, borderRadius: '12px 12px 0 0' }} />
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: '0.78rem', color: D.muted, fontWeight: 500 }}>{label}</span>
-        <div style={{ background: `${color}20`, borderRadius: 8, padding: 6 }}>
-          <Icon size={15} color={color} />
+    <motion.div
+      whileHover={{ y: -3, transition: springPhysics.card }}
+      whileTap={{ scale: 0.985 }}
+      onClick={onClick}
+      className={cn(
+        'rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border',
+        urgent
+          ? isDark
+            ? 'bg-red-900/20 border-red-800 hover:border-red-700'
+            : 'bg-red-50/60 border-red-200 hover:border-red-300'
+          : isDark
+            ? 'bg-slate-800 border-slate-700 hover:border-slate-600'
+            : 'bg-white border-slate-200/80 hover:border-slate-300'
+      )}
+    >
+      <div className="p-4 flex flex-col justify-between min-h-[110px]">
+        <div className="flex items-start justify-between">
+          <div className="min-w-0 flex-1 mr-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+            <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color }}>{value ?? 0}</p>
+            {sub && <p className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{sub}</p>}
+          </div>
+          <div className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
+            style={{ backgroundColor: `${color}18` }}>
+            <Icon className="h-4 w-4" style={{ color }} />
+          </div>
+        </div>
+        <div className={cn('flex items-center gap-1 mt-3 text-xs font-medium transition-colors', isDark ? 'text-slate-500' : 'text-slate-400')}
+          style={{ '--hover-color': color }}>
+          <span>View all</span>
+          <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
         </div>
       </div>
-      <div style={{ fontSize: '2rem', fontWeight: 700, color: D.text, lineHeight: 1 }}>{value}</div>
-      {sub && <div style={{ fontSize: '0.72rem', color: D.dimmer }}>{sub}</div>}
     </motion.div>
   );
 }
 
-function SectionHeader({ title, children }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      marginBottom: 12 }}>
-      <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: D.text }}>{title}</h2>
-      <div style={{ display: 'flex', gap: 8 }}>{children}</div>
-    </div>
-  );
-}
-
-function Chip({ label, active, onClick, color }) {
-  return (
-    <button onClick={onClick} style={{
-      background: active ? (color || '#1F6FB2') : D.raised,
-      color: active ? '#fff' : D.muted,
-      border: `1px solid ${active ? (color || '#1F6FB2') : D.border}`,
-      borderRadius: 20, padding: '4px 12px', fontSize: '0.75rem',
-      cursor: 'pointer', transition: 'all 0.15s', fontWeight: active ? 600 : 400,
-    }}>{label}</button>
-  );
-}
-
-function Input({ value, onChange, placeholder, icon: Icon, style: s }) {
-  return (
-    <div style={{ position: 'relative', ...s }}>
-      {Icon && (
-        <Icon size={14} style={{ position: 'absolute', left: 10, top: '50%',
-          transform: 'translateY(-50%)', color: D.muted, pointerEvents: 'none' }} />
-      )}
-      <input value={value} onChange={onChange} placeholder={placeholder}
-        style={{
-          width: '100%', boxSizing: 'border-box',
-          background: D.raised, border: `1px solid ${D.border}`,
-          borderRadius: 8, padding: Icon ? '8px 10px 8px 30px' : '8px 10px',
-          color: D.text, fontSize: '0.85rem', outline: 'none',
-        }} />
-    </div>
-  );
-}
-
-function Select({ value, onChange, options, placeholder, style: s }) {
-  return (
-    <select value={value} onChange={e => onChange(e.target.value)} style={{
-      background: D.raised, border: `1px solid ${D.border}`,
-      borderRadius: 8, padding: '8px 10px', color: value ? D.text : D.muted,
-      fontSize: '0.85rem', outline: 'none', cursor: 'pointer', ...s,
-    }}>
-      {placeholder && <option value="">{placeholder}</option>}
-      {options.map(o => (
-        <option key={o.value ?? o} value={o.value ?? o}>{o.label ?? o}</option>
-      ))}
-    </select>
-  );
-}
-
-function Btn({ children, onClick, variant = 'primary', size = 'md', icon: Icon, loading, disabled, style: s }) {
-  const base = {
-    display: 'inline-flex', alignItems: 'center', gap: 6,
-    borderRadius: 8, border: 'none', cursor: disabled || loading ? 'not-allowed' : 'pointer',
-    fontWeight: 600, transition: 'all 0.15s', opacity: disabled || loading ? 0.6 : 1,
-    padding: size === 'sm' ? '5px 12px' : '8px 16px',
-    fontSize: size === 'sm' ? '0.78rem' : '0.85rem',
-  };
-  const variants = {
-    primary:  { background: '#1F6FB2', color: '#fff' },
-    danger:   { background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)' },
-    ghost:    { background: D.raised, color: D.muted, border: `1px solid ${D.border}` },
-    success:  { background: 'rgba(31,175,90,0.15)', color: '#1FAF5A', border: '1px solid rgba(31,175,90,0.3)' },
-  };
-  return (
-    <button onClick={onClick} disabled={disabled || loading} style={{ ...base, ...variants[variant], ...s }}>
-      {loading ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
-               : Icon ? <Icon size={14} /> : null}
-      {children}
-    </button>
-  );
-}
-
 // ─── Add Trademark Modal ──────────────────────────────────────────────────────
-function AddTrademarkModal({ onClose, onAdded }) {
-  const [mode, setMode]         = useState('auto'); // 'auto' | 'manual'
+function AddTrademarkModal({ onClose, onAdded, isDark }) {
+  const [mode, setMode]         = useState('auto');
   const [appNumber, setAppNumber] = useState('');
   const [classNum, setClassNum] = useState('');
   const [preview, setPreview]   = useState(null);
@@ -208,13 +211,24 @@ function AddTrademarkModal({ onClose, onAdded }) {
   const [attorney, setAttorney] = useState('');
   const [notes, setNotes]       = useState('');
   const [emails, setEmails]     = useState('');
-
-  // Manual form state
   const [manualForm, setManualForm] = useState({
     application_number: '', word_mark: '', class_number: '',
     tm_status: 'Pending', proprietor: '', filing_date: '',
     registration_date: '', valid_upto: '', goods_and_services: '',
   });
+
+  const inputCls = cn(
+    'w-full box-border px-3 py-2 rounded-xl border text-sm outline-none transition-all focus:ring-2',
+    isDark
+      ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400 focus:border-blue-500 focus:ring-blue-900/40'
+      : 'bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:ring-blue-100'
+  );
+  const selectCls = cn(
+    'w-full px-3 py-2 rounded-xl border text-sm outline-none transition-all cursor-pointer',
+    isDark
+      ? 'bg-slate-700 border-slate-600 text-slate-100 focus:border-blue-500'
+      : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-blue-400'
+  );
 
   const handleFetch = async () => {
     if (!appNumber.trim()) { toast.error('Enter an application number'); return; }
@@ -225,10 +239,9 @@ function AddTrademarkModal({ onClose, onAdded }) {
         class_number: classNum || null,
       });
       setPreview(res.data);
-      toast.success('Trademark data fetched successfully!');
+      toast.success('Trademark data fetched!');
     } catch (err) {
-      const msg = err.response?.data?.detail || 'Failed to fetch. Use manual mode.';
-      toast.error(msg);
+      toast.error(err.response?.data?.detail || 'Failed to fetch. Try manual mode.');
     } finally { setLoading(false); }
   };
 
@@ -243,7 +256,7 @@ function AddTrademarkModal({ onClose, onAdded }) {
         reminder_emails: emails.split(',').map(e => e.trim()).filter(Boolean),
         manual_data: preview,
       });
-      toast.success(`✅ "${res.data.word_mark || appNumber}" added to Trademark Sphere`);
+      toast.success(`"${res.data.word_mark || appNumber}" added to Trademark Sphere`);
       onAdded(res.data);
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to add trademark');
@@ -257,11 +270,10 @@ function AddTrademarkModal({ onClose, onAdded }) {
     setSaving(true);
     try {
       const res = await api.post('/trademark-sphere/add-manual', {
-        ...manualForm,
-        attorney, notes,
+        ...manualForm, attorney, notes,
         reminder_emails: emails.split(',').map(e => e.trim()).filter(Boolean),
       });
-      toast.success(`✅ "${res.data.word_mark}" added to Trademark Sphere`);
+      toast.success(`"${res.data.word_mark}" added!`);
       onAdded(res.data);
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to add trademark');
@@ -269,264 +281,239 @@ function AddTrademarkModal({ onClose, onAdded }) {
   };
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000,
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
-    }} onClick={onClose}>
-      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-        onClick={e => e.stopPropagation()} style={{
-          background: D.card, borderRadius: 16, border: `1px solid ${D.border}`,
-          width: '100%', maxWidth: 640, maxHeight: '90vh', overflowY: 'auto',
-          padding: 28, boxShadow: '0 24px 80px rgba(0,0,0,0.5)',
-        }}>
+    <motion.div
+      className="fixed inset-0 z-[1000] flex items-center justify-center p-4"
+      style={{ background: 'rgba(7,15,30,0.72)', backdropFilter: 'blur(10px)' }}
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.88, y: 40, opacity: 0 }}
+        animate={{ scale: 1, y: 0, opacity: 1 }}
+        exit={{ scale: 0.88, y: 40, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 220, damping: 22 }}
+        onClick={e => e.stopPropagation()}
+        className={cn(
+          'w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl',
+          isDark ? 'bg-slate-900 border border-slate-700' : 'bg-white border border-slate-200'
+        )}
+        style={{ maxHeight: '90vh', overflowY: 'auto' }}
+      >
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ background: 'rgba(31,111,178,0.2)', borderRadius: 8, padding: 8 }}>
-              <Shield size={18} color="#1F6FB2" />
+        <div className="px-6 py-5 relative overflow-hidden"
+          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+          <div className="absolute right-0 top-0 w-48 h-48 rounded-full -mr-16 -mt-16 opacity-10"
+            style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+          <div className="relative flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center">
+                <Shield className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest">Trademark Sphere</p>
+                <h2 className="text-lg font-bold text-white">Add New Trademark</h2>
+              </div>
             </div>
-            <div>
-              <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: D.text }}>Add Trademark</h2>
-              <p style={{ margin: 0, fontSize: '0.75rem', color: D.muted }}>Track a trademark from IP India registry</p>
-            </div>
-          </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: D.muted, cursor: 'pointer' }}>
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Mode tabs */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 20, background: D.raised,
-          borderRadius: 10, padding: 4 }}>
-          {['auto', 'manual'].map(m => (
-            <button key={m} onClick={() => setMode(m)} style={{
-              flex: 1, padding: '8px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
-              background: mode === m ? '#1F6FB2' : 'transparent',
-              color: mode === m ? '#fff' : D.muted, fontSize: '0.82rem', fontWeight: 600,
-              transition: 'all 0.15s',
-            }}>
-              {m === 'auto' ? '🔍 Auto-fetch from IP India' : '✏️ Add Manually'}
+            <button onClick={onClose}
+              className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-all active:scale-90">
+              <X className="w-4 h-4 text-white" />
             </button>
-          ))}
+          </div>
         </div>
 
-        {mode === 'auto' ? (
-          <>
-            {/* Auto-fetch form */}
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 10, marginBottom: 12 }}>
-              <div>
-                <label style={{ fontSize: '0.78rem', color: D.muted, display: 'block', marginBottom: 5 }}>
-                  Application Number *
-                </label>
-                <input value={appNumber} onChange={e => setAppNumber(e.target.value)}
-                  placeholder="e.g. 1234567" onKeyDown={e => e.key === 'Enter' && handleFetch()}
-                  style={{
-                    width: '100%', boxSizing: 'border-box', background: D.raised,
-                    border: `1px solid ${D.border}`, borderRadius: 8, padding: '9px 12px',
-                    color: D.text, fontSize: '0.85rem', outline: 'none',
-                  }} />
-              </div>
-              <div>
-                <label style={{ fontSize: '0.78rem', color: D.muted, display: 'block', marginBottom: 5 }}>
-                  Class (Optional)
-                </label>
-                <select value={classNum} onChange={e => setClassNum(e.target.value)} style={{
-                  width: '100%', background: D.raised, border: `1px solid ${D.border}`,
-                  borderRadius: 8, padding: '9px 12px', color: classNum ? D.text : D.muted,
-                  fontSize: '0.85rem', outline: 'none',
-                }}>
-                  <option value="">Any</option>
-                  {NICE_CLASSES.map(c => <option key={c} value={c}>Class {c}</option>)}
-                </select>
-              </div>
-            </div>
-            <Btn onClick={handleFetch} loading={loading} icon={loading ? null : Search}
-              style={{ width: '100%', justifyContent: 'center', marginBottom: 16 }}>
-              {loading ? 'Fetching from IP India…' : 'Fetch Trademark Data'}
-            </Btn>
-
-            {/* Preview result */}
-            {preview && (
-              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-                style={{ background: D.raised, borderRadius: 10, padding: 16,
-                  border: `1px solid ${D.border}`, marginBottom: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
-                  {preview.trademark_image_url && (
-                    <img src={preview.trademark_image_url} alt="TM"
-                      style={{ width: 64, height: 64, objectFit: 'contain',
-                        borderRadius: 8, background: '#fff', padding: 4 }} />
-                  )}
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '1.1rem', fontWeight: 700, color: D.text }}>
-                      {preview.word_mark || '—'}
-                    </div>
-                    <div style={{ fontSize: '0.8rem', color: D.muted, marginTop: 2 }}>
-                      App #{preview.application_number} · Class {preview.class_number || '—'}
-                    </div>
-                    <div style={{ marginTop: 6 }}>
-                      <StatusBadge status={preview.tm_status || 'Unknown'} />
-                      {preview.renewal_status && (
-                        <RenewalBadge status={preview.renewal_status}
-                          daysLeft={preview.days_until_renewal} />
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 16px', fontSize: '0.8rem' }}>
-                  {[
-                    ['Proprietor', preview.proprietor],
-                    ['Filing Date', preview.filing_date],
-                    ['Registration Date', preview.registration_date],
-                    ['Valid Upto', preview.valid_upto],
-                    ['Renewal Date', preview.renewal_date],
-                  ].map(([k, v]) => v ? (
-                    <div key={k}>
-                      <span style={{ color: D.muted }}>{k}: </span>
-                      <span style={{ color: D.text }}>{v}</span>
-                    </div>
-                  ) : null)}
-                </div>
-                {preview.goods_and_services && (
-                  <div style={{ marginTop: 10, fontSize: '0.78rem', color: D.muted,
-                    borderTop: `1px solid ${D.border}`, paddingTop: 8 }}>
-                    <span style={{ color: D.dimmer }}>G&S: </span>{preview.goods_and_services.slice(0, 200)}
-                    {preview.goods_and_services.length > 200 ? '…' : ''}
-                  </div>
-                )}
-              </motion.div>
-            )}
-          </>
-        ) : (
-          /* Manual form */
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+        <div className="p-6">
+          {/* Mode toggle */}
+          <div className={cn('flex gap-1 p-1 rounded-xl mb-6', isDark ? 'bg-slate-800' : 'bg-slate-100')}>
             {[
-              { key: 'application_number', label: 'Application Number *', full: false },
-              { key: 'word_mark', label: 'Word Mark / TM Name *', full: false },
-              { key: 'tm_status', label: 'Status', full: false, type: 'select',
-                options: TM_STATUSES.map(s => ({ value: s, label: s })) },
-              { key: 'class_number', label: 'Nice Class', full: false, type: 'select',
-                options: NICE_CLASSES.map(c => ({ value: c, label: `Class ${c}` })) },
-              { key: 'proprietor', label: 'Proprietor Name', full: false },
-              { key: 'filing_date', label: 'Filing Date', full: false, type: 'date' },
-              { key: 'registration_date', label: 'Registration Date', full: false, type: 'date' },
-              { key: 'valid_upto', label: 'Valid Upto (Renewal Date)', full: false, type: 'date' },
-              { key: 'goods_and_services', label: 'Goods & Services', full: true, type: 'textarea' },
-            ].map(({ key, label, full, type, options }) => (
-              <div key={key} style={full ? { gridColumn: '1 / -1' } : {}}>
-                <label style={{ fontSize: '0.78rem', color: D.muted, display: 'block', marginBottom: 5 }}>
-                  {label}
-                </label>
-                {type === 'select' ? (
-                  <select value={manualForm[key]}
-                    onChange={e => setManualForm(p => ({ ...p, [key]: e.target.value }))} style={{
-                      width: '100%', background: D.raised, border: `1px solid ${D.border}`,
-                      borderRadius: 8, padding: '8px 10px', color: D.text,
-                      fontSize: '0.85rem', outline: 'none',
-                    }}>
-                    <option value="">Select…</option>
-                    {(options || []).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                ) : type === 'textarea' ? (
-                  <textarea value={manualForm[key]}
-                    onChange={e => setManualForm(p => ({ ...p, [key]: e.target.value }))}
-                    rows={3} style={{
-                      width: '100%', boxSizing: 'border-box', background: D.raised,
-                      border: `1px solid ${D.border}`, borderRadius: 8, padding: '8px 10px',
-                      color: D.text, fontSize: '0.85rem', outline: 'none', resize: 'vertical',
-                    }} />
-                ) : (
-                  <input type={type || 'text'} value={manualForm[key]}
-                    onChange={e => setManualForm(p => ({ ...p, [key]: e.target.value }))} style={{
-                      width: '100%', boxSizing: 'border-box', background: D.raised,
-                      border: `1px solid ${D.border}`, borderRadius: 8, padding: '8px 10px',
-                      color: D.text, fontSize: '0.85rem', outline: 'none',
-                    }} />
-                )}
-              </div>
+              { id: 'auto',   label: '🔍 Auto-fetch from IP India' },
+              { id: 'manual', label: '✏️ Add Manually' },
+            ].map(m => (
+              <button key={m.id} onClick={() => setMode(m.id)} className={cn(
+                'flex-1 py-2 rounded-lg text-sm font-semibold transition-all',
+                mode === m.id
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'
+              )}>{m.label}</button>
             ))}
           </div>
-        )}
 
-        {/* Common fields */}
-        {(preview || mode === 'manual') && (
-          <div style={{ borderTop: `1px solid ${D.border}`, paddingTop: 16, marginBottom: 16 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-              <div>
-                <label style={{ fontSize: '0.78rem', color: D.muted, display: 'block', marginBottom: 5 }}>
-                  Attorney / Agent
-                </label>
-                <input value={attorney} onChange={e => setAttorney(e.target.value)}
-                  placeholder="Name of attorney" style={{
-                    width: '100%', boxSizing: 'border-box', background: D.raised,
-                    border: `1px solid ${D.border}`, borderRadius: 8, padding: '8px 10px',
-                    color: D.text, fontSize: '0.85rem', outline: 'none',
-                  }} />
+          {mode === 'auto' ? (
+            <>
+              <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="col-span-2">
+                  <label className={cn('block text-xs font-semibold uppercase tracking-wider mb-1.5', isDark ? 'text-slate-400' : 'text-slate-500')}>Application Number *</label>
+                  <input className={inputCls} value={appNumber}
+                    onChange={e => setAppNumber(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleFetch()}
+                    placeholder="e.g. 1234567" />
+                </div>
+                <div>
+                  <label className={cn('block text-xs font-semibold uppercase tracking-wider mb-1.5', isDark ? 'text-slate-400' : 'text-slate-500')}>Class</label>
+                  <select className={selectCls} value={classNum} onChange={e => setClassNum(e.target.value)}>
+                    <option value="">Any</option>
+                    {NICE_CLASSES.map(c => <option key={c} value={c}>Class {c}</option>)}
+                  </select>
+                </div>
+              </div>
+              <motion.button
+                whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.99 }}
+                onClick={handleFetch} disabled={loading}
+                className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all flex items-center justify-center gap-2 mb-4"
+                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                {loading
+                  ? <><Loader2 className="w-4 h-4" style={{ animation: 'tm-spin 1s linear infinite' }} />Fetching from IP India…</>
+                  : <><Search className="w-4 h-4" />Fetch Trademark Data</>}
+              </motion.button>
+
+              {preview && (
+                <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                  className={cn('rounded-2xl p-4 mb-4 border', isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200')}>
+                  <div className="flex items-start gap-3 mb-3">
+                    {preview.trademark_image_url && (
+                      <img src={preview.trademark_image_url} alt="TM"
+                        className="w-16 h-16 object-contain rounded-xl bg-white p-1 border border-slate-200 flex-shrink-0" />
+                    )}
+                    <div>
+                      <p className={cn('text-lg font-bold', isDark ? 'text-slate-100' : 'text-slate-800')}>{preview.word_mark || '—'}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">App #{preview.application_number} · Class {preview.class_number || '—'}</p>
+                      <div className="flex gap-2 mt-2 flex-wrap">
+                        <StatusBadge status={preview.tm_status || 'Unknown'} />
+                        {preview.renewal_status && <RenewalBadge status={preview.renewal_status} daysLeft={preview.days_until_renewal} />}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-y-1 gap-x-4 text-xs">
+                    {[['Proprietor', preview.proprietor], ['Filing Date', preview.filing_date],
+                      ['Reg. Date', preview.registration_date], ['Valid Upto', preview.valid_upto],
+                    ].map(([k, v]) => v ? (
+                      <div key={k}><span className="text-slate-400">{k}: </span>
+                        <span className={isDark ? 'text-slate-200' : 'text-slate-700'}>{v}</span>
+                      </div>
+                    ) : null)}
+                  </div>
+                  {preview.goods_and_services && (
+                    <p className={cn('text-xs mt-2 pt-2 border-t leading-relaxed', isDark ? 'text-slate-400 border-slate-700' : 'text-slate-500 border-slate-200')}>
+                      {preview.goods_and_services.slice(0, 200)}{preview.goods_and_services.length > 200 ? '…' : ''}
+                    </p>
+                  )}
+                </motion.div>
+              )}
+            </>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              {[
+                { key: 'application_number', label: 'Application Number *', span: false },
+                { key: 'word_mark', label: 'Word Mark / TM Name *', span: false },
+                { key: 'tm_status', label: 'Status', span: false, type: 'select', options: TM_STATUSES },
+                { key: 'class_number', label: 'Nice Class', span: false, type: 'select',
+                  options: NICE_CLASSES.map(c => ({ value: c, label: `Class ${c}` })) },
+                { key: 'proprietor', label: 'Proprietor', span: false },
+                { key: 'filing_date', label: 'Filing Date', span: false, type: 'date' },
+                { key: 'registration_date', label: 'Registration Date', span: false, type: 'date' },
+                { key: 'valid_upto', label: 'Valid Upto', span: false, type: 'date' },
+                { key: 'goods_and_services', label: 'Goods & Services', span: true, type: 'textarea' },
+              ].map(({ key, label, span, type, options }) => (
+                <div key={key} className={span ? 'col-span-2' : ''}>
+                  <label className={cn('block text-xs font-semibold uppercase tracking-wider mb-1.5', isDark ? 'text-slate-400' : 'text-slate-500')}>{label}</label>
+                  {type === 'select' ? (
+                    <select className={selectCls} value={manualForm[key]}
+                      onChange={e => setManualForm(p => ({ ...p, [key]: e.target.value }))}>
+                      <option value="">Select…</option>
+                      {(options || []).map(o => (
+                        <option key={typeof o === 'string' ? o : o.value} value={typeof o === 'string' ? o : o.value}>
+                          {typeof o === 'string' ? o : o.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : type === 'textarea' ? (
+                    <textarea className={cn(inputCls, 'resize-vertical')} rows={3} value={manualForm[key]}
+                      onChange={e => setManualForm(p => ({ ...p, [key]: e.target.value }))} />
+                  ) : (
+                    <input type={type || 'text'} className={inputCls} value={manualForm[key]}
+                      onChange={e => setManualForm(p => ({ ...p, [key]: e.target.value }))} />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Common fields */}
+          {(preview || mode === 'manual') && (
+            <div className={cn('pt-4 mt-2 border-t space-y-3', isDark ? 'border-slate-700' : 'border-slate-200')}>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={cn('block text-xs font-semibold uppercase tracking-wider mb-1.5', isDark ? 'text-slate-400' : 'text-slate-500')}>Attorney / Agent</label>
+                  <input className={inputCls} value={attorney} onChange={e => setAttorney(e.target.value)} placeholder="Attorney name" />
+                </div>
+                <div>
+                  <label className={cn('block text-xs font-semibold uppercase tracking-wider mb-1.5', isDark ? 'text-slate-400' : 'text-slate-500')}>Reminder Emails</label>
+                  <input className={inputCls} value={emails} onChange={e => setEmails(e.target.value)} placeholder="a@b.com, c@d.com" />
+                </div>
               </div>
               <div>
-                <label style={{ fontSize: '0.78rem', color: D.muted, display: 'block', marginBottom: 5 }}>
-                  Reminder Emails (comma-sep.)
-                </label>
-                <input value={emails} onChange={e => setEmails(e.target.value)}
-                  placeholder="a@b.com, c@d.com" style={{
-                    width: '100%', boxSizing: 'border-box', background: D.raised,
-                    border: `1px solid ${D.border}`, borderRadius: 8, padding: '8px 10px',
-                    color: D.text, fontSize: '0.85rem', outline: 'none',
-                  }} />
+                <label className={cn('block text-xs font-semibold uppercase tracking-wider mb-1.5', isDark ? 'text-slate-400' : 'text-slate-500')}>Notes</label>
+                <textarea className={cn(inputCls, 'resize-vertical')} rows={2} value={notes}
+                  onChange={e => setNotes(e.target.value)} placeholder="Internal notes…" />
               </div>
             </div>
-            <div>
-              <label style={{ fontSize: '0.78rem', color: D.muted, display: 'block', marginBottom: 5 }}>
-                Notes
-              </label>
-              <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
-                placeholder="Internal notes about this trademark…" style={{
-                  width: '100%', boxSizing: 'border-box', background: D.raised,
-                  border: `1px solid ${D.border}`, borderRadius: 8, padding: '8px 10px',
-                  color: D.text, fontSize: '0.85rem', outline: 'none', resize: 'vertical',
-                }} />
-            </div>
-          </div>
-        )}
+          )}
+        </div>
 
-        {/* Footer actions */}
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-          <Btn variant="ghost" onClick={onClose} icon={X}>Cancel</Btn>
+        {/* Footer */}
+        <div className={cn('px-6 py-4 flex items-center justify-end gap-3 border-t', isDark ? 'border-slate-700 bg-slate-800/50' : 'border-slate-100 bg-slate-50')}>
+          <button onClick={onClose} className={cn(
+            'px-4 py-2 rounded-xl text-sm font-semibold border transition-all',
+            isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-500 hover:bg-slate-100'
+          )}>Cancel</button>
           {mode === 'auto' && preview && (
-            <Btn onClick={handleSaveAuto} loading={saving} icon={saving ? null : CheckCircle2} variant="success">
+            <motion.button whileTap={{ scale: 0.98 }} onClick={handleSaveAuto} disabled={saving}
+              className="px-5 py-2 rounded-xl text-sm font-semibold text-white flex items-center gap-2 transition-all"
+              style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen}, #15803d)` }}>
+              {saving ? <Loader2 className="w-4 h-4" style={{ animation: 'tm-spin 1s linear infinite' }} /> : <CheckCircle2 className="w-4 h-4" />}
               {saving ? 'Adding…' : 'Add to Trademark Sphere'}
-            </Btn>
+            </motion.button>
           )}
           {mode === 'manual' && (
-            <Btn onClick={handleSaveManual} loading={saving} icon={saving ? null : CheckCircle2} variant="success">
-              {saving ? 'Adding…' : 'Add to Trademark Sphere'}
-            </Btn>
+            <motion.button whileTap={{ scale: 0.98 }} onClick={handleSaveManual} disabled={saving}
+              className="px-5 py-2 rounded-xl text-sm font-semibold text-white flex items-center gap-2 transition-all"
+              style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen}, #15803d)` }}>
+              {saving ? <Loader2 className="w-4 h-4" style={{ animation: 'tm-spin 1s linear infinite' }} /> : <CheckCircle2 className="w-4 h-4" />}
+              {saving ? 'Adding…' : 'Add Trademark'}
+            </motion.button>
           )}
         </div>
       </motion.div>
-    </div>
+    </motion.div>
   );
 }
 
 // ─── Detail Drawer ────────────────────────────────────────────────────────────
-function DetailDrawer({ tm, onClose, onRefresh, onDelete }) {
-  const [editing, setEditing] = useState(false);
-  const [form, setForm]       = useState({});
-  const [saving, setSaving]   = useState(false);
+function DetailDrawer({ tm, onClose, onRefresh, onDelete, isDark }) {
+  const [editing,    setEditing]    = useState(false);
+  const [form,       setForm]       = useState({});
+  const [saving,     setSaving]     = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [deleting, setDeleting]     = useState(false);
+  const [deleting,   setDeleting]   = useState(false);
 
   useEffect(() => {
     if (tm) setForm({
-      attorney: tm.attorney || '',
-      notes: tm.notes || '',
-      reminder_emails: (tm.reminder_emails || []).join(', '),
-      valid_upto: tm.valid_upto || '',
-      tm_status: tm.tm_status || '',
+      attorney:           tm.attorney || '',
+      notes:              tm.notes || '',
+      reminder_emails:    (tm.reminder_emails || []).join(', '),
+      valid_upto:         tm.valid_upto || '',
+      tm_status:          tm.tm_status || '',
       goods_and_services: tm.goods_and_services || '',
     });
   }, [tm]);
 
   if (!tm) return null;
+
+  const inputCls = cn(
+    'w-full box-border px-3 py-2 rounded-xl border text-sm outline-none transition-all focus:ring-2',
+    isDark
+      ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400 focus:border-blue-500 focus:ring-blue-900/40'
+      : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-blue-400 focus:ring-blue-100'
+  );
 
   const handleSave = async () => {
     setSaving(true);
@@ -565,229 +552,254 @@ function DetailDrawer({ tm, onClose, onRefresh, onDelete }) {
     finally { setDeleting(false); }
   };
 
-  const Field = ({ label, value, mono }) => value ? (
-    <div style={{ marginBottom: 10 }}>
-      <div style={{ fontSize: '0.7rem', color: D.muted, marginBottom: 2, textTransform: 'uppercase',
-        letterSpacing: '0.05em', fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: '0.85rem', color: D.text,
-        fontFamily: mono ? 'monospace' : undefined }}>{value}</div>
-    </div>
-  ) : null;
+  const FieldRow = ({ label, value }) => {
+    if (!value) return null;
+    return (
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">{label}</p>
+        <p className={cn('text-sm font-medium', isDark ? 'text-slate-200' : 'text-slate-700')}>{value}</p>
+      </div>
+    );
+  };
+
+  const isUrgent = tm.renewal_status === 'critical' || tm.renewal_status === 'overdue';
+  const isWarning = tm.renewal_status === 'warning';
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 999,
-      display: 'flex', justifyContent: 'flex-end',
-    }} onClick={onClose}>
-      <motion.div initial={{ x: 400 }} animate={{ x: 0 }} exit={{ x: 400 }}
-        transition={{ type: 'spring', stiffness: 400, damping: 32 }}
-        onClick={e => e.stopPropagation()} style={{
-          width: 460, height: '100%', background: D.card,
-          borderLeft: `1px solid ${D.border}`, padding: 24, overflowY: 'auto',
-          display: 'flex', flexDirection: 'column', gap: 16,
-        }}>
-
-        {/* Drawer header */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-          <div style={{ flex: 1 }}>
-            {tm.trademark_image_url && (
-              <img src={tm.trademark_image_url} alt="TM"
-                style={{ width: 72, height: 72, objectFit: 'contain',
-                  borderRadius: 10, background: '#fff', padding: 6, marginBottom: 10 }} />
-            )}
-            <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700, color: D.text }}>
-              {tm.word_mark || tm.application_number}
-            </h2>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-              <StatusBadge status={tm.tm_status || 'Unknown'} />
-              {tm.class_number && (
-                <span style={{ background: 'rgba(31,111,178,0.12)', color: '#1F6FB2',
-                  border: '1px solid rgba(31,111,178,0.3)', borderRadius: 6,
-                  padding: '3px 8px', fontSize: '0.72rem', fontWeight: 600 }}>
-                  Class {tm.class_number}
-                </span>
+    <motion.div
+      className="fixed inset-0 z-[999] flex justify-end"
+      style={{ background: 'rgba(7,15,30,0.5)', backdropFilter: 'blur(8px)' }}
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ x: 480 }} animate={{ x: 0 }} exit={{ x: 480 }}
+        transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+        onClick={e => e.stopPropagation()}
+        className={cn(
+          'w-[480px] max-w-full h-full flex flex-col shadow-2xl',
+          isDark ? 'bg-slate-900 border-l border-slate-700' : 'bg-white border-l border-slate-200'
+        )}
+        style={{ overflowY: 'auto' }}
+      >
+        {/* Drawer top gradient */}
+        <div className="px-6 pt-6 pb-5 relative overflow-hidden"
+          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+          <div className="absolute right-0 top-0 w-40 h-40 rounded-full -mr-12 -mt-12 opacity-10"
+            style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+          <div className="relative flex items-start justify-between">
+            <div className="flex-1">
+              {tm.trademark_image_url && (
+                <img src={tm.trademark_image_url} alt="TM"
+                  className="w-14 h-14 object-contain rounded-xl bg-white p-1.5 mb-3" />
               )}
-              {tm.renewal_status && (
-                <RenewalBadge status={tm.renewal_status} daysLeft={tm.days_until_renewal} />
-              )}
+              <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest mb-1">Trademark Details</p>
+              <h2 className="text-xl font-bold text-white">{tm.word_mark || tm.application_number}</h2>
+              <div className="flex gap-2 flex-wrap mt-2">
+                <StatusBadge status={tm.tm_status || 'Unknown'} />
+                {tm.class_number && (
+                  <span style={{
+                    background: 'rgba(255,255,255,0.15)', color: '#fff',
+                    borderRadius: 6, padding: '3px 8px', fontSize: '0.68rem', fontWeight: 600,
+                  }}>Class {tm.class_number}</span>
+                )}
+                {tm.renewal_status && <RenewalBadge status={tm.renewal_status} daysLeft={tm.days_until_renewal} />}
+              </div>
             </div>
+            <button onClick={onClose}
+              className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-all flex-shrink-0">
+              <X className="w-4 h-4 text-white" />
+            </button>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none',
-            color: D.muted, cursor: 'pointer', padding: 4 }}>
-            <X size={18} />
-          </button>
         </div>
 
-        {/* Action buttons */}
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <Btn size="sm" variant="ghost" icon={RefreshCw} loading={refreshing} onClick={handleRefresh}>
-            Refresh
-          </Btn>
-          <Btn size="sm" variant="ghost" icon={Edit2} onClick={() => setEditing(!editing)}>
-            {editing ? 'Cancel Edit' : 'Edit'}
-          </Btn>
-          <Btn size="sm" variant="danger" icon={Trash2} loading={deleting} onClick={handleDelete}>
-            Remove
-          </Btn>
-          <a href={`https://tmrsearch.ipindia.gov.in/eregister/eregister.aspx`}
-            target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
-            <Btn size="sm" variant="ghost" icon={ExternalLink}>IP India</Btn>
+        {/* Actions row */}
+        <div className={cn('flex gap-2 px-5 py-3 flex-wrap border-b', isDark ? 'border-slate-700 bg-slate-800/50' : 'border-slate-100 bg-slate-50')}>
+          {[
+            { label: 'Refresh', icon: RefreshCw, loading: refreshing, onClick: handleRefresh, color: COLORS.mediumBlue },
+            { label: editing ? 'Cancel' : 'Edit', icon: Edit2, onClick: () => setEditing(!editing), color: COLORS.amber },
+            { label: 'Remove', icon: Trash2, loading: deleting, onClick: handleDelete, color: COLORS.coral },
+          ].map(({ label, icon: Icon, loading: isLoading, onClick, color }) => (
+            <button key={label} onClick={onClick} disabled={isLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all active:scale-95"
+              style={{ background: `${color}12`, color, border: `1px solid ${color}28` }}>
+              {isLoading
+                ? <Loader2 className="w-3 h-3" style={{ animation: 'tm-spin 1s linear infinite' }} />
+                : <Icon className="w-3 h-3" />}
+              {label}
+            </button>
+          ))}
+          <a href="https://tmrsearch.ipindia.gov.in/eregister/eregister.aspx" target="_blank" rel="noreferrer"
+            className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all',
+              isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-500 hover:bg-slate-100')}>
+            <ExternalLink className="w-3 h-3" />IP India
           </a>
         </div>
 
-        {/* Deadlines alert section */}
-        {(tm.renewal_status === 'critical' || tm.renewal_status === 'overdue' ||
-          tm.renewal_status === 'warning') && (
-          <div style={{
-            background: tm.renewal_status === 'overdue'
-              ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)',
-            border: `1px solid ${tm.renewal_status === 'overdue'
-              ? 'rgba(239,68,68,0.3)' : 'rgba(245,158,11,0.3)'}`,
-            borderRadius: 10, padding: '12px 14px', display: 'flex', gap: 10, alignItems: 'flex-start',
-          }}>
-            <AlertTriangle size={16} color={tm.renewal_status === 'overdue' ? '#ef4444' : '#f59e0b'} style={{ flexShrink: 0, marginTop: 1 }} />
-            <div>
-              <div style={{ fontSize: '0.82rem', fontWeight: 600,
-                color: tm.renewal_status === 'overdue' ? '#ef4444' : '#f59e0b' }}>
-                {tm.renewal_status === 'overdue'
-                  ? `Renewal OVERDUE by ${Math.abs(tm.days_until_renewal)} days!`
-                  : `Renewal due in ${tm.days_until_renewal} days`}
-              </div>
-              <div style={{ fontSize: '0.76rem', color: D.muted, marginTop: 2 }}>
-                Renewal date: {tm.renewal_date || tm.valid_upto}
+        <div className="flex-1 p-5 space-y-4">
+          {/* Urgency alert */}
+          {(isUrgent || isWarning) && (
+            <div className={cn('rounded-2xl p-3.5 flex gap-3 items-start',
+              isUrgent
+                ? 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'
+                : 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800')}>
+              <AlertTriangle className={cn('w-4 h-4 flex-shrink-0 mt-0.5', isUrgent ? 'text-red-500' : 'text-amber-500')} />
+              <div>
+                <p className={cn('text-sm font-bold', isUrgent ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400')}>
+                  {tm.renewal_status === 'overdue'
+                    ? `Renewal OVERDUE by ${Math.abs(tm.days_until_renewal)} days!`
+                    : `Renewal due in ${tm.days_until_renewal} days`}
+                </p>
+                <p className="text-xs text-slate-500 mt-0.5">Renewal date: {tm.renewal_date || tm.valid_upto}</p>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Editable fields */}
-        {editing ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {[
-              { key: 'tm_status', label: 'Status', type: 'select',
-                options: TM_STATUSES.map(s => ({ value: s, label: s })) },
-              { key: 'valid_upto', label: 'Valid Upto (Renewal Date)', type: 'date' },
-              { key: 'attorney', label: 'Attorney / Agent' },
-              { key: 'reminder_emails', label: 'Reminder Emails (comma-sep.)' },
-              { key: 'goods_and_services', label: 'Goods & Services', type: 'textarea' },
-              { key: 'notes', label: 'Notes', type: 'textarea' },
-            ].map(({ key, label, type, options }) => (
-              <div key={key}>
-                <label style={{ fontSize: '0.78rem', color: D.muted, display: 'block', marginBottom: 4 }}>
-                  {label}
-                </label>
-                {type === 'select' ? (
-                  <select value={form[key]} onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))}
-                    style={{ width: '100%', background: D.raised, border: `1px solid ${D.border}`,
-                      borderRadius: 8, padding: '8px 10px', color: D.text, fontSize: '0.85rem', outline: 'none' }}>
-                    {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                ) : type === 'textarea' ? (
-                  <textarea value={form[key]} onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))}
-                    rows={3} style={{ width: '100%', boxSizing: 'border-box', background: D.raised,
-                      border: `1px solid ${D.border}`, borderRadius: 8, padding: '8px 10px',
-                      color: D.text, fontSize: '0.85rem', outline: 'none', resize: 'vertical' }} />
-                ) : (
-                  <input type={type || 'text'} value={form[key]}
-                    onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))}
-                    style={{ width: '100%', boxSizing: 'border-box', background: D.raised,
-                      border: `1px solid ${D.border}`, borderRadius: 8, padding: '8px 10px',
-                      color: D.text, fontSize: '0.85rem', outline: 'none' }} />
-                )}
-              </div>
-            ))}
-            <Btn onClick={handleSave} loading={saving} icon={saving ? null : CheckCircle2} variant="success"
-              style={{ alignSelf: 'flex-end' }}>
-              {saving ? 'Saving…' : 'Save Changes'}
-            </Btn>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-            {/* Info grid */}
-            <div style={{ background: D.raised, borderRadius: 10, padding: 16,
-              border: `1px solid ${D.border}`, marginBottom: 12 }}>
-              <div style={{ fontSize: '0.78rem', fontWeight: 600, color: D.dimmer,
-                marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Registry Information
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px' }}>
-                <Field label="Application No." value={tm.application_number} mono />
-                <Field label="Nice Class" value={tm.class_number ? `Class ${tm.class_number}` : null} />
-                <Field label="Filing Date" value={tm.filing_date} />
-                <Field label="Registration Date" value={tm.registration_date} />
-                <Field label="Valid Upto" value={tm.valid_upto} />
-                <Field label="Renewal Date" value={tm.renewal_date} />
-              </div>
-            </div>
-
-            <div style={{ background: D.raised, borderRadius: 10, padding: 16,
-              border: `1px solid ${D.border}`, marginBottom: 12 }}>
-              <div style={{ fontSize: '0.78rem', fontWeight: 600, color: D.dimmer,
-                marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Owner Details
-              </div>
-              <Field label="Proprietor" value={tm.proprietor} />
-              <Field label="Applicant Name" value={tm.applicant_name} />
-              <Field label="Address" value={tm.address} />
-            </div>
-
-            {tm.goods_and_services && (
-              <div style={{ background: D.raised, borderRadius: 10, padding: 16,
-                border: `1px solid ${D.border}`, marginBottom: 12 }}>
-                <div style={{ fontSize: '0.78rem', fontWeight: 600, color: D.dimmer,
-                  marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Goods & Services
+          {editing ? (
+            <div className="space-y-3">
+              {[
+                { key: 'tm_status', label: 'Status', type: 'select', options: TM_STATUSES },
+                { key: 'valid_upto', label: 'Valid Upto (Renewal Date)', type: 'date' },
+                { key: 'attorney', label: 'Attorney / Agent' },
+                { key: 'reminder_emails', label: 'Reminder Emails (comma-sep.)' },
+                { key: 'goods_and_services', label: 'Goods & Services', type: 'textarea' },
+                { key: 'notes', label: 'Notes', type: 'textarea' },
+              ].map(({ key, label, type, options }) => (
+                <div key={key}>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">{label}</label>
+                  {type === 'select' ? (
+                    <select className={cn(inputCls)} value={form[key]}
+                      onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))}>
+                      {(options || []).map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                  ) : type === 'textarea' ? (
+                    <textarea className={cn(inputCls, 'resize-vertical')} rows={3} value={form[key]}
+                      onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))} />
+                  ) : (
+                    <input type={type || 'text'} className={inputCls} value={form[key]}
+                      onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))} />
+                  )}
                 </div>
-                <p style={{ margin: 0, fontSize: '0.82rem', color: D.muted,
-                  lineHeight: 1.6 }}>{tm.goods_and_services}</p>
+              ))}
+              <motion.button whileTap={{ scale: 0.98 }} onClick={handleSave} disabled={saving}
+                className="w-full py-2.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2"
+                style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen}, #15803d)` }}>
+                {saving ? <Loader2 className="w-4 h-4" style={{ animation: 'tm-spin 1s linear infinite' }} /> : <CheckCircle2 className="w-4 h-4" />}
+                {saving ? 'Saving…' : 'Save Changes'}
+              </motion.button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Registry Info */}
+              <div className={cn('rounded-2xl p-4 border', isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200')}>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3">Registry Information</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <FieldRow label="Application No." value={tm.application_number} />
+                  <FieldRow label="Nice Class" value={tm.class_number ? `Class ${tm.class_number}` : null} />
+                  <FieldRow label="Filing Date" value={tm.filing_date} />
+                  <FieldRow label="Registration Date" value={tm.registration_date} />
+                  <FieldRow label="Valid Upto" value={tm.valid_upto} />
+                  <FieldRow label="Renewal Date" value={tm.renewal_date} />
+                </div>
               </div>
-            )}
 
-            <div style={{ background: D.raised, borderRadius: 10, padding: 16,
-              border: `1px solid ${D.border}` }}>
-              <div style={{ fontSize: '0.78rem', fontWeight: 600, color: D.dimmer,
-                marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Internal
+              {/* Owner Details */}
+              <div className={cn('rounded-2xl p-4 border', isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200')}>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3">Owner Details</p>
+                <div className="space-y-2">
+                  <FieldRow label="Proprietor" value={tm.proprietor} />
+                  <FieldRow label="Applicant Name" value={tm.applicant_name} />
+                  <FieldRow label="Address" value={tm.address} />
+                </div>
               </div>
-              <Field label="Attorney / Agent" value={tm.attorney} />
-              <Field label="Client" value={tm.client_name} />
-              <Field label="Reminder Emails"
-                value={tm.reminder_emails?.length ? tm.reminder_emails.join(', ') : null} />
-              <Field label="Last Refreshed"
-                value={tm.last_fetched ? new Date(tm.last_fetched).toLocaleString('en-IN') : 'Manual'} />
-              {tm.notes && (
-                <div style={{ marginTop: 8, padding: '10px 12px',
-                  background: 'rgba(31,175,90,0.06)', borderRadius: 8,
-                  border: '1px solid rgba(31,175,90,0.15)', fontSize: '0.82rem',
-                  color: D.muted, lineHeight: 1.6 }}>
-                  <span style={{ color: '#1FAF5A', fontWeight: 600 }}>📝 Notes: </span>
-                  {tm.notes}
+
+              {/* G&S */}
+              {tm.goods_and_services && (
+                <div className={cn('rounded-2xl p-4 border', isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200')}>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Goods & Services</p>
+                  <p className={cn('text-sm leading-relaxed', isDark ? 'text-slate-300' : 'text-slate-600')}>{tm.goods_and_services}</p>
                 </div>
               )}
+
+              {/* Internal */}
+              <div className={cn('rounded-2xl p-4 border', isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200')}>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3">Internal</p>
+                <div className="space-y-2">
+                  <FieldRow label="Attorney / Agent" value={tm.attorney} />
+                  <FieldRow label="Client" value={tm.client_name} />
+                  <FieldRow label="Reminder Emails" value={tm.reminder_emails?.length ? tm.reminder_emails.join(', ') : null} />
+                  <FieldRow label="Last Refreshed" value={tm.last_fetched ? new Date(tm.last_fetched).toLocaleString('en-IN') : 'Manual'} />
+                </div>
+                {tm.notes && (
+                  <div className={cn('mt-3 p-3 rounded-xl border', isDark ? 'bg-emerald-900/20 border-emerald-800' : 'bg-emerald-50 border-emerald-200')}>
+                    <p className="text-xs text-emerald-500 font-bold mb-1">📝 Notes</p>
+                    <p className={cn('text-sm leading-relaxed', isDark ? 'text-slate-300' : 'text-slate-600')}>{tm.notes}</p>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </motion.div>
-    </div>
+    </motion.div>
   );
 }
 
-// ─── Main Page Component ──────────────────────────────────────────────────────
+// ─── Deadline Card ────────────────────────────────────────────────────────────
+function DeadlineCard({ tm, onClick, isDark }) {
+  const cfg = getRenewalCfg(tm.renewal_status || 'ok');
+  const isOverdue = tm.renewal_status === 'overdue';
+  return (
+    <motion.div
+      whileHover={{ y: -2, transition: springPhysics.lift }}
+      onClick={onClick}
+      className={cn(
+        'rounded-2xl border p-4 cursor-pointer transition-all flex items-center gap-4',
+        isOverdue
+          ? isDark ? 'bg-red-900/20 border-red-800 hover:border-red-700' : 'bg-red-50/70 border-red-200 hover:border-red-300'
+          : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600 hover:shadow-md' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-md'
+      )}
+    >
+      <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+        style={{ background: cfg.bg }}>
+        <Calendar className="w-5 h-5" style={{ color: cfg.color }} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={cn('font-bold text-sm', isDark ? 'text-slate-100' : 'text-slate-800')}>{tm.word_mark || tm.application_number}</span>
+          <StatusBadge status={tm.tm_status || 'Unknown'} />
+          {tm.class_number && <span className="text-xs text-slate-400">Class {tm.class_number}</span>}
+        </div>
+        <p className="text-xs text-slate-400 mt-0.5">App #{tm.application_number}{tm.proprietor ? ` · ${tm.proprietor}` : ''}</p>
+      </div>
+      <div className="text-right flex-shrink-0">
+        <p className="text-xs text-slate-400">{tm.renewal_date || tm.valid_upto}</p>
+        <RenewalBadge status={tm.renewal_status} daysLeft={tm.days_until_renewal} />
+      </div>
+      <ChevronRight className={cn('w-4 h-4 flex-shrink-0', isDark ? 'text-slate-600' : 'text-slate-300')} />
+    </motion.div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
 export default function TrademarkSphere() {
+  const isDark = useDark();
   const { user } = useAuth();
-  const [trademarks, setTrademarks] = useState([]);
-  const [stats, setStats]           = useState(null);
-  const [deadlines, setDeadlines]   = useState({ upcoming: [], overdue: [] });
-  const [loading, setLoading]       = useState(true);
-  const [search, setSearch]         = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
-  const [filterClass, setFilterClass]   = useState('');
-  const [filterAlert, setFilterAlert]   = useState('');
-  const [totalCount, setTotalCount] = useState(0);
-  const [page, setPage]             = useState(0);
-  const [showAdd, setShowAdd]       = useState(false);
-  const [activeTab, setActiveTab]   = useState('list'); // 'list' | 'deadlines'
-  const [selectedTm, setSelectedTm] = useState(null);
+
+  const [trademarks,    setTrademarks]    = useState([]);
+  const [stats,         setStats]         = useState(null);
+  const [deadlines,     setDeadlines]     = useState({ upcoming: [], overdue: [] });
+  const [loading,       setLoading]       = useState(true);
+  const [search,        setSearch]        = useState('');
+  const [filterStatus,  setFilterStatus]  = useState('');
+  const [filterClass,   setFilterClass]   = useState('');
+  const [filterAlert,   setFilterAlert]   = useState('');
+  const [totalCount,    setTotalCount]    = useState(0);
+  const [page,          setPage]          = useState(0);
+  const [showAdd,       setShowAdd]       = useState(false);
+  const [activeTab,     setActiveTab]     = useState('list');
+  const [selectedTm,    setSelectedTm]    = useState(null);
+  const [showFilters,   setShowFilters]   = useState(false);
   const LIMIT = 50;
 
   const fetchAll = useCallback(async () => {
@@ -795,7 +807,7 @@ export default function TrademarkSphere() {
     try {
       const params = new URLSearchParams({
         skip: String(page * LIMIT), limit: String(LIMIT),
-        ...(search ? { search } : {}),
+        ...(search       ? { search }             : {}),
         ...(filterStatus ? { tm_status: filterStatus } : {}),
         ...(filterClass  ? { class_number: filterClass } : {}),
         ...(filterAlert  ? { renewal_alert: filterAlert } : {}),
@@ -809,7 +821,7 @@ export default function TrademarkSphere() {
       setTotalCount(listRes.data.total);
       setStats(statsRes.data);
       setDeadlines(dlRes.data);
-    } catch (err) {
+    } catch {
       toast.error('Failed to load trademark data');
     } finally { setLoading(false); }
   }, [page, search, filterStatus, filterClass, filterAlert]);
@@ -817,383 +829,445 @@ export default function TrademarkSphere() {
   useEffect(() => { fetchAll(); }, [fetchAll]);
   useEffect(() => { setPage(0); }, [search, filterStatus, filterClass, filterAlert]);
 
-  const handleAdded = (tm) => {
-    setShowAdd(false);
-    fetchAll();
-    toast.success('Trademark Sphere updated!');
-  };
-
+  const handleAdded = () => { setShowAdd(false); fetchAll(); };
   const handleRefreshed = (updated) => {
     setTrademarks(prev => prev.map(t => t.id === updated.id ? updated : t));
     setSelectedTm(updated);
   };
-
   const handleDeleted = (id) => {
     setTrademarks(prev => prev.filter(t => t.id !== id));
     setTotalCount(n => n - 1);
-    fetchAll(); // refresh stats
+    fetchAll();
   };
 
   const exportCSV = () => {
     if (!trademarks.length) return;
-    const headers = ['App No','Word Mark','Class','Status','Proprietor','Filing Date',
-      'Renewal Date','Days Left','Attorney','Client','Notes'];
+    const headers = ['App No','Word Mark','Class','Status','Proprietor','Filing Date','Renewal Date','Days Left','Attorney','Notes'];
     const rows = trademarks.map(t => [
       t.application_number, t.word_mark, t.class_number, t.tm_status,
       t.proprietor, t.filing_date, t.renewal_date || t.valid_upto,
-      t.days_until_renewal ?? '', t.attorney, t.client_name, t.notes,
+      t.days_until_renewal ?? '', t.attorney, t.notes,
     ].map(v => `"${(v || '').toString().replace(/"/g, '""')}"`));
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    a.download = `trademark_sphere_${new Date().toISOString().slice(0,10)}.csv`;
+    a.download = `trademark_sphere_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
   };
 
+  const hasActiveFilters = search || filterStatus || filterClass || filterAlert;
+
+  const selectCls = cn(
+    'px-3 py-2 rounded-xl border text-sm outline-none transition-all cursor-pointer',
+    isDark
+      ? 'bg-slate-800 border-slate-700 text-slate-200 focus:border-blue-500'
+      : 'bg-white border-slate-200 text-slate-700 focus:border-blue-400'
+  );
+
   return (
-    <div style={{ minHeight: '100vh', background: D.bg, padding: '24px 24px 48px',
-      color: D.text, fontFamily: "'Inter', sans-serif" }}>
-
-      {/* ── Page header ── */}
-      <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }}
-        style={{ marginBottom: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          flexWrap: 'wrap', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 44, height: 44, background: 'rgba(31,111,178,0.15)',
-              borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              border: '1px solid rgba(31,111,178,0.3)' }}>
-              <Shield size={22} color="#1F6FB2" />
-            </div>
-            <div>
-              <h1 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 800, color: D.text,
-                letterSpacing: '-0.01em' }}>
-                Trademark Sphere
-              </h1>
-              <p style={{ margin: 0, fontSize: '0.78rem', color: D.muted }}>
-                Track, monitor & manage all trademark registrations
-              </p>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Btn variant="ghost" icon={Download} size="sm" onClick={exportCSV}>Export CSV</Btn>
-            <Btn variant="ghost" icon={RefreshCw} size="sm" onClick={fetchAll}>Refresh</Btn>
-            <Btn icon={Plus} onClick={() => setShowAdd(true)}>Add Trademark</Btn>
-          </div>
-        </div>
-      </motion.div>
-
-      {/* ── Stats cards ── */}
-      {stats && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-          gap: 12, marginBottom: 24 }}>
-          <StatCard icon={Shield} label="Total Tracked" value={stats.total}
-            color="#1F6FB2" sub="All trademarks" />
-          <StatCard icon={CheckCircle2} label="Registered" value={stats.registered}
-            color="#1FAF5A" sub="Active marks" />
-          <StatCard icon={Clock} label="Pending / Active" value={stats.pending}
-            color="#3B82F6" sub="Under process" />
-          <StatCard icon={AlertTriangle} label="Expiring ≤90d" value={stats.expiring_soon}
-            color="#F59E0B" sub="Need renewal" />
-          <StatCard icon={AlertCircle} label="Overdue" value={stats.overdue}
-            color="#EF4444" sub="Renewal past" />
-          <StatCard icon={Bell} label="Upcoming Reminders" value={stats.upcoming_reminders}
-            color="#8B5CF6" sub="Next 30 days" />
+    <>
+      {loading && (
+        <div className="fixed top-0 left-0 right-0 z-[99999] h-0.5">
+          <div className="h-full animate-pulse"
+            style={{ background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue}, ${COLORS.emeraldGreen})` }} />
         </div>
       )}
 
-      {/* ── Tabs ── */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 16, background: D.card,
-        border: `1px solid ${D.border}`, borderRadius: 10, padding: 4, width: 'fit-content' }}>
-        {[
-          { id: 'list',      label: '📋 All Trademarks', count: totalCount },
-          { id: 'deadlines', label: '⏰ Deadlines',
-            count: deadlines.overdue.length + deadlines.upcoming.length },
-        ].map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
-            padding: '7px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
-            background: activeTab === tab.id ? '#1F6FB2' : 'transparent',
-            color: activeTab === tab.id ? '#fff' : D.muted,
-            fontSize: '0.82rem', fontWeight: 600, transition: 'all 0.15s',
-            display: 'flex', alignItems: 'center', gap: 6,
-          }}>
-            {tab.label}
-            {tab.count > 0 && (
-              <span style={{
-                background: activeTab === tab.id
-                  ? 'rgba(255,255,255,0.2)' : 'rgba(148,163,184,0.15)',
-                borderRadius: 10, padding: '1px 7px', fontSize: '0.7rem',
-              }}>{tab.count}</span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      {/* ── List Tab ── */}
-      <AnimatePresence mode="wait">
-        {activeTab === 'list' && (
-          <motion.div key="list" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            {/* Filters row */}
-            <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-              <Input value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="Search mark, app #, proprietor…" icon={Search}
-                style={{ flex: '1 1 220px', minWidth: 200 }} />
-              <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{
-                background: D.raised, border: `1px solid ${D.border}`, borderRadius: 8,
-                padding: '8px 10px', color: filterStatus ? D.text : D.muted,
-                fontSize: '0.82rem', outline: 'none', minWidth: 150,
-              }}>
-                <option value="">All Statuses</option>
-                {TM_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <select value={filterClass} onChange={e => setFilterClass(e.target.value)} style={{
-                background: D.raised, border: `1px solid ${D.border}`, borderRadius: 8,
-                padding: '8px 10px', color: filterClass ? D.text : D.muted,
-                fontSize: '0.82rem', outline: 'none',
-              }}>
-                <option value="">All Classes</option>
-                {NICE_CLASSES.map(c => <option key={c} value={c}>Class {c}</option>)}
-              </select>
-              <select value={filterAlert} onChange={e => setFilterAlert(e.target.value)} style={{
-                background: D.raised, border: `1px solid ${D.border}`, borderRadius: 8,
-                padding: '8px 10px', color: filterAlert ? D.text : D.muted,
-                fontSize: '0.82rem', outline: 'none',
-              }}>
-                <option value="">All Renewal States</option>
-                {Object.entries(RENEWAL_CFG).map(([k, v]) => (
-                  <option key={k} value={k}>{v.icon} {v.label}</option>
-                ))}
-              </select>
-              {(filterStatus || filterClass || filterAlert || search) && (
-                <Btn variant="ghost" size="sm" icon={X}
-                  onClick={() => { setSearch(''); setFilterStatus(''); setFilterClass(''); setFilterAlert(''); }}>
-                  Clear
-                </Btn>
-              )}
-            </div>
-
-            {/* Table */}
-            <div style={{ background: D.card, borderRadius: 12, border: `1px solid ${D.border}`,
-              overflow: 'hidden' }}>
-              {loading ? (
-                <div style={{ padding: 40, textAlign: 'center', color: D.muted }}>
-                  <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', marginBottom: 10 }} />
-                  <div style={{ fontSize: '0.85rem' }}>Loading trademarks…</div>
-                </div>
-              ) : trademarks.length === 0 ? (
-                <div style={{ padding: 60, textAlign: 'center' }}>
-                  <Shield size={40} color={D.dimmer} style={{ marginBottom: 12 }} />
-                  <div style={{ fontSize: '1rem', fontWeight: 600, color: D.muted, marginBottom: 6 }}>
-                    No trademarks found
-                  </div>
-                  <div style={{ fontSize: '0.82rem', color: D.dimmer, marginBottom: 16 }}>
-                    Add a trademark to start tracking renewals and deadlines
-                  </div>
-                  <Btn icon={Plus} onClick={() => setShowAdd(true)}>Add First Trademark</Btn>
-                </div>
-              ) : (
-                <>
-                  {/* Table header */}
-                  <div style={{ display: 'grid', padding: '10px 16px',
-                    borderBottom: `1px solid ${D.border}`, background: D.raised,
-                    gridTemplateColumns: '36px 1.8fr 1fr 1.2fr 1.2fr 1fr 1fr 80px',
-                    fontSize: '0.72rem', fontWeight: 600, color: D.dimmer, textTransform: 'uppercase',
-                    letterSpacing: '0.04em', gap: 8 }}>
-                    <span>#</span>
-                    <span>Trademark / App No.</span>
-                    <span>Class</span>
-                    <span>Status</span>
-                    <span>Proprietor</span>
-                    <span>Filing Date</span>
-                    <span>Renewal</span>
-                    <span></span>
-                  </div>
-
-                  {/* Table rows */}
-                  {trademarks.map((tm, i) => (
-                    <motion.div key={tm.id} initial={{ opacity: 0, x: -8 }}
-                      animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.02 }}
-                      onClick={() => setSelectedTm(tm)} style={{
-                        display: 'grid', padding: '12px 16px',
-                        borderBottom: `1px solid ${D.border}`,
-                        gridTemplateColumns: '36px 1.8fr 1fr 1.2fr 1.2fr 1fr 1fr 80px',
-                        gap: 8, cursor: 'pointer', transition: 'background 0.12s',
-                        alignItems: 'center',
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = D.raised}
-                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-
-                      <span style={{ fontSize: '0.75rem', color: D.dimmer }}>
-                        {page * LIMIT + i + 1}
-                      </span>
-
-                      <div>
-                        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: D.text }}>
-                          {tm.word_mark || '—'}
-                        </div>
-                        <div style={{ fontSize: '0.72rem', color: D.muted, fontFamily: 'monospace' }}>
-                          {tm.application_number}
-                        </div>
-                      </div>
-
-                      <span style={{ fontSize: '0.8rem', color: D.muted }}>
-                        {tm.class_number ? `Class ${tm.class_number}` : '—'}
-                      </span>
-
-                      <div><StatusBadge status={tm.tm_status || 'Unknown'} size="xs" /></div>
-
-                      <div style={{ fontSize: '0.8rem', color: D.muted, overflow: 'hidden',
-                        textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {tm.proprietor || tm.applicant_name || '—'}
-                      </div>
-
-                      <span style={{ fontSize: '0.78rem', color: D.muted }}>
-                        {tm.filing_date || '—'}
-                      </span>
-
-                      <div>
-                        {tm.renewal_date || tm.valid_upto ? (
-                          <>
-                            <div style={{ fontSize: '0.76rem', color: D.muted }}>
-                              {tm.renewal_date || tm.valid_upto}
-                            </div>
-                            <RenewalBadge status={tm.renewal_status}
-                              daysLeft={tm.days_until_renewal} />
-                          </>
-                        ) : <span style={{ fontSize: '0.76rem', color: D.dimmer }}>—</span>}
-                      </div>
-
-                      <div style={{ display: 'flex', gap: 4 }}
-                        onClick={e => e.stopPropagation()}>
-                        <button onClick={() => setSelectedTm(tm)} style={{
-                          background: 'rgba(31,111,178,0.1)', border: '1px solid rgba(31,111,178,0.2)',
-                          borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: '#1F6FB2',
-                        }}>
-                          <Eye size={13} />
-                        </button>
-                      </div>
-                    </motion.div>
-                  ))}
-
-                  {/* Pagination */}
-                  {totalCount > LIMIT && (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      padding: '12px 16px', borderTop: `1px solid ${D.border}` }}>
-                      <span style={{ fontSize: '0.78rem', color: D.muted }}>
-                        Showing {page * LIMIT + 1}–{Math.min((page + 1) * LIMIT, totalCount)} of {totalCount}
-                      </span>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <Btn size="sm" variant="ghost" disabled={page === 0}
-                          onClick={() => setPage(p => p - 1)}>← Prev</Btn>
-                        <Btn size="sm" variant="ghost"
-                          disabled={(page + 1) * LIMIT >= totalCount}
-                          onClick={() => setPage(p => p + 1)}>Next →</Btn>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </motion.div>
-        )}
-
-        {/* ── Deadlines Tab ── */}
-        {activeTab === 'deadlines' && (
-          <motion.div key="deadlines" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            {/* Overdue section */}
-            {deadlines.overdue.length > 0 && (
-              <div style={{ marginBottom: 24 }}>
-                <SectionHeader title={`🔴 Overdue Renewals (${deadlines.overdue.length})`} />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {deadlines.overdue.map(tm => (
-                    <DeadlineCard key={tm.id} tm={tm} onClick={() => setSelectedTm(tm)} urgent />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Upcoming section */}
-            <SectionHeader title={`⏰ Upcoming Renewals (${deadlines.upcoming.length})`}>
-              <span style={{ fontSize: '0.75rem', color: D.muted }}>Next 180 days</span>
-            </SectionHeader>
-            {deadlines.upcoming.length === 0 ? (
-              <div style={{ padding: 40, textAlign: 'center', color: D.muted,
-                background: D.card, borderRadius: 12, border: `1px solid ${D.border}` }}>
-                <CheckCircle2 size={32} color="#1FAF5A" style={{ marginBottom: 10 }} />
-                <div style={{ fontSize: '0.9rem', fontWeight: 600, color: D.text }}>
-                  No renewals due in the next 6 months
-                </div>
-                <div style={{ fontSize: '0.78rem', marginTop: 4 }}>
-                  All tracked trademarks are in good standing
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {deadlines.upcoming.map(tm => (
-                  <DeadlineCard key={tm.id} tm={tm} onClick={() => setSelectedTm(tm)} />
-                ))}
-              </div>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── Modals ── */}
       <AnimatePresence>
         {showAdd && (
-          <AddTrademarkModal key="add-modal" onClose={() => setShowAdd(false)} onAdded={handleAdded} />
+          <AddTrademarkModal key="add" isDark={isDark} onClose={() => setShowAdd(false)} onAdded={handleAdded} />
         )}
         {selectedTm && (
-          <DetailDrawer key="detail-drawer" tm={selectedTm} onClose={() => setSelectedTm(null)}
-            onRefresh={handleRefreshed} onDelete={handleDeleted} />
+          <DetailDrawer key="detail" isDark={isDark} tm={selectedTm}
+            onClose={() => setSelectedTm(null)} onRefresh={handleRefreshed} onDelete={handleDeleted} />
         )}
       </AnimatePresence>
 
-      {/* Spin keyframe */}
-      <style>{`
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      `}</style>
-    </div>
-  );
-}
+      <motion.div className="space-y-5 w-full min-w-0 overflow-x-hidden pb-10"
+        variants={containerVariants} initial="hidden" animate="visible">
 
-// ─── Deadline Card (used in Deadlines tab) ────────────────────────────────────
-function DeadlineCard({ tm, onClick, urgent }) {
-  const cfg = getRenewalCfg(tm.renewal_status || 'ok');
-  return (
-    <motion.div whileHover={{ x: 3 }} onClick={onClick} style={{
-      background: D.card, borderRadius: 10,
-      border: `1px solid ${urgent ? 'rgba(239,68,68,0.3)' : D.border}`,
-      padding: '14px 16px', cursor: 'pointer',
-      display: 'flex', alignItems: 'center', gap: 14,
-      boxShadow: urgent ? '0 0 0 1px rgba(239,68,68,0.1)' : 'none',
-    }}>
-      <div style={{ width: 44, height: 44, borderRadius: 10, flexShrink: 0,
-        background: cfg.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Calendar size={20} color={cfg.color} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 700, fontSize: '0.9rem', color: D.text }}>
-            {tm.word_mark || tm.application_number}
-          </span>
-          <StatusBadge status={tm.tm_status || 'Unknown'} size="xs" />
-          {tm.class_number && (
-            <span style={{ fontSize: '0.72rem', color: D.muted }}>Class {tm.class_number}</span>
+        {/* ── WELCOME BANNER ── */}
+        <motion.div variants={itemVariants}>
+          <div className="relative overflow-hidden rounded-2xl px-5 sm:px-7 pt-5 pb-5"
+            style={{
+              background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`,
+              boxShadow: `0 8px 32px rgba(13,59,102,0.28)`,
+            }}>
+            <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10"
+              style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+            <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5"
+              style={{ background: 'white' }} />
+
+            <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                  <Shield className="h-3 w-3" />
+                  IP India Registry Monitor
+                </p>
+                <h1 className="text-2xl font-bold text-white tracking-tight">Trademark Sphere</h1>
+                <p className="text-white/60 text-sm mt-1">Track, monitor &amp; manage all trademark registrations</p>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button onClick={exportCSV}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/20 text-white border border-white/20 transition-all active:scale-95">
+                  <Download className="w-3.5 h-3.5" />Export CSV
+                </button>
+                <button onClick={fetchAll}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/20 text-white border border-white/20 transition-all active:scale-95">
+                  <RefreshCw className="w-3.5 h-3.5" />Refresh
+                </button>
+                <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                  onClick={() => setShowAdd(true)}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold bg-white text-blue-700 shadow-lg transition-all">
+                  <Plus className="w-4 h-4" />Add Trademark
+                </motion.button>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* ── METRIC CARDS ── */}
+        {stats && (
+          <motion.div variants={itemVariants}
+            className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+            <MetricCard isDark={isDark} icon={Shield}         label="Total Tracked"     value={stats.total}             color={COLORS.mediumBlue}   sub="All marks" />
+            <MetricCard isDark={isDark} icon={CheckCircle2}   label="Registered"        value={stats.registered}        color={COLORS.emeraldGreen} sub="Active marks" />
+            <MetricCard isDark={isDark} icon={Clock}          label="Pending / Active"  value={stats.pending}           color="#3B82F6"              sub="Under process" />
+            <MetricCard isDark={isDark} icon={AlertTriangle}  label="Expiring ≤90d"     value={stats.expiring_soon}     color={COLORS.amber}        sub="Need renewal"
+              urgent={stats.expiring_soon > 0} />
+            <MetricCard isDark={isDark} icon={AlertCircle}    label="Overdue"           value={stats.overdue}           color={COLORS.coral}        sub="Renewal past"
+              urgent={stats.overdue > 0} />
+            <MetricCard isDark={isDark} icon={Bell}           label="Reminders (30d)"   value={stats.upcoming_reminders} color={COLORS.violet}      sub="Upcoming" />
+          </motion.div>
+        )}
+
+        {/* ── TABS ── */}
+        <motion.div variants={itemVariants} className="flex items-center justify-between gap-3 flex-wrap">
+          <div className={cn('flex gap-1 p-1 rounded-xl border', isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-100 border-transparent')}>
+            {[
+              { id: 'list',      label: '📋 All Trademarks', count: totalCount },
+              { id: 'deadlines', label: '⏰ Deadlines',
+                count: deadlines.overdue.length + deadlines.upcoming.length },
+            ].map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all',
+                  activeTab === tab.id
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'
+                )}>
+                {tab.label}
+                {tab.count > 0 && (
+                  <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none',
+                    activeTab === tab.id ? 'bg-white/20 text-white' : 'bg-slate-400/20 text-slate-500')}>
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {activeTab === 'list' && (
+            <button onClick={() => setShowFilters(!showFilters)}
+              className={cn(
+                'flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all',
+                hasActiveFilters
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : isDark
+                    ? 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'
+                    : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+              )}>
+              <Filter className="w-3.5 h-3.5" />
+              Filters {hasActiveFilters && '·' }
+              {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-white inline-block" />}
+            </button>
           )}
-        </div>
-        <div style={{ fontSize: '0.78rem', color: D.muted, marginTop: 3 }}>
-          App #{tm.application_number}
-          {tm.proprietor && <> · {tm.proprietor}</>}
-        </div>
-      </div>
-      <div style={{ textAlign: 'right', flexShrink: 0 }}>
-        <div style={{ fontSize: '0.78rem', color: D.muted }}>
-          {tm.renewal_date || tm.valid_upto}
-        </div>
-        <RenewalBadge status={tm.renewal_status} daysLeft={tm.days_until_renewal} />
-      </div>
-      <ChevronRight size={16} color={D.dimmer} />
-    </motion.div>
+        </motion.div>
+
+        {/* ── LIST TAB ── */}
+        <AnimatePresence mode="wait">
+          {activeTab === 'list' && (
+            <motion.div key="list" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+
+              {/* Filters panel */}
+              <AnimatePresence>
+                {showFilters && (
+                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }} className="overflow-hidden mb-4">
+                    <div className={cn('rounded-2xl p-4 border space-y-3', isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200')}>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                        {/* Search */}
+                        <div className="relative sm:col-span-2 md:col-span-1">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                          <input
+                            value={search} onChange={e => setSearch(e.target.value)}
+                            placeholder="Search mark, app #, proprietor…"
+                            className={cn(
+                              'w-full pl-9 pr-3 py-2 rounded-xl border text-sm outline-none transition-all focus:ring-2',
+                              isDark
+                                ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400 focus:border-blue-500 focus:ring-blue-900/40'
+                                : 'bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:ring-blue-100'
+                            )} />
+                        </div>
+
+                        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className={selectCls}>
+                          <option value="">All Statuses</option>
+                          {TM_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+
+                        <select value={filterClass} onChange={e => setFilterClass(e.target.value)} className={selectCls}>
+                          <option value="">All Classes</option>
+                          {NICE_CLASSES.map(c => <option key={c} value={c}>Class {c}</option>)}
+                        </select>
+
+                        <select value={filterAlert} onChange={e => setFilterAlert(e.target.value)} className={selectCls}>
+                          <option value="">All Renewal States</option>
+                          {Object.entries(RENEWAL_CFG).map(([k, v]) => (
+                            <option key={k} value={k}>{v.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {hasActiveFilters && (
+                        <div className="flex items-center gap-2 flex-wrap pt-1">
+                          <span className="text-xs text-slate-400">Active filters:</span>
+                          {search && <span className={cn('text-xs font-medium px-2 py-0.5 rounded-full', isDark ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-100 text-blue-700')}>"{search}"</span>}
+                          {filterStatus && <span className={cn('text-xs font-medium px-2 py-0.5 rounded-full', isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600')}>{filterStatus}</span>}
+                          {filterClass && <span className={cn('text-xs font-medium px-2 py-0.5 rounded-full', isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600')}>Class {filterClass}</span>}
+                          {filterAlert && <span className={cn('text-xs font-medium px-2 py-0.5 rounded-full', isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600')}>{filterAlert}</span>}
+                          <button onClick={() => { setSearch(''); setFilterStatus(''); setFilterClass(''); setFilterAlert(''); }}
+                            className="ml-auto text-xs font-semibold text-red-500 hover:text-red-600 flex items-center gap-1">
+                            <X className="w-3 h-3" />Clear all
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Table card */}
+              <SectionCard>
+                <CardHeaderRow
+                  iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
+                  icon={<Shield className="h-4 w-4 text-blue-500" />}
+                  title="Trademarks"
+                  subtitle={`${totalCount} total · newest first`}
+                  badge={totalCount}
+                  action={
+                    <button onClick={() => setShowAdd(true)}
+                      className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl transition-all"
+                      style={{ background: `${COLORS.mediumBlue}15`, color: COLORS.mediumBlue }}>
+                      <Plus className="w-3.5 h-3.5" />Add
+                    </button>
+                  }
+                />
+
+                {loading ? (
+                  <div className="flex flex-col items-center justify-center py-16 gap-3">
+                    <Loader2 className="w-7 h-7 text-blue-500" style={{ animation: 'tm-spin 1s linear infinite' }} />
+                    <p className="text-sm text-slate-400">Loading trademarks…</p>
+                  </div>
+                ) : trademarks.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 gap-4">
+                    <div className={cn('p-4 rounded-2xl', isDark ? 'bg-slate-700' : 'bg-slate-100')}>
+                      <Shield className="w-10 h-10 text-slate-400" />
+                    </div>
+                    <div className="text-center">
+                      <p className={cn('font-semibold text-base mb-1', isDark ? 'text-slate-200' : 'text-slate-700')}>No trademarks found</p>
+                      <p className="text-sm text-slate-400 mb-4">
+                        {hasActiveFilters ? 'Try adjusting your filters' : 'Add a trademark to start tracking'}
+                      </p>
+                      {!hasActiveFilters && (
+                        <motion.button whileTap={{ scale: 0.97 }} onClick={() => setShowAdd(true)}
+                          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white mx-auto"
+                          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                          <Plus className="w-4 h-4" />Add First Trademark
+                        </motion.button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Table header */}
+                    <div className={cn(
+                      'hidden md:grid px-4 py-2.5 text-[10px] font-bold uppercase tracking-widest border-b',
+                      'grid-cols-[32px_1.8fr_0.8fr_1.2fr_1.2fr_1fr_1fr_60px] gap-3',
+                      isDark ? 'text-slate-500 border-slate-700 bg-slate-800/50' : 'text-slate-400 border-slate-100 bg-slate-50'
+                    )}>
+                      <span>#</span>
+                      <span>Trademark / App No.</span>
+                      <span>Class</span>
+                      <span>Status</span>
+                      <span>Proprietor</span>
+                      <span>Filing Date</span>
+                      <span>Renewal</span>
+                      <span />
+                    </div>
+
+                    {trademarks.map((tm, i) => (
+                      <motion.div key={tm.id}
+                        initial={{ opacity: 0, x: -8 }}
+                        animate={{ opacity: 1, x: 0, transition: { delay: i * 0.02 } }}
+                        onClick={() => setSelectedTm(tm)}
+                        className={cn(
+                          'flex flex-col md:grid px-4 py-3.5 border-b cursor-pointer transition-all group',
+                          'md:grid-cols-[32px_1.8fr_0.8fr_1.2fr_1.2fr_1fr_1fr_60px] gap-3 md:items-center',
+                          isDark
+                            ? 'border-slate-700/60 hover:bg-slate-700/40'
+                            : 'border-slate-100 hover:bg-slate-50'
+                        )}
+                      >
+                        {/* Row number */}
+                        <span className="hidden md:block text-xs text-slate-400">{page * LIMIT + i + 1}</span>
+
+                        {/* TM name */}
+                        <div className="flex items-start gap-2">
+                          <div>
+                            <p className={cn('font-semibold text-sm', isDark ? 'text-slate-100' : 'text-slate-800')}>
+                              {tm.word_mark || '—'}
+                            </p>
+                            <p className="text-xs text-slate-400 font-mono mt-0.5">{tm.application_number}</p>
+                          </div>
+                        </div>
+
+                        {/* Class */}
+                        <span className="text-sm text-slate-400">{tm.class_number ? `Class ${tm.class_number}` : '—'}</span>
+
+                        {/* Status */}
+                        <div><StatusBadge status={tm.tm_status || 'Unknown'} /></div>
+
+                        {/* Proprietor */}
+                        <p className="text-sm text-slate-400 truncate">{tm.proprietor || tm.applicant_name || '—'}</p>
+
+                        {/* Filing date */}
+                        <span className="text-sm text-slate-400">{tm.filing_date || '—'}</span>
+
+                        {/* Renewal */}
+                        <div>
+                          {tm.renewal_date || tm.valid_upto ? (
+                            <>
+                              <p className="text-xs text-slate-400">{tm.renewal_date || tm.valid_upto}</p>
+                              <RenewalBadge status={tm.renewal_status} daysLeft={tm.days_until_renewal} />
+                            </>
+                          ) : <span className="text-xs text-slate-400">—</span>}
+                        </div>
+
+                        {/* Action */}
+                        <div className="flex justify-end" onClick={e => e.stopPropagation()}>
+                          <button onClick={() => setSelectedTm(tm)}
+                            className={cn(
+                              'p-2 rounded-xl transition-all opacity-0 group-hover:opacity-100',
+                              isDark
+                                ? 'bg-blue-900/30 hover:bg-blue-900/50 text-blue-400'
+                                : 'bg-blue-50 hover:bg-blue-100 text-blue-600'
+                            )}>
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </motion.div>
+                    ))}
+
+                    {/* Pagination */}
+                    {totalCount > LIMIT && (
+                      <div className={cn('flex items-center justify-between px-4 py-3 border-t', isDark ? 'border-slate-700' : 'border-slate-100')}>
+                        <span className="text-xs text-slate-400">
+                          {page * LIMIT + 1}–{Math.min((page + 1) * LIMIT, totalCount)} of {totalCount}
+                        </span>
+                        <div className="flex gap-2">
+                          <button disabled={page === 0} onClick={() => setPage(p => p - 1)}
+                            className={cn('px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all',
+                              isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700 disabled:opacity-40' : 'border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40')}>
+                            ← Prev
+                          </button>
+                          <button disabled={(page + 1) * LIMIT >= totalCount} onClick={() => setPage(p => p + 1)}
+                            className={cn('px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all',
+                              isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700 disabled:opacity-40' : 'border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40')}>
+                            Next →
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </SectionCard>
+            </motion.div>
+          )}
+
+          {/* ── DEADLINES TAB ── */}
+          {activeTab === 'deadlines' && (
+            <motion.div key="deadlines" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="space-y-5">
+
+              {/* Overdue */}
+              {deadlines.overdue.length > 0 && (
+                <SectionCard>
+                  <CardHeaderRow
+                    iconBg={isDark ? 'bg-red-900/40' : 'bg-red-50'}
+                    icon={<AlertCircle className="h-4 w-4 text-red-500" />}
+                    title={`Overdue Renewals`}
+                    subtitle="These trademarks require immediate attention"
+                    badge={deadlines.overdue.length}
+                  />
+                  <div className="p-4 space-y-3">
+                    {deadlines.overdue.map(tm => (
+                      <DeadlineCard key={tm.id} tm={tm} isDark={isDark} onClick={() => setSelectedTm(tm)} />
+                    ))}
+                  </div>
+                </SectionCard>
+              )}
+
+              {/* Upcoming */}
+              <SectionCard>
+                <CardHeaderRow
+                  iconBg={isDark ? 'bg-amber-900/40' : 'bg-amber-50'}
+                  icon={<Clock className="h-4 w-4 text-amber-500" />}
+                  title="Upcoming Renewals"
+                  subtitle="Next 180 days"
+                  badge={deadlines.upcoming.length}
+                />
+                <div className="p-4">
+                  {deadlines.upcoming.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 gap-4">
+                      <div className={cn('p-4 rounded-2xl', isDark ? 'bg-slate-700' : 'bg-slate-100')}>
+                        <CheckCircle2 className="w-10 h-10 text-emerald-500" />
+                      </div>
+                      <div className="text-center">
+                        <p className={cn('font-semibold text-base mb-1', isDark ? 'text-slate-200' : 'text-slate-700')}>All clear!</p>
+                        <p className="text-sm text-slate-400">No renewals due in the next 6 months</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {deadlines.upcoming.map(tm => (
+                        <DeadlineCard key={tm.id} tm={tm} isDark={isDark} onClick={() => setSelectedTm(tm)} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </SectionCard>
+
+              {/* Summary strip */}
+              {(deadlines.upcoming.length > 0 || deadlines.overdue.length > 0) && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Critical (≤30d)', value: deadlines.upcoming.filter(t => t.renewal_status === 'critical').length, color: COLORS.coral },
+                    { label: 'Warning (≤90d)',  value: deadlines.upcoming.filter(t => t.renewal_status === 'warning').length, color: COLORS.amber },
+                    { label: 'Upcoming (≤180d)', value: deadlines.upcoming.filter(t => t.renewal_status === 'upcoming').length, color: '#3B82F6' },
+                    { label: 'Total Overdue',  value: deadlines.overdue.length, color: '#EF4444' },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} className={cn('rounded-2xl p-4 border', isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200')}>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
+                      <p className="text-2xl font-bold mt-1" style={{ color }}>{value}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
+    </>
   );
 }
