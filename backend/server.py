@@ -2086,14 +2086,34 @@ async def handle_attendance(
             # Clear auto_absent flag if user punches in manually
             "auto_marked": False,
         }
+        location_verified = True
         if location_data:
             update_fields["location"] = location_data
+            # Soft-fail geofence: allow punch but flag if outside office radius
+            lat = location_data.get("latitude")
+            lng = location_data.get("longitude")
+            if lat is not None and lng is not None:
+                import math
+                OFFICE_LAT = 21.18796
+                OFFICE_LNG = 72.81375
+                GEOFENCE_RADIUS_M = 200
+                R = 6371000  # Earth radius in metres
+                phi1 = math.radians(OFFICE_LAT)
+                phi2 = math.radians(lat)
+                dphi = math.radians(lat - OFFICE_LAT)
+                dlambda = math.radians(lng - OFFICE_LNG)
+                a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+                distance_m = R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+                if distance_m > GEOFENCE_RADIUS_M:
+                    location_verified = False
+                    logger.info(f"Geofence: user {current_user.id} punched in from {distance_m:.0f}m away — flagged as remote.")
+        update_fields["location_verified"] = location_verified
         await db.attendance.update_one(
             {"user_id": current_user.id, "date": today_str},
             {"$set": update_fields},
             upsert=True
         )
-        return {"message": "Punched in successfully", "is_late": is_late}
+        return {"message": "Punched in successfully", "is_late": is_late, "location_verified": location_verified}
 
     # PUNCH_OUT_BLOCK
     if action == "punch_out":
