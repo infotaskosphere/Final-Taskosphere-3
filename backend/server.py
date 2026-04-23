@@ -31,6 +31,8 @@ from backend.leads import router as leads_router
 from backend.telegram import router as telegram_router
 from backend.notifications import router as notification_router, create_notification
 from backend.email_integration import router as email_router
+from backend.trademark_sphere import router as trademark_sphere_router
+
 # Gemini AI instance (already configured in email_integration module)
 try:
     from backend.email_integration import _gemini as _gemini_ai
@@ -6750,6 +6752,7 @@ async def universal_exception_handler(request: Request, exc: Exception):
 
 # Api Router
 api_router.include_router(invoicing_router)
+api_router.include_router(trademark_sphere_router)
 api_router.include_router(compliance_router)
 api_router.include_router(gst_reconciliation_router)
 api_router.include_router(identix_router, prefix="/identix")
