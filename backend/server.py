@@ -403,6 +403,7 @@ async def startup_event():
         await db.staff_activity.create_index("domain")
         await db.staff_activity.create_index([("user_id", 1), ("timestamp", -1)])
         await db.staff_activity.create_index([("user_id", 1), ("type", 1)])
+        await db.trademark_sphere.create_index("application_number", unique=True)
 
     # ── FIXED: EMAIL CONNECTIONS INDEX ──────────────────────────────────
         try:
