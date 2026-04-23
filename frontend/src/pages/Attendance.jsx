@@ -452,7 +452,7 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
         {holiday
           ? <p className="font-medium" style={{ color: ATT_COLORS.holiday.fg }}>{holiday.name}</p>
           : dayRecord?.status === 'leave'
-            ? <p className="font-medium" style={{ color: ATT_COLORS.leave.fg }}>On Leave{dayRecord.leave_reason ? ` — ${dayRecord.leave_reason}` : ''}</p>
+            ? <p className="font-medium" style={{ color: ATT_COLORS.absent.fg }}>On Leave{dayRecord.leave_reason ? ` — ${dayRecord.leave_reason}` : ''}</p>
           : dayRecord?.status === 'absent'
             ? <p className="font-medium" style={{ color: ATT_COLORS.absent.fg }}>Absent{dayRecord.auto_marked ? ' (auto-marked)' : ''}</p>
           : dayRecord?.punch_in
@@ -3291,9 +3291,9 @@ export default function Attendance() {
                 {/* Leave notice */}
                 {displayTodayAttendance?.status === 'leave' && (
                   <div className="mb-4 flex items-center gap-3 px-4 py-3 rounded-xl border"
-                    style={{ backgroundColor: isDark ? 'rgba(249,115,22,0.08)' : '#fff7ed', borderColor: isDark ? '#7c2d12' : '#fed7aa' }}>
-                    <CalendarX className="w-4 h-4 flex-shrink-0" style={{ color: COLORS.orange }} />
-                    <p className="text-sm font-semibold" style={{ color: isDark ? '#fb923c' : '#c2410c' }}>On leave today</p>
+                    style={{ backgroundColor: isDark ? ATT_COLORS.absent.bgDark : ATT_COLORS.absent.bg, borderColor: isDark ? ATT_COLORS.absent.borderDark : ATT_COLORS.absent.border }}>
+                    <CalendarX className="w-4 h-4 flex-shrink-0" style={{ color: ATT_COLORS.absent.fg }} />
+                    <p className="text-sm font-semibold" style={{ color: ATT_COLORS.absent.fg }}>On leave today</p>
                   </div>
                 )}
 
@@ -3481,8 +3481,8 @@ export default function Attendance() {
                           const barHeight = d.hours ? Math.min(100, (parseFloat(d.hours) / 10) * 100) : 0;
                           const barColor = d.status === 'present' ? COLORS.emeraldGreen
                             : d.status === 'absent' ? COLORS.red
-                            : d.status === 'leave' ? COLORS.orange
-                            : d.status === 'holiday' ? COLORS.amber
+                            : d.status === 'leave' ? ATT_COLORS.absent.fg
+                            : d.status === 'holiday' ? '#1e3a8a'
                             : isDark ? D.border : '#e2e8f0';
 
                           return (
@@ -3909,10 +3909,10 @@ export default function Attendance() {
                         />
                         <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 text-xs justify-center">
                           {[
-                            { color: COLORS.emeraldGreen,  label: 'Present'     },
-                            { color: ATT_COLORS.absent.fg, label: 'Late/Absent' },
-                            { color: '#1e3a8a',            label: 'Holiday'     },
-                            { color: ATT_COLORS.absent.fg, label: 'Leave'       },
+                            { color: COLORS.emeraldGreen,  label: 'Present'      },
+                            { color: ATT_COLORS.late.fg,   label: 'Late'         },
+                            { color: '#1e3a8a',            label: 'Holiday'      },
+                            { color: ATT_COLORS.absent.fg, label: 'Leave/Absent' },
                           ].map(({ color, label }) => (
                             <div key={label} className="flex items-center gap-1.5">
                               <span className="w-3.5 h-3.5 rounded-full border-2 flex-shrink-0"
@@ -4000,8 +4000,8 @@ export default function Attendance() {
                     {/* Apply for Leave */}
                     <SectionCard className="flex flex-col">
                       <CardHeaderRow
-                        iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
-                        icon={<CalendarX className="h-4 w-4" style={{ color: COLORS.orange }} />}
+                        iconBg={isDark ? 'bg-red-900/40' : 'bg-red-50'}
+                        icon={<CalendarX className="h-4 w-4" style={{ color: ATT_COLORS.absent.fg }} />}
                         title="Apply for Leave"
                         subtitle={upcomingLeaves.length > 0
                           ? `${upcomingLeaves.length} upcoming leave${upcomingLeaves.length !== 1 ? 's' : ''}`
@@ -4016,11 +4016,11 @@ export default function Attendance() {
                                 <div key={leave.date}
                                   className="flex items-center justify-between px-3 py-2 rounded-lg border text-xs"
                                   style={{
-                                    backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed',
-                                    borderColor: isDark ? '#7c2d12' : '#fed7aa',
+                                    backgroundColor: isDark ? ATT_COLORS.absent.bgDark : ATT_COLORS.absent.bg,
+                                    borderColor: isDark ? ATT_COLORS.absent.borderDark : ATT_COLORS.absent.border,
                                   }}>
                                   <div className="flex items-center gap-2">
-                                    <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: COLORS.orange }} />
+                                    <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: ATT_COLORS.absent.fg }} />
                                     <span className="font-semibold" style={{ color: isDark ? D.text : '#1e293b' }}>
                                       {leaveDate ? format(leaveDate, 'EEE, MMM d') : leave.date}
                                     </span>
@@ -4045,9 +4045,9 @@ export default function Attendance() {
                           onClick={() => setShowLeaveForm(true)}
                           className="flex items-center justify-center gap-2.5 w-full py-3.5 rounded-xl text-sm font-bold transition-all border-2"
                           style={{
-                            borderColor: isDark ? 'rgba(249,115,22,0.4)' : `${COLORS.orange}40`,
-                            color: isDark ? '#fb923c' : COLORS.orange,
-                            backgroundColor: isDark ? 'rgba(249,115,22,0.08)' : `${COLORS.orange}06`,
+                            borderColor: isDark ? ATT_COLORS.absent.borderDark : `${ATT_COLORS.absent.fg}40`,
+                            color: isDark ? '#f87171' : ATT_COLORS.absent.fg,
+                            backgroundColor: isDark ? ATT_COLORS.absent.bgDark : ATT_COLORS.absent.bg,
                           }}
                         >
                           <Send className="w-4 h-4" /> Apply Leave
@@ -4200,7 +4200,7 @@ export default function Attendance() {
                                   style={{ color: ATT_COLORS.absent.fg, backgroundColor: isDark ? ATT_COLORS.absent.bgDark : ATT_COLORS.absent.bg }}>Absent</span>
                               ) : isLeave ? (
                                 <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded"
-                                  style={{ color: ATT_COLORS.leave.fg, backgroundColor: isDark ? ATT_COLORS.leave.bgDark : ATT_COLORS.leave.bg }}>Leave</span>
+                                  style={{ color: ATT_COLORS.absent.fg, backgroundColor: isDark ? ATT_COLORS.absent.bgDark : ATT_COLORS.absent.bg }}>Leave/Absent</span>
                               ) : (
                                 <span className="text-[11px] font-bold px-1.5 py-0.5 rounded font-mono"
                                   style={{
