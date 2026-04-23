@@ -8,6 +8,7 @@ import DashboardLayout from "@/components/layout/DashboardLayout.jsx";
 
 const Login             = lazy(() => import("@/pages/Login.jsx"));
 const ForgotPassword    = lazy(() => import("@/pages/ForgotPassword.jsx"));
+const TrademarkSphere = lazy(() => import("@/pages/TrademarkSphere.jsx"));
 const TaskAudit         = lazy(() => import("@/pages/TaskAudit.jsx"));
 const Register          = lazy(() => import("@/pages/Register.jsx"));
 const Dashboard         = lazy(() => import("@/pages/Dashboard.jsx"));
@@ -126,6 +127,7 @@ function AppRoutes() {
       <Route path="/duedates"           element={<Protected><PageLoader><DueDates /></PageLoader></Protected>} />
       <Route path="/compliance"         element={<Permission permission="can_view_compliance"><PageLoader><CompliancePage /></PageLoader></Permission>} />
       <Route path="/gst-reconciliation" element={<Permission permission="can_view_gst_reconciliation"><PageLoader><GSTReconciliation /></PageLoader></Permission>} />
+      <Route path="/trademark-sphere" element={<Permission permission="can_view_compliance"><PageLoader><TrademarkSphere /></PageLoader></Permission>} />
 
       {/* Settings — all roles */}
       <Route path="/settings/general" element={<Protected><PageLoader><GeneralSettings /></PageLoader></Protected>} />
