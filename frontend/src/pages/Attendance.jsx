@@ -3909,10 +3909,10 @@ export default function Attendance() {
                         />
                         <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 text-xs justify-center">
                           {[
-                            { color: COLORS.emeraldGreen, label: 'Present'     },
-                            { color: COLORS.red,          label: 'Late/Absent' },
-                            { color: COLORS.amber,        label: 'Holiday'     },
-                            { color: COLORS.orange,       label: 'Leave'       },
+                            { color: COLORS.emeraldGreen,  label: 'Present'     },
+                            { color: ATT_COLORS.absent.fg, label: 'Late/Absent' },
+                            { color: '#1e3a8a',            label: 'Holiday'     },
+                            { color: ATT_COLORS.absent.fg, label: 'Leave'       },
                           ].map(({ color, label }) => (
                             <div key={label} className="flex items-center gap-1.5">
                               <span className="w-3.5 h-3.5 rounded-full border-2 flex-shrink-0"
@@ -3973,9 +3973,9 @@ export default function Attendance() {
                           </div>
                         ) : selectedAttendance?.status === 'leave' ? (
                           <div className="relative p-4 pl-5 rounded-xl overflow-hidden"
-                            style={{ backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed' }}>
-                            <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.orange }} />
-                            <p className="font-bold text-sm mb-0.5" style={{ color: COLORS.orange }}>On Leave</p>
+                            style={{ backgroundColor: isDark ? ATT_COLORS.absent.bgDark : ATT_COLORS.absent.bg }}>
+                            <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: ATT_COLORS.absent.fg }} />
+                            <p className="font-bold text-sm mb-0.5" style={{ color: ATT_COLORS.absent.fg }}>On Leave</p>
                             <p className="text-xs text-slate-400">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
                           </div>
                         ) : selectedHoliday ? (
