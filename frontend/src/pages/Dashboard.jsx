@@ -1561,6 +1561,26 @@ export default function Dashboard() {
                   )}
 
                   <LiveClock compact />
+
+                  {/* New Task Quick Button — below clock */}
+                  {hasPermission('can_edit_tasks') && (
+                    <motion.button
+                      whileHover={{ scale: 1.05, y: -1, transition: { type: 'spring', stiffness: 320, damping: 22 } }}
+                      whileTap={{ scale: 0.96 }}
+                      onClick={() => navigate('/tasks?newTask=1')}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-semibold text-xs transition-all"
+                      style={{
+                        background: 'rgba(255,255,255,0.18)',
+                        border: '1px solid rgba(255,255,255,0.35)',
+                        color: 'white',
+                        backdropFilter: 'blur(8px)',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                      }}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      New Task
+                    </motion.button>
+                  )}
                 </div>
 
                 {!todayIsHoliday && todayAttendance?.punch_in && (
