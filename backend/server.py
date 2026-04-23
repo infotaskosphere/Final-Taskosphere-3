@@ -5276,8 +5276,8 @@ _DEPT_SERVICE_MAP: Dict[str, List[str]] = {
  
  
 @api_router.get("/clients", response_model=List[Client])
+@api_router.get("/clients/list", response_model=List[Client])
 async def get_clients(current_user: User = Depends(check_module_permission("clients", "view"))):
-
     permissions = get_user_permissions(current_user)
 
     # Issue #2 + #5: Admin=all; can_view_all_clients=all; Manager=assigned+team; Staff=own only
