@@ -17,7 +17,7 @@ import {
   AlertCircle, Filter, Tag, Hash, Zap,
   ArrowUpRight, MoreHorizontal, FileText,
   ShieldCheck, TrendingUp, Activity, Settings2,
-  ChevronDown, Info,
+  ChevronDown, Info, Briefcase,
 } from 'lucide-react';
 
 // ─── Design tokens (mirrors Dashboard) ───────────────────────────────────────
@@ -196,6 +196,257 @@ function MetricCard({ icon: Icon, label, value, color, sub, onClick, isDark, urg
           <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
         </div>
       </div>
+    </motion.div>
+  );
+}
+
+// ─── Import Attorney Modal ────────────────────────────────────────────────────
+function ImportAttorneyModal({ onClose, onImported, isDark }) {
+  const [form, setForm] = useState({
+    agent_code: '',
+    attorney: 'Manthan Desai',
+    client_id: '',
+    reminder_emails: '',
+  });
+  const [clients, setClients] = useState([]);
+  const [loadingClients, setLoadingClients] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+
+  // Fetch available clients for the dropdown
+  useEffect(() => {
+    const fetchClients = async () => {
+      setLoadingClients(true);
+      try {
+        const res = await api.get('/clients/list');
+        setClients(res.data?.items || res.data || []);
+      } catch {
+        // Silently fail — dropdown will just be empty
+        setClients([]);
+      } finally {
+        setLoadingClients(false);
+      }
+    };
+    fetchClients();
+  }, []);
+
+  const handleSync = async () => {
+    if (!form.agent_code.trim()) {
+      toast.error('Agent code is required');
+      return;
+    }
+    setSyncing(true);
+    try {
+      await api.post('/import-attorney', {
+        agent_code: form.agent_code.trim(),
+        attorney: form.attorney.trim() || 'Manthan Desai',
+        client_id: form.client_id || null,
+        reminder_emails: form.reminder_emails
+          .split(',')
+          .map(e => e.trim())
+          .filter(Boolean),
+      });
+      toast.success('Portfolio sync started. Marks will appear in 2-5 minutes.');
+      onImported?.();
+      onClose();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to start portfolio sync');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const inputCls = cn(
+    'w-full box-border px-3 py-2 rounded-xl border text-sm outline-none transition-all focus:ring-2',
+    isDark
+      ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400 focus:border-violet-500 focus:ring-violet-900/40'
+      : 'bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:border-violet-400 focus:ring-violet-100'
+  );
+  const selectCls = cn(
+    'w-full px-3 py-2 rounded-xl border text-sm outline-none transition-all cursor-pointer',
+    isDark
+      ? 'bg-slate-700 border-slate-600 text-slate-100 focus:border-violet-500'
+      : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-violet-400'
+  );
+  const labelCls = cn(
+    'block text-xs font-semibold uppercase tracking-wider mb-1.5',
+    isDark ? 'text-slate-400' : 'text-slate-500'
+  );
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[1000] flex items-center justify-center p-4"
+      style={{ background: 'rgba(7,15,30,0.72)', backdropFilter: 'blur(10px)' }}
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.88, y: 40, opacity: 0 }}
+        animate={{ scale: 1, y: 0, opacity: 1 }}
+        exit={{ scale: 0.88, y: 40, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 220, damping: 22 }}
+        onClick={e => e.stopPropagation()}
+        className={cn(
+          'w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl',
+          isDark ? 'bg-slate-900 border border-slate-700' : 'bg-white border border-slate-200'
+        )}
+      >
+        {/* Header */}
+        <div
+          className="px-6 py-5 relative overflow-hidden"
+          style={{
+            background: `linear-gradient(135deg, #4C1D95, ${COLORS.violet} 60%, #6D28D9 100%)`,
+            boxShadow: '0 4px 24px rgba(124,58,237,0.3)',
+          }}
+        >
+          <div className="absolute right-0 top-0 w-48 h-48 rounded-full -mr-16 -mt-16 opacity-10"
+            style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+          <div className="absolute left-4 bottom-0 w-32 h-32 rounded-full -mb-12 opacity-5"
+            style={{ background: 'white' }} />
+          <div className="relative flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center">
+                <Briefcase className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest">
+                  IP India Registry
+                </p>
+                <h2 className="text-lg font-bold text-white">Sync Attorney Portfolio</h2>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-all active:scale-90"
+            >
+              <X className="w-4 h-4 text-white" />
+            </button>
+          </div>
+        </div>
+
+        {/* Info strip */}
+        <div className={cn(
+          'flex items-start gap-3 px-6 py-3 border-b text-xs',
+          isDark
+            ? 'bg-violet-900/20 border-violet-800/40 text-violet-300'
+            : 'bg-violet-50 border-violet-100 text-violet-700'
+        )}>
+          <Info className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+          <p>
+            All trademarks filed under this agent code will be imported automatically.
+            Sync typically completes within 2–5 minutes.
+          </p>
+        </div>
+
+        {/* Body */}
+        <div className="p-6 space-y-4">
+          {/* Agent Code */}
+          <div>
+            <label className={labelCls}>
+              Agent Code <span className="text-red-400">*</span>
+            </label>
+            <input
+              className={inputCls}
+              value={form.agent_code}
+              onChange={e => setForm(p => ({ ...p, agent_code: e.target.value }))}
+              onKeyDown={e => e.key === 'Enter' && handleSync()}
+              placeholder="e.g. IN/PA-1234"
+            />
+            <p className={cn('text-[10px] mt-1', isDark ? 'text-slate-500' : 'text-slate-400')}>
+              Your IP India agent / practitioner code
+            </p>
+          </div>
+
+          {/* Attorney */}
+          <div>
+            <label className={labelCls}>Attorney / Agent Name</label>
+            <input
+              className={inputCls}
+              value={form.attorney}
+              onChange={e => setForm(p => ({ ...p, attorney: e.target.value }))}
+              placeholder="Manthan Desai"
+            />
+          </div>
+
+          {/* Client Dropdown */}
+          <div>
+            <label className={labelCls}>Assign to Client</label>
+            {loadingClients ? (
+              <div className={cn(
+                'flex items-center gap-2 px-3 py-2 rounded-xl border text-sm',
+                isDark ? 'bg-slate-700 border-slate-600 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-400'
+              )}>
+                <Loader2 className="w-3.5 h-3.5" style={{ animation: 'tm-spin 1s linear infinite' }} />
+                Loading clients…
+              </div>
+            ) : (
+              <select
+                className={selectCls}
+                value={form.client_id}
+                onChange={e => setForm(p => ({ ...p, client_id: e.target.value }))}
+              >
+                <option value="">— No client assigned —</option>
+                {clients.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name || c.client_name || c.id}
+                  </option>
+                ))}
+              </select>
+            )}
+            <p className={cn('text-[10px] mt-1', isDark ? 'text-slate-500' : 'text-slate-400')}>
+              Imported marks will be linked to this client
+            </p>
+          </div>
+
+          {/* Reminder Emails */}
+          <div>
+            <label className={labelCls}>Reminder Emails</label>
+            <input
+              className={inputCls}
+              value={form.reminder_emails}
+              onChange={e => setForm(p => ({ ...p, reminder_emails: e.target.value }))}
+              placeholder="a@example.com, b@example.com"
+            />
+            <p className={cn('text-[10px] mt-1', isDark ? 'text-slate-500' : 'text-slate-400')}>
+              Comma-separated — these addresses will receive renewal alerts
+            </p>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className={cn(
+          'px-6 py-4 flex items-center justify-end gap-3 border-t',
+          isDark ? 'border-slate-700 bg-slate-800/50' : 'border-slate-100 bg-slate-50'
+        )}>
+          <button
+            onClick={onClose}
+            className={cn(
+              'px-4 py-2 rounded-xl text-sm font-semibold border transition-all',
+              isDark
+                ? 'border-slate-600 text-slate-300 hover:bg-slate-700'
+                : 'border-slate-200 text-slate-500 hover:bg-slate-100'
+            )}
+          >
+            Cancel
+          </button>
+          <motion.button
+            whileHover={{ scale: 1.01 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={handleSync}
+            disabled={syncing || !form.agent_code.trim()}
+            className="px-5 py-2 rounded-xl text-sm font-semibold text-white flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{
+              background: syncing || !form.agent_code.trim()
+                ? '#6b7280'
+                : `linear-gradient(135deg, #4C1D95, ${COLORS.violet})`,
+            }}
+          >
+            {syncing
+              ? <><Loader2 className="w-4 h-4" style={{ animation: 'tm-spin 1s linear infinite' }} />Syncing…</>
+              : <><Download className="w-4 h-4" />Sync Portfolio</>
+            }
+          </motion.button>
+        </div>
+      </motion.div>
     </motion.div>
   );
 }
@@ -797,6 +1048,7 @@ export default function TrademarkSphere() {
   const [totalCount,    setTotalCount]    = useState(0);
   const [page,          setPage]          = useState(0);
   const [showAdd,       setShowAdd]       = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false); // ← NEW
   const [activeTab,     setActiveTab]     = useState('list');
   const [selectedTm,    setSelectedTm]    = useState(null);
   const [showFilters,   setShowFilters]   = useState(false);
@@ -874,6 +1126,14 @@ export default function TrademarkSphere() {
       )}
 
       <AnimatePresence>
+        {showImportModal && (
+          <ImportAttorneyModal
+            key="import"
+            isDark={isDark}
+            onClose={() => setShowImportModal(false)}
+            onImported={fetchAll}
+          />
+        )}
         {showAdd && (
           <AddTrademarkModal key="add" isDark={isDark} onClose={() => setShowAdd(false)} onAdded={handleAdded} />
         )}
@@ -917,6 +1177,22 @@ export default function TrademarkSphere() {
                   className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/20 text-white border border-white/20 transition-all active:scale-95">
                   <RefreshCw className="w-3.5 h-3.5" />Refresh
                 </button>
+
+                {/* ── NEW: Sync Portfolio Button ── */}
+                <motion.button
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => setShowImportModal(true)}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold border border-white/30 transition-all"
+                  style={{
+                    background: 'rgba(124,58,237,0.35)',
+                    color: '#fff',
+                    backdropFilter: 'blur(8px)',
+                  }}
+                >
+                  <Download className="w-4 h-4" />Sync Portfolio
+                </motion.button>
+
                 <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
                   onClick={() => setShowAdd(true)}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold bg-white text-blue-700 shadow-lg transition-all">
