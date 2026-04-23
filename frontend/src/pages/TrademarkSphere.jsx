@@ -214,20 +214,21 @@ function ImportAttorneyModal({ onClose, onImported, isDark }) {
 
   // Fetch available clients for the dropdown
   useEffect(() => {
-    const fetchClients = async () => {
-      setLoadingClients(true);
-      try {
-        const res = await api.get('/clients/list');
-        setClients(res.data?.items || res.data || []);
-      } catch {
-        // Silently fail — dropdown will just be empty
-        setClients([]);
-      } finally {
-        setLoadingClients(false);
-      }
-    };
-    fetchClients();
-  }, []);
+      const fetchClients = async () => {
+        setLoadingClients(true);
+        try {
+          // Points to the standard route to ensure compatibility
+          const res = await api.get('/clients');
+          setClients(res.data?.items || res.data || []);
+        } catch (err) {
+          console.error("Dropdown fetch failed", err);
+          setClients([]);
+        } finally {
+          setLoadingClients(false);
+        }
+      };
+      fetchClients();
+    }, []);
 
   const handleSync = async () => {
     if (!form.agent_code.trim()) {
@@ -236,7 +237,8 @@ function ImportAttorneyModal({ onClose, onImported, isDark }) {
     }
     setSyncing(true);
     try {
-      await api.post('/import-attorney', {
+      // Prefixed with '/trademark-sphere' to match the backend router prefix
+      await api.post('/trademark-sphere/import-attorney', {
         agent_code: form.agent_code.trim(),
         attorney: form.attorney.trim() || 'Manthan Desai',
         client_id: form.client_id || null,
@@ -963,7 +965,35 @@ function DetailDrawer({ tm, onClose, onRefresh, onDelete, isDark }) {
                   <FieldRow label="Address" value={tm.address} />
                 </div>
               </div>
+              {/* Registry Documents (Objections/Notices) */}
+              {tm.documents && tm.documents.length > 0 && (
+                <div className={cn('rounded-2xl p-4 border', isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200')}>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3">Registry Documents</p>
+                  <div className="space-y-2">
+                    {tm.documents.map((doc, idx) => (
+                      <a 
+                        key={idx} 
+                        href={doc.pdf_link} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-blue-400 text-blue-600 transition-all group"
+                      >
+                        <span className="text-xs font-medium truncate pr-2">{doc.name}</span>
+                        <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-40 group-hover:opacity-100" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
 
+              {/* Hearing Details */}
+              {tm.hearings && (
+                <div className={cn('rounded-2xl p-4 border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800')}>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-amber-600 mb-2">📅 Scheduled Hearing</p>
+                  <p className="text-sm font-bold text-slate-800 dark:text-slate-100">{tm.hearings.date || 'Date Pending'}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Officer: {tm.hearings.officer || 'Not Assigned'}</p>
+                </div>
+              )}
               {/* G&S */}
               {tm.goods_and_services && (
                 <div className={cn('rounded-2xl p-4 border', isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200')}>
