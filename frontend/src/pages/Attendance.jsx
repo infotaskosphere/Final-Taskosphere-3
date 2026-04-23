@@ -1,11 +1,3 @@
-// Attendance.jsx — redesigned to match Dashboard design language
-// • LiveClock removed (lives in Dashboard)
-// • Layout, fonts, card shells, header rows match Dashboard exactly
-// • Holiday safe-parsing: all parseISO wrapped in try/catch
-// • All v8 bug-fixes preserved (triple-fallback id, normalizeReminder, etc.)
-// • v9: Apply for Leave moved to dedicated card below calendar detail
-// • v9: Feature enhancements — streak counter, avg hours, weekly summary, overtime alert
-
 import { useDark } from '@/hooks/useDark';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -103,6 +95,17 @@ const COLORS = {
   red:          '#EF4444',
   purple:       '#8B5CF6',
   slate200:     '#E2E8F0',
+};
+
+// ── Attendance status colour tokens (single source of truth) ──────────────
+// present=green  holiday=dark-blue  late=dark-orange  absent=red
+const ATT_COLORS = {
+  present:      { fg: '#16a34a', bg: '#f0fdf4',         bgDark: 'rgba(22,163,74,0.10)',  border: '#bbf7d0', borderDark: '#14532d' },
+  holiday:      { fg: '#1e3a8a', bg: '#eff6ff',         bgDark: 'rgba(30,58,138,0.18)',  border: '#bfdbfe', borderDark: '#1e40af' },
+  late:         { fg: '#ea580c', bg: '#fff7ed',         bgDark: 'rgba(234,88,12,0.12)',  border: '#fed7aa', borderDark: '#7c2d12' },
+  absent:       { fg: '#dc2626', bg: '#fef2f2',         bgDark: 'rgba(220,38,38,0.10)',  border: '#fecaca', borderDark: '#7f1d1d' },
+  leave:        { fg: '#F97316', bg: '#fff7ed',         bgDark: 'rgba(249,115,22,0.08)', border: '#fed7aa', borderDark: '#7c2d12' },
+  ongoing:      { fg: '#F59E0B', bg: '#fffbeb',         bgDark: 'rgba(245,158,11,0.10)', border: '#fde68a', borderDark: '#92400e' },
 };
 
 const LEAVE_TYPES = [
@@ -409,11 +412,11 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
   const holiday  = (Array.isArray(holidays) ? holidays : []).find(h => h.date === dateStr);
 
   let ringColor = null, bgColor = null, isSpecial = false;
-  if (holiday)                                        { ringColor = COLORS.amber;        bgColor = '#FEF3C720'; isSpecial = true; }
-  else if (dayRecord?.status === 'leave')             { ringColor = COLORS.orange;       bgColor = '#FFF7ED20'; isSpecial = true; }
-  else if (dayRecord?.status === 'absent')            { ringColor = COLORS.red;          bgColor = '#FEE2E240'; isSpecial = true; }
-  else if (dayRecord?.punch_in && dayRecord?.is_late) { ringColor = COLORS.red;          bgColor = '#FEE2E220'; isSpecial = true; }
-  else if (dayRecord?.punch_in)                       { ringColor = COLORS.emeraldGreen; bgColor = '#D1FAE520'; }
+  if (holiday)                                        { ringColor = ATT_COLORS.holiday.fg; bgColor = `${ATT_COLORS.holiday.fg}18`; isSpecial = true; }
+  else if (dayRecord?.status === 'leave')             { ringColor = ATT_COLORS.leave.fg;   bgColor = `${ATT_COLORS.leave.fg}10`;   isSpecial = true; }
+  else if (dayRecord?.status === 'absent')            { ringColor = ATT_COLORS.absent.fg;  bgColor = `${ATT_COLORS.absent.fg}18`;  isSpecial = true; }
+  else if (dayRecord?.punch_in && dayRecord?.is_late) { ringColor = ATT_COLORS.late.fg;    bgColor = `${ATT_COLORS.late.fg}14`;    isSpecial = true; }
+  else if (dayRecord?.punch_in)                       { ringColor = ATT_COLORS.present.fg; bgColor = `${ATT_COLORS.present.fg}12`; }
 
   const isTodayDate = dateFnsIsToday(date);
 
@@ -447,20 +450,20 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
       <TooltipContent side="top" className="text-xs max-w-[180px]">
         <p className="font-bold mb-1">{format(date, 'MMM d, yyyy')}</p>
         {holiday
-          ? <p className="font-medium" style={{ color: COLORS.amber }}>{holiday.name}</p>
+          ? <p className="font-medium" style={{ color: ATT_COLORS.holiday.fg }}>{holiday.name}</p>
           : dayRecord?.status === 'leave'
-            ? <p className="font-medium" style={{ color: COLORS.orange }}>On Leave{dayRecord.leave_reason ? ` — ${dayRecord.leave_reason}` : ''}</p>
+            ? <p className="font-medium" style={{ color: ATT_COLORS.leave.fg }}>On Leave{dayRecord.leave_reason ? ` — ${dayRecord.leave_reason}` : ''}</p>
           : dayRecord?.status === 'absent'
-            ? <p className="font-medium text-red-500">Absent{dayRecord.auto_marked ? ' (auto-marked)' : ''}</p>
+            ? <p className="font-medium" style={{ color: ATT_COLORS.absent.fg }}>Absent{dayRecord.auto_marked ? ' (auto-marked)' : ''}</p>
           : dayRecord?.punch_in
             ? (<>
                 <p>In: {formatAttendanceTime(dayRecord.punch_in)}</p>
                 {dayRecord.punch_out && <p>Out: {formatAttendanceTime(dayRecord.punch_out)}</p>}
-                <p className="font-semibold" style={{ color: COLORS.emeraldGreen }}>{formatDuration(dayRecord.duration_minutes)}</p>
-                {dayRecord.is_late && <p className="text-red-500 font-semibold">Late arrival</p>}
+                <p className="font-semibold" style={{ color: ATT_COLORS.present.fg }}>{formatDuration(dayRecord.duration_minutes)}</p>
+                {dayRecord.is_late && <p className="font-semibold" style={{ color: ATT_COLORS.late.fg }}>Late arrival</p>}
               </>)
           : dateFnsIsToday(date)
-            ? <p className="text-red-500 font-semibold">Not punched in yet</p>
+            ? <p className="font-semibold" style={{ color: ATT_COLORS.late.fg }}>Not punched in yet</p>
           : <p className="text-slate-400">No record</p>
         }
       </TooltipContent>
@@ -1730,6 +1733,14 @@ export default function Attendance() {
   const [earlyLeaveTime,     setEarlyLeaveTime]     = useState('');
   const [showPunchInModal,  setShowPunchInModal]  = useState(false);
   const [modalActionDone,   setModalActionDone]   = useState(false);
+  // Tracks if user hit "Ignore" today — stored in sessionStorage so it
+  // resets on a new browser session / next calendar day.
+  const [punchInIgnoredToday, setPunchInIgnoredToday] = useState(() => {
+    try {
+      const stored = sessionStorage.getItem('att_punch_ignored_date');
+      return stored === format(new Date(), 'yyyy-MM-dd');
+    } catch { return false; }
+  });
   const [geoError,          setGeoError]          = useState(null);
   const [geoChecking,       setGeoChecking]       = useState(false);
   const [userLocation,      setUserLocation]      = useState(null);
@@ -1875,7 +1886,7 @@ export default function Attendance() {
   useEffect(() => {
     if (!isViewingOther && todayAttendance) {
       const shouldClose = todayAttendance.punch_in || todayAttendance.status === 'leave'
-        || todayAttendance.status === 'absent' || todayIsHoliday || modalActionDone;
+        || todayAttendance.status === 'absent' || todayIsHoliday || modalActionDone || punchInIgnoredToday;
       if (shouldClose) {
         setShowPunchInModal(false);
         setGeoError(null); setUserLocation(null); setIsWithinGeofence(null);
@@ -1888,7 +1899,7 @@ export default function Attendance() {
       }, 800);
       return () => clearTimeout(timer);
     }
-  }, [todayAttendance, isViewingOther, todayIsHoliday, modalActionDone]);
+  }, [todayAttendance, isViewingOther, todayIsHoliday, modalActionDone, punchInIgnoredToday]);
 
   // Block app body scroll when punch-in modal is open
   useEffect(() => {
@@ -3756,9 +3767,9 @@ export default function Attendance() {
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
                       style={{
                         backgroundColor: totalDaysLateThisMonth === 0
-                          ? (isDark ? 'rgba(31,175,90,0.18)' : '#dcfce7')
-                          : (isDark ? 'rgba(239,68,68,0.15)' : '#fee2e2'),
-                        color: totalDaysLateThisMonth === 0 ? COLORS.emeraldGreen : COLORS.red,
+                          ? (isDark ? 'rgba(22,163,74,0.18)' : '#dcfce7')
+                          : (isDark ? ATT_COLORS.late.bgDark : ATT_COLORS.late.bg),
+                        color: totalDaysLateThisMonth === 0 ? ATT_COLORS.present.fg : ATT_COLORS.late.fg,
                       }}>
                       {totalDaysLateThisMonth === 0 ? '✓ Perfect Punctuality' : `${totalDaysLateThisMonth} Late Arrival${totalDaysLateThisMonth !== 1 ? 's' : ''}`}
                     </span>
@@ -3767,21 +3778,21 @@ export default function Attendance() {
                 <div className="flex-1 p-4 overflow-y-auto slim-scroll" style={slimScroll}>
                   <div className="grid grid-cols-3 gap-2">
                     <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
-                      style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0' }}>
-                      <CheckCircle2 className="w-4 h-4 mb-1 text-emerald-500" />
-                      <p className="text-xl font-black tabular-nums" style={{ color: COLORS.emeraldGreen }}>{monthDaysPresent}</p>
+                      style={{ backgroundColor: isDark ? ATT_COLORS.present.bgDark : ATT_COLORS.present.bg, borderColor: isDark ? ATT_COLORS.present.borderDark : ATT_COLORS.present.border }}>
+                      <CheckCircle2 className="w-4 h-4 mb-1" style={{ color: ATT_COLORS.present.fg }} />
+                      <p className="text-xl font-black tabular-nums" style={{ color: ATT_COLORS.present.fg }}>{monthDaysPresent}</p>
                       <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Present</p>
                     </div>
                     <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
-                      style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2', borderColor: isDark ? '#7f1d1d' : '#fecaca' }}>
-                      <UserX className="w-4 h-4 mb-1 text-red-500" />
-                      <p className="text-xl font-black tabular-nums text-red-500">{monthDaysAbsent}</p>
+                      style={{ backgroundColor: isDark ? ATT_COLORS.absent.bgDark : ATT_COLORS.absent.bg, borderColor: isDark ? ATT_COLORS.absent.borderDark : ATT_COLORS.absent.border }}>
+                      <UserX className="w-4 h-4 mb-1" style={{ color: ATT_COLORS.absent.fg }} />
+                      <p className="text-xl font-black tabular-nums" style={{ color: ATT_COLORS.absent.fg }}>{monthDaysAbsent}</p>
                       <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Absent</p>
                     </div>
                     <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
-                      style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? '#92400e' : '#fde68a' }}>
-                      <AlarmClock className="w-4 h-4 mb-1 text-amber-500" />
-                      <p className="text-xl font-black tabular-nums" style={{ color: COLORS.amber }}>{totalDaysLateThisMonth}</p>
+                      style={{ backgroundColor: isDark ? ATT_COLORS.late.bgDark : ATT_COLORS.late.bg, borderColor: isDark ? ATT_COLORS.late.borderDark : ATT_COLORS.late.border }}>
+                      <AlarmClock className="w-4 h-4 mb-1" style={{ color: ATT_COLORS.late.fg }} />
+                      <p className="text-xl font-black tabular-nums" style={{ color: ATT_COLORS.late.fg }}>{totalDaysLateThisMonth}</p>
                       <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Late</p>
                     </div>
                     <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
@@ -4141,19 +4152,19 @@ export default function Attendance() {
                           className="relative p-2.5 rounded-xl border transition-all overflow-hidden flex-shrink-0"
                           style={{
                             backgroundColor: isOngoing
-                              ? isDark ? 'rgba(245,158,11,0.10)' : '#fffbeb'
+                              ? (isDark ? ATT_COLORS.ongoing.bgDark : ATT_COLORS.ongoing.bg)
                               : isDark
-                                ? isAbsent ? 'rgba(239,68,68,0.07)' : isLeave ? 'rgba(249,115,22,0.06)' : isPresent ? 'rgba(31,175,90,0.06)' : D.raised
-                                : isAbsent ? '#fff1f2' : isLeave ? '#fff7ed' : isPresent ? '#f0fdf4' : '#f8fafc',
+                                ? isAbsent ? ATT_COLORS.absent.bgDark : isLeave ? ATT_COLORS.leave.bgDark : isPresent ? ATT_COLORS.present.bgDark : D.raised
+                                : isAbsent ? ATT_COLORS.absent.bg : isLeave ? ATT_COLORS.leave.bg : isPresent ? ATT_COLORS.present.bg : '#f8fafc',
                             borderColor: isOngoing
-                              ? isDark ? '#92400e' : '#fde68a'
+                              ? (isDark ? ATT_COLORS.ongoing.borderDark : ATT_COLORS.ongoing.border)
                               : isDark
-                                ? isAbsent ? '#7f1d1d' : isLeave ? '#7c2d12' : isPresent ? '#14532d' : D.border
-                                : isAbsent ? '#fecaca' : isLeave ? '#fed7aa' : isPresent ? '#bbf7d0' : '#e2e8f0',
+                                ? isAbsent ? ATT_COLORS.absent.borderDark : isLeave ? ATT_COLORS.leave.borderDark : isPresent ? ATT_COLORS.present.borderDark : D.border
+                                : isAbsent ? ATT_COLORS.absent.border : isLeave ? ATT_COLORS.leave.border : isPresent ? ATT_COLORS.present.border : '#e2e8f0',
                           }}
                         >
                           <div className="absolute left-0 top-0 h-full w-1"
-                            style={{ backgroundColor: isOngoing ? COLORS.amber : isAbsent ? COLORS.red : isLeave ? COLORS.orange : isPresent ? COLORS.emeraldGreen : isDark ? D.border : COLORS.slate200 }} />
+                            style={{ backgroundColor: isOngoing ? ATT_COLORS.ongoing.fg : isAbsent ? ATT_COLORS.absent.fg : isLeave ? ATT_COLORS.leave.fg : isPresent ? ATT_COLORS.present.fg : isDark ? D.border : COLORS.slate200 }} />
                           <div className="flex justify-between items-center gap-2">
                             <div className="flex-1 min-w-0">
                               {recordUserName && (
@@ -4182,25 +4193,25 @@ export default function Attendance() {
                             <div className="flex flex-col items-end gap-1 flex-shrink-0">
                               {isOngoing ? (
                                 <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full animate-pulse"
-                                  style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.25)' : '#fef3c7', color: COLORS.amber }}>ONGOING</span>
+                                  style={{ backgroundColor: isDark ? ATT_COLORS.ongoing.bgDark : ATT_COLORS.ongoing.bg, color: ATT_COLORS.ongoing.fg }}>ONGOING</span>
                               ) : isAbsent ? (
-                                <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded text-red-500"
-                                  style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>Absent</span>
+                                <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded"
+                                  style={{ color: ATT_COLORS.absent.fg, backgroundColor: isDark ? ATT_COLORS.absent.bgDark : ATT_COLORS.absent.bg }}>Absent</span>
                               ) : isLeave ? (
                                 <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded"
-                                  style={{ color: COLORS.orange, backgroundColor: isDark ? 'rgba(249,115,22,0.15)' : `${COLORS.orange}18` }}>Leave</span>
+                                  style={{ color: ATT_COLORS.leave.fg, backgroundColor: isDark ? ATT_COLORS.leave.bgDark : ATT_COLORS.leave.bg }}>Leave</span>
                               ) : (
                                 <span className="text-[11px] font-bold px-1.5 py-0.5 rounded font-mono"
                                   style={{
-                                    backgroundColor: record.duration_minutes > 0 ? isDark ? 'rgba(31,175,90,0.18)' : `${COLORS.emeraldGreen}15` : isDark ? D.raised : '#f1f5f9',
-                                    color: record.duration_minutes > 0 ? COLORS.emeraldGreen : isDark ? D.muted : COLORS.deepBlue,
+                                    backgroundColor: record.duration_minutes > 0 ? isDark ? ATT_COLORS.present.bgDark : `${ATT_COLORS.present.fg}15` : isDark ? D.raised : '#f1f5f9',
+                                    color: record.duration_minutes > 0 ? ATT_COLORS.present.fg : isDark ? D.muted : COLORS.deepBlue,
                                   }}>
                                   {formatDuration(record.duration_minutes)}
                                 </span>
                               )}
                               {record.is_late && !isAbsent && (
-                                <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded text-red-500"
-                                  style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.18)' : '#fee2e2' }}>Late</span>
+                                <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded"
+                                  style={{ color: ATT_COLORS.late.fg, backgroundColor: isDark ? ATT_COLORS.late.bgDark : ATT_COLORS.late.bg }}>Late</span>
                               )}
                               {canEditAttendance && (
                                 <button
@@ -4326,7 +4337,7 @@ export default function Attendance() {
                                   style={{
                                     gridTemplateColumns: '180px 1fr 1fr 140px',
                                     backgroundColor: rowBg,
-                                    borderLeft: isOngoing ? `3px solid ${COLORS.amber}` : `3px solid ${isDark ? D.border : '#e2e8f0'}`,
+                                    borderLeft: isOngoing ? `3px solid ${ATT_COLORS.ongoing.fg}` : `3px solid ${ATT_COLORS.present.fg}`,
                                   }}
                                 >
                                   {/* Col 1 — Date */}
@@ -4355,8 +4366,8 @@ export default function Attendance() {
                                           </span>
                                         )}
                                         {record.is_late && (
-                                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded text-red-500"
-                                            style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.15)' : '#fee2e2' }}>LATE</span>
+                                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded"
+                                            style={{ color: ATT_COLORS.late.fg, backgroundColor: isDark ? ATT_COLORS.late.bgDark : ATT_COLORS.late.bg }}>LATE</span>
                                         )}
                                       </div>
                                     </div>
@@ -4579,7 +4590,7 @@ export default function Attendance() {
                     style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb' }}>
                     <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: COLORS.amber }} />
                     <p className="text-[11px] font-medium" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
-                      Access restricted — punch in required · Auto-absent at 7:00 PM IST
+                      Auto-absent at 7:00 PM IST · Auto punch-out at 11:00 PM IST
                     </p>
                   </div>
 
@@ -4591,6 +4602,19 @@ export default function Attendance() {
                       On leave today? Apply here
                     </button>
                   </div>
+
+                  {/* Ignore button */}
+                  <motion.button
+                    whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.97 }}
+                    onClick={() => {
+                      try { sessionStorage.setItem('att_punch_ignored_date', format(new Date(), 'yyyy-MM-dd')); } catch {}
+                      setPunchInIgnoredToday(true);
+                      setShowPunchInModal(false);
+                    }}
+                    className="w-full py-2.5 rounded-2xl text-xs font-bold border-2 transition-all active:scale-95"
+                    style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.dimmer : '#94a3b8', backgroundColor: 'transparent' }}>
+                    Ignore for Today
+                  </motion.button>
                 </div>
               </motion.div>
             </motion.div>
