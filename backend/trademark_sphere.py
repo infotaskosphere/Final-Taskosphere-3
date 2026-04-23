@@ -2,9 +2,10 @@ import os, uuid, logging, asyncio, re, time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Any, Dict
+from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo
 
-from curl_cffi import requests as curlex          # replaces `requests`
+from curl_cffi import requests as curlex          # HTTP client with browser impersonation
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from pydantic import BaseModel, Field
@@ -21,6 +22,8 @@ EREGISTER_URL    = "https://tmrsearch.ipindia.gov.in/eregister/eregister.aspx"
 AGENT_SEARCH_URL = "https://tmrsearch.ipindia.gov.in/eregister/Agent_Search.aspx"
 DOC_INDEX_BASE   = "https://tmrsearch.ipindia.gov.in/eregister/Document_Index.aspx"
 
+CRAWLBASE_API_URL = "https://api.crawlbase.com/"
+
 TM_STATUSES    = [
     "Registered", "Pending", "Objected", "Opposed", "Refused", "Abandoned",
     "Withdrawn", "Under Examination", "Advertised Before Acceptance",
@@ -29,15 +32,18 @@ TM_STATUSES    = [
 NICE_CLASSES  = [str(i) for i in range(1, 46)]
 REMINDER_DAYS = [365, 180, 90, 60, 30, 15, 7]
 
-# ── ScraperAPI config ─────────────────────────────────────────────────────────
 
-def _get_scraperapi_key() -> Optional[str]:
-    return os.environ.get("SCRAPERAPI_KEY")
+# ── Crawlbase config ──────────────────────────────────────────────────────────
 
-
-def _make_proxy_url(api_key: str) -> str:
-    """Build ScraperAPI proxy URL with India country code."""
-    return f"http://scraperapi.country_code=in:{api_key}@proxy-server.scraperapi.com:8001"
+def _get_crawlbase_token() -> str:
+    token = os.environ.get("CRAWLBASE_TOKEN")
+    if not token:
+        raise HTTPException(
+            500,
+            "CRAWLBASE_TOKEN environment variable is not set. "
+            "Configure your Crawlbase API token to enable scraping.",
+        )
+    return token
 
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
@@ -107,21 +113,6 @@ class TrademarkHearing(BaseModel):
     officer: Optional[str] = None
 
 
-# ── Headers ───────────────────────────────────────────────────────────────────
-
-_HEADERS = {
-    "User-Agent":                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language":           "en-IN,en;q=0.9",
-    "Accept-Encoding":           "gzip, deflate, br",
-    "Connection":                "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Ch-Ua":                 '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-    "Sec-Ch-Ua-Mobile":          "?0",
-    "Sec-Ch-Ua-Platform":        '"Windows"',
-    "Origin":                    "https://tmrsearch.ipindia.gov.in",
-}
-
 _ALIASES = {
     "application_no":        "application_number",
     "appl_no":               "application_number",
@@ -180,84 +171,92 @@ def _parse_tables(soup: BeautifulSoup) -> Dict[str, Any]:
     return data
 
 
-def _collect_hidden(soup: BeautifulSoup) -> Dict[str, str]:
-    """Extract ALL hidden form inputs: ViewState, EventValidation, VIEWSTATEGENERATOR, etc."""
-    hidden = {}
-    for inp in soup.find_all("input", type="hidden"):
-        name = inp.get("name")
-        if name:
-            hidden[name] = inp.get("value", "")
-    return hidden
+# ── Crawlbase Crawling API helper ─────────────────────────────────────────────
 
-
-# ── Math captcha solver ───────────────────────────────────────────────────────
-
-_MATH_CAPTCHA_RE = re.compile(
-    r"(\d+)\s*([+\-*/x×÷])\s*(\d+)",
-    re.IGNORECASE,
-)
-_OP_MAP = {"x": "*", "×": "*", "÷": "/"}
-
-
-def _solve_math_captcha(text: str) -> Optional[str]:
-    m = _MATH_CAPTCHA_RE.search(text or "")
-    if not m:
-        return None
-    a, op, b = m.group(1), m.group(2), m.group(3)
-    op = _OP_MAP.get(op, op)
-    try:
-        result = eval(f"{a}{op}{b}", {"__builtins__": {}})   # noqa: S307
-        return str(int(result))
-    except Exception:
-        return None
-
-
-def _find_and_fill_captcha(soup: BeautifulSoup, payload: Dict[str, str]) -> bool:
-    for el in soup.find_all(["label", "span", "td", "div"]):
-        text = _clean(el.get_text(" ", strip=True))
-        if text and _MATH_CAPTCHA_RE.search(text):
-            answer = _solve_math_captcha(text)
-            if answer is None:
-                return True
-            parent = el.find_parent(["tr", "div", "form"]) or el
-            for inp in parent.find_all("input", type=["text", "number", None]):
-                name = inp.get("name") or inp.get("id")
-                if name and any(k in name.lower() for k in ["captcha", "code", "verify", "answer"]):
-                    payload[name] = answer
-                    logger.info(f"Math captcha solved: '{text}' → {answer}")
-                    return True
-            for inp in parent.find_all("input"):
-                name = inp.get("name") or inp.get("id")
-                if name:
-                    payload[name] = answer
-                    return True
-    return False
-
-
-# ── curl_cffi session factory (ScraperAPI-powered) ────────────────────────────
-
-def _make_session() -> curlex.Session:
+def _get_crawlbase_html(target_url: str, max_retries: int = 3) -> str:
     """
-    Return a curl_cffi session impersonating Chrome 124.
-    If SCRAPERAPI_KEY is set, routes all traffic through ScraperAPI's
-    residential proxy network (India) to bypass IP India blocks.
+    Fetch the given target URL via the Crawlbase Crawling API.
+
+    - URL: https://api.crawlbase.com/
+    - Params: token, url (encoded target), country=IN (Indian residential IPs)
+    - HTTP client: curl_cffi impersonating Chrome 124
+
+    Returns the raw HTML string returned by Crawlbase (which is the rendered
+    response of the target TMR page).
+
+    Raises HTTPException on credit/auth issues, network errors, or non-200 responses.
     """
-    api_key = _get_scraperapi_key()
-    session = curlex.Session(impersonate="chrome124")
-    session.headers.update(_HEADERS)
+    token = _get_crawlbase_token()
+    params = {
+        "token":   token,
+        "url":     target_url,
+        "country": "IN",
+    }
+    # Build URL manually so the target URL is properly percent-encoded once.
+    api_url = f"{CRAWLBASE_API_URL}?{urlencode(params, quote_via=quote)}"
 
-    if api_key:
-        proxy_url = _make_proxy_url(api_key)
-        session.proxies = {"http": proxy_url, "https": proxy_url}
-        session.verify = False          # ScraperAPI uses its own TLS termination
-        logger.debug("ScraperAPI proxy enabled (country_code=in)")
-    else:
-        logger.warning(
-            "SCRAPERAPI_KEY not set — scraping directly. "
-            "Expect 403s on cloud/VPS IPs. Set SCRAPERAPI_KEY or run locally."
-        )
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = curlex.get(api_url, impersonate="chrome124", timeout=60)
+        except curlex.exceptions.Timeout as exc:
+            last_exc = exc
+            logger.warning(f"Crawlbase timeout (attempt {attempt}/{max_retries}) for {target_url}")
+            if attempt == max_retries:
+                raise HTTPException(504, "Crawlbase request timed out.")
+            time.sleep(3)
+            continue
+        except curlex.exceptions.RequestException as exc:
+            last_exc = exc
+            logger.warning(f"Crawlbase network error (attempt {attempt}/{max_retries}): {exc}")
+            if attempt == max_retries:
+                raise HTTPException(502, f"Crawlbase network error: {exc}")
+            time.sleep(3)
+            continue
 
-    return session
+        if resp.status_code == 403:
+            logger.error(
+                f"Crawlbase returned 403 for {target_url}. "
+                "Crawlbase credit limit reached or invalid token."
+            )
+            raise HTTPException(
+                403,
+                "Crawlbase credit limit reached or invalid token.",
+            )
+
+        if resp.status_code == 401:
+            raise HTTPException(401, "Crawlbase authentication failed — invalid CRAWLBASE_TOKEN.")
+
+        if resp.status_code == 429:
+            logger.warning(f"Crawlbase rate-limited (attempt {attempt}/{max_retries}); backing off…")
+            if attempt == max_retries:
+                raise HTTPException(429, "Crawlbase rate limit exceeded. Slow down requests.")
+            time.sleep(5)
+            continue
+
+        if resp.status_code != 200:
+            logger.warning(
+                f"Crawlbase returned HTTP {resp.status_code} on attempt {attempt}/{max_retries} "
+                f"for {target_url}"
+            )
+            if attempt == max_retries:
+                raise HTTPException(502, f"Crawlbase returned HTTP {resp.status_code}.")
+            time.sleep(3)
+            continue
+
+        # Optional Crawlbase status headers
+        original_status = resp.headers.get("original_status") or resp.headers.get("Original-Status")
+        pc_status       = resp.headers.get("pc_status")       or resp.headers.get("PC-Status")
+        if original_status and original_status not in ("200", 200):
+            logger.info(
+                f"Crawlbase: target {target_url} returned original_status={original_status}, "
+                f"pc_status={pc_status}"
+            )
+
+        return resp.text
+
+    # Should not reach here
+    raise HTTPException(502, f"Crawlbase request failed: {last_exc}")
 
 
 # ── Core scraper ──────────────────────────────────────────────────────────────
@@ -265,144 +264,23 @@ def _make_session() -> curlex.Session:
 def _scrape_sync(
     app_number: str,
     class_number: Optional[str] = None,
-    max_retries: int = 3,
 ) -> Dict[str, Any]:
-    session = _make_session()
-
-    # ── Step 1: GET page → collect cookies + hidden fields ─────────────────
-    r1 = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            r1 = session.get(EREGISTER_URL, timeout=30)
-            if r1.status_code == 403:
-                logger.warning(f"403 on GET attempt {attempt}/{max_retries}; retrying in 3s…")
-                time.sleep(3)
-                continue
-            break
-        except curlex.exceptions.ConnectionError:
-            if attempt == max_retries:
-                raise HTTPException(503, "Cannot reach IP India portal.")
-            time.sleep(3)
-        except curlex.exceptions.Timeout:
-            if attempt == max_retries:
-                raise HTTPException(504, "IP India portal timed out.")
-            time.sleep(3)
-
-    if r1 is None or r1.status_code == 403:
-        raise HTTPException(
-            403,
-            "IP India returned 403 after retries. "
-            "Ensure SCRAPERAPI_KEY is configured correctly.",
-        )
-    if r1.status_code != 200:
-        raise HTTPException(502, f"IP India returned HTTP {r1.status_code}.")
-
-    soup1 = BeautifulSoup(r1.text, "lxml")
-    hidden = _collect_hidden(soup1)   # Captures __VIEWSTATE, __EVENTVALIDATION, __VIEWSTATEGENERATOR …
-
-    # Locate application-number input field
-    app_field = next(
-        (
-            (inp.get("name") or inp.get("id"))
-            for inp in soup1.find_all("input", type="text")
-            if any(
-                k in (inp.get("name", "") + inp.get("id", "")).lower()
-                for k in ["appno", "appnum", "applicationno", "txtapp"]
-            )
-        ),
-        None,
-    )
-    if not app_field:
-        all_txt = soup1.find_all("input", type="text")
-        app_field = (all_txt[0].get("name") or all_txt[0].get("id")) if all_txt else "txtApplicationNo"
-
-    # Locate class field (optional)
-    class_field = None
+    """
+    Fetch trademark details from IP India eRegister via Crawlbase by passing
+    the application number (and optional class) directly as URL query params.
+    """
+    qs = {"app_no": app_number.strip()}
     if class_number:
-        class_field = next(
-            (
-                (inp.get("name") or inp.get("id"))
-                for inp in soup1.find_all("input", type="text")
-                if any(k in (inp.get("name", "") + inp.get("id", "")).lower() for k in ["class", "classno"])
-            ),
-            None,
-        )
+        qs["class"] = str(class_number).strip()
+    target = f"{EREGISTER_URL}?{urlencode(qs)}"
 
-    # Locate submit button
-    submit_btn   = soup1.find("input", type="submit") or soup1.find("button", type="submit")
-    submit_name  = submit_btn.get("name")             if submit_btn else None
-    submit_value = submit_btn.get("value", "View")    if submit_btn else "View"
+    html = _get_crawlbase_html(target)
+    soup = BeautifulSoup(html, "lxml")
 
-    # Build POST payload (includes all ASP.NET hidden fields)
-    payload: Dict[str, str] = {**hidden, app_field: app_number.strip()}
-    if class_field and class_number:
-        payload[class_field] = class_number.strip()
-    if submit_name:
-        payload[submit_name] = submit_value
-
-    # Solve math captcha on the initial page (if any)
-    _find_and_fill_captcha(soup1, payload)
-
-    # ── Step 2: POST form ──────────────────────────────────────────────────
-    r2 = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            r2 = session.post(
-                EREGISTER_URL,
-                data=payload,
-                timeout=30,
-                headers={
-                    **_HEADERS,
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Referer":      EREGISTER_URL,
-                },
-            )
-            if r2.status_code == 403:
-                logger.warning(f"403 on POST attempt {attempt}/{max_retries}; retrying in 3s…")
-                time.sleep(3)
-                continue
-            break
-        except curlex.exceptions.Timeout:
-            if attempt == max_retries:
-                raise HTTPException(504, "IP India timed out on form submit.")
-            time.sleep(3)
-        except curlex.exceptions.RequestException as exc:
-            raise HTTPException(502, f"Network error: {exc}")
-
-    if r2 is None or r2.status_code == 403:
-        raise HTTPException(
-            403,
-            "IP India returned 403 after retries. Check SCRAPERAPI_KEY or add manually.",
-        )
-
-    soup2 = BeautifulSoup(r2.text, "lxml")
-
-    # Handle math captcha on the response page
-    if "captcha" in r2.text.lower():
-        captcha_payload = {**_collect_hidden(soup2)}
-        solved = _find_and_fill_captcha(soup2, captcha_payload)
-        if solved:
-            logger.info("Captcha detected on result page; re-submitting with solution…")
-            if submit_name:
-                captcha_payload[submit_name] = submit_value
-            try:
-                r2 = session.post(EREGISTER_URL, data=captcha_payload, timeout=30,
-                                  headers={**_HEADERS, "Content-Type": "application/x-www-form-urlencoded",
-                                           "Referer": EREGISTER_URL})
-                soup2 = BeautifulSoup(r2.text, "lxml")
-            except Exception as exc:
-                logger.warning(f"Captcha re-submit failed: {exc}")
-        else:
-            raise HTTPException(
-                503,
-                "IP India is showing an unsolvable CAPTCHA. "
-                "Wait a few minutes and retry, or add manually.",
-            )
-
-    data = _parse_tables(soup2)
+    data = _parse_tables(soup)
 
     # Trademark image
-    for img in soup2.find_all("img"):
+    for img in soup.find_all("img"):
         src = img.get("src", "")
         if any(k in src.lower() for k in ["trademark", "tm_", "/tm/", "image"]):
             data["trademark_image_url"] = (
@@ -412,13 +290,13 @@ def _scrape_sync(
             break
 
     # Goods & Services — textarea first, then wide td
-    for el in soup2.find_all("textarea"):
+    for el in soup.find_all("textarea"):
         t = _clean(el.get_text(" ", strip=True))
         if t and len(t) > 20:
             data["goods_and_services"] = t
             break
     if "goods_and_services" not in data:
-        for td in soup2.find_all("td"):
+        for td in soup.find_all("td"):
             text = _clean(td.get_text(" ", strip=True))
             prev = td.find_previous_sibling("td")
             if text and len(text) > 80 and prev:
@@ -437,134 +315,65 @@ def _scrape_sync(
     return data
 
 
-# ── Document Index scraper — targets Document_Index.aspx ─────────────────────
+# ── Document Index scraper ───────────────────────────────────────────────────
 
 def _scrape_documents_sync(
     app_number: str,
     class_number: Optional[str] = None,
 ) -> tuple[List[Dict], Optional[Dict]]:
     """
-    Fetch the Document_Index.aspx page for the given application number and extract:
-      - documents : list of {name, pdf_link} for hearing notices & examination reports
-      - hearing   : {date, officer} extracted from Hearing Notice rows
-
-    Returns (documents, hearing).
+    Fetch Document_Index.aspx via Crawlbase using the application number as a
+    query parameter. Extracts target documents and the latest hearing entry.
     """
-    session = _make_session()
-    base    = "https://tmrsearch.ipindia.gov.in"
+    qs = {"app_no": app_number.strip()}
+    if class_number:
+        qs["class"] = str(class_number).strip()
+    target = f"{DOC_INDEX_BASE}?{urlencode(qs)}"
 
-    # ── Step 1: GET Document_Index.aspx ───────────────────────────────────
     try:
-        r1 = session.get(DOC_INDEX_BASE, timeout=30)
-        if r1.status_code != 200:
-            logger.warning(f"Document_Index.aspx GET returned {r1.status_code} for {app_number}")
-            return [], None
-    except Exception as exc:
-        logger.warning(f"Cannot reach Document_Index.aspx for {app_number}: {exc}")
+        html = _get_crawlbase_html(target)
+    except HTTPException as exc:
+        logger.warning(f"Document_Index fetch failed for {app_number}: {exc.detail}")
         return [], None
 
-    soup1  = BeautifulSoup(r1.text, "lxml")
-    hidden = _collect_hidden(soup1)   # __VIEWSTATE, __EVENTVALIDATION, etc.
+    soup = BeautifulSoup(html, "lxml")
+    base = "https://tmrsearch.ipindia.gov.in"
 
-    # Locate the application-number input
-    app_field = next(
-        (
-            (inp.get("name") or inp.get("id"))
-            for inp in soup1.find_all("input", type="text")
-            if any(k in (inp.get("name", "") + inp.get("id", "")).lower()
-                   for k in ["appno", "appnum", "applicationno", "txtapp"])
-        ),
-        None,
-    )
-    if not app_field:
-        all_txt  = soup1.find_all("input", type="text")
-        app_field = (all_txt[0].get("name") or all_txt[0].get("id")) if all_txt else "txtApplicationNo"
+    documents: List[Dict]      = []
+    hearing:   Optional[Dict]  = None
 
-    submit_btn   = soup1.find("input", type="submit") or soup1.find("button", type="submit")
-    submit_name  = submit_btn.get("name")            if submit_btn else None
-    submit_value = submit_btn.get("value", "Search") if submit_btn else "Search"
-
-    payload: Dict[str, str] = {**hidden, app_field: app_number.strip()}
-    if submit_name:
-        payload[submit_name] = submit_value
-    _find_and_fill_captcha(soup1, payload)
-
-    # ── Step 2: POST to retrieve document list ─────────────────────────────
-    try:
-        r2 = session.post(
-            DOC_INDEX_BASE,
-            data=payload,
-            timeout=30,
-            headers={**_HEADERS, "Content-Type": "application/x-www-form-urlencoded",
-                     "Referer": DOC_INDEX_BASE},
-        )
-    except Exception as exc:
-        logger.warning(f"Document_Index POST failed for {app_number}: {exc}")
-        return [], None
-
-    soup2 = BeautifulSoup(r2.text, "lxml")
-
-    # Handle captcha on result page
-    if "captcha" in r2.text.lower():
-        cap_payload = {**_collect_hidden(soup2)}
-        solved = _find_and_fill_captcha(soup2, cap_payload)
-        if solved:
-            if submit_name:
-                cap_payload[submit_name] = submit_value
-            try:
-                r2    = session.post(DOC_INDEX_BASE, data=cap_payload, timeout=30,
-                                     headers={**_HEADERS, "Content-Type": "application/x-www-form-urlencoded",
-                                              "Referer": DOC_INDEX_BASE})
-                soup2 = BeautifulSoup(r2.text, "lxml")
-            except Exception as exc:
-                logger.warning(f"Captcha re-submit failed on Document_Index for {app_number}: {exc}")
-                return [], None
-
-    # ── Step 3: Parse the document table ──────────────────────────────────
-    documents: List[Dict]  = []
-    hearing:   Optional[Dict] = None
-
-    for table in soup2.find_all("table"):
+    for table in soup.find_all("table"):
         header_texts = [_clean(th.get_text(" ", strip=True)) or "" for th in table.find_all("th")]
         header_lower = " ".join(header_texts).lower()
 
-        # Look for tables that mention document / index / description in their headers
         if not any(k in header_lower for k in ["document", "description", "type", "index"]):
             continue
 
-        for row in table.find_all("tr")[1:]:   # skip header row
+        for row in table.find_all("tr")[1:]:
             cells = row.find_all("td")
             if len(cells) < 1:
                 continue
 
-            # Try to grab the document name from the first or second cell
             doc_name = _clean(cells[0].get_text(" ", strip=True)) or ""
             if not doc_name and len(cells) > 1:
                 doc_name = _clean(cells[1].get_text(" ", strip=True)) or ""
 
             doc_lower = doc_name.lower()
-
-            # Filter: only capture targeted document types
             if not any(lbl in doc_lower for lbl in _DOC_LABELS):
                 continue
 
-            # Find PDF link in the row
             pdf_link = None
             anchor   = row.find("a", href=True)
             if anchor:
                 href     = anchor["href"]
                 pdf_link = href if href.startswith("http") else f"{base}/{href.lstrip('/')}"
 
-            entry = {"name": doc_name, "pdf_link": pdf_link}
-            documents.append(entry)
+            documents.append({"name": doc_name, "pdf_link": pdf_link})
 
-            # Extract hearing date / officer for Hearing Notice rows
             if "hearing notice" in doc_lower or "show cause notice" in doc_lower:
-                # Common column layout: [doc_name, date, officer/remarks, ...]
                 h_date    = _clean(cells[1].get_text(" ", strip=True)) if len(cells) > 1 else None
                 h_officer = _clean(cells[2].get_text(" ", strip=True)) if len(cells) > 2 else None
-                # Prefer the latest hearing entry (overwrite)
-                hearing = {"date": h_date, "officer": h_officer}
+                hearing   = {"date": h_date, "officer": h_officer}
 
     logger.info(
         f"Document_Index for {app_number}: "
@@ -573,103 +382,24 @@ def _scrape_documents_sync(
     return documents, hearing
 
 
-# ── Attorney portfolio scraper ─────────────────────────────────────────────────
+# ── Attorney portfolio scraper ───────────────────────────────────────────────
 
 def _scrape_by_attorney_sync(agent_code: str) -> List[str]:
     """
-    Submit `agent_code` to the Agent Search page and return all
-    application numbers found in `app_no=` query-string links.
-    Uses ScraperAPI proxy; handles ASP.NET hidden fields (__VIEWSTATE etc.).
+    Fetch the Agent_Search.aspx result page via Crawlbase by passing the
+    agent_code as a URL parameter. Extracts all application numbers from the
+    `app_no=` links and (as a fallback) bare 7+ digit cells.
     """
-    session = _make_session()
+    qs     = {"agent_code": agent_code.strip()}
+    target = f"{AGENT_SEARCH_URL}?{urlencode(qs)}"
 
-    # ── GET the Agent Search page ──────────────────────────────────────────
-    for attempt in range(1, 4):
-        try:
-            r1 = session.get(AGENT_SEARCH_URL, timeout=30)
-            if r1.status_code == 403:
-                logger.warning(f"403 on Agent Search GET attempt {attempt}; retrying in 3s…")
-                time.sleep(3)
-                continue
-            break
-        except curlex.exceptions.RequestException as exc:
-            if attempt == 3:
-                raise HTTPException(502, f"Cannot reach Agent Search page: {exc}")
-            time.sleep(3)
-    else:
-        raise HTTPException(403, "IP India returned 403 on Agent Search. Check SCRAPERAPI_KEY.")
+    html = _get_crawlbase_html(target)
+    soup = BeautifulSoup(html, "lxml")
 
-    if r1.status_code != 200:
-        raise HTTPException(502, f"Agent Search page returned HTTP {r1.status_code}.")
-
-    soup1  = BeautifulSoup(r1.text, "lxml")
-    hidden = _collect_hidden(soup1)   # All ASP.NET hidden fields including __VIEWSTATE
-
-    # Locate agent-code input field
-    agent_field = next(
-        (
-            (inp.get("name") or inp.get("id"))
-            for inp in soup1.find_all("input", type="text")
-            if any(k in (inp.get("name", "") + inp.get("id", "")).lower()
-                   for k in ["agentcode", "agentno", "agent", "code"])
-        ),
-        None,
-    )
-    if not agent_field:
-        all_txt     = soup1.find_all("input", type="text")
-        agent_field = (all_txt[0].get("name") or all_txt[0].get("id")) if all_txt else "txtAgentCode"
-
-    submit_btn   = soup1.find("input", type="submit") or soup1.find("button", type="submit")
-    submit_name  = submit_btn.get("name")             if submit_btn else None
-    submit_value = submit_btn.get("value", "Search")  if submit_btn else "Search"
-
-    # Build payload with all hidden ASP.NET fields + agent code
-    payload: Dict[str, str] = {**hidden, agent_field: agent_code.strip()}
-    if submit_name:
-        payload[submit_name] = submit_value
-
-    _find_and_fill_captcha(soup1, payload)
-
-    # ── POST ───────────────────────────────────────────────────────────────
-    try:
-        r2 = session.post(
-            AGENT_SEARCH_URL,
-            data=payload,
-            timeout=30,
-            headers={
-                **_HEADERS,
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Referer":      AGENT_SEARCH_URL,
-            },
-        )
-    except curlex.exceptions.RequestException as exc:
-        raise HTTPException(502, f"Network error on agent search submit: {exc}")
-
-    soup2 = BeautifulSoup(r2.text, "lxml")
-
-    # Handle captcha on result page
-    if "captcha" in r2.text.lower():
-        cap_payload = {**_collect_hidden(soup2)}
-        solved      = _find_and_fill_captcha(soup2, cap_payload)
-        if solved:
-            if submit_name:
-                cap_payload[submit_name] = submit_value
-            try:
-                r2    = session.post(AGENT_SEARCH_URL, data=cap_payload, timeout=30,
-                                     headers={**_HEADERS, "Content-Type": "application/x-www-form-urlencoded",
-                                              "Referer": AGENT_SEARCH_URL})
-                soup2 = BeautifulSoup(r2.text, "lxml")
-            except Exception as exc:
-                logger.warning(f"Captcha re-submit failed for agent search: {exc}")
-        else:
-            raise HTTPException(503, "CAPTCHA on agent search page could not be solved automatically.")
-
-    # ── Parse application numbers from result links ─────────────────────────
     app_numbers: List[str] = []
     seen: set = set()
 
-    # Primary: extract from href query params like ?app_no=1234567
-    for a in soup2.find_all("a", href=True):
+    for a in soup.find_all("a", href=True):
         href = a["href"]
         m    = re.search(r"[?&]app_no=(\d+)", href, re.IGNORECASE)
         if m:
@@ -678,9 +408,8 @@ def _scrape_by_attorney_sync(agent_code: str) -> List[str]:
                 seen.add(num)
                 app_numbers.append(num)
 
-    # Fallback: bare 7+ digit numbers in table cells
     if not app_numbers:
-        for table in soup2.find_all("table"):
+        for table in soup.find_all("table"):
             for row in table.find_all("tr")[1:]:
                 for cell in row.find_all("td"):
                     text = _clean(cell.get_text(" ", strip=True)) or ""
@@ -797,15 +526,21 @@ async def _import_attorney_bg(
     reminders_enabled: bool,
 ) -> None:
     """
-    Background task: scrape every application number for the given agent_code,
-    then add each one to the database (skipping duplicates).
+    Background task: scrape every application number for the given agent_code
+    via Crawlbase, then add each one to the database (skipping duplicates).
     Also fetches Document_Index.aspx for hearing/examination report data.
+
+    A 2-second sleep is enforced between every Crawlbase request to respect
+    the Free Tier concurrency limits.
     """
     try:
         app_numbers = await scrape_by_attorney_code(agent_code)
     except HTTPException as exc:
         logger.error(f"Attorney import failed for {agent_code}: {exc.detail}")
         return
+
+    # Respect Crawlbase Free Tier concurrency between calls
+    await asyncio.sleep(2)
 
     added = 0
     for app_num in app_numbers:
@@ -818,13 +553,19 @@ async def _import_attorney_bg(
             raw = await scrape_trademark(app_num)
         except HTTPException as exc:
             logger.warning(f"Attorney import: could not scrape {app_num} — {exc.detail}")
+            await asyncio.sleep(2)
             continue
 
-        # Also fetch document index for this trademark
+        # Throttle between Crawlbase calls (Free Tier)
+        await asyncio.sleep(2)
+
         try:
             documents, hearing = await scrape_documents(app_num, raw.get("class_number"))
         except Exception:
             documents, hearing = [], None
+
+        # Throttle after the Document_Index call as well
+        await asyncio.sleep(2)
 
         dl  = _compute_deadlines(raw)
         now = datetime.now(IST)
@@ -862,7 +603,6 @@ async def _import_attorney_bg(
         await db.trademark_sphere.insert_one({**doc, "_id": tid})
         await _gen_reminders(tid, doc)
         added += 1
-        await asyncio.sleep(1.5)   # be polite to the portal
 
     logger.info(f"Attorney import ({agent_code}): {added}/{len(app_numbers)} trademarks added.")
 
@@ -1043,10 +783,10 @@ async def import_attorney(
     user: User = Depends(get_current_user),
 ):
     """
-    Kick off a background import of all trademarks associated with an attorney/agent code.
-    The background task scrapes the Agent Search page (with full ASP.NET hidden field support
-    and ScraperAPI proxy), extracts all application numbers, then fetches and stores each one
-    (skipping duplicates). Document_Index.aspx is also queried for hearing/examination data.
+    Kick off a background import of all trademarks for an attorney/agent code.
+    Scrapes Agent_Search.aspx via Crawlbase (country=IN), extracts application
+    numbers, then fetches and stores each trademark (plus its Document_Index)
+    while throttling 2 seconds between Crawlbase calls (Free Tier limits).
     """
     bg.add_task(
         _import_attorney_bg,
@@ -1089,13 +829,13 @@ async def refresh_tm(tm_id: str, bg: BackgroundTasks, user: User = Depends(get_c
     if not doc:
         raise HTTPException(404, "Trademark not found.")
 
-    # Refresh core trademark data
     nd  = await scrape_trademark(doc["application_number"], doc.get("class_number"))
+    # Throttle between Crawlbase calls
+    await asyncio.sleep(2)
+    documents, hearing = await scrape_documents(doc["application_number"], doc.get("class_number"))
+
     dl  = _compute_deadlines(nd)
     now = datetime.now(IST)
-
-    # Refresh documents and hearings from Document_Index.aspx
-    documents, hearing = await scrape_documents(doc["application_number"], doc.get("class_number"))
 
     updates = {
         **{
