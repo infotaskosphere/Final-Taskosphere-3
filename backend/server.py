@@ -258,7 +258,112 @@ def mark_absent_users_task():
         if loop and not loop.is_closed():
             loop.close()
 
-    
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AUTO PUNCH-OUT JOB — runs at 23:00 IST daily
+# For every user who punched in today but never punched out,
+# back-fills punch_out = 19:00 IST (7:00 PM) of that same day.
+# ─────────────────────────────────────────────────────────────────────────────
+async def _force_punch_out_at_7pm(today_str: str) -> dict:
+    """
+    Back-fill punch_out for all users who punched in today but have no
+    punch_out recorded by 11:00 PM IST.
+    Each user's punch_out is set to THEIR OWN punch_out_time from their
+    user profile (defaults to 19:00 IST if not configured).
+    """
+    IST_tz     = ZoneInfo("Asia/Kolkata")
+    today_date = datetime.fromisoformat(today_str).date()
+
+    # Find records: punched in, no punch_out, status present
+    records = await db.attendance.find(
+        {
+            "date":      today_str,
+            "punch_in":  {"$ne": None},
+            "punch_out": None,
+            "status":    "present",
+        },
+        {"_id": 0, "user_id": 1, "punch_in": 1}
+    ).to_list(1000)
+
+    if not records:
+        logger.info(f"force_punch_out_11pm: no open records for {today_str}")
+        return {"patched": 0, "date": today_str}
+
+    # Bulk-fetch all relevant user docs to get per-user punch_out_time
+    user_ids  = [r["user_id"] for r in records]
+    user_docs = await db.users.find(
+        {"id": {"$in": user_ids}},
+        {"_id": 0, "id": 1, "punch_out_time": 1}
+    ).to_list(len(user_ids))
+    user_map  = {u["id"]: u for u in user_docs}
+
+    patched = 0
+    for rec in records:
+        user_doc = user_map.get(rec["user_id"], {})
+
+        # Resolve this user's configured shift-end time (default 19:00)
+        pot_str = user_doc.get("punch_out_time") or "19:00"
+        try:
+            pot = datetime.strptime(pot_str, "%H:%M")
+        except ValueError:
+            pot = datetime.strptime("19:00", "%H:%M")
+
+        # Build aware UTC datetime for that user's shift end today
+        shift_end_ist = datetime(
+            today_date.year, today_date.month, today_date.day,
+            pot.hour, pot.minute, 0, tzinfo=IST_tz
+        )
+        shift_end_utc = shift_end_ist.astimezone(timezone.utc)
+
+        # Normalise punch_in to aware UTC
+        punch_in_dt = rec.get("punch_in")
+        if isinstance(punch_in_dt, str):
+            try:
+                punch_in_dt = datetime.fromisoformat(punch_in_dt)
+            except Exception:
+                punch_in_dt = shift_end_utc
+        if punch_in_dt and punch_in_dt.tzinfo is None:
+            punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
+
+        duration_minutes = max(0, int(
+            (shift_end_utc - punch_in_dt.astimezone(timezone.utc)).total_seconds() / 60
+        ))
+
+        await db.attendance.update_one(
+            {"user_id": rec["user_id"], "date": today_str},
+            {"$set": {
+                "punch_out":         shift_end_utc,
+                "duration_minutes":  duration_minutes,
+                "punched_out_early": False,
+                "overtime_minutes":  0,
+                "auto_punch_out":    True,
+                "auto_punch_reason": "force_11pm_scheduler",
+            }}
+        )
+        patched += 1
+
+    logger.info(f"force_punch_out_11pm: patched {patched} record(s) for {today_str}")
+    return {"patched": patched, "date": today_str}
+
+
+def force_punch_out_11pm_task():
+    """
+    Sync wrapper called by APScheduler at 23:00 IST every day.
+    Back-fills punch_out = 7:00 PM IST for users who forgot to punch out.
+    """
+    loop = None
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        today_str = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+        result = loop.run_until_complete(_force_punch_out_at_7pm(today_str))
+        logger.info(f"force_punch_out_11pm job result: {result}")
+    except Exception as e:
+        logger.error(f"force_punch_out_11pm_task failed: {e}")
+    finally:
+        if loop and not loop.is_closed():
+            loop.close()
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -356,6 +461,17 @@ async def startup_event():
             minute=0,
             timezone=pytz.timezone("Asia/Kolkata"),
             id="mark_absent_daily",
+            replace_existing=True,
+        )
+        # Auto punch-out job — fires at 23:00 IST; records punch_out = 7 PM for
+        # any user who punched in today but never manually punched out.
+        scheduler.add_job(
+            force_punch_out_11pm_task,
+            'cron',
+            hour=23,
+            minute=0,
+            timezone=pytz.timezone("Asia/Kolkata"),
+            id="force_punch_out_11pm",
             replace_existing=True,
         )
         scheduler.start()
@@ -1206,7 +1322,7 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
         "birthday": user_data.birthday.isoformat() if user_data.birthday else None,
         "telegram_id": user_data.telegram_id,
         "punch_in_time": user_data.punch_in_time or "10:30",
-        "grace_time": user_data.grace_time or "00:15",
+        "grace_time": user_data.grace_time or "00:10",
         "punch_out_time": user_data.punch_out_time or "19:00",
         "profile_picture": user_data.profile_picture,
         "is_active": False,
@@ -1917,7 +2033,7 @@ def check_is_late(user: dict, punch_in_ist: datetime) -> bool:
         if user.get("late_grace_minutes") is not None:
             grace_minutes = int(user["late_grace_minutes"])
         else:
-            raw = str(user.get("grace_time", "00:15"))
+            raw = str(user.get("grace_time", "00:10"))
             gt = datetime.strptime(raw, "%H:%M")
             grace_minutes = gt.hour * 60 + gt.minute
         deadline = punch_in_ist.replace(
@@ -2020,8 +2136,13 @@ async def handle_attendance(
         if data.get("location"):
             update_fields["punch_out_location"] = data.get("location")
 
-        # ── NEW: record overtime minutes if punched out after 7 PM IST ───────
-        shift_end_ist = punch_out_ist.replace(hour=19, minute=0, second=0, microsecond=0)
+        # ── Overtime: minutes worked past the user's own shift-end time ──────
+        _pot_str = (user_doc or {}).get("punch_out_time") or "19:00"
+        try:
+            _pot = datetime.strptime(_pot_str, "%H:%M")
+        except ValueError:
+            _pot = datetime.strptime("19:00", "%H:%M")
+        shift_end_ist = punch_out_ist.replace(hour=_pot.hour, minute=_pot.minute, second=0, microsecond=0)
         if punch_out_ist > shift_end_ist:
             update_fields["overtime_minutes"] = max(
                 0, int((punch_out_ist - shift_end_ist).total_seconds() / 60)
@@ -2656,14 +2777,20 @@ async def auto_punch_out(
     delta = punch_out_utc - punch_in_dt.astimezone(timezone.utc)
     duration_minutes = max(0, int(delta.total_seconds() / 60))
 
-    # Calculate overtime minutes (minutes worked past 7:00 PM IST)
-    shift_end_ist = punch_out_ist.replace(hour=19, minute=0, second=0, microsecond=0)
+    # Fetch user doc first so we can use their personal shift-end time
+    user_doc = await db.users.find_one({"id": current_user.id}, {"_id": 0})
+    punched_out_early = check_punched_out_early(user_doc or {}, punch_out_ist)
+
+    # Overtime: minutes worked past this user's own punch_out_time
+    _pot_str = (user_doc or {}).get("punch_out_time") or "19:00"
+    try:
+        _pot = datetime.strptime(_pot_str, "%H:%M")
+    except ValueError:
+        _pot = datetime.strptime("19:00", "%H:%M")
+    shift_end_ist = punch_out_ist.replace(hour=_pot.hour, minute=_pot.minute, second=0, microsecond=0)
     overtime_minutes = 0
     if punch_out_ist > shift_end_ist:
         overtime_minutes = max(0, int((punch_out_ist - shift_end_ist).total_seconds() / 60))
-
-    user_doc = await db.users.find_one({"id": current_user.id}, {"_id": 0})
-    punched_out_early = check_punched_out_early(user_doc or {}, punch_out_ist)
 
     update_fields = {
         "punch_out":         punch_out_utc,
