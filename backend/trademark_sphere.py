@@ -2,10 +2,10 @@ import os, uuid, logging, asyncio, re, time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Any, Dict
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode, quote_plus
 from zoneinfo import ZoneInfo
 
-from curl_cffi import requests as curlex          # HTTP client with browser impersonation
+from curl_cffi import requests as curlex          # replaces `requests`
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from pydantic import BaseModel, Field
@@ -22,6 +22,7 @@ EREGISTER_URL    = "https://tmrsearch.ipindia.gov.in/eregister/eregister.aspx"
 AGENT_SEARCH_URL = "https://tmrsearch.ipindia.gov.in/eregister/Agent_Search.aspx"
 DOC_INDEX_BASE   = "https://tmrsearch.ipindia.gov.in/eregister/Document_Index.aspx"
 
+# Crawlbase API endpoint (plain HTTP Crawling API)
 CRAWLBASE_API_URL = "https://api.crawlbase.com/"
 
 TM_STATUSES    = [
@@ -35,15 +36,71 @@ REMINDER_DAYS = [365, 180, 90, 60, 30, 15, 7]
 
 # ── Crawlbase config ──────────────────────────────────────────────────────────
 
-def _get_crawlbase_token() -> str:
-    token = os.environ.get("CRAWLBASE_TOKEN")
+def _get_crawlbase_token() -> Optional[str]:
+    """Read the Crawlbase API token from the environment."""
+    return os.environ.get("CRAWLBASE_TOKEN")
+
+
+def _get_crawlbase_html(target_url: str) -> str:
+    """
+    Fetch `target_url` via the Crawlbase Crawling API and return the raw HTML.
+
+    Parameters sent to Crawlbase:
+      - token   : API token from CRAWLBASE_TOKEN env var
+      - url     : percent-encoded target URL
+      - country : IN  (routes request through Indian residential IPs)
+
+    Uses curl_cffi with Chrome 124 impersonation so the Crawlbase endpoint
+    itself sees a realistic browser TLS fingerprint.
+
+    Raises:
+      HTTPException(500) when CRAWLBASE_TOKEN is not configured.
+      HTTPException(403) when Crawlbase returns 403 (credit limit / bad token).
+      HTTPException(502) on unexpected non-200 responses.
+      HTTPException(504) on connection / timeout errors.
+    """
+    token = _get_crawlbase_token()
     if not token:
         raise HTTPException(
             500,
             "CRAWLBASE_TOKEN environment variable is not set. "
-            "Configure your Crawlbase API token to enable scraping.",
+            "Configure it before using trademark scraping features.",
         )
-    return token
+
+    params = {
+        "token":   token,
+        "url":     target_url,   # Crawlbase accepts the raw URL; it handles encoding internally
+        "country": "IN",
+    }
+    api_url = CRAWLBASE_API_URL + "?" + urlencode(params, quote_via=quote_plus)
+
+    try:
+        response = curlex.get(api_url, impersonate="chrome124", timeout=60)
+    except curlex.exceptions.Timeout:
+        raise HTTPException(504, f"Crawlbase timed out fetching: {target_url}")
+    except curlex.exceptions.ConnectionError as exc:
+        raise HTTPException(504, f"Connection error while calling Crawlbase: {exc}")
+    except curlex.exceptions.RequestException as exc:
+        raise HTTPException(502, f"Crawlbase request failed: {exc}")
+
+    if response.status_code == 403:
+        logger.error(
+            "Crawlbase credit limit reached or invalid token. "
+            f"target_url={target_url}"
+        )
+        raise HTTPException(
+            403,
+            "Crawlbase credit limit reached or invalid token. "
+            "Please check your CRAWLBASE_TOKEN and account credits.",
+        )
+
+    if response.status_code != 200:
+        raise HTTPException(
+            502,
+            f"Crawlbase returned HTTP {response.status_code} for URL: {target_url}",
+        )
+
+    return response.text
 
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
@@ -113,6 +170,8 @@ class TrademarkHearing(BaseModel):
     officer: Optional[str] = None
 
 
+# ── Field alias map ───────────────────────────────────────────────────────────
+
 _ALIASES = {
     "application_no":        "application_number",
     "appl_no":               "application_number",
@@ -143,6 +202,7 @@ _DOC_LABELS = {
     "show cause notice",
 }
 
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _clean(t: Any) -> Optional[str]:
@@ -171,112 +231,75 @@ def _parse_tables(soup: BeautifulSoup) -> Dict[str, Any]:
     return data
 
 
-# ── Crawlbase Crawling API helper ─────────────────────────────────────────────
+# ── Math captcha solver ───────────────────────────────────────────────────────
 
-def _get_crawlbase_html(target_url: str, max_retries: int = 3) -> str:
-    """
-    Fetch the given target URL via the Crawlbase Crawling API.
+_MATH_CAPTCHA_RE = re.compile(
+    r"(\d+)\s*([+\-*/x×÷])\s*(\d+)",
+    re.IGNORECASE,
+)
+_OP_MAP = {"x": "*", "×": "*", "÷": "/"}
 
-    - URL: https://api.crawlbase.com/
-    - Params: token, url (encoded target), country=IN (Indian residential IPs)
-    - HTTP client: curl_cffi impersonating Chrome 124
 
-    Returns the raw HTML string returned by Crawlbase (which is the rendered
-    response of the target TMR page).
-
-    Raises HTTPException on credit/auth issues, network errors, or non-200 responses.
-    """
-    token = _get_crawlbase_token()
-    params = {
-        "token":   token,
-        "url":     target_url,
-        "country": "IN",
-    }
-    # Build URL manually so the target URL is properly percent-encoded once.
-    api_url = f"{CRAWLBASE_API_URL}?{urlencode(params, quote_via=quote)}"
-
-    last_exc: Optional[Exception] = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            resp = curlex.get(api_url, impersonate="chrome124", timeout=60)
-        except curlex.exceptions.Timeout as exc:
-            last_exc = exc
-            logger.warning(f"Crawlbase timeout (attempt {attempt}/{max_retries}) for {target_url}")
-            if attempt == max_retries:
-                raise HTTPException(504, "Crawlbase request timed out.")
-            time.sleep(3)
-            continue
-        except curlex.exceptions.RequestException as exc:
-            last_exc = exc
-            logger.warning(f"Crawlbase network error (attempt {attempt}/{max_retries}): {exc}")
-            if attempt == max_retries:
-                raise HTTPException(502, f"Crawlbase network error: {exc}")
-            time.sleep(3)
-            continue
-
-        if resp.status_code == 403:
-            logger.error(
-                f"Crawlbase returned 403 for {target_url}. "
-                "Crawlbase credit limit reached or invalid token."
-            )
-            raise HTTPException(
-                403,
-                "Crawlbase credit limit reached or invalid token.",
-            )
-
-        if resp.status_code == 401:
-            raise HTTPException(401, "Crawlbase authentication failed — invalid CRAWLBASE_TOKEN.")
-
-        if resp.status_code == 429:
-            logger.warning(f"Crawlbase rate-limited (attempt {attempt}/{max_retries}); backing off…")
-            if attempt == max_retries:
-                raise HTTPException(429, "Crawlbase rate limit exceeded. Slow down requests.")
-            time.sleep(5)
-            continue
-
-        if resp.status_code != 200:
-            logger.warning(
-                f"Crawlbase returned HTTP {resp.status_code} on attempt {attempt}/{max_retries} "
-                f"for {target_url}"
-            )
-            if attempt == max_retries:
-                raise HTTPException(502, f"Crawlbase returned HTTP {resp.status_code}.")
-            time.sleep(3)
-            continue
-
-        # Optional Crawlbase status headers
-        original_status = resp.headers.get("original_status") or resp.headers.get("Original-Status")
-        pc_status       = resp.headers.get("pc_status")       or resp.headers.get("PC-Status")
-        if original_status and original_status not in ("200", 200):
-            logger.info(
-                f"Crawlbase: target {target_url} returned original_status={original_status}, "
-                f"pc_status={pc_status}"
-            )
-
-        return resp.text
-
-    # Should not reach here
-    raise HTTPException(502, f"Crawlbase request failed: {last_exc}")
+def _solve_math_captcha(text: str) -> Optional[str]:
+    m = _MATH_CAPTCHA_RE.search(text or "")
+    if not m:
+        return None
+    a, op, b = m.group(1), m.group(2), m.group(3)
+    op = _OP_MAP.get(op, op)
+    try:
+        result = eval(f"{a}{op}{b}", {"__builtins__": {}})   # noqa: S307
+        return str(int(result))
+    except Exception:
+        return None
 
 
 # ── Core scraper ──────────────────────────────────────────────────────────────
+
+def _build_eregister_url(app_number: str, class_number: Optional[str] = None) -> str:
+    """
+    Build a direct GET URL for the eRegister page pre-filled with the
+    application number (and optional class).  Crawlbase GETs this URL
+    so we avoid the ASP.NET POST / ViewState dance entirely.
+    """
+    params: Dict[str, str] = {"app_no": app_number.strip()}
+    if class_number:
+        params["class_no"] = class_number.strip()
+    return EREGISTER_URL + "?" + urlencode(params)
+
+
+def _build_doc_index_url(app_number: str, class_number: Optional[str] = None) -> str:
+    """Build a direct GET URL for Document_Index.aspx."""
+    params: Dict[str, str] = {"app_no": app_number.strip()}
+    if class_number:
+        params["class_no"] = class_number.strip()
+    return DOC_INDEX_BASE + "?" + urlencode(params)
+
+
+def _build_agent_search_url(agent_code: str) -> str:
+    """Build a direct GET URL for Agent_Search.aspx."""
+    return AGENT_SEARCH_URL + "?" + urlencode({"agent_code": agent_code.strip()})
+
 
 def _scrape_sync(
     app_number: str,
     class_number: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Fetch trademark details from IP India eRegister via Crawlbase by passing
-    the application number (and optional class) directly as URL query params.
+    Fetch trademark data for `app_number` via Crawlbase.
+
+    Strategy:
+      1. Build a direct GET URL that passes the application number (and optional
+         class) as query parameters — this bypasses the ASP.NET ViewState / POST
+         flow because Crawlbase renders the page as a real browser would after
+         following the GET.
+      2. Parse the returned HTML with BeautifulSoup.
+      3. Return the cleaned key-value dict.
     """
-    qs = {"app_no": app_number.strip()}
-    if class_number:
-        qs["class"] = str(class_number).strip()
-    target = f"{EREGISTER_URL}?{urlencode(qs)}"
+    target_url = _build_eregister_url(app_number, class_number)
+    logger.info(f"Fetching eRegister via Crawlbase: {target_url}")
 
-    html = _get_crawlbase_html(target)
+    html = _get_crawlbase_html(target_url)
     soup = BeautifulSoup(html, "lxml")
-
     data = _parse_tables(soup)
 
     # Trademark image
@@ -315,32 +338,37 @@ def _scrape_sync(
     return data
 
 
-# ── Document Index scraper ───────────────────────────────────────────────────
+# ── Document Index scraper ────────────────────────────────────────────────────
 
 def _scrape_documents_sync(
     app_number: str,
     class_number: Optional[str] = None,
 ) -> tuple[List[Dict], Optional[Dict]]:
     """
-    Fetch Document_Index.aspx via Crawlbase using the application number as a
-    query parameter. Extracts target documents and the latest hearing entry.
+    Fetch the Document_Index.aspx page for the given application number via
+    Crawlbase and extract:
+      - documents : list of {name, pdf_link} for targeted document types
+      - hearing   : {date, officer} from Hearing Notice / Show Cause Notice rows
+
+    Returns (documents, hearing).
     """
-    qs = {"app_no": app_number.strip()}
-    if class_number:
-        qs["class"] = str(class_number).strip()
-    target = f"{DOC_INDEX_BASE}?{urlencode(qs)}"
+    target_url = _build_doc_index_url(app_number, class_number)
+    logger.info(f"Fetching Document_Index via Crawlbase: {target_url}")
 
     try:
-        html = _get_crawlbase_html(target)
+        html = _get_crawlbase_html(target_url)
     except HTTPException as exc:
-        logger.warning(f"Document_Index fetch failed for {app_number}: {exc.detail}")
+        logger.warning(
+            f"Document_Index fetch failed for {app_number} "
+            f"(HTTP {exc.status_code}): {exc.detail}"
+        )
         return [], None
 
     soup = BeautifulSoup(html, "lxml")
     base = "https://tmrsearch.ipindia.gov.in"
 
-    documents: List[Dict]      = []
-    hearing:   Optional[Dict]  = None
+    documents: List[Dict]     = []
+    hearing:   Optional[Dict] = None
 
     for table in soup.find_all("table"):
         header_texts = [_clean(th.get_text(" ", strip=True)) or "" for th in table.find_all("th")]
@@ -359,6 +387,7 @@ def _scrape_documents_sync(
                 doc_name = _clean(cells[1].get_text(" ", strip=True)) or ""
 
             doc_lower = doc_name.lower()
+
             if not any(lbl in doc_lower for lbl in _DOC_LABELS):
                 continue
 
@@ -368,7 +397,8 @@ def _scrape_documents_sync(
                 href     = anchor["href"]
                 pdf_link = href if href.startswith("http") else f"{base}/{href.lstrip('/')}"
 
-            documents.append({"name": doc_name, "pdf_link": pdf_link})
+            entry = {"name": doc_name, "pdf_link": pdf_link}
+            documents.append(entry)
 
             if "hearing notice" in doc_lower or "show cause notice" in doc_lower:
                 h_date    = _clean(cells[1].get_text(" ", strip=True)) if len(cells) > 1 else None
@@ -382,23 +412,24 @@ def _scrape_documents_sync(
     return documents, hearing
 
 
-# ── Attorney portfolio scraper ───────────────────────────────────────────────
+# ── Attorney portfolio scraper ────────────────────────────────────────────────
 
 def _scrape_by_attorney_sync(agent_code: str) -> List[str]:
     """
-    Fetch the Agent_Search.aspx result page via Crawlbase by passing the
-    agent_code as a URL parameter. Extracts all application numbers from the
-    `app_no=` links and (as a fallback) bare 7+ digit cells.
+    Fetch the Agent_Search.aspx page for `agent_code` via Crawlbase and return
+    all application numbers found in `app_no=` query-string links (with a bare
+    digit fallback).
     """
-    qs     = {"agent_code": agent_code.strip()}
-    target = f"{AGENT_SEARCH_URL}?{urlencode(qs)}"
+    target_url = _build_agent_search_url(agent_code)
+    logger.info(f"Fetching Agent_Search via Crawlbase: {target_url}")
 
-    html = _get_crawlbase_html(target)
+    html = _get_crawlbase_html(target_url)
     soup = BeautifulSoup(html, "lxml")
 
     app_numbers: List[str] = []
-    seen: set = set()
+    seen: set              = set()
 
+    # Primary: extract from href query params like ?app_no=1234567
     for a in soup.find_all("a", href=True):
         href = a["href"]
         m    = re.search(r"[?&]app_no=(\d+)", href, re.IGNORECASE)
@@ -408,6 +439,7 @@ def _scrape_by_attorney_sync(agent_code: str) -> List[str]:
                 seen.add(num)
                 app_numbers.append(num)
 
+    # Fallback: bare 7+ digit numbers in table cells
     if not app_numbers:
         for table in soup.find_all("table"):
             for row in table.find_all("tr")[1:]:
@@ -530,7 +562,7 @@ async def _import_attorney_bg(
     via Crawlbase, then add each one to the database (skipping duplicates).
     Also fetches Document_Index.aspx for hearing/examination report data.
 
-    A 2-second sleep is enforced between every Crawlbase request to respect
+    A 2-second sleep is inserted between each Crawlbase request to respect
     the Free Tier concurrency limits.
     """
     try:
@@ -539,9 +571,6 @@ async def _import_attorney_bg(
         logger.error(f"Attorney import failed for {agent_code}: {exc.detail}")
         return
 
-    # Respect Crawlbase Free Tier concurrency between calls
-    await asyncio.sleep(2)
-
     added = 0
     for app_num in app_numbers:
         existing = await db.trademark_sphere.find_one({"application_number": app_num})
@@ -549,23 +578,22 @@ async def _import_attorney_bg(
             logger.info(f"Attorney import: {app_num} already tracked, skipping.")
             continue
 
+        # ── Crawlbase polite delay (Free Tier concurrency limit) ──────────
+        await asyncio.sleep(2)
+
         try:
             raw = await scrape_trademark(app_num)
         except HTTPException as exc:
             logger.warning(f"Attorney import: could not scrape {app_num} — {exc.detail}")
-            await asyncio.sleep(2)
             continue
 
-        # Throttle between Crawlbase calls (Free Tier)
+        # Polite delay before fetching the document index
         await asyncio.sleep(2)
 
         try:
             documents, hearing = await scrape_documents(app_num, raw.get("class_number"))
         except Exception:
             documents, hearing = [], None
-
-        # Throttle after the Document_Index call as well
-        await asyncio.sleep(2)
 
         dl  = _compute_deadlines(raw)
         now = datetime.now(IST)
@@ -783,10 +811,11 @@ async def import_attorney(
     user: User = Depends(get_current_user),
 ):
     """
-    Kick off a background import of all trademarks for an attorney/agent code.
-    Scrapes Agent_Search.aspx via Crawlbase (country=IN), extracts application
-    numbers, then fetches and stores each trademark (plus its Document_Index)
-    while throttling 2 seconds between Crawlbase calls (Free Tier limits).
+    Kick off a background import of all trademarks associated with an attorney/agent code.
+    The background task calls Crawlbase for Agent_Search.aspx, extracts all application
+    numbers, then fetches and stores each trademark (skipping duplicates).
+    Document_Index.aspx is also queried per trademark for hearing/examination data.
+    A 2-second sleep between each Crawlbase request respects Free Tier concurrency limits.
     """
     bg.add_task(
         _import_attorney_bg,
@@ -829,13 +858,13 @@ async def refresh_tm(tm_id: str, bg: BackgroundTasks, user: User = Depends(get_c
     if not doc:
         raise HTTPException(404, "Trademark not found.")
 
+    # Refresh core trademark data via Crawlbase
     nd  = await scrape_trademark(doc["application_number"], doc.get("class_number"))
-    # Throttle between Crawlbase calls
-    await asyncio.sleep(2)
-    documents, hearing = await scrape_documents(doc["application_number"], doc.get("class_number"))
-
     dl  = _compute_deadlines(nd)
     now = datetime.now(IST)
+
+    # Refresh documents and hearings from Document_Index.aspx via Crawlbase
+    documents, hearing = await scrape_documents(doc["application_number"], doc.get("class_number"))
 
     updates = {
         **{
