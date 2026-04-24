@@ -1,10 +1,11 @@
-import os, uuid, logging, asyncio, re, time
+import os, uuid, logging, asyncio, re
+import requests as _requests
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Any, Dict
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
-from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from pydantic import BaseModel, Field
@@ -15,209 +16,71 @@ from backend.models import User
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/trademark-sphere", tags=["trademark-sphere"])
 IST    = ZoneInfo("Asia/Kolkata")
+_pool  = ThreadPoolExecutor(max_workers=4)
 
 EREGISTER_URL    = "https://tmrsearch.ipindia.gov.in/eregister/eregister.aspx"
 AGENT_SEARCH_URL = "https://tmrsearch.ipindia.gov.in/eregister/Agent_Search.aspx"
 DOC_INDEX_BASE   = "https://tmrsearch.ipindia.gov.in/eregister/Document_Index.aspx"
+SCRAPERAPI_URL   = "https://api.scraperapi.com/"
 
 # ── Simple in-memory cache ────────────────────────────────────────────────────
 tm_cache: Dict[str, Any] = {}
 
-TM_STATUSES    = [
-    "Registered", "Pending", "Objected", "Opposed", "Refused", "Abandoned",
-    "Withdrawn", "Under Examination", "Advertised Before Acceptance",
-    "Accepted & Advertised", "Send to Vienna Codification", "Unknown",
-]
-NICE_CLASSES  = [str(i) for i in range(1, 46)]
-REMINDER_DAYS = [365, 180, 90, 60, 30, 15, 7]
+# ── ScraperAPI fetcher ───────────────────────────────────────────────────────
+
+def _get_scraperapi_key() -> str:
+    key = os.environ.get("SCRAPERAPI_KEY", "")
+    if not key:
+        raise HTTPException(
+            500,
+            "SCRAPERAPI_KEY environment variable is not set. "
+            "Sign up at scraperapi.com (free tier: 1000 calls/month) and add the key to Render.",
+        )
+    return key
 
 
-# ── Playwright HTML fetcher ───────────────────────────────────────────────────
-
-async def _fetch_html_playwright(target_url: str, retries: int = 3) -> str:
+def _scraperapi_get(target_url: str, retries: int = 3) -> str:
     """
-    Simple GET fetch via Playwright headless Chromium.
-    Used for Document_Index and Agent_Search pages.
+    Fetch target_url via ScraperAPI using an Indian residential IP.
+    ScraperAPI handles JS rendering, geo-routing, and retries automatically.
     """
-    last_error: Optional[Exception] = None
+    key = _get_scraperapi_key()
+    params = {
+        "api_key":      key,
+        "url":          target_url,
+        "country_code": "in",    # Route through Indian IP
+        "render":       "true",  # Full JS rendering
+        "keep_headers": "true",
+    }
+    last_error = None
     for attempt in range(1, retries + 1):
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=True,
-                    args=["--no-sandbox", "--disable-dev-shm-usage"],
-                )
-                context = await browser.new_context(
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/124.0.0.0 Safari/537.36"
-                    ),
-                    locale="en-IN",
-                )
-                page = await context.new_page()
-                try:
-                    await page.goto(target_url, timeout=60000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(2000)
-                    html = await page.content()
-                finally:
-                    await browser.close()
-            logger.info(f"Playwright GET OK (attempt {attempt}): {target_url}")
-            return html
-        except Exception as exc:
-            last_error = exc
-            logger.warning(f"Playwright attempt {attempt} failed for {target_url}: {exc}")
-            if attempt < retries:
-                await asyncio.sleep(2)
-
-    raise HTTPException(504, f"Failed to fetch page after {retries} attempts: {last_error}")
-
-
-async def _fetch_eregister_playwright(
-    app_number: str,
-    class_number: Optional[str] = None,
-    retries: int = 3,
-) -> str:
-    """
-    Navigate to IP India eRegister, fill in the search form, submit it,
-    and return the resulting HTML.
-
-    IP India uses ASP.NET with ViewState — a plain GET of the pre-filled
-    URL returns a blank form.  We must actually interact with the page.
-    """
-    last_error: Optional[Exception] = None
-    # Strip leading zeros and "Class " prefix if user passed "Class 7" etc.
-    cls = re.sub(r"(?i)class\s*", "", (class_number or "").strip())
-
-    for attempt in range(1, retries + 1):
-        try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=True,
-                    args=["--no-sandbox", "--disable-dev-shm-usage"],
-                )
-                context = await browser.new_context(
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/124.0.0.0 Safari/537.36"
-                    ),
-                    locale="en-IN",
-                )
-                page = await context.new_page()
-                try:
-                    # 1. Load the eRegister home page
-                    await page.goto(EREGISTER_URL, timeout=60000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(1500)
-
-                    # 2. Fill Application Number — try common input name/id patterns
-                    filled = False
-                    for selector in [
-                        'input[name*="ApplicationNumber"]',
-                        'input[id*="ApplicationNumber"]',
-                        'input[name*="appno"]',
-                        'input[id*="appno"]',
-                        'input[type="text"]',
-                    ]:
-                        try:
-                            el = page.locator(selector).first
-                            if await el.count() > 0:
-                                await el.fill(app_number.strip())
-                                filled = True
-                                logger.info(f"Filled app number using selector: {selector}")
-                                break
-                        except Exception:
-                            continue
-
-                    if not filled:
-                        raise RuntimeError("Could not find application number input field")
-
-                    # 3. Select Class if provided
-                    if cls:
-                        for sel_selector in [
-                            'select[name*="Class"]',
-                            'select[id*="Class"]',
-                            'select[name*="class"]',
-                        ]:
-                            try:
-                                sel_el = page.locator(sel_selector).first
-                                if await sel_el.count() > 0:
-                                    # Try value, label, and index approaches
-                                    for val in [cls, f"Class {cls}", cls.zfill(2)]:
-                                        try:
-                                            await sel_el.select_option(value=val)
-                                            break
-                                        except Exception:
-                                            try:
-                                                await sel_el.select_option(label=val)
-                                                break
-                                            except Exception:
-                                                continue
-                                    break
-                            except Exception:
-                                continue
-
-                    # 4. Solve math captcha if present
-                    try:
-                        captcha_text = await page.locator(
-                            '[id*="captcha"],[id*="Captcha"],[class*="captcha"]'
-                        ).first.inner_text(timeout=2000)
-                        answer = _solve_math_captcha(captcha_text)
-                        if answer:
-                            await page.locator(
-                                'input[id*="captcha"],input[id*="Captcha"],input[name*="captcha"]'
-                            ).first.fill(answer)
-                    except Exception:
-                        pass  # No captcha or not found — continue
-
-                    # 5. Click Search button
-                    clicked = False
-                    for btn_selector in [
-                        'input[id*="btnSearch"]',
-                        'input[value*="Search"]',
-                        'button[id*="Search"]',
-                        'button:has-text("Search")',
-                        'input[type="submit"]',
-                    ]:
-                        try:
-                            btn = page.locator(btn_selector).first
-                            if await btn.count() > 0:
-                                await btn.click()
-                                clicked = True
-                                logger.info(f"Clicked search using selector: {btn_selector}")
-                                break
-                        except Exception:
-                            continue
-
-                    if not clicked:
-                        raise RuntimeError("Could not find Search button")
-
-                    # 6. Wait for results to load
-                    await page.wait_for_timeout(4000)
-
-                    html = await page.content()
-                finally:
-                    await browser.close()
-
-            logger.info(f"eRegister form-submit OK (attempt {attempt}) for {app_number}")
-            return html
-
-        except Exception as exc:
-            last_error = exc
-            logger.warning(
-                f"eRegister Playwright attempt {attempt} failed "
-                f"for {app_number}: {exc}"
+            resp = _requests.get(
+                SCRAPERAPI_URL,
+                params=params,
+                timeout=120,
+                headers={"Accept": "text/html,application/xhtml+xml"},
             )
-            if attempt < retries:
-                await asyncio.sleep(3)
+            if resp.status_code == 200:
+                logger.info(f"ScraperAPI OK (attempt {attempt}): {target_url}")
+                return resp.text
+            elif resp.status_code == 401:
+                raise HTTPException(401, "Invalid ScraperAPI key. Check SCRAPERAPI_KEY in Render env vars.")
+            elif resp.status_code == 403:
+                raise HTTPException(403, "ScraperAPI credit limit reached. Upgrade your plan at scraperapi.com.")
+            else:
+                last_error = f"ScraperAPI returned HTTP {resp.status_code}"
+                logger.warning(f"Attempt {attempt} failed: {last_error}")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            last_error = str(exc)
+            logger.warning(f"ScraperAPI attempt {attempt} error: {exc}")
+        if attempt < retries:
+            import time; time.sleep(3)
 
-    raise HTTPException(
-        504,
-        f"Failed to fetch eRegister for '{app_number}' after {retries} attempts: {last_error}",
-    )
+    raise HTTPException(504, f"ScraperAPI failed after {retries} attempts: {last_error}")
 
-
-# ── Pydantic models ───────────────────────────────────────────────────────────
 
 class TrademarkAddRequest(BaseModel):
     application_number: str
@@ -367,54 +230,40 @@ def _solve_math_captcha(text: str) -> Optional[str]:
         return None
 
 
+
 # ── Core scraper ──────────────────────────────────────────────────────────────
 
 def _build_eregister_url(app_number: str, class_number: Optional[str] = None) -> str:
-    """
-    Build a direct GET URL for the eRegister page pre-filled with the
-    application number (and optional class).  Playwright GETs this URL
-    so we avoid the ASP.NET POST / ViewState dance entirely.
-    """
     params: Dict[str, str] = {"app_no": app_number.strip()}
     if class_number:
-        params["class_no"] = class_number.strip()
+        cls = re.sub(r"(?i)class\s*", "", class_number.strip())
+        params["class_no"] = cls
     return EREGISTER_URL + "?" + urlencode(params)
 
 
 def _build_doc_index_url(app_number: str, class_number: Optional[str] = None) -> str:
-    """Build a direct GET URL for Document_Index.aspx."""
     params: Dict[str, str] = {"app_no": app_number.strip()}
     if class_number:
-        params["class_no"] = class_number.strip()
+        cls = re.sub(r"(?i)class\s*", "", class_number.strip())
+        params["class_no"] = cls
     return DOC_INDEX_BASE + "?" + urlencode(params)
 
 
 def _build_agent_search_url(agent_code: str) -> str:
-    """Build a direct GET URL for Agent_Search.aspx."""
     return AGENT_SEARCH_URL + "?" + urlencode({"agent_code": agent_code.strip()})
 
 
-async def _scrape_async(
-    app_number: str,
-    class_number: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Fetch trademark data for `app_number` using Playwright headless browser.
-
-    Strategy:
-      1. Check in-memory cache first (key = app_number + class_number).
-      2. Build a direct GET URL and fetch it via Playwright.
-      3. Parse the returned HTML with BeautifulSoup.
-      4. Cache and return the cleaned key-value dict.
-    """
+def _scrape_sync(app_number: str, class_number: Optional[str] = None) -> Dict[str, Any]:
+    """Fetch trademark data via ScraperAPI (Indian IP + JS rendering)."""
     cache_key = f"{app_number.strip()}_{(class_number or '').strip()}"
     if cache_key in tm_cache:
         logger.info(f"Cache hit for {cache_key}")
         return tm_cache[cache_key]
 
-    logger.info(f"Fetching eRegister via Playwright form for: {app_number} class={class_number}")
+    target_url = _build_eregister_url(app_number, class_number)
+    logger.info(f"Fetching eRegister via ScraperAPI: {target_url}")
 
-    html = await _fetch_eregister_playwright(app_number, class_number)
+    html = _scraperapi_get(target_url)
     soup = BeautifulSoup(html, "lxml")
     data = _parse_tables(soup)
 
@@ -428,7 +277,7 @@ async def _scrape_async(
             )
             break
 
-    # Goods & Services — textarea first, then wide td
+    # Goods & Services
     for el in soup.find_all("textarea"):
         t = _clean(el.get_text(" ", strip=True))
         if t and len(t) > 20:
@@ -451,110 +300,76 @@ async def _scrape_async(
         )
 
     data.setdefault("application_number", app_number.strip())
-    tm_cache[cache_key] = data   # store in cache
+    tm_cache[cache_key] = data
     return data
 
 
-# ── Document Index scraper ────────────────────────────────────────────────────
-
-async def _scrape_documents_async(
-    app_number: str,
-    class_number: Optional[str] = None,
+def _scrape_documents_sync(
+    app_number: str, class_number: Optional[str] = None
 ) -> tuple[List[Dict], Optional[Dict]]:
-    """
-    Fetch the Document_Index.aspx page using Playwright and extract:
-      - documents : list of {name, pdf_link} for targeted document types
-      - hearing   : {date, officer} from Hearing Notice / Show Cause Notice rows
-
-    Returns (documents, hearing).
-    """
+    """Fetch Document_Index.aspx via ScraperAPI."""
     target_url = _build_doc_index_url(app_number, class_number)
-    logger.info(f"Fetching Document_Index via Playwright: {target_url}")
+    logger.info(f"Fetching Document_Index via ScraperAPI: {target_url}")
 
     try:
-        html = await _fetch_html_playwright(target_url)
+        html = _scraperapi_get(target_url)
     except HTTPException as exc:
-        logger.warning(
-            f"Document_Index fetch failed for {app_number} "
-            f"(HTTP {exc.status_code}): {exc.detail}"
-        )
+        logger.warning(f"Document_Index fetch failed for {app_number}: {exc.detail}")
         return [], None
 
     soup = BeautifulSoup(html, "lxml")
     base = "https://tmrsearch.ipindia.gov.in"
-
-    documents: List[Dict]     = []
-    hearing:   Optional[Dict] = None
+    documents: List[Dict] = []
+    hearing: Optional[Dict] = None
 
     for table in soup.find_all("table"):
         header_texts = [_clean(th.get_text(" ", strip=True)) or "" for th in table.find_all("th")]
         header_lower = " ".join(header_texts).lower()
-
         if not any(k in header_lower for k in ["document", "description", "type", "index"]):
             continue
-
         for row in table.find_all("tr")[1:]:
             cells = row.find_all("td")
             if len(cells) < 1:
                 continue
-
             doc_name = _clean(cells[0].get_text(" ", strip=True)) or ""
             if not doc_name and len(cells) > 1:
                 doc_name = _clean(cells[1].get_text(" ", strip=True)) or ""
-
             doc_lower = doc_name.lower()
-
             if not any(lbl in doc_lower for lbl in _DOC_LABELS):
                 continue
-
             pdf_link = None
-            anchor   = row.find("a", href=True)
+            anchor = row.find("a", href=True)
             if anchor:
-                href     = anchor["href"]
+                href = anchor["href"]
                 pdf_link = href if href.startswith("http") else f"{base}/{href.lstrip('/')}"
-
-            entry = {"name": doc_name, "pdf_link": pdf_link}
-            documents.append(entry)
-
+            documents.append({"name": doc_name, "pdf_link": pdf_link})
             if "hearing notice" in doc_lower or "show cause notice" in doc_lower:
                 h_date    = _clean(cells[1].get_text(" ", strip=True)) if len(cells) > 1 else None
                 h_officer = _clean(cells[2].get_text(" ", strip=True)) if len(cells) > 2 else None
                 hearing   = {"date": h_date, "officer": h_officer}
 
-    logger.info(
-        f"Document_Index for {app_number}: "
-        f"{len(documents)} docs captured, hearing={'yes' if hearing else 'no'}"
-    )
+    logger.info(f"Document_Index for {app_number}: {len(documents)} docs, hearing={'yes' if hearing else 'no'}")
     return documents, hearing
 
 
-# ── Attorney portfolio scraper ────────────────────────────────────────────────
-
-async def _scrape_by_attorney_async(agent_code: str) -> List[str]:
-    """
-    Fetch the Agent_Search.aspx page using Playwright and return
-    all application numbers found in `app_no=` query-string links.
-    """
+def _scrape_by_attorney_sync(agent_code: str) -> List[str]:
+    """Fetch Agent_Search.aspx via ScraperAPI."""
     target_url = _build_agent_search_url(agent_code)
-    logger.info(f"Fetching Agent_Search via Playwright: {target_url}")
+    logger.info(f"Fetching Agent_Search via ScraperAPI: {target_url}")
 
-    html = await _fetch_html_playwright(target_url)
+    html = _scraperapi_get(target_url)
     soup = BeautifulSoup(html, "lxml")
-
     app_numbers: List[str] = []
-    seen: set              = set()
+    seen: set = set()
 
-    # Primary: extract from href query params like ?app_no=1234567
     for a in soup.find_all("a", href=True):
-        href = a["href"]
-        m    = re.search(r"[?&]app_no=(\d+)", href, re.IGNORECASE)
+        m = re.search(r"[?&]app_no=(\d+)", a["href"], re.IGNORECASE)
         if m:
             num = m.group(1)
             if num not in seen:
                 seen.add(num)
                 app_numbers.append(num)
 
-    # Fallback: bare 7+ digit numbers in table cells
     if not app_numbers:
         for table in soup.find_all("table"):
             for row in table.find_all("tr")[1:]:
@@ -567,23 +382,22 @@ async def _scrape_by_attorney_async(agent_code: str) -> List[str]:
     logger.info(f"Attorney {agent_code}: found {len(app_numbers)} application numbers.")
     return app_numbers
 
-    logger.info(f"Attorney {agent_code}: found {len(app_numbers)} application numbers.")
-    return app_numbers
 
-
-# ── Public async API (direct, no thread pool needed) ─────────────────────────
+# ── Async wrappers ────────────────────────────────────────────────────────────
 
 async def scrape_trademark(app_number: str, class_number: Optional[str] = None) -> Dict[str, Any]:
-    return await _scrape_async(app_number, class_number)
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_pool, _scrape_sync, app_number, class_number)
 
 
 async def scrape_documents(app_number: str, class_number: Optional[str] = None):
-    return await _scrape_documents_async(app_number, class_number)
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_pool, _scrape_documents_sync, app_number, class_number)
 
 
 async def scrape_by_attorney_code(agent_code: str) -> List[str]:
-    return await _scrape_by_attorney_async(agent_code)
-
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_pool, _scrape_by_attorney_sync, agent_code)
 
 # ── Deadline logic ────────────────────────────────────────────────────────────
 
