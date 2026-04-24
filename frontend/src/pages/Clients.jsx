@@ -3418,136 +3418,130 @@ export default function Clients() {
         onAssignComplete={fetchClients}
       />
 
-      // ── GST Import Dialog (declared before return so it can be referenced in JSX) ──
-        const GSTImportDialog = (
-          <Dialog open={gstImportOpen} onOpenChange={setGstImportOpen}>
-            <DialogContent
-              className="max-w-lg rounded-2xl border border-slate-200 shadow-2xl p-0 bg-white overflow-hidden"
-              style={{ maxWidth: 480 }}
-            >
-              <DialogTitle className="sr-only">Import from GST Certificate</DialogTitle>
-      
-              {/* Header */}
+      {/* GST IMPORT DIALOG */}
+      <Dialog open={gstImportOpen} onOpenChange={setGstImportOpen}>
+        <DialogContent
+          className="max-w-lg rounded-2xl border border-slate-200 shadow-2xl p-0 bg-white overflow-hidden"
+          style={{ maxWidth: 480 }}
+        >
+          <DialogTitle className="sr-only">Import from GST Certificate</DialogTitle>
+
+          {/* Header */}
+          <div
+            className="px-7 py-5 border-b border-slate-100"
+            style={{ background: 'linear-gradient(135deg, #f0fdf4, #dcfce7)' }}
+          >
+            <div className="flex items-center gap-3">
               <div
-                className="px-7 py-5 border-b border-slate-100"
-                style={{ background: 'linear-gradient(135deg, #f0fdf4, #dcfce7)' }}
+                className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-sm flex-shrink-0"
+                style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
               >
-                <div className="flex items-center gap-3">
+                <svg viewBox="0 0 24 24" className="h-5 w-5 fill-white">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/>
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Import GST Certificate</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Upload Form GST REG-06 PDF — client details auto-extracted by AI
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Body */}
+          <div className="p-7 space-y-5">
+            {/* Upload zone */}
+            <div
+              className="border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center gap-4 cursor-pointer transition-all hover:border-blue-400 hover:bg-blue-50/40"
+              style={{ borderColor: '#bfdbfe', background: '#f8faff' }}
+              onClick={() => gstInputRef.current?.click()}
+            >
+              {gstImportLoading ? (
+                <>
+                  <div className="w-12 h-12 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin" />
+                  <p className="text-sm font-semibold text-slate-600">Reading certificate…</p>
+                  <p className="text-xs text-slate-400">AI is extracting client data</p>
+                </>
+              ) : (
+                <>
                   <div
-                    className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-sm flex-shrink-0"
+                    className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm"
                     style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
                   >
-                    <svg viewBox="0 0 24 24" className="h-5 w-5 fill-white">
+                    <svg viewBox="0 0 24 24" className="h-7 w-7 fill-white">
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/>
                     </svg>
                   </div>
-                  <div>
-                    <h2 className="text-lg font-bold text-slate-900">Import GST Certificate</h2>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Upload Form GST REG-06 PDF — client details auto-extracted by AI
-                    </p>
+                  <div className="text-center">
+                    <p className="text-sm font-bold text-slate-700">Click to upload GST Certificate PDF</p>
+                    <p className="text-xs text-slate-400 mt-1">Form GST REG-06 · Max 10 MB</p>
                   </div>
-                </div>
-              </div>
-      
-              {/* Body */}
-              <div className="p-7 space-y-5">
-                {/* Upload zone */}
-                <div
-                  className="border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center gap-4 cursor-pointer transition-all hover:border-blue-400 hover:bg-blue-50/40"
-                  style={{ borderColor: '#bfdbfe', background: '#f8faff' }}
-                  onClick={() => gstInputRef.current?.click()}
-                >
-                  {gstImportLoading ? (
-                    <>
-                      <div className="w-12 h-12 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin" />
-                      <p className="text-sm font-semibold text-slate-600">Reading certificate…</p>
-                      <p className="text-xs text-slate-400">AI is extracting client data</p>
-                    </>
-                  ) : (
-                    <>
-                      <div
-                        className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm"
-                        style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
-                      >
-                        <svg viewBox="0 0 24 24" className="h-7 w-7 fill-white">
-                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/>
-                        </svg>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-sm font-bold text-slate-700">Click to upload GST Certificate PDF</p>
-                        <p className="text-xs text-slate-400 mt-1">Form GST REG-06 · Max 10 MB</p>
-                      </div>
-                      <div
-                        className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold shadow-sm"
-                        style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
-                      >
-                        <svg viewBox="0 0 24 24" className="h-4 w-4 fill-white">
-                          <path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/>
-                        </svg>
-                        Choose PDF
-                      </div>
-                    </>
-                  )}
-                </div>
-      
-                {/* Error */}
-                {gstImportError && (
-                  <div className="flex items-start gap-2 px-4 py-3 rounded-xl border border-red-200 bg-red-50">
-                    <svg viewBox="0 0 24 24" className="h-4 w-4 fill-red-500 flex-shrink-0 mt-0.5">
-                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                  <div
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold shadow-sm"
+                    style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
+                  >
+                    <svg viewBox="0 0 24 24" className="h-4 w-4 fill-white">
+                      <path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/>
                     </svg>
-                    <p className="text-xs text-red-700 font-medium">{gstImportError}</p>
+                    Choose PDF
                   </div>
-                )}
-      
-                {/* What gets extracted */}
-                <div className="rounded-xl border border-slate-100 p-4 bg-slate-50/60 space-y-2">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
-                    What gets auto-filled
-                  </p>
-                  {[
-                    ['GSTIN', 'Registration number'],
-                    ['Company Name', 'Legal & trade name'],
-                    ['Constitution', 'Proprietor / Partnership / Pvt Ltd…'],
-                    ['Address', 'Principal place of business'],
-                    ['Partners / Directors', 'From Annexure B'],
-                  ].map(([field, desc]) => (
-                    <div key={field} className="flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />
-                      <span className="text-xs font-semibold text-slate-700">{field}</span>
-                      <span className="text-[10px] text-slate-400">— {desc}</span>
-                    </div>
-                  ))}
+                </>
+              )}
+            </div>
+
+            {/* Error */}
+            {gstImportError && (
+              <div className="flex items-start gap-2 px-4 py-3 rounded-xl border border-red-200 bg-red-50">
+                <svg viewBox="0 0 24 24" className="h-4 w-4 fill-red-500 flex-shrink-0 mt-0.5">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                </svg>
+                <p className="text-xs text-red-700 font-medium">{gstImportError}</p>
+              </div>
+            )}
+
+            {/* What gets extracted */}
+            <div className="rounded-xl border border-slate-100 p-4 bg-slate-50/60 space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                What gets auto-filled
+              </p>
+              {[
+                ['GSTIN', 'Registration number'],
+                ['Company Name', 'Legal & trade name'],
+                ['Constitution', 'Proprietor / Partnership / Pvt Ltd…'],
+                ['Address', 'Principal place of business'],
+                ['Partners / Directors', 'From Annexure B'],
+              ].map(([field, desc]) => (
+                <div key={field} className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />
+                  <span className="text-xs font-semibold text-slate-700">{field}</span>
+                  <span className="text-[10px] text-slate-400">— {desc}</span>
                 </div>
-              </div>
-      
-              {/* Footer */}
-              <div className="flex items-center justify-between px-7 py-4 border-t border-slate-100 bg-white">
-                <button
-                  type="button"
-                  onClick={() => { setGstImportOpen(false); setGstImportError(''); }}
-                  className="h-10 px-5 text-sm rounded-xl text-slate-500 hover:bg-slate-100 transition-colors font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={gstImportLoading}
-                  onClick={() => gstInputRef.current?.click()}
-                  className="h-10 px-6 text-sm rounded-xl text-white font-semibold shadow-sm disabled:opacity-50 transition-all"
-                  style={{ background: gstImportLoading ? '#94a3b8' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
-                >
-                  {gstImportLoading ? 'Extracting…' : 'Upload PDF'}
-                </button>
-              </div>
-            </DialogContent>
-          </Dialog>
-        );
-      
-        return (
-      
-      {GSTImportDialog}
+              ))}
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-between px-7 py-4 border-t border-slate-100 bg-white">
+            <button
+              type="button"
+              onClick={() => { setGstImportOpen(false); setGstImportError(''); }}
+              className="h-10 px-5 text-sm rounded-xl text-slate-500 hover:bg-slate-100 transition-colors font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={gstImportLoading}
+              onClick={() => gstInputRef.current?.click()}
+              className="h-10 px-6 text-sm rounded-xl text-white font-semibold shadow-sm disabled:opacity-50 transition-all"
+              style={{ background: gstImportLoading ? '#94a3b8' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
+            >
+              {gstImportLoading ? 'Extracting…' : 'Upload PDF'}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
       
       {/* HIDDEN FILE INPUTS */}
       <input type="file" ref={fileInputRef}  accept=".csv"       onChange={handleImportCSV}   className="hidden" />
