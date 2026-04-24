@@ -36,11 +36,8 @@ REMINDER_DAYS = [365, 180, 90, 60, 30, 15, 7]
 
 async def _fetch_html_playwright(target_url: str, retries: int = 3) -> str:
     """
-    Fetch `target_url` using a headless Chromium browser via Playwright.
-    Retries up to `retries` times on failure.
-
-    Raises:
-      HTTPException(504) if all attempts time out or fail.
+    Simple GET fetch via Playwright headless Chromium.
+    Used for Document_Index and Agent_Search pages.
     """
     last_error: Optional[Exception] = None
     for attempt in range(1, retries + 1):
@@ -61,11 +58,11 @@ async def _fetch_html_playwright(target_url: str, retries: int = 3) -> str:
                 page = await context.new_page()
                 try:
                     await page.goto(target_url, timeout=60000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(2000)   # let JS settle
+                    await page.wait_for_timeout(2000)
                     html = await page.content()
                 finally:
                     await browser.close()
-            logger.info(f"Playwright fetch OK (attempt {attempt}): {target_url}")
+            logger.info(f"Playwright GET OK (attempt {attempt}): {target_url}")
             return html
         except Exception as exc:
             last_error = exc
@@ -74,6 +71,150 @@ async def _fetch_html_playwright(target_url: str, retries: int = 3) -> str:
                 await asyncio.sleep(2)
 
     raise HTTPException(504, f"Failed to fetch page after {retries} attempts: {last_error}")
+
+
+async def _fetch_eregister_playwright(
+    app_number: str,
+    class_number: Optional[str] = None,
+    retries: int = 3,
+) -> str:
+    """
+    Navigate to IP India eRegister, fill in the search form, submit it,
+    and return the resulting HTML.
+
+    IP India uses ASP.NET with ViewState — a plain GET of the pre-filled
+    URL returns a blank form.  We must actually interact with the page.
+    """
+    last_error: Optional[Exception] = None
+    # Strip leading zeros and "Class " prefix if user passed "Class 7" etc.
+    cls = re.sub(r"(?i)class\s*", "", (class_number or "").strip())
+
+    for attempt in range(1, retries + 1):
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-dev-shm-usage"],
+                )
+                context = await browser.new_context(
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                    locale="en-IN",
+                )
+                page = await context.new_page()
+                try:
+                    # 1. Load the eRegister home page
+                    await page.goto(EREGISTER_URL, timeout=60000, wait_until="domcontentloaded")
+                    await page.wait_for_timeout(1500)
+
+                    # 2. Fill Application Number — try common input name/id patterns
+                    filled = False
+                    for selector in [
+                        'input[name*="ApplicationNumber"]',
+                        'input[id*="ApplicationNumber"]',
+                        'input[name*="appno"]',
+                        'input[id*="appno"]',
+                        'input[type="text"]',
+                    ]:
+                        try:
+                            el = page.locator(selector).first
+                            if await el.count() > 0:
+                                await el.fill(app_number.strip())
+                                filled = True
+                                logger.info(f"Filled app number using selector: {selector}")
+                                break
+                        except Exception:
+                            continue
+
+                    if not filled:
+                        raise RuntimeError("Could not find application number input field")
+
+                    # 3. Select Class if provided
+                    if cls:
+                        for sel_selector in [
+                            'select[name*="Class"]',
+                            'select[id*="Class"]',
+                            'select[name*="class"]',
+                        ]:
+                            try:
+                                sel_el = page.locator(sel_selector).first
+                                if await sel_el.count() > 0:
+                                    # Try value, label, and index approaches
+                                    for val in [cls, f"Class {cls}", cls.zfill(2)]:
+                                        try:
+                                            await sel_el.select_option(value=val)
+                                            break
+                                        except Exception:
+                                            try:
+                                                await sel_el.select_option(label=val)
+                                                break
+                                            except Exception:
+                                                continue
+                                    break
+                            except Exception:
+                                continue
+
+                    # 4. Solve math captcha if present
+                    try:
+                        captcha_text = await page.locator(
+                            '[id*="captcha"],[id*="Captcha"],[class*="captcha"]'
+                        ).first.inner_text(timeout=2000)
+                        answer = _solve_math_captcha(captcha_text)
+                        if answer:
+                            await page.locator(
+                                'input[id*="captcha"],input[id*="Captcha"],input[name*="captcha"]'
+                            ).first.fill(answer)
+                    except Exception:
+                        pass  # No captcha or not found — continue
+
+                    # 5. Click Search button
+                    clicked = False
+                    for btn_selector in [
+                        'input[id*="btnSearch"]',
+                        'input[value*="Search"]',
+                        'button[id*="Search"]',
+                        'button:has-text("Search")',
+                        'input[type="submit"]',
+                    ]:
+                        try:
+                            btn = page.locator(btn_selector).first
+                            if await btn.count() > 0:
+                                await btn.click()
+                                clicked = True
+                                logger.info(f"Clicked search using selector: {btn_selector}")
+                                break
+                        except Exception:
+                            continue
+
+                    if not clicked:
+                        raise RuntimeError("Could not find Search button")
+
+                    # 6. Wait for results to load
+                    await page.wait_for_timeout(4000)
+
+                    html = await page.content()
+                finally:
+                    await browser.close()
+
+            logger.info(f"eRegister form-submit OK (attempt {attempt}) for {app_number}")
+            return html
+
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                f"eRegister Playwright attempt {attempt} failed "
+                f"for {app_number}: {exc}"
+            )
+            if attempt < retries:
+                await asyncio.sleep(3)
+
+    raise HTTPException(
+        504,
+        f"Failed to fetch eRegister for '{app_number}' after {retries} attempts: {last_error}",
+    )
 
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
@@ -271,10 +412,9 @@ async def _scrape_async(
         logger.info(f"Cache hit for {cache_key}")
         return tm_cache[cache_key]
 
-    target_url = _build_eregister_url(app_number, class_number)
-    logger.info(f"Fetching eRegister via Playwright: {target_url}")
+    logger.info(f"Fetching eRegister via Playwright form for: {app_number} class={class_number}")
 
-    html = await _fetch_html_playwright(target_url)
+    html = await _fetch_eregister_playwright(app_number, class_number)
     soup = BeautifulSoup(html, "lxml")
     data = _parse_tables(soup)
 
