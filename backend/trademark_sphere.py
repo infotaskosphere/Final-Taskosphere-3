@@ -1,11 +1,10 @@
 import os, uuid, logging, asyncio, re, time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Any, Dict
-from urllib.parse import urlencode, quote_plus
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
-from curl_cffi import requests as curlex          # replaces `requests`
+from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from pydantic import BaseModel, Field
@@ -16,14 +15,13 @@ from backend.models import User
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/trademark-sphere", tags=["trademark-sphere"])
 IST    = ZoneInfo("Asia/Kolkata")
-_pool  = ThreadPoolExecutor(max_workers=4)
 
 EREGISTER_URL    = "https://tmrsearch.ipindia.gov.in/eregister/eregister.aspx"
 AGENT_SEARCH_URL = "https://tmrsearch.ipindia.gov.in/eregister/Agent_Search.aspx"
 DOC_INDEX_BASE   = "https://tmrsearch.ipindia.gov.in/eregister/Document_Index.aspx"
 
-# Crawlbase API endpoint (plain HTTP Crawling API)
-CRAWLBASE_API_URL = "https://api.crawlbase.com/"
+# ── Simple in-memory cache ────────────────────────────────────────────────────
+tm_cache: Dict[str, Any] = {}
 
 TM_STATUSES    = [
     "Registered", "Pending", "Objected", "Opposed", "Refused", "Abandoned",
@@ -34,73 +32,48 @@ NICE_CLASSES  = [str(i) for i in range(1, 46)]
 REMINDER_DAYS = [365, 180, 90, 60, 30, 15, 7]
 
 
-# ── Crawlbase config ──────────────────────────────────────────────────────────
+# ── Playwright HTML fetcher ───────────────────────────────────────────────────
 
-def _get_crawlbase_token() -> Optional[str]:
-    """Read the Crawlbase API token from the environment."""
-    return os.environ.get("CRAWLBASE_TOKEN")
-
-
-def _get_crawlbase_html(target_url: str) -> str:
+async def _fetch_html_playwright(target_url: str, retries: int = 3) -> str:
     """
-    Fetch `target_url` via the Crawlbase Crawling API and return the raw HTML.
-
-    Parameters sent to Crawlbase:
-      - token   : API token from CRAWLBASE_TOKEN env var
-      - url     : percent-encoded target URL
-      - country : IN  (routes request through Indian residential IPs)
-
-    Uses curl_cffi with Chrome 124 impersonation so the Crawlbase endpoint
-    itself sees a realistic browser TLS fingerprint.
+    Fetch `target_url` using a headless Chromium browser via Playwright.
+    Retries up to `retries` times on failure.
 
     Raises:
-      HTTPException(500) when CRAWLBASE_TOKEN is not configured.
-      HTTPException(403) when Crawlbase returns 403 (credit limit / bad token).
-      HTTPException(502) on unexpected non-200 responses.
-      HTTPException(504) on connection / timeout errors.
+      HTTPException(504) if all attempts time out or fail.
     """
-    token = _get_crawlbase_token()
-    if not token:
-        raise HTTPException(
-            500,
-            "CRAWLBASE_TOKEN environment variable is not set. "
-            "Configure it before using trademark scraping features.",
-        )
+    last_error: Optional[Exception] = None
+    for attempt in range(1, retries + 1):
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-dev-shm-usage"],
+                )
+                context = await browser.new_context(
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                    locale="en-IN",
+                )
+                page = await context.new_page()
+                try:
+                    await page.goto(target_url, timeout=60000, wait_until="domcontentloaded")
+                    await page.wait_for_timeout(2000)   # let JS settle
+                    html = await page.content()
+                finally:
+                    await browser.close()
+            logger.info(f"Playwright fetch OK (attempt {attempt}): {target_url}")
+            return html
+        except Exception as exc:
+            last_error = exc
+            logger.warning(f"Playwright attempt {attempt} failed for {target_url}: {exc}")
+            if attempt < retries:
+                await asyncio.sleep(2)
 
-    params = {
-        "token":   token,
-        "url":     target_url,   # Crawlbase accepts the raw URL; it handles encoding internally
-        "country": "IN",
-    }
-    api_url = CRAWLBASE_API_URL + "?" + urlencode(params, quote_via=quote_plus)
-
-    try:
-        response = curlex.get(api_url, impersonate="chrome124", timeout=60)
-    except curlex.exceptions.Timeout:
-        raise HTTPException(504, f"Crawlbase timed out fetching: {target_url}")
-    except curlex.exceptions.ConnectionError as exc:
-        raise HTTPException(504, f"Connection error while calling Crawlbase: {exc}")
-    except curlex.exceptions.RequestException as exc:
-        raise HTTPException(502, f"Crawlbase request failed: {exc}")
-
-    if response.status_code == 403:
-        logger.error(
-            "Crawlbase credit limit reached or invalid token. "
-            f"target_url={target_url}"
-        )
-        raise HTTPException(
-            403,
-            "Crawlbase credit limit reached or invalid token. "
-            "Please check your CRAWLBASE_TOKEN and account credits.",
-        )
-
-    if response.status_code != 200:
-        raise HTTPException(
-            502,
-            f"Crawlbase returned HTTP {response.status_code} for URL: {target_url}",
-        )
-
-    return response.text
+    raise HTTPException(504, f"Failed to fetch page after {retries} attempts: {last_error}")
 
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
@@ -258,7 +231,7 @@ def _solve_math_captcha(text: str) -> Optional[str]:
 def _build_eregister_url(app_number: str, class_number: Optional[str] = None) -> str:
     """
     Build a direct GET URL for the eRegister page pre-filled with the
-    application number (and optional class).  Crawlbase GETs this URL
+    application number (and optional class).  Playwright GETs this URL
     so we avoid the ASP.NET POST / ViewState dance entirely.
     """
     params: Dict[str, str] = {"app_no": app_number.strip()}
@@ -280,25 +253,28 @@ def _build_agent_search_url(agent_code: str) -> str:
     return AGENT_SEARCH_URL + "?" + urlencode({"agent_code": agent_code.strip()})
 
 
-def _scrape_sync(
+async def _scrape_async(
     app_number: str,
     class_number: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Fetch trademark data for `app_number` via Crawlbase.
+    Fetch trademark data for `app_number` using Playwright headless browser.
 
     Strategy:
-      1. Build a direct GET URL that passes the application number (and optional
-         class) as query parameters — this bypasses the ASP.NET ViewState / POST
-         flow because Crawlbase renders the page as a real browser would after
-         following the GET.
-      2. Parse the returned HTML with BeautifulSoup.
-      3. Return the cleaned key-value dict.
+      1. Check in-memory cache first (key = app_number + class_number).
+      2. Build a direct GET URL and fetch it via Playwright.
+      3. Parse the returned HTML with BeautifulSoup.
+      4. Cache and return the cleaned key-value dict.
     """
-    target_url = _build_eregister_url(app_number, class_number)
-    logger.info(f"Fetching eRegister via Crawlbase: {target_url}")
+    cache_key = f"{app_number.strip()}_{(class_number or '').strip()}"
+    if cache_key in tm_cache:
+        logger.info(f"Cache hit for {cache_key}")
+        return tm_cache[cache_key]
 
-    html = _get_crawlbase_html(target_url)
+    target_url = _build_eregister_url(app_number, class_number)
+    logger.info(f"Fetching eRegister via Playwright: {target_url}")
+
+    html = await _fetch_html_playwright(target_url)
     soup = BeautifulSoup(html, "lxml")
     data = _parse_tables(soup)
 
@@ -335,28 +311,28 @@ def _scrape_sync(
         )
 
     data.setdefault("application_number", app_number.strip())
+    tm_cache[cache_key] = data   # store in cache
     return data
 
 
 # ── Document Index scraper ────────────────────────────────────────────────────
 
-def _scrape_documents_sync(
+async def _scrape_documents_async(
     app_number: str,
     class_number: Optional[str] = None,
 ) -> tuple[List[Dict], Optional[Dict]]:
     """
-    Fetch the Document_Index.aspx page for the given application number via
-    Crawlbase and extract:
+    Fetch the Document_Index.aspx page using Playwright and extract:
       - documents : list of {name, pdf_link} for targeted document types
       - hearing   : {date, officer} from Hearing Notice / Show Cause Notice rows
 
     Returns (documents, hearing).
     """
     target_url = _build_doc_index_url(app_number, class_number)
-    logger.info(f"Fetching Document_Index via Crawlbase: {target_url}")
+    logger.info(f"Fetching Document_Index via Playwright: {target_url}")
 
     try:
-        html = _get_crawlbase_html(target_url)
+        html = await _fetch_html_playwright(target_url)
     except HTTPException as exc:
         logger.warning(
             f"Document_Index fetch failed for {app_number} "
@@ -414,16 +390,15 @@ def _scrape_documents_sync(
 
 # ── Attorney portfolio scraper ────────────────────────────────────────────────
 
-def _scrape_by_attorney_sync(agent_code: str) -> List[str]:
+async def _scrape_by_attorney_async(agent_code: str) -> List[str]:
     """
-    Fetch the Agent_Search.aspx page for `agent_code` via Crawlbase and return
-    all application numbers found in `app_no=` query-string links (with a bare
-    digit fallback).
+    Fetch the Agent_Search.aspx page using Playwright and return
+    all application numbers found in `app_no=` query-string links.
     """
     target_url = _build_agent_search_url(agent_code)
-    logger.info(f"Fetching Agent_Search via Crawlbase: {target_url}")
+    logger.info(f"Fetching Agent_Search via Playwright: {target_url}")
 
-    html = _get_crawlbase_html(target_url)
+    html = await _fetch_html_playwright(target_url)
     soup = BeautifulSoup(html, "lxml")
 
     app_numbers: List[str] = []
@@ -452,22 +427,22 @@ def _scrape_by_attorney_sync(agent_code: str) -> List[str]:
     logger.info(f"Attorney {agent_code}: found {len(app_numbers)} application numbers.")
     return app_numbers
 
+    logger.info(f"Attorney {agent_code}: found {len(app_numbers)} application numbers.")
+    return app_numbers
 
-# ── Async wrappers ────────────────────────────────────────────────────────────
+
+# ── Public async API (direct, no thread pool needed) ─────────────────────────
 
 async def scrape_trademark(app_number: str, class_number: Optional[str] = None) -> Dict[str, Any]:
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_pool, _scrape_sync, app_number, class_number)
+    return await _scrape_async(app_number, class_number)
 
 
 async def scrape_documents(app_number: str, class_number: Optional[str] = None):
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_pool, _scrape_documents_sync, app_number, class_number)
+    return await _scrape_documents_async(app_number, class_number)
 
 
 async def scrape_by_attorney_code(agent_code: str) -> List[str]:
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_pool, _scrape_by_attorney_sync, agent_code)
+    return await _scrape_by_attorney_async(agent_code)
 
 
 # ── Deadline logic ────────────────────────────────────────────────────────────
@@ -559,11 +534,10 @@ async def _import_attorney_bg(
 ) -> None:
     """
     Background task: scrape every application number for the given agent_code
-    via Crawlbase, then add each one to the database (skipping duplicates).
+    using Playwright, then add each one to the database (skipping duplicates).
     Also fetches Document_Index.aspx for hearing/examination report data.
 
-    A 2-second sleep is inserted between each Crawlbase request to respect
-    the Free Tier concurrency limits.
+    A 2-second sleep is inserted between each request to be polite to the server.
     """
     try:
         app_numbers = await scrape_by_attorney_code(agent_code)
@@ -578,7 +552,7 @@ async def _import_attorney_bg(
             logger.info(f"Attorney import: {app_num} already tracked, skipping.")
             continue
 
-        # ── Crawlbase polite delay (Free Tier concurrency limit) ──────────
+        # ── Polite delay between requests ──────────────────────────────────
         await asyncio.sleep(2)
 
         try:
@@ -812,10 +786,10 @@ async def import_attorney(
 ):
     """
     Kick off a background import of all trademarks associated with an attorney/agent code.
-    The background task calls Crawlbase for Agent_Search.aspx, extracts all application
+    The background task uses Playwright to fetch Agent_Search.aspx, extracts all application
     numbers, then fetches and stores each trademark (skipping duplicates).
     Document_Index.aspx is also queried per trademark for hearing/examination data.
-    A 2-second sleep between each Crawlbase request respects Free Tier concurrency limits.
+    A 2-second sleep between each request is polite to the IP India server.
     """
     bg.add_task(
         _import_attorney_bg,
@@ -858,12 +832,12 @@ async def refresh_tm(tm_id: str, bg: BackgroundTasks, user: User = Depends(get_c
     if not doc:
         raise HTTPException(404, "Trademark not found.")
 
-    # Refresh core trademark data via Crawlbase
+    # Refresh core trademark data via Playwright
     nd  = await scrape_trademark(doc["application_number"], doc.get("class_number"))
     dl  = _compute_deadlines(nd)
     now = datetime.now(IST)
 
-    # Refresh documents and hearings from Document_Index.aspx via Crawlbase
+    # Refresh documents and hearings from Document_Index.aspx via Playwright
     documents, hearing = await scrape_documents(doc["application_number"], doc.get("class_number"))
 
     updates = {
