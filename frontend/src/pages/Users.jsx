@@ -257,7 +257,7 @@ const EMPTY_PERMISSIONS = {
   can_view_staff_rankings: false, can_delete_data: false, can_delete_tasks: false,
   can_connect_email: false, can_view_own_data: false, can_create_quotations: false,
   can_manage_invoices: false, can_view_passwords: false, can_edit_passwords: false,
-  can_edit_attendance: false, can_view_compliance: false, can_manage_compliance: false,
+  can_edit_attendance: false, can_view_compliance: false, can_manage_compliance: false, can_view_trademark_sphere: false,
   can_view_gst_reconciliation: false,
   can_view_all_visits: false, can_edit_visits: false,
   can_delete_visits: false, can_delete_own_visits: true,
@@ -454,7 +454,7 @@ const ModuleAccessBadges = ({ userData }) => {
 
 const PermissionMatrixSummary = ({ permissions }) => {
   // Include module-level perms (managed from the Modules tab) so coverage % is accurate
-  const MODULE_PERM_KEYS = ['can_manage_invoices', 'can_view_passwords', 'can_edit_passwords', 'can_view_gst_reconciliation'];
+  const MODULE_PERM_KEYS = ['can_manage_invoices', 'can_view_passwords', 'can_edit_passwords', 'can_view_gst_reconciliation', 'can_view_trademark_sphere'];
   const allPerms = [...GLOBAL_PERMS, ...OPS_PERMS, ...EDIT_PERMS];
   const granted  = allPerms.filter(p => permissions[p.key]).length
                  + MODULE_PERM_KEYS.filter(k => permissions[k]).length;
@@ -2983,6 +2983,18 @@ export default function Users() {
                     setPermissions={setPermissions}
                     accentColor="#065f46"
                     badge={permissions.can_view_gst_reconciliation ? 'GST Access' : undefined}
+                  />
+
+                  {/* ── Trademark Sphere ────────────────────────────────── */}
+                  <ModuleAccessCard
+                    icon={ShieldCheck}
+                    title="Trademark Sphere"
+                    desc="Access the Trademark Sphere module to track, monitor and manage trademark applications from IP India."
+                    permKey="can_view_trademark_sphere"
+                    permissions={permissions}
+                    setPermissions={setPermissions}
+                    accentColor="#1D4ED8"
+                    badge={permissions.can_view_trademark_sphere ? 'Full Access' : undefined}
                   />
                 </div>
               </div>
