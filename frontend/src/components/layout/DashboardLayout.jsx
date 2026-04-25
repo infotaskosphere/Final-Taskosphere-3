@@ -357,18 +357,26 @@ const DashboardLayout = ({ children }) => {
               collapsed ? 'w-12' : 'w-full px-5'
             }`}
           >
-            <img
-              src="/logo.png"
-              alt="TaskOsphere"
-              className="object-contain cursor-pointer mx-auto block"
-              onClick={() => navigate('/dashboard')}
-              style={{
-                maxHeight: collapsed ? '46px' : '60px',
-                width: 'auto',
-                mixBlendMode: isDark ? 'normal' : 'multiply',
-                filter: isDark ? 'brightness(1.1) invert(1) hue-rotate(180deg) saturate(0.9)' : 'none',
-              }}
-            />
+            <div style={{
+              background: isDark ? 'transparent' : '#ffffff',
+              borderRadius: 8,
+              padding: isDark ? 0 : '2px 6px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+              <img
+                src="/logo.png"
+                alt="TaskOsphere"
+                className="object-contain cursor-pointer block"
+                onClick={() => navigate('/dashboard')}
+                style={{
+                  maxHeight: collapsed ? '42px' : '52px',
+                  width: 'auto',
+                  mixBlendMode: isDark ? 'normal' : 'multiply',
+                }}
+              />
+            </div>
             {hasUnread && (
               <span
                 className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#1FAF5A] rounded-full border-2 border-white dark:border-slate-800 shadow-sm z-20"
