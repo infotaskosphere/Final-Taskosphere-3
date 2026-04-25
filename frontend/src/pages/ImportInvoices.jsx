@@ -75,7 +75,7 @@ export default function ImportInvoices() {
     form.append('file', file);
 
     try {
-      const { data } = await api.post('/api/invoices/parse-backup', form, {
+      const { data } = await api.post('/invoices/parse-backup', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 120_000,
       });
@@ -107,7 +107,7 @@ export default function ImportInvoices() {
     if (!preview) return;
     setStep(STEP.IMPORTING);
     try {
-      const { data } = await api.post('/api/invoices/import-backup', {
+      const { data } = await api.post('/invoices/import-backup', {
         company_id:      companyId,
         source:          preview.source || 'import',
         invoices:        preview.invoices || [],
