@@ -4902,6 +4902,189 @@ async def sync_master_sheets(
         raise HTTPException(status_code=400, detail=f"Database synchronization failed: {str(e)}")
 
 # ==============================================================
+# GST CERTIFICATE PDF PARSER  (pure pdfplumber — no 3rd-party AI)
+# ==============================================================
+
+def _strip_watermark(s: str) -> str:
+    """
+    GST REG-06 PDFs contain a diagonal 'Goods and Services Tax' watermark
+    whose single letters bleed into the extracted text.  This helper removes:
+      • a leading single letter followed by a space before an uppercase word
+        e.g. "S JUHIL DIPAK" → "JUHIL DIPAK"
+      • a trailing single letter at the end of a value
+        e.g. "MAHALAXMI MEDICAL a" → "MAHALAXMI MEDICAL"
+    """
+    s = re.sub(r'^[A-Za-z]\s+(?=[A-Z])', '', s.strip())   # leading wm char
+    s = re.sub(r'\s+[a-zA-Z]$', '', s.strip())             # trailing wm char
+    return re.sub(r'\s{2,}', ' ', s).strip()
+
+
+def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
+    """
+    Parse a GST Form REG-06 PDF using pdfplumber + regex.
+    Returns a dict with: gstin, legal_name, trade_name, constitution,
+    constitution_raw, address, city, state, pin, registration_type,
+    valid_from, partners[{name, designation}].
+    No external AI service is called.
+    """
+    from io import BytesIO
+    import pdfplumber
+
+    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+        pages = [p.extract_text() or "" for p in pdf.pages]
+
+    page1      = pages[0] if pages else ""
+    annexure_b = next(
+        (p for p in pages if "Annexure B" in p or "Details of Managing" in p), ""
+    )
+
+    def _find(pat, text, group=1, flags=re.IGNORECASE | re.MULTILINE):
+        m = re.search(pat, text, flags)
+        return _strip_watermark(m.group(group).strip()) if m else ""
+
+    def _addr_field(label, text):
+        m = re.search(label + r'[:\s]+([^\n]+)', text, re.IGNORECASE)
+        return _strip_watermark(m.group(1)) if m else ""
+
+    # ── Core fields ──────────────────────────────────────────────────────
+    gstin      = _find(r'Registration Number\s*[:\-]?\s*([A-Z0-9]{15})', page1)
+    legal_name = _find(r'Legal Name\s+([A-Z][A-Z0-9 &.\-]+)', page1)
+    trade_name = _find(r'Trade Name,?\s*if any\s+([A-Z][A-Z0-9 &.\-]+)', page1)
+    const_raw  = _find(r'Constitution of Business\s+([A-Za-z ]+)', page1)
+
+    _cmap = {
+        'proprietorship': 'proprietor', 'proprietary': 'proprietor', 'proprietor': 'proprietor',
+        'private limited': 'pvt_ltd',   'pvt ltd': 'pvt_ltd',
+        'limited liability partnership': 'llp', 'llp': 'llp',
+        'partnership': 'partnership',
+        'huf': 'huf', 'hindu undivided family': 'huf',
+        'trust': 'trust', 'public limited': 'pvt_ltd',
+    }
+    constitution = _cmap.get(const_raw.lower().strip(), 'other')
+
+    # ── Address section ───────────────────────────────────────────────────
+    addr_m = re.search(
+        r'Address of Principal Place of.*?(?=\d+\.\s|Date of Liability)',
+        page1, re.DOTALL | re.IGNORECASE
+    )
+    addr_text = addr_m.group(0) if addr_m else page1
+
+    floor    = _addr_field(r'Floor No\.', addr_text)
+    building = _addr_field(r'Building No\./Flat No\.', addr_text)
+    premises = _addr_field(r'Name Of Premises/Building', addr_text)
+    road     = _addr_field(r'Road/Street', addr_text)
+    locality = _addr_field(r'Locality/Sub Loc?ality', addr_text)
+    city     = _addr_field(r'City/Town/Village', addr_text)
+    state    = _addr_field(r'State', addr_text)
+    pin      = _find(r'PIN Code[:\s]+(\d{6})', addr_text)
+
+    address  = ", ".join(x for x in [floor, building, premises, road, locality] if x)
+
+    # ── Other fields ──────────────────────────────────────────────────────
+    reg_type   = _find(r'Type of Registration\s*\n\s*([A-Za-z ]+)', page1)
+    valid_from = _find(r'Period of Validity\s+From\s+(\d{2}/\d{2}/\d{4})', page1)
+
+    # ── Partners / Directors (Annexure B) ─────────────────────────────────
+    partners = []
+    if annexure_b:
+        # 1. Remove lines that are purely a single watermark letter
+        clean_lines = [
+            ln for ln in annexure_b.split('\n')
+            if not re.fullmatch(r'\s*[a-zA-Z]\s*', ln)
+        ]
+        clean = '\n'.join(clean_lines)
+
+        # 2. Fix inline watermark on Designation line: "a Designation/Status" → "Designation/Status"
+        clean = re.sub(r'(?m)^[a-zA-Z]\s+(Designation/Status)', r'\1', clean)
+
+        # 3. Extract numbered partner blocks
+        entries = re.findall(
+            r'\d+\s+Name\s+([A-Z][A-Z \-]+?)\s*\n\s*Designation/Status\s+([A-Z /]+)',
+            clean, re.IGNORECASE
+        )
+        for name, desig in entries:
+            partners.append({
+                "name":        _strip_watermark(name.strip()),
+                "designation": _strip_watermark(desig.strip()),
+            })
+
+    return {
+        "gstin":            gstin,
+        "legal_name":       legal_name,
+        "trade_name":       trade_name,
+        "constitution":     constitution,
+        "constitution_raw": const_raw,
+        "address":          address,
+        "city":             city,
+        "state":            state,
+        "pin":              pin,
+        "registration_type": reg_type,
+        "valid_from":       valid_from,
+        "partners":         partners,
+    }
+
+
+@api_router.post("/clients/parse-gst-pdf")
+async def parse_gst_pdf(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Parse a GST REG-06 certificate PDF and return extracted client fields.
+    Uses pdfplumber + regex entirely server-side — no AI / 3rd-party API.
+    """
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="PDF too large — max 10 MB.")
+
+    try:
+        result = _parse_gst_reg06_pdf(content)
+    except Exception as e:
+        logger.error(f"parse_gst_pdf error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=422,
+            detail="Could not extract data from this PDF. Please ensure it is a valid GST REG-06 certificate."
+        )
+
+    if not result.get("gstin"):
+        raise HTTPException(
+            status_code=422,
+            detail="No GSTIN found in PDF. Please upload a valid Form GST REG-06 certificate."
+        )
+
+    return result
+
+
+@api_router.get("/clients/check-gstin")
+async def check_gstin(
+    gstin: str,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Check if a client with the given GSTIN already exists in the database.
+    Returns { exists: bool, client_id: str|null, company_name: str|null }
+    """
+    gstin = gstin.strip().upper()
+    if not gstin:
+        return {"exists": False, "client_id": None, "company_name": None}
+
+    existing = await db.clients.find_one(
+        {"gstin": gstin},
+        {"_id": 1, "company_name": 1}
+    )
+    if existing:
+        return {
+            "exists": True,
+            "client_id": str(existing["_id"]),
+            "company_name": existing.get("company_name", ""),
+        }
+    return {"exists": False, "client_id": None, "company_name": None}
+
+
+# ==============================================================
 # MDS (MCA) EXCEL SMART PARSER
 # ==============================================================
 @api_router.post("/clients/parse-mds-excel")
