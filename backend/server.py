@@ -1383,6 +1383,56 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
         "user": new_user
     }
 
+@api_router.post("/auth/self-register", response_model=Token)
+async def self_register(user_data: UserCreate):
+    """
+    Public self-registration endpoint — no auth token required.
+    Role is always forced to 'staff' and status is always 'pending_approval'.
+    An admin must approve the account before the user can log in.
+    Used by the public /register page.
+    """
+    existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    hashed_password = get_password_hash(user_data.password)
+    default_permissions = DEFAULT_ROLE_PERMISSIONS.get("staff", {})
+    user_id = str(uuid.uuid4())
+
+    new_user = {
+        "id": user_id,
+        "email": user_data.email,
+        "full_name": user_data.full_name,
+        "role": "staff",           # always staff for self-registration
+        "password": hashed_password,
+        "departments": user_data.departments or [],
+        "phone": user_data.phone,
+        "birthday": user_data.birthday.isoformat() if user_data.birthday else None,
+        "telegram_id": user_data.telegram_id,
+        "punch_in_time": user_data.punch_in_time or "10:30",
+        "grace_time": user_data.grace_time or "00:10",
+        "punch_out_time": user_data.punch_out_time or "19:00",
+        "profile_picture": user_data.profile_picture,
+        "is_active": False,
+        "status": "pending_approval",   # always pending for self-registration
+        "approved_by": None,
+        "approved_at": None,
+        "permissions": default_permissions,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    await db.users.insert_one(new_user)
+    access_token = create_access_token({"sub": user_id})
+    new_user.pop("password", None)
+    new_user.pop("_id", None)
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": new_user,
+    }
+
+
 @api_router.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin):
     user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
@@ -3282,7 +3332,7 @@ async def get_task(task_id: str, current_user: User = Depends(check_module_permi
 async def patch_task(
     task_id: str,
     updates: dict,
-    current_user: User = Depends(check_module_permission("tasks", "view"))
+    current_user: User = Depends(check_module_permission("tasks", "edit"))
 ):
     existing_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not existing_task:
@@ -4377,148 +4427,6 @@ async def delete_due_date(
     return {"message": "Due date deleted successfully"}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# REMINDERS & MEETINGS  (inlined — no separate router file needed)
-# ─────────────────────────────────────────────────────────────────────────────
-
-reminders_col = db["reminders"]
-
-
-# These inline reminder schemas extend the imported ReminderCreate model
-# with email-specific fields (event_id, source, reminder_type).
-class InlineReminderCreate(BaseModel):
-    title: str
-    description: Optional[str] = ""
-    remind_at: str          # ISO datetime string
-    event_id: Optional[str] = None
-    source: Optional[str] = "manual"
-    priority: Optional[str] = "medium"    # low | medium | high
-    reminder_type: Optional[str] = "reminder"  # reminder | meeting
-    related_task_id: Optional[str] = None
-
-
-class InlineReminderUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    remind_at: Optional[str] = None
-    is_dismissed: Optional[bool] = None
-    priority: Optional[str] = None
-    reminder_type: Optional[str] = None
-    status: Optional[str] = None
-
-
-def _serialize_reminder(doc: dict) -> dict:
-    if not doc:
-        return doc
-    doc["_id"] = str(doc["_id"])
-    doc["id"]  = doc["_id"]
-    return doc
-
-
-@api_router.get("/email/reminders")
-async def get_reminders(
-    user_id: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user),
-):
-    """Fetch reminders for the current user (admin can pass ?user_id=)."""
-    query_uid = current_user.id
-    if user_id and current_user.role == "admin":
-        query_uid = user_id
-
-    cursor = reminders_col.find({
-        "user_id": str(query_uid),
-        "$or": [
-            {"is_dismissed": {"$ne": True}},
-            {"is_dismissed": {"$exists": False}},
-        ],
-    }).sort("remind_at", 1)
-
-    results = []
-    async for doc in cursor:
-        results.append(_serialize_reminder(doc))
-    return results
-
-
-@api_router.post("/email/save-as-reminder")
-async def create_reminder(
-    body: InlineReminderCreate,
-    current_user: User = Depends(get_current_user),
-):
-    """Create a new reminder."""
-    now = datetime.now(timezone.utc).isoformat()
-    doc = {
-        "user_id":       str(current_user.id),
-        "title":         body.title,
-        "description":   body.description or "",
-        "remind_at":     body.remind_at,
-        "event_id":      body.event_id or f"manual-{int(datetime.now().timestamp() * 1000)}",
-        "source":        body.source or "manual",
-        "priority":      body.priority or "medium",
-        "reminder_type": body.reminder_type or "reminder",
-        "related_task_id": body.related_task_id,
-        "is_dismissed":  False,
-        "is_fired":      False,
-        "created_at":    now,
-        "updated_at":    now,
-    }
-    result = await reminders_col.insert_one(doc)
-    doc["_id"] = str(result.inserted_id)
-    doc["id"]  = doc["_id"]
-    return doc
-
-
-@api_router.patch("/email/reminders/{reminder_id}")
-async def update_reminder(
-    reminder_id: str,
-    body: InlineReminderUpdate,
-    current_user: User = Depends(get_current_user),
-):
-    """Update a reminder — title, description, remind_at, is_dismissed, etc."""
-    try:
-        obj_id = ObjectId(reminder_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid reminder ID")
-
-    update_fields = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
-    if not update_fields:
-        raise HTTPException(status_code=400, detail="No fields to update")
-
-    update_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
-
-    query = {"_id": obj_id}
-    if current_user.role != "admin":
-        query["user_id"] = str(current_user.id)
-
-    result = await reminders_col.update_one(query, {"$set": update_fields})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Reminder not found")
-
-    updated = await reminders_col.find_one({"_id": obj_id})
-    return _serialize_reminder(updated)
-
-
-@api_router.delete("/email/reminders/{reminder_id}")
-async def delete_reminder(
-    reminder_id: str,
-    current_user: User = Depends(get_current_user),
-):
-    """Delete a reminder permanently."""
-    try:
-        obj_id = ObjectId(reminder_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid reminder ID")
-
-    query = {"_id": obj_id}
-    if current_user.role != "admin":
-        query["user_id"] = str(current_user.id)
-
-    result = await reminders_col.delete_one(query)
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Reminder not found")
-
-    return {"message": "Reminder deleted", "id": reminder_id}
-
-
 # Registered before /clients/{client_id} to prevent route shadowing
 @api_router.get("/clients/upcoming-birthdays")
 async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get_current_user)):
@@ -5459,7 +5367,6 @@ _DEPT_SERVICE_MAP: Dict[str, List[str]] = {
  
  
 @api_router.get("/clients", response_model=List[Client])
-@api_router.get("/clients/list", response_model=List[Client])
 async def get_clients(current_user: User = Depends(check_module_permission("clients", "view"))):
     permissions = get_user_permissions(current_user)
 
