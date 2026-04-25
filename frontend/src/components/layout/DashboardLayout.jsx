@@ -51,7 +51,7 @@ const NAV_GROUPS = [
       { path: '/duedates',           icon: Calendar,       label: 'Compliance Calendar' },
       { path: '/compliance',         icon: ShieldCheck,    label: 'Compliance Tracker',  permission: 'can_view_compliance' },
       { path: '/gst-reconciliation', icon: ArrowLeftRight, label: 'GST Reconciliation', permission: 'can_view_gst_reconciliation' },
-      { path: '/trademark-sphere', icon: Shield, label: 'Trademark Sphere', permission: 'can_view_compliance' },
+      { path: '/trademark-sphere', icon: Shield, label: 'Trademark Sphere', permission: 'can_view_trademark_sphere' },
     ],
   },
   {
@@ -365,7 +365,8 @@ const DashboardLayout = ({ children }) => {
               style={{
                 maxHeight: collapsed ? '46px' : '60px',
                 width: 'auto',
-                filter: isDark ? 'brightness(1.08)' : 'none',
+                mixBlendMode: isDark ? 'normal' : 'multiply',
+                filter: isDark ? 'brightness(1.1) invert(1) hue-rotate(180deg) saturate(0.9)' : 'none',
               }}
             />
             {hasUnread && (
@@ -464,22 +465,22 @@ const DashboardLayout = ({ children }) => {
             {/* Theme toggle */}
             <motion.button
               onClick={() => setIsDark(!isDark)}
-              className={`relative flex-shrink-0 w-14 h-8 rounded-full p-1 flex items-center border transition-colors ${
-                isDark ? 'bg-slate-800 border-slate-600' : 'bg-slate-100 border-slate-200'
+              className={`relative flex-shrink-0 w-[52px] h-7 rounded-full flex items-center border transition-colors ${
+                isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-200 border-slate-300'
               }`}
               whileTap={{ scale: 0.93 }}
               transition={springMed}
               aria-label="Toggle theme"
             >
-              <Sun  className="absolute left-1.5 h-3 w-3 text-amber-400 opacity-70" />
-              <Moon className="absolute right-1.5 h-3 w-3 text-slate-400 opacity-70" />
+              <Sun  className="absolute left-1.5 h-3 w-3 text-amber-400" />
+              <Moon className="absolute right-1.5 h-3 w-3 text-slate-400" />
               <motion.div
-                className={`absolute w-6 h-6 rounded-full shadow-sm flex items-center justify-center ${
+                className={`absolute w-5 h-5 rounded-full shadow flex items-center justify-center z-10 ${
                   isDark ? 'bg-slate-200' : 'bg-white'
                 }`}
-                animate={{ x: isDark ? 32 : 4 }}
+                animate={{ x: isDark ? 28 : 3 }}
                 transition={springSnap}
-                style={{ top: '50%', marginTop: -12 }}
+                style={{ top: '50%', marginTop: -10 }}
               >
                 <AnimatePresence mode="wait" initial={false}>
                   <motion.div
