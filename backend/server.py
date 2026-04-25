@@ -5430,7 +5430,7 @@ async def create_client(payload: dict, current_user: User = Depends(check_module
                     "referred_by", "gstin", "pan", "gst_treatment",
                     "place_of_supply", "default_payment_terms", "credit_limit",
                     "opening_balance", "opening_balance_type", "tally_ledger_name",
-                    "tally_group", "website", "msme_number"):
+                    "tally_group", "website", "msme_number", "gst_address"):
             val = payload.get(key)
             if val is not None:
                 doc[key] = val
@@ -5585,7 +5585,7 @@ async def update_client(
         "gstin", "pan", "gst_treatment", "place_of_supply",
         "default_payment_terms", "credit_limit", "opening_balance",
         "opening_balance_type", "tally_ledger_name", "tally_group",
-        "website", "msme_number",
+        "website", "msme_number", "gst_address",
     }
     update_data = {k: v for k, v in client_data.items() if k in ALLOWED_FIELDS}
  
@@ -5596,7 +5596,7 @@ async def update_client(
         "state", "client_type_label",
         "gstin", "pan", "place_of_supply", "default_payment_terms",
         "credit_limit", "opening_balance", "tally_ledger_name",
-        "tally_group", "website", "msme_number",
+        "tally_group", "website", "msme_number", "gst_address",
     }
     for field in NULLABLE_FIELDS:
         if field in update_data and update_data[field] == "":
