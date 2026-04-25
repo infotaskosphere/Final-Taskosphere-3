@@ -4830,13 +4830,27 @@ def _strip_watermark(s: str) -> str:
 def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
     """
     Parse a GST Form REG-06 PDF using pdfplumber + regex.
-    Returns a dict with: gstin, legal_name, trade_name, constitution,
-    constitution_raw, address, city, state, pin, registration_type,
-    valid_from, partners[{name, designation}].
-    No external AI service is called.
+    Handles both the structured (labelled fields) and the inline address formats
+    used in digital GST REG-06 certificates.
+    Returns: gstin, legal_name, trade_name, constitution, constitution_raw,
+             address, city, state, pin, full_address, registration_type,
+             valid_from, partners[{name, designation}].
     """
     from io import BytesIO
     import pdfplumber
+
+    # All known Indian states / UTs in lowercase for address parsing
+    _INDIAN_STATES = {
+        "andhra pradesh", "arunachal pradesh", "assam", "bihar", "chhattisgarh",
+        "goa", "gujarat", "haryana", "himachal pradesh", "jharkhand", "karnataka",
+        "kerala", "madhya pradesh", "maharashtra", "manipur", "meghalaya", "mizoram",
+        "nagaland", "odisha", "punjab", "rajasthan", "sikkim", "tamil nadu",
+        "telangana", "tripura", "uttar pradesh", "uttarakhand", "west bengal",
+        "andaman and nicobar islands", "andaman and nicobar", "chandigarh",
+        "dadra and nagar haveli and daman and diu", "dadra and nagar haveli",
+        "daman and diu", "delhi", "jammu and kashmir", "ladakh", "lakshadweep",
+        "puducherry", "pondicherry", "uttaranchal", "orissa",
+    }
 
     with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
         pages = [p.extract_text() or "" for p in pdf.pages]
@@ -4854,81 +4868,178 @@ def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
         m = re.search(label + r'[:\s]+([^\n]+)', text, re.IGNORECASE)
         return _strip_watermark(m.group(1)) if m else ""
 
-    # ── Core fields ──────────────────────────────────────────────────────
+    # ── Core fields ──────────────────────────────────────────────────────────
     gstin      = _find(r'Registration Number\s*[:\-]?\s*([A-Z0-9]{15})', page1)
-    legal_name = _find(r'Legal Name\s+([A-Z][A-Z0-9 &.\-]+)', page1)
-    trade_name = _find(r'Trade Name,?\s*if any\s+([A-Z][A-Z0-9 &.\-]+)', page1)
-    const_raw  = _find(r'Constitution of Business\s+([A-Za-z ]+)', page1)
+    legal_name = _find(r'Legal Name\s+([A-Z][A-Z0-9 &.\-,]+?)(?=\n|\d+\.)', page1)
+    trade_name = _find(r'Trade Name,?\s*if any\s+([A-Z][A-Z0-9 &.\-,]+?)(?=\n|\d+\.)', page1)
+    const_raw  = _find(r'Constitution of Business\s+([A-Za-z ]+?)(?=\n|\d+\.)', page1)
 
+    # ── Constitution mapping — exact first, then substring ────────────────────
     _cmap = {
-        'proprietorship': 'proprietor', 'proprietary': 'proprietor', 'proprietor': 'proprietor',
-        'private limited': 'pvt_ltd',   'pvt ltd': 'pvt_ltd',
-        'limited liability partnership': 'llp', 'llp': 'llp',
-        'partnership': 'partnership',
-        'huf': 'huf', 'hindu undivided family': 'huf',
-        'trust': 'trust', 'public limited': 'pvt_ltd',
+        "proprietorship":              "proprietor",
+        "proprietary":                 "proprietor",
+        "sole proprietorship":         "proprietor",
+        "proprietor":                  "proprietor",
+        "private limited company":     "pvt_ltd",
+        "private limited":             "pvt_ltd",
+        "pvt ltd":                     "pvt_ltd",
+        "pvt. ltd.":                   "pvt_ltd",
+        "limited liability partnership": "llp",
+        "llp":                         "llp",
+        "partnership firm":            "partnership",
+        "partnership":                 "partnership",
+        "huf":                         "huf",
+        "hindu undivided family":      "huf",
+        "trust":                       "trust",
+        "public limited company":      "pvt_ltd",
+        "public limited":              "pvt_ltd",
+        "society":                     "other",
+        "cooperative":                 "other",
     }
-    constitution = _cmap.get(const_raw.lower().strip(), 'other')
+    lc_const = const_raw.lower().strip()
+    constitution = _cmap.get(lc_const, "")
+    if not constitution:
+        # Substring fallback — most reliable for real-world PDFs
+        if "private limited" in lc_const or "pvt" in lc_const:
+            constitution = "pvt_ltd"
+        elif "llp" in lc_const or "limited liability" in lc_const:
+            constitution = "llp"
+        elif "proprietor" in lc_const or "sole " in lc_const:
+            constitution = "proprietor"
+        elif "partnership" in lc_const:
+            constitution = "partnership"
+        elif "huf" in lc_const or "hindu undivided" in lc_const:
+            constitution = "huf"
+        elif "trust" in lc_const:
+            constitution = "trust"
+        elif "public limited" in lc_const:
+            constitution = "pvt_ltd"
+        else:
+            constitution = "other"
 
-    # ── Address section ───────────────────────────────────────────────────
-    addr_m = re.search(
-        r'Address of Principal Place of.*?(?=\d+\.\s|Date of Liability)',
+    # ── Address section ───────────────────────────────────────────────────────
+    # Step 1: Extract the raw address block from page 1.
+    # Two formats exist:
+    #   (A) Structured: field labels like "Floor No.", "Building No.", etc.
+    #   (B) Inline:    "Address of Principal Place of <full address>\nBusiness ..."
+    addr_block_m = re.search(
+        r'Address of Principal Place of\s*(Business)?\s*(.+?)(?=\n\s*\d+\.\s|Date of Liability|6\.|$)',
         page1, re.DOTALL | re.IGNORECASE
     )
-    addr_text = addr_m.group(0) if addr_m else page1
+    addr_block_raw = ""
+    if addr_block_m:
+        chunk = addr_block_m.group(2) or addr_block_m.group(0)
+        # Remove any leading "Business" label that wraps to next line
+        chunk = re.sub(r'(?i)^Business\s+', '', chunk.strip())
+        chunk = re.sub(r'(?i)\nBusiness\s+', ' ', chunk)
+        addr_block_raw = re.sub(r'\s+', ' ', chunk).strip()
 
-    floor    = _addr_field(r'Floor No\.', addr_text)
-    building = _addr_field(r'Building No\./Flat No\.', addr_text)
-    premises = _addr_field(r'Name Of Premises/Building', addr_text)
-    road     = _addr_field(r'Road/Street', addr_text)
-    locality = _addr_field(r'Locality/Sub Loc?ality', addr_text)
-    city     = _addr_field(r'City/Town/Village', addr_text)
-    state    = _addr_field(r'State', addr_text)
-    pin      = _find(r'PIN Code[:\s]+(\d{6})', addr_text)
+    address = city = state = pin = full_address = ""
 
-    address  = ", ".join(x for x in [floor, building, premises, road, locality] if x)
+    if addr_block_raw:
+        # ── Try structured (labelled) format first ────────────────────────────
+        floor    = _addr_field(r'Floor No\.', addr_block_raw)
+        building = _addr_field(r'Building No\./Flat No\.', addr_block_raw)
+        premises = _addr_field(r'Name Of Premises/Building', addr_block_raw)
+        road     = _addr_field(r'Road/Street', addr_block_raw)
+        locality = _addr_field(r'Locality/Sub Loc?ality', addr_block_raw)
+        city_lbl = _addr_field(r'City/Town/Village', addr_block_raw)
+        state_lbl= _addr_field(r'State', addr_block_raw)
+        pin_lbl  = _find(r'PIN Code[:\s]+(\d{6})', addr_block_raw)
 
-    # ── Other fields ──────────────────────────────────────────────────────
-    reg_type   = _find(r'Type of Registration\s*\n\s*([A-Za-z ]+)', page1)
+        if any([floor, building, premises, road, locality, city_lbl]):
+            # Structured format — use the labelled fields directly
+            address      = ", ".join(x for x in [floor, building, premises, road, locality] if x)
+            city         = city_lbl
+            state        = state_lbl
+            pin          = pin_lbl
+            full_address = ", ".join(x for x in [address, city, state, pin] if x)
+        else:
+            # ── Inline format — parse comma-separated address string ──────────
+            full_address = addr_block_raw  # preserve original
+
+            # Remove trailing watermark/signature noise
+            raw = re.sub(r'(?i)(signature not verified|digitally signed|date:.*|goods and services tax.*)', '', addr_block_raw).strip()
+
+            parts = [p.strip() for p in re.split(r',\s*', raw) if p.strip()]
+
+            # Extract 6-digit PIN
+            for i, p in enumerate(parts):
+                cleaned_p = re.sub(r'\s+', '', p)
+                if re.match(r'^\d{6}$', cleaned_p):
+                    pin = cleaned_p
+                    parts = parts[:i] + parts[i+1:]
+                    break
+
+            # Extract state (scan from right, match known Indian state)
+            for i in range(len(parts) - 1, -1, -1):
+                candidate = parts[i].lower().strip()
+                if candidate in _INDIAN_STATES:
+                    state = parts[i].strip().title()
+                    parts = parts[:i] + parts[i+1:]
+                    break
+
+            # City is typically the last part after removing state & PIN
+            # Skip if it duplicates the preceding part (GST often repeats city)
+            if parts:
+                last = parts[-1].strip()
+                prev = parts[-2].strip() if len(parts) > 1 else ""
+                if last.lower() == prev.lower():
+                    parts = parts[:-1]  # remove duplicate
+                city = parts[-1].strip() if parts else ""
+                if city:
+                    parts = parts[:-1]
+
+            # Remaining parts form the street address
+            address = ", ".join(p for p in parts if p)
+
+    # ── Other fields ──────────────────────────────────────────────────────────
+    reg_type   = _find(r'Type of Registration\s*[\n\r]+\s*([A-Za-z ]+)', page1)
+    if not reg_type:
+        reg_type = _find(r'Type of Registration\s+([A-Za-z ]+)', page1)
     valid_from = _find(r'Period of Validity\s+From\s+(\d{2}/\d{2}/\d{4})', page1)
 
-    # ── Partners / Directors (Annexure B) ─────────────────────────────────
+    # ── Partners / Directors (Annexure B) ─────────────────────────────────────
     partners = []
     if annexure_b:
-        # 1. Remove lines that are purely a single watermark letter
         clean_lines = [
             ln for ln in annexure_b.split('\n')
             if not re.fullmatch(r'\s*[a-zA-Z]\s*', ln)
         ]
         clean = '\n'.join(clean_lines)
-
-        # 2. Fix inline watermark on Designation line: "a Designation/Status" → "Designation/Status"
         clean = re.sub(r'(?m)^[a-zA-Z]\s+(Designation/Status)', r'\1', clean)
 
-        # 3. Extract numbered partner blocks
+        # Try numbered block pattern first
         entries = re.findall(
-            r'\d+\s+Name\s+([A-Z][A-Z \-]+?)\s*\n\s*Designation/Status\s+([A-Z /]+)',
+            r'\d+\s+Name\s+([A-Z][A-Z \-]+?)\s*\n\s*Designation/Status\s+([A-Za-z /]+)',
             clean, re.IGNORECASE
         )
+        # Fallback: adjacent Name / Designation lines without number prefix
+        if not entries:
+            entries = re.findall(
+                r'Name\s+([A-Z][A-Z \-]+?)\s*\n\s*Designation(?:/Status)?\s+([A-Za-z /]+)',
+                clean, re.IGNORECASE
+            )
         for name, desig in entries:
-            partners.append({
-                "name":        _strip_watermark(name.strip()),
-                "designation": _strip_watermark(desig.strip()),
-            })
+            name_clean  = _strip_watermark(name.strip())
+            desig_clean = _strip_watermark(desig.strip())
+            if name_clean:
+                partners.append({"name": name_clean, "designation": desig_clean})
 
     return {
-        "gstin":            gstin,
-        "legal_name":       legal_name,
-        "trade_name":       trade_name,
-        "constitution":     constitution,
-        "constitution_raw": const_raw,
-        "address":          address,
-        "city":             city,
-        "state":            state,
-        "pin":              pin,
+        "gstin":             gstin,
+        "legal_name":        legal_name,
+        "trade_name":        trade_name,
+        "constitution":      constitution,
+        "constitution_raw":  const_raw,
+        "address":           address,
+        "city":              city,
+        "state":             state,
+        "pin":               pin,
+        "full_address":      full_address,
         "registration_type": reg_type,
-        "valid_from":       valid_from,
-        "partners":         partners,
+        "valid_from":        valid_from,
+        "partners":          partners,
     }
 
 
@@ -5338,7 +5449,8 @@ async def create_client(payload: dict, current_user: User = Depends(check_module
                     "referred_by", "gstin", "pan", "gst_treatment",
                     "place_of_supply", "default_payment_terms", "credit_limit",
                     "opening_balance", "opening_balance_type", "tally_ledger_name",
-                    "tally_group", "website", "msme_number", "gst_address"):
+                    "tally_group", "website", "msme_number",
+                    "gst_address", "gst_city", "gst_state", "gst_pin"):
             val = payload.get(key)
             if val is not None:
                 doc[key] = val
@@ -5493,6 +5605,7 @@ async def update_client(
         "default_payment_terms", "credit_limit", "opening_balance",
         "opening_balance_type", "tally_ledger_name", "tally_group",
         "website", "msme_number", "gst_address",
+        "gst_city", "gst_state", "gst_pin",
     }
     update_data = {k: v for k, v in client_data.items() if k in ALLOWED_FIELDS}
  
@@ -5503,7 +5616,7 @@ async def update_client(
         "state", "client_type_label",
         "gstin", "pan", "place_of_supply", "default_payment_terms",
         "credit_limit", "opening_balance", "tally_ledger_name",
-        "tally_group", "website", "msme_number", "gst_address",
+        "tally_group", "website", "msme_number", "gst_address", "gst_city", "gst_state", "gst_pin",
     }
     for field in NULLABLE_FIELDS:
         if field in update_data and update_data[field] == "":
