@@ -28,7 +28,7 @@ export default function Register() {
     e.preventDefault();
     setLoading(true);
     try {
-      const response = await axios.post(`${API}/auth/register`, { email, password, full_name: fullName, role });
+      const response = await axios.post(`${API}/auth/self-register`, { email, password, full_name: fullName, role });
       const { access_token, user } = response.data;
       localStorage.setItem('token', access_token);
       localStorage.setItem('user', JSON.stringify(user));
