@@ -1982,6 +1982,82 @@ async def import_backup(
 
 
 # ─────────────────────────────────────────────
+# GET /invoices/backup-sources  — list distinct import sources with counts
+# DELETE /invoices/remove-backup  — delete all data from a given import source
+# ─────────────────────────────────────────────
+
+@router.get("/invoices/backup-sources")
+async def get_backup_sources(
+    current_user: User = Depends(check_module_permission("invoicing", "view")),
+):
+    """
+    Return all distinct import sources that exist in the database,
+    together with the count of invoices, clients and products from each source.
+    """
+    pipeline = [
+        {"$group": {"_id": "$imported_from", "invoice_count": {"$sum": 1}}},
+        {"$match": {"_id": {"$ne": None}}},
+    ]
+    invoice_docs = await db.invoices.aggregate(pipeline).to_list(100)
+
+    # Index by source for quick merging
+    source_map: dict = {}
+    for doc in invoice_docs:
+        src = doc["_id"] or "unknown"
+        source_map[src] = {
+            "source": src,
+            "invoice_count": doc["invoice_count"],
+            "client_count": 0,
+            "product_count": 0,
+        }
+
+    # Count clients per source
+    async for doc in db.clients.aggregate([
+        {"$group": {"_id": "$imported_from", "count": {"$sum": 1}}},
+        {"$match": {"_id": {"$ne": None}}},
+    ]):
+        src = doc["_id"] or "unknown"
+        if src in source_map:
+            source_map[src]["client_count"] = doc["count"]
+
+    # Count products per source
+    async for doc in db.products.aggregate([
+        {"$group": {"_id": "$imported_from", "count": {"$sum": 1}}},
+        {"$match": {"_id": {"$ne": None}}},
+    ]):
+        src = doc["_id"] or "unknown"
+        if src in source_map:
+            source_map[src]["product_count"] = doc["count"]
+
+    return list(source_map.values())
+
+
+@router.delete("/invoices/remove-backup")
+async def remove_backup(
+    source: str,
+    current_user: User = Depends(check_module_permission("invoicing", "delete")),
+):
+    """
+    Delete ALL invoices, clients and products that were imported from *source*.
+    Requires DELETE permission on the invoicing module.
+    """
+    if not source:
+        raise HTTPException(status_code=400, detail="source query param is required")
+
+    inv_res    = await db.invoices.delete_many({"imported_from": source})
+    client_res = await db.clients.delete_many({"imported_from": source})
+    prod_res   = await db.products.delete_many({"imported_from": source})
+
+    return {
+        "source": source,
+        "invoices_deleted": inv_res.deleted_count,
+        "clients_deleted":  client_res.deleted_count,
+        "products_deleted": prod_res.deleted_count,
+    }
+
+
+
+# ─────────────────────────────────────────────
 # ✅ NEW ENDPOINT (CHANGE 3 — ADD THIS HERE)
 # ─────────────────────────────────────────────
 
