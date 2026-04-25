@@ -58,75 +58,103 @@ def _get_captcha_answer(soup: BeautifulSoup) -> Optional[str]:
     return None
 
 
+def _scraperapi_get_html(url: str) -> str:
+    """Fetch any IP India URL via ScraperAPI (Indian IP, JS rendered)."""
+    key = os.environ.get("SCRAPERAPI_KEY", "")
+    if not key:
+        raise HTTPException(500, "SCRAPERAPI_KEY not set in Render environment variables.")
+    resp = _requests.get(
+        "https://api.scraperapi.com/",
+        params={"api_key": key, "url": url, "country_code": "in", "render": "true"},
+        timeout=120,
+    )
+    if resp.status_code == 401:
+        raise HTTPException(401, "Invalid ScraperAPI key.")
+    if resp.status_code == 403:
+        raise HTTPException(403, "ScraperAPI credit limit reached.")
+    if resp.status_code != 200:
+        raise HTTPException(502, f"ScraperAPI returned {resp.status_code} for {url}")
+    return resp.text
+
+
+def _scraperapi_post_html(url: str, data: dict) -> str:
+    """POST to any IP India URL via ScraperAPI (Indian IP)."""
+    key = os.environ.get("SCRAPERAPI_KEY", "")
+    if not key:
+        raise HTTPException(500, "SCRAPERAPI_KEY not set in Render environment variables.")
+    resp = _requests.post(
+        "https://api.scraperapi.com/",
+        params={"api_key": key, "url": url, "country_code": "in", "render": "true"},
+        data=data,
+        timeout=120,
+    )
+    if resp.status_code == 401:
+        raise HTTPException(401, "Invalid ScraperAPI key.")
+    if resp.status_code == 403:
+        raise HTTPException(403, "ScraperAPI credit limit reached.")
+    # 200, 302 or any 2xx is fine
+    return resp.text
+
+
 def _send_otp_sync(email: str) -> str:
     """
-    Step 1: POST email to IP India estatus login page to trigger OTP.
-    Returns a new session_id. The session (with cookies) is stored in _sessions.
+    Step 1: Load IP India estatus login page via ScraperAPI (Indian IP),
+    fill the email + captcha form, POST it to trigger OTP.
+    Returns a session_id stored in _sessions.
     """
-    sess = _make_session()
+    logger.info(f"Loading estatus login page via ScraperAPI for {email}")
 
-    # Load login page to get any initial cookies / viewstate
-    try:
-        r = sess.get(ESTATUS_LOGIN, timeout=30)
-        r.raise_for_status()
-    except Exception as e:
-        raise HTTPException(504, f"Could not reach IP India login page: {e}")
+    # GET login page through ScraperAPI
+    html = _scraperapi_get_html(ESTATUS_LOGIN)
+    soup = BeautifulSoup(html, "lxml")
 
-    soup = BeautifulSoup(r.text, "lxml")
-
-    # Build POST payload — find all hidden fields (ViewState etc.)
+    # Build POST payload from hidden fields (ViewState etc.)
     payload: Dict[str, str] = {}
     for inp in soup.find_all("input", {"type": "hidden"}):
         if inp.get("name"):
             payload[inp["name"]] = inp.get("value", "")
 
-    # Fill email field
+    # Find email field
     email_field = None
-    for inp in soup.find_all("input", {"type": ["text", "email"]}):
+    for inp in soup.find_all("input"):
         name = (inp.get("name") or "").lower()
         id_  = (inp.get("id")   or "").lower()
         if "email" in name or "email" in id_ or "mail" in name:
             email_field = inp.get("name") or inp.get("id")
             break
     if not email_field:
-        # Fallback: first text input
         first = soup.find("input", {"type": ["text", "email"]})
         email_field = first.get("name") or first.get("id") if first else "email"
 
     payload[email_field] = email
 
-    # Solve captcha if present
+    # Solve math captcha
     captcha_answer = _get_captcha_answer(soup)
     if captcha_answer:
         for inp in soup.find_all("input"):
-            name = (inp.get("name") or "").lower()
-            id_  = (inp.get("id")   or "").lower()
-            if "captcha" in name or "captcha" in id_:
-                payload[inp["name"]] = captcha_answer
+            n = (inp.get("name") or inp.get("id") or "").lower()
+            if "captcha" in n or "answer" in n:
+                payload[inp.get("name") or inp.get("id")] = captcha_answer
                 break
 
-    # Find submit button
+    # Submit button
     btn = soup.find("input", {"type": "submit"}) or soup.find("button", {"type": "submit"})
     if btn and btn.get("name"):
         payload[btn["name"]] = btn.get("value", "Submit")
 
-    try:
-        r2 = sess.post(ESTATUS_LOGIN, data=payload, timeout=30)
-        r2.raise_for_status()
-    except Exception as e:
-        raise HTTPException(504, f"Failed to submit email to IP India: {e}")
+    logger.info(f"POSTing email form to {ESTATUS_LOGIN} via ScraperAPI")
+    r2_html = _scraperapi_post_html(ESTATUS_LOGIN, payload)
 
-    # Check response — IP India redirects or shows OTP input on success
-    if "otp" not in r2.text.lower() and "sent" not in r2.text.lower() and r2.status_code not in (200, 302):
-        raise HTTPException(400, "IP India did not accept the email. Check it is registered on estatus.")
+    # Verify OTP was triggered
+    if "otp" not in r2_html.lower() and "sent" not in r2_html.lower():
+        logger.warning(f"Unexpected response after email submit: {r2_html[:300]}")
+        raise HTTPException(400, "IP India did not send OTP. Check the email is registered on tmrsearch.ipindia.gov.in/estatus")
 
-    # Save session
     session_id = str(uuid.uuid4())
     _sessions[session_id] = {
-        "cookies":    dict(sess.cookies),
         "email":      email,
         "created_at": datetime.now(IST).isoformat(),
-        "otp_url":    r2.url,  # URL after OTP trigger (may differ)
+        "otp_page_html": r2_html,   # store OTP page HTML for next step
     }
     logger.info(f"OTP triggered for {email}, session_id={session_id}")
     return session_id
@@ -139,89 +167,72 @@ def _fetch_with_otp_sync(
     class_number: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Step 2: Submit OTP to complete login, then scrape trademark data.
-    Reuses the session cookies from _send_otp_sync.
+    Step 2: Submit OTP via ScraperAPI, then scrape trademark data.
+    Uses the stored OTP-page HTML from _send_otp_sync.
     """
     sess_data = _sessions.get(session_id)
     if not sess_data:
         raise HTTPException(401, "Session expired or invalid. Please start again.")
 
-    # Check TTL
     created = datetime.fromisoformat(sess_data["created_at"])
     if (datetime.now(IST) - created).total_seconds() > SESSION_TTL_SECONDS:
         del _sessions[session_id]
         raise HTTPException(401, "Session expired (>4 hours). Please login again.")
 
-    sess = _make_session()
-    sess.cookies.update(sess_data["cookies"])
+    # Parse stored OTP page HTML
+    otp_page_html = sess_data.get("otp_page_html", "")
+    soup = BeautifulSoup(otp_page_html, "lxml")
 
-    # Load OTP page (may be same URL or redirect after email submit)
-    otp_page_url = sess_data.get("otp_url") or ESTATUS_LOGIN
-    try:
-        r = sess.get(otp_page_url, timeout=30)
-        r.raise_for_status()
-    except Exception as e:
-        raise HTTPException(504, f"Could not load OTP page: {e}")
-
-    soup = BeautifulSoup(r.text, "lxml")
-
-    # Build OTP submit payload
+    # Build OTP submit payload from hidden fields
     payload: Dict[str, str] = {}
     for inp in soup.find_all("input", {"type": "hidden"}):
         if inp.get("name"):
             payload[inp["name"]] = inp.get("value", "")
 
     # Fill OTP field
+    otp_filled = False
     for inp in soup.find_all("input"):
         name = (inp.get("name") or "").lower()
         id_  = (inp.get("id")   or "").lower()
         if "otp" in name or "otp" in id_ or "code" in name or "answer" in name:
             payload[inp.get("name") or inp.get("id")] = otp
+            otp_filled = True
             break
+    if not otp_filled:
+        # fallback — fill all non-hidden text inputs with OTP
+        for inp in soup.find_all("input", {"type": ["text", "number"]}):
+            if inp.get("name"):
+                payload[inp["name"]] = otp
 
     # Captcha on OTP page
-    captcha_answer = _get_captcha_answer(soup)
-    if captcha_answer:
+    cap_ans = _get_captcha_answer(soup)
+    if cap_ans:
         for inp in soup.find_all("input"):
-            name = (inp.get("name") or "").lower()
-            id_  = (inp.get("id")   or "").lower()
-            if "captcha" in name or "captcha" in id_:
-                payload[inp.get("name")] = captcha_answer
+            n = (inp.get("name") or inp.get("id") or "").lower()
+            if "captcha" in n or "answer" in n:
+                payload[inp.get("name") or inp.get("id")] = cap_ans
                 break
 
     btn = soup.find("input", {"type": "submit"}) or soup.find("button", {"type": "submit"})
     if btn and btn.get("name"):
         payload[btn["name"]] = btn.get("value", "Submit")
 
-    try:
-        r2 = sess.post(otp_page_url, data=payload, timeout=30)
-        r2.raise_for_status()
-    except Exception as e:
-        raise HTTPException(504, f"OTP submit failed: {e}")
+    logger.info(f"Submitting OTP for session {session_id} via ScraperAPI")
+    login_result_html = _scraperapi_post_html(ESTATUS_LOGIN, payload)
 
-    # Check login succeeded — should redirect to main menu / search page
-    if "invalid" in r2.text.lower() or "incorrect" in r2.text.lower():
+    if "invalid" in login_result_html.lower() or "incorrect" in login_result_html.lower():
         raise HTTPException(401, "Incorrect OTP. Please try again.")
 
-    # Update stored cookies with post-login cookies
-    _sessions[session_id]["cookies"] = dict(sess.cookies)
-
-    # ── Now navigate to trademark search page ────────────────────────────────
-    # Check cache first
+    # ── Now fetch trademark search page and submit ───────────────────────────
     cache_key = f"{app_number.strip()}_{(class_number or '').strip()}"
     if cache_key in tm_cache:
         logger.info(f"Cache hit for {cache_key}")
         return tm_cache[cache_key]
 
-    cls = re.sub(r"(?i)class\s*", "", (class_number or "").strip())
+    logger.info(f"Loading trademark search page via ScraperAPI")
+    search_html = _scraperapi_get_html(ESTATUS_SEARCH)
+    search_soup = BeautifulSoup(search_html, "lxml")
 
-    try:
-        search_page = sess.get(ESTATUS_SEARCH, timeout=30)
-        search_page.raise_for_status()
-    except Exception as e:
-        raise HTTPException(504, f"Could not load trademark search page: {e}")
-
-    search_soup = BeautifulSoup(search_page.text, "lxml")
     search_payload: Dict[str, str] = {}
     for inp in search_soup.find_all("input", {"type": "hidden"}):
         if inp.get("name"):
@@ -235,28 +246,22 @@ def _fetch_with_otp_sync(
             search_payload[inp.get("name") or inp.get("id")] = app_number.strip()
             break
 
-    # Solve captcha
-    cap_ans = _get_captcha_answer(search_soup)
-    if cap_ans:
+    # Captcha on search page
+    cap_ans2 = _get_captcha_answer(search_soup)
+    if cap_ans2:
         for inp in search_soup.find_all("input"):
             n = (inp.get("name") or inp.get("id") or "").lower()
             if "captcha" in n or "answer" in n:
-                search_payload[inp.get("name") or inp.get("id")] = cap_ans
+                search_payload[inp.get("name") or inp.get("id")] = cap_ans2
                 break
 
-    # Submit button
     sbtn = search_soup.find("input", {"type": "submit"}) or search_soup.find("button", {"type": "submit"})
     if sbtn and sbtn.get("name"):
         search_payload[sbtn["name"]] = sbtn.get("value", "View")
 
-    try:
-        result = sess.post(ESTATUS_SEARCH, data=search_payload, timeout=30)
-        result.raise_for_status()
-    except Exception as e:
-        raise HTTPException(504, f"Trademark search POST failed: {e}")
-
-    # Parse result
-    result_soup = BeautifulSoup(result.text, "lxml")
+    logger.info(f"Submitting trademark search for {app_number} via ScraperAPI")
+    result_html = _scraperapi_post_html(ESTATUS_SEARCH, search_payload)
+    result_soup = BeautifulSoup(result_html, "lxml")
     data = _parse_tables(result_soup)
 
     # Trademark image
@@ -352,6 +357,8 @@ class AttorneyImportRequest(BaseModel):
     client_name:        Optional[str]  = None
     reminder_emails:    List[str]      = Field(default_factory=list)
     reminders_enabled:  bool           = True
+    session_id:         Optional[str]  = None
+    otp:                Optional[str]  = None
 
 
 class TrademarkDocument(BaseModel):
@@ -531,13 +538,28 @@ def _scrape_documents_sync(
     return documents, hearing
 
 
-def _scrape_by_attorney_sync(agent_code: str) -> List[str]:
-    """Fetch Agent_Search.aspx via direct request."""
+def _scrape_by_attorney_sync(
+    agent_code: str,
+    session_id: Optional[str] = None,
+    otp: Optional[str] = None,
+) -> List[str]:
+    """Fetch Agent_Search.aspx using authenticated IP India session."""
     target_url = _build_agent_search_url(agent_code)
     logger.info(f"Fetching Agent_Search: {target_url}")
 
-    resp = _requests.get(target_url, headers=_HEADERS, timeout=30)
-    html = resp.text
+    # Use authenticated session if available
+    if session_id and otp:
+        sess_data = _sessions.get(session_id)
+        if sess_data:
+            sess = _make_session()
+            sess.cookies.update(sess_data["cookies"])
+            resp = sess.get(target_url, timeout=30)
+            html = resp.text if resp.status_code == 200 else ""
+        else:
+            html = ""
+    else:
+        resp = _requests.get(target_url, headers=_HEADERS, timeout=30)
+        html = resp.text
     soup = BeautifulSoup(html, "lxml")
     app_numbers: List[str] = []
     seen: set = set()
@@ -587,9 +609,13 @@ async def scrape_documents(app_number: str, class_number: Optional[str] = None):
     return await loop.run_in_executor(_pool, _scrape_documents_sync, app_number, class_number)
 
 
-async def scrape_by_attorney_code(agent_code: str) -> List[str]:
+async def scrape_by_attorney_code(
+    agent_code: str,
+    session_id: Optional[str] = None,
+    otp: Optional[str] = None,
+) -> List[str]:
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_pool, _scrape_by_attorney_sync, agent_code)
+    return await loop.run_in_executor(_pool, _scrape_by_attorney_sync, agent_code, session_id, otp)
 
 # ── Deadline logic ────────────────────────────────────────────────────────────
 
@@ -677,6 +703,8 @@ async def _import_attorney_bg(
     client_name:       Optional[str],
     reminder_emails:   List[str],
     reminders_enabled: bool,
+    session_id:        Optional[str] = None,
+    otp:               Optional[str] = None,
 ) -> None:
     """
     Background task: scrape every application number for the given agent_code
@@ -686,7 +714,7 @@ async def _import_attorney_bg(
     A 2-second sleep is inserted between each request to be polite to the server.
     """
     try:
-        app_numbers = await scrape_by_attorney_code(agent_code)
+        app_numbers = await scrape_by_attorney_code(agent_code, session_id, otp)
     except HTTPException as exc:
         logger.error(f"Attorney import failed for {agent_code}: {exc.detail}")
         return
@@ -702,7 +730,7 @@ async def _import_attorney_bg(
         await asyncio.sleep(2)
 
         try:
-            raw = await scrape_trademark(app_num)
+            raw = await scrape_trademark(app_num, session_id=session_id, otp=otp)
         except HTTPException as exc:
             logger.warning(f"Attorney import: could not scrape {app_num} — {exc.detail}")
             continue
@@ -967,6 +995,8 @@ async def import_attorney(
         body.client_name,
         body.reminder_emails,
         body.reminders_enabled,
+        body.session_id,
+        body.otp,
     )
     return {
         "message": (
