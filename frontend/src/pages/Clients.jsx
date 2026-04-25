@@ -2598,69 +2598,14 @@ export default function Clients() {
     setGstImportError('');
    
     try {
-      // Convert PDF to base64
-      const base64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload  = () => resolve(reader.result.split(',')[1]);
-        reader.onerror = () => reject(new Error('Failed to read file'));
-        reader.readAsDataURL(file);
+      // Send PDF to backend proxy (avoids CORS + keeps API key server-side)
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.post('/clients/parse-gst-pdf', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
-   
-      // Send to Claude via Anthropic API
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          messages: [{
-            role: 'user',
-            content: [
-              {
-                type: 'document',
-                source: { type: 'base64', media_type: 'application/pdf', data: base64 },
-              },
-              {
-                type: 'text',
-                text: `Extract all fields from this GST Registration Certificate (Form GST REG-06) and return ONLY a JSON object with no markdown, no preamble. Use this exact schema:
-  {
-    "gstin": "",
-    "legal_name": "",
-    "trade_name": "",
-    "constitution": "",
-    "address": "",
-    "city": "",
-    "state": "",
-    "pin": "",
-    "registration_type": "",
-    "valid_from": "",
-    "partners": [
-      { "name": "", "designation": "" }
-    ]
-  }
-  For "constitution" map: "Proprietorship"→"proprietor", "Private Limited"→"pvt_ltd", "LLP"→"llp", "Partnership"→"partnership", "HUF"→"huf", "Trust"→"trust", otherwise "other".
-  Extract all partners/directors from Annexure B if present.
-  Return ONLY the JSON object.`,
-              },
-            ],
-          }],
-        }),
-      });
-   
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err?.error?.message || `API error ${response.status}`);
-      }
-   
-      const data = await response.json();
-      const raw  = data.content?.find(b => b.type === 'text')?.text?.trim() || '';
-   
-      // Strip possible markdown fences
-      const jsonStr = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-      let parsed;
-      try { parsed = JSON.parse(jsonStr); }
-      catch { throw new Error('Could not parse response from AI. Please try again.'); }
-   
+      const parsed = res.data;
+
       // Map constitution string → client_type key
       const constitutionMap = {
         proprietorship: 'proprietor', proprietor: 'proprietor',
@@ -2690,14 +2635,65 @@ export default function Clients() {
         .map(s => (s || '').trim())
         .filter(Boolean);
       const fullAddress = addressParts.slice(0, -2).join(', ') || parsed.address || '';
+
+      const extractedGstin = (parsed.gstin || '').trim().toUpperCase();
+
+      // ── Duplicate GSTIN check ──────────────────────────────────────
+      if (extractedGstin) {
+        try {
+          const checkRes = await api.get(`/clients/check-gstin?gstin=${encodeURIComponent(extractedGstin)}`);
+          if (checkRes.data?.exists) {
+            const existingId   = checkRes.data.client_id;
+            const existingName = checkRes.data.company_name || 'this client';
+            // Close GST dialog and open the EXISTING client for editing
+            setGstImportOpen(false);
+            setGstImportError('');
+            const existing = clients.find(c => c.id === existingId || c._id === existingId);
+            if (existing) {
+              // Open edit dialog for the existing client
+              setEditingClient(existing);
+              setFormData({
+                company_name:    existing.company_name    || '',
+                client_type:     existing.client_type     || 'proprietor',
+                client_type_other: existing.client_type_other || '',
+                email:           existing.email           || '',
+                phone:           existing.phone           || '',
+                birthday:        existing.birthday        || '',
+                address:         existing.address         || '',
+                city:            existing.city            || '',
+                state:           existing.state           || '',
+                services:        existing.services        || [],
+                notes:           existing.notes           || '',
+                status:          existing.status          || 'active',
+                contact_persons: existing.contact_persons?.length > 0 ? existing.contact_persons : [{ name: '', designation: '', email: '', phone: '', birthday: '', din: '' }],
+                dsc_details:     existing.dsc_details     || [],
+                assignments:     existing.assignments?.length > 0 ? existing.assignments : [{ ...EMPTY_ASSIGNMENT }],
+                referred_by:     existing.referred_by     || '',
+                gstin:           extractedGstin,
+                pan:             existing.pan             || '',
+                gst_treatment:   existing.gst_treatment   || 'regular',
+                place_of_supply: existing.place_of_supply || '',
+              });
+              setFormErrors({});
+              setContactErrors([]);
+              setDialogOpen(true);
+              toast.info(`"${existingName}" already exists with GSTIN ${extractedGstin}. Opening for editing — GSTIN pre-filled.`, { duration: 6000 });
+            } else {
+              toast.warning(`A client with GSTIN ${extractedGstin} already exists: "${existingName}". Please search and edit them directly.`, { duration: 7000 });
+            }
+            return;
+          }
+        } catch (_) { /* non-blocking: if check fails just proceed */ }
+      }
+      // ── End duplicate check ────────────────────────────────────────
    
-      // Pre-fill form
+      // Pre-fill form for a NEW client
       setFormData(prev => ({
         ...prev,
         company_name:    parsed.legal_name?.trim()  || parsed.trade_name?.trim() || '',
         client_type:     clientType,
         client_type_other: clientType === 'other' ? rawConstitution : '',
-        gstin:           (parsed.gstin || '').trim().toUpperCase(),
+        gstin:           extractedGstin,
         address:         fullAddress,
         city:            (parsed.city  || '').trim(),
         state:           (parsed.state || '').trim(),
@@ -2719,12 +2715,13 @@ export default function Clients() {
       );
     } catch (err) {
       console.error('GST import error:', err);
-      setGstImportError(err.message || 'Failed to parse GST certificate');
-      toast.error(err.message || 'Failed to parse GST certificate');
+      const msg = err?.response?.data?.detail || err.message || 'Failed to parse GST certificate';
+      setGstImportError(msg);
+      toast.error(msg);
     } finally {
       setGstImportLoading(false);
     }
-  }, []);
+  }, [clients]);
 
   
   const handleMdsConfirm = useCallback(async (saveDirectly = false) => {
@@ -3421,8 +3418,8 @@ export default function Clients() {
       {/* GST IMPORT DIALOG */}
       <Dialog open={gstImportOpen} onOpenChange={setGstImportOpen}>
         <DialogContent
-          className="max-w-lg rounded-2xl border border-slate-200 shadow-2xl p-0 bg-white overflow-hidden"
-          style={{ maxWidth: 480 }}
+          className="rounded-2xl border border-slate-200 shadow-2xl p-0 bg-white overflow-hidden"
+          style={{ maxWidth: 560, width: '95vw', maxHeight: '90vh', overflowY: 'auto' }}
         >
           <DialogTitle className="sr-only">Import from GST Certificate</DialogTitle>
 
@@ -3450,10 +3447,10 @@ export default function Clients() {
           </div>
 
           {/* Body */}
-          <div className="p-7 space-y-5">
+          <div className="p-5 space-y-4">
             {/* Upload zone */}
             <div
-              className="border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center gap-4 cursor-pointer transition-all hover:border-blue-400 hover:bg-blue-50/40"
+              className="border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all hover:border-blue-400 hover:bg-blue-50/40"
               style={{ borderColor: '#bfdbfe', background: '#f8faff' }}
               onClick={() => gstInputRef.current?.click()}
             >
@@ -3522,7 +3519,7 @@ export default function Clients() {
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between px-7 py-4 border-t border-slate-100 bg-white">
+          <div className="flex items-center justify-between px-5 py-3 border-t border-slate-100 bg-white">
             <button
               type="button"
               onClick={() => { setGstImportOpen(false); setGstImportError(''); }}
