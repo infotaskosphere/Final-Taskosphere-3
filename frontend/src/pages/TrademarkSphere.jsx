@@ -470,6 +470,12 @@ function AddTrademarkModal({ onClose, onAdded, isDark }) {
     registration_date: '', valid_upto: '', goods_and_services: '',
   });
 
+  // OTP flow state
+  const [fetchStep, setFetchStep] = useState('idle'); // idle | email | otp | done
+  const [loginEmail, setLoginEmail] = useState('');
+  const [otpValue, setOtpValue]   = useState('');
+  const [sessionId, setSessionId] = useState(null);
+
   const inputCls = cn(
     'w-full box-border px-3 py-2 rounded-xl border text-sm outline-none transition-all focus:ring-2',
     isDark
@@ -483,18 +489,44 @@ function AddTrademarkModal({ onClose, onAdded, isDark }) {
       : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-blue-400'
   );
 
-  const handleFetch = async () => {
+  // Step 1: User clicks "Fetch" → ask for email
+  const handleFetch = () => {
     if (!appNumber.trim()) { toast.error('Enter an application number'); return; }
+    setFetchStep('email');
+  };
+
+  // Step 2: User submits email → backend sends OTP to IP India
+  const handleSendOtp = async () => {
+    if (!loginEmail.trim()) { toast.error('Enter your IP India registered email'); return; }
+    setLoading(true);
+    try {
+      const res = await api.post('/trademark-sphere/send-otp', { email: loginEmail.trim() });
+      setSessionId(res.data.session_id);
+      setFetchStep('otp');
+      toast.success('OTP sent to your email! Check inbox.');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to send OTP. Check your email.');
+    } finally { setLoading(false); }
+  };
+
+  // Step 3: User submits OTP → backend logs in, scrapes data
+  const handleVerifyOtp = async () => {
+    if (!otpValue.trim()) { toast.error('Enter the OTP from your email'); return; }
     setLoading(true); setPreview(null);
     try {
       const res = await api.post('/trademark-sphere/fetch-preview', {
         application_number: appNumber.trim(),
         class_number: classNum || null,
+        session_id: sessionId,
+        otp: otpValue.trim(),
       });
       setPreview(res.data);
+      setFetchStep('done');
       toast.success('Trademark data fetched!');
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to fetch. Try manual mode.');
+      toast.error(err.response?.data?.detail || 'Wrong OTP or session expired. Try again.');
+      setFetchStep('email');
+      setOtpValue('');
     } finally { setLoading(false); }
   };
 
@@ -608,15 +640,87 @@ function AddTrademarkModal({ onClose, onAdded, isDark }) {
                   </select>
                 </div>
               </div>
-              <motion.button
-                whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.99 }}
-                onClick={handleFetch} disabled={loading}
-                className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all flex items-center justify-center gap-2 mb-4"
-                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-                {loading
-                  ? <><Loader2 className="w-4 h-4" style={{ animation: 'tm-spin 1s linear infinite' }} />Fetching from IP India…</>
-                  : <><Search className="w-4 h-4" />Fetch Trademark Data</>}
-              </motion.button>
+              {/* Step indicator */}
+              {fetchStep !== 'idle' && (
+                <div className="flex items-center gap-2 mb-4">
+                  {['email','otp','done'].map((s, i) => (
+                    <div key={s} className="flex items-center gap-2">
+                      <div className={cn(
+                        'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold',
+                        fetchStep === s || (s === 'done' && fetchStep === 'done')
+                          ? 'bg-blue-600 text-white'
+                          : ['email','otp','done'].indexOf(fetchStep) > i
+                            ? 'bg-green-500 text-white'
+                            : isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-200 text-slate-500'
+                      )}>{i + 1}</div>
+                      <span className={cn('text-xs', isDark ? 'text-slate-400' : 'text-slate-500')}>
+                        {s === 'email' ? 'Email' : s === 'otp' ? 'OTP' : 'Done'}
+                      </span>
+                      {i < 2 && <div className={cn('w-8 h-px', isDark ? 'bg-slate-600' : 'bg-slate-300')} />}
+                    </div>
+                  ))}
+                  <button onClick={() => { setFetchStep('idle'); setOtpValue(''); setSessionId(null); }}
+                    className="ml-auto text-xs text-slate-400 hover:text-slate-200 underline">Reset</button>
+                </div>
+              )}
+
+              {/* Step idle: show Fetch button */}
+              {fetchStep === 'idle' && (
+                <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.99 }}
+                  onClick={handleFetch}
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all flex items-center justify-center gap-2 mb-4"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                  <Search className="w-4 h-4" />Fetch Trademark Data
+                </motion.button>
+              )}
+
+              {/* Step email: enter IP India email */}
+              {fetchStep === 'email' && (
+                <div className="mb-4 space-y-3">
+                  <div className={cn('rounded-xl p-3 text-xs', isDark ? 'bg-blue-900/30 text-blue-300' : 'bg-blue-50 text-blue-700')}>
+                    📧 Enter your IP India registered email. We'll trigger an OTP to be sent there.
+                  </div>
+                  <input className={inputCls} type="email" placeholder="your@email.com"
+                    value={loginEmail} onChange={e => setLoginEmail(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleSendOtp()} autoFocus />
+                  <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.99 }}
+                    onClick={handleSendOtp} disabled={loading}
+                    className="w-full py-2.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2"
+                    style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                    {loading
+                      ? <><Loader2 className="w-4 h-4" style={{ animation: 'tm-spin 1s linear infinite' }} />Sending OTP…</>
+                      : <>Send OTP to Email</>}
+                  </motion.button>
+                </div>
+              )}
+
+              {/* Step otp: enter OTP */}
+              {fetchStep === 'otp' && (
+                <div className="mb-4 space-y-3">
+                  <div className={cn('rounded-xl p-3 text-xs', isDark ? 'bg-green-900/30 text-green-300' : 'bg-green-50 text-green-700')}>
+                    ✅ OTP sent to <strong>{loginEmail}</strong>. Check your inbox and enter it below.
+                  </div>
+                  <input className={inputCls} type="text" placeholder="Enter OTP"
+                    value={otpValue} onChange={e => setOtpValue(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleVerifyOtp()}
+                    maxLength={10} autoFocus />
+                  <div className="flex gap-2">
+                    <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.99 }}
+                      onClick={() => { setFetchStep('email'); setOtpValue(''); }}
+                      className={cn('flex-1 py-2.5 rounded-xl text-sm font-semibold', isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600')}>
+                      ← Resend OTP
+                    </motion.button>
+                    <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.99 }}
+                      onClick={handleVerifyOtp} disabled={loading}
+                      className="flex-2 flex-grow py-2.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2"
+                      style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                      {loading
+                        ? <><Loader2 className="w-4 h-4" style={{ animation: 'tm-spin 1s linear infinite' }} />Fetching…</>
+                        : <><Search className="w-4 h-4" />Verify & Fetch</>}
+                    </motion.button>
+                  </div>
+                </div>
+              )}
 
               {preview && (
                 <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
