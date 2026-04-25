@@ -2101,6 +2101,7 @@ export default function Clients() {
     default_payment_terms: 'Due on receipt', credit_limit: '', opening_balance: '',
     opening_balance_type: 'Dr', tally_ledger_name: '', tally_group: 'Sundry Debtors',
     website: '', msme_number: '',
+    gst_address: '',  // GST registered address (if different from MCA/primary address)
   });
   const [formErrors, setFormErrors]     = useState({});
   const [contactErrors, setContactErrors] = useState([]);
@@ -2405,10 +2406,39 @@ export default function Clients() {
         tally_group: formData.tally_group || 'Sundry Debtors',
         website: formData.website?.trim() || null,
         msme_number: formData.msme_number?.trim() || null,
+        gst_address: formData.gst_address?.trim() || null,
       };
       if (!editingClient) {
-        const dup = clients.find(c => c.company_name?.toLowerCase().trim() === payload.company_name?.toLowerCase().trim());
-        if (dup) { toast.error(`"${payload.company_name}" already exists`); setLoading(false); return; }
+        // Duplicate check: flag only when GSTIN matches (same tax entity),
+        // OR when both name AND client_type are identical (same business type).
+        // A "MAHALAXMI MEDICAL" proprietorship and a "MAHALAXMI MEDICAL" partnership
+        // are legally different entities and must be allowed to coexist.
+        const newGstin = payload.gstin?.trim().toUpperCase();
+        const newName  = payload.company_name?.toLowerCase().trim();
+        const newType  = payload.client_type?.toLowerCase().trim();
+
+        const dup = clients.find(c => {
+          const existingGstin = c.gstin?.trim().toUpperCase();
+          const existingName  = c.company_name?.toLowerCase().trim();
+          const existingType  = c.client_type?.toLowerCase().trim();
+
+          // 1. Same GSTIN → definite duplicate (same tax registration)
+          if (newGstin && existingGstin && newGstin === existingGstin) return true;
+
+          // 2. Same name AND same constitution → likely duplicate
+          if (newName && existingName === newName && newType && existingType === newType) return true;
+
+          return false;
+        });
+
+        if (dup) {
+          const reason = dup.gstin?.trim().toUpperCase() === newGstin
+            ? `GSTIN ${newGstin} is already registered`
+            : `"${payload.company_name}" (${payload.client_type}) already exists`;
+          toast.error(reason);
+          setLoading(false);
+          return;
+        }
       }
       if (editingClient) await api.put(`/clients/${editingClient.id}`, payload);
       else await api.post('/clients', payload);
@@ -2458,7 +2488,7 @@ export default function Clients() {
   }, []);
 
   const resetForm = useCallback(() => {
-    setFormData({ company_name: '', client_type: 'proprietor', client_type_other: '', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '', gstin: '', pan: '', gst_treatment: 'regular', place_of_supply: '', default_payment_terms: 'Due on receipt', credit_limit: '', opening_balance: '', opening_balance_type: 'Dr', tally_ledger_name: '', tally_group: 'Sundry Debtors', website: '', msme_number: '' });
+    setFormData({ company_name: '', client_type: 'proprietor', client_type_other: '', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '', gstin: '', pan: '', gst_treatment: 'regular', place_of_supply: '', default_payment_terms: 'Due on receipt', credit_limit: '', opening_balance: '', opening_balance_type: 'Dr', tally_ledger_name: '', tally_group: 'Sundry Debtors', website: '', msme_number: '', gst_address: '' });
     setOtherService(''); setEditingClient(null); setFormErrors({}); setContactErrors([]); setReferrerInput(''); setReferrerSelectValue('');
   }, []);
 
@@ -2598,7 +2628,6 @@ export default function Clients() {
     setGstImportError('');
    
     try {
-      // Send PDF to backend proxy (avoids CORS + keeps API key server-side)
       const formData = new FormData();
       formData.append('file', file);
       const res = await api.post('/clients/parse-gst-pdf', formData, {
@@ -2606,7 +2635,6 @@ export default function Clients() {
       });
       const parsed = res.data;
 
-      // Map constitution string → client_type key
       const constitutionMap = {
         proprietorship: 'proprietor', proprietor: 'proprietor',
         'private limited': 'pvt_ltd', pvt_ltd: 'pvt_ltd',
@@ -2617,102 +2645,138 @@ export default function Clients() {
       };
       const rawConstitution = (parsed.constitution || '').toLowerCase().trim();
       const clientType = constitutionMap[rawConstitution] || parsed.constitution || 'other';
-   
-      // Build contact persons from partners list
+
       const contacts = (parsed.partners || [])
         .filter(p => p.name?.trim())
         .map(p => ({
-          name:        p.name.trim(),
+          name: p.name.trim(),
           designation: p.designation?.trim() || 'Partner',
           email: '', phone: '', birthday: '', din: '',
         }));
       if (contacts.length === 0) {
         contacts.push({ name: '', designation: '', email: '', phone: '', birthday: '', din: '' });
       }
-   
-      // Build address string
-      const addressParts = [parsed.address, parsed.city, parsed.state, parsed.pin]
-        .map(s => (s || '').trim())
-        .filter(Boolean);
-      const fullAddress = addressParts.slice(0, -2).join(', ') || parsed.address || '';
 
-      const extractedGstin = (parsed.gstin || '').trim().toUpperCase();
+      const extractedGstin   = (parsed.gstin   || '').trim().toUpperCase();
+      const extractedAddress = (parsed.address  || '').trim();
+      const extractedCity    = (parsed.city     || '').trim();
+      const extractedState   = (parsed.state    || '').trim();
+      const extractedName    = (parsed.legal_name?.trim() || parsed.trade_name?.trim() || '');
 
-      // ── Duplicate GSTIN check ──────────────────────────────────────
+      // ── Helper: open an existing client in edit mode with GST data merged ──
+      const openExistingWithGST = (existing) => {
+        setEditingClient(existing);
+        const existingAddress = (existing.address || '').trim();
+
+        // Determine whether GST address differs from the stored primary address.
+        // If they differ → store the GST one in gst_address so both are visible.
+        const addressesMatch = extractedAddress &&
+          existingAddress.toLowerCase() === extractedAddress.toLowerCase();
+
+        const mergedGstAddress = (!addressesMatch && extractedAddress)
+          ? extractedAddress
+          : (existing.gst_address || '');
+
+        // If client has no address yet, use the GST address as the primary one
+        const mergedPrimaryAddress = existingAddress || extractedAddress;
+        const mergedCity  = existing.city  || extractedCity;
+        const mergedState = existing.state || extractedState;
+
+        // Merge contacts: keep existing, add new partners not already present
+        const existingContacts = existing.contact_persons?.length > 0
+          ? existing.contact_persons.map(cp => ({ ...cp, birthday: cp.birthday ? cp.birthday.slice(0, 10) : '', din: cp.din || '' }))
+          : [];
+        const existingNames = new Set(existingContacts.map(c => c.name?.toLowerCase().trim()).filter(Boolean));
+        const newContacts = contacts.filter(c => !existingNames.has(c.name.toLowerCase().trim()));
+        const mergedContacts = [...existingContacts, ...newContacts];
+        if (mergedContacts.length === 0) mergedContacts.push({ name: '', designation: '', email: '', phone: '', birthday: '', din: '' });
+
+        let assignments = existing.assignments || [];
+        if (assignments.length === 0 && existing.assigned_to) assignments = [{ user_id: existing.assigned_to, services: [] }];
+        if (assignments.length === 0) assignments = [{ ...EMPTY_ASSIGNMENT }];
+
+        setFormData({
+          ...existing,
+          client_type_other: existing.client_type === 'other' ? (existing.client_type_label || '') : '',
+          contact_persons:   mergedContacts,
+          birthday:          existing.birthday ? existing.birthday.slice(0, 10) : '',
+          dsc_details:       existing.dsc_details || [],
+          assignments,
+          // GST fields — always take from the certificate
+          gstin:             extractedGstin || existing.gstin || '',
+          gst_treatment:     existing.gst_treatment || 'regular',
+          // Address merge
+          address:           mergedPrimaryAddress,
+          city:              mergedCity,
+          state:             mergedState,
+          gst_address:       mergedGstAddress,
+        });
+        setFormErrors({});
+        setContactErrors([]);
+        setGstImportOpen(false);
+        setDialogOpen(true);
+
+        const msgs = [];
+        if (extractedGstin) msgs.push(`GSTIN ${extractedGstin} added`);
+        if (mergedGstAddress) msgs.push('GST address saved separately');
+        if (newContacts.length > 0) msgs.push(`${newContacts.length} new contact(s) merged`);
+        toast.success(
+          `"${existing.company_name}" updated from GST certificate. ${msgs.join(' · ')}. Review and save.`,
+          { duration: 7000 }
+        );
+      };
+
+      // ── 1. Check by GSTIN first (exact tax entity match) ─────────────────
       if (extractedGstin) {
         try {
           const checkRes = await api.get(`/clients/check-gstin?gstin=${encodeURIComponent(extractedGstin)}`);
           if (checkRes.data?.exists) {
-            const existingId   = checkRes.data.client_id;
-            const existingName = checkRes.data.company_name || 'this client';
-            // Close GST dialog and open the EXISTING client for editing
-            setGstImportOpen(false);
-            setGstImportError('');
-            const existing = clients.find(c => c.id === existingId || c._id === existingId);
+            const existingId = checkRes.data.client_id;
+            const existing   = clients.find(c => (c.id || c._id) === existingId);
             if (existing) {
-              // Open edit dialog for the existing client
-              setEditingClient(existing);
-              setFormData({
-                company_name:    existing.company_name    || '',
-                client_type:     existing.client_type     || 'proprietor',
-                client_type_other: existing.client_type_other || '',
-                email:           existing.email           || '',
-                phone:           existing.phone           || '',
-                birthday:        existing.birthday        || '',
-                address:         existing.address         || '',
-                city:            existing.city            || '',
-                state:           existing.state           || '',
-                services:        existing.services        || [],
-                notes:           existing.notes           || '',
-                status:          existing.status          || 'active',
-                contact_persons: existing.contact_persons?.length > 0 ? existing.contact_persons : [{ name: '', designation: '', email: '', phone: '', birthday: '', din: '' }],
-                dsc_details:     existing.dsc_details     || [],
-                assignments:     existing.assignments?.length > 0 ? existing.assignments : [{ ...EMPTY_ASSIGNMENT }],
-                referred_by:     existing.referred_by     || '',
-                gstin:           extractedGstin,
-                pan:             existing.pan             || '',
-                gst_treatment:   existing.gst_treatment   || 'regular',
-                place_of_supply: existing.place_of_supply || '',
-              });
-              setFormErrors({});
-              setContactErrors([]);
-              setDialogOpen(true);
-              toast.info(`"${existingName}" already exists with GSTIN ${extractedGstin}. Opening for editing — GSTIN pre-filled.`, { duration: 6000 });
-            } else {
-              toast.warning(`A client with GSTIN ${extractedGstin} already exists: "${existingName}". Please search and edit them directly.`, { duration: 7000 });
+              openExistingWithGST(existing);
+              return;
             }
-            return;
           }
-        } catch (_) { /* non-blocking: if check fails just proceed */ }
+        } catch (_) { /* non-blocking */ }
       }
-      // ── End duplicate check ────────────────────────────────────────
-   
-      // Pre-fill form for a NEW client
+
+      // ── 2. Check by name + client_type (same business entity type) ────────
+      if (extractedName) {
+        const nameMatch = clients.find(c =>
+          c.company_name?.toLowerCase().trim() === extractedName.toLowerCase() &&
+          (c.client_type || '').toLowerCase() === rawConstitution
+        );
+        if (nameMatch) {
+          openExistingWithGST(nameMatch);
+          return;
+        }
+      }
+
+      // ── 3. No match — pre-fill form for a brand NEW client ────────────────
       setFormData(prev => ({
         ...prev,
-        company_name:    parsed.legal_name?.trim()  || parsed.trade_name?.trim() || '',
-        client_type:     clientType,
+        company_name:      extractedName,
+        client_type:       clientType,
         client_type_other: clientType === 'other' ? rawConstitution : '',
-        gstin:           extractedGstin,
-        address:         fullAddress,
-        city:            (parsed.city  || '').trim(),
-        state:           (parsed.state || '').trim(),
-        contact_persons: contacts,
-        gst_treatment:   'regular',
+        gstin:             extractedGstin,
+        address:           extractedAddress,
+        city:              extractedCity,
+        state:             extractedState,
+        gst_address:       '',
+        contact_persons:   contacts,
+        gst_treatment:     'regular',
       }));
-   
       setEditingClient(null);
       setFormErrors({});
       setContactErrors([]);
-   
-      // Close any open dialogs and open the main client form
       setGstImportOpen(false);
       setDialogOpen(true);
-   
       toast.success(
-        `GST data extracted! ${contacts.length > 1 ? `${contacts.length} partners found.` : ''} Review and save.`,
+        `GST data extracted!${contacts.length > 1 ? ` ${contacts.length} partners found.` : ''} Review and save.`,
         { duration: 5000 }
       );
+
     } catch (err) {
       console.error('GST import error:', err);
       const msg = err?.response?.data?.detail || err.message || 'Failed to parse GST certificate';
@@ -2933,7 +2997,34 @@ export default function Clients() {
                             : <p className="text-[10px] text-slate-400 mt-1.5">Press Enter or click Save — name will appear in dropdown next time</p>;
                         })()}
                       </div>
-                      <div className="md:col-span-2"><label className={labelCls}>Address</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} placeholder="Street address (optional)" value={formData.address} onChange={e => setFormData(p => ({ ...p, address: e.target.value }))} /></div>
+                      <div className="md:col-span-2">
+                        <label className={labelCls}>Address {formData.gst_address ? '(MCA / Primary)' : ''}</label>
+                        <Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} placeholder="Street address (optional)" value={formData.address} onChange={e => setFormData(p => ({ ...p, address: e.target.value }))} />
+                      </div>
+                      {/* GST Address — shown only when it exists or is different from primary */}
+                      {(formData.gst_address || (editingClient && formData.gstin)) && (
+                        <div className="md:col-span-2">
+                          <label className={labelCls}>
+                            GST Registered Address
+                            {formData.gst_address && formData.address && formData.gst_address.toLowerCase().trim() !== formData.address.toLowerCase().trim() && (
+                              <span className="ml-2 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 normal-case tracking-normal">
+                                Different from primary
+                              </span>
+                            )}
+                          </label>
+                          <Input
+                            className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}
+                            placeholder="GST registered address (auto-filled from certificate)"
+                            value={formData.gst_address || ''}
+                            onChange={e => setFormData(p => ({ ...p, gst_address: e.target.value }))}
+                          />
+                          {formData.gst_address && (
+                            <p className="text-[10px] text-slate-400 mt-1">
+                              Both addresses will be saved. Primary address is used for invoices.
+                            </p>
+                          )}
+                        </div>
+                      )}
                       <div><label className={labelCls}>City</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} value={formData.city} onChange={e => setFormData(p => ({ ...p, city: e.target.value }))} /></div>
                       <div><label className={labelCls}>State</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} value={formData.state} onChange={e => setFormData(p => ({ ...p, state: e.target.value }))} /></div>
                     </div>
