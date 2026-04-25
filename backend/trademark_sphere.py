@@ -21,70 +21,287 @@ _pool  = ThreadPoolExecutor(max_workers=4)
 EREGISTER_URL    = "https://tmrsearch.ipindia.gov.in/eregister/eregister.aspx"
 AGENT_SEARCH_URL = "https://tmrsearch.ipindia.gov.in/eregister/Agent_Search.aspx"
 DOC_INDEX_BASE   = "https://tmrsearch.ipindia.gov.in/eregister/Document_Index.aspx"
-SCRAPERAPI_URL   = "https://api.scraperapi.com/"
 
 # ── Simple in-memory cache ────────────────────────────────────────────────────
 tm_cache: Dict[str, Any] = {}
 
-# ── ScraperAPI fetcher ───────────────────────────────────────────────────────
+# ── Session store (in-memory, lives for duration of server process) ──────────
+# Key: session_id (uuid), Value: {"cookies": ..., "created_at": ..., "email": ...}
+_sessions: Dict[str, Any] = {}
+SESSION_TTL_SECONDS = 4 * 3600  # 4 hours
 
-def _get_scraperapi_key() -> str:
-    key = os.environ.get("SCRAPERAPI_KEY", "")
-    if not key:
-        raise HTTPException(
-            500,
-            "SCRAPERAPI_KEY environment variable is not set. "
-            "Sign up at scraperapi.com (free tier: 1000 calls/month) and add the key to Render.",
-        )
-    return key
+ESTATUS_BASE    = "https://tmrsearch.ipindia.gov.in/estatus"
+ESTATUS_LOGIN   = f"{ESTATUS_BASE}"
+ESTATUS_SEARCH  = f"{ESTATUS_BASE}/TradeMarkApplication/ViewRegistered"
+
+_HEADERS = {
+    "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
+    "Accept":          "text/html,application/xhtml+xml,application/xhtml+xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-IN,en;q=0.9",
+    "Connection":      "keep-alive",
+}
 
 
-def _scraperapi_get(target_url: str, retries: int = 3) -> str:
+def _make_session() -> _requests.Session:
+    s = _requests.Session()
+    s.headers.update(_HEADERS)
+    return s
+
+
+def _get_captcha_answer(soup: BeautifulSoup) -> Optional[str]:
+    """Extract and solve the math captcha shown on IP India pages."""
+    for el in soup.find_all(["span", "div", "td", "label", "p"]):
+        text = el.get_text(" ", strip=True)
+        m = re.search(r"(\d+)\s*([+\-*/x×÷])\s*(\d+)\s*=", text, re.IGNORECASE)
+        if m:
+            return _solve_math_captcha(text)
+    return None
+
+
+def _send_otp_sync(email: str) -> str:
     """
-    Fetch target_url via ScraperAPI using an Indian residential IP.
-    ScraperAPI handles JS rendering, geo-routing, and retries automatically.
+    Step 1: POST email to IP India estatus login page to trigger OTP.
+    Returns a new session_id. The session (with cookies) is stored in _sessions.
     """
-    key = _get_scraperapi_key()
-    params = {
-        "api_key":      key,
-        "url":          target_url,
-        "country_code": "in",    # Route through Indian IP
-        "render":       "true",  # Full JS rendering
-        "keep_headers": "true",
+    sess = _make_session()
+
+    # Load login page to get any initial cookies / viewstate
+    try:
+        r = sess.get(ESTATUS_LOGIN, timeout=30)
+        r.raise_for_status()
+    except Exception as e:
+        raise HTTPException(504, f"Could not reach IP India login page: {e}")
+
+    soup = BeautifulSoup(r.text, "lxml")
+
+    # Build POST payload — find all hidden fields (ViewState etc.)
+    payload: Dict[str, str] = {}
+    for inp in soup.find_all("input", {"type": "hidden"}):
+        if inp.get("name"):
+            payload[inp["name"]] = inp.get("value", "")
+
+    # Fill email field
+    email_field = None
+    for inp in soup.find_all("input", {"type": ["text", "email"]}):
+        name = (inp.get("name") or "").lower()
+        id_  = (inp.get("id")   or "").lower()
+        if "email" in name or "email" in id_ or "mail" in name:
+            email_field = inp.get("name") or inp.get("id")
+            break
+    if not email_field:
+        # Fallback: first text input
+        first = soup.find("input", {"type": ["text", "email"]})
+        email_field = first.get("name") or first.get("id") if first else "email"
+
+    payload[email_field] = email
+
+    # Solve captcha if present
+    captcha_answer = _get_captcha_answer(soup)
+    if captcha_answer:
+        for inp in soup.find_all("input"):
+            name = (inp.get("name") or "").lower()
+            id_  = (inp.get("id")   or "").lower()
+            if "captcha" in name or "captcha" in id_:
+                payload[inp["name"]] = captcha_answer
+                break
+
+    # Find submit button
+    btn = soup.find("input", {"type": "submit"}) or soup.find("button", {"type": "submit"})
+    if btn and btn.get("name"):
+        payload[btn["name"]] = btn.get("value", "Submit")
+
+    try:
+        r2 = sess.post(ESTATUS_LOGIN, data=payload, timeout=30)
+        r2.raise_for_status()
+    except Exception as e:
+        raise HTTPException(504, f"Failed to submit email to IP India: {e}")
+
+    # Check response — IP India redirects or shows OTP input on success
+    if "otp" not in r2.text.lower() and "sent" not in r2.text.lower() and r2.status_code not in (200, 302):
+        raise HTTPException(400, "IP India did not accept the email. Check it is registered on estatus.")
+
+    # Save session
+    session_id = str(uuid.uuid4())
+    _sessions[session_id] = {
+        "cookies":    dict(sess.cookies),
+        "email":      email,
+        "created_at": datetime.now(IST).isoformat(),
+        "otp_url":    r2.url,  # URL after OTP trigger (may differ)
     }
-    last_error = None
-    for attempt in range(1, retries + 1):
-        try:
-            resp = _requests.get(
-                SCRAPERAPI_URL,
-                params=params,
-                timeout=120,
-                headers={"Accept": "text/html,application/xhtml+xml"},
-            )
-            if resp.status_code == 200:
-                logger.info(f"ScraperAPI OK (attempt {attempt}): {target_url}")
-                return resp.text
-            elif resp.status_code == 401:
-                raise HTTPException(401, "Invalid ScraperAPI key. Check SCRAPERAPI_KEY in Render env vars.")
-            elif resp.status_code == 403:
-                raise HTTPException(403, "ScraperAPI credit limit reached. Upgrade your plan at scraperapi.com.")
-            else:
-                last_error = f"ScraperAPI returned HTTP {resp.status_code}"
-                logger.warning(f"Attempt {attempt} failed: {last_error}")
-        except HTTPException:
-            raise
-        except Exception as exc:
-            last_error = str(exc)
-            logger.warning(f"ScraperAPI attempt {attempt} error: {exc}")
-        if attempt < retries:
-            import time; time.sleep(3)
+    logger.info(f"OTP triggered for {email}, session_id={session_id}")
+    return session_id
 
-    raise HTTPException(504, f"ScraperAPI failed after {retries} attempts: {last_error}")
+
+def _fetch_with_otp_sync(
+    session_id: str,
+    otp: str,
+    app_number: str,
+    class_number: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Step 2: Submit OTP to complete login, then scrape trademark data.
+    Reuses the session cookies from _send_otp_sync.
+    """
+    sess_data = _sessions.get(session_id)
+    if not sess_data:
+        raise HTTPException(401, "Session expired or invalid. Please start again.")
+
+    # Check TTL
+    created = datetime.fromisoformat(sess_data["created_at"])
+    if (datetime.now(IST) - created).total_seconds() > SESSION_TTL_SECONDS:
+        del _sessions[session_id]
+        raise HTTPException(401, "Session expired (>4 hours). Please login again.")
+
+    sess = _make_session()
+    sess.cookies.update(sess_data["cookies"])
+
+    # Load OTP page (may be same URL or redirect after email submit)
+    otp_page_url = sess_data.get("otp_url") or ESTATUS_LOGIN
+    try:
+        r = sess.get(otp_page_url, timeout=30)
+        r.raise_for_status()
+    except Exception as e:
+        raise HTTPException(504, f"Could not load OTP page: {e}")
+
+    soup = BeautifulSoup(r.text, "lxml")
+
+    # Build OTP submit payload
+    payload: Dict[str, str] = {}
+    for inp in soup.find_all("input", {"type": "hidden"}):
+        if inp.get("name"):
+            payload[inp["name"]] = inp.get("value", "")
+
+    # Fill OTP field
+    for inp in soup.find_all("input"):
+        name = (inp.get("name") or "").lower()
+        id_  = (inp.get("id")   or "").lower()
+        if "otp" in name or "otp" in id_ or "code" in name or "answer" in name:
+            payload[inp.get("name") or inp.get("id")] = otp
+            break
+
+    # Captcha on OTP page
+    captcha_answer = _get_captcha_answer(soup)
+    if captcha_answer:
+        for inp in soup.find_all("input"):
+            name = (inp.get("name") or "").lower()
+            id_  = (inp.get("id")   or "").lower()
+            if "captcha" in name or "captcha" in id_:
+                payload[inp.get("name")] = captcha_answer
+                break
+
+    btn = soup.find("input", {"type": "submit"}) or soup.find("button", {"type": "submit"})
+    if btn and btn.get("name"):
+        payload[btn["name"]] = btn.get("value", "Submit")
+
+    try:
+        r2 = sess.post(otp_page_url, data=payload, timeout=30)
+        r2.raise_for_status()
+    except Exception as e:
+        raise HTTPException(504, f"OTP submit failed: {e}")
+
+    # Check login succeeded — should redirect to main menu / search page
+    if "invalid" in r2.text.lower() or "incorrect" in r2.text.lower():
+        raise HTTPException(401, "Incorrect OTP. Please try again.")
+
+    # Update stored cookies with post-login cookies
+    _sessions[session_id]["cookies"] = dict(sess.cookies)
+
+    # ── Now navigate to trademark search page ────────────────────────────────
+    # Check cache first
+    cache_key = f"{app_number.strip()}_{(class_number or '').strip()}"
+    if cache_key in tm_cache:
+        logger.info(f"Cache hit for {cache_key}")
+        return tm_cache[cache_key]
+
+    cls = re.sub(r"(?i)class\s*", "", (class_number or "").strip())
+
+    try:
+        search_page = sess.get(ESTATUS_SEARCH, timeout=30)
+        search_page.raise_for_status()
+    except Exception as e:
+        raise HTTPException(504, f"Could not load trademark search page: {e}")
+
+    search_soup = BeautifulSoup(search_page.text, "lxml")
+    search_payload: Dict[str, str] = {}
+    for inp in search_soup.find_all("input", {"type": "hidden"}):
+        if inp.get("name"):
+            search_payload[inp["name"]] = inp.get("value", "")
+
+    # Fill application number
+    for inp in search_soup.find_all("input", {"type": ["text", "number"]}):
+        name = (inp.get("name") or "").lower()
+        id_  = (inp.get("id")   or "").lower()
+        if "number" in name or "appno" in name or "number" in id_ or "appno" in id_:
+            search_payload[inp.get("name") or inp.get("id")] = app_number.strip()
+            break
+
+    # Solve captcha
+    cap_ans = _get_captcha_answer(search_soup)
+    if cap_ans:
+        for inp in search_soup.find_all("input"):
+            n = (inp.get("name") or inp.get("id") or "").lower()
+            if "captcha" in n or "answer" in n:
+                search_payload[inp.get("name") or inp.get("id")] = cap_ans
+                break
+
+    # Submit button
+    sbtn = search_soup.find("input", {"type": "submit"}) or search_soup.find("button", {"type": "submit"})
+    if sbtn and sbtn.get("name"):
+        search_payload[sbtn["name"]] = sbtn.get("value", "View")
+
+    try:
+        result = sess.post(ESTATUS_SEARCH, data=search_payload, timeout=30)
+        result.raise_for_status()
+    except Exception as e:
+        raise HTTPException(504, f"Trademark search POST failed: {e}")
+
+    # Parse result
+    result_soup = BeautifulSoup(result.text, "lxml")
+    data = _parse_tables(result_soup)
+
+    # Trademark image
+    for img in result_soup.find_all("img"):
+        src = img.get("src", "")
+        if any(k in src.lower() for k in ["trademark", "tm_", "/tm/", "image"]):
+            data["trademark_image_url"] = (
+                src if src.startswith("http")
+                else f"https://tmrsearch.ipindia.gov.in/{src.lstrip('/')}"
+            )
+            break
+
+    # Goods & Services
+    for el in result_soup.find_all("textarea"):
+        t = _clean(el.get_text(" ", strip=True))
+        if t and len(t) > 20:
+            data["goods_and_services"] = t
+            break
+    if "goods_and_services" not in data:
+        for td in result_soup.find_all("td"):
+            text = _clean(td.get_text(" ", strip=True))
+            prev = td.find_previous_sibling("td")
+            if text and len(text) > 80 and prev:
+                lbl = (prev.get_text(" ", strip=True) or "").lower()
+                if any(k in lbl for k in ["goods", "service", "description"]):
+                    data["goods_and_services"] = text
+                    break
+
+    if len(data) < 3:
+        raise HTTPException(404, f"No data found for '{app_number}'. Verify the number.")
+
+    data.setdefault("application_number", app_number.strip())
+    tm_cache[cache_key] = data
+    return data
+
+
+class SendOtpRequest(BaseModel):
+    email: str
 
 
 class TrademarkAddRequest(BaseModel):
     application_number: str
     class_number:       Optional[str]            = None
+    session_id:         Optional[str]            = None
+    otp:                Optional[str]            = None
     client_id:          Optional[str]            = None
     client_name:        Optional[str]            = None
     attorney:           Optional[str]            = None
@@ -253,66 +470,28 @@ def _build_agent_search_url(agent_code: str) -> str:
     return AGENT_SEARCH_URL + "?" + urlencode({"agent_code": agent_code.strip()})
 
 
-def _scrape_sync(app_number: str, class_number: Optional[str] = None) -> Dict[str, Any]:
-    """Fetch trademark data via ScraperAPI (Indian IP + JS rendering)."""
-    cache_key = f"{app_number.strip()}_{(class_number or '').strip()}"
-    if cache_key in tm_cache:
-        logger.info(f"Cache hit for {cache_key}")
-        return tm_cache[cache_key]
-
-    target_url = _build_eregister_url(app_number, class_number)
-    logger.info(f"Fetching eRegister via ScraperAPI: {target_url}")
-
-    html = _scraperapi_get(target_url)
-    soup = BeautifulSoup(html, "lxml")
-    data = _parse_tables(soup)
-
-    # Trademark image
-    for img in soup.find_all("img"):
-        src = img.get("src", "")
-        if any(k in src.lower() for k in ["trademark", "tm_", "/tm/", "image"]):
-            data["trademark_image_url"] = (
-                src if src.startswith("http")
-                else f"https://tmrsearch.ipindia.gov.in/{src.lstrip('/')}"
-            )
-            break
-
-    # Goods & Services
-    for el in soup.find_all("textarea"):
-        t = _clean(el.get_text(" ", strip=True))
-        if t and len(t) > 20:
-            data["goods_and_services"] = t
-            break
-    if "goods_and_services" not in data:
-        for td in soup.find_all("td"):
-            text = _clean(td.get_text(" ", strip=True))
-            prev = td.find_previous_sibling("td")
-            if text and len(text) > 80 and prev:
-                lbl = (prev.get_text(" ", strip=True) or "").lower()
-                if any(k in lbl for k in ["goods", "service", "description"]):
-                    data["goods_and_services"] = text
-                    break
-
-    if len(data) < 3:
-        raise HTTPException(
-            404,
-            f"No data found for '{app_number}'. Verify the number or use 'Add Manually'.",
-        )
-
-    data.setdefault("application_number", app_number.strip())
-    tm_cache[cache_key] = data
-    return data
+def _scrape_sync(
+    app_number: str,
+    class_number: Optional[str] = None,
+    session_id: Optional[str] = None,
+    otp: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Fetch trademark data using OTP-authenticated IP India session."""
+    if not session_id or not otp:
+        raise HTTPException(400, "Login required. Please provide email and OTP.")
+    return _fetch_with_otp_sync(session_id, otp, app_number, class_number)
 
 
 def _scrape_documents_sync(
     app_number: str, class_number: Optional[str] = None
 ) -> tuple[List[Dict], Optional[Dict]]:
-    """Fetch Document_Index.aspx via ScraperAPI."""
+    """Fetch Document_Index.aspx via direct request."""
     target_url = _build_doc_index_url(app_number, class_number)
-    logger.info(f"Fetching Document_Index via ScraperAPI: {target_url}")
+    logger.info(f"Fetching Document_Index: {target_url}")
 
     try:
-        html = _scraperapi_get(target_url)
+        resp = _requests.get(target_url, headers=_HEADERS, timeout=30)
+        html = resp.text if resp.status_code == 200 else ""
     except HTTPException as exc:
         logger.warning(f"Document_Index fetch failed for {app_number}: {exc.detail}")
         return [], None
@@ -353,11 +532,12 @@ def _scrape_documents_sync(
 
 
 def _scrape_by_attorney_sync(agent_code: str) -> List[str]:
-    """Fetch Agent_Search.aspx via ScraperAPI."""
+    """Fetch Agent_Search.aspx via direct request."""
     target_url = _build_agent_search_url(agent_code)
-    logger.info(f"Fetching Agent_Search via ScraperAPI: {target_url}")
+    logger.info(f"Fetching Agent_Search: {target_url}")
 
-    html = _scraperapi_get(target_url)
+    resp = _requests.get(target_url, headers=_HEADERS, timeout=30)
+    html = resp.text
     soup = BeautifulSoup(html, "lxml")
     app_numbers: List[str] = []
     seen: set = set()
@@ -385,9 +565,21 @@ def _scrape_by_attorney_sync(agent_code: str) -> List[str]:
 
 # ── Async wrappers ────────────────────────────────────────────────────────────
 
-async def scrape_trademark(app_number: str, class_number: Optional[str] = None) -> Dict[str, Any]:
+async def scrape_trademark(
+    app_number: str,
+    class_number: Optional[str] = None,
+    session_id: Optional[str] = None,
+    otp: Optional[str] = None,
+) -> Dict[str, Any]:
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_pool, _scrape_sync, app_number, class_number)
+    return await loop.run_in_executor(
+        _pool, _scrape_sync, app_number, class_number, session_id, otp
+    )
+
+
+async def send_otp(email: str) -> str:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_pool, _send_otp_sync, email)
 
 
 async def scrape_documents(app_number: str, class_number: Optional[str] = None):
@@ -657,9 +849,28 @@ async def get_tm(tm_id: str, user: User = Depends(get_current_user)):
     return doc
 
 
+@router.post("/send-otp")
+async def send_otp_route(body: SendOtpRequest, user: User = Depends(get_current_user)):
+    """
+    Step 1 of fetch flow: trigger OTP email from IP India.
+    Returns a session_id the frontend must pass back with the OTP.
+    """
+    session_id = await send_otp(body.email)
+    return {"session_id": session_id, "message": "OTP sent to your email. Enter it to continue."}
+
+
 @router.post("/fetch-preview")
 async def fetch_preview(body: TrademarkAddRequest, user: User = Depends(get_current_user)):
-    data = await scrape_trademark(body.application_number, body.class_number)
+    """
+    Step 2 of fetch flow: verify OTP, login, scrape trademark data.
+    Requires session_id (from /send-otp) and otp (from user's email).
+    """
+    data = await scrape_trademark(
+        body.application_number,
+        body.class_number,
+        body.session_id,
+        body.otp,
+    )
     return {**data, **_compute_deadlines(data)}
 
 
@@ -667,7 +878,9 @@ async def fetch_preview(body: TrademarkAddRequest, user: User = Depends(get_curr
 async def add_trademark(body: TrademarkAddRequest, bg: BackgroundTasks, user: User = Depends(get_current_user)):
     if await db.trademark_sphere.find_one({"application_number": body.application_number.strip()}):
         raise HTTPException(409, f"Trademark {body.application_number} is already tracked.")
-    raw = body.manual_data or await scrape_trademark(body.application_number, body.class_number)
+    raw = body.manual_data or await scrape_trademark(
+        body.application_number, body.class_number, body.session_id, body.otp
+    )
     dl  = _compute_deadlines(raw)
     now = datetime.now(IST)
     tid = str(uuid.uuid4())
