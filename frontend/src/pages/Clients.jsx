@@ -2051,6 +2051,7 @@ export default function Clients() {
   const [gstImportOpen,    setGstImportOpen]    = useState(false);
   const [gstImportLoading, setGstImportLoading] = useState(false);
   const [gstImportError,   setGstImportError]   = useState('');
+  const [addressTab,       setAddressTab]       = useState('primary'); // 'primary' | 'gst'
   const [previewData, setPreviewData]     = useState([]);
   const [previewHeaders, setPreviewHeaders] = useState([]);
   const [previewOpen, setPreviewOpen]     = useState(false);
@@ -2102,6 +2103,9 @@ export default function Clients() {
     opening_balance_type: 'Dr', tally_ledger_name: '', tally_group: 'Sundry Debtors',
     website: '', msme_number: '',
     gst_address: '',  // GST registered address (if different from MCA/primary address)
+    gst_city: '',
+    gst_state: '',
+    gst_pin: '',       // PIN from GST certificate
   });
   const [formErrors, setFormErrors]     = useState({});
   const [contactErrors, setContactErrors] = useState([]);
@@ -2407,6 +2411,9 @@ export default function Clients() {
         website: formData.website?.trim() || null,
         msme_number: formData.msme_number?.trim() || null,
         gst_address: formData.gst_address?.trim() || null,
+        gst_city:    formData.gst_city?.trim()    || null,
+        gst_state:   formData.gst_state?.trim()   || null,
+        gst_pin:     formData.gst_pin?.trim()      || null,
       };
       if (!editingClient) {
         // Duplicate check: flag only when GSTIN matches (same tax entity),
@@ -2488,7 +2495,8 @@ export default function Clients() {
   }, []);
 
   const resetForm = useCallback(() => {
-    setFormData({ company_name: '', client_type: 'proprietor', client_type_other: '', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '', gstin: '', pan: '', gst_treatment: 'regular', place_of_supply: '', default_payment_terms: 'Due on receipt', credit_limit: '', opening_balance: '', opening_balance_type: 'Dr', tally_ledger_name: '', tally_group: 'Sundry Debtors', website: '', msme_number: '', gst_address: '' });
+    setAddressTab('primary');
+    setFormData({ company_name: '', client_type: 'proprietor', client_type_other: '', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '', gstin: '', pan: '', gst_treatment: 'regular', place_of_supply: '', default_payment_terms: 'Due on receipt', credit_limit: '', opening_balance: '', opening_balance_type: 'Dr', tally_ledger_name: '', tally_group: 'Sundry Debtors', website: '', msme_number: '', gst_address: '', gst_city: '', gst_state: '', gst_pin: '' });
     setOtherService(''); setEditingClient(null); setFormErrors({}); setContactErrors([]); setReferrerInput(''); setReferrerSelectValue('');
   }, []);
 
@@ -2635,16 +2643,24 @@ export default function Clients() {
       });
       const parsed = res.data;
 
+      // Backend already maps constitution → slug (pvt_ltd, llp, etc.)
+      // Frontend map is a safety net for raw values and for existing client flows.
       const constitutionMap = {
-        proprietorship: 'proprietor', proprietor: 'proprietor',
-        'private limited': 'pvt_ltd', pvt_ltd: 'pvt_ltd',
+        proprietorship: 'proprietor', proprietor: 'proprietor', 'sole proprietorship': 'proprietor',
+        'private limited': 'pvt_ltd', 'private limited company': 'pvt_ltd',
+        pvt_ltd: 'pvt_ltd', 'pvt ltd': 'pvt_ltd',
         llp: 'llp', 'limited liability partnership': 'llp',
-        partnership: 'partnership',
+        partnership: 'partnership', 'partnership firm': 'partnership',
         huf: 'huf', 'hindu undivided family': 'huf',
         trust: 'trust',
+        'public limited': 'pvt_ltd', 'public limited company': 'pvt_ltd',
       };
-      const rawConstitution = (parsed.constitution || '').toLowerCase().trim();
-      const clientType = constitutionMap[rawConstitution] || parsed.constitution || 'other';
+      // Use backend-mapped value directly; fall back to mapping constitution_raw
+      const mappedConstitution = parsed.constitution && parsed.constitution !== 'other'
+        ? parsed.constitution
+        : constitutionMap[(parsed.constitution_raw || '').toLowerCase().trim()] || 'other';
+      const rawConstitution = (parsed.constitution_raw || parsed.constitution || '').toLowerCase().trim();
+      const clientType = mappedConstitution;
 
       const contacts = (parsed.partners || [])
         .filter(p => p.name?.trim())
@@ -2695,6 +2711,11 @@ export default function Clients() {
         if (assignments.length === 0 && existing.assigned_to) assignments = [{ user_id: existing.assigned_to, services: [] }];
         if (assignments.length === 0) assignments = [{ ...EMPTY_ASSIGNMENT }];
 
+        const extractedPin = (parsed.pin || '').trim();
+        // Determine GST city/state for tab display (different from primary or not)
+        const gstCityForTab  = (!addressesMatch && extractedCity)  ? extractedCity  : '';
+        const gstStateForTab = (!addressesMatch && extractedState) ? extractedState : '';
+
         setFormData({
           ...existing,
           client_type_other: existing.client_type === 'other' ? (existing.client_type_label || '') : '',
@@ -2710,7 +2731,12 @@ export default function Clients() {
           city:              mergedCity,
           state:             mergedState,
           gst_address:       mergedGstAddress,
+          gst_city:          gstCityForTab,
+          gst_state:         gstStateForTab,
+          gst_pin:           extractedPin,
         });
+        // Auto-switch to GST tab when addresses differ so user sees the difference
+        setAddressTab(mergedGstAddress ? 'gst' : 'primary');
         setFormErrors({});
         setContactErrors([]);
         setGstImportOpen(false);
@@ -2718,8 +2744,8 @@ export default function Clients() {
 
         const msgs = [];
         if (extractedGstin) msgs.push(`GSTIN ${extractedGstin} added`);
-        if (mergedGstAddress) msgs.push('GST address saved separately');
-        if (newContacts.length > 0) msgs.push(`${newContacts.length} new contact(s) merged`);
+        if (mergedGstAddress) msgs.push('GST address saved in Certificate tab');
+        if (newContacts.length > 0) msgs.push(`${newContacts.length} new director(s) merged`);
         toast.success(
           `"${existing.company_name}" updated from GST certificate. ${msgs.join(' · ')}. Review and save.`,
           { duration: 7000 }
@@ -2754,6 +2780,7 @@ export default function Clients() {
       }
 
       // ── 3. No match — pre-fill form for a brand NEW client ────────────────
+      const extractedPin = (parsed.pin || '').trim();
       setFormData(prev => ({
         ...prev,
         company_name:      extractedName,
@@ -2763,18 +2790,27 @@ export default function Clients() {
         address:           extractedAddress,
         city:              extractedCity,
         state:             extractedState,
-        gst_address:       '',
+        gst_address:       '',     // same address — no separate GST tab needed
+        gst_city:          '',
+        gst_state:         '',
+        gst_pin:           extractedPin,
         contact_persons:   contacts,
         gst_treatment:     'regular',
       }));
+      setAddressTab('primary');
       setEditingClient(null);
       setFormErrors({});
       setContactErrors([]);
       setGstImportOpen(false);
       setDialogOpen(true);
       toast.success(
-        `GST data extracted!${contacts.length > 1 ? ` ${contacts.length} partners found.` : ''} Review and save.`,
-        { duration: 5000 }
+        `GST data extracted! ${[
+          extractedName && `"${extractedName}"`,
+          clientType !== 'other' && `Type: ${clientType.toUpperCase()}`,
+          extractedCity && `City: ${extractedCity}`,
+          contacts.length > 1 && `${contacts.length} directors found`,
+        ].filter(Boolean).join(' · ')}. Review and save.`,
+        { duration: 6000 }
       );
 
     } catch (err) {
@@ -2997,36 +3033,138 @@ export default function Clients() {
                             : <p className="text-[10px] text-slate-400 mt-1.5">Press Enter or click Save — name will appear in dropdown next time</p>;
                         })()}
                       </div>
-                      <div className="md:col-span-2">
-                        <label className={labelCls}>Address {formData.gst_address ? '(MCA / Primary)' : ''}</label>
-                        <Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} placeholder="Street address (optional)" value={formData.address} onChange={e => setFormData(p => ({ ...p, address: e.target.value }))} />
-                      </div>
-                      {/* GST Address — shown only when it exists or is different from primary */}
-                      {(formData.gst_address || (editingClient && formData.gstin)) && (
-                        <div className="md:col-span-2">
-                          <label className={labelCls}>
-                            GST Registered Address
-                            {formData.gst_address && formData.address && formData.gst_address.toLowerCase().trim() !== formData.address.toLowerCase().trim() && (
-                              <span className="ml-2 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 normal-case tracking-normal">
-                                Different from primary
-                              </span>
+                      {/* ── Address Section: tabs when GST address differs from primary ─ */}
+                      {(() => {
+                        const hasGstAddr = !!(formData.gst_address && formData.gst_address.trim());
+                        const addrsDiffer = hasGstAddr && formData.address &&
+                          formData.gst_address.toLowerCase().trim() !== formData.address.toLowerCase().trim();
+                        const inpCls = `h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`;
+
+                        return (
+                          <div className="md:col-span-2 space-y-3">
+                            {/* Tab switcher — only when two distinct addresses exist */}
+                            {hasGstAddr && (
+                              <div className={`flex gap-1 p-1 rounded-xl w-fit ${isDark ? 'bg-slate-700/60' : 'bg-slate-100'}`}>
+                                <button
+                                  type="button"
+                                  onClick={() => setAddressTab('primary')}
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                    addressTab === 'primary'
+                                      ? 'bg-white shadow text-slate-800 dark:bg-slate-600 dark:text-white'
+                                      : 'text-slate-500 hover:text-slate-700'
+                                  }`}
+                                >
+                                  🏢 Primary Address
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setAddressTab('gst')}
+                                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                    addressTab === 'gst'
+                                      ? 'bg-white shadow text-slate-800 dark:bg-slate-600 dark:text-white'
+                                      : 'text-slate-500 hover:text-slate-700'
+                                  }`}
+                                >
+                                  📋 GST Certificate
+                                  {addrsDiffer && (
+                                    <span className="text-[9px] font-bold text-amber-600 bg-amber-100 rounded-full px-1.5 py-0.5">
+                                      Different
+                                    </span>
+                                  )}
+                                </button>
+                              </div>
                             )}
-                          </label>
-                          <Input
-                            className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}
-                            placeholder="GST registered address (auto-filled from certificate)"
-                            value={formData.gst_address || ''}
-                            onChange={e => setFormData(p => ({ ...p, gst_address: e.target.value }))}
-                          />
-                          {formData.gst_address && (
-                            <p className="text-[10px] text-slate-400 mt-1">
-                              Both addresses will be saved. Primary address is used for invoices.
-                            </p>
-                          )}
-                        </div>
+
+                            {/* Primary address panel */}
+                            {(!hasGstAddr || addressTab === 'primary') && (
+                              <div className="space-y-3">
+                                <div>
+                                  <label className={labelCls}>
+                                    {hasGstAddr ? 'Primary Address (used for invoices)' : 'Address'}
+                                  </label>
+                                  <Input
+                                    className={inpCls}
+                                    placeholder="Street address (optional)"
+                                    value={formData.address}
+                                    onChange={e => setFormData(p => ({ ...p, address: e.target.value }))}
+                                  />
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label className={labelCls}>City</label>
+                                    <Input className={inpCls} value={formData.city} onChange={e => setFormData(p => ({ ...p, city: e.target.value }))} />
+                                  </div>
+                                  <div>
+                                    <label className={labelCls}>State</label>
+                                    <Input className={inpCls} value={formData.state} onChange={e => setFormData(p => ({ ...p, state: e.target.value }))} />
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* GST Certificate address panel */}
+                            {hasGstAddr && addressTab === 'gst' && (
+                              <div className={`rounded-xl border p-4 space-y-3 ${isDark ? 'bg-green-900/10 border-green-800/40' : 'bg-green-50/60 border-green-200'}`}>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-xs font-semibold text-green-700 dark:text-green-400">
+                                    📋 GST REG-06 Certificate Address
+                                  </span>
+                                  <span className="text-[10px] text-slate-400">Auto-filled from certificate · editable</span>
+                                </div>
+                                <div>
+                                  <label className={labelCls}>GST Registered Address</label>
+                                  <Input
+                                    className={inpCls}
+                                    placeholder="GST registered address from certificate"
+                                    value={formData.gst_address || ''}
+                                    onChange={e => setFormData(p => ({ ...p, gst_address: e.target.value }))}
+                                  />
+                                </div>
+                                <div className="grid grid-cols-3 gap-3">
+                                  <div>
+                                    <label className={labelCls}>City</label>
+                                    <Input
+                                      className={inpCls}
+                                      placeholder="City"
+                                      value={formData.gst_city || ''}
+                                      onChange={e => setFormData(p => ({ ...p, gst_city: e.target.value }))}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className={labelCls}>State</label>
+                                    <Input
+                                      className={inpCls}
+                                      placeholder="State"
+                                      value={formData.gst_state || ''}
+                                      onChange={e => setFormData(p => ({ ...p, gst_state: e.target.value }))}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className={labelCls}>PIN Code</label>
+                                    <Input
+                                      className={inpCls}
+                                      placeholder="6-digit PIN"
+                                      maxLength={6}
+                                      value={formData.gst_pin || ''}
+                                      onChange={e => setFormData(p => ({ ...p, gst_pin: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
+                                    />
+                                  </div>
+                                </div>
+                                <p className="text-[10px] text-slate-400">
+                                  Both addresses are saved. Primary is used for invoices; GST address is shown on GST reports.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                      {/* City & State when no GST tab is shown (handled inside tab panels above) */}
+                      {!formData.gst_address && (
+                        <>
+                          <div><label className={labelCls}>City</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} value={formData.city} onChange={e => setFormData(p => ({ ...p, city: e.target.value }))} /></div>
+                          <div><label className={labelCls}>State</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} value={formData.state} onChange={e => setFormData(p => ({ ...p, state: e.target.value }))} /></div>
+                        </>
                       )}
-                      <div><label className={labelCls}>City</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} value={formData.city} onChange={e => setFormData(p => ({ ...p, city: e.target.value }))} /></div>
-                      <div><label className={labelCls}>State</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} value={formData.state} onChange={e => setFormData(p => ({ ...p, state: e.target.value }))} /></div>
                     </div>
                   </div>
                   {/* Contact Persons */}
