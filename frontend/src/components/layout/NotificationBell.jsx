@@ -142,7 +142,7 @@ export const NotificationBell = () => {
         <Button
           variant="ghost"
           size="icon"
-          className="relative"
+          className="relative text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700/60"
           data-testid="notification-bell"
         >
           <Bell className="h-5 w-5" />
