@@ -127,7 +127,7 @@ function AppRoutes() {
       <Route path="/duedates"           element={<Protected><PageLoader><DueDates /></PageLoader></Protected>} />
       <Route path="/compliance"         element={<Permission permission="can_view_compliance"><PageLoader><CompliancePage /></PageLoader></Permission>} />
       <Route path="/gst-reconciliation" element={<Permission permission="can_view_gst_reconciliation"><PageLoader><GSTReconciliation /></PageLoader></Permission>} />
-      <Route path="/trademark-sphere" element={<Permission permission="can_view_compliance"><PageLoader><TrademarkSphere /></PageLoader></Permission>} />
+      <Route path="/trademark-sphere" element={<Permission permission="can_view_trademark_sphere"><PageLoader><TrademarkSphere /></PageLoader></Permission>} />
 
       {/* Settings — all roles */}
       <Route path="/settings/general" element={<Protected><PageLoader><GeneralSettings /></PageLoader></Protected>} />
