@@ -412,6 +412,7 @@ class Task(TaskBase):
     created_by: str
     created_at: Optional[Any] = None
     updated_at: Optional[Any] = None
+    completed_at: Optional[Any] = None
     parent_task_id: Optional[str] = None
 
 
