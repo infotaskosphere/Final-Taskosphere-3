@@ -63,6 +63,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_compliance": True,       # Compliance Tracker — view all categories
           "can_manage_compliance": True,     # Create / edit / delete compliance masters
           "can_view_gst_reconciliation": True,  # GST Reconciliation — admin always has access
+          "can_view_trademark_sphere": True,    # Trademark Sphere — admin always has access
           "can_view_all_visits": True,
           "can_edit_attendance": True,
           "can_edit_visits": True,
@@ -255,6 +256,10 @@ class UserPermissions(BaseModel):
     #   Grant this to GST department users only.
     #   Admin always has access regardless of this flag.
     can_view_gst_reconciliation: bool = False
+    # ── Trademark Sphere ─────────────────────────────────────────────────────
+    # can_view_trademark_sphere → access the Trademark Sphere page
+    #   Admin always has access regardless of this flag.
+    can_view_trademark_sphere: bool = False
     # ── Visit-specific permissions ───────────────────────────────────────────
     can_view_all_visits: bool = False
     can_edit_visits: bool = False
