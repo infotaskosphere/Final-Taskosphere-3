@@ -1978,6 +1978,7 @@ async def import_backup(
         f"{result.clients_imported} clients new, {result.clients_updated} clients updated, "
         f"{result.items_imported} items, {result.invoices_skipped} skipped, {len(result.errors)} errors"
     )
+    return result
 
 
 
@@ -2195,7 +2196,17 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(check
             raise HTTPException(400, f"Invoice number '{requested_no}' is already in use. Please choose a different number.")
         inv_no = requested_no
     else:
-        inv_no = await _next_invoice_no(prefix, data.company_id)
+        # Fallback: auto-generate using the same settings the frontend would use.
+        # The frontend always sends invoice_no pre-filled; this path is a safety net.
+        inv_no = await _next_invoice_no(
+            prefix=prefix,
+            company_id=data.company_id,
+            separator="/",
+            include_fy=True,
+            fy_format="short",
+            include_month=False,
+            number_padding=3,
+        )
 
     inv_date = data.invoice_date or date.today().isoformat()
     due_date = data.due_date or (date.today() + timedelta(days=30)).isoformat()
@@ -2443,7 +2454,15 @@ async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(c
         invoice_type = (data.get("invoice_type") or ex.get("invoice_type") or "tax_invoice")
         prefix_map = {"proforma": "PRO", "estimate": "EST", "credit_note": "CN", "debit_note": "DN"}
         prefix = prefix_map.get(invoice_type, "INV")
-        auto_no = await _next_invoice_no(prefix, new_company_id)
+        auto_no = await _next_invoice_no(
+            prefix=prefix,
+            company_id=new_company_id,
+            separator="/",
+            include_fy=True,
+            fy_format="short",
+            include_month=False,
+            number_padding=3,
+        )
 
         if new_invoice_no and new_invoice_no != old_invoice_no:
             # Frontend sent a new explicit number (pre-fetched from /next-number).
