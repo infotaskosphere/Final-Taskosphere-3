@@ -2934,16 +2934,28 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
           due_date: (editingInv.due_date || '').slice(0, 10) || '',
         });
       } else {
-        // Restore draft if available
+        // Restore draft if available — but NEVER restore invoice_no from draft
+        // (it is stale: the number was reserved for a previous session and may
+        //  already be in use or no longer be the next-in-sequence).
+        let restoredForm = defaultForm;
         try {
           const saved = localStorage.getItem(INV_DRAFT_KEY);
           if (saved) {
             const parsed = JSON.parse(saved);
             if (parsed?.client_name?.trim() || parsed?.items?.length > 1) {
-              setForm(prev => ({ ...defaultForm, ...parsed }));
-            } else { setForm(defaultForm); }
-          } else { setForm(defaultForm); }
-        } catch { setForm(defaultForm); }
+              restoredForm = { ...defaultForm, ...parsed, invoice_no: '' };
+            }
+          }
+        } catch { /* ignore */ }
+        setForm(restoredForm);
+
+        // If the draft already had a company selected, immediately fetch a fresh
+        // invoice number so the user never sees a stale or duplicate number.
+        if (restoredForm.company_id) {
+          fetchNextInvoiceNo(restoredForm.company_id, restoredForm.invoice_type || 'tax_invoice')
+            .then(no => { if (no) setField('invoice_no', no); })
+            .catch(() => {});
+        }
       }
       setActiveTab('details');
     }
@@ -3176,9 +3188,9 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                         const prevCompanyId = form.company_id;
                         const companyChanged = prevCompanyId && prevCompanyId !== v;
                         // Fetch next invoice number when:
-                        //   1. Creating a new invoice and no number yet, OR
+                        //   1. Creating a new invoice (always — to avoid stale/duplicate numbers), OR
                         //   2. Editing an existing invoice and the company changed
-                        const shouldFetchNextNo = (!editingInv?.id && !form.invoice_no) || companyChanged;
+                        const shouldFetchNextNo = !editingInv?.id || companyChanged;
                         const nextNo = shouldFetchNextNo ? (await fetchNextInvoiceNo(v, form.invoice_type) || '') : '';
                         if (companyChanged && nextNo) {
                           toast.info(`Invoice number updated to ${nextNo} for the new company`, { duration: 3000 });
