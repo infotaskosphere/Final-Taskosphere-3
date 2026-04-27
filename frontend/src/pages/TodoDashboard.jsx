@@ -130,9 +130,9 @@ const SourceBadge = ({ todo, compact = false }) => {
   const source = getTodoSource(todo);
   if (source === 'synced') {
     return (
-      <span className={`inline-flex items-center gap-0.5 font-bold rounded-md ${
+      <span className={`inline-flex items-center gap-0.5 font-bold rounded-md leading-none ${
         compact 
-          ? 'text-[8px] px-1 py-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400'
+          ? 'text-[7px] px-1 py-px bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400'
           : 'text-[9px] px-1.5 py-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400'
       }`}>
         <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
