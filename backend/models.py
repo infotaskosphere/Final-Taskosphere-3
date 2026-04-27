@@ -375,10 +375,11 @@ class Todo(BaseModel):
 class TodoCreate(BaseModel):
     title: str
     description: Optional[str] = None
-    due_date: Optional[Any] = None
+    due_date: Optional[datetime] = None
     is_completed: bool = False
     status: str = "pending"
-    completed_at: Optional[Any] = None
+    source: Optional[str] = "manual"      # 'manual' | 'email_sync' | 'auto'
+    auto_imported: Optional[bool] = False
 
 
 class TaskBase(BaseModel):
