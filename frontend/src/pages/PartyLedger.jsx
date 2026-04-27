@@ -43,6 +43,7 @@ import {
   CreditCard,
   ChevronRight,
   Info,
+  Building2,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -1079,13 +1080,14 @@ export default function PartyLedger({
   initialClient = null,
   isDark,
 }) {
-  const [clientId,    setClientId]    = useState(null);
-  const [presetId,    setPresetId]    = useState('curFY');
-  const [dateFrom,    setDateFrom]    = useState(DATE_PRESETS[0].from);
-  const [dateTo,      setDateTo]      = useState(DATE_PRESETS[0].to);
-  const [openingBal,  setOpeningBal]  = useState(0);
-  const [paymentsMap, setPaymentsMap] = useState({});
-  const [loadingPmts, setLoadingPmts] = useState(false);
+  const [clientId,      setClientId]      = useState(null);
+  const [presetId,      setPresetId]      = useState('curFY');
+  const [dateFrom,      setDateFrom]      = useState(DATE_PRESETS[0].from);
+  const [dateTo,        setDateTo]        = useState(DATE_PRESETS[0].to);
+  const [openingBal,    setOpeningBal]    = useState(0);
+  const [paymentsMap,   setPaymentsMap]   = useState({});
+  const [loadingPmts,   setLoadingPmts]   = useState(false);
+  const [companyFilter, setCompanyFilter] = useState('all'); // 'all' or company.id
 
   // Pre-select client via name or id
   useEffect(() => {
@@ -1104,15 +1106,19 @@ export default function PartyLedger({
     setClientId(null);
   }, [open, preselectedClientName, initialClient, clients]);
 
-  // Filter invoices for selected client
+  // Filter invoices for selected client + company
   const clientInvoices = useMemo(() => {
     if (!clientId) return [];
     const client = clients.find((c) => c.id === clientId);
     if (!client) return [];
-    return invoices.filter(
+    let filtered = invoices.filter(
       (inv) => inv.client_name === client.company_name || inv.client_id === clientId
     );
-  }, [invoices, clientId, clients]);
+    if (companyFilter !== 'all') {
+      filtered = filtered.filter((inv) => inv.company_id === companyFilter);
+    }
+    return filtered;
+  }, [invoices, clientId, clients, companyFilter]);
 
   // Fetch payments
   useEffect(() => {
@@ -1251,6 +1257,27 @@ export default function PartyLedger({
               <ClientCombobox clients={clients} value={clientId} onChange={setClientId} isDark={isDark} />
             </div>
 
+            {/* Company filter */}
+            {companies.length > 1 && (
+              <div className="flex-shrink-0 w-52">
+                <span className={labelCls}>Our Company</span>
+                <div className="relative">
+                  <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+                  <select
+                    value={companyFilter}
+                    onChange={(e) => setCompanyFilter(e.target.value)}
+                    className={`${inputBase} pl-8 pr-3 w-full appearance-none cursor-pointer`}
+                  >
+                    <option value="all">All Companies</option>
+                    {companies.map((co) => (
+                      <option key={co.id} value={co.id}>{co.name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400 pointer-events-none" />
+                </div>
+              </div>
+            )}
+
             {/* Period presets */}
             <div className="flex-1 min-w-0">
               <span className={labelCls}>Period</span>
@@ -1365,6 +1392,16 @@ export default function PartyLedger({
                       <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-blue-50 text-blue-600'}`}>
                         {clientInvoices.length} invoice{clientInvoices.length !== 1 ? 's' : ''}
                       </span>
+                      {/* Active company filter badge */}
+                      {companyFilter !== 'all' && (() => {
+                        const co = companies.find(c => c.id === companyFilter);
+                        return co ? (
+                          <span className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold ${isDark ? 'bg-violet-900/40 text-violet-300' : 'bg-violet-50 text-violet-600'}`}>
+                            <Building2 className="w-2.5 h-2.5" />
+                            {co.name}
+                          </span>
+                        ) : null;
+                      })()}
                     </div>
                   </div>
                 </div>
