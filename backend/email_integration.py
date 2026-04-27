@@ -1493,7 +1493,7 @@ async def update_connection(
             query_filter["user_id"] = {"$in": visible_ids}
         else:
             query_filter["user_id"] = str(current_user.id)
-    existing = await db[COL_CONNECTIONS].find_one({**query_filter, **{"_id": 0 if False else None}}, {"_id": 0})
+    existing = await db[COL_CONNECTIONS].find_one(query_filter, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Connection not found")
     updates = {k: v for k, v in body.dict().items() if v is not None or isinstance(v, bool)}
