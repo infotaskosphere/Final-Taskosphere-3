@@ -1935,6 +1935,7 @@ export default function TodoDashboard() {
                                 <span className="text-[9px] font-black opacity-75">{stats.syncedCount}</span>
                               </button>
                             </div>
+                          </div>
 
                           {/* ── LIST VIEW ── */}
                           {viewMode === 'list' && (
