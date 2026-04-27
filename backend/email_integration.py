@@ -74,10 +74,14 @@ class ConnectionCreateRequest(BaseModel):
     imap_host: Optional[str] = None
     imap_port: Optional[int] = 993
     label: Optional[str] = None
+    linked_page: Optional[str] = "all"
+    auto_sync: Optional[bool] = False
 
 class ConnectionUpdateRequest(BaseModel):
     label: Optional[str] = None
     is_active: Optional[bool] = None
+    linked_page: Optional[str] = None
+    auto_sync: Optional[bool] = None
 
 class ConnectionOut(BaseModel):
     email_address: str
@@ -89,6 +93,8 @@ class ConnectionOut(BaseModel):
     last_synced: Optional[str] = None
     connected_at: Optional[str] = None
     sync_error: Optional[str] = None
+    linked_page: Optional[str] = "all"
+    auto_sync: Optional[bool] = False
 
 class ExtractedEventOut(BaseModel):
     id: Optional[str] = None
@@ -978,6 +984,8 @@ def _conn_doc_to_out(doc: Dict) -> ConnectionOut:
         last_synced=doc.get("last_synced"),
         connected_at=doc.get("connected_at"),
         sync_error=doc.get("sync_error"),
+        linked_page=doc.get("linked_page", "all"),
+        auto_sync=doc.get("auto_sync", False),
     )
 
 # =============================================================================
@@ -1459,6 +1467,8 @@ async def add_connection(body: ConnectionCreateRequest, current_user=Depends(che
             "label": body.label or f"{provider.capitalize()} ({clean_email})",
             "provider": provider, "is_active": True,
             "connected_at": datetime.now(timezone.utc).isoformat(),
+            "linked_page": body.linked_page or "all",
+            "auto_sync": body.auto_sync or False,
         }
         await db[COL_CONNECTIONS].update_one(
             {"user_id": str(current_user.id), "email_address": clean_email},
@@ -1486,7 +1496,7 @@ async def update_connection(
     existing = await db[COL_CONNECTIONS].find_one({**query_filter, **{"_id": 0 if False else None}}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Connection not found")
-    updates = {k: v for k, v in body.dict().items() if v is not None}
+    updates = {k: v for k, v in body.dict().items() if v is not None or isinstance(v, bool)}
     if updates.get("is_active"):
         updates["sync_error"] = None
     await db[COL_CONNECTIONS].update_one(
