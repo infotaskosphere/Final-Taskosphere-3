@@ -117,6 +117,48 @@ const getTodoStripeColor = (todo) => {
   return 'bg-emerald-500';
 };
 
+// ── SOURCE BADGE HELPER ───────────────────────────────────────────────────────
+const getTodoSource = (todo) => {
+  if (todo.source === 'email_sync' || todo.auto_imported || 
+      (todo.description && todo.description.includes('Auto-imported from email'))) {
+    return 'synced';
+  }
+  return 'manual';
+};
+
+const SourceBadge = ({ todo, compact = false }) => {
+  const source = getTodoSource(todo);
+  if (source === 'synced') {
+    return (
+      <span className={`inline-flex items-center gap-0.5 font-bold rounded-md ${
+        compact 
+          ? 'text-[8px] px-1 py-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400'
+          : 'text-[9px] px-1.5 py-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400'
+      }`}>
+        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        {compact ? 'SYNC' : 'AUTO-SYNC'}
+      </span>
+    );
+  }
+  return (
+    <span className={`inline-flex items-center gap-0.5 font-bold rounded-md ${
+      compact
+        ? 'text-[8px] px-1 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+        : 'text-[9px] px-1.5 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+    }`}>
+      <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+        <line x1="12" y1="5" x2="12" y2="19"/>
+        <line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+      {compact ? 'MAN' : 'MANUAL'}
+    </span>
+  );
+};
+
 // ── SECTION CARD ──────────────────────────────────────────────────────────────
 function SectionCard({ children, className = '' }) {
   return (
@@ -705,6 +747,7 @@ function TodoRow({ todo, onToggle, onPromote, onDelete, showOwner, ownerName, on
   const due         = getDueLabel(todo.due_date);
   const isOverdue   = due?.label === 'Overdue';
   const stripe      = getTodoStripeColor(todo);
+  const isSynced    = getTodoSource(todo) === 'synced';
 
   return (
     <motion.div
@@ -720,7 +763,9 @@ function TodoRow({ todo, onToggle, onPromote, onDelete, showOwner, ownerName, on
             ? 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 opacity-70'
             : isOverdue
               ? 'bg-red-50/60 dark:bg-red-900/10 border-red-200 dark:border-red-800 hover:border-red-300 dark:hover:border-red-700 hover:shadow-sm'
-              : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-500 hover:shadow-sm'
+              : isSynced
+                ? 'bg-violet-50/40 dark:bg-violet-900/10 border-violet-200 dark:border-violet-800/50 hover:border-violet-300 dark:hover:border-violet-700 hover:shadow-sm'
+                : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-500 hover:shadow-sm'
           }`}
       >
         {/* Left colored stripe */}
@@ -753,16 +798,17 @@ function TodoRow({ todo, onToggle, onPromote, onDelete, showOwner, ownerName, on
 
           {/* Title */}
           <button
-            className={`min-w-0 text-left font-medium truncate transition-colors pl-1 pr-2 text-sm
+            className={`min-w-0 text-left font-medium transition-colors pl-1 pr-2 text-sm flex items-center gap-1.5
               ${isCompleted
                 ? 'text-slate-400 dark:text-slate-500 line-through'
                 : 'text-slate-800 dark:text-slate-100 hover:text-blue-700 dark:hover:text-blue-400'
               }`}
             onClick={() => onClickDetail(todo)}
           >
-            {todo.title || 'Untitled'}
+            <span className="truncate">{todo.title || 'Untitled'}</span>
+            <SourceBadge todo={todo} compact={true} />
             {showOwner && ownerName && (
-              <span className="ml-2 text-[10px] font-normal text-slate-400">· {ownerName}</span>
+              <span className="text-[10px] font-normal text-slate-400 flex-shrink-0">· {ownerName}</span>
             )}
           </button>
 
@@ -860,7 +906,9 @@ function TodoBoardCard({ todo, onToggle, onPromote, onDelete, onClickDetail, sho
             ? 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 opacity-75'
             : isOverdue
               ? 'bg-red-50/60 dark:bg-red-900/10 border-red-200 dark:border-red-800 hover:border-red-300 dark:hover:border-red-700 hover:shadow-md'
-              : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-500 hover:shadow-md'
+              : getTodoSource(todo) === 'synced'
+                ? 'bg-violet-50/40 dark:bg-violet-900/10 border-violet-200 dark:border-violet-800/50 hover:border-violet-300 dark:hover:border-violet-700 hover:shadow-md'
+                : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-500 hover:shadow-md'
           }`}
         onClick={() => onClickDetail(todo)}
       >
@@ -918,6 +966,7 @@ function TodoBoardCard({ todo, onToggle, onPromote, onDelete, onClickDetail, sho
 
           {/* Badges */}
           <div className="flex flex-wrap gap-1.5">
+            <SourceBadge todo={todo} compact={false} />
             {due && (
               <span
                 className="text-[10px] font-bold px-2 py-0.5 rounded-md"
@@ -1072,6 +1121,7 @@ export default function TodoDashboard() {
   const [activeTab,    setActiveTab]    = useState('todos');
   const [selectedUser, setSelectedUser] = useState('self');
   const [todoFilter,   setTodoFilter]   = useState('all');
+  const [sourceFilter, setSourceFilter] = useState('all'); // 'all' | 'manual' | 'synced'
   const [search,       setSearch]       = useState('');
   const [logSearch,    setLogSearch]    = useState('');
   const [viewMode,     setViewMode]     = useState('list'); // 'list' | 'board'
@@ -1231,7 +1281,9 @@ export default function TodoDashboard() {
     }).length;
     const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
     const healthScore    = Math.max(0, Math.min(100, 100 - (overdue * 10)));
-    return { total, completed, pending, overdue, completionRate, healthScore };
+    const manualCount = todos.filter(t => getTodoSource(t) === 'manual').length;
+    const syncedCount = todos.filter(t => getTodoSource(t) === 'synced').length;
+    return { total, completed, pending, overdue, completionRate, healthScore, manualCount, syncedCount };
   }, [todos]);
 
   // ── Filtered todos ─────────────────────────────────────────────────────────
@@ -1255,8 +1307,14 @@ export default function TodoDashboard() {
         break;
       default: break;
     }
+    // Source filter
+    if (sourceFilter === 'manual') {
+      list = list.filter(t => getTodoSource(t) === 'manual');
+    } else if (sourceFilter === 'synced') {
+      list = list.filter(t => getTodoSource(t) === 'synced');
+    }
     return list;
-  }, [todos, search, todoFilter]);
+  }, [todos, search, todoFilter, sourceFilter]);
 
   // ── Filtered log ───────────────────────────────────────────────────────────
   const filteredLog = useMemo(() => {
@@ -1844,8 +1902,39 @@ export default function TodoDashboard() {
                               {stats.overdue > 0 && (
                                 <FilterChip id="overdue" label="Overdue" count={stats.overdue} todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
                               )}
+                              {/* Source filter divider */}
+                              <span className="text-slate-300 dark:text-slate-600 text-xs">|</span>
+                              <button
+                                onClick={() => setSourceFilter(sourceFilter === 'manual' ? 'all' : 'manual')}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-lg border transition-all ${
+                                  sourceFilter === 'manual'
+                                    ? 'bg-slate-700 text-white border-slate-700'
+                                    : 'border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-500'
+                                }`}
+                              >
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                                </svg>
+                                Manual
+                                <span className="text-[9px] font-black opacity-75">{stats.manualCount}</span>
+                              </button>
+                              <button
+                                onClick={() => setSourceFilter(sourceFilter === 'synced' ? 'all' : 'synced')}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-lg border transition-all ${
+                                  sourceFilter === 'synced'
+                                    ? 'bg-violet-600 text-white border-violet-600'
+                                    : 'border-violet-200 dark:border-violet-700 text-violet-600 dark:text-violet-400 hover:border-violet-300 dark:hover:border-violet-600'
+                                }`}
+                              >
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                  <polyline points="17 8 12 3 7 8"/>
+                                  <line x1="12" y1="3" x2="12" y2="15"/>
+                                </svg>
+                                Synced
+                                <span className="text-[9px] font-black opacity-75">{stats.syncedCount}</span>
+                              </button>
                             </div>
-                          </div>
 
                           {/* ── LIST VIEW ── */}
                           {viewMode === 'list' && (
