@@ -465,16 +465,27 @@ function AutoSaveDialog({ onSave, onSkip, isDark }) {
 // CONNECT FORM
 // ─────────────────────────────────────────────────────────────────────────────
 function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
-  const [emailVal,  setEmailVal]  = useState(provider.domain ? `@${provider.domain}` : "");
-  const [password,  setPassword]  = useState("");
-  const [host,      setHost]      = useState(provider.imap_host);
-  const [port,      setPort]      = useState(provider.imap_port);
-  const [label,     setLabel]     = useState("");
-  const [showPass,  setShowPass]  = useState(false);
-  const [showSteps, setShowSteps] = useState(true);
-  const [loading,   setLoading]   = useState(false);
-  const [authError, setAuthError] = useState(false);
+  const [emailVal,    setEmailVal]    = useState(provider.domain ? `@${provider.domain}` : "");
+  const [password,    setPassword]    = useState("");
+  const [host,        setHost]        = useState(provider.imap_host);
+  const [port,        setPort]        = useState(provider.imap_port);
+  const [label,       setLabel]       = useState("");
+  const [linkedPage,  setLinkedPage]  = useState("all");
+  const [autoSync,    setAutoSync]    = useState(false);
+  const [showPass,    setShowPass]    = useState(false);
+  const [showSteps,   setShowSteps]   = useState(true);
+  const [loading,     setLoading]     = useState(false);
+  const [authError,   setAuthError]   = useState(false);
   const emailRef = useRef(null);
+
+  const LINKED_PAGE_OPTIONS = [
+    { value: "all",      label: "All Pages",    icon: "🌐" },
+    { value: "leads",    label: "Leads",        icon: "🎯" },
+    { value: "invoicing",label: "Invoicing",    icon: "📄" },
+    { value: "tasks",    label: "Tasks",        icon: "✅" },
+    { value: "reminders",label: "Reminders",    icon: "🔔" },
+    { value: "visits",   label: "Visits",       icon: "📍" },
+  ];
 
   useEffect(() => { setTimeout(() => emailRef.current?.focus(), 50); }, []);
 
@@ -490,6 +501,7 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
       await api.post("/email/connections", {
         email_address: trimEmail, app_password: password,
         imap_host: host || undefined, imap_port: Number(port), label: label || undefined,
+        linked_page: linkedPage, auto_sync: autoSync,
       });
       toast.success(`✓ ${trimEmail} connected successfully!`);
       onSuccess();
@@ -593,6 +605,54 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
             <input type="text" value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. Work Gmail, CA Office"
               className={inputCls} style={inputStyle} />
           </div>
+
+          {/* ── Linked Page ── */}
+          <div>
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: isDark ? D.muted : "#374151" }}>
+              Link to Page <span className="font-normal text-slate-400">(events from this email appear in selected page)</span>
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {LINKED_PAGE_OPTIONS.map(opt => (
+                <button key={opt.value} type="button"
+                  onClick={() => setLinkedPage(opt.value)}
+                  className="flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition-all"
+                  style={{
+                    backgroundColor: linkedPage === opt.value
+                      ? (isDark ? "rgba(31,115,90,0.2)" : "#dcfce7")
+                      : (isDark ? D.raised : "#f8fafc"),
+                    borderColor: linkedPage === opt.value
+                      ? COLORS.emeraldGreen
+                      : (isDark ? D.border : "#e2e8f0"),
+                    color: linkedPage === opt.value
+                      ? COLORS.emeraldGreen
+                      : (isDark ? D.muted : "#64748b"),
+                  }}>
+                  <span>{opt.icon}</span>
+                  <span>{opt.label}</span>
+                  {linkedPage === opt.value && <Check className="w-3 h-3 ml-auto" />}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Auto Sync ── */}
+          <div className="flex items-center justify-between p-3 rounded-xl border"
+            style={{
+              backgroundColor: isDark ? D.raised : "#f8fafc",
+              borderColor: isDark ? D.border : "#e2e8f0",
+            }}>
+            <div>
+              <p className="text-xs font-semibold" style={{ color: isDark ? D.text : "#374151" }}>Auto Sync</p>
+              <p className="text-[11px] mt-0.5" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+                Automatically sync new emails daily
+              </p>
+            </div>
+            <button type="button" onClick={() => setAutoSync(v => !v)}
+              className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${autoSync ? "bg-emerald-500" : (isDark ? "bg-slate-600" : "bg-slate-300")}`}>
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${autoSync ? "translate-x-5" : "translate-x-0"}`} />
+            </button>
+          </div>
+
           {provider.id === "other" && (
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -618,7 +678,7 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
           style={{ backgroundColor: isDark ? "rgba(31,175,90,0.08)" : "#f0fdf4", borderColor: isDark ? "#14532d" : "#bbf7d0" }}>
           <Shield className="w-4 h-4 text-emerald-500 flex-shrink-0" />
           <p className="text-xs text-emerald-600 dark:text-emerald-400">
-            Password is stored securely. We only read email subjects & bodies for event extraction — we never send or modify anything.
+            Password is stored securely. We only read email subjects &amp; bodies for event extraction — we never send or modify anything.
           </p>
         </div>
       </div>
@@ -629,23 +689,46 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // CONNECTED ACCOUNT CARD
 // ─────────────────────────────────────────────────────────────────────────────
-function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, isDark }) {
+function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, onUpdateSettings, isDark }) {
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelVal,     setLabelVal]     = useState(conn.label || conn.email_address);
   const [testing,      setTesting]      = useState(false);
   const [syncing,      setSyncing]      = useState(false);
+  const [autoSync,     setAutoSync]     = useState(conn.auto_sync ?? false);
+  const [syncingAuto,  setSyncingAuto]  = useState(false);
 
   const color    = PROVIDER_COLORS[conn.provider] || PROVIDER_COLORS.other;
   const icon     = PROVIDER_ICONS[conn.provider]  || PROVIDER_ICONS.other;
   const hasError = !!conn.sync_error;
 
+  const PAGE_LABELS = {
+    all:      { label: "All Pages",  icon: "🌐" },
+    leads:    { label: "Leads",      icon: "🎯" },
+    invoicing:{ label: "Invoicing",  icon: "📄" },
+    tasks:    { label: "Tasks",      icon: "✅" },
+    reminders:{ label: "Reminders",  icon: "🔔" },
+    visits:   { label: "Visits",     icon: "📍" },
+  };
+  const linkedPageInfo = PAGE_LABELS[conn.linked_page || "all"] || PAGE_LABELS.all;
+
   const handleSaveLabel = async () => {
     try { await api.patch(`/email/connections/${encodeURIComponent(conn.email_address)}`, { label: labelVal }); toast.success("Label updated"); setEditingLabel(false); }
     catch { toast.error("Failed to update label"); }
   };
-  const handleTest = async () => { setTesting(true); try { await onTest(conn.email_address); } finally { setTesting(false); } };
-  // Pass last_synced as the base date so only new emails are fetched
-  const handleSync = async () => { setSyncing(true); try { await onSync(conn.email_address, conn.last_synced); } finally { setSyncing(false); } };
+  const handleTest  = async () => { setTesting(true); try { await onTest(conn.email_address); } finally { setTesting(false); } };
+  const handleSync  = async () => { setSyncing(true); try { await onSync(conn.email_address, conn.last_synced); } finally { setSyncing(false); } };
+
+  const handleToggleAutoSync = async () => {
+    const newVal = !autoSync;
+    setSyncingAuto(true);
+    try {
+      await api.patch(`/email/connections/${encodeURIComponent(conn.email_address)}`, { auto_sync: newVal });
+      setAutoSync(newVal);
+      toast.success(newVal ? "Auto-sync enabled" : "Auto-sync disabled");
+      if (onUpdateSettings) onUpdateSettings(conn.email_address, { auto_sync: newVal });
+    } catch { toast.error("Failed to update auto-sync"); }
+    finally { setSyncingAuto(false); }
+  };
 
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -2, transition: springPhysics.lift }}>
@@ -674,7 +757,16 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, is
             )}
             <p className="text-xs truncate" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>{conn.email_address}</p>
           </div>
-          <div className="flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Linked page badge */}
+            <span className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg border"
+              style={{
+                backgroundColor: isDark ? "rgba(99,102,241,0.12)" : "#eef2ff",
+                borderColor: isDark ? "rgba(99,102,241,0.3)" : "#c7d2fe",
+                color: isDark ? "#a5b4fc" : "#4f46e5",
+              }}>
+              {linkedPageInfo.icon} {linkedPageInfo.label}
+            </span>
             {hasError ? (
               <span className="flex items-center gap-1 text-xs font-semibold text-red-500 px-2 py-1 rounded-full"
                 style={{ backgroundColor: isDark ? "rgba(239,68,68,0.15)" : "#fee2e2" }}>
@@ -716,6 +808,31 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, is
             </span>
           )}
         </div>
+
+        {/* ── Auto-sync toggle row ── */}
+        <div className="flex items-center justify-between px-4 py-2 border-t border-slate-100 dark:border-slate-700"
+          style={{ backgroundColor: isDark ? "rgba(255,255,255,0.02)" : "#fafafa" }}>
+          <div className="flex items-center gap-2">
+            <Zap className={`w-3.5 h-3.5 ${autoSync ? "text-emerald-500" : (isDark ? "text-slate-500" : "text-slate-400")}`} />
+            <span className="text-xs font-semibold" style={{ color: isDark ? D.muted : "#64748b" }}>
+              Auto-sync daily
+            </span>
+            {autoSync && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                style={{ backgroundColor: isDark ? "rgba(31,175,90,0.15)" : "#dcfce7", color: COLORS.emeraldGreen }}>
+                ON
+              </span>
+            )}
+          </div>
+          <button type="button" onClick={handleToggleAutoSync} disabled={syncingAuto}
+            className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${autoSync ? "bg-emerald-500" : (isDark ? "bg-slate-600" : "bg-slate-300")}`}>
+            {syncingAuto
+              ? <Loader2 className="w-3 h-3 animate-spin absolute top-1 left-1 text-white" />
+              : <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${autoSync ? "translate-x-5" : "translate-x-0"}`} />
+            }
+          </button>
+        </div>
+
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 border-t border-slate-100 dark:border-slate-700"
           style={{ backgroundColor: isDark ? D.raised : "#f8fafc" }}>
           <p className="text-xs truncate" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
@@ -728,7 +845,7 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, is
             <button onClick={handleSync} disabled={syncing}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700 whitespace-nowrap"
               style={{ color: isDark ? D.muted : "#64748b" }}>
-              {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Sync
+              {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Sync Now
             </button>
             <button onClick={handleTest} disabled={testing}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700 whitespace-nowrap"
@@ -1360,6 +1477,10 @@ export default function EmailSettings() {
     }
   };
 
+  const handleUpdateSettings = useCallback((emailAddress, updates) => {
+    setConnections(prev => prev.map(c => c.email_address === emailAddress ? { ...c, ...updates } : c));
+  }, []);
+
   // Called by ScanPreviewPanel after successful saves — add keys to session set
   const handleEventsSaved = useCallback((newKeys) => {
     setSavedKeys(prev => {
@@ -1502,7 +1623,8 @@ export default function EmailSettings() {
               <AnimatePresence>
                 {connections.map(conn => (
                   <ConnectedAccountCard key={conn.email_address} conn={conn} isDark={isDark}
-                    onDisconnect={handleDisconnect} onTest={handleTest} onToggle={handleToggle} onSync={handleSync} />
+                    onDisconnect={handleDisconnect} onTest={handleTest} onToggle={handleToggle}
+                    onSync={handleSync} onUpdateSettings={handleUpdateSettings} />
                 ))}
               </AnimatePresence>
             )}
