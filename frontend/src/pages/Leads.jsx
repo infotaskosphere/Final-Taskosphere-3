@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -914,6 +915,7 @@ function ClientConversionDialog({
 export default function LeadsPage() {
   const isDark = useDark();
   const { user } = useAuth();
+  const navigate            = useNavigate();
   const isAdmin         = user?.role === 'admin';
   const perms           = user?.permissions || {};
   const canDeleteLead   = isAdmin || !!perms.can_manage_users;
@@ -932,6 +934,10 @@ export default function LeadsPage() {
   const [dialogOpen,        setDialogOpen]        = useState(false);
   const [editingLead,       setEditingLead]       = useState(null);
   const [clientConvLead,    setClientConvLead]    = useState(null);
+  const [emailConnections,  setEmailConnections]  = useState([]);
+  const [emailBannerDismissed, setEmailBannerDismissed] = useState(() =>
+    localStorage.getItem('leads_email_banner_dismissed') === '1'
+  );
   const [clientConverting,  setClientConverting]  = useState(false);
   const [errors,            setErrors]            = useState({});
   const [expandedQtn,       setExpandedQtn]       = useState({});
@@ -965,6 +971,11 @@ export default function LeadsPage() {
       const raw = r.data; setAvailableServices(Array.isArray(raw) ? raw : (raw?.services || []));
     }).catch(() => {});
     api.get('/users').then(r => setAllUsers(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+    // Fetch email connections linked to Leads
+    api.get('/email/connections').then(r => {
+      const conns = r.data?.connections || [];
+      setEmailConnections(conns.filter(c => !c.linked_page || c.linked_page === 'all' || c.linked_page === 'leads'));
+    }).catch(() => {});
   }, []);
 
   const stats = useMemo(() => ({
@@ -1393,6 +1404,62 @@ export default function LeadsPage() {
           <p className="text-xl font-bold text-indigo-700 dark:text-indigo-400 mt-1">₹{stats.pipeValue.toLocaleString()}</p>
         </div>
       </motion.div>
+
+      {/* ── Email Integration Banner ── */}
+      {!emailBannerDismissed && (
+        <motion.div variants={itemVariants}>
+          <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <div className="h-[2px] w-full" style={{ background: `linear-gradient(90deg, #EA4335, #4285F4, #34A853)` }} />
+            <div className="px-4 py-3 flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                <div className={`p-2 rounded-xl flex-shrink-0 ${isDark ? 'bg-blue-900/30' : 'bg-blue-50'}`}>
+                  <Mail className="h-4 w-4 text-blue-500" />
+                </div>
+                <div className="min-w-0">
+                  <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                    Email → Leads Integration
+                  </p>
+                  {emailConnections.length > 0 ? (
+                    <p className="text-xs text-slate-400 truncate">
+                      {emailConnections.length} email{emailConnections.length !== 1 ? 's' : ''} linked:{' '}
+                      {emailConnections.map(c => c.label || c.email_address).join(', ')}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-slate-400">
+                      No email linked yet — connect an email to auto-import leads from inquiries
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {emailConnections.length > 0 && (
+                  <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border ${isDark ? 'bg-emerald-900/20 border-emerald-800 text-emerald-400' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                    <CheckCircle2 className="h-3 h-3" />
+                    {emailConnections.filter(c => c.is_active).length} active
+                  </div>
+                )}
+                <button
+                  onClick={() => navigate('/settings/email')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all active:scale-95"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`, color: 'white' }}
+                >
+                  <Mail className="h-3 w-3" />
+                  {emailConnections.length > 0 ? 'Manage Emails' : 'Connect Email'}
+                </button>
+                <button
+                  onClick={() => {
+                    localStorage.setItem('leads_email_banner_dismissed', '1');
+                    setEmailBannerDismissed(true);
+                  }}
+                  className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-slate-500 hover:text-slate-300 hover:bg-slate-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      )}
 
       {/* ── Filters — Dashboard SectionCard style ── */}
       <motion.div variants={itemVariants}>
