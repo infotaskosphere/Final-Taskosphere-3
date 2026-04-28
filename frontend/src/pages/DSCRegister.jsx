@@ -17,8 +17,9 @@ import {
   Plus, Edit, Trash2, AlertCircle, ArrowDownCircle, ArrowUpCircle,
   History, Search, ArrowUpDown, Printer, CheckSquare, Square,
   MinusSquare, XCircle, Key, Shield, Clock, TrendingDown,
-  Sparkles, Loader2,
+  Sparkles, Loader2, Share2, Mail, MessageCircle, Download
 } from 'lucide-react';
+import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
 import { detectDscDuplicates } from '@/lib/aiDuplicateEngine';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
@@ -236,6 +237,28 @@ export default function DSCRegister() {
   });
   const [movementData, setMovementData]         = useState({ movement_type: 'IN', person_name: '', notes: '' });
   const [editMovementData, setEditMovementData] = useState({ movement_type: 'IN', person_name: '', notes: '' });
+
+  const shareAreaRef = useRef(null);
+  const handleShare = async (method) => {
+    if (!shareAreaRef.current) return;
+    const canvas = await html2canvas(shareAreaRef.current, { 
+      backgroundColor: isDark ? '#0f172a' : '#ffffff',
+      scale: 2 
+    });
+    const dataUrl = canvas.toDataURL('image/png');
+    const summaryText = `DSC Details: ${selectedDSC.holder_name}\nStatus: ${getDocumentInOutStatus(selectedDSC)}\nExpiry: ${selectedDSC.expiry_date ? format(new Date(selectedDSC.expiry_date), 'dd MMM yyyy') : 'N/A'}`;
+
+    if (method === 'whatsapp') {
+      window.open(`https://wa.me/?text=${encodeURIComponent(summaryText)}`, '_blank');
+    } else if (method === 'email') {
+      window.location.href = `mailto:?subject=DSC Certificate Details&body=${encodeURIComponent(summaryText)}`;
+    } else if (method === 'download') {
+      const link = document.createElement('a');
+      link.download = `DSC_${selectedDSC.holder_name}.png`;
+      link.href = dataUrl;
+      link.click();
+    }
+  };
 
   useEffect(() => { fetchDSC(); }, []);
   useEffect(() => { setCurrentPageIn(1); setCurrentPageOut(1); setCurrentPageExpired(1); }, [sortOrder, searchQuery]);
@@ -1091,36 +1114,70 @@ export default function DSCRegister() {
 
       {/* ── Log Dialog ── */}
       <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="font-outfit text-2xl flex items-center gap-2">
-              <History className="h-6 w-6 text-indigo-500" />Movement Log
-            </DialogTitle>
-            <DialogDescription className="font-medium">{selectedDSC?.holder_name}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            {selectedDSC?.movement_log?.length > 0
-              ? selectedDSC.movement_log.map((movement, index) => (
-                  <Card key={index} className={`p-4 ${movement.movement_type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Badge className={movement.movement_type === 'IN' ? 'bg-emerald-600' : 'bg-red-600'}>{movement.movement_type}</Badge>
-                          <span className="text-sm font-semibold">{movement.person_name}</span>
-                        </div>
-                        <p className="text-sm text-slate-600">{movement.movement_type === 'IN' ? 'Delivered by' : 'Taken by'}: {movement.person_name}</p>
-                        <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Recorded by: {movement.recorded_by}</p>
-                        {movement.notes && <p className="text-sm text-slate-600 mt-2">{movement.notes}</p>}
-                      </div>
-                      <div className="text-right">
-                        <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{format(new Date(movement.timestamp), 'MMM dd, yyyy')}</p>
-                        <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{format(new Date(movement.timestamp), 'hh:mm a')}</p>
-                      </div>
+        <DialogContent className="max-w-xl p-0 border-none bg-transparent shadow-none overflow-visible">
+          <div ref={shareAreaRef} className={`p-6 rounded-3xl border shadow-2xl ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+            <div className="flex justify-between items-start mb-6">
+              <div>
+                <Badge className="mb-2 bg-indigo-500/10 text-indigo-500 border-none px-2 py-0.5 text-[10px] uppercase tracking-widest font-bold">Official DSC Record</Badge>
+                <DialogTitle className="text-3xl font-black tracking-tight flex items-center gap-2">
+                  <Key className="h-7 w-7 text-indigo-500" /> Details
+                </DialogTitle>
+                <p className="text-[10px] font-mono opacity-40 mt-1 uppercase">UID: {selectedDSC?.id}</p>
+              </div>
+              <div className="flex gap-2 print:hidden">
+                <Button size="icon" variant="outline" onClick={() => handleShare('whatsapp')} className="rounded-full h-9 w-9 text-emerald-500 border-emerald-500/20 hover:bg-emerald-50"><MessageCircle className="h-4 w-4" /></Button>
+                <Button size="icon" variant="outline" onClick={() => handleShare('email')} className="rounded-full h-9 w-9 text-blue-500 border-blue-500/20 hover:bg-blue-50"><Mail className="h-4 w-4" /></Button>
+                <Button size="icon" variant="outline" onClick={() => handleShare('download')} className="rounded-full h-9 w-9 text-slate-500 border-slate-500/20 hover:bg-slate-50"><Download className="h-4 w-4" /></Button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-y-6 gap-x-8 mb-8">
+              <div className="space-y-1">
+                <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-tighter">Holder Name</Label>
+                <p className="text-lg font-bold leading-tight">{selectedDSC?.holder_name}</p>
+              </div>
+              <div className="space-y-1 text-right">
+                <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-tighter">Current Location</Label>
+                <div><Badge className={`font-bold ${getDocumentInOutStatus(selectedDSC) === 'IN' ? 'bg-emerald-500' : 'bg-red-500'}`}>{getDocumentInOutStatus(selectedDSC)}</Badge></div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-tighter">DSC Type</Label>
+                <p className="font-semibold text-sm">{selectedDSC?.dsc_type || 'Standard'}</p>
+              </div>
+              <div className="space-y-1 text-right">
+                <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-tighter">Associated Firm</Label>
+                <p className="font-semibold text-sm truncate">{selectedDSC?.associated_with || 'N/A'}</p>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-tighter">Security Password</Label>
+                <p className="font-mono text-sm bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded w-fit">{selectedDSC?.dsc_password || '********'}</p>
+              </div>
+              <div className="space-y-1 text-right">
+                <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-tighter">Expiry Date</Label>
+                <p className={`text-sm font-bold ${selectedDSC && getDSCStatus(selectedDSC.expiry_date).textColor}`}>
+                  {selectedDSC?.expiry_date && format(new Date(selectedDSC.expiry_date), 'dd MMM, yyyy')}
+                </p>
+              </div>
+            </div>
+
+            <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+              <h4 className="text-[10px] uppercase font-black text-slate-400 mb-3 tracking-widest flex items-center gap-2">
+                <History className="h-3 w-3" /> Recent Movement Activity
+              </h4>
+              <div className="space-y-2">
+                {selectedDSC?.movement_log?.length > 0 ? (
+                  selectedDSC.movement_log.slice(-3).reverse().map((m, i) => (
+                    <div key={i} className="flex justify-between items-center text-[11px] border-b border-slate-200/50 dark:border-slate-700/50 pb-2 last:border-0 last:pb-0">
+                      <span className="font-medium"><b className={m.movement_type === 'IN' ? 'text-emerald-500' : 'text-red-500'}>{m.movement_type}</b> by {m.person_name}</span>
+                      <span className="opacity-50">{format(new Date(m.timestamp), 'dd MMM, hh:mm a')}</span>
                     </div>
-                  </Card>
-                ))
-              : <div className="text-center py-8 text-slate-500"><History className="h-12 w-12 mx-auto mb-3 text-slate-300" /><p>No movement history yet</p></div>
-            }
+                  ))
+                ) : <p className="text-center py-2 text-slate-400 italic text-[11px]">No history recorded</p>}
+              </div>
+            </div>
+            <div className="mt-8 pt-4 border-t border-slate-200/50 dark:border-slate-700/50 text-center">
+              <p className="text-[9px] uppercase tracking-[0.3em] font-bold opacity-20">TaskOsphere Command Center</p>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
