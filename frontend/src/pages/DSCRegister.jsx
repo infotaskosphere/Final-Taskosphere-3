@@ -17,7 +17,7 @@ import {
   Plus, Edit, Trash2, AlertCircle, ArrowDownCircle, ArrowUpCircle,
   History, Search, ArrowUpDown, Printer, CheckSquare, Square,
   MinusSquare, XCircle, Key, Shield, Clock, TrendingDown,
-  Sparkles, Loader2, Share2, Mail, MessageCircle, Download
+  Sparkles, Loader2, Share2, Mail, MessageCircle, Download, Eye
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
@@ -84,6 +84,7 @@ function PaginationBar({ currentPage, totalPages, totalItems, pageSize, onPageCh
 }
 
 // ─── DSC Table ────────────────────────────────────────────────────────────────
+// FIX: onViewLog is now properly used (was calling undefined `openLogDialog` directly)
 function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, type, globalIndexStart, isDark, selectedIds, onToggleSelect, onToggleAll }) {
   const allSelected  = dscList.length > 0 && dscList.every(d => selectedIds.has(d.id));
   const someSelected = dscList.some(d => selectedIds.has(d.id)) && !allSelected;
@@ -132,8 +133,9 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
 
             return (
               <tr key={dsc.id}
-                onClick={() => openLogDialog(dsc)}
+                onClick={() => onViewLog(dsc)}
                 className={`transition-colors cursor-pointer ${highlight} ${isSelected ? (isDark ? 'ring-1 ring-inset ring-indigo-500' : 'ring-1 ring-inset ring-indigo-300') : ''} ${isDark ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50/80'}`}
+                title="Click to view full DSC details"
                 data-testid={`dsc-row-${dsc.id}`}>
                 <td className="px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
                   <button onClick={() => onToggleSelect(dsc.id)} className="flex items-center justify-center">
@@ -167,8 +169,8 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                 </td>
                 <td className="px-1 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                   <div className="flex justify-end gap-0">
-                    <Button variant="ghost" size="sm" onClick={() => openLogDialog(dsc)} className={`h-7 w-7 p-0 ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`} title="View Log">
-                      <Share2 className="h-3.5 w-3.5 text-indigo-500" />
+                    <Button variant="ghost" size="sm" onClick={() => onViewLog(dsc)} className={`h-7 w-7 p-0 ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`} title="View Details & Share">
+                      <Eye className="h-3.5 w-3.5 text-indigo-500" />
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => onMovement(dsc, type === 'IN' ? 'OUT' : 'IN')}
                       className={`h-7 w-7 p-0 ${type === 'IN' ? 'hover:bg-red-50 text-red-600' : 'hover:bg-emerald-50 text-emerald-600'}`}
@@ -216,6 +218,7 @@ export default function DSCRegister() {
   const [currentPageExpired, setCurrentPageExpired] = useState(1);
   const [sortOrder, setSortOrder]                   = useState('az');
   const [activeTab, setActiveTab]                   = useState('in');
+  const [sharing, setSharing]                       = useState(false);
 
   const [selectedIds, setSelectedIds]       = useState(new Set());
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
@@ -237,24 +240,135 @@ export default function DSCRegister() {
   const [editMovementData, setEditMovementData] = useState({ movement_type: 'IN', person_name: '', notes: '' });
 
   const shareAreaRef = useRef(null);
-  const handleShare = async (method) => {
-    if (!shareAreaRef.current) return;
-    const canvas = await html2canvas(shareAreaRef.current, { 
-      backgroundColor: isDark ? '#0f172a' : '#ffffff',
-      scale: 2 
-    });
-    const dataUrl = canvas.toDataURL('image/png');
-    const summaryText = `DSC Details: ${selectedDSC.holder_name}\nStatus: ${getDocumentInOutStatus(selectedDSC)}\nExpiry: ${selectedDSC.expiry_date ? format(new Date(selectedDSC.expiry_date), 'dd MMM yyyy') : 'N/A'}`;
 
-    if (method === 'whatsapp') {
-      window.open(`https://wa.me/?text=${encodeURIComponent(summaryText)}`, '_blank');
-    } else if (method === 'email') {
-      window.location.href = `mailto:?subject=DSC Certificate Details&body=${encodeURIComponent(summaryText)}`;
-    } else if (method === 'download') {
-      const link = document.createElement('a');
-      link.download = `DSC_${selectedDSC.holder_name}.png`;
-      link.href = dataUrl;
-      link.click();
+  // ── Status helpers (defined early so handleShare can use them) ────────────
+  const getDSCInOutStatus = (dsc) => {
+    if (!dsc) return 'OUT';
+    if (dsc.current_status) return dsc.current_status;
+    return dsc.current_location === 'with_company' ? 'IN' : 'OUT';
+  };
+  // FIX: was referenced but never defined — alias to keep dialog working
+  const getDocumentInOutStatus = getDSCInOutStatus;
+
+  const getDSCStatus = (expiryDate) => {
+    const daysLeft = Math.ceil((new Date(expiryDate) - new Date()) / (1000 * 60 * 60 * 24));
+    if (daysLeft < 0)   return { color: 'bg-red-500',    text: 'Expired',              textColor: 'text-red-600' };
+    if (daysLeft <= 7)  return { color: 'bg-orange-500', text: `${daysLeft}d left`,    textColor: 'text-orange-600' };
+    if (daysLeft <= 30) return { color: 'bg-yellow-500', text: `${daysLeft}d left`,    textColor: 'text-yellow-700' };
+    return               { color: 'bg-emerald-500',      text: `${daysLeft}d left`,    textColor: 'text-emerald-700' };
+  };
+
+  // ── Build a clean text summary of the DSC for copy/paste ──────────────────
+  const buildSummaryText = (dsc) => {
+    if (!dsc) return '';
+    const lastMove = dsc.movement_log?.length > 0 ? dsc.movement_log[dsc.movement_log.length - 1] : null;
+    return [
+      `*DSC Certificate Details*`,
+      ``,
+      `👤 Holder: ${dsc.holder_name || 'N/A'}`,
+      `🏷️ Type: ${dsc.dsc_type || 'Standard'}`,
+      `🏢 Associated With: ${dsc.associated_with || 'N/A'}`,
+      `📅 Issue Date: ${dsc.issue_date ? format(new Date(dsc.issue_date), 'dd MMM yyyy') : 'N/A'}`,
+      `⏳ Expiry Date: ${dsc.expiry_date ? format(new Date(dsc.expiry_date), 'dd MMM yyyy') : 'N/A'}`,
+      `📍 Current Status: ${getDSCInOutStatus(dsc)}`,
+      dsc.dsc_password ? `🔑 Password: ${dsc.dsc_password}` : null,
+      dsc.notes ? `📝 Notes: ${dsc.notes}` : null,
+      lastMove ? `\nLast Movement: ${lastMove.movement_type} by ${lastMove.person_name} on ${format(new Date(lastMove.timestamp), 'dd MMM yyyy, hh:mm a')}` : null,
+      ``,
+      `— TaskOsphere Command Center`,
+    ].filter(Boolean).join('\n');
+  };
+
+  // ── Share handler — supports native file share for WhatsApp on mobile ─────
+  const handleShare = async (method) => {
+    if (!shareAreaRef.current || !selectedDSC) return;
+    setSharing(true);
+    try {
+      const canvas = await html2canvas(shareAreaRef.current, {
+        backgroundColor: isDark ? '#0f172a' : '#ffffff',
+        scale: 2,
+        useCORS: true,
+      });
+      const summaryText = buildSummaryText(selectedDSC);
+      const safeName = (selectedDSC.holder_name || 'DSC').replace(/[^a-z0-9]/gi, '_');
+      const fileName = `DSC_${safeName}.png`;
+
+      // Get blob for native file sharing
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+
+      if (method === 'whatsapp') {
+        // Try native share with the image file (works on mobile WhatsApp)
+        const file = blob ? new File([blob], fileName, { type: 'image/png' }) : null;
+        if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({
+              files: [file],
+              title: `DSC — ${selectedDSC.holder_name}`,
+              text: summaryText,
+            });
+            toast.success('Opened share sheet');
+            return;
+          } catch (err) {
+            if (err?.name === 'AbortError') return; // user cancelled
+            // fall through to fallback
+          }
+        }
+        // Desktop fallback: download the image and open WhatsApp Web with text
+        if (blob) {
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.download = fileName;
+          link.href = url;
+          link.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+        try {
+          await navigator.clipboard?.writeText(summaryText);
+          toast.success('Image downloaded & details copied. Paste in WhatsApp ✓');
+        } catch {
+          toast.success('Image downloaded. Attach it in WhatsApp.');
+        }
+        window.open(`https://wa.me/?text=${encodeURIComponent(summaryText)}`, '_blank');
+        return;
+      }
+
+      if (method === 'email') {
+        if (blob) {
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.download = fileName;
+          link.href = url;
+          link.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+        window.location.href = `mailto:?subject=${encodeURIComponent('DSC Certificate Details — ' + selectedDSC.holder_name)}&body=${encodeURIComponent(summaryText)}`;
+        return;
+      }
+
+      if (method === 'download') {
+        const dataUrl = canvas.toDataURL('image/png');
+        const link = document.createElement('a');
+        link.download = fileName;
+        link.href = dataUrl;
+        link.click();
+        toast.success('Screenshot downloaded');
+        return;
+      }
+
+      if (method === 'copy') {
+        try {
+          await navigator.clipboard.writeText(summaryText);
+          toast.success('DSC details copied to clipboard');
+        } catch {
+          toast.error('Could not copy to clipboard');
+        }
+        return;
+      }
+    } catch (err) {
+      console.error('Share failed:', err);
+      toast.error('Failed to capture / share. Please try again.');
+    } finally {
+      setSharing(false);
     }
   };
 
@@ -389,12 +503,6 @@ export default function DSCRegister() {
 
   const openLogDialog = (dsc) => { setSelectedDSC(dsc); setLogDialogOpen(true); };
 
-  const getDSCInOutStatus = (dsc) => {
-    if (!dsc) return 'OUT';
-    if (dsc.current_status) return dsc.current_status;
-    return dsc.current_location === 'with_company' ? 'IN' : 'OUT';
-  };
-
   const handleMovementInModal = async () => {
     if (!editingDSC || !movementData.person_name) return;
     setLoading(true);
@@ -468,15 +576,6 @@ export default function DSCRegister() {
   const resetForm = () => {
     setFormData({ holder_name: '', dsc_type: '', dsc_password: '', associated_with: '', entity_type: 'firm', issue_date: '', expiry_date: '', notes: '' });
     setEditingDSC(null);
-  };
-
-  // ── Status ────────────────────────────────────────────────────────────────
-  const getDSCStatus = (expiryDate) => {
-    const daysLeft = Math.ceil((new Date(expiryDate) - new Date()) / (1000 * 60 * 60 * 24));
-    if (daysLeft < 0)   return { color: 'bg-red-500',    text: 'Expired',              textColor: 'text-red-600' };
-    if (daysLeft <= 7)  return { color: 'bg-orange-500', text: `${daysLeft}d left`,    textColor: 'text-orange-600' };
-    if (daysLeft <= 30) return { color: 'bg-yellow-500', text: `${daysLeft}d left`,    textColor: 'text-yellow-700' };
-    return               { color: 'bg-emerald-500',      text: `${daysLeft}d left`,    textColor: 'text-emerald-700' };
   };
 
   const filterBySearch = (dsc) => {
@@ -626,9 +725,6 @@ export default function DSCRegister() {
     borderColor: isDark ? 'rgba(255,255,255,0.07)' : borderColor,
   });
 
-  const tabHeaderClass = (bg, border, text) =>
-    `${bg} border-b ${border} px-5 py-3 flex items-center gap-2`;
-
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className={`min-h-screen ${isDark ? 'bg-[#0f172a]' : 'bg-slate-50'}`} data-testid="dsc-page">
@@ -682,7 +778,7 @@ export default function DSCRegister() {
             <div>
               <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1">Registers</p>
               <h1 className="text-2xl font-bold text-white leading-tight">DSC Register</h1>
-              <p className="text-white/60 text-sm mt-0.5">Manage digital signature certificates with IN/OUT tracking</p>
+              <p className="text-white/60 text-sm mt-0.5">Click any row to view full details & share via WhatsApp</p>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -690,7 +786,6 @@ export default function DSCRegister() {
               className="h-9 px-4 gap-2 rounded-xl text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 backdrop-blur-sm">
               <Printer className="h-4 w-4" />Print
             </Button>
-            {/* ── AI Duplicate Detector ── */}
             <Button
               variant="outline"
               onClick={handleDetectDscDuplicates}
@@ -711,91 +806,45 @@ export default function DSCRegister() {
               <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle className="font-outfit text-2xl">{editingDSC ? 'Edit DSC' : 'Add New DSC'}</DialogTitle>
-                  <DialogDescription>{editingDSC ? 'Update DSC details and track IN/OUT status.' : 'Fill in the details to add a new DSC certificate.'}</DialogDescription>
+                  <DialogDescription>{editingDSC ? 'Update DSC details and view movement history' : 'Add a new digital signature certificate'}</DialogDescription>
                 </DialogHeader>
-
                 {editingDSC ? (
                   <Tabs defaultValue="details" className="w-full">
-                    <TabsList className="grid w-full grid-cols-3">
+                    <TabsList className="grid w-full grid-cols-2">
                       <TabsTrigger value="details">Details</TabsTrigger>
-                      <TabsTrigger value="status">IN/OUT Status</TabsTrigger>
-                      <TabsTrigger value="history">History</TabsTrigger>
+                      <TabsTrigger value="history">Movement History ({editingDSC?.movement_log?.length || 0})</TabsTrigger>
                     </TabsList>
-
-                    <TabsContent value="details" className="mt-4">
+                    <TabsContent value="details">
                       <form onSubmit={handleSubmit} className="space-y-4">{renderFormBody(true)}</form>
                     </TabsContent>
-
-                    <TabsContent value="status" className="mt-4 space-y-4">
-                      <Card className={`p-4 ${getDSCInOutStatus(editingDSC) === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
-                        <p className="text-sm text-slate-600 mb-1">Current Status</p>
-                        <div className="flex items-center gap-2">
-                          {getDSCInOutStatus(editingDSC) === 'IN'
-                            ? <><ArrowDownCircle className="h-5 w-5 text-emerald-600" /><Badge className="bg-emerald-600 text-white">IN — Available</Badge></>
-                            : <><ArrowUpCircle className="h-5 w-5 text-red-600" /><Badge className="bg-red-600 text-white">OUT — Taken</Badge></>}
-                        </div>
-                      </Card>
-                      <Card className="p-4">
-                        <h4 className={`font-medium mb-3 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                          {getDSCInOutStatus(editingDSC) === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
-                        </h4>
-                        <form onSubmit={e => { e.preventDefault(); handleMovementInModal(); }} className="space-y-3">
-                          <div className="space-y-2">
-                            <Label htmlFor="inline_person">{getDSCInOutStatus(editingDSC) === 'IN' ? 'Taken By *' : 'Delivered By *'}</Label>
-                            <Input id="inline_person" placeholder="Enter person name" value={movementData.person_name}
-                              onChange={e => setMovementData({ ...movementData, person_name: e.target.value })} required />
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="inline_notes">Notes</Label>
-                            <Input id="inline_notes" placeholder="Optional notes" value={movementData.notes}
-                              onChange={e => setMovementData({ ...movementData, notes: e.target.value })} />
-                          </div>
-                          <Button type="submit" disabled={loading}
-                            className={getDSCInOutStatus(editingDSC) === 'IN' ? 'bg-red-600 hover:bg-red-700 w-full' : 'bg-emerald-600 hover:bg-emerald-700 w-full'}>
-                            {getDSCInOutStatus(editingDSC) === 'IN'
-                              ? <><ArrowUpCircle className="h-4 w-4 mr-2" />Mark as OUT</>
-                              : <><ArrowDownCircle className="h-4 w-4 mr-2" />Mark as IN</>}
-                          </Button>
-                        </form>
-                      </Card>
-                    </TabsContent>
-
-                    <TabsContent value="history" className="mt-4">
-                      <div className="space-y-3 max-h-80 overflow-y-auto">
+                    <TabsContent value="history">
+                      <div className="space-y-3 max-h-[60vh] overflow-y-auto">
                         {editingDSC?.movement_log?.length > 0
-                          ? editingDSC.movement_log.slice().reverse().map((movement, index) => {
-                              const mKey   = movement.id || movement.timestamp;
-                              const isEdit = editingMovement === mKey;
+                          ? [...editingDSC.movement_log].reverse().map((movement, idx) => {
+                              const isEditing = editingMovement === (movement.id || movement.timestamp);
                               return (
-                                <Card key={index} className={`p-3 ${movement.movement_type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
-                                  {isEdit ? (
+                                <Card key={movement.id || idx} className="p-3">
+                                  {isEditing ? (
                                     <div className="space-y-3">
-                                      <div className="flex items-center gap-3">
-                                        <Label className="text-sm font-medium">Status:</Label>
-                                        <div className="flex gap-2">
-                                          <Button type="button" size="sm"
-                                            variant={editMovementData.movement_type === 'IN' ? 'default' : 'outline'}
-                                            className={editMovementData.movement_type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
-                                            onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'IN' })}>
-                                            <ArrowDownCircle className="h-4 w-4 mr-1" />IN
-                                          </Button>
-                                          <Button type="button" size="sm"
-                                            variant={editMovementData.movement_type === 'OUT' ? 'default' : 'outline'}
-                                            className={editMovementData.movement_type === 'OUT' ? 'bg-red-600 hover:bg-red-700' : ''}
-                                            onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'OUT' })}>
-                                            <ArrowUpCircle className="h-4 w-4 mr-1" />OUT
-                                          </Button>
+                                      <div className="grid grid-cols-2 gap-3">
+                                        <div className="space-y-1">
+                                          <Label className="text-xs">Movement Type</Label>
+                                          <Select value={editMovementData.movement_type} onValueChange={v => setEditMovementData({ ...editMovementData, movement_type: v })}>
+                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value="IN">IN</SelectItem>
+                                              <SelectItem value="OUT">OUT</SelectItem>
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                        <div className="space-y-1">
+                                          <Label className="text-xs">Person Name</Label>
+                                          <Input value={editMovementData.person_name} onChange={e => setEditMovementData({ ...editMovementData, person_name: e.target.value })} />
                                         </div>
                                       </div>
-                                      <div className="space-y-2">
-                                        <Label className="text-xs">Person Name</Label>
-                                        <Input size="sm" value={editMovementData.person_name}
-                                          onChange={e => setEditMovementData({ ...editMovementData, person_name: e.target.value })} placeholder="Person name" />
-                                      </div>
-                                      <div className="space-y-2">
+                                      <div className="space-y-1">
                                         <Label className="text-xs">Notes</Label>
-                                        <Input size="sm" value={editMovementData.notes}
-                                          onChange={e => setEditMovementData({ ...editMovementData, notes: e.target.value })} placeholder="Notes (optional)" />
+                                        <Textarea value={editMovementData.notes} onChange={e => setEditMovementData({ ...editMovementData, notes: e.target.value })} rows={2} />
                                       </div>
                                       <div className="flex gap-2 justify-end">
                                         <Button type="button" size="sm" variant="outline" onClick={() => setEditingMovement(null)}>Cancel</Button>
@@ -1110,26 +1159,41 @@ export default function DSCRegister() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Log Dialog ── */}
+      {/* ── DSC Details / Share Dialog (opens on row click) ── */}
       <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
         <DialogContent className="max-w-xl p-0 border-none bg-transparent shadow-none overflow-visible">
+          {/* Hidden a11y title required by Radix Dialog */}
+          <DialogHeader className="sr-only">
+            <DialogTitle>DSC Details — {selectedDSC?.holder_name}</DialogTitle>
+            <DialogDescription>Full details of the selected DSC. Use the buttons to share via WhatsApp, email, or download the screenshot.</DialogDescription>
+          </DialogHeader>
+
           <div ref={shareAreaRef} className={`p-6 rounded-3xl border shadow-2xl ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
             <div className="flex justify-between items-start mb-6">
               <div>
                 <Badge className="mb-2 bg-indigo-500/10 text-indigo-500 border-none px-2 py-0.5 text-[10px] uppercase tracking-widest font-bold">Official DSC Record</Badge>
-                <DialogTitle className="text-3xl font-black tracking-tight flex items-center gap-2">
-                  <Key className="h-7 w-7 text-indigo-500" /> Details
-                </DialogTitle>
+                <h2 className="text-3xl font-black tracking-tight flex items-center gap-2">
+                  <Key className="h-7 w-7 text-indigo-500" /> DSC Details
+                </h2>
                 <p className="text-[10px] font-mono opacity-40 mt-1 uppercase">UID: {selectedDSC?.id}</p>
               </div>
               <div className="flex gap-2 print:hidden">
-                <Button size="icon" variant="outline" onClick={() => handleShare('whatsapp')} className="rounded-full h-9 w-9 text-emerald-500 border-emerald-500/20 hover:bg-emerald-50"><MessageCircle className="h-4 w-4" /></Button>
-                <Button size="icon" variant="outline" onClick={() => handleShare('email')} className="rounded-full h-9 w-9 text-blue-500 border-blue-500/20 hover:bg-blue-50"><Mail className="h-4 w-4" /></Button>
-                <Button size="icon" variant="outline" onClick={() => handleShare('download')} className="rounded-full h-9 w-9 text-slate-500 border-slate-500/20 hover:bg-slate-50"><Download className="h-4 w-4" /></Button>
+                <Button size="icon" variant="outline" disabled={sharing} onClick={() => handleShare('whatsapp')} title="Share on WhatsApp" className="rounded-full h-9 w-9 text-emerald-500 border-emerald-500/20 hover:bg-emerald-50">
+                  {sharing ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
+                </Button>
+                <Button size="icon" variant="outline" disabled={sharing} onClick={() => handleShare('email')} title="Share via Email" className="rounded-full h-9 w-9 text-blue-500 border-blue-500/20 hover:bg-blue-50">
+                  <Mail className="h-4 w-4" />
+                </Button>
+                <Button size="icon" variant="outline" disabled={sharing} onClick={() => handleShare('download')} title="Download screenshot" className="rounded-full h-9 w-9 text-slate-500 border-slate-500/20 hover:bg-slate-50">
+                  <Download className="h-4 w-4" />
+                </Button>
+                <Button size="icon" variant="outline" disabled={sharing} onClick={() => handleShare('copy')} title="Copy details to clipboard" className="rounded-full h-9 w-9 text-indigo-500 border-indigo-500/20 hover:bg-indigo-50">
+                  <Share2 className="h-4 w-4" />
+                </Button>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-y-6 gap-x-8 mb-8">
+            <div className="grid grid-cols-2 gap-y-6 gap-x-8 mb-6">
               <div className="space-y-1">
                 <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-tighter">Holder Name</Label>
                 <p className="text-lg font-bold leading-tight">{selectedDSC?.holder_name}</p>
@@ -1143,8 +1207,18 @@ export default function DSCRegister() {
                 <p className="font-semibold text-sm">{selectedDSC?.dsc_type || 'Standard'}</p>
               </div>
               <div className="space-y-1 text-right">
-                <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-tighter">Associated Firm</Label>
+                <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-tighter">Associated With</Label>
                 <p className="font-semibold text-sm truncate">{selectedDSC?.associated_with || 'N/A'}</p>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-tighter">Entity Type</Label>
+                <p className="font-semibold text-sm capitalize">{selectedDSC?.entity_type || 'N/A'}</p>
+              </div>
+              <div className="space-y-1 text-right">
+                <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-tighter">Issue Date</Label>
+                <p className="font-semibold text-sm">
+                  {selectedDSC?.issue_date && format(new Date(selectedDSC.issue_date), 'dd MMM, yyyy')}
+                </p>
               </div>
               <div className="space-y-1">
                 <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-tighter">Security Password</Label>
@@ -1156,6 +1230,12 @@ export default function DSCRegister() {
                   {selectedDSC?.expiry_date && format(new Date(selectedDSC.expiry_date), 'dd MMM, yyyy')}
                 </p>
               </div>
+              {selectedDSC?.notes && (
+                <div className="space-y-1 col-span-2">
+                  <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-tighter">Notes</Label>
+                  <p className="text-sm">{selectedDSC.notes}</p>
+                </div>
+              )}
             </div>
 
             <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
@@ -1173,8 +1253,8 @@ export default function DSCRegister() {
                 ) : <p className="text-center py-2 text-slate-400 italic text-[11px]">No history recorded</p>}
               </div>
             </div>
-            <div className="mt-8 pt-4 border-t border-slate-200/50 dark:border-slate-700/50 text-center">
-              <p className="text-[9px] uppercase tracking-[0.3em] font-bold opacity-20">TaskOsphere Command Center</p>
+            <div className="mt-6 pt-4 border-t border-slate-200/50 dark:border-slate-700/50 text-center">
+              <p className="text-[9px] uppercase tracking-[0.3em] font-bold opacity-30">TaskOsphere Command Center · Generated {format(new Date(), 'dd MMM yyyy, hh:mm a')}</p>
             </div>
           </div>
         </DialogContent>
