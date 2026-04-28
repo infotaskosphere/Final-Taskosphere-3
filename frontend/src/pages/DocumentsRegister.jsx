@@ -133,54 +133,39 @@ function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, 
 
             return (
               <tr key={doc.id}
-                onClick={() => onViewLog(doc)}
+                onClick={() => openLogDialog(doc)}
                 className={`transition-colors cursor-pointer ${highlight} ${isSelected ? (isDark ? 'ring-1 ring-inset ring-indigo-500' : 'ring-1 ring-inset ring-indigo-300') : ''} ${isDark ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50/80'}`}
                 data-testid={`document-row-${doc.id}`}>
 
-                <td className="px-2 py-2.5">
+                <td className="px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
                   <button onClick={() => onToggleSelect(doc.id)} className="flex items-center justify-center">
                     {isSelected ? <CheckSquare className="h-4 w-4 text-indigo-500" /> : <Square className="h-4 w-4 text-slate-400" />}
                   </button>
                 </td>
 
                 <td className={`px-2 py-2.5 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{index + 1}</td>
-
                 <td className={`px-3 py-2.5 text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`} title={doc.holder_name}>{doc.holder_name}</td>
-
                 <td className={`px-2 py-2.5 text-xs truncate ${isDark ? 'text-slate-300' : 'text-slate-600'}`} title={doc.document_type || ''}>{doc.document_type || '—'}</td>
-
                 <td className={`px-2 py-2.5 text-xs truncate ${isDark ? 'text-slate-300' : 'text-slate-600'}`} title={doc.associated_with || ''}>{doc.associated_with || '—'}</td>
 
                 <td className="px-2 py-2.5">
                   {lastMove ? (
-                    <div className="flex flex-col gap-0.5">
-                      <div className="flex items-center gap-1">
-                        <Badge className={`text-[9px] px-1 py-0 font-semibold leading-tight ${lastMove.movement_type === 'IN' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                          {lastMove.movement_type}
-                        </Badge>
-                        <span className={`text-[11px] font-medium truncate ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{lastMove.person_name}</span>
-                      </div>
-                      <span className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        {format(new Date(lastMove.timestamp), 'dd MMM yy')}
-                      </span>
-                    </div>
+                    <Badge className={`text-[9px] px-1 py-0 font-semibold leading-tight ${lastMove.movement_type === 'IN' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                      {lastMove.movement_type} - {lastMove.person_name}
+                    </Badge>
                   ) : (
                     <span className="text-[11px] text-slate-400 italic">No movement</span>
                   )}
                 </td>
 
-                <td className={`px-2 py-2.5 transition-colors group relative ${isDark ? 'text-slate-300' : 'text-slate-600'} ${doc.notes ? 'cursor-pointer' : 'cursor-default'}`}
-                  onClick={() => doc.notes && onShowFullNotes(doc)}>
-                  {doc.notes
-                    ? <div className="text-xs truncate pr-4" title={doc.notes}>{doc.notes}</div>
-                    : <span className="text-xs text-slate-400 italic">—</span>
-                  }
+                <td className={`px-2 py-2.5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                  {doc.notes ? <div className="text-xs truncate pr-4" title={doc.notes}>{doc.notes}</div> : <span className="text-xs text-slate-400 italic">—</span>}
                 </td>
 
-                <td className="px-1 py-2.5 text-right">
+                <td className="px-1 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                   <div className="flex justify-end gap-0">
-                    <Button variant="ghost" size="sm" onClick={() => onViewLog(doc)} className={`h-7 w-7 p-0 ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`} title="View Log">
-                      <History className="h-3.5 w-3.5 text-slate-500" />
+                    <Button variant="ghost" size="sm" onClick={() => openLogDialog(doc)} className={`h-7 w-7 p-0 ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`} title="View Detail">
+                      <Share2 className="h-3.5 w-3.5 text-emerald-500" />
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => onMovement(doc, type === 'IN' ? 'OUT' : 'IN')}
                       className={`h-7 w-7 p-0 ${type === 'IN' ? 'hover:bg-red-50 text-red-500' : 'hover:bg-emerald-50 text-emerald-600'}`}
