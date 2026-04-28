@@ -250,6 +250,8 @@ export default function DocumentRegister() {
   const [dupGroups,     setDupGroups]     = useState([]);
   const [detectingDups, setDetectingDups] = useState(false);
 
+  const shareAreaRef = useRef(null);
+
   const [formData, setFormData] = useState({
     holder_name: '', document_type: 'Agreement', document_password: '',
     associated_with: '', entity_type: 'firm', issue_date: '', notes: '',
@@ -301,6 +303,28 @@ export default function DocumentRegister() {
   };
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
+  const handleShare = async (method) => {
+    if (!shareAreaRef.current) return;
+    const canvas = await html2canvas(shareAreaRef.current, { 
+      backgroundColor: isDark? '#0f172a' : '#ffffff',
+      scale: 2 
+    });
+    const dataUrl = canvas.toDataURL('image/png');
+    const name = selectedDocument?.holder_name || 'Document';
+    const summaryText = `${name} Details Attached.`;
+
+    if (method === 'whatsapp') {
+      window.open(`https://wa.me/?text=${encodeURIComponent(summaryText)}`, '_blank');
+    } else if (method === 'email') {
+      window.location.href = `mailto:?subject=Document Details&body=${encodeURIComponent(summaryText)}`;
+    } else if (method === 'download') {
+      const link = document.createElement('a');
+      link.download = `${name}_Details.png`;
+      link.href = dataUrl;
+      link.click();
+    }
+  };
+  
   const fetchDocuments = async () => {
     setLoading(true);
     try {
