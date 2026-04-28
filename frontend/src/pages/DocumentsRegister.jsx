@@ -18,6 +18,7 @@ import {
   History, Search, ArrowUpDown, Printer,
   CheckSquare, Square, MinusSquare, XCircle,
   FileText, Clock, Sparkles, Loader2,
+  Mail, MessageCircle, Download, Share2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { detectDocumentDuplicates } from '@/lib/aiDuplicateEngine';
@@ -1118,59 +1119,116 @@ export default function DocumentRegister() {
 
       {/* ── Log Dialog ── */}
      <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
-        <DialogContent className="max-w-xl p-0 border-none bg-transparent shadow-none">
-          <div ref={shareAreaRef} className={`p-6 rounded-3xl border shadow-2xl ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
-            <div className="flex justify-between items-start mb-6">
+        <DialogContent className="max-w-md p-0 border-none bg-transparent shadow-none overflow-visible">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Document Details — {selectedDocument?.holder_name}</DialogTitle>
+          </DialogHeader>
+
+          <div ref={shareAreaRef} className={`rounded-2xl overflow-hidden border shadow-2xl ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+            {/* Header strip — dark navy with icon tile */}
+            <div className="relative px-5 py-4" style={{ background: 'linear-gradient(135deg,#0f1f4d,#1e3a8a)' }}>
+              <div className="flex items-center gap-3">
+                <div className="h-11 w-11 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur">
+                  <FileText className="h-5 w-5 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold tracking-[0.18em] text-white/60 uppercase">Document Details</p>
+                  <h2 className="text-xl font-bold text-white truncate">{selectedDocument?.holder_name || '—'}</h2>
+                </div>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 space-y-4">
+              {/* Status pills */}
+              <div className="flex flex-wrap gap-2">
+                <span className={`text-[11px] font-semibold px-3 py-1 rounded-full ${getDocumentInOutStatus(selectedDocument) === 'IN' ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-600'}`}>
+                  {getDocumentInOutStatus(selectedDocument) === 'IN' ? 'available' : 'out'}
+                </span>
+                {selectedDocument?.document_type && (
+                  <span className="text-[11px] font-semibold px-3 py-1 rounded-full bg-rose-50 text-rose-600 capitalize">
+                    {selectedDocument.document_type}
+                  </span>
+                )}
+                {selectedDocument?.status && (
+                  <span className="text-[11px] font-semibold px-3 py-1 rounded-full bg-indigo-50 text-indigo-600 capitalize">
+                    {selectedDocument.status}
+                  </span>
+                )}
+              </div>
+
+              {/* Description / Notes */}
               <div>
-                <Badge className="mb-2 bg-emerald-500/10 text-emerald-500 border-none px-2 py-0.5 text-[10px] uppercase tracking-widest font-bold">Security Document Log</Badge>
-                <DialogTitle className="text-3xl font-black tracking-tight flex items-center gap-2">
-                  <FileText className="h-7 w-7 text-emerald-500" /> Details
-                </DialogTitle>
+                <p className="text-[10px] font-bold tracking-[0.15em] text-slate-400 uppercase mb-1.5">Description</p>
+                <div className={`rounded-lg px-3 py-2.5 text-sm font-semibold ${isDark ? 'bg-slate-800/60' : 'bg-slate-50'}`}>
+                  {selectedDocument?.notes || 'No additional notes provided.'}
+                </div>
               </div>
-              <div className="flex gap-2">
-                <Button size="icon" variant="outline" onClick={() => handleShare('whatsapp')} className="rounded-full h-9 w-9 text-emerald-500 border-emerald-500/20"><MessageCircle className="h-4 w-4" /></Button>
-                <Button size="icon" variant="outline" onClick={() => handleShare('email')} className="rounded-full h-9 w-9 text-blue-500 border-blue-500/20"><Mail className="h-4 w-4" /></Button>
-                <Button size="icon" variant="outline" onClick={() => handleShare('download')} className="rounded-full h-9 w-9 text-slate-500 border-slate-500/20"><Download className="h-4 w-4" /></Button>
+
+              {/* Meta rows with icons */}
+              <div className="space-y-3 pt-1">
+                <div className="flex items-start gap-3">
+                  <div className={`h-7 w-7 rounded-md flex items-center justify-center mt-0.5 ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                    <FileText className="h-3.5 w-3.5 text-slate-500" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-[10px] font-bold tracking-[0.15em] text-slate-400 uppercase">Document Holder</p>
+                    <p className="text-sm font-semibold">{selectedDocument?.holder_name || '—'}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className={`h-7 w-7 rounded-md flex items-center justify-center mt-0.5 ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                    <FileText className="h-3.5 w-3.5 text-slate-500" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-[10px] font-bold tracking-[0.15em] text-slate-400 uppercase">Reference / Password</p>
+                    <p className="text-sm font-mono">{selectedDocument?.document_password || 'NONE'}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className={`h-7 w-7 rounded-md flex items-center justify-center mt-0.5 ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                    <Clock className="h-3.5 w-3.5 text-slate-500" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-[10px] font-bold tracking-[0.15em] text-slate-400 uppercase">Issue Date</p>
+                    <p className="text-sm font-semibold">{selectedDocument?.issue_date ? format(new Date(selectedDocument.issue_date), 'dd MMM, yyyy') : '—'}</p>
+                  </div>
+                </div>
+                {selectedDocument?.movement_log?.length > 0 && (
+                  <div className="flex items-start gap-3">
+                    <div className={`h-7 w-7 rounded-md flex items-center justify-center mt-0.5 ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                      <History className="h-3.5 w-3.5 text-slate-500" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-[10px] font-bold tracking-[0.15em] text-slate-400 uppercase">Last Movement</p>
+                      {(() => {
+                        const m = selectedDocument.movement_log[selectedDocument.movement_log.length - 1];
+                        return (
+                          <p className="text-sm font-semibold">
+                            <span className={m.movement_type === 'IN' ? 'text-emerald-600' : 'text-red-500'}>{m.movement_type}</span>
+                            {' '}· {m.person_name} · {format(new Date(m.timestamp), 'dd MMM, hh:mm a')}
+                          </p>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-y-6 gap-x-8 mb-8">
-              <div className="col-span-2 space-y-1">
-                <Label className="text-[10px] uppercase font-bold text-slate-400">Document Holder</Label>
-                <p className="text-xl font-bold leading-tight">{selectedDocument?.holder_name}</p>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-[10px] uppercase font-bold text-slate-400">Type</Label>
-                <p className="font-semibold text-sm">{selectedDocument?.document_type}</p>
-              </div>
-              <div className="space-y-1 text-right">
-                <Label className="text-[10px] uppercase font-bold text-slate-400">Status</Label>
-                <div><Badge className={`font-bold ${getDocumentInOutStatus(selectedDocument) === 'IN' ? 'bg-emerald-500' : 'bg-red-500'}`}>{getDocumentInOutStatus(selectedDocument)}</Badge></div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-[10px] uppercase font-bold text-slate-400">Reference / Password</Label>
-                <p className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">{selectedDocument?.document_password || 'NONE'}</p>
-              </div>
-               <div className="space-y-1 text-right">
-                <Label className="text-[10px] uppercase font-bold text-slate-400">Issue Date</Label>
-                <p className="text-sm font-bold">{selectedDocument?.issue_date && format(new Date(selectedDocument.issue_date), 'dd MMM, yyyy')}</p>
-              </div>
-            </div>
-
-            <div className={`p-4 rounded-2xl border mb-4 ${isDark ? 'bg-slate-800/50 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-100 text-slate-600'} text-xs italic`}>
-              "{selectedDocument?.notes || 'No additional notes provided for this record.'}"
-            </div>
-
-            <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
-              <h4 className="text-[10px] uppercase font-black text-slate-400 mb-3 tracking-widest flex items-center gap-2"><History className="h-3 w-3" /> Movement History</h4>
-              <div className="space-y-2">
-                {selectedDocument?.movement_log?.slice(-3).reverse().map((m, i) => (
-                   <div key={i} className="flex justify-between items-center text-[11px] border-b border-slate-200/50 dark:border-slate-700/50 pb-2 last:border-0 last:pb-0">
-                      <span className="font-medium"><b className={m.movement_type === 'IN' ? 'text-emerald-500' : 'text-red-500'}>{m.movement_type}</b> - {m.person_name}</span>
-                      <span className="opacity-50">{format(new Date(m.timestamp), 'dd MMM')}</span>
-                   </div>
-                ))}
-              </div>
+            {/* Footer action buttons */}
+            <div className={`px-5 py-3 border-t flex gap-2 print:hidden ${isDark ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-slate-50/50'}`}>
+              <Button size="sm" variant="outline" onClick={() => handleShare('whatsapp')} className="flex-1 gap-1.5 text-emerald-600 border-emerald-200 hover:bg-emerald-50">
+                <MessageCircle className="h-3.5 w-3.5" />
+                WhatsApp
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => handleShare('download')} className="flex-1 gap-1.5 text-slate-700 border-slate-200 hover:bg-slate-100">
+                <Download className="h-3.5 w-3.5" />
+                Screenshot
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => handleShare('email')} className="gap-1.5 text-blue-600 border-blue-200 hover:bg-blue-50">
+                <Mail className="h-3.5 w-3.5" />
+              </Button>
             </div>
           </div>
         </DialogContent>
