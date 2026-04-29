@@ -294,9 +294,9 @@ function totalsHTML(inv) {
   if ((inv.advance_received||inv.amount_paid||0) > 0) {
     html += '<tr><td class="lbl grn">\u2212 Advance Received</td><td class="val grn">\u2212 ' + fmtC(inv.advance_received||inv.amount_paid) + '</td></tr>';
   }
-  if ((inv.amount_due||0) > 0) {
-    html += '<tr><td class="lbl due">Balance Due</td><td class="val due">' + fmtC(inv.amount_due) + '</td></tr>';
-  }
+  // Always show Balance Due (even if equal to grand total or zero) so the
+  // payable amount after deducting any advance is always visible on the invoice.
+  html += '<tr><td class="lbl due">Balance Due</td><td class="val due">' + fmtC(inv.amount_due||0) + '</td></tr>';
   html += '</table>';
   return html;
 }
@@ -1134,7 +1134,7 @@ function tplTallyTheme(inv, company, theme) {
     + '<div class="tot-grand"><span>Total</span><span>' + fmtC(inv.grand_total) + '</span></div>'
     + '<hr class="solid"/>'
     + ((inv.advance_received||inv.amount_paid||0) > 0 ? '<div class="tot-row" style="color:#059669"><span>\u2212 Advance Received</span><span>\u2212 ' + fmtC(inv.advance_received||inv.amount_paid) + '</span></div>' : '')
-    + ((inv.amount_due||0) > 0 ? '<div class="tot-row" style="font-weight:bold;color:#C62828"><span>Balance Due at Delivery</span><span>' + fmtC(inv.amount_due) + '</span></div>' : '')
+    + '<div class="tot-row" style="font-weight:bold;color:#C62828"><span>Balance Due at Delivery</span><span>' + fmtC(inv.amount_due||0) + '</span></div>'
     + '</div>'
     + '</div>'
     + qrBlock
@@ -1196,7 +1196,7 @@ function tplThermal1(inv, company, theme) {
     + '<table><tr class="gt"><td><strong>TOTAL</strong></td><td class="r"><strong>' + fmtC(inv.grand_total) + '</strong></td></tr></table>'
     + '<hr class="s2"/>'
     + ((inv.amount_paid||0) > 0 ? '<table><tr><td>Received</td><td class="r">' + fmtC(inv.amount_paid) + '</td></tr></table>' : '')
-    + (pendingAmt > 0 ? '<table><tr><td><strong>Balance Due</strong></td><td class="r"><strong>' + fmtC(pendingAmt) + '</strong></td></tr></table>' : '')
+    + '<table><tr><td><strong>Balance Due</strong></td><td class="r"><strong>' + fmtC(pendingAmt) + '</strong></td></tr></table>'
     + '<hr class="s"/>'
     + '<div style="font-size:10px;text-align:center;font-style:italic">' + amountToWords(inv.grand_total||0) + '</div>'
     + (qr ? '<hr class="s"/><div class="c">' + qr + '</div>' : '')
