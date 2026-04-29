@@ -21,6 +21,7 @@ import {
   Copy, ExternalLink, CheckSquare, Square, MinusSquare,
   Shield, Download, UserCheck, AlertCircle, Sparkles, Loader2,
   ArrowLeftRight, RefreshCw, FileSpreadsheet, ExternalLink as ExternalLinkIcon,
+  IndianRupee, Save as SaveIcon,
 } from 'lucide-react';
 import { detectClientDuplicates } from '@/lib/aiDuplicateEngine';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
@@ -1332,7 +1333,19 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
   const [gstDeleting,    setGstDeleting]    = React.useState(null);
   const [gstDownloading, setGstDownloading] = React.useState(null); // sessionId + format
 
-  React.useEffect(() => { setActiveTab('details'); setClientInvoices([]); setGstSessions([]); }, [selectedClient?.id]);
+  // Govt Fees tab — compliance items flagged as govt_fees, joined per client
+  const [govtFees,         setGovtFees]         = React.useState([]);
+  const [govtFeesLoading,  setGovtFeesLoading]  = React.useState(false);
+  const [govtFeesSavingId, setGovtFeesSavingId] = React.useState(null);
+  const [govtFeesDraft,    setGovtFeesDraft]    = React.useState({}); // { assignment_id: { amount, notes } }
+
+  React.useEffect(() => {
+    setActiveTab('details');
+    setClientInvoices([]);
+    setGstSessions([]);
+    setGovtFees([]);
+    setGovtFeesDraft({});
+  }, [selectedClient?.id]);
 
   React.useEffect(() => {
     if (activeTab !== 'invoices' || !selectedClient) return;
@@ -1361,6 +1374,48 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
       .catch(() => setGstSessions([]))
       .finally(() => setGstLoading(false));
   }, [activeTab, selectedClient]);
+
+  // Fetch Govt-Fees compliance assignments for this client
+  React.useEffect(() => {
+    if (activeTab !== 'govtfees' || !selectedClient?.id) return;
+    setGovtFeesLoading(true);
+    api.get(`/compliance/by-client/${selectedClient.id}`, { params: { govt_fees: true } })
+      .then(r => {
+        const items = r.data?.items || [];
+        setGovtFees(items);
+        const d = {};
+        items.forEach(it => {
+          d[it.assignment_id] = {
+            amount: it.govt_fees_amount ?? 0,
+            notes:  it.govt_fees_notes  ?? '',
+          };
+        });
+        setGovtFeesDraft(d);
+      })
+      .catch(() => setGovtFees([]))
+      .finally(() => setGovtFeesLoading(false));
+  }, [activeTab, selectedClient]);
+
+  const saveGovtFee = async (item) => {
+    const draft = govtFeesDraft[item.assignment_id] || {};
+    setGovtFeesSavingId(item.assignment_id);
+    try {
+      await api.patch(
+        `/compliance/${item.compliance_id}/assignments/${item.assignment_id}/govt-fee`,
+        { govt_fees_amount: parseFloat(draft.amount) || 0, govt_fees_notes: draft.notes || '' }
+      );
+      setGovtFees(prev => prev.map(x =>
+        x.assignment_id === item.assignment_id
+          ? { ...x, govt_fees_amount: parseFloat(draft.amount) || 0, govt_fees_notes: draft.notes || '' }
+          : x
+      ));
+      toast.success('Government fee saved');
+    } catch {
+      toast.error('Failed to save fee');
+    } finally {
+      setGovtFeesSavingId(null);
+    }
+  };
 
   const handleDeleteGstSession = async (sessionId) => {
     if (!window.confirm('Delete this reconciliation record?')) return;
@@ -1437,6 +1492,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
             { key: 'details',        label: 'Details',     icon: <User className="h-3.5 w-3.5" /> },
             { key: 'invoices',       label: 'Invoices',    icon: <FileText className="h-3.5 w-3.5" /> },
             { key: 'reconciliation', label: 'GST Recon',   icon: <ArrowLeftRight className="h-3.5 w-3.5" /> },
+            { key: 'govtfees',       label: 'Govt Fees',   icon: <IndianRupee className="h-3.5 w-3.5" /> },
           ].map(tab => (
             <button
               key={tab.key}
@@ -1457,6 +1513,11 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
               {tab.key === 'reconciliation' && gstSessions.length > 0 && (
                 <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ background: activeTab === 'reconciliation' ? 'rgba(255,255,255,0.25)' : '#e2e8f0', color: activeTab === 'reconciliation' ? '#fff' : '#64748b' }}>
                   {gstSessions.length}
+                </span>
+              )}
+              {tab.key === 'govtfees' && govtFees.length > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ background: activeTab === 'govtfees' ? 'rgba(255,255,255,0.25)' : '#e2e8f0', color: activeTab === 'govtfees' ? '#fff' : '#64748b' }}>
+                  {govtFees.length}
                 </span>
               )}
             </button>
@@ -1670,6 +1731,83 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                       </div>
                     );
                   })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ════════════════ GOVT FEES TAB ════════════════ */}
+          {activeTab === 'govtfees' && (
+            <div className="p-6">
+              {govtFeesLoading ? (
+                <div className="py-16 text-center text-sm text-slate-500">Loading…</div>
+              ) : govtFees.length === 0 ? (
+                <div className="py-16 text-center">
+                  <IndianRupee className="h-10 w-10 mx-auto mb-3 text-slate-300" />
+                  <p className={`text-sm font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                    No government-fee compliance yet
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    In Compliance Tracker, mark a compliance "Government Fees: Yes" and assign it to this client.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className={`grid grid-cols-12 gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    <div className="col-span-4">Compliance</div>
+                    <div className="col-span-2">FY Year</div>
+                    <div className="col-span-2">Due Date</div>
+                    <div className="col-span-2">Govt Fee (₹)</div>
+                    <div className="col-span-2 text-right">Action</div>
+                  </div>
+                  {govtFees.map(item => {
+                    const draft = govtFeesDraft[item.assignment_id] || { amount: 0, notes: '' };
+                    const dirty = (parseFloat(draft.amount) || 0) !== (item.govt_fees_amount || 0)
+                               || (draft.notes || '') !== (item.govt_fees_notes || '');
+                    return (
+                      <div key={item.assignment_id}
+                        className={`grid grid-cols-12 gap-2 items-center px-3 py-2.5 rounded-xl border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-white border-slate-200'}`}>
+                        <div className="col-span-4">
+                          <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{item.name}</p>
+                          <p className="text-[11px] text-slate-500">{item.category} · {item.frequency}{item.period_label ? ` · ${item.period_label}` : ''}</p>
+                        </div>
+                        <div className="col-span-2 text-xs text-slate-600">{item.fy_year || '—'}</div>
+                        <div className="col-span-2 text-xs text-slate-600">
+                          {item.due_date ? format(new Date(item.due_date), 'MMM d, yyyy') : '—'}
+                        </div>
+                        <div className="col-span-2">
+                          <input
+                            type="number" min="0" step="0.01"
+                            value={draft.amount}
+                            onChange={e => setGovtFeesDraft(prev => ({
+                              ...prev,
+                              [item.assignment_id]: { ...prev[item.assignment_id], amount: e.target.value },
+                            }))}
+                            className={`w-full px-2.5 py-1.5 text-sm rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100' : 'bg-white border-slate-300'}`}
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div className="col-span-2 flex justify-end">
+                          <button
+                            onClick={() => saveGovtFee(item)}
+                            disabled={!dirty || govtFeesSavingId === item.assignment_id}
+                            className="inline-flex items-center gap-1 h-8 px-3 rounded-lg text-xs font-bold text-white disabled:opacity-40"
+                            style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                            <SaveIcon className="h-3.5 w-3.5" />
+                            {govtFeesSavingId === item.assignment_id ? 'Saving…' : 'Save'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className={`mt-4 flex justify-end px-3 py-3 rounded-xl border ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                    <p className="text-sm">
+                      <span className="text-slate-500 mr-2">Total recorded:</span>
+                      <span className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                        ₹ {govtFees.reduce((s, i) => s + (i.govt_fees_amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
