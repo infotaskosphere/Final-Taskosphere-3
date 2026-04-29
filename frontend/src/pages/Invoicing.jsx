@@ -65,9 +65,43 @@ const STATUS_META = {
 // ─── Pure Module-Level Helpers ────────────────────────────────────────────────
 const fmt = (n) => new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n ?? 0);
 const fmtC = (n) => `₹${fmt(n)}`;
+
+// ── Robust money helpers ────────────────────────────────────────────────────
+// Always derive the outstanding amount on the client. Never trust a stale
+// `amount_due` field coming from the backend — recompute as
+// grand_total − (advance + payments). amount_paid already includes the
+// advance (see save / update flow).
+const num = (v) => {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : 0;
+};
+const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+const calcPaid = (inv) => {
+  if (!inv) return 0;
+  // amount_paid is the canonical "received so far" field once the form has
+  // run; fall back to advance_received for legacy / partially-migrated rows.
+  const paid = num(inv.amount_paid);
+  const advance = num(inv.advance_received);
+  return Math.max(paid, advance);
+};
+const calcDue = (inv) => {
+  if (!inv) return 0;
+  const grand = num(inv.grand_total);
+  return round2(Math.max(0, grand - calcPaid(inv)));
+};
+const isFullyPaid = (inv) => {
+  if (!inv) return false;
+  if (inv.status === 'paid') return true;
+  return num(inv.grand_total) > 0 && calcDue(inv) <= 0.009;
+};
+const isPartiallyPaid = (inv) => {
+  if (!inv) return false;
+  return calcPaid(inv) > 0.009 && calcDue(inv) > 0.009;
+};
+
 const getStatusMeta = (inv) => {
   if (inv.status && STATUS_META[inv.status]) return STATUS_META[inv.status];
-  if (inv.amount_due > 0 && inv.due_date && differenceInDays(parseISO(inv.due_date), new Date()) < 0)
+  if (calcDue(inv) > 0 && inv.due_date && differenceInDays(parseISO(inv.due_date), new Date()) < 0)
     return STATUS_META.overdue;
   return STATUS_META.draft;
 };
@@ -161,7 +195,7 @@ const getCompanyStripColor = (companyId, companies = []) => {
 // orange = outstanding 15-30 days since invoice date
 // red = outstanding > 30 days since invoice date OR past due date
 const getInvoiceStripe = (inv) => {
-  if (inv.status === 'paid' || inv.amount_due <= 0) return { color: '#1FAF5A', label: 'Paid' };
+  if (inv.status === 'paid' || calcDue(inv) <= 0) return { color: '#1FAF5A', label: 'Paid' };
   if (inv.status === 'cancelled') return { color: '#94A3B8', label: 'Cancelled' };
   const today = new Date();
   const invoiceDate = inv.invoice_date ? new Date(inv.invoice_date) : null;
@@ -4135,12 +4169,12 @@ function Invoicing() {
       return true;
     });
     const total_revenue = base.reduce((s, i) => s + (i.grand_total || 0), 0);
-    const total_outstanding = base.reduce((s, i) => s + (i.amount_due || 0), 0);
+    const total_outstanding = base.reduce((s, i) => s + calcDue(i), 0);
     const total_gst = base.reduce((s, i) => s + (i.total_gst || 0), 0);
     const total_invoices = base.length;
     const month_revenue = base.filter(i => i.invoice_date?.startsWith(curMonth)).reduce((s, i) => s + (i.grand_total || 0), 0);
     const month_invoices = base.filter(i => i.invoice_date?.startsWith(curMonth)).length;
-    const overdue_count = base.filter(i => i.amount_due > 0 && i.due_date && differenceInDays(new Date(), parseISO(i.due_date)) > 0).length;
+    const overdue_count = base.filter(i => calcDue(i) > 0 && i.due_date && differenceInDays(new Date(), parseISO(i.due_date)) > 0).length;
     const paid_count = base.filter(i => i.status === 'paid').length;
     const draft_count = base.filter(i => i.status === 'draft').length;
     const monthly_trend = Array.from({ length: 12 }, (_, i) => {
@@ -4165,7 +4199,7 @@ function Invoicing() {
       if (statusFilter === 'outstanding') {
         // Outstanding = anything with balance due OR draft (not cancelled, not paid)
         if (inv.status === 'paid' || inv.status === 'cancelled') return false;
-        if ((inv.amount_due || 0) <= 0 && inv.status !== 'draft') return false;
+        if (calcDue(inv) <= 0 && inv.status !== 'draft') return false;
       } else if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
       if (typeFilter !== 'all' && inv.invoice_type !== typeFilter) return false;
       if (fromDate && inv.invoice_date < fromDate) return false;
@@ -4177,8 +4211,15 @@ function Invoicing() {
   // ── F. ALL useMemo: TOTALS / AGGREGATIONS ────────────────────────────────
 
   const enrichedFiltered = useMemo(() => (filtered || []).map(inv => {
-    if (inv.status === 'sent' && inv.amount_due > 0 && inv.due_date && differenceInDays(parseISO(inv.due_date), new Date()) < 0) return { ...inv, status: 'overdue' };
-    return inv;
+    // Always recompute the outstanding amount from grand_total − paid so the
+    // UI is correct even if the backend stored a stale `amount_due`.
+    const computedDue = calcDue(inv);
+    const computedPaid = calcPaid(inv);
+    const enriched = { ...inv, amount_due: computedDue, amount_paid: computedPaid };
+    if (enriched.status === 'sent' && computedDue > 0 && enriched.due_date && differenceInDays(parseISO(enriched.due_date), new Date()) < 0) {
+      enriched.status = 'overdue';
+    }
+    return enriched;
   }), [filtered]);
 
   // ── paginatedFiltered: client-side page slice of enrichedFiltered ──────────
@@ -4193,12 +4234,14 @@ function Invoicing() {
   );
 
   // ── Split invoices into Received and Outstanding sections ─────────────────
+  // amount_due in enrichedFiltered is the freshly recomputed value, so these
+  // splits stay in sync with what the rows actually display.
   const receivedInvoices = useMemo(() =>
-    enrichedFiltered.filter(inv => inv.status === 'paid' || (inv.amount_due <= 0 && inv.status !== 'draft' && inv.status !== 'cancelled')),
+    enrichedFiltered.filter(inv => inv.status === 'paid' || (calcDue(inv) <= 0 && inv.status !== 'draft' && inv.status !== 'cancelled')),
     [enrichedFiltered]
   );
   const outstandingInvoices = useMemo(() =>
-    enrichedFiltered.filter(inv => inv.status !== 'paid' && (inv.amount_due > 0 || inv.status === 'draft' || inv.status === 'cancelled')),
+    enrichedFiltered.filter(inv => inv.status !== 'paid' && (calcDue(inv) > 0 || inv.status === 'draft' || inv.status === 'cancelled')),
     [enrichedFiltered]
   );
 
@@ -4621,7 +4664,7 @@ const fetchAll = useCallback(async () => {
                 <span className={`text-sm font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Outstanding</span>
                 <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${isDark ? 'bg-amber-900/40 text-amber-300' : 'bg-amber-100 text-amber-700'}`}>{outstandingInvoices.length}</span>
                 <span className={`ml-auto text-xs font-bold ${isDark ? 'text-red-400' : 'text-red-600'}`}>
-                  {fmtC(outstandingInvoices.reduce((s, i) => s + (i.amount_due || 0), 0))} due
+                  {fmtC(outstandingInvoices.reduce((s, i) => s + calcDue(i), 0))} due
                 </span>
               </div>
               <div className="overflow-x-auto">
@@ -4703,7 +4746,37 @@ const fetchAll = useCallback(async () => {
                       </td>
                       <td className="px-4 py-3.5">
                         <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(inv.grand_total)}</p>
-                        {inv.amount_due > 0 && <p className="text-[10px] font-semibold mt-0.5" style={{ color: getInvoiceStripe(inv).color }}>Due: {fmtC(inv.amount_due)}</p>}
+                        {(() => {
+                          const due = calcDue(inv);
+                          const paid = calcPaid(inv);
+                          const partial = paid > 0.009 && due > 0.009;
+                          if (due > 0.009) {
+                            return (
+                              <>
+                                <p
+                                  className={`text-[10px] font-bold mt-0.5 inline-block px-1.5 py-0.5 rounded ${isDark ? 'bg-red-900/30' : 'bg-red-50'}`}
+                                  style={{ color: getInvoiceStripe(inv).color }}
+                                  title={partial ? `Advance/Paid: ${fmtC(paid)}  •  Outstanding: ${fmtC(due)}` : `Outstanding: ${fmtC(due)}`}
+                                >
+                                  Due: {fmtC(due)}
+                                </p>
+                                {partial && (
+                                  <p className={`text-[10px] font-medium mt-0.5 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                                    Adv: {fmtC(paid)}
+                                  </p>
+                                )}
+                              </>
+                            );
+                          }
+                          if (num(inv.grand_total) > 0) {
+                            return (
+                              <p className={`text-[10px] font-semibold mt-0.5 inline-block px-1.5 py-0.5 rounded ${isDark ? 'bg-emerald-900/30 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
+                                Settled
+                              </p>
+                            );
+                          }
+                          return null;
+                        })()}
                       </td>
                       <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
                         <InlineStatusDropdown inv={inv} onStatusChange={handleStatusChange} isDark={isDark} />
