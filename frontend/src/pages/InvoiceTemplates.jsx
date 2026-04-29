@@ -287,8 +287,8 @@ function totalsHTML(inv) {
     html += '<tr><td class="lbl">Other Charges</td><td class="val">' + fmtC(inv.other_charges) + '</td></tr>';
   }
   html += '<tr class="grand"><td>Total</td><td>' + fmtC(inv.grand_total) + '</td></tr>';
-  if ((inv.amount_paid||0) > 0) {
-    html += '<tr><td class="lbl grn">Received</td><td class="val grn">' + fmtC(inv.amount_paid) + '</td></tr>';
+  if ((inv.advance_received||inv.amount_paid||0) > 0) {
+    html += '<tr><td class="lbl grn">\u2212 Advance Received</td><td class="val grn">\u2212 ' + fmtC(inv.advance_received||inv.amount_paid) + '</td></tr>';
   }
   if ((inv.amount_due||0) > 0) {
     html += '<tr><td class="lbl due">Balance Due</td><td class="val due">' + fmtC(inv.amount_due) + '</td></tr>';
@@ -1129,8 +1129,8 @@ function tplTallyTheme(inv, company, theme) {
     + '<hr class="solid"/>'
     + '<div class="tot-grand"><span>Total</span><span>' + fmtC(inv.grand_total) + '</span></div>'
     + '<hr class="solid"/>'
-    + ((inv.amount_paid||0) > 0 ? '<div class="tot-row"><span>Received</span><span>' + fmtC(inv.amount_paid) + '</span></div>' : '')
-    + ((inv.amount_due||0) > 0 ? '<div class="tot-row" style="font-weight:bold"><span>Balance</span><span>' + fmtC(inv.amount_due) + '</span></div>' : '')
+    + ((inv.advance_received||inv.amount_paid||0) > 0 ? '<div class="tot-row" style="color:#059669"><span>\u2212 Advance Received</span><span>\u2212 ' + fmtC(inv.advance_received||inv.amount_paid) + '</span></div>' : '')
+    + ((inv.amount_due||0) > 0 ? '<div class="tot-row" style="font-weight:bold;color:#C62828"><span>Balance Due at Delivery</span><span>' + fmtC(inv.amount_due) + '</span></div>' : '')
     + '</div>'
     + '</div>'
     + qrBlock
