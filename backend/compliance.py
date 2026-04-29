@@ -114,6 +114,7 @@ class ComplianceMasterCreate(BaseModel):
     due_date:      Optional[str]              = None    # "YYYY-MM-DD"
     description:   Optional[str]             = None
     applicable_entity_types: List[str]        = Field(default_factory=list)
+    govt_fees:     bool                       = False   # NEW: marks compliance as having a Government Fee
 
 
 class ComplianceMasterUpdate(BaseModel):
@@ -125,6 +126,7 @@ class ComplianceMasterUpdate(BaseModel):
     due_date:      Optional[str]             = None
     description:   Optional[str]            = None
     applicable_entity_types: Optional[List[str]] = None
+    govt_fees:     Optional[bool]           = None   # NEW
 
 
 class AssignmentCreate(BaseModel):
@@ -283,6 +285,7 @@ async def create_compliance_master(
         "due_date":                data.due_date,
         "description":             data.description,
         "applicable_entity_types": data.applicable_entity_types,
+        "govt_fees":               bool(data.govt_fees),
         "created_by":              current_user.id,
         "created_by_name":         getattr(current_user, "full_name", ""),
         "created_at":              _now(),
@@ -1096,5 +1099,83 @@ async def update_monthly_status(
     if res.matched_count == 0:
         raise HTTPException(404, "Assignment not found")
 
+    doc = await db.compliance_assignments.find_one({"id": assignment_id}, {"_id": 0})
+    return doc
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GOVERNMENT FEES — per-client view
+# ─────────────────────────────────────────────────────────────────────────────
+
+class GovtFeeUpdate(BaseModel):
+    govt_fees_amount: float = 0.0
+    govt_fees_notes:  Optional[str] = None
+
+
+@router.get("/by-client/{client_id}")
+async def list_compliance_for_client(
+    client_id:  str,
+    govt_fees:  bool = Query(True, description="Only compliance entries marked as Govt Fees"),
+    current_user: User = Depends(check_module_permission("compliance", "view")),
+):
+    """
+    Returns every compliance master assigned to a client, joined with its
+    assignment (so we can read/write the govt-fee amount per client).
+    Used by the 'Govt Fees' tab on the Client detail popup.
+    """
+    asgns = await db.compliance_assignments.find(
+        {"client_id": client_id}, {"_id": 0}
+    ).to_list(2000)
+    if not asgns:
+        return {"items": []}
+
+    cm_ids = list({a["compliance_id"] for a in asgns if a.get("compliance_id")})
+    cm_query: dict = {"id": {"$in": cm_ids}}
+    if govt_fees:
+        cm_query["govt_fees"] = True
+    masters = await db.compliance_masters.find(cm_query, {"_id": 0}).to_list(2000)
+    master_map = {m["id"]: m for m in masters}
+
+    items = []
+    for a in asgns:
+        m = master_map.get(a.get("compliance_id"))
+        if not m:
+            continue  # filtered out (not a govt-fees compliance)
+        items.append({
+            "assignment_id":    a["id"],
+            "compliance_id":    m["id"],
+            "name":             m.get("name"),
+            "category":         m.get("category"),
+            "frequency":        m.get("frequency"),
+            "fy_year":          m.get("fy_year"),
+            "period_label":     m.get("period_label"),
+            "due_date":         m.get("due_date"),
+            "status":           a.get("status"),
+            "govt_fees_amount": a.get("govt_fees_amount", 0) or 0,
+            "govt_fees_notes":  a.get("govt_fees_notes", "") or "",
+        })
+    items.sort(key=lambda x: (x.get("fy_year") or "", x.get("name") or ""))
+    return {"items": items}
+
+
+@router.patch("/{compliance_id}/assignments/{assignment_id}/govt-fee")
+async def update_assignment_govt_fee(
+    compliance_id: str,
+    assignment_id: str,
+    data: GovtFeeUpdate,
+    current_user: User = Depends(check_module_permission("compliance", "create")),
+):
+    """Persist the manually entered government-fee amount for a single client/compliance."""
+    res = await db.compliance_assignments.update_one(
+        {"id": assignment_id, "compliance_id": compliance_id},
+        {"$set": {
+            "govt_fees_amount": float(data.govt_fees_amount or 0),
+            "govt_fees_notes":  data.govt_fees_notes,
+            "updated_at":       _now(),
+            "updated_by":       current_user.id,
+        }},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Assignment not found")
     doc = await db.compliance_assignments.find_one({"id": assignment_id}, {"_id": 0})
     return doc
