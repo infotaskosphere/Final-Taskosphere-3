@@ -96,8 +96,12 @@ function recomputeTotals(inv) {
   const shipping      = parseFloat(inv.shipping_charges || 0);
   const other         = parseFloat(inv.other_charges    || 0);
   const grandTotal    = Math.round((totalTaxable + totalGST + shipping + other - parseFloat(inv.discount_amount || 0)) * 100) / 100;
-  const amountPaid    = parseFloat(inv.amount_paid || 0);
-  const amountDue     = Math.max(Math.round((grandTotal - amountPaid) * 100) / 100, 0);
+  // Use the larger of amount_paid / advance_received so Balance Due is always
+  // grand_total minus what has actually been received (advance counts as paid).
+  const advanceReceived = parseFloat(inv.advance_received || 0);
+  const rawAmountPaid   = parseFloat(inv.amount_paid || 0);
+  const amountPaid      = Math.max(rawAmountPaid, advanceReceived);
+  const amountDue       = Math.max(Math.round((grandTotal - amountPaid) * 100) / 100, 0);
   return { ...inv, items,
     subtotal:       Math.round(subtotal      * 100) / 100,
     total_discount: Math.round(totalDiscount * 100) / 100,
