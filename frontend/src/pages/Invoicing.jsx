@@ -3043,12 +3043,18 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
 
   const handlePreview = useCallback(() => {
     const company = (companies || []).find(c => c.id === form.company_id) || {};
+    const advance = parseFloat(form.advance_received) || 0;
+    const grand   = totals.grand_total || 0;
     const previewInv = {
       ...form,
+      ...totals,                         // ensure grand_total/taxes are present
       invoice_no: form.invoice_no || editingInv?.invoice_no || 'PREVIEW-001',
       invoice_date: form.invoice_date || format(new Date(), 'yyyy-MM-dd'),
       due_date: form.due_date || format(new Date(Date.now() + 30 * 86400000), 'yyyy-MM-dd'),
-      client_name: form.client_name || 'Client Name'
+      client_name: form.client_name || 'Client Name',
+      advance_received: advance,
+      amount_paid: advance,
+      amount_due:  Math.max(0, Math.round((grand - advance) * 100) / 100),
     };
     const html = generateInvoiceHTML(previewInv, {
       company,
@@ -3059,7 +3065,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     if (previewRef.current) {
       previewRef.current.srcdoc = html;
     }
-  }, [companies, form, editingInv]);
+  }, [companies, form, totals, editingInv]);
 
   const handleSubmit = useCallback(async (e) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -3068,7 +3074,21 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     if (!form.items.some(it => it.description?.trim())) { toast.error('Add at least one item'); return; }
     setLoading(true);
     try {
-      const payload = { ...form, ...totals };
+      // ── Apply Advance Received to amount_paid / amount_due so the saved
+      //    invoice (and generated PDF) match what the popup shows.
+      const advance      = parseFloat(form.advance_received) || 0;
+      const grand        = totals.grand_total || 0;
+      const existingPaid = parseFloat(editingInv?.amount_paid) || 0;
+      // Never reduce previously-recorded payments (e.g. partial payments via /payments)
+      const amountPaid   = Math.max(existingPaid, advance);
+      const amountDue    = Math.max(0, Math.round((grand - amountPaid) * 100) / 100);
+      const payload = {
+        ...form,
+        ...totals,
+        advance_received: advance,
+        amount_paid: amountPaid,
+        amount_due:  amountDue,
+      };
       if (editingInv?.id) await api.put(`/invoices/${editingInv.id}`, payload);
       else {
         await api.post('/invoices', payload);
