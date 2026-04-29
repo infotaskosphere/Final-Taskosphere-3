@@ -315,6 +315,7 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
   const[recurMonth,setRecurMonth]=useState(existing?.recurring_quarter_month||'4');
   const[filingOffset,setFilingOffset]=useState(existing?.filing_offset??'1');
   const[desc,setDesc]=useState(existing?.description||'');
+  const[govtFees,setGovtFees]=useState(!!existing?.govt_fees);
   const[saving,setSaving]=useState(false);
   const[templates,setTemplates]=useState([]);
   const[calendarOpen,setCalendarOpen]=useState(false);
@@ -404,6 +405,7 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
         fy_year:fyYear||undefined,
         period_label:period||undefined,
         description:desc||undefined,
+        govt_fees:!!govtFees,
         applicable_periods:applicablePeriods.length>0?applicablePeriods:undefined,
         ...(dueType==='specific'&&dueDate?{due_date:dueDate}:{}),
         ...(dueType==='recurring'?{
@@ -510,6 +512,26 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
               <input value={period} onChange={e=>setPeriod(e.target.value)}
                 placeholder="Auto-filled from selection"
                 className={inputCls} style={inputStyle}/>
+            </div>
+          </div>
+
+          {/* Government Fees toggle */}
+          <div className="rounded-2xl border p-4 flex items-center justify-between gap-4"
+            style={{borderColor:isDark?D.border:'#e2e8f0',backgroundColor:isDark?D.raised:'#fafbff'}}>
+            <div>
+              <p className="text-sm font-bold" style={{color:isDark?D.text:'#1e293b'}}>Government Fees</p>
+              <p className="text-[11px] mt-0.5" style={{color:isDark?D.muted:'#64748b'}}>
+                Show this compliance under each client's "Govt Fees" tab so you can record the fee paid.
+              </p>
+            </div>
+            <div className="flex items-center gap-1 rounded-lg overflow-hidden border text-xs font-bold"
+              style={{borderColor:isDark?D.border:'#e2e8f0'}}>
+              {[['no','No',false],['yes','Yes',true]].map(([k,l,v])=>(
+                <button key={k} type="button" onClick={()=>setGovtFees(v)}
+                  className="px-3.5 py-1.5 transition-all"
+                  style={{backgroundColor:govtFees===v?'#1F6FB2':'transparent',
+                          color:govtFees===v?'#fff':isDark?D.dimmer:'#64748b'}}>{l}</button>
+              ))}
             </div>
           </div>
 
