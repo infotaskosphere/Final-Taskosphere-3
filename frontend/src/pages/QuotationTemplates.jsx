@@ -61,6 +61,27 @@ function lighten(hex, pct) {
   } catch { return '#e8f0fb'; }
 }
 
+// ─── Service document checklists (mirrors backend) ───────────────────────────
+var QTN_SERVICE_CHECKLISTS = {
+  "GST Registration": ["PAN Card of Applicant / Business","Aadhaar Card of Proprietor / Partners / Directors","Photograph (Passport Size)","Address Proof of Business Premises (Electricity Bill / Rent Agreement)","Bank Account Statement / Cancelled Cheque","Constitution Proof (Partnership Deed / MOA-AOA / Certificate of Incorporation)","Digital Signature Certificate (for Companies/LLP)","Letter of Authorization / Board Resolution","Mobile Number & Email ID"],
+  "GST Return Filing": ["GSTIN","GST Username & Password","Sales Invoices / Register","Purchase Invoices / Register","Bank Statement","Credit / Debit Notes (if any)","Previous Return Copy (GSTR-3B / GSTR-1)","E-way Bill Records (if applicable)"],
+  "GST Annual Return (GSTR-9)": ["GSTIN","GSTR-1 Filed Returns (All months)","GSTR-3B Filed Returns (All months)","Audited Financial Statements","Purchase & Sales Ledger","Input Tax Credit (ITC) Reconciliation","HSN/SAC Code Summary"],
+  "Income Tax Return (ITR) - Individual": ["PAN Card","Aadhaar Card","Form 16 (from Employer)","Bank Statements (All accounts)","Interest Certificates (FD/Savings)","Investment Proofs (80C, 80D, etc.)","Rental Income Details (if any)","Capital Gains Statements","Previous Year ITR Copy"],
+  "Income Tax Return (ITR) - Business": ["PAN Card of Business / Proprietor","Aadhaar Card","Audited Financial Statements (P&L, Balance Sheet)","Bank Statements (All accounts)","TDS Certificates / Form 26AS","GST Returns (if applicable)","Loan Statements","Investment / Asset Details","Previous Year ITR Copy"],
+  "TDS Return Filing": ["TAN (Tax Deduction Account Number)","PAN of Deductee(s)","Challan Details (BSR Code, Date, Amount, Challan No.)","Nature of Payment & Rate of TDS","Previous Quarter TDS Return Copy","Form 16 / 16A Data"],
+  "Tax Audit (Form 3CA/3CB)": ["PAN Card of Business","Audited Financial Statements","Books of Accounts (Ledger, Cash Book, Journal)","Bank Statements","GST Returns","ITR Filed Copies","Stock Valuation Report","Fixed Asset Register","Loan & Advance Details"],
+  "Company Registration (Pvt. Ltd.)": ["PAN Card of all Proposed Directors","Aadhaar Card of all Proposed Directors","Passport Size Photographs of all Directors","Address Proof of Registered Office (Electricity Bill / NOC)","Rent Agreement (if rented premises)","Email IDs & Mobile Numbers of all Directors","Proposed Company Name(s) (2-3 Options)","Object Clause / Business Description","DSC (Digital Signature Certificate) - will be applied","DIN (Director Identification Number) - will be applied"],
+  "LLP Registration": ["PAN Card of all Designated Partners","Aadhaar Card of all Designated Partners","Passport Size Photographs","Address Proof of Registered Office","Proposed LLP Name(s)","LLP Agreement Draft","DPIN / DIN of Partners","Email IDs & Mobile Numbers"],
+  "ROC Annual Compliance": ["Certificate of Incorporation","MOA & AOA","Audited Financial Statements","Board Resolution","Minutes of AGM / Board Meeting","Shareholding Pattern","List of Directors","DIN of all Directors","DSC of Authorized Signatory","Previous Year Filed Forms"],
+  "Trademark Registration": ["PAN Card of Applicant","Aadhaar Card","Trademark (Logo / Word / Device) in JPEG format","Business Proof (MSME / GST Certificate / MOA / Partnership Deed)","TM Class Description (Goods/Services)","Power of Attorney (TM-48)","Prior Use Evidence (if claiming use before date)"],
+  "MSME / Udyam Registration": ["Aadhaar Card of Proprietor / Director / Partner","PAN Card","GSTIN (if applicable)","Bank Account Details","Business Address Proof","NIC Code (Business Activity)"],
+  "Accounting & Bookkeeping": ["Bank Statements (All accounts)","Sales Invoices","Purchase Invoices","Expense Vouchers / Bills","Payroll Details (if employees)","Loan Statements","Credit Card Statements (if any)","Opening Balance Sheet / Previous Year Data"],
+  "Payroll Processing": ["Employee Details (Name, PAN, Aadhaar, Bank Account)","Salary Structure / CTC Breakup","Attendance Records","Leave Records","ESI & PF Registration Numbers","Professional Tax Registration","Investment Declarations (Form 12BB)"],
+  "FEMA / RBI Compliance": ["PAN Card","Certificate of Incorporation","MOA & AOA","Foreign Inward Remittance Certificate (FIRC)","Valuation Report","CS Certificate","Board Resolution for Foreign Investment","Form FC-GPR / FC-TRS (as applicable)"],
+  "DSC (Digital Signature Certificate)": ["PAN Card","Aadhaar Card","Passport Size Photograph","Mobile Number (linked to Aadhaar)","Email ID","Organisation Certificate (for Class-3 Org DSC)"],
+  "Other / Custom Service": ["PAN Card","Aadhaar Card","Address Proof","Bank Account Details","Photograph","Any specific document advised by our team"],
+};
+
 // ─── main export ─────────────────────────────────────────────────────────────
 export function generateQuotationHTML(qtn, options) {
   if (!options) options = {};
@@ -153,10 +174,35 @@ export function generateQuotationHTML(qtn, options) {
       + '</div>'
     : '';
 
-  // ── Notes ─────────────────────────────────────────────────────────────────
+  // ── Notes ─────────────────────────────────────────────────────────────
   var notesHTML = qtn.notes
     ? '<p style="margin:10px 0 0;font-size:11px;color:#64748b;font-style:italic;">'+qtn.notes+'</p>'
     : '';
+
+  // ── Document Checklist ────────────────────────────────────────────────
+  var _svc      = qtn.service || 'Other / Custom Service';
+  var _baseDocs = QTN_SERVICE_CHECKLISTS[_svc] || QTN_SERVICE_CHECKLISTS['Other / Custom Service'] || [];
+  var _extras   = (qtn.extra_checklist_items || []).filter(function(e){ return e && String(e).trim(); });
+  var _allDocs  = _baseDocs.concat(_extras);
+  var checklistHTML = '';
+  if (_allDocs.length > 0) {
+    var _rows = _allDocs.map(function(doc, i) {
+      var bg = i % 2 === 0 ? '#ffffff' : brandLight;
+      return '<tr style="background:'+bg+'">'
+        + '<td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:center;font-size:11px;color:#64748b;width:32px;">'+(i+1)+'</td>'
+        + '<td style="padding:5px 8px;border:1px solid #e2e8f0;font-size:11px;color:#1e293b;">'+doc+'</td>'
+        + '</tr>';
+    }).join('');
+    checklistHTML = '<div style="margin:16px 0;padding-top:12px;border-top:2px solid '+brandLight+';">'
+      + '<p style="margin:0 0 8px;font-size:11px;font-weight:700;color:rgb('+brandRgb+');text-transform:uppercase;letter-spacing:.08em;">Document Checklist</p>'
+      + '<table style="width:100%;border-collapse:collapse;">'
+      + '<thead><tr style="background:rgb('+brandRgb+');">'
+      + '<th style="padding:6px 8px;border:1px solid #e2e8f0;text-align:center;color:#fff;font-size:10px;font-weight:700;width:36px;">Sr</th>'
+      + '<th style="padding:6px 8px;border:1px solid #e2e8f0;text-align:left;color:#fff;font-size:10px;font-weight:700;">Document Required</th>'
+      + '</tr></thead>'
+      + '<tbody>'+_rows+'</tbody>'
+      + '</table></div>';
+  }
 
   // ── Signature ─────────────────────────────────────────────────────────────
   var sigHTML = '<div style="margin-top:32px;text-align:right;">'
@@ -258,6 +304,9 @@ export function generateQuotationHTML(qtn, options) {
 
     // Notes
     + notesHTML
+
+    // Checklist
+    + checklistHTML
 
     // Signature
     + sigHTML
