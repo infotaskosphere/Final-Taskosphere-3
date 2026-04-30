@@ -260,7 +260,6 @@ export function generateQuotationHTML(qtn, options) {
     + (qtn.quotation_no ? '<tr><td style="padding:2px 8px 2px 0;color:#64748b;font-weight:600;">Quotation No:</td><td style="color:#1e293b;">'+qtn.quotation_no+'</td></tr>' : '')
     + '<tr><td style="padding:2px 8px 2px 0;color:#64748b;font-weight:600;">Date:</td><td style="color:#1e293b;">'+today+'</td></tr>'
     + '<tr><td style="padding:2px 8px 2px 0;color:#64748b;font-weight:600;">Valid For:</td><td style="color:#1e293b;">'+(qtn.validity_days||30)+' days</td></tr>'
-    + (qtn.subject ? '<tr><td style="padding:2px 8px 2px 0;color:#64748b;font-weight:600;">Subject:</td><td style="color:#1e293b;">'+qtn.subject+'</td></tr>' : '')
     + (qtn.payment_terms ? '<tr><td style="padding:2px 8px 2px 0;color:#64748b;font-weight:600;">Payment:</td><td style="color:#1e293b;">'+qtn.payment_terms+'</td></tr>' : '')
     + '</table></div></div>'
 
