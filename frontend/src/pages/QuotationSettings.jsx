@@ -259,6 +259,8 @@ export default function QuotationSettings({ open, onClose, companies = [], isDar
     if (!cid) { toast.error('Select a company first'); return; }
     saveQtnSettings(cid, form);
 
+    try {
+
   const resolvedSaveColor = form.theme === 'custom'
         ? (form.custom_color || '#0D3B66')
         : ((COLOR_THEMES || []).find(t => t.id === form.theme)?.primary || form.custom_color || '#0D3B66');
