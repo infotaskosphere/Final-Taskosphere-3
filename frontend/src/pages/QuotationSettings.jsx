@@ -274,13 +274,18 @@ export default function QuotationSettings({ open, onClose, companies = [], isDar
     if (!cid) { toast.error('Select a company first'); return; }
     saveQtnSettings(cid, form);
 
+  const activeColor = form.theme === 'custom'
+          ? form.custom_color
+          : ((COLOR_THEMES || []).find(t => t.id === form.theme)?.primary || form.custom_color || '#0D3B66');    
     try {
       await api.put(`/companies/${cid}`, {
-        bank_name:       form.bank_name,
-        bank_account_no: form.bank_account_no,
-        bank_ifsc:       form.bank_ifsc,
-        bank_branch:     form.bank_branch,
-        upi_id:          form.upi_id,
+        bank_name:            form.bank_name,
+        bank_account_no:      form.bank_account_no,
+        bank_ifsc:            form.bank_ifsc,
+        bank_branch:          form.bank_branch,
+        upi_id:               form.upi_id,
+        invoice_custom_color: activeColor,
+        invoice_template:     form.template || 'classic',
       });
     } catch (err) {
       toast.warning('Settings saved locally but failed to sync bank/UPI to server');
