@@ -835,6 +835,37 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
         pdf.ln(2)
 
     # ═══════════════════════════════════════════════════════
+    # DOCUMENT CHECKLIST
+    # ═══════════════════════════════════════════════════════
+    _svc      = q.get("service", "Other / Custom Service")
+    _base     = SERVICE_CHECKLISTS.get(_svc, SERVICE_CHECKLISTS.get("Other / Custom Service", []))
+    _extras   = [e for e in (q.get("extra_checklist_items") or []) if str(e).strip()]
+    _all_docs = _base + _extras
+
+    if _all_docs:
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*BRAND)
+        _cell(pdf, 0, 5, "Document Checklist", nl=True)
+        pdf.set_draw_color(*_lighten(BRAND, 0.70))
+        pdf.line(M, pdf.get_y(), M + CW, pdf.get_y())
+        pdf.ln(2)
+        _csr = 8
+        _cdc = CW - _csr
+        pdf.set_fill_color(*BRAND)
+        pdf.set_text_color(*WHITE)
+        pdf.set_font("Helvetica", "B", 7.5)
+        _cell(pdf, _csr, 6, "Sr.",               align="C", fill=True, nl=False)
+        _cell(pdf, _cdc, 6, "Document Required",             fill=True, nl=True)
+        for _i, _doc in enumerate(_all_docs, 1):
+            _bg = BL if _i % 2 == 0 else WHITE
+            pdf.set_fill_color(*_bg)
+            pdf.set_text_color(*DARK)
+            pdf.set_font("Helvetica", "", 8)
+            _cell(pdf, _csr, 6, str(_i),              align="C", fill=True, nl=False)
+            _cell(pdf, _cdc, 6, _safe_str(_doc, 80),             fill=True, nl=True)
+        pdf.ln(2)
+
+    # ═══════════════════════════════════════════════════════
     # BANK DETAILS
     # ═══════════════════════════════════════════════════════
     if company.get("bank_account_no") or company.get("bank_name"):
