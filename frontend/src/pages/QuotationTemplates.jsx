@@ -220,7 +220,7 @@ export function generateQuotationHTML(qtn, options) {
 
     // Greeting
     + '<div style="margin:14px 0 0;padding:10px 16px;background:'+brandLight+';border-radius:6px;">'
-    + (qtn.subject ? '<p style="margin:0 0 4px;font-size:12.5px;font-weight:700;color:rgb('+brandRgb+');">Subject: Quotation for '+qtn.subject+'</p>' : '')
+    + (qtn.subject ? '<p style="margin:0 0 4px;font-size:12.5px;font-weight:700;color:rgb('+brandRgb+');">Subject: '+qtn.subject+'</p>' : '')
     + '<p style="margin:0;font-size:12px;color:#475569;">Dear '+(qtn.client_name||'Sir / Madam')+',<br>Thank you for your inquiry. We are pleased to submit our quotation as under:</p>'
     + '</div>'
 
