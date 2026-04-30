@@ -926,7 +926,16 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
               quotation_no: editingQuotation?.quotation_no || 'QTN-PREVIEW',
               date: editingQuotation?.date || new Date().toISOString().slice(0, 10),
             };
-            const previewHTML = generateQuotationHTML(previewQtn, { company: previewCompany });
+            const _qtnSettings  = getQtnSettings(form.company_id);
+            const _activeColor  = _qtnSettings.theme === 'custom'
+              ? _qtnSettings.custom_color
+              : (_qtnSettings.custom_color || previewCompany.invoice_custom_color || '#0D3B66');
+            const previewHTML = generateQuotationHTML(previewQtn, {
+              company:     previewCompany,
+              template:    _qtnSettings.template    || previewCompany.invoice_template    || 'classic',
+              theme:       _qtnSettings.theme       || 'custom',
+              customColor: _activeColor,
+            });
             return (
               <div className="space-y-3">
                 <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-50 border border-blue-100 text-xs text-blue-700">
@@ -1328,14 +1337,32 @@ export default function Quotations() {
   };
 
   const handlePreview = (q) => {
-    const company = getCompany(q.company_id) || {};
-    const html = generateQuotationHTML(q, { company });
+    const company  = getCompany(q.company_id) || {};
+    const settings = getQtnSettings(q.company_id);
+    const activeColor = settings.theme === 'custom'
+      ? settings.custom_color
+      : (settings.custom_color || company.invoice_custom_color || '#0D3B66');
+    const html = generateQuotationHTML(q, {
+      company,
+      template:    settings.template    || company.invoice_template    || 'classic',
+      theme:       settings.theme       || 'custom',
+      customColor: activeColor,
+    });
     const win = window.open('', '_blank'); win.document.write(html); win.document.close();
   };
 
   const handlePrint = (q) => {
-    const company = getCompany(q.company_id) || {};
-    const html = generateQuotationHTML(q, { company });
+    const company  = getCompany(q.company_id) || {};
+    const settings = getQtnSettings(q.company_id);
+    const activeColor = settings.theme === 'custom'
+      ? settings.custom_color
+      : (settings.custom_color || company.invoice_custom_color || '#0D3B66');
+    const html = generateQuotationHTML(q, {
+      company,
+      template:    settings.template    || company.invoice_template    || 'classic',
+      theme:       settings.theme       || 'custom',
+      customColor: activeColor,
+    });
     const win = window.open('', '_blank'); win.document.write(html); win.document.close(); win.print();
   };
 
