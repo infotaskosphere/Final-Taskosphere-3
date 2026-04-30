@@ -654,8 +654,6 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
         ("Date",          q.get("date", "")),
         ("Valid For",     f"{q.get('validity_days', 30)} days"),
     ]
-    if q.get("subject"):
-        detail_rows.append(("Subject", _safe_str(q["subject"], 55)))
     if q.get("payment_terms"):
         detail_rows.append(("Payment", _safe_str(q["payment_terms"], 30)))
 
@@ -853,16 +851,19 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
         _cdc = CW - _csr
         pdf.set_fill_color(*BRAND)
         pdf.set_text_color(*WHITE)
-        pdf.set_font("Helvetica", "B", 7.5)
-        _cell(pdf, _csr, 6, "Sr.",               align="C", fill=True, nl=False)
-        _cell(pdf, _cdc, 6, "Document Required",             fill=True, nl=True)
+        pdf.set_font("Helvetica", "B", 7)
+        _cell(pdf, _csr, 5, "Sr.",               align="C", fill=True, nl=False)
+        _cell(pdf, _cdc, 5, "Document Required",             fill=True, nl=True)
         for _i, _doc in enumerate(_all_docs, 1):
             _bg = BL if _i % 2 == 0 else WHITE
+            _doc_text = _safe_str(_doc, 250)
             pdf.set_fill_color(*_bg)
             pdf.set_text_color(*DARK)
             pdf.set_font("Helvetica", "", 8)
-            _cell(pdf, _csr, 6, str(_i),              align="C", fill=True, nl=False)
-            _cell(pdf, _cdc, 6, _safe_str(_doc, 80),             fill=True, nl=True)
+            _row_y = pdf.get_y()
+            _cell(pdf, _csr, 5, str(_i), align="C", fill=True, nl=False)
+            pdf.set_xy(M + _csr, _row_y)
+            pdf.multi_cell(_cdc, 5, _doc_text, align="L", fill=True)
         pdf.ln(2)
 
     # ═══════════════════════════════════════════════════════
