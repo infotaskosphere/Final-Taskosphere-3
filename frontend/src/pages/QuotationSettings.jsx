@@ -18,6 +18,7 @@ import {
   Banknote, Smartphone, Shield, Pen, ChevronDown,
 } from 'lucide-react';
 import { COLOR_THEMES, INVOICE_TEMPLATES, generateInvoiceHTML } from './InvoiceTemplates';
+import { generateQuotationHTML } from './QuotationTemplates';
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'taskosphere_qtn_settings_v2';
@@ -93,54 +94,36 @@ function saveQtnSettings(companyId, settings) {
 
 // ─── Sample quotation builder for settings preview ───────────────────────────
 function makeSampleQuotationForSettings(companyId, settings) {
-  const items = [
-    {
-      description:   'Website Design & Development',
-      hsn_sac:       '998314',
-      quantity:      1,
-      unit:          'project',
-      unit_price:    25000,
-      discount_pct:  0,
-      gst_rate:      settings.default_gst_rate ?? 18,
-    },
-    {
-      description:   'SEO & Digital Marketing (3 Months)',
-      hsn_sac:       '998361',
-      quantity:      3,
-      unit:          'month',
-      unit_price:    8000,
-      discount_pct:  10,
-      gst_rate:      settings.default_gst_rate ?? 18,
-    },
-    {
-      description:   'Annual Maintenance Contract',
-      hsn_sac:       '998314',
-      quantity:      1,
-      unit:          'year',
-      unit_price:    12000,
-      discount_pct:  0,
-      gst_rate:      settings.default_gst_rate ?? 18,
-    },
-  ];
-
   return {
-    invoice_no:       previewNumber(settings, 'quotation'),
-    invoice_type:     'estimate',
-    invoice_date:     '2025-07-15',
-    due_date:         `Valid for ${settings.default_validity_days || 30} days`,
-    client_name:      'Sunrise Technologies Pvt. Ltd.',
-    client_address:   '14 Patel Nagar, Ahmedabad, Gujarat – 380009',
-    client_email:     'accounts@sunrise.in',
-    client_phone:     '9876543210',
-    client_gstin:     '24AABCS1429B1Z5',
-    client_state:     'Gujarat',
-    payment_terms:    settings.default_payment_terms || '50% advance, balance on delivery',
-    reference_no:     'REQ/2025/0138',
-    is_interstate:    false,
-    items,
-    amount_paid:      0,
-    notes:            settings.default_notes || 'Quotation valid for the mentioned validity period.',
-    terms_conditions: settings.default_terms  || 'Prices quoted are exclusive of taxes unless stated.',
+    quotation_no:   previewNumber(settings),
+    date:           '2026-04-30',
+    client_name:    'Sunrise Technologies Pvt. Ltd.',
+    client_address: '14 Patel Nagar, Ahmedabad, Gujarat – 380009',
+    client_email:   'accounts@sunrise.in',
+    client_phone:   '9876543210',
+    service:        'GST Return Filing',
+    subject:        'Monthly GST Return Filing Services',
+    scope_of_work:  [
+      'Filing of GSTR-1 (Monthly)',
+      'Filing of GSTR-3B (Monthly)',
+      'Reconciliation of ITC as per books',
+    ],
+    items: [
+      { description: 'GST Return Filing (Monthly)', quantity: 12, unit: 'month', unit_price: 1500, amount: 18000 },
+      { description: 'Accounting & Bookkeeping Support', quantity: 1, unit: 'year', unit_price: 8000, amount: 8000 },
+      { description: 'Annual Compliance Review', quantity: 1, unit: 'service', unit_price: 3500, amount: 3500 },
+    ],
+    gst_rate:       settings.default_gst_rate ?? 18,
+    payment_terms:  settings.default_payment_terms || '50% advance, balance on completion',
+    validity_days:  settings.default_validity_days || 30,
+    timeline:       '5 working days',
+    advance_terms:  '50% advance required before commencement',
+    notes:          settings.default_notes || 'Quotation valid for the mentioned validity period.',
+    extra_terms:    [
+      'Prices are exclusive of taxes unless stated',
+      'Subject to jurisdiction of Surat courts',
+    ],
+    extra_checklist_items: [],
   };
 }
 
@@ -257,16 +240,18 @@ export default function QuotationSettings({ open, onClose, companies = [], isDar
       footer_line:      form.footer_line,
     };
 
-    const html = generateInvoiceHTML(sampleQtn, {
+    const resolvedColor = form.theme === 'custom'
+      ? (form.custom_color || '#0D3B66')
+      : ((COLOR_THEMES || []).find(t => t.id === form.theme)?.primary || form.custom_color || '#0D3B66');
+
+    const html = generateQuotationHTML(sampleQtn, {
       company,
-      template:    form.template    || 'classic',
-      theme:       form.theme       || 'classic_blue',
-      customColor: form.custom_color || '#0D3B66',
+      customColor: resolvedColor,
     });
 
     setSettingsPreviewHtml(html);
     setPreviewKey(k => k + 1);
-  }, [tab, cid, form, companies]);
+   }, [tab, cid, form, companies]);
 
   const set = useCallback((k, v) => setForm(p => ({ ...p, [k]: v })), []);
 
@@ -274,18 +259,17 @@ export default function QuotationSettings({ open, onClose, companies = [], isDar
     if (!cid) { toast.error('Select a company first'); return; }
     saveQtnSettings(cid, form);
 
-  const activeColor = form.theme === 'custom'
-          ? form.custom_color
-          : ((COLOR_THEMES || []).find(t => t.id === form.theme)?.primary || form.custom_color || '#0D3B66');    
-    try {
+  const resolvedSaveColor = form.theme === 'custom'
+        ? (form.custom_color || '#0D3B66')
+        : ((COLOR_THEMES || []).find(t => t.id === form.theme)?.primary || form.custom_color || '#0D3B66');
+
       await api.put(`/companies/${cid}`, {
         bank_name:            form.bank_name,
         bank_account_no:      form.bank_account_no,
         bank_ifsc:            form.bank_ifsc,
         bank_branch:          form.bank_branch,
         upi_id:               form.upi_id,
-        invoice_custom_color: activeColor,
-        invoice_template:     form.template || 'classic',
+        invoice_custom_color: resolvedSaveColor,
       });
     } catch (err) {
       toast.warning('Settings saved locally but failed to sync bank/UPI to server');
