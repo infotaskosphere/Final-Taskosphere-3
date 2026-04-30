@@ -655,7 +655,7 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
         ("Valid For",     f"{q.get('validity_days', 30)} days"),
     ]
     if q.get("subject"):
-        detail_rows.append(("Subject", _safe_str(q["subject"], 30)))
+        detail_rows.append(("Subject", _safe_str(q["subject"], 55)))
     if q.get("payment_terms"):
         detail_rows.append(("Payment", _safe_str(q["payment_terms"], 30)))
 
@@ -685,7 +685,7 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
         pdf.set_x(M)
         pdf.set_font("Helvetica", "B", 8)
         pdf.set_text_color(*DARK)
-        _cell(pdf, 0, 5, _safe_str(f"Subject: Quotation for {q['subject']}"), nl=True)
+        _cell(pdf, 0, 5, _safe_str(f"Subject: {q['subject']}"), nl=True)
 
     pdf.set_x(M)
     pdf.set_font("Helvetica", "", 8)
