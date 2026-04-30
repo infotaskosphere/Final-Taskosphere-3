@@ -1,6 +1,23 @@
 // QuotationTemplates.jsx  — v3.0
-// Generates quotation HTML that exactly matches the backend PDF layout.
-// Used for: live preview in wizard, print, WhatsApp attachment description.
+// ─── Theme colour map (mirrors InvoiceTemplates COLOR_THEMES) ─────────────────
+var QTN_THEME_MAP = {
+  ocean:        '#0D3B66',
+  classic_blue: '#0D3B66',
+  emerald:      '#064e3b',
+  forest:       '#14532d',
+  sunset:       '#7c2d12',
+  coral:        '#c2410c',
+  purple:       '#4c1d95',
+  violet:       '#5b21b6',
+  rose:         '#881337',
+  crimson:      '#991b1b',
+  teal:         '#134e4a',
+  slate:        '#1e293b',
+  charcoal:     '#374151',
+  amber:        '#92400e',
+  gold:         '#78350f',
+  custom:       null,
+};
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 const ONES = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine',
@@ -88,7 +105,11 @@ export function generateQuotationHTML(qtn, options) {
   const company = options.company || {};
   const customColor = options.customColor;
 
-  const brandColor = customColor || qtn.invoice_custom_color || company.brand_color || '#0D3B66';
+  var _themeColor = null;
+  if (options.theme && options.theme !== 'custom' && QTN_THEME_MAP[options.theme]) {
+    _themeColor = QTN_THEME_MAP[options.theme];
+  }
+  var brandColor = customColor || _themeColor || qtn.invoice_custom_color || company.invoice_custom_color || company.brand_color || '#0D3B66';
   const brandLight = lighten(brandColor, 0.92);
   const brandRgb   = hexToRgb(brandColor);
 
