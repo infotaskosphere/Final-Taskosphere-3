@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import axios from "axios";
+import api from "@/lib/api";
 import { Sparkles, ChevronDown, ChevronUp, Loader2, X } from "lucide-react";
 
 /**
@@ -33,9 +33,9 @@ export default function AIFileInsights({ file, autoAnalyze = true, label }) {
     const form = new FormData();
     form.append("file", f);
     try {
-      const { data } = await axios.post("/api/ai/analyze-document", form, {
-        withCredentials: true,
+      const { data } = await api.post("/ai/analyze-document", form, {
         headers: { "Content-Type": "multipart/form-data" },
+        timeout: 120000,
       });
       setResult(data.analysis || "No analysis returned.");
       setStatus("done");
