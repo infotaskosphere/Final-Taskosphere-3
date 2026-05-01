@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import useDark from '../hooks/useDark';
 import { useAuth } from '../contexts/AuthContext';
+import AIFileInsights from "@/components/ui/AIFileInsights.jsx";
+
 
 // ✅ UI COMPONENTS (fixed)
 import { Card, CardContent } from '../components/ui/card';
@@ -1135,7 +1137,10 @@ export default function Tasks() {
     }
   };
 
-  const handleCsvUpload = () => { toast.success('CSV upload (stub)'); };
+  const handleCsvUpload = (e) => {
+  const f = e?.target?.files?.[0];
+  if (f) { setCsvAiFile(f); toast.info(`${f.name} selected — AI is analysing…`); }
+  };
   const handleExportCsv = () => { toast.success('Exporting CSV (stub)'); };
   const handleExportPdf = () => { toast.success('Exporting PDF (stub)'); };
 
@@ -2597,6 +2602,7 @@ export default function Tasks() {
       </Dialog>
 
       <input type="file" accept=".csv" ref={fileInputRef} style={{ display: 'none' }} onChange={handleCsvUpload} />
+      <AIFileInsights file={csvAiFile} label="CSV Task Data Insights" />
     </motion.div>
   );
 }
