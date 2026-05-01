@@ -762,6 +762,9 @@ export default function Tasks() {
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
   const [duplicateGroups,     setDuplicateGroups]     = useState([]);
   const [detectingDuplicates, setDetectingDuplicates] = useState(false);
+  const [aiProvider, setAiProvider] = useState('auto'); // 'auto' | 'gemini' | 'grok' | 'local'
+  const [scanProgress, setScanProgress] = useState(0);   // 0–100 progress while detecting duplicates
+  const [scanStatus,   setScanStatus]   = useState('');  // human-readable status (e.g. 'Asking Gemini…')
   const [compareTaskIds,      setCompareTaskIds]       = useState([]);
   const [compareMode,         setCompareMode]          = useState(false);
 
@@ -1090,46 +1093,58 @@ export default function Tasks() {
     if (detectingDuplicates) return;
     setDetectingDuplicates(true);
     setDuplicateGroups([]);
+    setScanProgress(0);
+    setScanStatus('Preparing tasks…');
 
-    // ── Filter out completed tasks — only check active/pending/in-progress ──
     const activeTasks = scopedTasks.filter(t => t.status !== 'completed');
 
-    // ── 1. Try Gemini AI (via backend) first ─────────────────────────────
-    try {
+    // Smoothly tween scanProgress toward a target value while a step is running.
+    let progressTimer = null;
+    const tweenTo = (target, stepMs = 120) => {
+      if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+      progressTimer = setInterval(() => {
+        setScanProgress(prev => {
+          if (prev >= target) { clearInterval(progressTimer); progressTimer = null; return prev; }
+          // ease toward target
+          const next = prev + Math.max(1, Math.round((target - prev) * 0.15));
+          return next >= target ? target : next;
+        });
+      }, stepMs);
+    };
+    const stopTween = () => { if (progressTimer) { clearInterval(progressTimer); progressTimer = null; } };
+
+    // Helper: run Gemini
+    const tryGemini = async () => {
+      setScanStatus('✦ Asking Gemini…');
+      tweenTo(60);
       const res = await fetch(`${API_BASE}/tasks/detect-duplicates`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
         body: JSON.stringify({ exclude_completed: true }),
       });
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || `Server error ${res.status}`);
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e.detail || `Server error ${res.status}`);
       }
-      const data   = await res.json();
-      const groups = Array.isArray(data.groups) ? data.groups : [];
-      // Further filter: remove any tasks that slipped through as completed
-      const filteredGroups = groups.map(g => ({
-        ...g,
-        task_ids: (g.task_ids || []).filter(id => {
-          const t = tasks.find(x => String(x.id) === String(id));
-          return t && t.status !== 'completed';
-        }),
-      })).filter(g => (g.task_ids || []).length > 1);
-      setDuplicateGroups(filteredGroups.map(g => ({ ...g, source: 'gemini' })));
-      setShowDuplicateDialog(true);
-      if (!filteredGroups.length) {
-        toast.success(`✦ Gemini scanned ${activeTasks.length} active tasks — no duplicates found ✓`);
-      } else {
-        toast.info(`✦ Gemini found ${filteredGroups.length} duplicate group${filteredGroups.length !== 1 ? 's' : ''} (completed tasks excluded)`);
-      }
-      setDetectingDuplicates(false);
-      return; // Gemini succeeded — done
-    } catch (geminiErr) {
-      console.warn('Gemini AI duplicate detection unavailable, trying Grok:', geminiErr.message);
-    }
+      setScanStatus('✦ Parsing Gemini response…');
+      tweenTo(85);
+      const data = await res.json();
+      return (Array.isArray(data.groups) ? data.groups : [])
+        .map(g => ({
+          ...g,
+          task_ids: (g.task_ids || []).filter(id => {
+            const t = tasks.find(x => String(x.id) === String(id));
+            return t && t.status !== 'completed';
+          }),
+        }))
+        .filter(g => (g.task_ids || []).length > 1)
+        .map(g => ({ ...g, source: 'gemini' }));
+    };
 
-    // ── 2. Try Grok AI (via backend Grok endpoint) ───────────────────────
-    try {
+    // Helper: run Grok
+    const tryGrok = async () => {
+      setScanStatus('⚡ Asking Grok…');
+      tweenTo(60);
       const res = await fetch(`${API_BASE}/tasks/detect-duplicates-grok`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
@@ -1144,49 +1159,80 @@ export default function Tasks() {
         }),
       });
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || `Server error ${res.status}`);
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e.detail || `Server error ${res.status}`);
       }
-      const data   = await res.json();
-      const groups = Array.isArray(data.groups) ? data.groups : [];
-      const filteredGroups = groups.map(g => ({
-        ...g,
-        task_ids: (g.task_ids || []).filter(id => {
-          const t = tasks.find(x => String(x.id) === String(id));
-          return t && t.status !== 'completed';
-        }),
-      })).filter(g => (g.task_ids || []).length > 1);
-      setDuplicateGroups(filteredGroups.map(g => ({ ...g, source: 'grok' })));
-      setShowDuplicateDialog(true);
-      if (!filteredGroups.length) {
-        toast.success(`⚡ Grok scanned ${activeTasks.length} active tasks — no duplicates found ✓`);
-      } else {
-        toast.info(`⚡ Grok found ${filteredGroups.length} duplicate group${filteredGroups.length !== 1 ? 's' : ''} (completed tasks excluded)`);
-      }
-      setDetectingDuplicates(false);
-      return; // Grok succeeded — done
-    } catch (grokErr) {
-      console.warn('Grok AI duplicate detection unavailable, using local algorithm:', grokErr.message);
-    }
+      setScanStatus('⚡ Parsing Grok response…');
+      tweenTo(85);
+      const data = await res.json();
+      return (Array.isArray(data.groups) ? data.groups : [])
+        .map(g => ({
+          ...g,
+          task_ids: (g.task_ids || []).filter(id => {
+            const t = tasks.find(x => String(x.id) === String(id));
+            return t && t.status !== 'completed';
+          }),
+        }))
+        .filter(g => (g.task_ids || []).length > 1)
+        .map(g => ({ ...g, source: 'grok' }));
+    };
 
-    // ── 3. Local fallback — runs in browser, works offline ────────────────
-    try {
-      const localGroups = detectDuplicatesLocally(activeTasks);
-      setDuplicateGroups(localGroups);
+    // Helper: run local
+    const runLocal = () => {
+      setScanStatus('⚙ Running local algorithm…');
+      tweenTo(85);
+      return detectDuplicatesLocally(activeTasks).map(g => ({ ...g, source: 'local' }));
+    };
+
+    const finish = (groups, label) => {
+      stopTween();
+      setScanStatus(`${label} — done`);
+      setScanProgress(100);
+      setDuplicateGroups(groups);
       setShowDuplicateDialog(true);
-      if (!localGroups.length) {
-        toast.success(`Local scan of ${activeTasks.length} active tasks — no duplicates found ✓`);
+      if (!groups.length) toast.success(`${label} scanned ${activeTasks.length} active tasks — no duplicates found ✓`);
+      else toast.info(`${label} found ${groups.length} duplicate group${groups.length !== 1 ? 's' : ''}`);
+      // Brief pause so the user sees 100% before clearing
+      setTimeout(() => {
+        setDetectingDuplicates(false);
+        setScanProgress(0);
+        setScanStatus('');
+      }, 600);
+    };
+
+    try {
+      // Initial tween to show motion immediately
+      tweenTo(15);
+
+      if (aiProvider === 'gemini') {
+        finish(await tryGemini(), '✦ Gemini AI');
+      } else if (aiProvider === 'grok') {
+        finish(await tryGrok(), '⚡ Grok AI');
+      } else if (aiProvider === 'local') {
+        finish(runLocal(), '⚙ Local Scan');
       } else {
-        toast.info(
-          `Found ${localGroups.length} duplicate group${localGroups.length !== 1 ? 's' : ''} (local scan — AI unavailable, completed excluded)`,
-          { duration: 5000 }
-        );
+        // auto — try gemini → grok → local with per-step status
+        try { finish(await tryGemini(), '✦ Gemini AI'); return; }
+        catch (e) {
+          console.warn('Gemini unavailable:', e.message);
+          setScanStatus('Gemini unavailable — trying Grok…');
+          stopTween(); setScanProgress(35); tweenTo(45);
+        }
+        try { finish(await tryGrok(), '⚡ Grok AI'); return; }
+        catch (e) {
+          console.warn('Grok unavailable:', e.message);
+          setScanStatus('Grok unavailable — using local scan…');
+          stopTween(); setScanProgress(55); tweenTo(70);
+        }
+        finish(runLocal(), '⚙ Local Scan');
       }
-    } catch (localErr) {
-      toast.error('Duplicate detection failed. Please try again.', { duration: 5000 });
-      console.error('Local duplicate detection error:', localErr);
-    } finally {
+    } catch (err) {
+      stopTween();
+      toast.error('Duplicate detection failed. Please try again.');
+      console.error(err);
       setDetectingDuplicates(false);
+      setScanProgress(0);
+      setScanStatus('');
     }
   };
 
@@ -2101,20 +2147,111 @@ export default function Tasks() {
             </SelectContent>
           </Select>
 
-          {/* AI Duplicate Detector */}
-          <button
-            onClick={handleDetectDuplicates}
-            disabled={detectingDuplicates}
-            className={`h-8 px-3 text-xs font-semibold rounded-xl border transition-all flex items-center gap-1.5 whitespace-nowrap
-              ${isDark
-                ? 'bg-violet-900/30 border-violet-700 text-violet-300 hover:bg-violet-900/50 disabled:opacity-40'
-                : 'bg-violet-50 border-violet-300 text-violet-700 hover:bg-violet-100 disabled:opacity-40'
-              }`}
-          >
-            {detectingDuplicates
-              ? <><Loader2 className="h-3 w-3 animate-spin" />Scanning…</>
-              : <><Sparkles className="h-3 w-3" />AI Duplicates</>}
-          </button>
+          {/* AI Provider Selector + Duplicate Detector */}
+          <div className={`flex items-center rounded-xl border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+            {/* Tab: Gemini */}
+            <button
+              onClick={() => setAiProvider('gemini')}
+              title="Use Google Gemini AI"
+              className={`h-8 px-2.5 text-[10px] font-bold tracking-wide border-r transition-all flex items-center gap-1
+                ${aiProvider === 'gemini'
+                  ? 'bg-violet-600 text-white border-violet-600'
+                  : (isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:bg-violet-900/30 hover:text-violet-300' : 'bg-white text-slate-500 border-slate-200 hover:bg-violet-50 hover:text-violet-700')
+                }`}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2L9.5 9.5 2 12l7.5 2.5L12 22l2.5-7.5L22 12l-7.5-2.5z"/>
+              </svg>
+              Gemini
+            </button>
+
+            {/* Tab: Grok */}
+            <button
+              onClick={() => setAiProvider('grok')}
+              title="Use xAI Grok"
+              className={`h-8 px-2.5 text-[10px] font-bold tracking-wide border-r transition-all flex items-center gap-1
+                ${aiProvider === 'grok'
+                  ? 'bg-orange-500 text-white border-orange-500'
+                  : (isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:bg-orange-900/30 hover:text-orange-300' : 'bg-white text-slate-500 border-slate-200 hover:bg-orange-50 hover:text-orange-600')
+                }`}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+              </svg>
+              Grok
+            </button>
+
+            {/* Tab: Local */}
+            <button
+              onClick={() => setAiProvider('local')}
+              title="Use local browser algorithm (offline)"
+              className={`h-8 px-2.5 text-[10px] font-bold tracking-wide border-r transition-all flex items-center gap-1
+                ${aiProvider === 'local'
+                  ? 'bg-slate-600 text-white border-slate-600'
+                  : (isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:bg-slate-600 hover:text-slate-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100 hover:text-slate-700')
+                }`}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+              </svg>
+              Local
+            </button>
+
+            {/* Tab: Auto */}
+            <button
+              onClick={() => setAiProvider('auto')}
+              title="Auto: tries Gemini → Grok → Local"
+              className={`h-8 px-2.5 text-[10px] font-bold tracking-wide border-r transition-all
+                ${aiProvider === 'auto'
+                  ? 'bg-emerald-500 text-white border-emerald-500'
+                  : (isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:bg-emerald-900/30 hover:text-emerald-300' : 'bg-white text-slate-500 border-slate-200 hover:bg-emerald-50 hover:text-emerald-600')
+                }`}
+            >
+              Auto
+            </button>
+
+            {/* Run button */}
+            <button
+              onClick={handleDetectDuplicates}
+              disabled={detectingDuplicates}
+              className={`h-8 px-3 text-[10px] font-bold transition-all flex items-center gap-1.5 whitespace-nowrap
+                ${aiProvider === 'gemini' ? (detectingDuplicates ? 'bg-violet-400 text-white' : 'bg-violet-600 hover:bg-violet-700 text-white') :
+                  aiProvider === 'grok'   ? (detectingDuplicates ? 'bg-orange-400 text-white' : 'bg-orange-500 hover:bg-orange-600 text-white') :
+                  aiProvider === 'local'  ? (detectingDuplicates ? 'bg-slate-400 text-white'  : 'bg-slate-600 hover:bg-slate-700 text-white')  :
+                                            (detectingDuplicates ? 'bg-emerald-400 text-white': 'bg-emerald-500 hover:bg-emerald-600 text-white')}
+              `}
+            >
+              {detectingDuplicates
+                ? <><Loader2 className="h-3 w-3 animate-spin" />Scanning…</>
+                : <><Sparkles className="h-3 w-3" />Scan</>}
+            </button>
+          </div>
+
+          {/* Scan progress + status (only while scanning) */}
+          {detectingDuplicates && (
+            <div className={`flex items-center gap-2 h-8 px-3 rounded-xl border min-w-[200px] ${
+              isDark ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-200 text-slate-700'
+            }`}>
+              <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] font-medium truncate" title={scanStatus}>
+                  {scanStatus || 'Scanning…'}
+                </div>
+                <div className={`mt-0.5 h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
+                  <div
+                    className={`h-full transition-all duration-200 ${
+                      aiProvider === 'gemini' ? 'bg-violet-500' :
+                      aiProvider === 'grok'   ? 'bg-orange-500' :
+                      aiProvider === 'local'  ? 'bg-slate-500'  :
+                                                'bg-emerald-500'
+                    }`}
+                    style={{ width: `${Math.max(2, Math.min(100, scanProgress))}%` }}
+                  />
+                </div>
+              </div>
+              <span className="text-[10px] font-bold tabular-nums shrink-0">{scanProgress}%</span>
+            </div>
+          )}
 
           {/* View toggle */}
           <div className={`flex p-0.5 rounded-xl ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
