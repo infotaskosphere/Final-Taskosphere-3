@@ -9,6 +9,7 @@ import {
   Download, ChevronDown, ChevronUp, X, ArrowRight, Database,
   Users, Package, Receipt, CreditCard,
 } from 'lucide-react';
+import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
 
 // ── constants ──────────────────────────────────────────────────────────────
 const COLORS = { blue: '#1F6FB2', green: '#1FAF5A', red: '#EF4444', amber: '#F59E0B', purple: '#7C3AED' };
@@ -59,6 +60,7 @@ export default function ImportInvoices() {
   const [error,       setError]      = useState('');
   const [expanded,    setExpanded]   = useState({});         // table section toggles
   const [skipDups,    setSkipDups]   = useState(true);
+  const [aiFile,      setAiFile]     = useState(null);
   const fileRef = useRef(null);
 
   const companyId = user?.company_id || user?.id || '';
@@ -69,6 +71,7 @@ export default function ImportInvoices() {
     setError('');
     setPreview(null);
     setResult(null);
+    setAiFile(file);
     setStep(STEP.PARSING);
 
     const form = new FormData();
@@ -256,6 +259,8 @@ export default function ImportInvoices() {
               Supports .vyp, .vyb, .xml, .tbk, .xlsx, .xls, .csv, .json
             </p>
           </div>
+
+          <AIFileInsights file={aiFile} label="Invoice File Insights" />
 
           {error && (
             <div className="flex items-center gap-2 p-3 rounded-xl text-sm"
