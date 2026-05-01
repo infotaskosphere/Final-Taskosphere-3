@@ -865,8 +865,8 @@ async def detect_duplicate_tasks(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Use Gemini AI (gemini-1.5-flash) to find duplicate tasks.
-    Better free-tier quota than gemini-2.0-flash-lite.
+    Use Gemini AI (gemini-2.0-flash) to find duplicate tasks.
+    
     """
     import json as _json, re as _re
 
@@ -881,7 +881,7 @@ async def detect_duplicate_tasks(
     try:
         import google.generativeai as _genai
         _genai.configure(api_key=gemini_key)
-        _model = _genai.GenerativeModel("gemini-1.5-flash")
+        _model = _genai.GenerativeModel("gemini-2.0-flash")
     except ImportError:
         raise HTTPException(
             status_code=503,
