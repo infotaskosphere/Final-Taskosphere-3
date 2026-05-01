@@ -765,6 +765,8 @@ export default function Tasks() {
   const [aiProvider, setAiProvider] = useState('auto'); // 'auto' | 'gemini' | 'grok' | 'local'
   const [scanProgress, setScanProgress] = useState(0);   // 0–100 progress while detecting duplicates
   const [scanStatus,   setScanStatus]   = useState('');  // human-readable status (e.g. 'Asking Gemini…')
+  const scanAbortRef = useRef(null); // AbortController for in-flight duplicate-detection requests
+  const [scanHistory, setScanHistory] = useState([]); // last few finished scans: { id, provider, label, groupCount, taskCount, scannedCount, durationMs, at }
   const [compareTaskIds,      setCompareTaskIds]       = useState([]);
   const [compareMode,         setCompareMode]          = useState(false);
 
@@ -1089,23 +1091,38 @@ export default function Tasks() {
     return groups;
   };
 
+  const cancelScan = () => {
+    if (scanAbortRef.current) {
+      try { scanAbortRef.current.abort(); } catch {}
+      scanAbortRef.current = null;
+    }
+  };
+
   const handleDetectDuplicates = async () => {
     if (detectingDuplicates) return;
+
+    // Fresh abort controller for this scan
+    const controller = new AbortController();
+    scanAbortRef.current = controller;
+    const { signal } = controller;
+    const isAborted = () => signal.aborted;
+
     setDetectingDuplicates(true);
     setDuplicateGroups([]);
     setScanProgress(0);
     setScanStatus('Preparing tasks…');
 
     const activeTasks = scopedTasks.filter(t => t.status !== 'completed');
+    const startedAt = Date.now();
 
     // Smoothly tween scanProgress toward a target value while a step is running.
     let progressTimer = null;
     const tweenTo = (target, stepMs = 120) => {
       if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
       progressTimer = setInterval(() => {
+        if (isAborted()) { clearInterval(progressTimer); progressTimer = null; return; }
         setScanProgress(prev => {
           if (prev >= target) { clearInterval(progressTimer); progressTimer = null; return prev; }
-          // ease toward target
           const next = prev + Math.max(1, Math.round((target - prev) * 0.15));
           return next >= target ? target : next;
         });
@@ -1121,6 +1138,7 @@ export default function Tasks() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
         body: JSON.stringify({ exclude_completed: true }),
+        signal,
       });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
@@ -1157,6 +1175,7 @@ export default function Tasks() {
           })),
           exclude_completed: true,
         }),
+        signal,
       });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
@@ -1190,18 +1209,47 @@ export default function Tasks() {
       setScanProgress(100);
       setDuplicateGroups(groups);
       setShowDuplicateDialog(true);
+
+      // Determine which provider actually produced the result from the label/source
+      const usedProvider =
+        label.includes('Gemini') ? 'gemini' :
+        label.includes('Grok')   ? 'grok'   :
+        label.includes('Local')  ? 'local'  :
+                                   aiProvider;
+      const duplicateTaskCount = groups.reduce((sum, g) => sum + (g.task_ids?.length || 0), 0);
+      const entry = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        provider: usedProvider,
+        label,
+        groupCount: groups.length,
+        taskCount: duplicateTaskCount,
+        scannedCount: activeTasks.length,
+        durationMs: Date.now() - startedAt,
+        at: new Date().toISOString(),
+      };
+      // Keep the most recent 5 scans
+      setScanHistory(prev => [entry, ...prev].slice(0, 5));
+
       if (!groups.length) toast.success(`${label} scanned ${activeTasks.length} active tasks — no duplicates found ✓`);
       else toast.info(`${label} found ${groups.length} duplicate group${groups.length !== 1 ? 's' : ''}`);
-      // Brief pause so the user sees 100% before clearing
       setTimeout(() => {
         setDetectingDuplicates(false);
         setScanProgress(0);
         setScanStatus('');
+        scanAbortRef.current = null;
       }, 600);
     };
 
+    const handleCancelled = () => {
+      stopTween();
+      toast.message('Scan cancelled');
+      setDetectingDuplicates(false);
+      setScanProgress(0);
+      setScanStatus('');
+      scanAbortRef.current = null;
+    };
+
     try {
-      // Initial tween to show motion immediately
       tweenTo(15);
 
       if (aiProvider === 'gemini') {
@@ -1209,30 +1257,37 @@ export default function Tasks() {
       } else if (aiProvider === 'grok') {
         finish(await tryGrok(), '⚡ Grok AI');
       } else if (aiProvider === 'local') {
+        // Local is synchronous — only honor cancellation if it happened before we got here
+        if (isAborted()) { handleCancelled(); return; }
         finish(runLocal(), '⚙ Local Scan');
       } else {
         // auto — try gemini → grok → local with per-step status
         try { finish(await tryGemini(), '✦ Gemini AI'); return; }
         catch (e) {
+          if (isAborted() || e?.name === 'AbortError') { handleCancelled(); return; }
           console.warn('Gemini unavailable:', e.message);
           setScanStatus('Gemini unavailable — trying Grok…');
           stopTween(); setScanProgress(35); tweenTo(45);
         }
         try { finish(await tryGrok(), '⚡ Grok AI'); return; }
         catch (e) {
+          if (isAborted() || e?.name === 'AbortError') { handleCancelled(); return; }
           console.warn('Grok unavailable:', e.message);
           setScanStatus('Grok unavailable — using local scan…');
           stopTween(); setScanProgress(55); tweenTo(70);
         }
+        if (isAborted()) { handleCancelled(); return; }
         finish(runLocal(), '⚙ Local Scan');
       }
     } catch (err) {
+      if (isAborted() || err?.name === 'AbortError') { handleCancelled(); return; }
       stopTween();
       toast.error('Duplicate detection failed. Please try again.');
       console.error(err);
       setDetectingDuplicates(false);
       setScanProgress(0);
       setScanStatus('');
+      scanAbortRef.current = null;
     }
   };
 
@@ -2250,6 +2305,19 @@ export default function Tasks() {
                 </div>
               </div>
               <span className="text-[10px] font-bold tabular-nums shrink-0">{scanProgress}%</span>
+              <button
+                type="button"
+                onClick={cancelScan}
+                title="Cancel scan"
+                aria-label="Cancel scan"
+                className={`shrink-0 inline-flex items-center justify-center h-5 w-5 rounded-md transition-colors ${
+                  isDark
+                    ? 'text-slate-400 hover:text-white hover:bg-red-600/70'
+                    : 'text-slate-500 hover:text-white hover:bg-red-500'
+                }`}
+              >
+                <X className="h-3 w-3" />
+              </button>
             </div>
           )}
 
@@ -2266,6 +2334,92 @@ export default function Tasks() {
           </div>
         </div>
       </motion.div>
+
+      {/* ── Recent Scan History ──────────────────────────────────────────── */}
+      <AnimatePresence>
+        {scanHistory.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            className={`rounded-xl border px-3 py-2 ${
+              isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-200'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-1.5">
+                <Clock className={`h-3 w-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`} />
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  Recent Scans
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setScanHistory([])}
+                title="Clear history"
+                className={`text-[10px] font-medium px-1.5 py-0.5 rounded transition-colors ${
+                  isDark
+                    ? 'text-slate-400 hover:text-white hover:bg-slate-700'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                }`}
+              >
+                Clear
+              </button>
+            </div>
+            <ul className="flex flex-col gap-1">
+              {scanHistory.map(h => {
+                const providerStyle =
+                  h.provider === 'gemini' ? { dot: 'bg-violet-500',  badge: isDark ? 'bg-violet-900/40 text-violet-300' : 'bg-violet-50 text-violet-700',  name: 'Gemini' } :
+                  h.provider === 'grok'   ? { dot: 'bg-orange-500',  badge: isDark ? 'bg-orange-900/40 text-orange-300' : 'bg-orange-50 text-orange-700',  name: 'Grok' }   :
+                  h.provider === 'local'  ? { dot: 'bg-slate-500',   badge: isDark ? 'bg-slate-700 text-slate-200'      : 'bg-slate-100 text-slate-700',   name: 'Local' }  :
+                                            { dot: 'bg-emerald-500', badge: isDark ? 'bg-emerald-900/40 text-emerald-300': 'bg-emerald-50 text-emerald-700', name: 'Auto' };
+                const when = format(new Date(h.at), 'HH:mm:ss');
+                const seconds = (h.durationMs / 1000).toFixed(1);
+                const resultText = h.groupCount === 0
+                  ? 'no duplicates'
+                  : `${h.groupCount} group${h.groupCount !== 1 ? 's' : ''} · ${h.taskCount} task${h.taskCount !== 1 ? 's' : ''}`;
+                return (
+                  <li
+                    key={h.id}
+                    className={`flex items-center gap-2 text-[11px] py-1 px-2 rounded-lg ${
+                      isDark ? 'hover:bg-slate-700/50' : 'hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${providerStyle.dot}`} />
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${providerStyle.badge}`}>
+                      {providerStyle.name}
+                    </span>
+                    <span className={`font-mono shrink-0 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {when}
+                    </span>
+                    <span className={`flex-1 truncate ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                      Scanned {h.scannedCount} task{h.scannedCount !== 1 ? 's' : ''} —{' '}
+                      <span className={h.groupCount === 0 ? (isDark ? 'text-emerald-400' : 'text-emerald-600') : (isDark ? 'text-amber-300' : 'text-amber-600')}>
+                        {resultText}
+                      </span>
+                    </span>
+                    <span className={`shrink-0 tabular-nums ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                      {seconds}s
+                    </span>
+                    {h.groupCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowDuplicateDialog(true)}
+                        title="Reopen results"
+                        className={`shrink-0 inline-flex items-center justify-center h-5 w-5 rounded-md transition-colors ${
+                          isDark ? 'text-slate-400 hover:text-white hover:bg-slate-600' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200'
+                        }`}
+                      >
+                        <ArrowRight className="h-3 w-3" />
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Active Filter Pills ──────────────────────────────────────────── */}
       <AnimatePresence>
