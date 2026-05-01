@@ -78,6 +78,7 @@ import {
 } from 'lucide-react';
 import LayoutCustomizer from '../components/layout/LayoutCustomizer';
 import { usePageLayout } from '../hooks/usePageLayout';
+import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS & TOKENS
@@ -1092,6 +1093,7 @@ function AttendanceProofModal({ onClose, onSave, isDark, existingProof = null })
   const [docs,      setDocs]      = useState([]);
   const [isSaving,  setIsSaving]  = useState(false);
   const [previewUrl, setPreviewUrl] = useState(null);
+  const [aiDoc,     setAiDoc]     = useState(null);
   const photoRef = useRef(null);
   const docRef   = useRef(null);
 
@@ -1106,6 +1108,7 @@ function AttendanceProofModal({ onClose, onSave, isDark, existingProof = null })
     const files = Array.from(e.target.files || []);
     const items = files.map(f => ({ file: f, name: f.name, size: f.size, type: f.type }));
     setDocs(prev => [...prev, ...items].slice(0, 5));
+    if (files.length > 0) setAiDoc(files[0]);
     if (docRef.current) docRef.current.value = '';
   };
 
@@ -1225,6 +1228,7 @@ function AttendanceProofModal({ onClose, onSave, isDark, existingProof = null })
             >
               <Upload className="w-4 h-4" /> Upload Documents
             </button>
+            <AIFileInsights file={aiDoc} label="Document Insights" />
             {docs.length > 0 && (
               <div className="mt-3 space-y-2">
                 {docs.map((d, i) => (
