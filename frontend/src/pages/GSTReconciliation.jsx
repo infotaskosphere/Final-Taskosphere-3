@@ -15,6 +15,7 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
 
 /* ═══════════════════════════════════════════════════════════════════════════
    PARSING UTILITIES
@@ -4414,6 +4415,10 @@ export default function GSTReconciliation() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
               <DropZone label="GSTR-2B (GST Portal)" icon={Globe}   hint="Download GSTR-2B Excel from GST portal"        file={portalFile} onFile={handlePortalFile} onClear={()=>{ setPortalFile(null); }} colors={{ done:'bg-blue-50 dark:bg-blue-900/20 border-blue-400', drag:'bg-blue-50 dark:bg-blue-900/10 border-blue-400', iconBg:'bg-blue-100 dark:bg-blue-900/40', iconColor:'text-blue-600 dark:text-blue-300', btn:'bg-blue-600 hover:bg-blue-700 text-white' }}/>
               <DropZone label="Purchase Register (Books)" icon={BookOpen} hint="Export b2b sheet from your accounting software" file={booksFile}  onFile={setBooksFile}  onClear={()=>setBooksFile(null)}  colors={{ done:'bg-violet-50 dark:bg-violet-900/20 border-violet-400', drag:'bg-violet-50 dark:bg-violet-900/10 border-violet-400', iconBg:'bg-violet-100 dark:bg-violet-900/40', iconColor:'text-violet-600 dark:text-violet-300', btn:'bg-violet-600 hover:bg-violet-700 text-white' }}/>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
+              <AIFileInsights file={portalFile} label="GST Portal Data Insights" />
+              <AIFileInsights file={booksFile}  label="Books Data Insights" />
             </div>
 
             <div className="flex items-start gap-3 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800 mb-5 text-xs text-amber-700 dark:text-amber-300">
