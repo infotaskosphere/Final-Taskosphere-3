@@ -31,7 +31,7 @@ const Invoicing         = lazy(() => import("@/pages/Invoicing.jsx"));
 const Reminders         = lazy(() => import("@/pages/Reminders.jsx"));
 const CompliancePage    = lazy(() => import("@/pages/CompliancePage.jsx"));
 const GSTReconciliation = lazy(() => import("@/pages/GSTReconciliation.jsx")); // ← NEW
-const AIDocumentReader  = lazy(() => import("@/pages/AIDocumentReader.jsx"));
+
 
 /* ── Route Guards ───────────────────────────────────────────────────────── */
 
