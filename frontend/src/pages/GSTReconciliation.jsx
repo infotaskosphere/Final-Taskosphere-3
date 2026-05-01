@@ -12,7 +12,7 @@ import {
   Phone, Mail, Calendar, ChevronRight, ScanSearch,
   Filter, Tag, ArrowUpDown, ChevronsUpDown,
   History, Clock, Trash2, ChevronDown, User, Loader2, FolderOpen, Edit3,
-  MessageSquare,
+  MessageSquare, Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
@@ -3206,6 +3206,8 @@ const ClientSelector = ({ clients, selectedId, onSelect }) => {
 const HistoryView = ({ onOpenSession }) => {
   const [sessions,  setSessions]  = useState([]);
   const [loading,   setLoading]   = useState(true);
+  const [aiInsights,     setAiInsights]     = useState('');
+  const [aiInsightState, setAiInsightState] = useState('idle'); // idle | loading | done | error
   const [deleting,  setDeleting]  = useState(null);
   const [opening,   setOpening]   = useState(null);
   const [expanded,  setExpanded]  = useState(null);
@@ -4498,6 +4500,43 @@ export default function GSTReconciliation() {
                   </div>
                 );
               })()}
+
+              {/* AI Insights Panel */}
+              <div className="mb-5">
+                {aiInsightState === 'idle' && (
+                  <button
+                    onClick={handleAiInsights}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-xl shadow-sm transition-colors"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    Generate AI Insights for this Reconciliation
+                  </button>
+                )}
+                {aiInsightState === 'loading' && (
+                  <div className="flex items-center gap-3 p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl border border-indigo-200 dark:border-indigo-800 text-sm text-indigo-600 dark:text-indigo-300">
+                    <div className="h-4 w-4 border-2 border-indigo-400 border-t-indigo-600 rounded-full animate-spin" />
+                    Gemini AI is analysing your reconciliation data…
+                  </div>
+                )}
+                {(aiInsightState === 'done' || aiInsightState === 'error') && (
+                  <div className={`rounded-xl border p-4 text-sm ${aiInsightState === 'error' ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800' : 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="flex items-center gap-2 font-semibold text-indigo-700 dark:text-indigo-300">
+                        <Sparkles className="h-4 w-4" /> AI Reconciliation Insights
+                      </span>
+                      <button
+                        onClick={() => { setAiInsightState('idle'); setAiInsights(''); }}
+                        className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 underline"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    <pre className={`whitespace-pre-wrap leading-relaxed font-sans text-xs ${aiInsightState === 'error' ? 'text-red-600 dark:text-red-400' : 'text-slate-700 dark:text-slate-300'}`}>
+                      {aiInsights}
+                    </pre>
+                  </div>
+                )}
+              </div>
 
               {/* Summary cards — all data tabs */}
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
