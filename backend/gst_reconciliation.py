@@ -1221,6 +1221,117 @@ async def dashboard_summary(current_user: User=Depends(get_current_user)):
             "total_itc_reversals":total_reversals,"recent_sessions":recent}
 
 
+
+# ─── AI INSIGHTS ENDPOINT (Gemini) ────────────────────────────────────────────
+
+class AIInsightBody(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    mismatch_count: int = 0
+    portal_only_count: int = 0
+    books_only_count: int = 0
+    high_risk_vendors: int = 0
+    itc_eligible_total: float = 0.0
+    itc_at_risk_total: float = 0.0
+    period: Optional[str] = None
+    top_mismatches: Optional[List[Dict[str, Any]]] = None
+
+
+@router.post("/ai-insights")
+async def generate_ai_insights(
+    body: AIInsightBody,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Send reconciliation summary to Gemini and get back:
+      - Executive summary
+      - Key risk areas
+      - Recommended actions
+      - ITC impact analysis
+    """
+    import os
+    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    if not gemini_key:
+        raise HTTPException(
+            status_code=500,
+            detail="GEMINI_API_KEY is not configured on the server."
+        )
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=gemini_key)
+        model = genai.GenerativeModel("gemini-2.0-flash")
+    except ImportError:
+        raise HTTPException(status_code=500, detail="google-generativeai package not installed.")
+
+    # Build top mismatches text
+    mismatch_text = ""
+    if body.top_mismatches:
+        lines = []
+        for i, m in enumerate(body.top_mismatches[:5], 1):
+            p = m.get("portal", {})
+            b = m.get("books", {})
+            lines.append(
+                f"  {i}. GSTIN: {p.get('gstin','')} | Invoice: {p.get('invoice_no_raw', p.get('invoice_no',''))} | "
+                f"Portal Value: Rs.{p.get('invoice_value',0):,.2f} | Books Value: Rs.{b.get('invoice_value',0):,.2f} | "
+                f"Reason: {m.get('mismatch_reason','')}"
+            )
+        mismatch_text = "\nTop Mismatches:\n" + "\n".join(lines)
+
+    prompt = f"""You are an expert Indian GST consultant and chartered accountant.
+A client has completed GSTR-2B vs Purchase Register reconciliation for period: {body.period or "current period"}.
+
+Reconciliation Summary:
+- Total Portal (GSTR-2B) Invoices: {body.summary.get("total_portal", 0)}
+- Total Books Invoices: {body.summary.get("total_books", 0)}
+- Matched: {body.summary.get("matched_count", 0)} invoices (Rs.{body.summary.get("matched_value", 0):,.2f})
+- Mismatched: {body.mismatch_count} invoices (Rs.{body.summary.get("mismatch_value", 0):,.2f})
+- Missing in Books: {body.portal_only_count} invoices (Rs.{body.summary.get("portal_only_value", 0):,.2f})
+- Missing in GST Portal: {body.books_only_count} invoices (Rs.{body.summary.get("books_only_value", 0):,.2f})
+- High Risk Vendors: {body.high_risk_vendors}
+- ITC Eligible (matched): Rs.{body.itc_eligible_total:,.2f}
+- ITC At Risk (missing in books): Rs.{body.itc_at_risk_total:,.2f}
+- Fuzzy Matched: {body.summary.get("fuzzy_matched_count", 0)} invoices
+- Duplicate Invoices (Portal): {body.summary.get("duplicate_portal", 0)}
+- Duplicate Invoices (Books): {body.summary.get("duplicate_books", 0)}
+{mismatch_text}
+
+Please provide a concise professional analysis in the following structure:
+
+## Executive Summary
+(2-3 sentences summarising the reconciliation outcome)
+
+## Key Risk Areas
+(Bullet points of the most important issues found)
+
+## ITC Impact Analysis
+(Analysis of ITC eligible vs at-risk amounts and what actions are needed)
+
+## Recommended Actions
+(Prioritised action items the client should take immediately)
+
+## Compliance Note
+(Brief note on GST compliance status and filing deadlines if relevant)
+
+Keep the response clear, professional, and actionable. Use Indian GST terminology.
+"""
+
+    try:
+        response = await model.generate_content_async(prompt)
+        return {
+            "insights": response.text,
+            "period": body.period,
+            "generated_at": _now().isoformat(),
+        }
+    except Exception as e:
+        error_msg = str(e)
+        if "429" in error_msg or "quota" in error_msg.lower():
+            raise HTTPException(
+                status_code=429,
+                detail="Gemini quota exceeded. Please wait a moment and try again."
+            )
+        raise HTTPException(status_code=422, detail=f"AI analysis failed: {error_msg}")
+
+
 # ─── INDEXES (extended) ───────────────────────────────────────────────────────
 
 async def create_gst_reconciliation_indexes():
