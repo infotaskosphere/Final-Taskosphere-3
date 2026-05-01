@@ -18,6 +18,7 @@ from datetime import datetime, date, timezone, timedelta
 # --- FIXED ROUTER IMPORTS ---
 # Added 'backend.' to invoicing to match the others
 from backend.compliance import router as compliance_router
+from backend.ai_document_reader import router as ai_document_reader_router
 from backend.gst_reconciliation import router as gst_reconciliation_router
 from backend.gst_reconciliation import create_gst_reconciliation_indexes
 # reminders routes are inlined directly below (no separate router file needed)
@@ -6956,6 +6957,7 @@ async def universal_exception_handler(request: Request, exc: Exception):
 
 # Api Router
 api_router.include_router(invoicing_router)
+app.include_router(ai_document_reader_router)
 api_router.include_router(trademark_sphere_router)
 api_router.include_router(compliance_router)
 api_router.include_router(gst_reconciliation_router)
