@@ -25,6 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
+import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
 
 const C = { deepBlue: '#0D3B66', medBlue: '#1F6FB2', green: '#1FAF5A', whatsapp: '#25D366' };
 const spring = { type: 'spring', stiffness: 340, damping: 24 };
@@ -625,6 +626,7 @@ function WAModal({ open, onClose, entry, isDark }) {
 function ImportModal({ open, onClose, isDark, onDownloadTemplate }) {
   const [step, setStep] = useState(1);
   const [file, setFile] = useState(null);
+  const [aiFile, setAiFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const qc = useQueryClient();
@@ -634,7 +636,7 @@ function ImportModal({ open, onClose, isDark, onDownloadTemplate }) {
     if (!f) return;
     const ext = f.name.split('.').pop()?.toLowerCase() || '';
     if (!['xlsx', 'xls', 'csv'].includes(ext)) return toast.error('Upload Excel or CSV only');
-    setFile(f); setResult(null); setStep(1);
+    setFile(f); setAiFile(f); setResult(null); setStep(1);
   };
 
   const doImport = async () => {
@@ -720,6 +722,7 @@ function ImportModal({ open, onClose, isDark, onDownloadTemplate }) {
                   </button>
                 </div>
               )}
+              <AIFileInsights file={aiFile} label="Credential Import Insights" />
 
               {/* Column reference table */}
               <details className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
