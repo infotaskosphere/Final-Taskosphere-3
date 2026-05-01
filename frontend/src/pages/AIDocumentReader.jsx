@@ -1,6 +1,6 @@
 import React, { useState, useRef } from "react";
-import axios from "axios";
 import { Upload, FileText, Loader2, Sparkles, X } from "lucide-react";
+import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -46,9 +46,9 @@ export default function AIDocumentReader() {
     const form = new FormData();
     form.append("file", file);
     try {
-      const { data } = await axios.post("/api/ai/analyze-document", form, {
-        withCredentials: true,
+      const { data } = await api.post("/ai/analyze-document", form, {
         headers: { "Content-Type": "multipart/form-data" },
+        timeout: 120000,
       });
       setResult(data.analysis);
     } catch (err) {
