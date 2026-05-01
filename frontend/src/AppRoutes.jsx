@@ -31,6 +31,7 @@ const Invoicing         = lazy(() => import("@/pages/Invoicing.jsx"));
 const Reminders         = lazy(() => import("@/pages/Reminders.jsx"));
 const CompliancePage    = lazy(() => import("@/pages/CompliancePage.jsx"));
 const GSTReconciliation = lazy(() => import("@/pages/GSTReconciliation.jsx")); // ← NEW
+const AIDocumentReader  = lazy(() => import("@/pages/AIDocumentReader.jsx"));
 
 /* ── Route Guards ───────────────────────────────────────────────────────── */
 
@@ -111,6 +112,7 @@ function AppRoutes() {
       <Route path="/login"          element={<Public><PageLoader isPublic><Login /></PageLoader></Public>} />
       <Route path="/register"       element={<Public><PageLoader isPublic><Register /></PageLoader></Public>} />
       <Route path="/forgot-password" element={<Public><PageLoader isPublic><ForgotPassword /></PageLoader></Public>} />
+      <Route path="/ai-reader" element={<Protected><PageLoader><AIDocumentReader /></PageLoader></Protected>} />
 
       {/* Dashboard — all roles */}
       <Route path="/dashboard" element={<Protected><PageLoader><Dashboard /></PageLoader></Protected>} />
