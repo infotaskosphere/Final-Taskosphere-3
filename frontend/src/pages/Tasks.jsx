@@ -1091,11 +1091,15 @@ export default function Tasks() {
     setDetectingDuplicates(true);
     setDuplicateGroups([]);
 
-    // ── 1. Try AI (Gemini via backend) first ──────────────────────────────
+    // ── Filter out completed tasks — only check active/pending/in-progress ──
+    const activeTasks = scopedTasks.filter(t => t.status !== 'completed');
+
+    // ── 1. Try Gemini AI (via backend) first ─────────────────────────────
     try {
       const res = await fetch(`${API_BASE}/tasks/detect-duplicates`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify({ exclude_completed: true }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -1103,29 +1107,78 @@ export default function Tasks() {
       }
       const data   = await res.json();
       const groups = Array.isArray(data.groups) ? data.groups : [];
-      setDuplicateGroups(groups.map(g => ({ ...g, source: 'ai' })));
+      // Further filter: remove any tasks that slipped through as completed
+      const filteredGroups = groups.map(g => ({
+        ...g,
+        task_ids: (g.task_ids || []).filter(id => {
+          const t = tasks.find(x => String(x.id) === String(id));
+          return t && t.status !== 'completed';
+        }),
+      })).filter(g => (g.task_ids || []).length > 1);
+      setDuplicateGroups(filteredGroups.map(g => ({ ...g, source: 'gemini' })));
       setShowDuplicateDialog(true);
-      if (!groups.length) {
-        toast.success(`AI scanned ${data.total_tasks_scanned} tasks — no duplicates found ✓`);
+      if (!filteredGroups.length) {
+        toast.success(`✦ Gemini scanned ${activeTasks.length} active tasks — no duplicates found ✓`);
       } else {
-        toast.info(`AI found ${groups.length} duplicate group${groups.length !== 1 ? 's' : ''}`);
+        toast.info(`✦ Gemini found ${filteredGroups.length} duplicate group${filteredGroups.length !== 1 ? 's' : ''} (completed tasks excluded)`);
       }
       setDetectingDuplicates(false);
-      return; // AI succeeded — done
-    } catch (aiErr) {
-      console.warn('AI duplicate detection unavailable, using local algorithm:', aiErr.message);
+      return; // Gemini succeeded — done
+    } catch (geminiErr) {
+      console.warn('Gemini AI duplicate detection unavailable, trying Grok:', geminiErr.message);
     }
 
-    // ── 2. Local fallback — runs in browser, works offline ────────────────
+    // ── 2. Try Grok AI (via backend Grok endpoint) ───────────────────────
     try {
-      const localGroups = detectDuplicatesLocally(scopedTasks);
+      const res = await fetch(`${API_BASE}/tasks/detect-duplicates-grok`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify({
+          tasks: activeTasks.map(t => ({
+            id: t.id, title: t.title, description: t.description,
+            category: t.category, client_id: t.client_id,
+            assigned_to: t.assigned_to, due_date: t.due_date,
+            priority: t.priority, status: t.status,
+          })),
+          exclude_completed: true,
+        }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server error ${res.status}`);
+      }
+      const data   = await res.json();
+      const groups = Array.isArray(data.groups) ? data.groups : [];
+      const filteredGroups = groups.map(g => ({
+        ...g,
+        task_ids: (g.task_ids || []).filter(id => {
+          const t = tasks.find(x => String(x.id) === String(id));
+          return t && t.status !== 'completed';
+        }),
+      })).filter(g => (g.task_ids || []).length > 1);
+      setDuplicateGroups(filteredGroups.map(g => ({ ...g, source: 'grok' })));
+      setShowDuplicateDialog(true);
+      if (!filteredGroups.length) {
+        toast.success(`⚡ Grok scanned ${activeTasks.length} active tasks — no duplicates found ✓`);
+      } else {
+        toast.info(`⚡ Grok found ${filteredGroups.length} duplicate group${filteredGroups.length !== 1 ? 's' : ''} (completed tasks excluded)`);
+      }
+      setDetectingDuplicates(false);
+      return; // Grok succeeded — done
+    } catch (grokErr) {
+      console.warn('Grok AI duplicate detection unavailable, using local algorithm:', grokErr.message);
+    }
+
+    // ── 3. Local fallback — runs in browser, works offline ────────────────
+    try {
+      const localGroups = detectDuplicatesLocally(activeTasks);
       setDuplicateGroups(localGroups);
       setShowDuplicateDialog(true);
       if (!localGroups.length) {
-        toast.success(`Local scan of ${scopedTasks.length} tasks — no duplicates found ✓`);
+        toast.success(`Local scan of ${activeTasks.length} active tasks — no duplicates found ✓`);
       } else {
         toast.info(
-          `Found ${localGroups.length} duplicate group${localGroups.length !== 1 ? 's' : ''} (local scan — AI unavailable)`,
+          `Found ${localGroups.length} duplicate group${localGroups.length !== 1 ? 's' : ''} (local scan — AI unavailable, completed excluded)`,
           { duration: 5000 }
         );
       }
@@ -2358,15 +2411,20 @@ export default function Tasks() {
                   ? `Found ${duplicateGroups.length} group${duplicateGroups.length !== 1 ? 's' : ''} of potential duplicate tasks.`
                   : 'No duplicate tasks detected.'}
               </span>
-              {duplicateGroups.length > 0 && (
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                  duplicateGroups[0]?.source === 'ai'
-                    ? 'bg-violet-50 text-violet-700 border-violet-200'
-                    : 'bg-blue-50 text-blue-700 border-blue-200'
-                }`}>
-                  {duplicateGroups[0]?.source === 'ai' ? '✦ Gemini AI' : '⚡ Local Scan'}
-                </span>
-              )}
+              {duplicateGroups.length > 0 && (() => {
+                const src = duplicateGroups[0]?.source;
+                const badgeClass = src === 'gemini'
+                  ? 'bg-violet-50 text-violet-700 border-violet-200'
+                  : src === 'grok'
+                    ? 'bg-orange-50 text-orange-700 border-orange-200'
+                    : 'bg-blue-50 text-blue-700 border-blue-200';
+                const badgeLabel = src === 'gemini' ? '✦ Gemini AI' : src === 'grok' ? '⚡ Grok AI' : '⚡ Local Scan';
+                return (
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badgeClass}`}>
+                    {badgeLabel}
+                  </span>
+                );
+              })()}
               {duplicateGroups.length > 0 && (
                 <button
                   onClick={() => { setCompareMode(p => !p); setCompareTaskIds([]); }}
