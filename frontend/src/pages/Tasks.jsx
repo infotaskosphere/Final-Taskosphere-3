@@ -2,8 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import useDark from '../hooks/useDark';
 import { useAuth } from '../contexts/AuthContext';
-import AIFileInsights from "@/components/ui/AIFileInsights.jsx";
-
 
 // ✅ UI COMPONENTS (fixed)
 import { Card, CardContent } from '../components/ui/card';
@@ -34,6 +32,7 @@ import {
   Briefcase, Target, Activity, ChevronRight, Sun,
   Loader2, Mail, Send,
 } from 'lucide-react';
+import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
 
 // ─── API Helpers ─────────────────────────────────────────────────────────────
 const API_BASE = api.defaults.baseURL;
@@ -796,6 +795,7 @@ export default function Tasks() {
   const [workflowFrequencyFilter, setWorkflowFrequencyFilter] = useState('all');
 
   const fileInputRef = useRef(null);
+  const [csvAiFile, setCsvAiFile] = useState(null);
 
   const hasCrossVisibility = React.useMemo(() => {
     if (isAdmin) return true;
@@ -1138,8 +1138,8 @@ export default function Tasks() {
   };
 
   const handleCsvUpload = (e) => {
-  const f = e?.target?.files?.[0];
-  if (f) { setCsvAiFile(f); toast.info(`${f.name} selected — AI is analysing…`); }
+    const f = e?.target?.files?.[0];
+    if (f) { setCsvAiFile(f); toast.info(`${f.name} selected — AI is analysing…`); }
   };
   const handleExportCsv = () => { toast.success('Exporting CSV (stub)'); };
   const handleExportPdf = () => { toast.success('Exporting PDF (stub)'); };
