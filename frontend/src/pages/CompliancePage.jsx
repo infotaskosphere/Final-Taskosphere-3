@@ -18,6 +18,7 @@ import {
   BarChart3, ChevronLeft, TrendingUp, Settings2, Sparkles,
 } from 'lucide-react';
 import LayoutCustomizer from '@/components/layout/LayoutCustomizer';
+import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
 import { usePageLayout } from '@/hooks/usePageLayout';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import { detectComplianceDuplicates } from '@/lib/aiDuplicateEngine';
@@ -775,6 +776,7 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
 function ImportExcelModal({complianceId,complianceName,onClose,onImported,isDark,allUsers=[],compliance}){
   const[step,setStep]=useState(1);
   const[file,setFile]=useState(null);
+  const[aiFile,setAiFile]=useState(null);
   const[preview,setPreview]=useState(null);
   const[previewing,setPreviewing]=useState(false);
   const[clientCol,setClientCol]=useState('Client Name');
@@ -797,7 +799,7 @@ function ImportExcelModal({complianceId,complianceName,onClose,onImported,isDark
 
   const handleFileChange=async e=>{
     const f=e.target.files?.[0]; if(!f)return;
-    setFile(f);setPreviewing(true);
+    setFile(f); setAiFile(f); setPreviewing(true);
     try{
       const fd=new FormData();fd.append('file',f);
       const res=await api.post(`/compliance/${complianceId}/preview-excel`,fd,{headers:{'Content-Type':'multipart/form-data'}});
@@ -869,6 +871,7 @@ function ImportExcelModal({complianceId,complianceName,onClose,onImported,isDark
                     <p className="text-sm font-semibold" style={{color:isDark?D.text:'#1e293b'}}>Click to upload Excel or CSV</p>
                     <p className="text-xs" style={{color:isDark?D.dimmer:'#94a3b8'}}>Columns: Client Name, Status (optional), Notes (optional)</p></>}
               </button>
+              <AIFileInsights file={aiFile} label="Compliance Data Insights" />
             </div>
           )}
           {step===2&&preview&&(
