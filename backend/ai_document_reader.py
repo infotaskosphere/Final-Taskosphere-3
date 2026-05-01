@@ -12,7 +12,7 @@ def _get_gemini_model():
     try:
         import google.generativeai as genai
         genai.configure(api_key=key)
-        return genai.GenerativeModel("gemini-1.5-flash")
+        return genai.GenerativeModel("gemini-2.0-flash")
     except ImportError:
         raise HTTPException(status_code=500, detail="google-generativeai package not installed.")
 
