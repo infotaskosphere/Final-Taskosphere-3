@@ -104,17 +104,20 @@ async def analyze_document(
 
         if not text_content.strip():
             # PDF has no extractable text (scanned image PDF) — use vision
+            # google-generativeai 0.8.x accepts PIL Image objects directly
             try:
-                import google.generativeai as genai
-                image_parts = []
+                from PIL import Image as PILImage
+                pil_images = []
                 with pdfplumber.open(io.BytesIO(contents)) as pdf:
                     for page in pdf.pages[:5]:
-                        buf = io.BytesIO()
-                        page.to_image(resolution=150).save(buf, format="PNG")
-                        buf.seek(0)
-                        image_parts.append(
-                            genai.types.Part.from_bytes(data=buf.read(), mime_type="image/png")
-                        )
+                        # .to_image() returns pdfplumber PageImage; .original is the PIL Image
+                        pil_img = page.to_image(resolution=150).original
+                        # Ensure RGB so Gemini accepts it
+                        if pil_img.mode not in ("RGB", "L"):
+                            pil_img = pil_img.convert("RGB")
+                        pil_images.append(pil_img)
+                if not pil_images:
+                    raise HTTPException(status_code=422, detail="No pages could be rendered from this PDF.")
                 prompt = (
                     "You are a document analyst. This is a scanned PDF document.\n"
                     "Please read it carefully and provide:\n"
@@ -123,8 +126,10 @@ async def analyze_document(
                     "3. A structured summary\n"
                     "4. Important observations"
                 )
-                response = await model.generate_content_async(image_parts + [prompt])
+                response = await model.generate_content_async(pil_images + [prompt])
                 return {"filename": filename, "analysis": response.text}
+            except HTTPException:
+                raise
             except Exception as e:
                 raise HTTPException(status_code=422, detail=f"Scanned PDF could not be processed: {e}")
 
