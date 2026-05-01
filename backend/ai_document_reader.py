@@ -105,13 +105,16 @@ async def analyze_document(
         if not text_content.strip():
             # PDF has no extractable text (scanned image PDF) — use vision
             try:
-                from PIL import Image
-                import pdfplumber
-                images = []
+                import google.generativeai as genai
+                image_parts = []
                 with pdfplumber.open(io.BytesIO(contents)) as pdf:
                     for page in pdf.pages[:5]:
-                        img = page.to_image(resolution=150).original
-                        images.append(img)
+                        buf = io.BytesIO()
+                        page.to_image(resolution=150).save(buf, format="PNG")
+                        buf.seek(0)
+                        image_parts.append(
+                            genai.types.Part.from_bytes(data=buf.read(), mime_type="image/png")
+                        )
                 prompt = (
                     "You are a document analyst. This is a scanned PDF document.\n"
                     "Please read it carefully and provide:\n"
@@ -120,11 +123,10 @@ async def analyze_document(
                     "3. A structured summary\n"
                     "4. Important observations"
                 )
-                parts = images + [prompt]
-                response = await model.generate_content_async(parts)
+                response = await model.generate_content_async(image_parts + [prompt])
                 return {"filename": filename, "analysis": response.text}
-            except Exception:
-                raise HTTPException(status_code=422, detail="PDF appears to be a scanned image and could not be processed.")
+            except Exception as e:
+                raise HTTPException(status_code=422, detail=f"Scanned PDF could not be processed: {e}")
 
         prompt = (
             "You are a document analyst. Below is extracted text from a PDF document.\n"
