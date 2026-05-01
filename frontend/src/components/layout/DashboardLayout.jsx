@@ -6,7 +6,7 @@ import {
   LayoutDashboard, CheckSquare, FileText, Clock, BarChart3,
   Users, LogOut, Menu, Calendar, Activity, ChevronDown,
   PanelLeftClose, PanelLeftOpen, Target, Sun, Moon, MapPin,
-  Settings, Mail, Receipt, X, KeyRound,
+  Settings, Mail, Receipt, X, KeyRound, BrainCircuit,
   CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -42,6 +42,8 @@ const NAV_GROUPS = [
       { path: '/attendance', icon: Clock,           label: 'Attendance' },
       { path: '/reminders',  icon: Bell,            label: 'Reminders' },
       { path: '/visits',     icon: MapPin,          label: 'Client Visits' },
+      { path: '/reports',        icon: BarChart3,     label: 'Reports' },
+      { path: '/ai-reader',      icon: BrainCircuit,  label: 'AI Document Reader' },  // ← ADD THIS
     ],
   },
   {
