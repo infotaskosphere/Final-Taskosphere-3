@@ -1253,6 +1253,30 @@ export default function DSCRegister() {
                     </p>
                   </div>
                 </div>
+                {/* Last Movement */}
+                {selectedDSC?.movement_log?.length > 0 && (() => {
+                  const lastMove = selectedDSC.movement_log[selectedDSC.movement_log.length - 1];
+                  return (
+                    <div className="flex items-start gap-3">
+                      <div className={`h-7 w-7 rounded-md flex items-center justify-center mt-0.5 ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                        <History className="h-3.5 w-3.5 text-slate-500" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-[10px] font-bold tracking-[0.15em] text-slate-400 uppercase">Last Movement</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <Badge className={`text-[10px] px-2 py-0.5 font-bold ${lastMove.movement_type === 'IN' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                            {lastMove.movement_type}
+                          </Badge>
+                          <p className="text-sm font-semibold">{lastMove.person_name}</p>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          {format(new Date(lastMove.timestamp), 'dd MMM yyyy, hh:mm a')}
+                        </p>
+                        {lastMove.notes && <p className="text-xs text-slate-500 mt-0.5 italic">{lastMove.notes}</p>}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {selectedDSC?.notes && (
                   <div className="flex items-start gap-3">
                     <div className={`h-7 w-7 rounded-md flex items-center justify-center mt-0.5 ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
