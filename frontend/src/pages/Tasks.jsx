@@ -1142,7 +1142,14 @@ export default function Tasks() {
       });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
-        throw new Error(e.detail || `Server error ${res.status}`);
+        const detail = e.detail || '';
+        if (res.status === 405 || res.status === 404) {
+          throw new Error('ENDPOINT_UNAVAILABLE: Gemini endpoint not available');
+        }
+        if (res.status === 429 || detail.toLowerCase().includes('quota') || detail.toLowerCase().includes('rate limit')) {
+          throw new Error('QUOTA_EXCEEDED: Gemini API quota exceeded');
+        }
+        throw new Error(detail || `Server error ${res.status}`);
       }
       setScanStatus('✦ Parsing Gemini response…');
       tweenTo(85);
@@ -1179,7 +1186,17 @@ export default function Tasks() {
       });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
-        throw new Error(e.detail || `Server error ${res.status}`);
+        const detail = e.detail || '';
+        if (res.status === 405) {
+          throw new Error('ENDPOINT_UNAVAILABLE: Grok endpoint not available');
+        }
+        if (res.status === 404) {
+          throw new Error('ENDPOINT_UNAVAILABLE: Grok endpoint not found');
+        }
+        if (res.status === 429 || detail.toLowerCase().includes('quota') || detail.toLowerCase().includes('rate limit') || detail.toLowerCase().includes('too many')) {
+          throw new Error('QUOTA_EXCEEDED: Grok API quota exceeded');
+        }
+        throw new Error(detail || `Server error ${res.status}`);
       }
       setScanStatus('⚡ Parsing Grok response…');
       tweenTo(85);
@@ -1253,9 +1270,39 @@ export default function Tasks() {
       tweenTo(15);
 
       if (aiProvider === 'gemini') {
-        finish(await tryGemini(), '✦ Gemini AI');
+        try {
+          finish(await tryGemini(), '✦ Gemini AI');
+        } catch (e) {
+          if (isAborted() || e?.name === 'AbortError') { handleCancelled(); return; }
+          if (e?.message?.startsWith('QUOTA_EXCEEDED')) {
+            setScanStatus('Gemini quota exceeded — falling back to local scan…');
+            toast.info('Gemini API quota exceeded — running local duplicate scan instead');
+            stopTween(); setScanProgress(55); tweenTo(70);
+            if (!isAborted()) finish(runLocal(), '⚙ Local Scan (Gemini quota exceeded)');
+          } else if (e?.message?.startsWith('ENDPOINT_UNAVAILABLE')) {
+            setScanStatus('Gemini not configured on server — using local scan…');
+            toast.info('Gemini is not configured on this server — running local scan instead');
+            stopTween(); setScanProgress(55); tweenTo(70);
+            if (!isAborted()) finish(runLocal(), '⚙ Local Scan (Gemini unavailable)');
+          } else throw e;
+        }
       } else if (aiProvider === 'grok') {
-        finish(await tryGrok(), '⚡ Grok AI');
+        try {
+          finish(await tryGrok(), '⚡ Grok AI');
+        } catch (e) {
+          if (isAborted() || e?.name === 'AbortError') { handleCancelled(); return; }
+          if (e?.message?.startsWith('QUOTA_EXCEEDED')) {
+            setScanStatus('Grok quota exceeded — falling back to local scan…');
+            toast.info('Grok API quota exceeded — running local duplicate scan instead');
+            stopTween(); setScanProgress(55); tweenTo(70);
+            if (!isAborted()) finish(runLocal(), '⚙ Local Scan (Grok quota exceeded)');
+          } else if (e?.message?.startsWith('ENDPOINT_UNAVAILABLE')) {
+            setScanStatus('Grok not configured on server — using local scan…');
+            toast.info('Grok is not configured on this server — running local duplicate scan instead');
+            stopTween(); setScanProgress(55); tweenTo(70);
+            if (!isAborted()) finish(runLocal(), '⚙ Local Scan (Grok unavailable)');
+          } else throw e;
+        }
       } else if (aiProvider === 'local') {
         // Local is synchronous — only honor cancellation if it happened before we got here
         if (isAborted()) { handleCancelled(); return; }
@@ -1265,15 +1312,32 @@ export default function Tasks() {
         try { finish(await tryGemini(), '✦ Gemini AI'); return; }
         catch (e) {
           if (isAborted() || e?.name === 'AbortError') { handleCancelled(); return; }
+          const isQuota = e?.message?.startsWith('QUOTA_EXCEEDED');
+          const isUnavailable = e?.message?.startsWith('ENDPOINT_UNAVAILABLE');
           console.warn('Gemini unavailable:', e.message);
-          setScanStatus('Gemini unavailable — trying Grok…');
+          if (isQuota) {
+            setScanStatus('Gemini quota exceeded — trying Grok…');
+          } else if (isUnavailable) {
+            setScanStatus('Gemini not configured — trying Grok…');
+          } else {
+            setScanStatus('Gemini unavailable — trying Grok…');
+          }
           stopTween(); setScanProgress(35); tweenTo(45);
         }
         try { finish(await tryGrok(), '⚡ Grok AI'); return; }
         catch (e) {
           if (isAborted() || e?.name === 'AbortError') { handleCancelled(); return; }
+          const isQuota = e?.message?.startsWith('QUOTA_EXCEEDED');
+          const isUnavailable = e?.message?.startsWith('ENDPOINT_UNAVAILABLE');
           console.warn('Grok unavailable:', e.message);
-          setScanStatus('Grok unavailable — using local scan…');
+          if (isQuota) {
+            setScanStatus('Grok quota exceeded — using local scan…');
+            toast.info('AI quota limits reached — running local duplicate scan instead');
+          } else if (isUnavailable) {
+            setScanStatus('Grok not configured — using local scan…');
+          } else {
+            setScanStatus('Grok unavailable — using local scan…');
+          }
           stopTween(); setScanProgress(55); tweenTo(70);
         }
         if (isAborted()) { handleCancelled(); return; }
