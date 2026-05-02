@@ -954,25 +954,25 @@ async def detect_duplicate_tasks(
     return {"groups": groups, "total_tasks_scanned": len(tasks)}
 
 
-# ── AI: Detect Duplicate Tasks via xAI Grok ────────────────────────────────────
+# ── AI: Detect Duplicate Tasks via Groq (Llama) ────────────────────────────────
 @api_router.post("/tasks/detect-duplicates-grok")
 async def detect_duplicate_tasks_grok(
     payload: dict,
     current_user: User = Depends(get_current_user)
 ):
     """
-    Use xAI Grok (grok-3-mini) to find duplicate tasks.
+    Use Groq API (llama-3.3-70b-versatile) to find duplicate tasks.
     Expects optional body: { "tasks": [...], "exclude_completed": true }
     Falls back to fetching tasks from DB if no tasks provided in payload.
     """
     import json as _json, re as _re
 
-    # ── 1. Verify Grok is configured ──────────────────────────────────────
-    grok_key = os.environ.get("XAI_API_KEY", "") or os.environ.get("GROK_API_KEY", "")
-    if not grok_key:
+    # ── 1. Verify Groq is configured ──────────────────────────────────────
+    groq_key = os.environ.get("GROQ_API_KEY", "")
+    if not groq_key:
         raise HTTPException(
             status_code=503,
-            detail="XAI_API_KEY is not set on the server. Add your xAI API key to enable Grok duplicate detection."
+            detail="GROQ_API_KEY is not set on the server. Add your Groq API key to enable Grok duplicate detection."
         )
 
     # ── 2. Get tasks — from payload or DB ────────────────────────────────
@@ -980,10 +980,8 @@ async def detect_duplicate_tasks_grok(
     exclude_completed = payload.get("exclude_completed", True) if payload else True
 
     if incoming_tasks and isinstance(incoming_tasks, list):
-        # Frontend sent tasks directly
         tasks = incoming_tasks
     else:
-        # Fetch from DB with same scope as Gemini endpoint
         query: dict = {"type": {"$ne": "todo"}}
         if current_user.role != "admin":
             permissions = get_user_permissions(current_user)
@@ -1007,7 +1005,7 @@ async def detect_duplicate_tasks_grok(
     if not tasks:
         return {"groups": [], "total_tasks_scanned": 0}
 
-    # ── 3. Build minimal payload ──────────────────────────────────────────
+    # ── 3. Build minimal task summaries ──────────────────────────────────
     task_summaries = [
         {
             "id":    str(t.get("id", "")),
@@ -1027,21 +1025,21 @@ async def detect_duplicate_tasks_grok(
         f"Tasks: {_json.dumps(task_summaries, ensure_ascii=False)}"
     )
 
-    # ── 4. Call xAI Grok API ──────────────────────────────────────────────
+    # ── 4. Call Groq API (OpenAI-compatible endpoint) ─────────────────────
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
-                "https://api.x.ai/v1/chat/completions",
+                "https://api.groq.com/openai/v1/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {grok_key}",
+                    "Authorization": f"Bearer {groq_key}",
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": "grok-3-mini",
+                    "model": "llama-3.3-70b-versatile",
                     "messages": [
                         {
                             "role": "system",
-                            "content": "You are a task deduplication assistant. Always respond with valid JSON only, no markdown, no explanation."
+                            "content": "You are a task deduplication assistant. Always respond with valid JSON only — no markdown, no code fences, no explanation."
                         },
                         {
                             "role": "user",
@@ -1056,22 +1054,22 @@ async def detect_duplicate_tasks_grok(
         if response.status_code == 429:
             raise HTTPException(
                 status_code=429,
-                detail="Grok API rate limit exceeded. Please wait a moment and try again."
+                detail="Groq API rate limit exceeded. Please wait a moment and try again."
             )
         if response.status_code == 401:
             raise HTTPException(
                 status_code=503,
-                detail="Invalid XAI_API_KEY. Please check your xAI API key configuration."
+                detail="Invalid GROQ_API_KEY. Please check your Groq API key on Render."
             )
         if not response.is_success:
             raise HTTPException(
                 status_code=502,
-                detail=f"Grok API error: {response.status_code} — {response.text[:200]}"
+                detail=f"Groq API error: {response.status_code} — {response.text[:200]}"
             )
 
         data = response.json()
         raw_text = data["choices"][0]["message"]["content"].strip()
-        # Strip markdown code fences if Grok wraps in them
+        # Strip markdown code fences if model wraps response in them
         raw_text = _re.sub(r"```[a-zA-Z]*", "", raw_text).replace("```", "").strip()
         groups = _json.loads(raw_text)
         if not isinstance(groups, list):
@@ -1080,14 +1078,14 @@ async def detect_duplicate_tasks_grok(
     except HTTPException:
         raise
     except _json.JSONDecodeError as e:
-        logger.warning(f"Grok returned non-JSON response: {e}")
-        raise HTTPException(status_code=500, detail="Grok returned an unparseable response. Try again.")
+        logger.warning(f"Groq returned non-JSON response: {e}")
+        raise HTTPException(status_code=500, detail="Groq returned an unparseable response. Try again.")
     except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Grok API timed out. Please try again.")
+        raise HTTPException(status_code=504, detail="Groq API timed out. Please try again.")
     except Exception as e:
         err_str = str(e)
-        logger.warning(f"Grok duplicate detection failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Grok error: {err_str[:200]}")
+        logger.warning(f"Groq duplicate detection failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Groq error: {err_str[:200]}")
 
     return {"groups": groups, "total_tasks_scanned": len(tasks)}
 
