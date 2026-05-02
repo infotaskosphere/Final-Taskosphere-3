@@ -134,7 +134,7 @@ function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, 
 
             return (
               <tr key={doc.id}
-                onClick={() => openLogDialog(doc)}
+                onClick={() => onViewLog(doc)}
                 className={`transition-colors cursor-pointer ${highlight} ${isSelected ? (isDark ? 'ring-1 ring-inset ring-indigo-500' : 'ring-1 ring-inset ring-indigo-300') : ''} ${isDark ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50/80'}`}
                 data-testid={`document-row-${doc.id}`}>
 
@@ -165,7 +165,7 @@ function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, 
 
                 <td className="px-1 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                   <div className="flex justify-end gap-0">
-                    <Button variant="ghost" size="sm" onClick={() => openLogDialog(doc)} className={`h-7 w-7 p-0 ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`} title="View Detail">
+                    <Button variant="ghost" size="sm" onClick={() => onViewLog(doc)} className={`h-7 w-7 p-0 ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`} title="View Detail">
                       <Share2 className="h-3.5 w-3.5 text-emerald-500" />
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => onMovement(doc, type === 'IN' ? 'OUT' : 'IN')}
