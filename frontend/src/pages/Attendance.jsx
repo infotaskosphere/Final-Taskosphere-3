@@ -4905,6 +4905,124 @@ export default function Attendance() {
           )}
         </AnimatePresence>
 
+        {/* Add Holiday Modal */}
+        <AnimatePresence>
+          {showHolidayModal && (
+            <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+              style={{ background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <motion.div
+                className="w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+                style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
+                initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
+                transition={{ type: 'spring', stiffness: 220, damping: 20 }}
+              >
+                {/* Header */}
+                <div className="px-6 py-5 text-white flex items-center justify-between flex-shrink-0"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, #1e40af)` }}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center">
+                      <CalendarIcon className="w-4.5 h-4.5 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-black">Add Holidays</h2>
+                      <p className="text-blue-200 text-xs">Add one or multiple holidays at once</p>
+                    </div>
+                  </div>
+                  <button onClick={() => { setShowHolidayModal(false); setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); }}
+                    className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
+                    <X className="w-4 h-4 text-white" />
+                  </button>
+                </div>
+
+                {/* PDF Import Option */}
+                <div className="px-6 pt-4 pb-2 flex-shrink-0">
+                  <input ref={pdfInputRef} type="file" accept=".pdf" onChange={handlePdfImport} className="hidden" />
+                  <button
+                    onClick={() => pdfInputRef.current?.click()}
+                    disabled={pdfImporting}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold border-2 transition-all"
+                    style={{ borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? D.muted : '#64748b' }}>
+                    {pdfImporting
+                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Reading PDF…</>
+                      : <><FileUp className="w-3.5 h-3.5" />Import from PDF</>}
+                  </button>
+                </div>
+
+                {/* Holiday Rows */}
+                <div className="flex-1 overflow-y-auto px-6 pb-2 space-y-3" style={{ maxHeight: 360 }}>
+                  {holidayRows.map((row, idx) => (
+                    <div key={idx} className="flex items-end gap-2">
+                      <div className="flex-1 space-y-1">
+                        <label className="text-xs font-semibold text-slate-500 dark:text-slate-400">Holiday Name *</label>
+                        <input
+                          type="text"
+                          value={row.name}
+                          onChange={e => {
+                            const rows = [...holidayRows];
+                            rows[idx] = { ...rows[idx], name: e.target.value };
+                            setHolidayRows(rows);
+                          }}
+                          placeholder="e.g. Diwali, Christmas…"
+                          className={inputCls}
+                          style={inputStyle}
+                        />
+                      </div>
+                      <div className="space-y-1" style={{ minWidth: 150 }}>
+                        <label className="text-xs font-semibold text-slate-500 dark:text-slate-400">Date *</label>
+                        <input
+                          type="date"
+                          value={row.date}
+                          onChange={e => {
+                            const rows = [...holidayRows];
+                            rows[idx] = { ...rows[idx], date: e.target.value };
+                            setHolidayRows(rows);
+                          }}
+                          className={inputCls}
+                          style={inputStyle}
+                        />
+                      </div>
+                      {holidayRows.length > 1 && (
+                        <button
+                          onClick={() => setHolidayRows(prev => prev.filter((_, i) => i !== idx))}
+                          className="mb-0.5 w-8 h-10 flex items-center justify-center rounded-xl text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex-shrink-0">
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+
+                  <button
+                    onClick={() => setHolidayRows(prev => [...prev, { name: '', date: format(new Date(), 'yyyy-MM-dd') }])}
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
+                    style={{ color: COLORS.deepBlue }}>
+                    <Plus className="w-3.5 h-3.5" /> Add Another Holiday
+                  </button>
+                </div>
+
+                {/* Footer */}
+                <div className="px-6 py-4 flex justify-end gap-2 flex-shrink-0 border-t"
+                  style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
+                  <Button variant="ghost" onClick={() => { setShowHolidayModal(false); setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); }}
+                    className="font-semibold rounded-xl" style={{ color: isDark ? D.muted : undefined }}>
+                    Cancel
+                  </Button>
+                  <Button
+                    disabled={holidayRows.every(r => !r.name.trim())}
+                    onClick={handleAddHolidays}
+                    className="font-semibold text-white rounded-xl px-5"
+                    style={{ backgroundColor: COLORS.deepBlue }}>
+                    <CheckCircle2 className="w-4 h-4 mr-1.5" />
+                    Save {holidayRows.filter(r => r.name.trim()).length > 1
+                      ? `${holidayRows.filter(r => r.name.trim()).length} Holidays`
+                      : 'Holiday'}
+                  </Button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Edit Holiday Modal */}
         <AnimatePresence>
           {editingHoliday && (
