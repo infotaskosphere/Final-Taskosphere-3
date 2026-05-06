@@ -1140,7 +1140,7 @@ export default function DocumentRegister() {
 
             {/* Body */}
             <div className="p-6 space-y-4">
-              {/* Status pills */
+              {/* Status pills */}
               <div className="flex flex-wrap gap-2">
                 <span className={`text-[11px] font-semibold px-3 py-1 rounded-full ${getDocumentInOutStatus(selectedDocument) === 'IN' ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-600'}`}>
                   {getDocumentInOutStatus(selectedDocument) === 'IN' ? 'Available' : 'Out'}
