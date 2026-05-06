@@ -581,7 +581,13 @@ def sanitize_user_data(users, current_user=None):
     return sanitized[0] if is_single else sanitized
 
 def convert_objectids(data):
-    """Recursively convert MongoDB ObjectId fields to string."""
+    """Recursively convert MongoDB ObjectId / date / datetime fields to JSON-safe types.
+
+    PyMongo's BSON encoder accepts datetime.datetime but NOT datetime.date, so we
+    convert bare date objects to ISO strings here to prevent InvalidDocument errors
+    when inserting audit-log entries whose old_data came straight out of MongoDB
+    (where birthday / date_of_incorporation may have been stored as date objects).
+    """
     if isinstance(data, list):
         return [convert_objectids(item) for item in data]
     if isinstance(data, dict):
@@ -589,6 +595,12 @@ def convert_objectids(data):
         for key, value in data.items():
             if isinstance(value, ObjectId):
                 new_dict[key] = str(value)
+            elif isinstance(value, datetime):
+                # Keep as datetime — pymongo handles datetime natively
+                new_dict[key] = value
+            elif isinstance(value, date):
+                # Convert bare date → ISO string; pymongo cannot encode datetime.date
+                new_dict[key] = value.isoformat()
             elif isinstance(value, (dict, list)):
                 new_dict[key] = convert_objectids(value)
             else:
@@ -596,6 +608,8 @@ def convert_objectids(data):
         return new_dict
     if isinstance(data, ObjectId):
         return str(data)
+    if isinstance(data, date) and not isinstance(data, datetime):
+        return data.isoformat()
     return data
 
 def get_user_permissions(current_user: User) -> dict:
@@ -5795,19 +5809,55 @@ async def update_client(
         if not (10 <= len(cleaned_phone) <= 15):
             raise HTTPException(status_code=422, detail="Phone number must be 10–15 digits")
  
+    # ── Sanitise date fields before writing so DB always stores ISO strings ──
+    def safe_iso(val):
+        """Convert None / str / date / datetime → ISO date string (YYYY-MM-DD) or None."""
+        if val is None:
+            return None
+        if isinstance(val, str):
+            return val[:10] if val else None
+        if isinstance(val, (date, datetime)):
+            return val.isoformat()[:10]
+        return str(val)
+
+    for date_field in ("birthday", "date_of_incorporation"):
+        if date_field in update_data:
+            update_data[date_field] = safe_iso(update_data[date_field])
+
+    # Sanitise dates inside dsc_details sub-documents
+    if "dsc_details" in update_data and isinstance(update_data["dsc_details"], list):
+        for dsc in update_data["dsc_details"]:
+            if isinstance(dsc, dict):
+                dsc["issue_date"]  = safe_iso(dsc.get("issue_date"))
+                dsc["expiry_date"] = safe_iso(dsc.get("expiry_date"))
+
+    # Sanitise dates inside contact_persons sub-documents
+    if "contact_persons" in update_data and isinstance(update_data["contact_persons"], list):
+        for cp in update_data["contact_persons"]:
+            if isinstance(cp, dict):
+                cp["birthday"] = safe_iso(cp.get("birthday"))
+
     # ── Persist ─────────────────────────────────────────────────────
     await db.clients.update_one({"id": client_id}, {"$set": update_data})
- 
+
+    # Sanitise existing record before passing to audit log so that bare
+    # date objects (datetime.date) in old DB records don't cause a
+    # pymongo BSON encode error (InvalidDocument) → 500.
+    sanitised_existing = convert_objectids(existing)
+
     await create_audit_log(
         current_user,
         action="UPDATE_CLIENT",
         module="client",
         record_id=client_id,
-        old_data=existing,
+        old_data=sanitised_existing,
         new_data=update_data,
     )
- 
+
     updated = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Client not found after update")
+
     if isinstance(updated.get("created_at"), str):
         try:
             updated["created_at"] = datetime.fromisoformat(updated["created_at"])
@@ -5818,10 +5868,20 @@ async def update_client(
             updated["birthday"] = date.fromisoformat(updated["birthday"])
         except ValueError:
             updated["birthday"] = None
+    if updated.get("date_of_incorporation") and isinstance(updated["date_of_incorporation"], str):
+        try:
+            updated["date_of_incorporation"] = date.fromisoformat(updated["date_of_incorporation"])
+        except ValueError:
+            updated["date_of_incorporation"] = None
+
     # Strip fields not in Pydantic model before constructing Client
     client_fields = Client.model_fields.keys()
     safe_updated = {k: v for k, v in updated.items() if k in client_fields}
-    return Client(**safe_updated)
+    try:
+        return Client(**safe_updated)
+    except Exception as e:
+        logger.error(f"update_client response construction error for {client_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Client updated but response failed: {str(e)}")
 @api_router.delete("/clients/{client_id}")
 async def delete_client(
     client_id: str,
