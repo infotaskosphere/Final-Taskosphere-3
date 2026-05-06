@@ -1119,14 +1119,14 @@ export default function DocumentRegister() {
 
       {/* ── Log Dialog ── */}
      <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
-        <DialogContent className="max-w-md p-0 border-none bg-transparent shadow-none overflow-visible">
+        <DialogContent className="max-w-xl p-0 border-none bg-transparent shadow-none overflow-visible">
           <DialogHeader className="sr-only">
             <DialogTitle>Document Details — {selectedDocument?.holder_name}</DialogTitle>
           </DialogHeader>
 
           <div ref={shareAreaRef} className={`rounded-2xl overflow-hidden border shadow-2xl ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
             {/* Header strip — dark navy with icon tile */}
-            <div className="relative px-5 py-4" style={{ background: 'linear-gradient(135deg,#0f1f4d,#1e3a8a)' }}>
+            <div className="relative px-6 py-5" style={{ background: 'linear-gradient(135deg,#0f1f4d,#1e3a8a)' }}>
               <div className="flex items-center gap-3">
                 <div className="h-11 w-11 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur">
                   <FileText className="h-5 w-5 text-white" />
@@ -1139,11 +1139,11 @@ export default function DocumentRegister() {
             </div>
 
             {/* Body */}
-            <div className="p-5 space-y-4">
-              {/* Status pills */}
+            <div className="p-6 space-y-4">
+              {/* Status pills */
               <div className="flex flex-wrap gap-2">
                 <span className={`text-[11px] font-semibold px-3 py-1 rounded-full ${getDocumentInOutStatus(selectedDocument) === 'IN' ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-600'}`}>
-                  {getDocumentInOutStatus(selectedDocument) === 'IN' ? 'available' : 'out'}
+                  {getDocumentInOutStatus(selectedDocument) === 'IN' ? 'Available' : 'Out'}
                 </span>
                 {selectedDocument?.document_type && (
                   <span className="text-[11px] font-semibold px-3 py-1 rounded-full bg-rose-50 text-rose-600 capitalize">
@@ -1160,7 +1160,7 @@ export default function DocumentRegister() {
               {/* Description / Notes */}
               <div>
                 <p className="text-[10px] font-bold tracking-[0.15em] text-slate-400 uppercase mb-1.5">Description</p>
-                <div className={`rounded-lg px-3 py-2.5 text-sm font-semibold ${isDark ? 'bg-slate-800/60' : 'bg-slate-50'}`}>
+                <div className={`rounded-lg px-3 py-2.5 text-sm font-semibold capitalize ${isDark ? 'bg-slate-800/60' : 'bg-slate-50'}`}>
                   {selectedDocument?.notes || 'No additional notes provided.'}
                 </div>
               </div>
@@ -1173,7 +1173,7 @@ export default function DocumentRegister() {
                   </div>
                   <div className="flex-1">
                     <p className="text-[10px] font-bold tracking-[0.15em] text-slate-400 uppercase">Document Holder</p>
-                    <p className="text-sm font-semibold">{selectedDocument?.holder_name || '—'}</p>
+                    <p className="text-sm font-semibold capitalize">{selectedDocument?.holder_name || '—'}</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3">
@@ -1217,7 +1217,7 @@ export default function DocumentRegister() {
             </div>
 
             {/* Footer action buttons */}
-            <div className={`px-5 py-3 border-t flex gap-2 print:hidden ${isDark ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-slate-50/50'}`}>
+            <div className={`px-6 py-4 border-t flex gap-2 print:hidden ${isDark ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-slate-50/50'}`}>
               <Button size="sm" variant="outline" onClick={() => handleShare('whatsapp')} className="flex-1 gap-1.5 text-emerald-600 border-emerald-200 hover:bg-emerald-50">
                 <MessageCircle className="h-3.5 w-3.5" />
                 WhatsApp
