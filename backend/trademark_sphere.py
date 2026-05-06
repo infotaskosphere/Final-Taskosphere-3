@@ -30,6 +30,9 @@ tm_cache: Dict[str, Any] = {}
 _sessions: Dict[str, Any] = {}
 SESSION_TTL_SECONDS = 4 * 3600  # 4 hours
 
+# ── Sync progress tracker: key = sync_id, value = progress dict ──────────────
+_sync_progress: Dict[str, Any] = {}
+
 ESTATUS_BASE    = "https://tmrsearch.ipindia.gov.in/estatus"
 ESTATUS_LOGIN   = f"{ESTATUS_BASE}"
 ESTATUS_SEARCH  = f"{ESTATUS_BASE}/TradeMarkApplication/ViewRegistered"
@@ -152,8 +155,8 @@ def _send_otp_sync(email: str) -> str:
 
     session_id = str(uuid.uuid4())
     _sessions[session_id] = {
-        "email":      email,
-        "created_at": datetime.now(IST).isoformat(),
+        "email":         email,
+        "created_at":    datetime.now(IST).isoformat(),
         "otp_page_html": r2_html,   # store OTP page HTML for next step
     }
     logger.info(f"OTP triggered for {email}, session_id={session_id}")
@@ -298,6 +301,8 @@ def _fetch_with_otp_sync(
     return data
 
 
+# ── Pydantic models ───────────────────────────────────────────────────────────
+
 class SendOtpRequest(BaseModel):
     email: str
 
@@ -359,6 +364,23 @@ class AttorneyImportRequest(BaseModel):
     reminders_enabled:  bool           = True
     session_id:         Optional[str]  = None
     otp:                Optional[str]  = None
+
+
+class PortalSyncRequest(BaseModel):
+    """Request body for the unified Login → Sync All flow."""
+    agent_code:       str
+    session_id:       str            # from /send-otp
+    otp:              str            # entered by user from email
+    attorney:         str            = ""
+    client_id:        Optional[str]  = None
+    reminder_emails:  List[str]      = []
+    refresh_existing: bool           = True   # also re-scrape already-tracked marks
+
+
+class BulkRefreshRequest(BaseModel):
+    """Request body for refreshing all existing trademarks via OTP session."""
+    session_id: str
+    otp:        str
 
 
 class TrademarkDocument(BaseModel):
@@ -452,7 +474,6 @@ def _solve_math_captcha(text: str) -> Optional[str]:
         return str(int(result))
     except Exception:
         return None
-
 
 
 # ── Core scraper ──────────────────────────────────────────────────────────────
@@ -617,6 +638,7 @@ async def scrape_by_attorney_code(
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(_pool, _scrape_by_attorney_sync, agent_code, session_id, otp)
 
+
 # ── Deadline logic ────────────────────────────────────────────────────────────
 
 def _parse_date(s: Any) -> Optional[date]:
@@ -762,7 +784,7 @@ async def _import_attorney_bg(
             "address":             raw.get("address", ""),
             "attorney":            attorney or "",
             "notes":               f"Imported via attorney portfolio ({agent_code})",
-            "client_id":           client_id  or "",
+            "client_id":           client_id   or "",
             "client_name":         client_name or "",
             "reminder_emails":     reminder_emails,
             "reminders_enabled":   reminders_enabled,
@@ -781,6 +803,156 @@ async def _import_attorney_bg(
         added += 1
 
     logger.info(f"Attorney import ({agent_code}): {added}/{len(app_numbers)} trademarks added.")
+
+
+# ── Background task: full portal sync (import new + refresh existing) ─────────
+
+async def _portal_sync_bg(
+    sync_id:          str,
+    agent_code:       str,
+    session_id:       str,
+    otp:              str,
+    created_by:       str,
+    attorney:         str,
+    client_id:        Optional[str],
+    reminder_emails:  List[str],
+    refresh_existing: bool,
+) -> None:
+    """
+    Full portal sync background task:
+    1. Fetches all application numbers for the agent code (authenticated).
+    2. NEW trademarks   → imports them into the DB.
+    3. EXISTING marks   → refreshes their status/dates if refresh_existing=True.
+    Tracks progress in _sync_progress[sync_id].
+    """
+    _sync_progress[sync_id] = {
+        "status":  "running",
+        "phase":   "Fetching application list from IP India…",
+        "total":   0,
+        "done":    0,
+        "added":   0,
+        "updated": 0,
+        "failed":  0,
+        "errors":  [],
+    }
+
+    # ── Step 1: Fetch all application numbers for this agent ──────────────
+    try:
+        app_numbers = await scrape_by_attorney_code(agent_code, session_id, otp)
+    except Exception as exc:
+        _sync_progress[sync_id].update({
+            "status": "error",
+            "phase":  f"Failed to fetch application list: {getattr(exc, 'detail', str(exc))}",
+        })
+        return
+
+    total = len(app_numbers)
+    _sync_progress[sync_id]["total"] = total
+    _sync_progress[sync_id]["phase"] = f"Processing {total} trademarks…"
+
+    # ── Step 2: Process each application number ───────────────────────────
+    for i, app_num in enumerate(app_numbers, 1):
+        _sync_progress[sync_id]["phase"] = f"Processing {app_num} ({i}/{total})…"
+
+        existing = await db.trademark_sphere.find_one({"application_number": app_num})
+
+        await asyncio.sleep(2)   # polite delay
+
+        if existing and not refresh_existing:
+            # Skip already-tracked marks if refresh not requested
+            _sync_progress[sync_id]["done"] += 1
+            continue
+
+        try:
+            raw = await scrape_trademark(app_num, session_id=session_id, otp=otp)
+        except Exception as exc:
+            logger.warning(f"Portal sync: could not scrape {app_num} — {exc}")
+            _sync_progress[sync_id]["failed"] += 1
+            _sync_progress[sync_id]["done"]   += 1
+            _sync_progress[sync_id]["errors"].append(app_num)
+            continue
+
+        await asyncio.sleep(2)
+
+        try:
+            documents, hearing = await scrape_documents(app_num, raw.get("class_number"))
+        except Exception:
+            documents, hearing = [], None
+
+        dl  = _compute_deadlines(raw)
+        now = datetime.now(IST)
+
+        if existing:
+            # ── REFRESH existing trademark ────────────────────────────────
+            updates = {
+                **{k: raw.get(k) or existing.get(k) for k in (
+                    "word_mark", "tm_status", "proprietor", "filing_date",
+                    "registration_date", "valid_upto", "goods_and_services",
+                    "trademark_image_url",
+                )},
+                "raw_data":      raw,
+                "last_fetched":  now.isoformat(),
+                "updated_at":    now.isoformat(),
+                "scrape_source": "portal_sync",
+                "documents":     documents if documents else existing.get("documents", []),
+                "hearings":      hearing   if hearing   else existing.get("hearings"),
+                **dl,
+            }
+            await db.trademark_sphere.update_one(
+                {"application_number": app_num},
+                {"$set": updates},
+            )
+            await _gen_reminders(existing["id"], {**existing, **updates})
+            _sync_progress[sync_id]["updated"] += 1
+        else:
+            # ── INSERT new trademark ──────────────────────────────────────
+            tid = str(uuid.uuid4())
+            doc = {
+                "id":                  tid,
+                "application_number":  app_num,
+                "word_mark":           raw.get("word_mark", ""),
+                "class_number":        raw.get("class_number", ""),
+                "tm_status":           raw.get("tm_status", "Unknown"),
+                "proprietor":          raw.get("proprietor") or raw.get("applicant_name", ""),
+                "applicant_name":      raw.get("applicant_name", ""),
+                "filing_date":         raw.get("filing_date", ""),
+                "registration_date":   raw.get("registration_date", ""),
+                "valid_upto":          raw.get("valid_upto", ""),
+                "goods_and_services":  raw.get("goods_and_services", ""),
+                "trademark_image_url": raw.get("trademark_image_url", ""),
+                "address":             raw.get("address", ""),
+                "attorney":            attorney or "",
+                "notes":               f"Imported via portal sync ({agent_code})",
+                "client_id":           client_id or "",
+                "client_name":         "",
+                "reminder_emails":     reminder_emails,
+                "reminders_enabled":   bool(reminder_emails),
+                "last_fetched":        now.isoformat(),
+                "created_at":          now.isoformat(),
+                "updated_at":          now.isoformat(),
+                "created_by":          created_by,
+                "raw_data":            raw,
+                "scrape_source":       "portal_sync",
+                "documents":           documents,
+                "hearings":            hearing,
+                **dl,
+            }
+            await db.trademark_sphere.insert_one({**doc, "_id": tid})
+            await _gen_reminders(tid, doc)
+            _sync_progress[sync_id]["added"] += 1
+
+        _sync_progress[sync_id]["done"] += 1
+
+    _sync_progress[sync_id].update({
+        "status": "done",
+        "phase":  "Sync complete!",
+    })
+    logger.info(
+        f"Portal sync ({agent_code}): "
+        f"{_sync_progress[sync_id]['added']} added, "
+        f"{_sync_progress[sync_id]['updated']} updated, "
+        f"{_sync_progress[sync_id]['failed']} failed."
+    )
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -1005,6 +1177,55 @@ async def import_attorney(
         ),
         "agent_code": body.agent_code,
     }
+
+
+@router.post("/portal-sync")
+async def portal_sync_route(
+    body: PortalSyncRequest,
+    bg:   BackgroundTasks,
+    user: User = Depends(get_current_user),
+):
+    """
+    Unified Login → Sync All:
+    Authenticates with the IP India estatus OTP session, then in the background:
+    - Scrapes all trademarks for the given agent code
+    - Inserts new ones, refreshes existing ones (if refresh_existing=True)
+    Returns a sync_id for polling GET /portal-sync/{sync_id}/status.
+    """
+    if not _sessions.get(body.session_id):
+        raise HTTPException(401, "Session expired or invalid. Please login again via Send OTP.")
+
+    sync_id = str(uuid.uuid4())
+    _sync_progress[sync_id] = {"status": "queued", "phase": "Starting…", "total": 0, "done": 0}
+
+    bg.add_task(
+        _portal_sync_bg,
+        sync_id,
+        body.agent_code.strip(),
+        body.session_id,
+        body.otp.strip(),
+        user.id,
+        body.attorney,
+        body.client_id,
+        body.reminder_emails,
+        body.refresh_existing,
+    )
+    return {
+        "sync_id": sync_id,
+        "message": "Portal sync started! You can track progress below.",
+    }
+
+
+@router.get("/portal-sync/{sync_id}/status")
+async def portal_sync_status(
+    sync_id: str,
+    user: User = Depends(get_current_user),
+):
+    """Poll this endpoint to track portal sync progress."""
+    progress = _sync_progress.get(sync_id)
+    if not progress:
+        raise HTTPException(404, "Sync job not found. It may have expired.")
+    return progress
 
 
 @router.put("/{tm_id}")
