@@ -9,6 +9,7 @@ import api from '@/lib/api';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import useDark from '../hooks/useDark';
+import AgentPortalSyncModal from '@/components/AgentPortalSyncModal';
 import {
   Shield, Plus, Search, RefreshCw, Trash2, Edit2, Eye,
   Calendar, AlertTriangle, CheckCircle2, Clock, X,
@@ -1069,16 +1070,17 @@ function DetailDrawer({ tm, onClose, onRefresh, onDelete, isDark }) {
                   <FieldRow label="Address" value={tm.address} />
                 </div>
               </div>
+
               {/* Registry Documents (Objections/Notices) */}
               {tm.documents && tm.documents.length > 0 && (
                 <div className={cn('rounded-2xl p-4 border', isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200')}>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3">Registry Documents</p>
                   <div className="space-y-2">
                     {tm.documents.map((doc, idx) => (
-                      <a 
-                        key={idx} 
-                        href={doc.pdf_link} 
-                        target="_blank" 
+                      <a
+                        key={idx}
+                        href={doc.pdf_link}
+                        target="_blank"
                         rel="noreferrer"
                         className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-blue-400 text-blue-600 transition-all group"
                       >
@@ -1098,6 +1100,7 @@ function DetailDrawer({ tm, onClose, onRefresh, onDelete, isDark }) {
                   <p className="text-xs text-slate-500 mt-0.5">Officer: {tm.hearings.officer || 'Not Assigned'}</p>
                 </div>
               )}
+
               {/* G&S */}
               {tm.goods_and_services && (
                 <div className={cn('rounded-2xl p-4 border', isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200')}>
@@ -1171,21 +1174,22 @@ export default function TrademarkSphere() {
   const isDark = useDark();
   const { user } = useAuth();
 
-  const [trademarks,    setTrademarks]    = useState([]);
-  const [stats,         setStats]         = useState(null);
-  const [deadlines,     setDeadlines]     = useState({ upcoming: [], overdue: [] });
-  const [loading,       setLoading]       = useState(true);
-  const [search,        setSearch]        = useState('');
-  const [filterStatus,  setFilterStatus]  = useState('');
-  const [filterClass,   setFilterClass]   = useState('');
-  const [filterAlert,   setFilterAlert]   = useState('');
-  const [totalCount,    setTotalCount]    = useState(0);
-  const [page,          setPage]          = useState(0);
-  const [showAdd,       setShowAdd]       = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false); // ← NEW
-  const [activeTab,     setActiveTab]     = useState('list');
-  const [selectedTm,    setSelectedTm]    = useState(null);
-  const [showFilters,   setShowFilters]   = useState(false);
+  const [trademarks,      setTrademarks]      = useState([]);
+  const [stats,           setStats]           = useState(null);
+  const [deadlines,       setDeadlines]       = useState({ upcoming: [], overdue: [] });
+  const [loading,         setLoading]         = useState(true);
+  const [search,          setSearch]          = useState('');
+  const [filterStatus,    setFilterStatus]    = useState('');
+  const [filterClass,     setFilterClass]     = useState('');
+  const [filterAlert,     setFilterAlert]     = useState('');
+  const [totalCount,      setTotalCount]      = useState(0);
+  const [page,            setPage]            = useState(0);
+  const [showAdd,         setShowAdd]         = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [showPortalSync,  setShowPortalSync]  = useState(false);
+  const [activeTab,       setActiveTab]       = useState('list');
+  const [selectedTm,      setSelectedTm]      = useState(null);
+  const [showFilters,     setShowFilters]     = useState(false);
   const LIMIT = 50;
 
   const fetchAll = useCallback(async () => {
@@ -1193,9 +1197,9 @@ export default function TrademarkSphere() {
     try {
       const params = new URLSearchParams({
         skip: String(page * LIMIT), limit: String(LIMIT),
-        ...(search       ? { search }             : {}),
-        ...(filterStatus ? { tm_status: filterStatus } : {}),
-        ...(filterClass  ? { class_number: filterClass } : {}),
+        ...(search       ? { search }                     : {}),
+        ...(filterStatus ? { tm_status: filterStatus }    : {}),
+        ...(filterClass  ? { class_number: filterClass }  : {}),
         ...(filterAlert  ? { renewal_alert: filterAlert } : {}),
       });
       const [listRes, statsRes, dlRes] = await Promise.all([
@@ -1260,6 +1264,17 @@ export default function TrademarkSphere() {
       )}
 
       <AnimatePresence>
+        {showPortalSync && (
+          <AgentPortalSyncModal
+            key="portal-sync"
+            isDark={isDark}
+            onClose={() => setShowPortalSync(false)}
+            onSyncComplete={() => {
+              setShowPortalSync(false);
+              fetchAll();
+            }}
+          />
+        )}
         {showImportModal && (
           <ImportAttorneyModal
             key="import"
@@ -1312,7 +1327,22 @@ export default function TrademarkSphere() {
                   <RefreshCw className="w-3.5 h-3.5" />Refresh
                 </button>
 
-                {/* ── NEW: Sync Portfolio Button ── */}
+                {/* ── Daily Sync (Agent Portal) ── */}
+                <motion.button
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => setShowPortalSync(true)}
+                  className={cn(
+                    'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all',
+                    'bg-gradient-to-r from-violet-600 to-blue-600 text-white shadow-md shadow-violet-500/20',
+                    'hover:from-violet-500 hover:to-blue-500 hover:shadow-lg hover:shadow-violet-500/30'
+                  )}
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Daily Sync
+                </motion.button>
+
+                {/* ── Sync Portfolio (Attorney Import) ── */}
                 <motion.button
                   whileHover={{ scale: 1.03 }}
                   whileTap={{ scale: 0.97 }}
@@ -1341,14 +1371,14 @@ export default function TrademarkSphere() {
         {stats && (
           <motion.div variants={itemVariants}
             className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-            <MetricCard isDark={isDark} icon={Shield}         label="Total Tracked"     value={stats.total}             color={COLORS.mediumBlue}   sub="All marks" />
-            <MetricCard isDark={isDark} icon={CheckCircle2}   label="Registered"        value={stats.registered}        color={COLORS.emeraldGreen} sub="Active marks" />
-            <MetricCard isDark={isDark} icon={Clock}          label="Pending / Active"  value={stats.pending}           color="#3B82F6"              sub="Under process" />
-            <MetricCard isDark={isDark} icon={AlertTriangle}  label="Expiring ≤90d"     value={stats.expiring_soon}     color={COLORS.amber}        sub="Need renewal"
+            <MetricCard isDark={isDark} icon={Shield}        label="Total Tracked"    value={stats.total}              color={COLORS.mediumBlue}   sub="All marks" />
+            <MetricCard isDark={isDark} icon={CheckCircle2}  label="Registered"       value={stats.registered}         color={COLORS.emeraldGreen} sub="Active marks" />
+            <MetricCard isDark={isDark} icon={Clock}         label="Pending / Active" value={stats.pending}            color="#3B82F6"              sub="Under process" />
+            <MetricCard isDark={isDark} icon={AlertTriangle} label="Expiring ≤90d"    value={stats.expiring_soon}      color={COLORS.amber}        sub="Need renewal"
               urgent={stats.expiring_soon > 0} />
-            <MetricCard isDark={isDark} icon={AlertCircle}    label="Overdue"           value={stats.overdue}           color={COLORS.coral}        sub="Renewal past"
+            <MetricCard isDark={isDark} icon={AlertCircle}   label="Overdue"          value={stats.overdue}            color={COLORS.coral}        sub="Renewal past"
               urgent={stats.overdue > 0} />
-            <MetricCard isDark={isDark} icon={Bell}           label="Reminders (30d)"   value={stats.upcoming_reminders} color={COLORS.violet}      sub="Upcoming" />
+            <MetricCard isDark={isDark} icon={Bell}          label="Reminders (30d)"  value={stats.upcoming_reminders} color={COLORS.violet}       sub="Upcoming" />
           </motion.div>
         )}
 
@@ -1389,7 +1419,7 @@ export default function TrademarkSphere() {
                     : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
               )}>
               <Filter className="w-3.5 h-3.5" />
-              Filters {hasActiveFilters && '·' }
+              Filters {hasActiveFilters && '·'}
               {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-white inline-block" />}
             </button>
           )}
@@ -1616,7 +1646,7 @@ export default function TrademarkSphere() {
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-red-900/40' : 'bg-red-50'}
                     icon={<AlertCircle className="h-4 w-4 text-red-500" />}
-                    title={`Overdue Renewals`}
+                    title="Overdue Renewals"
                     subtitle="These trademarks require immediate attention"
                     badge={deadlines.overdue.length}
                   />
@@ -1662,10 +1692,10 @@ export default function TrademarkSphere() {
               {(deadlines.upcoming.length > 0 || deadlines.overdue.length > 0) && (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {[
-                    { label: 'Critical (≤30d)', value: deadlines.upcoming.filter(t => t.renewal_status === 'critical').length, color: COLORS.coral },
-                    { label: 'Warning (≤90d)',  value: deadlines.upcoming.filter(t => t.renewal_status === 'warning').length, color: COLORS.amber },
-                    { label: 'Upcoming (≤180d)', value: deadlines.upcoming.filter(t => t.renewal_status === 'upcoming').length, color: '#3B82F6' },
-                    { label: 'Total Overdue',  value: deadlines.overdue.length, color: '#EF4444' },
+                    { label: 'Critical (≤30d)',  value: deadlines.upcoming.filter(t => t.renewal_status === 'critical').length, color: COLORS.coral },
+                    { label: 'Warning (≤90d)',   value: deadlines.upcoming.filter(t => t.renewal_status === 'warning').length,  color: COLORS.amber },
+                    { label: 'Upcoming (≤180d)', value: deadlines.upcoming.filter(t => t.renewal_status === 'upcoming').length, color: '#3B82F6'    },
+                    { label: 'Total Overdue',    value: deadlines.overdue.length,                                               color: '#EF4444'    },
                   ].map(({ label, value, color }) => (
                     <div key={label} className={cn('rounded-2xl p-4 border', isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200')}>
                       <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
