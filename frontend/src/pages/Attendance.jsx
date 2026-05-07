@@ -1728,6 +1728,7 @@ export default function Attendance() {
   const [holidays,           setHolidays]           = useState([]);
   const [pendingHolidays,    setPendingHolidays]    = useState([]);
   const [allUsers,           setAllUsers]           = useState([]);
+  const [allCompanies,       setAllCompanies]       = useState([]);
   const [tasksCompleted,     setTasksCompleted]     = useState(0);
   const [myRank,             setMyRank]             = useState('—');
   const [locationCache,      setLocationCache]      = useState({});
@@ -2110,6 +2111,12 @@ export default function Attendance() {
           const others = fetchedUsers.filter(u => (u.id || u._id) !== user?.id);
           if (others.length > 0) setAllUsers(others);
         }
+      } catch {}
+
+      // Fetch companies for report filter
+      try {
+        const companiesRes = await api.get('/quotations/companies');
+        setAllCompanies(Array.isArray(companiesRes.data) ? companiesRes.data : []);
       } catch {}
 
       const history = historyRes.data || [];
@@ -3014,6 +3021,7 @@ export default function Attendance() {
         isAdmin={isAdmin}
         currentUser={user}
         canViewOtherAttendance={crossVisAttendance}
+        companies={allCompanies}
       />
 
       {/* ── Layout Customizer Panel ─────────────────────────────────────────── */}
