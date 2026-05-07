@@ -235,10 +235,18 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
   const [saving, setSaving]             = useState(false);
   const [saved,  setSaved]              = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Certificate reading state
+  const [pin,          setPin]          = useState('');
+  const [reading,      setReading]      = useState(false);
+  const [readError,    setReadError]    = useState('');
+  const [certFetched,  setCertFetched]  = useState(false);
+
   const [form, setForm] = useState({
     holder_name:     '',
     dsc_type:        guessDscType(device),
     dsc_password:    '',
+    serial_number:   '',
     associated_with: '',
     entity_type:     'firm',
     issue_date:      todayStr(),
@@ -252,6 +260,37 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
 
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
+  // ── Read certificate from token via backend ─────────────────────────────────
+  const handleReadCertificate = async () => {
+    if (!pin.trim()) { setReadError('Enter the token PIN first.'); return; }
+    setReading(true);
+    setReadError('');
+    try {
+      const res = await api.post('/dsc/read-certificate', { pin: pin.trim() });
+      const cert = res.data;
+      setForm(prev => ({
+        ...prev,
+        holder_name:   cert.holder_name   || prev.holder_name,
+        serial_number: cert.serial_number || prev.serial_number,
+        issue_date:    cert.issue_date    || prev.issue_date,
+        expiry_date:   cert.expiry_date   || prev.expiry_date,
+        associated_with: cert.organization || prev.associated_with,
+        notes: [
+          prev.notes,
+          cert.issuer ? `Issuer: ${cert.issuer}` : null,
+          cert.email  ? `Email: ${cert.email}`   : null,
+        ].filter(Boolean).join('\n'),
+      }));
+      setCertFetched(true);
+      toast.success('Certificate data read from token ✓');
+    } catch (err) {
+      const msg = err?.response?.data?.detail || 'Failed to read token. Check PIN and middleware.';
+      setReadError(msg);
+    } finally {
+      setReading(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!form.holder_name.trim()) { return; }
     setSaving(true);
@@ -260,6 +299,7 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
         holder_name:     form.holder_name.trim(),
         dsc_type:        form.dsc_type,
         dsc_password:    form.dsc_password,
+        serial_number:   form.serial_number,
         associated_with: form.associated_with,
         entity_type:     form.entity_type,
         issue_date:      new Date(form.issue_date).toISOString(),
@@ -392,20 +432,71 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
           {!saved && (
             <div style={{ padding: '0 20px 4px' }}>
 
+              {/* ── PIN Read Section ── */}
+              <div style={{ marginBottom: 14, padding: '10px 12px', background: certFetched ? (isDark ? 'rgba(16,185,129,0.1)' : '#f0fdf4') : surface, borderRadius: 10, border: `1px solid ${certFetched ? '#10b981' : border}` }}>
+                <label style={{ ...labelStyle, marginBottom: 6, color: certFetched ? '#10b981' : labelClr }}>
+                  {certFetched ? '✓ Certificate Read from Token' : 'Read Certificate from Token'}
+                </label>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    style={{ ...inputStyle, flex: 1, letterSpacing: pin ? '0.2em' : 'normal' }}
+                    type="password"
+                    placeholder="Enter token PIN / password"
+                    value={pin}
+                    onChange={e => { setPin(e.target.value); setReadError(''); }}
+                    onKeyDown={e => { if (e.key === 'Enter') handleReadCertificate(); }}
+                    disabled={reading}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleReadCertificate}
+                    disabled={reading || !pin.trim()}
+                    style={{
+                      height: 34, padding: '0 14px', borderRadius: 8, border: 'none',
+                      background: certFetched ? 'linear-gradient(135deg,#10b981,#059669)' : 'linear-gradient(135deg,#4f46e5,#6366f1)',
+                      color: '#fff', fontSize: 12, fontWeight: 700, cursor: reading || !pin.trim() ? 'not-allowed' : 'pointer',
+                      opacity: !pin.trim() ? 0.5 : 1,
+                      display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {reading
+                      ? <><span style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.35)', borderTopColor: '#fff', borderRadius: '50%', display: 'inline-block', animation: 'dscSpin 0.7s linear infinite' }} />Reading…</>
+                      : certFetched ? '↻ Re-read' : '⬆ Fetch Data'}
+                  </button>
+                </div>
+                {readError && (
+                  <p style={{ margin: '6px 0 0', fontSize: 11, color: '#ef4444', lineHeight: 1.4 }}>⚠ {readError}</p>
+                )}
+                {!certFetched && !readError && (
+                  <p style={{ margin: '5px 0 0', fontSize: 10, color: labelClr, lineHeight: 1.4 }}>
+                    Enter your token PIN and click "Fetch Data" to auto-fill the certificate details below.
+                  </p>
+                )}
+              </div>
+
               {/* Holder Name — full width, prominent */}
               <div style={{ marginBottom: 12 }}>
                 <label style={labelStyle}>Holder Name <span style={{ color: '#ef4444' }}>*</span></label>
                 <input
-                  style={{ ...inputStyle, fontSize: 14, fontWeight: 600 }}
+                  style={{ ...inputStyle, fontSize: 14, fontWeight: 600, background: certFetched && form.holder_name ? (isDark ? 'rgba(16,185,129,0.08)' : '#f0fdf4') : inputBg, borderColor: certFetched && form.holder_name ? '#10b981' : inputBdr }}
                   placeholder="e.g. Rajesh Kumar Sharma"
                   value={form.holder_name}
                   onChange={e => set('holder_name', e.target.value)}
-                  autoFocus
+                  autoFocus={!certFetched}
                 />
               </div>
 
-              {/* Row: Type + Password */}
+              {/* Row: Serial Number + DSC Type */}
               <div style={{ ...rowStyle, marginBottom: 12 }}>
+                <div>
+                  <label style={labelStyle}>Serial Number</label>
+                  <input
+                    style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 11, background: certFetched && form.serial_number ? (isDark ? 'rgba(16,185,129,0.08)' : '#f0fdf4') : inputBg, borderColor: certFetched && form.serial_number ? '#10b981' : inputBdr }}
+                    placeholder="Auto-filled from token"
+                    value={form.serial_number}
+                    onChange={e => set('serial_number', e.target.value)}
+                  />
+                </div>
                 <div>
                   <label style={labelStyle}>DSC Type</label>
                   <select
@@ -418,10 +509,23 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
                     ))}
                   </select>
                 </div>
+              </div>
+
+              {/* Row: Type + Password */}
+              <div style={{ ...rowStyle, marginBottom: 12 }}>
+                <div>
+                  <label style={labelStyle}>Associated With</label>
+                  <input
+                    style={inputStyle}
+                    placeholder="Firm / client name"
+                    value={form.associated_with}
+                    onChange={e => set('associated_with', e.target.value)}
+                  />
+                </div>
                 <div>
                   <label style={labelStyle}>
                     <Lock style={{ width: 10, height: 10, display: 'inline', marginRight: 3, verticalAlign: 'middle' }} />
-                    Token Password
+                    Token Password (stored)
                   </label>
                   <input
                     style={inputStyle}
@@ -436,33 +540,9 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
               {/* Row: Associated With + Entity Type */}
               <div style={{ ...rowStyle, marginBottom: 12 }}>
                 <div>
-                  <label style={labelStyle}>Associated With</label>
-                  <input
-                    style={inputStyle}
-                    placeholder="Firm / client name"
-                    value={form.associated_with}
-                    onChange={e => set('associated_with', e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label style={labelStyle}>Entity Type</label>
-                  <select
-                    style={{ ...inputStyle, cursor: 'pointer' }}
-                    value={form.entity_type}
-                    onChange={e => set('entity_type', e.target.value)}
-                  >
-                    <option value="firm">Firm</option>
-                    <option value="client">Client</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Row: Issue Date + Expiry Date */}
-              <div style={{ ...rowStyle, marginBottom: 12 }}>
-                <div>
                   <label style={labelStyle}>Issue Date <span style={{ color: '#ef4444' }}>*</span></label>
                   <input
-                    style={inputStyle}
+                    style={{ ...inputStyle, background: certFetched && form.issue_date ? (isDark ? 'rgba(16,185,129,0.08)' : '#f0fdf4') : inputBg, borderColor: certFetched && form.issue_date ? '#10b981' : inputBdr }}
                     type="date"
                     value={form.issue_date}
                     onChange={e => set('issue_date', e.target.value)}
@@ -471,12 +551,25 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
                 <div>
                   <label style={labelStyle}>Expiry Date <span style={{ color: '#ef4444' }}>*</span></label>
                   <input
-                    style={inputStyle}
+                    style={{ ...inputStyle, background: certFetched && form.expiry_date ? (isDark ? 'rgba(16,185,129,0.08)' : '#f0fdf4') : inputBg, borderColor: certFetched && form.expiry_date ? '#10b981' : inputBdr }}
                     type="date"
                     value={form.expiry_date}
                     onChange={e => set('expiry_date', e.target.value)}
                   />
                 </div>
+              </div>
+
+              {/* Entity Type */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={labelStyle}>Entity Type</label>
+                <select
+                  style={{ ...inputStyle, cursor: 'pointer' }}
+                  value={form.entity_type}
+                  onChange={e => set('entity_type', e.target.value)}
+                >
+                  <option value="firm">Firm</option>
+                  <option value="client">Client</option>
+                </select>
               </div>
 
               {/* Advanced — Notes (collapsible) */}
@@ -592,7 +685,7 @@ export default function DSCRegister() {
   const [detectingDups, setDetectingDups] = useState(false);
 
   const [formData, setFormData] = useState({
-    holder_name: '', dsc_type: '', dsc_password: '',
+    holder_name: '', dsc_type: '', dsc_password: '', serial_number: '',
     associated_with: '', entity_type: 'firm',
     issue_date: '', expiry_date: '', notes: '',
   });
@@ -631,6 +724,7 @@ export default function DSCRegister() {
       ``,
       `👤 Holder: ${dsc.holder_name || 'N/A'}`,
       `🏷️ Type: ${dsc.dsc_type || 'Standard'}`,
+      dsc.serial_number ? `🔢 Serial No: ${dsc.serial_number}` : null,
       `🏢 Associated With: ${dsc.associated_with || 'N/A'}`,
       `📅 Issue Date: ${dsc.issue_date ? format(new Date(dsc.issue_date), 'dd MMM yyyy') : 'N/A'}`,
       `⏳ Expiry Date: ${dsc.expiry_date ? format(new Date(dsc.expiry_date), 'dd MMM yyyy') : 'N/A'}`,
@@ -837,6 +931,7 @@ export default function DSCRegister() {
         holder_name:     formData.holder_name,
         dsc_type:        formData.dsc_type,
         dsc_password:    formData.dsc_password,
+        serial_number:   formData.serial_number || '',
         associated_with: formData.associated_with,
         entity_type:     formData.entity_type,
         notes:           formData.notes,
@@ -933,6 +1028,7 @@ export default function DSCRegister() {
       holder_name:     dsc.holder_name,
       dsc_type:        dsc.dsc_type || '',
       dsc_password:    dsc.dsc_password || '',
+      serial_number:   dsc.serial_number || '',
       associated_with: dsc.associated_with || '',
       entity_type:     dsc.entity_type || 'firm',
       issue_date:      format(new Date(dsc.issue_date), 'yyyy-MM-dd'),
@@ -956,7 +1052,7 @@ export default function DSCRegister() {
   };
 
   const resetForm = () => {
-    setFormData({ holder_name: '', dsc_type: '', dsc_password: '', associated_with: '', entity_type: 'firm', issue_date: '', expiry_date: '', notes: '' });
+    setFormData({ holder_name: '', dsc_type: '', dsc_password: '', serial_number: '', associated_with: '', entity_type: 'firm', issue_date: '', expiry_date: '', notes: '' });
     setEditingDSC(null);
   };
 
@@ -1052,14 +1148,14 @@ export default function DSCRegister() {
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
+          <Label htmlFor="serial_number">Serial Number</Label>
+          <Input id="serial_number" placeholder="Certificate serial number" value={formData.serial_number}
+            onChange={e => setFormData({ ...formData, serial_number: e.target.value })} className="font-mono text-xs" data-testid="dsc-serial-input" />
+        </div>
+        <div className="space-y-2">
           <Label htmlFor="dsc_password">Password</Label>
           <Input id="dsc_password" type="text" placeholder="DSC Password" value={formData.dsc_password}
             onChange={e => setFormData({ ...formData, dsc_password: e.target.value })} data-testid="dsc-password-input" />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="associated_with">Associated With (Firm/Client)</Label>
-          <Input id="associated_with" placeholder="Firm or client name" value={formData.associated_with}
-            onChange={e => setFormData({ ...formData, associated_with: e.target.value })} data-testid="dsc-associated-input" />
         </div>
       </div>
       <div className="grid grid-cols-2 gap-4">
@@ -1603,6 +1699,17 @@ export default function DSCRegister() {
                     <p className="text-sm font-mono">{selectedDSC?.dsc_password || '********'}</p>
                   </div>
                 </div>
+                {selectedDSC?.serial_number && (
+                  <div className="flex items-start gap-3">
+                    <div className={`h-7 w-7 rounded-md flex items-center justify-center mt-0.5 ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                      <Shield className="h-3.5 w-3.5 text-indigo-400" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-[10px] font-bold tracking-[0.15em] text-slate-400 uppercase">Serial Number</p>
+                      <p className="text-xs font-mono text-indigo-500 break-all">{selectedDSC.serial_number}</p>
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-start gap-3">
                   <div className={`h-7 w-7 rounded-md flex items-center justify-center mt-0.5 ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
                     <Clock className="h-3.5 w-3.5 text-slate-500" />
