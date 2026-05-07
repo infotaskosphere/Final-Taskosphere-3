@@ -472,3 +472,37 @@ export async function readCertFromLocalAgent(pin) {
   if (data.success && data.cert) return data.cert;
   throw new Error(data.error || 'Local agent could not read the certificate');
 }
+
+// ─── Certificate File Parser (no agent / no WebUSB needed) ───────────────────
+/**
+ * Parse a .cer / .crt / .pem certificate file uploaded by the user.
+ * Works entirely in the browser — no backend, no local agent required.
+ *
+ * Supports:
+ *   - DER binary  (.cer, .crt, .der)
+ *   - PEM base64  (.pem, .cer exported as text)
+ *
+ * @param {File} file - The File object from an <input type="file">
+ * @returns {Promise<object|null>} - Parsed cert fields or null
+ */
+export async function parseCertificateFile(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  let der = new Uint8Array(arrayBuffer);
+
+  // Detect PEM format (starts with "-----BEGIN")
+  const text = new TextDecoder('utf-8').decode(der.slice(0, 30));
+  if (text.startsWith('-----BEGIN')) {
+    const pem = new TextDecoder('utf-8').decode(der);
+    const b64 = pem
+      .replace(/-----BEGIN[\s\S]*?-----/, '')
+      .replace(/-----END[\s\S]*?-----/, '')
+      .replace(/\s+/g, '');
+    const binary = atob(b64);
+    der = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) der[i] = binary.charCodeAt(i);
+  }
+
+  // Extract DER SEQUENCE if wrapped in extra bytes
+  const clean = extractDerFromBlob(der);
+  return parseDerCertificate(clean);
+}
