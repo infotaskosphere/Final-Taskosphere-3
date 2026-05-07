@@ -2115,7 +2115,7 @@ export default function Attendance() {
 
       // Fetch companies for report filter
       try {
-        const companiesRes = await api.get('/quotations/companies');
+        const companiesRes = await api.get('/companies/list');
         setAllCompanies(Array.isArray(companiesRes.data) ? companiesRes.data : []);
       } catch {}
 
