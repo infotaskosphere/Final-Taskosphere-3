@@ -29,6 +29,9 @@ import {
   readCertFromWebSmartCard,
   isWebSmartCardSupported,
   parseCertificateFile,
+  checkLocalAgent,
+  readCertFromLocalAgent,
+  diagnoseDscReader,
 } from '@/lib/dscTokenReader';
 
 // ─── Print styles ─────────────────────────────────────────────────────────────
@@ -285,62 +288,96 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
     setCertFetched(true);
   };
 
-  // ── 3-Tier certificate reading strategy ──────────────────────────────────────
-  // Tier 1: navigator.smartCard  — Chrome PC/SC API, works on Windows with CCID driver
-  // Tier 2: WebUSB + CCID        — works on Linux/Mac, fails on Windows
-  // Tier 3: File upload fallback — always works, user exports .cer from mToken Manager
+  // ── 4-Tier certificate reading strategy ──────────────────────────────────────
+  // Tier 1: navigator.smartCard  — Chrome PC/SC API (Windows + fixed API shape)
+  // Tier 2: Local DSC Agent      — node process on localhost:7432 (most reliable on Windows)
+  // Tier 3: WebUSB + CCID        — direct USB (Linux/Mac only)
+  // Tier 4: File upload fallback — always works (.cer export from mToken Manager)
   const handleReadCertificate = async () => {
     if (!pin.trim()) { setReadError('Enter the token PIN first.'); return; }
     setReading(true);
     setReadError('');
 
-    // ── TIER 1: navigator.smartCard (Windows + all platforms) ─────────────────
+    const tierErrors = [];
+
+    // ── TIER 1: navigator.smartCard (Chrome 114+ on Windows) ─────────────────
     if (isWebSmartCardSupported()) {
+      console.log('[DSC] Tier 1: trying navigator.smartCard…');
       try {
         const cert = await readCertFromWebSmartCard(pin.trim());
         if (cert && cert.holder_name) {
           applyCert(cert);
-          toast.success('Certificate read from token ✓');
+          toast.success(`Certificate read from token ✓ (method: ${cert.read_method})`);
+          setReading(false);
           return;
         }
-        // Fell through — no cert found, try next tier
+        tierErrors.push('Tier 1 (smartCard): no certificate found');
       } catch (err) {
-        // PIN errors are definitive — don't fall through
-        if (err?.message?.includes('PIN') || err?.message?.includes('blocked')) {
+        console.warn('[DSC] Tier 1 smartCard error:', err.message);
+        // PIN / block errors are definitive — stop here
+        if (err?.message?.includes('PIN') || err?.message?.includes('blocked') || err?.message?.includes('attempt')) {
           setReadError(err.message);
           setReading(false);
           return;
         }
-        // Other errors — fall through to WebUSB
-        console.warn('[DSC] smartCard failed, trying WebUSB:', err.message);
+        tierErrors.push(`Tier 1 (smartCard): ${err.message}`);
       }
+    } else {
+      tierErrors.push('Tier 1 (smartCard): not available in this browser');
+      console.log('[DSC] Tier 1: navigator.smartCard not supported, skipping');
     }
 
-    // ── TIER 2: WebUSB + CCID (Linux / Mac) ───────────────────────────────────
+    // ── TIER 2: Local DSC Agent (node on localhost:7432) ──────────────────────
+    console.log('[DSC] Tier 2: checking local DSC agent…');
+    const agentRunning = await checkLocalAgent();
+    if (agentRunning) {
+      try {
+        const cert = await readCertFromLocalAgent(pin.trim());
+        if (cert && cert.holder_name) {
+          applyCert(cert);
+          toast.success('Certificate read via local agent ✓');
+          setReading(false);
+          return;
+        }
+        tierErrors.push('Tier 2 (local agent): no certificate found');
+      } catch (err) {
+        console.warn('[DSC] Tier 2 local agent error:', err.message);
+        if (err?.message?.includes('PIN') || err?.message?.includes('blocked') || err?.message?.includes('Incorrect')) {
+          setReadError(err.message);
+          setReading(false);
+          return;
+        }
+        tierErrors.push(`Tier 2 (local agent): ${err.message}`);
+      }
+    } else {
+      tierErrors.push('Tier 2 (local agent): not running on localhost:7432');
+      console.log('[DSC] Tier 2: local agent not running');
+    }
+
+    // ── TIER 3: WebUSB + CCID (Linux / Mac) ───────────────────────────────────
     if (device) {
+      console.log('[DSC] Tier 3: trying WebUSB…');
       try {
         if (!device.opened) await device.open();
         const cert = await readCertFromUsbToken(device, pin.trim());
         if (cert && cert.holder_name) {
           applyCert(cert);
-          toast.success('Certificate read from token ✓');
+          toast.success('Certificate read via WebUSB ✓');
+          setReading(false);
           return;
         }
+        tierErrors.push('Tier 3 (WebUSB): no certificate found');
       } catch (err) {
-        const isClaimError =
-          err?.message?.includes('claimInterface') ||
-          err?.message?.includes('Access denied') ||
-          err?.message?.includes('Unable to claim');
-        if (!isClaimError) {
-          // Non-claim error on WebUSB — report it
-          console.warn('[DSC] WebUSB error:', err.message);
-        }
-        // Fall through to Tier 3
+        console.warn('[DSC] Tier 3 WebUSB error:', err.message);
+        tierErrors.push(`Tier 3 (WebUSB): ${err.message}`);
       }
+    } else {
+      tierErrors.push('Tier 3 (WebUSB): no USB device available');
     }
 
-    // ── TIER 3: File upload (universal fallback) ──────────────────────────────
-    // Show instructions for exporting .cer from mToken Manager
+    // ── TIER 4: File upload (universal fallback) ──────────────────────────────
+    console.log('[DSC] All tiers failed — showing file upload fallback');
+    console.log('[DSC] Tier errors:\n' + tierErrors.join('\n'));
     setReadError('FILE_UPLOAD_NEEDED');
     setReading(false);
   };
@@ -543,7 +580,7 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
                   </button>
                 </div>
                 {readError === 'FILE_UPLOAD_NEEDED' ? (
-                  /* ── Fallback: .cer file upload ── */
+                  /* ── Fallback: .cer file upload + local agent option ── */
                   <div style={{ margin: '8px 0 0', padding: '10px 12px', background: isDark ? 'rgba(251,191,36,0.08)' : '#fffbeb', borderRadius: 8, border: '1px solid rgba(251,191,36,0.35)' }}>
                     <p style={{ margin: '0 0 4px', fontSize: 11, color: '#d97706', fontWeight: 700 }}>
                       🪟 Auto-read failed — upload your certificate file instead
@@ -558,19 +595,39 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
                       style={{ display: 'none' }}
                       onChange={handleCertFileUpload}
                     />
-                    <button
-                      onClick={() => certFileRef.current?.click()}
-                      disabled={reading}
-                      style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 6,
-                        padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                        background: 'linear-gradient(135deg,#f59e0b,#d97706)',
-                        color: '#fff', fontSize: 11, fontWeight: 700,
-                      }}
-                    >
-                      📂 Upload .cer / .pem File
-                    </button>
-                    <p style={{ margin: '6px 0 0', fontSize: 9, color: isDark ? '#6b7280' : '#9ca3af' }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => certFileRef.current?.click()}
+                        disabled={reading}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                          padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                          background: 'linear-gradient(135deg,#f59e0b,#d97706)',
+                          color: '#fff', fontSize: 11, fontWeight: 700,
+                        }}
+                      >
+                        📂 Upload .cer / .pem File
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const report = await diagnoseDscReader();
+                          alert('DSC Diagnostic Report\n\n' + report + '\n\nThis report was also printed to the DevTools console.');
+                        }}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                          padding: '6px 12px', borderRadius: 6, border: `1px solid ${isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)'}`,
+                          background: 'transparent', cursor: 'pointer',
+                          color: isDark ? '#94a3b8' : '#64748b', fontSize: 10, fontWeight: 600,
+                        }}
+                        title="Run full diagnostic to see why auto-read failed"
+                      >
+                        🔍 Run Diagnostic
+                      </button>
+                    </div>
+                    <p style={{ margin: '8px 0 2px', fontSize: 9.5, color: isDark ? '#6b7280' : '#9ca3af', lineHeight: 1.5 }}>
+                      💡 <strong>For Windows users:</strong> Run the <code style={{ background: isDark ? '#1e293b' : '#f1f5f9', padding: '1px 3px', borderRadius: 2 }}>dsc-agent</code> locally with <code style={{ background: isDark ? '#1e293b' : '#f1f5f9', padding: '1px 3px', borderRadius: 2 }}>node index.js</code> for automatic reading.
+                    </p>
+                    <p style={{ margin: '2px 0 0', fontSize: 9, color: isDark ? '#6b7280' : '#9ca3af' }}>
                       Your private key is never exported — only the public certificate (name, dates, serial).
                     </p>
                   </div>
