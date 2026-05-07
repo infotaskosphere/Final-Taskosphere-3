@@ -24,7 +24,12 @@ import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
 import { detectDscDuplicates } from '@/lib/aiDuplicateEngine';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
-import { readCertFromUsbToken, readCertFromLocalAgent, isLocalAgentAvailable, parseCertificateFile } from '@/lib/dscTokenReader';
+import {
+  readCertFromUsbToken,
+  readCertFromWebSmartCard,
+  isWebSmartCardSupported,
+  parseCertificateFile,
+} from '@/lib/dscTokenReader';
 
 // ─── Print styles ─────────────────────────────────────────────────────────────
 const PRINT_STYLE = `
@@ -262,74 +267,85 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
 
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
-  // ── Read certificate — tries WebUSB first, falls back to local PC/SC agent ──
+  // ── Apply parsed cert data to form ──────────────────────────────────────────
+  const applyCert = (cert) => {
+    setForm(prev => ({
+      ...prev,
+      holder_name:     cert.holder_name   || prev.holder_name,
+      serial_number:   cert.serial_number || prev.serial_number,
+      issue_date:      cert.issue_date    || prev.issue_date,
+      expiry_date:     cert.expiry_date   || prev.expiry_date,
+      associated_with: cert.organization  || prev.associated_with,
+      notes: [
+        prev.notes,
+        cert.issuer ? `Issuer: ${cert.issuer}` : null,
+        cert.email  ? `Email: ${cert.email}`   : null,
+      ].filter(Boolean).join('\n'),
+    }));
+    setCertFetched(true);
+  };
+
+  // ── 3-Tier certificate reading strategy ──────────────────────────────────────
+  // Tier 1: navigator.smartCard  — Chrome PC/SC API, works on Windows with CCID driver
+  // Tier 2: WebUSB + CCID        — works on Linux/Mac, fails on Windows
+  // Tier 3: File upload fallback — always works, user exports .cer from mToken Manager
   const handleReadCertificate = async () => {
     if (!pin.trim()) { setReadError('Enter the token PIN first.'); return; }
-    if (!device) { setReadError('No USB device available.'); return; }
     setReading(true);
     setReadError('');
 
-    const applycert = (cert) => {
-      setForm(prev => ({
-        ...prev,
-        holder_name:     cert.holder_name   || prev.holder_name,
-        serial_number:   cert.serial_number || prev.serial_number,
-        issue_date:      cert.issue_date    || prev.issue_date,
-        expiry_date:     cert.expiry_date   || prev.expiry_date,
-        associated_with: cert.organization  || prev.associated_with,
-        notes: [
-          prev.notes,
-          cert.issuer ? `Issuer: ${cert.issuer}` : null,
-          cert.email  ? `Email: ${cert.email}`   : null,
-        ].filter(Boolean).join('\n'),
-      }));
-      setCertFetched(true);
-      const method = cert.read_method === 'pcsc-local-agent' ? ' (via local agent)' : '';
-      toast.success(`Certificate data read from token ✓${method}`);
-    };
-
-    try {
-      // ── Attempt 1: WebUSB + CCID (works on Linux/Mac; may fail on Windows) ──
-      if (!device.opened) await device.open();
-      const cert = await readCertFromUsbToken(device, pin.trim());
-      if (cert && cert.holder_name) { applycert(cert); return; }
-      setReadError('Could not read certificate data. Try the local agent or fill the form manually.');
-    } catch (err) {
-      const isClaimError =
-        err?.message?.includes('claimInterface') ||
-        err?.message?.includes('Unable to claim interface') ||
-        err?.message?.includes('Access denied');
-
-      if (isClaimError) {
-        // ── Attempt 2: Local PC/SC agent (Windows fallback) ──────────────────
-        try {
-          const agentUp = await isLocalAgentAvailable();
-          if (agentUp) {
-            const cert = await readCertFromLocalAgent(pin.trim());
-            if (cert && cert.holder_name) { applycert(cert); return; }
-            setReadError('Local agent could not read the certificate. Check your PIN and try again.');
-          } else {
-            // Agent not running — show download instructions
-            setReadError('AGENT_REQUIRED');
-          }
-        } catch (agentErr) {
-          setReadError(
-            agentErr?.message?.includes('Incorrect PIN')
-              ? 'Incorrect PIN. Please check your token PIN and try again.'
-              : agentErr?.message?.includes('blocked')
-              ? 'Token PIN is blocked. Please unlock your token using the mToken management software.'
-              : ('Local agent error: ' + (agentErr?.message || 'Unknown error'))
-          );
+    // ── TIER 1: navigator.smartCard (Windows + all platforms) ─────────────────
+    if (isWebSmartCardSupported()) {
+      try {
+        const cert = await readCertFromWebSmartCard(pin.trim());
+        if (cert && cert.holder_name) {
+          applyCert(cert);
+          toast.success('Certificate read from token ✓');
+          return;
         }
-      } else {
-        setReadError(err?.message || 'Failed to read token. Ensure the token is plugged in and try again.');
+        // Fell through — no cert found, try next tier
+      } catch (err) {
+        // PIN errors are definitive — don't fall through
+        if (err?.message?.includes('PIN') || err?.message?.includes('blocked')) {
+          setReadError(err.message);
+          setReading(false);
+          return;
+        }
+        // Other errors — fall through to WebUSB
+        console.warn('[DSC] smartCard failed, trying WebUSB:', err.message);
       }
-    } finally {
-      setReading(false);
     }
+
+    // ── TIER 2: WebUSB + CCID (Linux / Mac) ───────────────────────────────────
+    if (device) {
+      try {
+        if (!device.opened) await device.open();
+        const cert = await readCertFromUsbToken(device, pin.trim());
+        if (cert && cert.holder_name) {
+          applyCert(cert);
+          toast.success('Certificate read from token ✓');
+          return;
+        }
+      } catch (err) {
+        const isClaimError =
+          err?.message?.includes('claimInterface') ||
+          err?.message?.includes('Access denied') ||
+          err?.message?.includes('Unable to claim');
+        if (!isClaimError) {
+          // Non-claim error on WebUSB — report it
+          console.warn('[DSC] WebUSB error:', err.message);
+        }
+        // Fall through to Tier 3
+      }
+    }
+
+    // ── TIER 3: File upload (universal fallback) ──────────────────────────────
+    // Show instructions for exporting .cer from mToken Manager
+    setReadError('FILE_UPLOAD_NEEDED');
+    setReading(false);
   };
 
-  // ── Parse an uploaded .cer / .pem file — no agent or WebUSB needed ──────────
+  // ── Handle .cer / .pem file upload ───────────────────────────────────────────
   const handleCertFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -341,26 +357,12 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
         setReadError('Could not read certificate from this file. Make sure it is a valid .cer or .pem file.');
         return;
       }
-      setForm(prev => ({
-        ...prev,
-        holder_name:     cert.holder_name   || prev.holder_name,
-        serial_number:   cert.serial_number || prev.serial_number,
-        issue_date:      cert.issue_date    || prev.issue_date,
-        expiry_date:     cert.expiry_date   || prev.expiry_date,
-        associated_with: cert.organization  || prev.associated_with,
-        notes: [
-          prev.notes,
-          cert.issuer ? `Issuer: ${cert.issuer}` : null,
-          cert.email  ? `Email: ${cert.email}`   : null,
-        ].filter(Boolean).join('\n'),
-      }));
-      setCertFetched(true);
-      toast.success(`Certificate read from file: ${file.name} ✓`);
+      applyCert(cert);
+      toast.success(`Certificate read from ${file.name} ✓`);
     } catch (err) {
       setReadError('Failed to parse certificate file: ' + (err?.message || 'Unknown error'));
     } finally {
       setReading(false);
-      // Reset file input so same file can be re-uploaded if needed
       if (certFileRef.current) certFileRef.current.value = '';
     }
   };
@@ -540,65 +542,44 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
                       : certFetched ? '↻ Re-read' : '⬆ Fetch Data'}
                   </button>
                 </div>
-                {readError === 'AGENT_REQUIRED' ? (
-                  <div style={{ margin: '8px 0 0', padding: '10px 12px', background: isDark ? 'rgba(251,191,36,0.08)' : '#fffbeb', borderRadius: 8, border: '1px solid rgba(251,191,36,0.4)' }}>
-                    <p style={{ margin: 0, fontSize: 11, color: '#d97706', fontWeight: 700 }}>🪟 Windows: Use one of these two options</p>
-
-                    {/* Option A — Upload cert file */}
-                    <div style={{ margin: '8px 0', padding: '8px 10px', background: isDark ? 'rgba(79,70,229,0.15)' : '#eef2ff', borderRadius: 6, border: '1px solid rgba(99,102,241,0.3)' }}>
-                      <p style={{ margin: '0 0 6px', fontSize: 11, color: isDark ? '#a5b4fc' : '#4338ca', fontWeight: 700 }}>
-                        ✅ Option A — Upload Certificate File (Easiest)
-                      </p>
-                      <ol style={{ margin: '0 0 8px 14px', padding: 0, fontSize: 10, color: isDark ? '#c7d2fe' : '#3730a3', lineHeight: 1.8 }}>
-                        <li>Open <strong>mToken Manager</strong> (installed with your DSC token)</li>
-                        <li>Go to <strong>Certificate</strong> tab → select your certificate</li>
-                        <li>Click <strong>Export</strong> → save as <code style={{ background: isDark ? '#1e1b4b' : '#e0e7ff', padding: '1px 4px', borderRadius: 3 }}>.cer</code> file</li>
-                        <li>Upload that file below ↓</li>
-                      </ol>
-                      {/* Hidden file input */}
-                      <input
-                        ref={certFileRef}
-                        type="file"
-                        accept=".cer,.crt,.pem,.der"
-                        style={{ display: 'none' }}
-                        onChange={handleCertFileUpload}
-                      />
-                      <button
-                        onClick={() => certFileRef.current?.click()}
-                        disabled={reading}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 6,
-                          padding: '7px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                          background: 'linear-gradient(135deg,#4f46e5,#6366f1)',
-                          color: '#fff', fontSize: 11, fontWeight: 700,
-                        }}
-                      >
-                        📂 Upload .cer / .pem File
-                      </button>
-                    </div>
-
-                    {/* Option B — Local agent */}
-                    <div style={{ padding: '8px 10px', background: isDark ? 'rgba(0,0,0,0.2)' : '#f9fafb', borderRadius: 6, border: `1px solid ${border}` }}>
-                      <p style={{ margin: '0 0 4px', fontSize: 11, color: isDark ? '#9ca3af' : '#6b7280', fontWeight: 700 }}>
-                        Option B — Run Local Agent (Advanced)
-                      </p>
-                      <p style={{ margin: '0 0 4px', fontSize: 10, color: isDark ? '#6b7280' : '#9ca3af', lineHeight: 1.6 }}>
-                        In the <code style={{ background: isDark ? '#1e1b4b' : '#e0e7ff', padding: '1px 4px', borderRadius: 3 }}>dsc-agent/</code> folder from the project, run:
-                      </p>
-                      <code style={{ display: 'block', fontSize: 10, color: isDark ? '#a5b4fc' : '#4338ca', background: isDark ? '#1e1b4b' : '#e0e7ff', padding: '4px 8px', borderRadius: 4 }}>
-                        npm install &amp;&amp; node index.js
-                      </code>
-                      <p style={{ margin: '4px 0 0', fontSize: 9, color: isDark ? '#4b5563' : '#9ca3af' }}>
-                        Keep terminal open, then click Fetch Data again.
-                      </p>
-                    </div>
+                {readError === 'FILE_UPLOAD_NEEDED' ? (
+                  /* ── Fallback: .cer file upload ── */
+                  <div style={{ margin: '8px 0 0', padding: '10px 12px', background: isDark ? 'rgba(251,191,36,0.08)' : '#fffbeb', borderRadius: 8, border: '1px solid rgba(251,191,36,0.35)' }}>
+                    <p style={{ margin: '0 0 4px', fontSize: 11, color: '#d97706', fontWeight: 700 }}>
+                      🪟 Auto-read failed — upload your certificate file instead
+                    </p>
+                    <p style={{ margin: '0 0 6px', fontSize: 10, color: isDark ? '#fde68a' : '#92400e', lineHeight: 1.6 }}>
+                      Export from <strong>mToken Manager</strong> → Certificate tab → <strong>Export</strong> → save as <code style={{ background: isDark ? '#1e1b4b' : '#e0e7ff', padding: '1px 4px', borderRadius: 3 }}>.cer</code>, then upload:
+                    </p>
+                    <input
+                      ref={certFileRef}
+                      type="file"
+                      accept=".cer,.crt,.pem,.der"
+                      style={{ display: 'none' }}
+                      onChange={handleCertFileUpload}
+                    />
+                    <button
+                      onClick={() => certFileRef.current?.click()}
+                      disabled={reading}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                        background: 'linear-gradient(135deg,#f59e0b,#d97706)',
+                        color: '#fff', fontSize: 11, fontWeight: 700,
+                      }}
+                    >
+                      📂 Upload .cer / .pem File
+                    </button>
+                    <p style={{ margin: '6px 0 0', fontSize: 9, color: isDark ? '#6b7280' : '#9ca3af' }}>
+                      Your private key is never exported — only the public certificate (name, dates, serial).
+                    </p>
                   </div>
-                ) : readError && (
+                ) : readError ? (
                   <div style={{ margin: '8px 0 0', padding: '8px 10px', background: isDark ? 'rgba(239,68,68,0.12)' : '#fff1f1', borderRadius: 8, border: '1px solid rgba(239,68,68,0.3)' }}>
                     <p style={{ margin: 0, fontSize: 11, color: '#ef4444', lineHeight: 1.5, fontWeight: 600 }}>⚠ Could not read certificate</p>
                     <p style={{ margin: '3px 0 0', fontSize: 10, color: isDark ? '#fca5a5' : '#b91c1c', lineHeight: 1.5 }}>{readError}</p>
                   </div>
-                )}
+                ) : null}
                 {!certFetched && !readError && (
                   <p style={{ margin: '5px 0 0', fontSize: 10, color: labelClr, lineHeight: 1.4 }}>
                     Optional — enter your token PIN and click “Fetch Data” to auto-fill. Or fill the form manually below.
