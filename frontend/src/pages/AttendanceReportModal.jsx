@@ -245,6 +245,7 @@ function buildMonthlyHTML(companyName, year, month, rows, dayHeaders, holidays) 
         <tr class="hdr1">
           <th>Emp. ID</th>
           <th>Employee Name</th>
+          <th>Company</th>
           <th>Month</th>
           ${dayHeaders.map(({ day, isSunday }) =>
             `<th class="${isSunday ? 'sun-col' : ''}">${day}</th>`
@@ -252,7 +253,7 @@ function buildMonthlyHTML(companyName, year, month, rows, dayHeaders, holidays) 
           <th>P</th><th>A</th><th>L</th><th>Leave</th>
         </tr>
         <tr class="hdr2">
-          <th colspan="3"></th>
+          <th colspan="4"></th>
           ${dayHeaders.map(({ day, isSunday }) => {
             const d = new Date(year, month - 1, day);
             return `<th class="${isSunday ? 'sun-col' : ''}">${dayWeekLetters[d.getDay()]}</th>`;
@@ -265,6 +266,7 @@ function buildMonthlyHTML(companyName, year, month, rows, dayHeaders, holidays) 
           <tr>
             <td class="td-left emp-id">${row.user.id ? row.user.id.slice(0, 8).toUpperCase() : `EMP${String(idx + 1).padStart(3, '0')}`}</td>
             <td class="td-left emp-name">${row.user.full_name || 'Unknown'}</td>
+            <td class="td-left" style="font-size:10px;color:#475569;">${row.user.company_name || '—'}</td>
             <td class="month-col">${monthName.substring(0, 3).toUpperCase()}</td>
             ${row.days.map((st, i) => {
               const isSun = dayHeaders[i].isSunday;
@@ -436,6 +438,7 @@ function buildDatewiseHTML(companyName, dateStr, rows) {
           <th style="width:32px">#</th>
           <th>Emp. ID</th>
           <th>Employee Name</th>
+          <th>Company</th>
           <th class="tc">Status</th>
           <th class="tc">Punch In</th>
           <th class="tc">Punch Out</th>
@@ -449,6 +452,7 @@ function buildDatewiseHTML(companyName, dateStr, rows) {
             <td class="num">${idx + 1}</td>
             <td class="emp-id">${row.user.id ? row.user.id.slice(0, 8).toUpperCase() : `EMP${String(idx + 1).padStart(3, '0')}`}</td>
             <td class="emp-name">${row.user.full_name || 'Unknown'}</td>
+            <td style="font-size:10px;color:#475569;">${row.user.company_name || '—'}</td>
             <td class="tc">
               <span class="badge" style="background:${row.status.bg};color:${row.status.text}">
                 ${row.status.code}  ${row.status.label}
@@ -475,6 +479,7 @@ export default function AttendanceReportModal({
   allUsers, holidays,
   isAdmin, currentUser,
   canViewOtherAttendance, // array of permitted user IDs (non-admins)
+  companies, // array of company objects { id, name }
 }) {
   const [reportType,        setReportType]        = useState('monthly');
   const [selectedMonth,     setSelectedMonth]     = useState(format(new Date(), 'yyyy-MM'));
@@ -483,15 +488,24 @@ export default function AttendanceReportModal({
   const [selectedEmployees, setSelectedEmployees] = useState([]);
   const [companyName,       setCompanyName]       = useState('Your Company Name');
   const [generating,        setGenerating]        = useState(false);
+  const [companyFilter,     setCompanyFilter]     = useState('all');
+
+  const safeCompanies = useMemo(() => Array.isArray(companies) ? companies : [], [companies]);
 
   // Users this role can report on
-  const availableUsers = useMemo(() => {
+  const baseUsers = useMemo(() => {
     if (isAdmin) return Array.isArray(allUsers) ? allUsers : [];
     const permIds = Array.isArray(canViewOtherAttendance) ? canViewOtherAttendance : [];
     return (Array.isArray(allUsers) ? allUsers : []).filter(
       u => u.id === currentUser?.id || permIds.includes(u.id)
     );
   }, [isAdmin, allUsers, canViewOtherAttendance, currentUser]);
+
+  const availableUsers = useMemo(() => {
+    if (companyFilter === 'all') return baseUsers;
+    if (companyFilter === '__unassigned__') return baseUsers.filter(u => !u.company_id);
+    return baseUsers.filter(u => u.company_id === companyFilter);
+  }, [baseUsers, companyFilter]);
 
   const targetUsers = useMemo(() => {
     if (employeeFilter === 'all') return availableUsers;
@@ -795,6 +809,34 @@ export default function AttendanceReportModal({
                 />
               )}
             </div>
+
+            {/* Company filter */}
+            {safeCompanies.length > 0 && (
+              <div>
+                <label className="text-xs font-bold uppercase tracking-widest mb-2 block" style={{ color: isDark ? D.muted : '#64748b' }}>
+                  Filter by Company
+                </label>
+                <div className="relative">
+                  <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                  <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                  <select
+                    value={companyFilter}
+                    onChange={e => { setCompanyFilter(e.target.value); setSelectedEmployees([]); }}
+                    className={`${inputBase} pl-10 pr-10 appearance-none`}
+                    style={inputStyle}
+                  >
+                    <option value="all">All Companies ({baseUsers.length} employees)</option>
+                    {safeCompanies.map(co => {
+                      const count = baseUsers.filter(u => u.company_id === co.id).length;
+                      return <option key={co.id} value={co.id}>{co.name} ({count})</option>;
+                    })}
+                    {baseUsers.some(u => !u.company_id) && (
+                      <option value="__unassigned__">— No Company ({baseUsers.filter(u => !u.company_id).length})</option>
+                    )}
+                  </select>
+                </div>
+              </div>
+            )}
 
             {/* Employee filter */}
             <div>
