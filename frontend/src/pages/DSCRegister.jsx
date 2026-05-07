@@ -846,12 +846,13 @@ export default function DSCRegister() {
     const scanExistingDevices = async () => {
       try {
         const devices = await navigator.usb.getDevices();
-        if (devices.length > 0) setUsbPermission('granted');
-        if (usbDismissed) return;
-        const dscDevice = devices.find(isDSCDevice);
-        if (dscDevice) {
-          setUsbDevice(dscDevice);
-          setUsbPromptOpen(true);
+        if (devices.length > 0) {
+          setUsbPermission('granted');
+          // Show popup for any previously-permitted device (user selected it, so it's their DSC)
+          if (!usbDismissed) {
+            setUsbDevice(devices[0]);
+            setUsbPromptOpen(true);
+          }
         }
       } catch (_) {}
     };
@@ -859,17 +860,14 @@ export default function DSCRegister() {
 
     const handleConnect = (event) => {
       if (usbDismissed) return;
-      const device = event.device;
       setUsbPermission('granted');
-      if (!isDSCDevice(device)) return;
-      setUsbDevice(device);
+      // Show popup for ANY newly plugged-in permitted device
+      setUsbDevice(event.device);
       setUsbPromptOpen(true);
     };
 
-    const handleDisconnect = (event) => {
-      if (usbDevice && event.device === usbDevice) {
-        setUsbPromptOpen(false);
-      }
+    const handleDisconnect = () => {
+      setUsbPromptOpen(false);
     };
 
     navigator.usb.addEventListener('connect', handleConnect);
@@ -878,31 +876,26 @@ export default function DSCRegister() {
       navigator.usb.removeEventListener('connect', handleConnect);
       navigator.usb.removeEventListener('disconnect', handleDisconnect);
     };
-  }, [usbDismissed, isDSCDevice]);
+  }, [usbDismissed]);
 
   // Called when user clicks "Grant USB Access" button
   const handleGrantUsbAccess = useCallback(async () => {
     if (!navigator.usb) return;
     setUsbGranting(true);
     try {
-      // Show browser's device picker — user selects their token
-      // We pass all known vendor filters; browser shows matching + "all" option
-      const device = await navigator.usb.requestDevice({ filters: DSC_VENDOR_IDS });
+      // IMPORTANT: Use empty filters [] so Chrome shows ALL connected USB devices.
+      // Vendor-ID filters cause "No compatible devices found" if the token's VID
+      // isn't in our list. The user picks their DSC token from the full list.
+      const device = await navigator.usb.requestDevice({ filters: [] });
       setUsbPermission('granted');
-      if (isDSCDevice(device) && !usbDismissed) {
+      if (!usbDismissed) {
         setUsbDevice(device);
         setUsbPromptOpen(true);
-      } else {
-        // Permission granted for a non-DSC, still show popup for manual entry
-        if (!usbDismissed) {
-          setUsbDevice(device);
-          setUsbPromptOpen(true);
-        }
       }
     } catch (err) {
       if (err.name === 'NotFoundError') {
-        // User cancelled the picker — not an error
-        toast.info('No device selected. Plug in your DSC token and try again.');
+        // User closed the picker without selecting — not an error
+        toast.info('No device selected. Make sure your DSC token is plugged in, then try again.');
       } else {
         setUsbPermission('denied');
         toast.error('USB access denied. Please allow USB access in browser settings.');
@@ -910,7 +903,7 @@ export default function DSCRegister() {
     } finally {
       setUsbGranting(false);
     }
-  }, [isDSCDevice, usbDismissed]);
+  }, [usbDismissed]);
 
   // ── Keyboard shortcut: "/" focuses search ────────────────────────────────
   useEffect(() => {
