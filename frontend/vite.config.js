@@ -13,7 +13,9 @@ export default defineConfig({
     },
   },
   server: {
-    port: 3000,
+    host: '0.0.0.0',
+    port: 5000,
+    allowedHosts: true,
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
@@ -37,7 +39,7 @@ export default defineConfig({
           'framer':     ['framer-motion'],
           'charts':     ['recharts', 'chart.js'],
           'dnd':        ['@hello-pangea/dnd'],
-          'icons':      ['lucide-react'],        // ← ADDED
+          'icons':      ['lucide-react'],
           'radix':      [
             '@radix-ui/react-dialog',
             '@radix-ui/react-dropdown-menu',
