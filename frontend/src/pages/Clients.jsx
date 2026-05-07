@@ -2643,6 +2643,8 @@ export default function Clients() {
     setAddressTab('primary');
     setFormData({ company_name: '', client_type: 'proprietor', client_type_other: '', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '', gstin: '', pan: '', gst_treatment: 'regular', place_of_supply: '', default_payment_terms: 'Due on receipt', credit_limit: '', opening_balance: '', opening_balance_type: 'Dr', tally_ledger_name: '', tally_group: 'Sundry Debtors', website: '', msme_number: '', gst_address: '', gst_city: '', gst_state: '', gst_pin: '' });
     setOtherService(''); setEditingClient(null); setFormErrors({}); setContactErrors([]); setReferrerInput(''); setReferrerSelectValue('');
+    setSmartImportFiles({ gst: null, udyam: null, mca: null });
+    setSmartImportError('');
   }, []);
 
   useEffect(() => { if (!dialogOpen) { setFormErrors({}); setContactErrors([]); } }, [dialogOpen]);
@@ -3090,9 +3092,7 @@ export default function Clients() {
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={downloadTemplate} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm"><FileText className="h-4 w-4" /> CSV Template</Button>
             {canEditClients && <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importLoading} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl backdrop-blur-sm">{importLoading ? 'Importing…' : 'Import CSV'}</Button>}
-            <Button variant="outline" onClick={() => { setGstImportOpen(true); setGstImportError(''); }} className="h-9 px-4 text-sm rounded-xl gap-2 backdrop-blur-sm font-semibold" style={{ backgroundColor: 'rgba(16,185,129,0.2)', borderColor: 'rgba(52,211,153,0.5)', color: '#d1fae5' }}>
-              <FileText className="h-4 w-4" /> Import GST
-            </Button>
+
             {/* ── AI Duplicate Detector ── */}
             <Button
               variant="outline"
@@ -3124,6 +3124,192 @@ export default function Clients() {
                   </div>
                 </div>
                 <form onSubmit={handleSubmit} className="p-8 space-y-7">
+                  {/* ── Smart Document Import ───────────────────────────────────────────── */}
+                  {!editingClient && (
+                    <div className={`border-2 rounded-2xl p-5 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-gradient-to-br from-blue-50/80 to-indigo-50/50 border-blue-100'}`}>
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white flex-shrink-0 shadow-sm" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                          <svg viewBox="0 0 24 24" className="h-5 w-5 fill-white"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/></svg>
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-slate-800">Auto-fill from Documents</p>
+                          <p className="text-xs text-slate-500 mt-0.5">Upload GST Certificate, Udyam Certificate, or MCA Master Data — form fills automatically</p>
+                        </div>
+                      </div>
+                      {/* Drop zones */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                        {/* GST */}
+                        <div
+                          className={`relative border-2 border-dashed rounded-xl p-3 flex flex-col items-center gap-1.5 cursor-pointer transition-all hover:border-blue-400 hover:bg-blue-50/60 ${smartImportFiles.gst ? 'border-emerald-400 bg-emerald-50/60' : 'border-slate-200 bg-white/60'}`}
+                          onClick={() => document.getElementById('_si_gst')?.click()}
+                        >
+                          {smartImportFiles.gst ? (
+                            <>
+                              <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center"><svg viewBox="0 0 24 24" className="h-4 w-4 fill-emerald-600"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg></div>
+                              <p className="text-[10px] font-bold text-emerald-700 text-center leading-tight">{smartImportFiles.gst.name.length > 18 ? smartImportFiles.gst.name.slice(0, 16) + '…' : smartImportFiles.gst.name}</p>
+                              <button type="button" onClick={e => { e.stopPropagation(); setSmartImportFiles(p => ({ ...p, gst: null })); }} className="text-[9px] text-red-400 hover:text-red-600 font-medium">Remove</button>
+                            </>
+                          ) : (
+                            <>
+                              <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center"><svg viewBox="0 0 24 24" className="h-4 w-4 fill-blue-600"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5z"/></svg></div>
+                              <p className="text-[10px] font-bold text-slate-600">GST Certificate</p>
+                              <p className="text-[9px] text-slate-400">Form GST REG-06 PDF</p>
+                            </>
+                          )}
+                          <input id="_si_gst" type="file" accept=".pdf" className="hidden" onChange={e => { if (e.target.files[0]) setSmartImportFiles(p => ({ ...p, gst: e.target.files[0] })); e.target.value = ''; }} />
+                        </div>
+                        {/* Udyam */}
+                        <div
+                          className={`relative border-2 border-dashed rounded-xl p-3 flex flex-col items-center gap-1.5 cursor-pointer transition-all hover:border-orange-400 hover:bg-orange-50/60 ${smartImportFiles.udyam ? 'border-emerald-400 bg-emerald-50/60' : 'border-slate-200 bg-white/60'}`}
+                          onClick={() => document.getElementById('_si_udyam')?.click()}
+                        >
+                          {smartImportFiles.udyam ? (
+                            <>
+                              <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center"><svg viewBox="0 0 24 24" className="h-4 w-4 fill-emerald-600"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg></div>
+                              <p className="text-[10px] font-bold text-emerald-700 text-center leading-tight">{smartImportFiles.udyam.name.length > 18 ? smartImportFiles.udyam.name.slice(0, 16) + '…' : smartImportFiles.udyam.name}</p>
+                              <button type="button" onClick={e => { e.stopPropagation(); setSmartImportFiles(p => ({ ...p, udyam: null })); }} className="text-[9px] text-red-400 hover:text-red-600 font-medium">Remove</button>
+                            </>
+                          ) : (
+                            <>
+                              <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center"><svg viewBox="0 0 24 24" className="h-4 w-4 fill-orange-600"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div>
+                              <p className="text-[10px] font-bold text-slate-600">Udyam Certificate</p>
+                              <p className="text-[9px] text-slate-400">Udyam Registration PDF</p>
+                            </>
+                          )}
+                          <input id="_si_udyam" type="file" accept=".pdf" className="hidden" onChange={e => { if (e.target.files[0]) setSmartImportFiles(p => ({ ...p, udyam: e.target.files[0] })); e.target.value = ''; }} />
+                        </div>
+                        {/* MCA Excel */}
+                        <div
+                          className={`relative border-2 border-dashed rounded-xl p-3 flex flex-col items-center gap-1.5 cursor-pointer transition-all hover:border-violet-400 hover:bg-violet-50/60 ${smartImportFiles.mca ? 'border-emerald-400 bg-emerald-50/60' : 'border-slate-200 bg-white/60'}`}
+                          onClick={() => document.getElementById('_si_mca')?.click()}
+                        >
+                          {smartImportFiles.mca ? (
+                            <>
+                              <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center"><svg viewBox="0 0 24 24" className="h-4 w-4 fill-emerald-600"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg></div>
+                              <p className="text-[10px] font-bold text-emerald-700 text-center leading-tight">{smartImportFiles.mca.name.length > 18 ? smartImportFiles.mca.name.slice(0, 16) + '…' : smartImportFiles.mca.name}</p>
+                              <button type="button" onClick={e => { e.stopPropagation(); setSmartImportFiles(p => ({ ...p, mca: null })); }} className="text-[9px] text-red-400 hover:text-red-600 font-medium">Remove</button>
+                            </>
+                          ) : (
+                            <>
+                              <div className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center"><svg viewBox="0 0 24 24" className="h-4 w-4 fill-violet-600"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.93 0 3.5 1.57 3.5 3.5S13.93 13 12 13s-3.5-1.57-3.5-3.5S10.07 6 12 6zm7 13H5v-.23c0-.62.28-1.2.76-1.58C7.47 15.82 9.64 15 12 15s4.53.82 6.24 2.19c.48.38.76.97.76 1.58V19z"/></svg></div>
+                              <p className="text-[10px] font-bold text-slate-600">MCA Master Data</p>
+                              <p className="text-[9px] text-slate-400">Master Data Excel (.xlsx)</p>
+                            </>
+                          )}
+                          <input id="_si_mca" type="file" accept=".xlsx,.xls" className="hidden" onChange={e => { if (e.target.files[0]) setSmartImportFiles(p => ({ ...p, mca: e.target.files[0] })); e.target.value = ''; }} />
+                        </div>
+                      </div>
+                      {/* Extract button + status */}
+                      {(smartImportFiles.gst || smartImportFiles.udyam || smartImportFiles.mca) && (
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            disabled={smartImportLoading}
+                            onClick={async () => {
+                              const anyFile = smartImportFiles.gst || smartImportFiles.udyam || smartImportFiles.mca;
+                              if (!anyFile) return;
+                              setSmartImportLoading(true);
+                              setSmartImportError('');
+                              try {
+                                const fd = new FormData();
+                                if (smartImportFiles.gst)   fd.append('files', smartImportFiles.gst);
+                                if (smartImportFiles.udyam) fd.append('files', smartImportFiles.udyam);
+                                if (smartImportFiles.mca)   fd.append('files', smartImportFiles.mca);
+                                const res = await api.post('/clients/parse-multi-documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+                                const parsed = res.data;
+                                const constitutionMap = {
+                                  proprietorship: 'proprietor', proprietor: 'proprietor', 'sole proprietorship': 'proprietor',
+                                  'private limited': 'pvt_ltd', 'private limited company': 'pvt_ltd', pvt_ltd: 'pvt_ltd', 'pvt ltd': 'pvt_ltd',
+                                  llp: 'llp', 'limited liability partnership': 'llp',
+                                  partnership: 'partnership', 'partnership firm': 'partnership',
+                                  huf: 'huf', 'hindu undivided family': 'huf',
+                                  trust: 'trust', 'public limited': 'pvt_ltd', 'public limited company': 'pvt_ltd',
+                                };
+                                const mappedConstitution = parsed.constitution && parsed.constitution !== 'other'
+                                  ? parsed.constitution
+                                  : constitutionMap[(parsed.constitution_raw || '').toLowerCase().trim()] || 'other';
+                                const contacts = (parsed.contact_persons || [])
+                                  .filter(p => p.name?.trim())
+                                  .map(p => ({ name: p.name.trim(), designation: p.designation?.trim() || 'Director', email: p.email || '', phone: p.phone || '', birthday: '', din: p.din || '' }));
+                                if (contacts.length === 0) contacts.push({ name: '', designation: '', email: '', phone: '', birthday: '', din: '' });
+                                // Check for existing client by GSTIN
+                                let mergedIntoExisting = false;
+                                if (parsed.gstin) {
+                                  try {
+                                    const chk = await api.get(`/clients/check-gstin?gstin=${encodeURIComponent(parsed.gstin)}`);
+                                    if (chk.data?.exists) {
+                                      const existing = clients.find(c => (c.id || c._id) === chk.data.client_id);
+                                      if (existing) {
+                                        setEditingClient(existing);
+                                        const existingContacts = existing.contact_persons?.length > 0
+                                          ? existing.contact_persons.map(cp => ({ ...cp, birthday: cp.birthday?.slice(0, 10) || '', din: cp.din || '' }))
+                                          : [];
+                                        const existingNames = new Set(existingContacts.map(c => c.name?.toLowerCase().trim()).filter(Boolean));
+                                        const mergedContacts = [...existingContacts, ...contacts.filter(c => !existingNames.has(c.name.toLowerCase().trim()))];
+                                        if (mergedContacts.length === 0) mergedContacts.push({ name: '', designation: '', email: '', phone: '', birthday: '', din: '' });
+                                        setFormData({ ...existing, contact_persons: mergedContacts, gstin: parsed.gstin || existing.gstin, pan: parsed.pan || existing.pan, address: existing.address || parsed.address, city: existing.city || parsed.city, state: existing.state || parsed.state, gst_address: parsed.gst_address || existing.gst_address || '', gst_city: '', gst_state: '', gst_pin: parsed.pin || '', msme_number: parsed.udyam_number || existing.msme_number || '', notes: parsed.notes ? (existing.notes ? existing.notes + '\n' + parsed.notes : parsed.notes) : existing.notes || '', email: existing.email || parsed.email || '', phone: existing.phone || parsed.phone || '' });
+                                        setSmartImportFiles({ gst: null, udyam: null, mca: null });
+                                        toast.success(`"${existing.company_name}" updated from ${parsed.doc_types_found?.join(' + ')}. Review and save.`, { duration: 6000 });
+                                        mergedIntoExisting = true;
+                                      }
+                                    }
+                                  } catch (_) {}
+                                }
+                                if (!mergedIntoExisting) {
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    company_name:      parsed.company_name || '',
+                                    client_type:       mappedConstitution,
+                                    client_type_other: mappedConstitution === 'other' ? (parsed.constitution_raw || '') : '',
+                                    gstin:             parsed.gstin || '',
+                                    pan:               parsed.pan || '',
+                                    email:             parsed.email || '',
+                                    phone:             parsed.phone || '',
+                                    address:           parsed.address || '',
+                                    city:              parsed.city || '',
+                                    state:             parsed.state || '',
+                                    gst_address:       parsed.gst_address || '',
+                                    gst_city:          '',
+                                    gst_state:         '',
+                                    gst_pin:           parsed.pin || '',
+                                    msme_number:       parsed.udyam_number || '',
+                                    notes:             parsed.notes || '',
+                                    contact_persons:   contacts,
+                                    gst_treatment:     'regular',
+                                  }));
+                                  setSmartImportFiles({ gst: null, udyam: null, mca: null });
+                                  toast.success(`Data extracted from ${parsed.doc_types_found?.join(' + ')}! Review form and save.`, { duration: 5000 });
+                                }
+                              } catch (err) {
+                                const msg = err?.response?.data?.detail || err.message || 'Failed to parse documents';
+                                setSmartImportError(msg);
+                                toast.error(msg);
+                              } finally {
+                                setSmartImportLoading(false);
+                              }
+                            }}
+                            className="h-9 px-5 text-sm rounded-xl text-white font-semibold shadow-sm disabled:opacity-50 flex items-center gap-2 transition-all"
+                            style={{ background: smartImportLoading ? '#94a3b8' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
+                          >
+                            {smartImportLoading ? (
+                              <><div className="w-3.5 h-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" /> Extracting…</>
+                            ) : (
+                              <><svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-white"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg> Extract &amp; Fill Form</>
+                            )}
+                          </button>
+                          <p className="text-[10px] text-slate-400">
+                            {[smartImportFiles.gst && 'GST', smartImportFiles.udyam && 'Udyam', smartImportFiles.mca && 'MCA'].filter(Boolean).join(' + ')} ready
+                          </p>
+                        </div>
+                      )}
+                      {smartImportError && (
+                        <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-xl border border-red-200 bg-red-50">
+                          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-red-500 flex-shrink-0"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                          <p className="text-xs text-red-700 font-medium">{smartImportError}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {/* Basic Details */}
                   <div className={`border rounded-2xl p-6 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`}>
                     <SectionHeading icon={<Briefcase className="h-4 w-4" />} title="Basic Details" subtitle="Company identity and primary contact" isDark={isDark} />
@@ -3504,8 +3690,6 @@ export default function Clients() {
                     </div>
                     <div className="flex gap-2">
                       <Button type="button" variant="outline" className="h-9 px-4 text-sm rounded-xl border-slate-200" onClick={() => fileInputRef.current?.click()}>Import CSV</Button>
-                      <Button type="button" variant="outline" className="h-9 px-4 text-sm rounded-xl border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100" onClick={() => { setGstImportOpen(true); setGstImportError(''); }}>Import GST</Button>
-                      <Button type="button" variant="outline" className="h-9 px-4 text-sm rounded-xl border-slate-200" disabled={importLoading} onClick={() => excelInputRef.current?.click()}>Import Master Data</Button>
                       <Button type="submit" disabled={loading} className="h-9 px-6 text-sm rounded-xl text-white font-semibold shadow-sm" style={{ background: loading ? '#94a3b8' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>{loading ? 'Saving…' : editingClient ? 'Update Client' : 'Create Client'}</Button>
                     </div>
                   </div>
@@ -3790,134 +3974,9 @@ export default function Clients() {
       />
 
       {/* GST IMPORT DIALOG */}
-      <Dialog open={gstImportOpen} onOpenChange={setGstImportOpen}>
-        <DialogContent
-          className="rounded-2xl border border-slate-200 shadow-2xl p-0 bg-white overflow-hidden"
-          style={{ maxWidth: 560, width: '95vw', maxHeight: '90vh', overflowY: 'auto' }}
-        >
-          <DialogTitle className="sr-only">Import from GST Certificate</DialogTitle>
-
-          {/* Header */}
-          <div
-            className="px-7 py-5 border-b border-slate-100"
-            style={{ background: 'linear-gradient(135deg, #f0fdf4, #dcfce7)' }}
-          >
-            <div className="flex items-center gap-3">
-              <div
-                className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-sm flex-shrink-0"
-                style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
-              >
-                <svg viewBox="0 0 24 24" className="h-5 w-5 fill-white">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/>
-                </svg>
-              </div>
-              <div>
-                <h2 className="text-lg font-bold text-slate-900">Import GST Certificate</h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Upload Form GST REG-06 PDF — client details auto-extracted by AI
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Body */}
-          <div className="p-5 space-y-4">
-            {/* Upload zone */}
-            <div
-              className="border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all hover:border-blue-400 hover:bg-blue-50/40"
-              style={{ borderColor: '#bfdbfe', background: '#f8faff' }}
-              onClick={() => gstInputRef.current?.click()}
-            >
-              {gstImportLoading ? (
-                <>
-                  <div className="w-12 h-12 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin" />
-                  <p className="text-sm font-semibold text-slate-600">Reading certificate…</p>
-                  <p className="text-xs text-slate-400">AI is extracting client data</p>
-                </>
-              ) : (
-                <>
-                  <div
-                    className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm"
-                    style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
-                  >
-                    <svg viewBox="0 0 24 24" className="h-7 w-7 fill-white">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/>
-                    </svg>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-sm font-bold text-slate-700">Click to upload GST Certificate PDF</p>
-                    <p className="text-xs text-slate-400 mt-1">Form GST REG-06 · Max 10 MB</p>
-                  </div>
-                  <div
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold shadow-sm"
-                    style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
-                  >
-                    <svg viewBox="0 0 24 24" className="h-4 w-4 fill-white">
-                      <path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/>
-                    </svg>
-                    Choose PDF
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Error */}
-            {gstImportError && (
-              <div className="flex items-start gap-2 px-4 py-3 rounded-xl border border-red-200 bg-red-50">
-                <svg viewBox="0 0 24 24" className="h-4 w-4 fill-red-500 flex-shrink-0 mt-0.5">
-                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
-                </svg>
-                <p className="text-xs text-red-700 font-medium">{gstImportError}</p>
-              </div>
-            )}
-
-            {/* What gets extracted */}
-            <div className="rounded-xl border border-slate-100 p-4 bg-slate-50/60 space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
-                What gets auto-filled
-              </p>
-              {[
-                ['GSTIN', 'Registration number'],
-                ['Company Name', 'Legal & trade name'],
-                ['Constitution', 'Proprietor / Partnership / Pvt Ltd…'],
-                ['Address', 'Principal place of business'],
-                ['Partners / Directors', 'From Annexure B'],
-              ].map(([field, desc]) => (
-                <div key={field} className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />
-                  <span className="text-xs font-semibold text-slate-700">{field}</span>
-                  <span className="text-[10px] text-slate-400">— {desc}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div className="flex items-center justify-between px-5 py-3 border-t border-slate-100 bg-white">
-            <button
-              type="button"
-              onClick={() => { setGstImportOpen(false); setGstImportError(''); }}
-              className="h-10 px-5 text-sm rounded-xl text-slate-500 hover:bg-slate-100 transition-colors font-medium"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              disabled={gstImportLoading}
-              onClick={() => gstInputRef.current?.click()}
-              className="h-10 px-6 text-sm rounded-xl text-white font-semibold shadow-sm disabled:opacity-50 transition-all"
-              style={{ background: gstImportLoading ? '#94a3b8' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
-            >
-              {gstImportLoading ? 'Extracting…' : 'Upload PDF'}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
-      
       {/* HIDDEN FILE INPUTS */}
       <input type="file" ref={fileInputRef}  accept=".csv"       onChange={handleImportCSV}   className="hidden" />
       <input type="file" ref={excelInputRef} accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" />
-      <input type="file" ref={gstInputRef} accept=".pdf" onChange={handleImportGST} className="hidden" />
 
       {/* CSV PREVIEW DIALOG */}
 <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
