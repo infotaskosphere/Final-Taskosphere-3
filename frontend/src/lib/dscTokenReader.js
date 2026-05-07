@@ -438,3 +438,37 @@ export async function readCertFromUsbToken(device, pin) {
     try { await device.releaseInterface(interfaceNumber); } catch {}
   }
 }
+
+// ─── Local Agent Fallback (Windows PC/SC bridge) ──────────────────────────────
+/**
+ * Check if the local DSC agent is running at localhost:7432.
+ * The agent is a small Node.js server the user runs locally to bridge the
+ * gap when WebUSB cannot claim the Windows CCID interface.
+ */
+export async function isLocalAgentAvailable() {
+  try {
+    const ctrl = new AbortController();
+    const id = setTimeout(() => ctrl.abort(), 1500);
+    const res = await fetch('http://127.0.0.1:7432/health', { signal: ctrl.signal });
+    clearTimeout(id);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read certificate from the local PC/SC agent instead of WebUSB.
+ * Falls back when WebUSB throws a claimInterface error on Windows.
+ *
+ * @param {string} pin - Token PIN
+ * @returns {Promise<object|null>}
+ */
+export async function readCertFromLocalAgent(pin) {
+  const url = `http://127.0.0.1:7432/read-dsc?pin=${encodeURIComponent(pin)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Local agent HTTP error: ${res.status}`);
+  const data = await res.json();
+  if (data.success && data.cert) return data.cert;
+  throw new Error(data.error || 'Local agent could not read the certificate');
+}
