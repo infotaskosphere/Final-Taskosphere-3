@@ -375,6 +375,84 @@ export default function DSCRegister() {
   useEffect(() => { fetchDSC(); }, []);
   useEffect(() => { setCurrentPageIn(1); setCurrentPageOut(1); setCurrentPageExpired(1); }, [sortOrder, searchQuery]);
 
+  // ── DSC Token USB detection ───────────────────────────────────────────────
+  // Fires ONLY for known DSC/smart-card token hardware, not mice/keyboards/etc.
+  const [usbPromptOpen, setUsbPromptOpen] = useState(false);
+  const [usbDevice,     setUsbDevice]     = useState(null);
+  const [usbDismissed,  setUsbDismissed]  = useState(false);
+
+  useEffect(() => {
+    if (!navigator.usb) return; // Chrome/Edge only; silently skip on Firefox/Safari
+
+    // ── Known DSC token USB Vendor IDs (India market) ─────────────────────
+    // SafeNet/Gemalto eToken (most common):  0x0529, 0x08E6
+    // Feitian ePass / rKey (eMudhra, SIFY):  0x096E
+    // Watchdata / WD USB Token:              0x1FC9
+    // HID Global (Crescendo):                0x076B
+    // Moser Baer iKey:                       0x04B9
+    // Eutron SmartKey (PCS India):           0x073D
+    // ACS ACR readers/tokens:                0x072F
+    // Bit4id miniLector:                     0x22CD
+    // TrustKey G310/G320:                    0x311F
+    // Alcor Micro token readers:             0x058F
+    const DSC_VENDOR_IDS = new Set([
+      0x0529, 0x08E6, 0x096E, 0x1FC9,
+      0x076B, 0x04B9, 0x073D, 0x072F,
+      0x22CD, 0x311F, 0x058F,
+    ]);
+
+    // ── Product/manufacturer name keywords that identify DSC tokens ────────
+    const DSC_NAME_KEYWORDS = [
+      'token', 'dsc', 'etoken', 'epass', 'safenet', 'feitian',
+      'watchdata', 'smart card', 'smartcard', 'crypto', 'pkcs',
+      'moser baer', 'ikey', 'crescendo', 'eutron', 'trustkey',
+      'emudhra', 'sify', 'ncode', 'capricorn', 'e-mudhra',
+    ];
+
+    const isDSCDevice = (device) => {
+      // 1. Vendor ID match (most reliable — hardware-level)
+      if (DSC_VENDOR_IDS.has(device.vendorId)) return true;
+
+      // 2. Product or manufacturer name contains a DSC keyword
+      const combined = [
+        device.productName        || '',
+        device.manufacturerName   || '',
+      ].join(' ').toLowerCase();
+      if (DSC_NAME_KEYWORDS.some(kw => combined.includes(kw))) return true;
+
+      // 3. USB device class 0x0B = Smart Card (ISO 7816)
+      // Check top-level class or first interface class
+      if (device.deviceClass === 0x0B) return true;
+      try {
+        const configs = device.configurations || [];
+        for (const cfg of configs) {
+          for (const iface of cfg.interfaces || []) {
+            for (const alt of iface.alternates || []) {
+              if (alt.interfaceClass === 0x0B) return true; // Smart Card class
+              if (alt.interfaceClass === 0x03 && alt.interfaceSubclass === 0x00) {
+                // HID with no subclass — common for crypto tokens
+                if (DSC_NAME_KEYWORDS.some(kw => combined.includes(kw))) return true;
+              }
+            }
+          }
+        }
+      } catch (_) { /* config access may be restricted */ }
+
+      return false;
+    };
+
+    const handleConnect = (event) => {
+      if (usbDismissed) return;
+      const device = event.device;
+      if (!isDSCDevice(device)) return; // ignore mice, keyboards, drives, chargers…
+      setUsbDevice(device);
+      setUsbPromptOpen(true);
+    };
+
+    navigator.usb.addEventListener('connect', handleConnect);
+    return () => navigator.usb.removeEventListener('connect', handleConnect);
+  }, [usbDismissed]);
+
   useEffect(() => {
     const handler = (e) => {
       if (e.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
@@ -1311,6 +1389,90 @@ export default function DSCRegister() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── USB / DSC Plug-in Prompt ──────────────────────────────────────── */}
+      {usbPromptOpen && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center p-4 sm:p-0"
+          style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}
+        >
+          <div
+            className={`w-full sm:max-w-sm rounded-2xl shadow-2xl border overflow-hidden ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}
+            style={{ animation: 'slideUp 0.22s cubic-bezier(0.34,1.56,0.64,1)' }}
+          >
+            {/* Accent bar */}
+            <div className="h-1 w-full" style={{ background: 'linear-gradient(90deg, #4f46e5, #6366f1, #818cf8)' }} />
+
+            {/* Header */}
+            <div className="px-5 pt-5 pb-3 flex items-start gap-4">
+              <div
+                className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md"
+                style={{ background: 'linear-gradient(135deg, #4f46e5, #6366f1)' }}
+              >
+                <Key className="h-5 w-5 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-slate-900 dark:text-slate-100 leading-tight">
+                  DSC Token Detected
+                </p>
+                <p className={`text-xs mt-1 leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  {usbDevice?.productName
+                    ? <><span className="font-semibold text-indigo-500">{usbDevice.productName}</span> was plugged in.<br /></>
+                    : usbDevice?.manufacturerName
+                      ? <><span className="font-semibold text-indigo-500">{usbDevice.manufacturerName}</span> token plugged in.<br /></>
+                      : <>A DSC token was plugged in.<br /></>}
+                  Add this DSC to the register?
+                </p>
+              </div>
+            </div>
+
+            {/* Device info pill */}
+            {(usbDevice?.manufacturerName || usbDevice?.vendorId) && (
+              <div className={`mx-5 mb-3 px-3 py-2 rounded-xl text-[11px] font-mono flex items-center gap-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
+                {usbDevice.manufacturerName ? `${usbDevice.manufacturerName} · ` : ''}
+                {usbDevice.vendorId ? `VID: 0x${usbDevice.vendorId.toString(16).toUpperCase().padStart(4,'0')}` : ''}
+                {usbDevice.productId ? ` · PID: 0x${usbDevice.productId.toString(16).toUpperCase().padStart(4,'0')}` : ''}
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="px-5 pb-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setUsbPromptOpen(false);
+                  setUsbDismissed(true);
+                }}
+                className={`flex-1 h-9 rounded-xl text-sm font-medium transition-colors ${isDark ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+              >
+                Not a DSC
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUsbPromptOpen(false);
+                  // Pre-fill holder name from device name if available
+                  const productName = usbDevice?.productName || '';
+                  resetForm();
+                  if (productName) {
+                    setFormData(prev => ({
+                      ...prev,
+                      notes: `USB Device: ${productName}${usbDevice?.manufacturerName ? ' · ' + usbDevice.manufacturerName : ''}`,
+                    }));
+                  }
+                  setDialogOpen(true);
+                }}
+                className="flex-1 h-9 rounded-xl text-sm font-semibold text-white shadow-sm transition-all hover:opacity-90"
+                style={{ background: 'linear-gradient(135deg, #4f46e5, #6366f1)' }}
+              >
+                Add to Register
+              </button>
+            </div>
+          </div>
+          <style>{`@keyframes slideUp { from { transform: translateY(24px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }`}</style>
+        </div>
+      )}
 
       {/* ── AI Duplicate Detection Dialog ─────────────────────────────── */}
       <AIDuplicateDialog
