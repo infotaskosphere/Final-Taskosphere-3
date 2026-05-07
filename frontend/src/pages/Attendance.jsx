@@ -1,4 +1,5 @@
 import { useDark } from '@/hooks/useDark';
+import AttendanceReportModal from './AttendanceReportModal';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatInTimeZone } from 'date-fns-tz';
@@ -1702,6 +1703,7 @@ export default function Attendance() {
   const isManager = user?.role === 'manager';
   const crossVisAttendance  = user?.permissions?.view_other_attendance || [];
   const hasCrossVisAttendance = crossVisAttendance.length > 0;
+  const canGenerateReport = isAdmin || hasPermission('can_view_selected_users_reports') || hasCrossVisAttendance;
   // canSwitchUser: admin can switch to any user; others if they have cross-vis OR backend returned other users
   const canSwitchUser = isAdmin || hasCrossVisAttendance || allUsers.some(u => u.id !== user?.id);
 
@@ -1784,6 +1786,7 @@ export default function Attendance() {
   const trademarkPdfRef = useRef(null);
 
   const [exportingPDF,       setExportingPDF]       = useState(false);
+  const [showReportModal,     setShowReportModal]     = useState(false);
   const [trademarkData,      setTrademarkData]      = useState(null);
   const [trademarkLoading,   setTrademarkLoading]   = useState(false);
 
@@ -3001,6 +3004,18 @@ export default function Attendance() {
         />
       )}
 
+      {/* ── Attendance Report Modal ───────────────────────────────────────────── */}
+      <AttendanceReportModal
+        isOpen={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        isDark={isDark}
+        allUsers={allUsers}
+        holidays={holidays}
+        isAdmin={isAdmin}
+        currentUser={user}
+        canViewOtherAttendance={crossVisAttendance}
+      />
+
       {/* ── Layout Customizer Panel ─────────────────────────────────────────── */}
       <LayoutCustomizer
         isOpen={showLayoutCustomizer}
@@ -3085,6 +3100,16 @@ export default function Attendance() {
                   >
                     <UserX className="w-3.5 h-3.5" />
                     {absentLoading ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Marking…</> : 'Mark Absent'}
+                  </button>
+                )}
+                {canGenerateReport && (
+                  <button
+                    onClick={() => setShowReportModal(true)}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 border"
+                    style={{ backgroundColor: 'rgba(255,255,255,0.15)', borderColor: 'rgba(255,255,255,0.25)', color: '#ffffff' }}
+                  >
+                    <BarChart3 className="w-3.5 h-3.5" />
+                    Generate Report
                   </button>
                 )}
                 <button
