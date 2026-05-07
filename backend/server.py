@@ -1498,7 +1498,9 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
         "approved_by": None,
         "approved_at": None,
         "permissions": user_data.permissions if user_data.permissions else default_permissions,
-        "created_at": datetime.now(timezone.utc).isoformat()
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "company_id": user_data.company_id or None,
+        "company_name": user_data.company_name or None,
     }
 
     await db.users.insert_one(new_user)
@@ -1909,7 +1911,7 @@ async def update_user(
             "full_name", "email", "role", "departments", "phone",
             "birthday", "punch_in_time", "grace_time",
             "punch_out_time", "is_active", "profile_picture", "telegram_id",
-            "status", "permissions"
+            "status", "permissions", "company_id", "company_name"
         ]
     elif is_manager and has_edit_users and not is_own:
         # Manager editing a team staff member — can update profile + work settings, not role/permissions
@@ -1917,7 +1919,7 @@ async def update_user(
             "full_name", "email", "departments", "phone",
             "birthday", "punch_in_time", "grace_time",
             "punch_out_time", "is_active", "profile_picture", "telegram_id",
-            "status"
+            "status", "company_id", "company_name"
         ]
     else:
         # Self-edit: own profile fields only
