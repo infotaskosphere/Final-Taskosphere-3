@@ -2189,6 +2189,11 @@ export default function Clients() {
   const [gstImportOpen,    setGstImportOpen]    = useState(false);
   const [gstImportLoading, setGstImportLoading] = useState(false);
   const [gstImportError,   setGstImportError]   = useState('');
+  // Unified smart import state
+  const [smartImportOpen,    setSmartImportOpen]    = useState(false);
+  const [smartImportLoading, setSmartImportLoading] = useState(false);
+  const [smartImportError,   setSmartImportError]   = useState('');
+  const [smartImportFiles,   setSmartImportFiles]   = useState({ gst: null, udyam: null, mca: null });
   const [addressTab,       setAddressTab]       = useState('primary'); // 'primary' | 'gst'
   const [previewData, setPreviewData]     = useState([]);
   const [previewHeaders, setPreviewHeaders] = useState([]);
@@ -2251,7 +2256,9 @@ export default function Clients() {
   // ── Refs ────────────────────────────────────────────────────────────────
   const fileInputRef  = useRef(null);
   const excelInputRef = useRef(null);
-  const gstInputRef = useRef(null)
+  const gstInputRef   = useRef(null)
+  const udyamInputRef = useRef(null);
+  const mcaSmartRef   = useRef(null);
   const searchRef     = useRef(null);
   // pending delete undo ref
   const pendingDeleteRef = useRef(null);
