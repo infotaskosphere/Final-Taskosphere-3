@@ -3656,6 +3656,185 @@ def _to_iso(val) -> Optional[str]:
     return str(val)  # already a plain string like "2026-03-22"
 
 
+# ─── DSC Certificate Reader ────────────────────────────────────────────────────
+class DSCReadRequest(BaseModel):
+    pin: str
+    lib_path: Optional[str] = None   # optional override for PKCS#11 library path
+
+
+class DSCCertificateData(BaseModel):
+    holder_name: Optional[str] = None
+    serial_number: Optional[str] = None
+    issue_date: Optional[str] = None
+    expiry_date: Optional[str] = None
+    issuer: Optional[str] = None
+    email: Optional[str] = None
+    organization: Optional[str] = None
+    raw_subject: Optional[str] = None
+    read_method: str = "unknown"
+
+
+def _extract_dn_field(name_obj, oid_dotted: str, fallback_attr: str = "") -> Optional[str]:
+    """Extract a field from an x509 Name by OID or attribute."""
+    try:
+        from cryptography.x509.oid import NameOID
+        import cryptography.x509 as cx509
+        oid = cx509.NameOID.__dict__.get(fallback_attr) if fallback_attr else None
+        # Try by dotted string OID first
+        for attr in name_obj:
+            if attr.oid.dotted_string == oid_dotted:
+                return attr.value
+        # Fallback to NameOID attribute name
+        if oid:
+            try:
+                return name_obj.get_attributes_for_oid(oid)[0].value
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return None
+
+
+def _parse_cert_bytes(cert_bytes: bytes) -> DSCCertificateData:
+    """Parse DER or PEM certificate bytes and return structured data."""
+    from cryptography import x509
+    from cryptography.hazmat.backends import default_backend
+
+    try:
+        cert = x509.load_der_x509_certificate(cert_bytes, default_backend())
+    except Exception:
+        try:
+            import base64
+            pem = b"-----BEGIN CERTIFICATE-----\n" + base64.b64encode(cert_bytes) + b"\n-----END CERTIFICATE-----"
+            cert = x509.load_pem_x509_certificate(pem, default_backend())
+        except Exception:
+            return DSCCertificateData()
+
+    subject = cert.subject
+
+    # Common Name (holder name)
+    holder_name = _extract_dn_field(subject, "2.5.4.3", "COMMON_NAME")
+
+    # Email — try SAN first, then subject emailAddress OID
+    email = None
+    try:
+        san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+        emails = san.value.get_values_for_type(x509.RFC822Name)
+        if emails:
+            email = emails[0]
+    except Exception:
+        pass
+    if not email:
+        email = _extract_dn_field(subject, "1.2.840.113549.1.9.1")
+
+    organization = _extract_dn_field(subject, "2.5.4.10", "ORGANIZATION_NAME")
+
+    serial_hex = format(cert.serial_number, "X")
+
+    not_before = cert.not_valid_before_utc if hasattr(cert, "not_valid_before_utc") else cert.not_valid_before
+    not_after  = cert.not_valid_after_utc  if hasattr(cert, "not_valid_after_utc")  else cert.not_valid_after
+
+    try:
+        raw_subject = cert.subject.rfc4514_string()
+    except Exception:
+        raw_subject = str(cert.subject)
+
+    return DSCCertificateData(
+        holder_name=holder_name,
+        serial_number=serial_hex,
+        issue_date=not_before.date().isoformat() if not_before else None,
+        expiry_date=not_after.date().isoformat()  if not_after  else None,
+        email=email,
+        organization=organization,
+        raw_subject=raw_subject,
+        read_method="pkcs11",
+    )
+
+
+def _try_pkcs11_read(pin: str, lib_path: Optional[str] = None) -> Optional[DSCCertificateData]:
+    """Try to read certificate using PyKCS11 (python-pkcs11 wrapper)."""
+    # Common PKCS#11 library paths on Linux / Windows
+    CANDIDATE_LIBS = [
+        lib_path,
+        "/usr/lib/x86_64-linux-gnu/pkcs11/opensc-pkcs11.so",
+        "/usr/lib/opensc-pkcs11.so",
+        "/usr/lib/libeTPkcs11.so",          # eToken / Aladdin
+        "/usr/lib/libcastle.so.1",           # Watchdata / Proxkey
+        "/usr/lib/libcryptoki.so",
+        "/usr/lib64/pkcs11/opensc-pkcs11.so",
+        "C:\\Windows\\System32\\eTPKCS11.dll",
+        "C:\\Windows\\System32\\akisp11.dll",
+        "C:\\Windows\\System32\\opensc-pkcs11.dll",
+    ]
+    try:
+        import PyKCS11
+    except ImportError:
+        return None
+
+    for lib in CANDIDATE_LIBS:
+        if not lib:
+            continue
+        try:
+            pkcs11 = PyKCS11.PyKCS11Lib()
+            pkcs11.load(lib)
+            slots = pkcs11.getSlotList(tokenPresent=True)
+            if not slots:
+                continue
+            session = pkcs11.openSession(slots[0], PyKCS11.CKF_SERIAL_SESSION | PyKCS11.CKF_RW_SESSION)
+            session.login(pin)
+            certs = session.findObjects([(PyKCS11.CKA_CLASS, PyKCS11.CKO_CERTIFICATE)])
+            if not certs:
+                session.logout()
+                session.closeSession()
+                continue
+            # Prefer signing certificate (CKC_X_509)
+            for cert_obj in certs:
+                attrs = session.getAttributeValue(cert_obj, [PyKCS11.CKA_VALUE, PyKCS11.CKA_CERTIFICATE_TYPE])
+                cert_bytes = bytes(attrs[0])
+                if cert_bytes:
+                    data = _parse_cert_bytes(cert_bytes)
+                    data.read_method = "pkcs11"
+                    session.logout()
+                    session.closeSession()
+                    return data
+            session.logout()
+            session.closeSession()
+        except Exception:
+            continue
+    return None
+
+
+@api_router.post("/dsc/read-certificate", response_model=DSCCertificateData)
+async def read_dsc_certificate(
+    req: DSCReadRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Read certificate data (holder name, expiry, serial number, etc.) from a
+    physically connected DSC USB token using the supplied PIN.
+
+    The backend tries PKCS#11 (via PyKCS11) with several common library paths.
+    If no hardware token is found, a 422 is returned so the frontend can
+    gracefully fall back to manual entry.
+    """
+    if not req.pin or not req.pin.strip():
+        raise HTTPException(status_code=422, detail="PIN is required to read the DSC token.")
+
+    data = _try_pkcs11_read(req.pin.strip(), req.lib_path)
+
+    if data is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Could not read certificate from the token. "
+                "Ensure the token is plugged in, the PKCS#11 middleware is installed "
+                "(e.g. opensc, eToken middleware), and the PIN is correct."
+            )
+        )
+
+    return data
+
+
 @api_router.post("/dsc", response_model=DSC)
 async def create_dsc(
     dsc_data: DSCCreate,
