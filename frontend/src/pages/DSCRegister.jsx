@@ -17,7 +17,8 @@ import {
   Plus, Edit, Trash2, AlertCircle, ArrowDownCircle, ArrowUpCircle,
   History, Search, ArrowUpDown, Printer, CheckSquare, Square,
   MinusSquare, XCircle, Key, Shield, Clock, TrendingDown,
-  Sparkles, Loader2, Share2, Mail, MessageCircle, Download, Eye
+  Sparkles, Loader2, Share2, Mail, MessageCircle, Download, Eye,
+  Usb, ChevronDown, ChevronUp, CheckCircle2, Lock
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
@@ -31,6 +32,20 @@ const PRINT_STYLE = `
   #dsc-print-area, #dsc-print-area * { visibility: visible !important; }
   #dsc-print-area { position: fixed; inset: 0; padding: 24px; background: #fff; }
   @page { margin: 16mm; }
+}`;
+
+// ─── USB Popup animation styles ───────────────────────────────────────────────
+const USB_POPUP_STYLE = `
+@keyframes dscSlideUp {
+  from { transform: translateY(32px) scale(0.97); opacity: 0; }
+  to   { transform: translateY(0)    scale(1);    opacity: 1; }
+}
+@keyframes dscPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+@keyframes dscSpin {
+  to { transform: rotate(360deg); }
 }`;
 
 // ─── Row highlight colours based on expiry ────────────────────────────────────
@@ -84,7 +99,6 @@ function PaginationBar({ currentPage, totalPages, totalItems, pageSize, onPageCh
 }
 
 // ─── DSC Table ────────────────────────────────────────────────────────────────
-// FIX: onViewLog is now properly used (was calling undefined `openLogDialog` directly)
 function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, type, globalIndexStart, isDark, selectedIds, onToggleSelect, onToggleAll }) {
   const allSelected  = dscList.length > 0 && dscList.every(d => selectedIds.has(d.id));
   const someSelected = dscList.some(d => selectedIds.has(d.id)) && !allSelected;
@@ -194,6 +208,351 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
   );
 }
 
+// ─── Guess DSC type from device info ─────────────────────────────────────────
+function guessDscType(device) {
+  const combined = [device.productName || '', device.manufacturerName || ''].join(' ').toLowerCase();
+  if (combined.includes('class 3') || combined.includes('cl3'))  return 'Class 3';
+  if (combined.includes('class 2') || combined.includes('cl2'))  return 'Class 2';
+  if (combined.includes('encrypt'))                              return 'Encryption';
+  if (combined.includes('sign'))                                 return 'Signature';
+  if (combined.includes('combo'))                                return 'Combo';
+  return 'Class 3';   // safe default for India DSC tokens
+}
+
+// ─── Default expiry (2 years from today) ─────────────────────────────────────
+function defaultExpiry() {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() + 2);
+  return format(d, 'yyyy-MM-dd');
+}
+
+function todayStr() {
+  return format(new Date(), 'yyyy-MM-dd');
+}
+
+// ─── USB DSC Popup Component ──────────────────────────────────────────────────
+function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
+  const [saving, setSaving]             = useState(false);
+  const [saved,  setSaved]              = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [form, setForm] = useState({
+    holder_name:     '',
+    dsc_type:        guessDscType(device),
+    dsc_password:    '',
+    associated_with: '',
+    entity_type:     'firm',
+    issue_date:      todayStr(),
+    expiry_date:     defaultExpiry(),
+    notes:           [
+      device.productName      ? `Device: ${device.productName}`      : null,
+      device.manufacturerName ? `Maker: ${device.manufacturerName}`   : null,
+      device.vendorId         ? `VID: 0x${device.vendorId.toString(16).toUpperCase().padStart(4,'0')}` : null,
+    ].filter(Boolean).join(' · '),
+  });
+
+  const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
+
+  const handleSave = async () => {
+    if (!form.holder_name.trim()) { return; }
+    setSaving(true);
+    try {
+      const payload = {
+        holder_name:     form.holder_name.trim(),
+        dsc_type:        form.dsc_type,
+        dsc_password:    form.dsc_password,
+        associated_with: form.associated_with,
+        entity_type:     form.entity_type,
+        issue_date:      new Date(form.issue_date).toISOString(),
+        expiry_date:     new Date(form.expiry_date).toISOString(),
+        notes:           form.notes,
+      };
+      const res = await api.post('/dsc', payload);
+      const newId = res.data?.id || res.data?.data?.id;
+
+      // Auto-mark as IN immediately
+      if (newId) {
+        await api.post(`/dsc/${newId}/movement`, {
+          movement_type: 'IN',
+          person_name:   'Token Inserted',
+          notes:         'Auto-detected via USB — marked IN on plug-in',
+        });
+      }
+
+      setSaved(true);
+      toast.success(`DSC for "${form.holder_name}" added & marked IN ✓`);
+      setTimeout(() => { onSaved(); }, 1200);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to save DSC');
+      setSaving(false);
+    }
+  };
+
+  // ── colour palette ──────────────────────────────────────────────────────────
+  const bg        = isDark ? '#0f172a' : '#ffffff';
+  const surface   = isDark ? '#1e293b' : '#f8fafc';
+  const border    = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+  const labelClr  = isDark ? '#94a3b8' : '#64748b';
+  const textClr   = isDark ? '#f1f5f9' : '#0f172a';
+  const inputBg   = isDark ? '#0f172a' : '#ffffff';
+  const inputBdr  = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.14)';
+
+  const inputStyle = {
+    width: '100%', boxSizing: 'border-box',
+    background: inputBg, border: `1px solid ${inputBdr}`,
+    borderRadius: 8, padding: '7px 10px',
+    fontSize: 13, color: textClr,
+    outline: 'none', fontFamily: 'inherit',
+  };
+  const labelStyle = { fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: labelClr, display: 'block', marginBottom: 4 };
+  const rowStyle   = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 };
+
+  return (
+    <>
+      <style>{USB_POPUP_STYLE}</style>
+      <div
+        style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          display: 'flex', alignItems: 'flex-end',
+          justifyContent: 'center',
+          padding: '0 16px 24px',
+          background: 'rgba(0,0,0,0.52)',
+          backdropFilter: 'blur(5px)',
+        }}
+      >
+        <div style={{
+          width: '100%', maxWidth: 480,
+          background: bg, border: `1px solid ${border}`,
+          borderRadius: 20, boxShadow: '0 24px 64px rgba(0,0,0,0.35)',
+          overflow: 'hidden',
+          animation: 'dscSlideUp 0.26s cubic-bezier(0.34,1.4,0.64,1)',
+        }}>
+
+          {/* ── Accent bar ── */}
+          <div style={{ height: 3, background: 'linear-gradient(90deg,#4f46e5,#6366f1,#818cf8,#4f46e5)', backgroundSize: '200% 100%' }} />
+
+          {/* ── Header ── */}
+          <div style={{ padding: '18px 20px 12px', display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+            {/* Icon */}
+            <div style={{
+              width: 46, height: 46, borderRadius: 13, flexShrink: 0,
+              background: saved ? 'linear-gradient(135deg,#10b981,#059669)' : 'linear-gradient(135deg,#4f46e5,#6366f1)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 4px 14px rgba(79,70,229,0.35)',
+              transition: 'background 0.4s',
+            }}>
+              {saved
+                ? <CheckCircle2 style={{ width: 22, height: 22, color: '#fff' }} />
+                : <Key style={{ width: 22, height: 22, color: '#fff' }} />}
+            </div>
+
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: textClr, lineHeight: 1.2 }}>
+                  {saved ? 'DSC Added ✓' : 'DSC Token Detected'}
+                </p>
+                {/* Live USB dot */}
+                {!saved && (
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', animation: 'dscPulse 1.4s ease-in-out infinite', flexShrink: 0 }} />
+                )}
+              </div>
+              <p style={{ margin: '3px 0 0', fontSize: 12, color: labelClr, lineHeight: 1.5 }}>
+                {saved
+                  ? `"${form.holder_name}" added to DSC Register & marked IN`
+                  : device.productName
+                      ? <><span style={{ color: '#818cf8', fontWeight: 600 }}>{device.productName}</span> — fill details below</>
+                      : 'Fill details to add this certificate to the register'}
+              </p>
+            </div>
+
+            {/* Dismiss × */}
+            {!saved && (
+              <button
+                onClick={onDismiss}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: labelClr, padding: 4, borderRadius: 6, lineHeight: 1, fontSize: 18, flexShrink: 0 }}
+                title="Dismiss"
+              >×</button>
+            )}
+          </div>
+
+          {/* ── Device info pill ── */}
+          {(device.manufacturerName || device.vendorId) && !saved && (
+            <div style={{ margin: '0 20px 12px', padding: '7px 12px', background: surface, borderRadius: 10, border: `1px solid ${border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Usb style={{ width: 13, height: 13, color: '#818cf8', flexShrink: 0 }} />
+              <span style={{ fontSize: 11, color: labelClr, fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {[
+                  device.manufacturerName || null,
+                  device.vendorId  ? `VID 0x${device.vendorId.toString(16).toUpperCase().padStart(4,'0')}`  : null,
+                  device.productId ? `PID 0x${device.productId.toString(16).toUpperCase().padStart(4,'0')}` : null,
+                ].filter(Boolean).join(' · ')}
+              </span>
+            </div>
+          )}
+
+          {/* ── Form ── */}
+          {!saved && (
+            <div style={{ padding: '0 20px 4px' }}>
+
+              {/* Holder Name — full width, prominent */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={labelStyle}>Holder Name <span style={{ color: '#ef4444' }}>*</span></label>
+                <input
+                  style={{ ...inputStyle, fontSize: 14, fontWeight: 600 }}
+                  placeholder="e.g. Rajesh Kumar Sharma"
+                  value={form.holder_name}
+                  onChange={e => set('holder_name', e.target.value)}
+                  autoFocus
+                />
+              </div>
+
+              {/* Row: Type + Password */}
+              <div style={{ ...rowStyle, marginBottom: 12 }}>
+                <div>
+                  <label style={labelStyle}>DSC Type</label>
+                  <select
+                    style={{ ...inputStyle, cursor: 'pointer' }}
+                    value={form.dsc_type}
+                    onChange={e => set('dsc_type', e.target.value)}
+                  >
+                    {['Class 3','Class 2','Signature','Encryption','Combo','DGFT'].map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>
+                    <Lock style={{ width: 10, height: 10, display: 'inline', marginRight: 3, verticalAlign: 'middle' }} />
+                    Token Password
+                  </label>
+                  <input
+                    style={inputStyle}
+                    type="text"
+                    placeholder="e.g. 12345678"
+                    value={form.dsc_password}
+                    onChange={e => set('dsc_password', e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* Row: Associated With + Entity Type */}
+              <div style={{ ...rowStyle, marginBottom: 12 }}>
+                <div>
+                  <label style={labelStyle}>Associated With</label>
+                  <input
+                    style={inputStyle}
+                    placeholder="Firm / client name"
+                    value={form.associated_with}
+                    onChange={e => set('associated_with', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label style={labelStyle}>Entity Type</label>
+                  <select
+                    style={{ ...inputStyle, cursor: 'pointer' }}
+                    value={form.entity_type}
+                    onChange={e => set('entity_type', e.target.value)}
+                  >
+                    <option value="firm">Firm</option>
+                    <option value="client">Client</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Row: Issue Date + Expiry Date */}
+              <div style={{ ...rowStyle, marginBottom: 12 }}>
+                <div>
+                  <label style={labelStyle}>Issue Date <span style={{ color: '#ef4444' }}>*</span></label>
+                  <input
+                    style={inputStyle}
+                    type="date"
+                    value={form.issue_date}
+                    onChange={e => set('issue_date', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label style={labelStyle}>Expiry Date <span style={{ color: '#ef4444' }}>*</span></label>
+                  <input
+                    style={inputStyle}
+                    type="date"
+                    value={form.expiry_date}
+                    onChange={e => set('expiry_date', e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* Advanced — Notes (collapsible) */}
+              <div style={{ marginBottom: 14 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanced(p => !p)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: labelClr, fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, padding: 0, letterSpacing: '0.04em' }}
+                >
+                  {showAdvanced
+                    ? <ChevronUp style={{ width: 13, height: 13 }} />
+                    : <ChevronDown style={{ width: 13, height: 13 }} />}
+                  {showAdvanced ? 'Hide notes' : 'Add notes'}
+                </button>
+                {showAdvanced && (
+                  <textarea
+                    style={{ ...inputStyle, marginTop: 8, resize: 'vertical', minHeight: 60 }}
+                    placeholder="Additional notes…"
+                    value={form.notes}
+                    onChange={e => set('notes', e.target.value)}
+                    rows={2}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Footer actions ── */}
+          {!saved && (
+            <div style={{ padding: '0 20px 20px', display: 'flex', gap: 10 }}>
+              <button
+                type="button"
+                onClick={onDismiss}
+                style={{
+                  flex: 1, height: 40, borderRadius: 10, border: `1px solid ${border}`,
+                  background: surface, color: labelClr, fontSize: 13, fontWeight: 600,
+                  cursor: 'pointer', transition: 'opacity 0.15s',
+                }}
+              >
+                Not a DSC
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving || !form.holder_name.trim() || !form.issue_date || !form.expiry_date}
+                style={{
+                  flex: 2, height: 40, borderRadius: 10, border: 'none',
+                  background: saving ? '#6366f1' : 'linear-gradient(135deg,#4f46e5,#6366f1)',
+                  color: '#fff', fontSize: 13, fontWeight: 700,
+                  cursor: saving || !form.holder_name.trim() ? 'not-allowed' : 'pointer',
+                  opacity: (!form.holder_name.trim() || !form.issue_date || !form.expiry_date) ? 0.55 : 1,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  transition: 'opacity 0.2s',
+                }}
+              >
+                {saving
+                  ? <><span style={{ width: 14, height: 14, border: '2px solid rgba(255,255,255,0.35)', borderTopColor: '#fff', borderRadius: '50%', display: 'inline-block', animation: 'dscSpin 0.7s linear infinite' }} />Saving…</>
+                  : <><ArrowDownCircle style={{ width: 15, height: 15 }} />Add to Register & Mark IN</>}
+              </button>
+            </div>
+          )}
+
+          {/* ── Success state footer ── */}
+          {saved && (
+            <div style={{ padding: '8px 20px 22px', textAlign: 'center' }}>
+              <p style={{ margin: 0, fontSize: 12, color: '#10b981', fontWeight: 600 }}>
+                ✓ Certificate saved and automatically marked as IN
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function DSCRegister() {
   const isDark    = useDark();
@@ -220,12 +579,13 @@ export default function DSCRegister() {
   const [activeTab, setActiveTab]                   = useState('in');
   const [sharing, setSharing]                       = useState(false);
 
-  const [selectedIds, setSelectedIds]       = useState(new Set());
-  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [selectedIds, setSelectedIds]           = useState(new Set());
+  const [bulkDialogOpen, setBulkDialogOpen]     = useState(false);
   const [bulkMovementType, setBulkMovementType] = useState('IN');
-  const [bulkPersonName, setBulkPersonName] = useState('');
-  const [bulkNotes, setBulkNotes]           = useState('');
-  const [bulkLoading, setBulkLoading]       = useState(false);
+  const [bulkPersonName, setBulkPersonName]     = useState('');
+  const [bulkNotes, setBulkNotes]               = useState('');
+  const [bulkLoading, setBulkLoading]           = useState(false);
+
   // ── AI Duplicate detection ────────────────────────────────────────────────
   const [showDupDialog, setShowDupDialog] = useState(false);
   const [dupGroups,     setDupGroups]     = useState([]);
@@ -241,24 +601,28 @@ export default function DSCRegister() {
 
   const shareAreaRef = useRef(null);
 
-  // ── Status helpers (defined early so handleShare can use them) ────────────
+  // ── USB state ──────────────────────────────────────────────────────────────
+  const [usbPromptOpen, setUsbPromptOpen] = useState(false);
+  const [usbDevice,     setUsbDevice]     = useState(null);
+  const [usbDismissed,  setUsbDismissed]  = useState(false);
+
+  // ── Status helpers ────────────────────────────────────────────────────────
   const getDSCInOutStatus = (dsc) => {
     if (!dsc) return 'OUT';
     if (dsc.current_status) return dsc.current_status;
     return dsc.current_location === 'with_company' ? 'IN' : 'OUT';
   };
-  // FIX: was referenced but never defined — alias to keep dialog working
   const getDocumentInOutStatus = getDSCInOutStatus;
 
   const getDSCStatus = (expiryDate) => {
     const daysLeft = Math.ceil((new Date(expiryDate) - new Date()) / (1000 * 60 * 60 * 24));
-    if (daysLeft < 0)   return { color: 'bg-red-500',    text: 'Expired',              textColor: 'text-red-600' };
-    if (daysLeft <= 7)  return { color: 'bg-orange-500', text: `${daysLeft}d left`,    textColor: 'text-orange-600' };
-    if (daysLeft <= 30) return { color: 'bg-yellow-500', text: `${daysLeft}d left`,    textColor: 'text-yellow-700' };
-    return               { color: 'bg-emerald-500',      text: `${daysLeft}d left`,    textColor: 'text-emerald-700' };
+    if (daysLeft < 0)   return { color: 'bg-red-500',    text: 'Expired',           textColor: 'text-red-600' };
+    if (daysLeft <= 7)  return { color: 'bg-orange-500', text: `${daysLeft}d left`, textColor: 'text-orange-600' };
+    if (daysLeft <= 30) return { color: 'bg-yellow-500', text: `${daysLeft}d left`, textColor: 'text-yellow-700' };
+    return               { color: 'bg-emerald-500',      text: `${daysLeft}d left`, textColor: 'text-emerald-700' };
   };
 
-  // ── Build a clean text summary of the DSC for copy/paste ──────────────────
+  // ── Build share text ──────────────────────────────────────────────────────
   const buildSummaryText = (dsc) => {
     if (!dsc) return '';
     const lastMove = dsc.movement_log?.length > 0 ? dsc.movement_log[dsc.movement_log.length - 1] : null;
@@ -279,7 +643,7 @@ export default function DSCRegister() {
     ].filter(Boolean).join('\n');
   };
 
-  // ── Share handler — supports native file share for WhatsApp on mobile ─────
+  // ── Share handler ─────────────────────────────────────────────────────────
   const handleShare = async (method) => {
     if (!shareAreaRef.current || !selectedDSC) return;
     setSharing(true);
@@ -292,76 +656,50 @@ export default function DSCRegister() {
       const summaryText = buildSummaryText(selectedDSC);
       const safeName = (selectedDSC.holder_name || 'DSC').replace(/[^a-z0-9]/gi, '_');
       const fileName = `DSC_${safeName}.png`;
-
-      // Get blob for native file sharing
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
 
       if (method === 'whatsapp') {
-        // Try native share with the image file (works on mobile WhatsApp)
         const file = blob ? new File([blob], fileName, { type: 'image/png' }) : null;
         if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
           try {
-            await navigator.share({
-              files: [file],
-              title: `DSC — ${selectedDSC.holder_name}`,
-              text: summaryText,
-            });
+            await navigator.share({ files: [file], title: `DSC — ${selectedDSC.holder_name}`, text: summaryText });
             toast.success('Opened share sheet');
             return;
           } catch (err) {
-            if (err?.name === 'AbortError') return; // user cancelled
-            // fall through to fallback
+            if (err?.name === 'AbortError') return;
           }
         }
-        // Desktop fallback: download the image and open WhatsApp Web with text
         if (blob) {
           const url = URL.createObjectURL(blob);
           const link = document.createElement('a');
-          link.download = fileName;
-          link.href = url;
-          link.click();
+          link.download = fileName; link.href = url; link.click();
           setTimeout(() => URL.revokeObjectURL(url), 1000);
         }
-        try {
-          await navigator.clipboard?.writeText(summaryText);
-          toast.success('Image downloaded & details copied. Paste in WhatsApp ✓');
-        } catch {
-          toast.success('Image downloaded. Attach it in WhatsApp.');
-        }
+        try { await navigator.clipboard?.writeText(summaryText); toast.success('Image downloaded & details copied. Paste in WhatsApp ✓'); }
+        catch { toast.success('Image downloaded. Attach it in WhatsApp.'); }
         window.open(`https://wa.me/?text=${encodeURIComponent(summaryText)}`, '_blank');
         return;
       }
-
       if (method === 'email') {
         if (blob) {
           const url = URL.createObjectURL(blob);
           const link = document.createElement('a');
-          link.download = fileName;
-          link.href = url;
-          link.click();
+          link.download = fileName; link.href = url; link.click();
           setTimeout(() => URL.revokeObjectURL(url), 1000);
         }
         window.location.href = `mailto:?subject=${encodeURIComponent('DSC Certificate Details — ' + selectedDSC.holder_name)}&body=${encodeURIComponent(summaryText)}`;
         return;
       }
-
       if (method === 'download') {
         const dataUrl = canvas.toDataURL('image/png');
         const link = document.createElement('a');
-        link.download = fileName;
-        link.href = dataUrl;
-        link.click();
+        link.download = fileName; link.href = dataUrl; link.click();
         toast.success('Screenshot downloaded');
         return;
       }
-
       if (method === 'copy') {
-        try {
-          await navigator.clipboard.writeText(summaryText);
-          toast.success('DSC details copied to clipboard');
-        } catch {
-          toast.error('Could not copy to clipboard');
-        }
+        try { await navigator.clipboard.writeText(summaryText); toast.success('DSC details copied to clipboard'); }
+        catch { toast.error('Could not copy to clipboard'); }
         return;
       }
     } catch (err) {
@@ -375,33 +713,16 @@ export default function DSCRegister() {
   useEffect(() => { fetchDSC(); }, []);
   useEffect(() => { setCurrentPageIn(1); setCurrentPageOut(1); setCurrentPageExpired(1); }, [sortOrder, searchQuery]);
 
-  // ── DSC Token USB detection ───────────────────────────────────────────────
-  // Fires ONLY for known DSC/smart-card token hardware, not mice/keyboards/etc.
-  const [usbPromptOpen, setUsbPromptOpen] = useState(false);
-  const [usbDevice,     setUsbDevice]     = useState(null);
-  const [usbDismissed,  setUsbDismissed]  = useState(false);
-
+  // ── USB DSC Token Detection ───────────────────────────────────────────────
   useEffect(() => {
-    if (!navigator.usb) return; // Chrome/Edge only; silently skip on Firefox/Safari
+    if (!navigator.usb) return;
 
-    // ── Known DSC token USB Vendor IDs (India market) ─────────────────────
-    // SafeNet/Gemalto eToken (most common):  0x0529, 0x08E6
-    // Feitian ePass / rKey (eMudhra, SIFY):  0x096E
-    // Watchdata / WD USB Token:              0x1FC9
-    // HID Global (Crescendo):                0x076B
-    // Moser Baer iKey:                       0x04B9
-    // Eutron SmartKey (PCS India):           0x073D
-    // ACS ACR readers/tokens:                0x072F
-    // Bit4id miniLector:                     0x22CD
-    // TrustKey G310/G320:                    0x311F
-    // Alcor Micro token readers:             0x058F
     const DSC_VENDOR_IDS = new Set([
       0x0529, 0x08E6, 0x096E, 0x1FC9,
       0x076B, 0x04B9, 0x073D, 0x072F,
       0x22CD, 0x311F, 0x058F,
     ]);
 
-    // ── Product/manufacturer name keywords that identify DSC tokens ────────
     const DSC_NAME_KEYWORDS = [
       'token', 'dsc', 'etoken', 'epass', 'safenet', 'feitian',
       'watchdata', 'smart card', 'smartcard', 'crypto', 'pkcs',
@@ -410,41 +731,23 @@ export default function DSCRegister() {
     ];
 
     const isDSCDevice = (device) => {
-      // 1. Vendor ID match (most reliable — hardware-level)
       if (DSC_VENDOR_IDS.has(device.vendorId)) return true;
-
-      // 2. Product or manufacturer name contains a DSC keyword
-      const combined = [
-        device.productName        || '',
-        device.manufacturerName   || '',
-      ].join(' ').toLowerCase();
+      const combined = [device.productName || '', device.manufacturerName || ''].join(' ').toLowerCase();
       if (DSC_NAME_KEYWORDS.some(kw => combined.includes(kw))) return true;
-
-      // 3. USB device class 0x0B = Smart Card (ISO 7816)
-      // Check top-level class or first interface class
       if (device.deviceClass === 0x0B) return true;
       try {
-        const configs = device.configurations || [];
-        for (const cfg of configs) {
-          for (const iface of cfg.interfaces || []) {
-            for (const alt of iface.alternates || []) {
-              if (alt.interfaceClass === 0x0B) return true; // Smart Card class
-              if (alt.interfaceClass === 0x03 && alt.interfaceSubclass === 0x00) {
-                // HID with no subclass — common for crypto tokens
-                if (DSC_NAME_KEYWORDS.some(kw => combined.includes(kw))) return true;
-              }
-            }
-          }
-        }
-      } catch (_) { /* config access may be restricted */ }
-
+        for (const cfg of device.configurations || [])
+          for (const iface of cfg.interfaces || [])
+            for (const alt of iface.alternates || [])
+              if (alt.interfaceClass === 0x0B) return true;
+      } catch (_) {}
       return false;
     };
 
     const handleConnect = (event) => {
       if (usbDismissed) return;
       const device = event.device;
-      if (!isDSCDevice(device)) return; // ignore mice, keyboards, drives, chargers…
+      if (!isDSCDevice(device)) return;
       setUsbDevice(device);
       setUsbPromptOpen(true);
     };
@@ -453,6 +756,7 @@ export default function DSCRegister() {
     return () => navigator.usb.removeEventListener('connect', handleConnect);
   }, [usbDismissed]);
 
+  // ── Keyboard shortcut: "/" focuses search ────────────────────────────────
   useEffect(() => {
     const handler = (e) => {
       if (e.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
@@ -473,7 +777,7 @@ export default function DSCRegister() {
 
   const handlePrint = () => window.print();
 
-  // ── AI Duplicate Detection ─────────────────────────────────────────────────
+  // ── AI Duplicate Detection ────────────────────────────────────────────────
   const handleDetectDscDuplicates = useCallback(() => {
     if (detectingDups) return;
     setDetectingDups(true);
@@ -689,12 +993,12 @@ export default function DSCRegister() {
 
   // ── Pagination ────────────────────────────────────────────────────────────
   const safePage = (cur, total) => Math.min(cur, Math.max(1, total));
-  const tpIn     = Math.ceil(inDSC.length      / rowsPerPage);
-  const tpOut    = Math.ceil(outDSC.length     / rowsPerPage);
-  const tpExp    = Math.ceil(expiredDSC.length / rowsPerPage);
-  const spIn     = safePage(currentPageIn,      tpIn);
-  const spOut    = safePage(currentPageOut,     tpOut);
-  const spExp    = safePage(currentPageExpired, tpExp);
+  const tpIn  = Math.ceil(inDSC.length      / rowsPerPage);
+  const tpOut = Math.ceil(outDSC.length     / rowsPerPage);
+  const tpExp = Math.ceil(expiredDSC.length / rowsPerPage);
+  const spIn  = safePage(currentPageIn,      tpIn);
+  const spOut = safePage(currentPageOut,     tpOut);
+  const spExp = safePage(currentPageExpired, tpExp);
   const pagedIn  = inDSC.slice((spIn  - 1) * rowsPerPage, spIn  * rowsPerPage);
   const pagedOut = outDSC.slice((spOut - 1) * rowsPerPage, spOut * rowsPerPage);
   const pagedExp = expiredDSC.slice((spExp - 1) * rowsPerPage, spExp * rowsPerPage);
@@ -797,8 +1101,7 @@ export default function DSCRegister() {
     </>
   );
 
-  // ─── Shared tab container style ───────────────────────────────────────────
-  const tabCard = (borderColor, bg) => ({
+  const tabCard = (borderColor) => ({
     background: isDark ? '#1e293b' : '#fff',
     borderColor: isDark ? 'rgba(255,255,255,0.07)' : borderColor,
   });
@@ -839,15 +1142,13 @@ export default function DSCRegister() {
         </table>
       </div>
 
-      {/* ── Dashboard-style Banner Header ── */}
+      {/* ── Banner Header ── */}
       <div className="relative overflow-hidden rounded-2xl"
         style={{ background: 'linear-gradient(135deg, #0D3B66 0%, #1F6FB2 60%, #1a8fcc 100%)', boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
         <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10"
           style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
-        <div className="absolute right-28 bottom-0 w-40 h-40 rounded-full mb-[-40px] opacity-5"
-          style={{ background: 'white' }} />
-        <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5"
-          style={{ background: 'white' }} />
+        <div className="absolute right-28 bottom-0 w-40 h-40 rounded-full mb-[-40px] opacity-5" style={{ background: 'white' }} />
+        <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5" style={{ background: 'white' }} />
         <div className="relative px-4 sm:px-6 pt-4 sm:pt-5 pb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-xl bg-white/15 backdrop-blur-sm flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -974,7 +1275,7 @@ export default function DSCRegister() {
           </div>
         </div>
 
-        {/* ── Stats strip inside banner ── */}
+        {/* ── Stats strip ── */}
         <div className="relative px-6 pb-6 grid grid-cols-2 sm:grid-cols-5 gap-3">
           {[
             { label: 'Total IN',     value: statsIn,         icon: ArrowDownCircle, color: '#10b981' },
@@ -1004,7 +1305,7 @@ export default function DSCRegister() {
       {/* ── Page body ── */}
       <div className="px-6 py-6 space-y-5">
 
-        {/* ── Alert banner ── */}
+        {/* Alert banner */}
         {dscList.filter(d => getDSCStatus(d.expiry_date).color !== 'bg-emerald-500').length > 0 && (
           <div className={`flex items-start gap-3 px-4 py-3 rounded-xl border ${isDark ? 'bg-orange-900/20 border-orange-700/40' : 'bg-orange-50 border-orange-200'}`}>
             <AlertCircle className="h-5 w-5 text-orange-500 mt-0.5 flex-shrink-0" />
@@ -1018,7 +1319,7 @@ export default function DSCRegister() {
           </div>
         )}
 
-        {/* ── Controls bar ── */}
+        {/* Controls bar */}
         <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-center">
           <Select value={rowsPerPage.toString()} onValueChange={v => { setRowsPerPage(Number(v)); setCurrentPageIn(1); setCurrentPageOut(1); setCurrentPageExpired(1); }}>
             <SelectTrigger className={`w-[140px] focus:border-indigo-500 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}>
@@ -1059,7 +1360,7 @@ export default function DSCRegister() {
           </div>
         </div>
 
-        {/* ── Bulk action bar ── */}
+        {/* Bulk action bar */}
         {selectedIds.size > 0 && (
           <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${isDark ? 'bg-indigo-900/30 border-indigo-700' : 'bg-indigo-50 border-indigo-200'}`}>
             <CheckSquare className="h-4 w-4 text-indigo-500 flex-shrink-0" />
@@ -1081,7 +1382,7 @@ export default function DSCRegister() {
           </div>
         )}
 
-        {/* ── Row colour legend ── */}
+        {/* Row colour legend */}
         <div className="flex items-center gap-4 text-xs flex-wrap">
           <span className={`font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Row colours:</span>
           <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-orange-200 inline-block border border-orange-300" />Expiring ≤ 7 days</span>
@@ -1089,7 +1390,7 @@ export default function DSCRegister() {
           <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-100 inline-block border border-red-300" />Expired</span>
         </div>
 
-        {/* ── Tabs ── */}
+        {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className={`inline-flex h-11 items-center rounded-xl p-1 gap-1 ${isDark ? 'bg-slate-800 border border-slate-700' : 'bg-slate-100 border border-slate-200'}`}>
             <TabsTrigger value="in"
@@ -1106,9 +1407,9 @@ export default function DSCRegister() {
             </TabsTrigger>
           </TabsList>
 
-          {/* IN */}
+          {/* IN tab */}
           <TabsContent value="in" className="mt-4">
-            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={tabCard('#d1fae5', '')}>
+            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={tabCard('#d1fae5')}>
               <div className="bg-emerald-50 border-b border-emerald-200 px-5 py-3 flex items-center gap-2">
                 <ArrowDownCircle className="h-4 w-4 text-emerald-700 flex-shrink-0" />
                 <p className="text-sm font-semibold text-emerald-700 uppercase tracking-wider">DSC IN — Available ({inDSC.length})</p>
@@ -1129,9 +1430,9 @@ export default function DSCRegister() {
             </div>
           </TabsContent>
 
-          {/* OUT */}
+          {/* OUT tab */}
           <TabsContent value="out" className="mt-4">
-            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={tabCard('#fecaca', '')}>
+            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={tabCard('#fecaca')}>
               <div className="bg-red-50 border-b border-red-200 px-5 py-3 flex items-center gap-2">
                 <ArrowUpCircle className="h-4 w-4 text-red-700 flex-shrink-0" />
                 <p className="text-sm font-semibold text-red-700 uppercase tracking-wider">DSC OUT — Taken ({outDSC.length})</p>
@@ -1152,9 +1453,9 @@ export default function DSCRegister() {
             </div>
           </TabsContent>
 
-          {/* EXPIRED */}
+          {/* EXPIRED tab */}
           <TabsContent value="expired" className="mt-4">
-            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={tabCard('#fde68a', '')}>
+            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={tabCard('#fde68a')}>
               <div className="bg-amber-50 border-b border-amber-300 px-5 py-3 flex items-center gap-2">
                 <AlertCircle className="h-4 w-4 text-amber-700 flex-shrink-0" />
                 <p className="text-sm font-semibold text-amber-700 uppercase tracking-wider">DSC EXPIRED ({expiredDSC.length})</p>
@@ -1237,7 +1538,7 @@ export default function DSCRegister() {
         </DialogContent>
       </Dialog>
 
-      {/* ── DSC Details / Share Dialog (opens on row click) ── */}
+      {/* ── DSC Details / Share Dialog ── */}
       <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
         <DialogContent className="max-w-xl p-0 border-none bg-transparent shadow-none overflow-visible">
           <DialogHeader className="sr-only">
@@ -1246,7 +1547,6 @@ export default function DSCRegister() {
           </DialogHeader>
 
           <div ref={shareAreaRef} className={`rounded-2xl overflow-hidden border shadow-2xl ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
-            {/* Header strip — dark navy with icon tile */}
             <div className="relative px-6 py-5" style={{ background: 'linear-gradient(135deg,#0f1f4d,#1e3a8a)' }}>
               <div className="flex items-center gap-3">
                 <div className="h-13 w-13 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur">
@@ -1259,22 +1559,16 @@ export default function DSCRegister() {
               </div>
             </div>
 
-            {/* Body */}
             <div className="p-6 space-y-4">
-              {/* Status pills */}
               <div className="flex flex-wrap gap-2">
                 <span className={`text-[11px] font-semibold px-3 py-1 rounded-full ${getDocumentInOutStatus(selectedDSC) === 'IN' ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-600'}`}>
                   {getDocumentInOutStatus(selectedDSC) === 'IN' ? 'Available' : 'Out'}
                 </span>
                 {selectedDSC?.dsc_type && (
-                  <span className="text-[11px] font-semibold px-3 py-1 rounded-full bg-rose-50 text-rose-600 capitalize">
-                    {selectedDSC.dsc_type}
-                  </span>
+                  <span className="text-[11px] font-semibold px-3 py-1 rounded-full bg-rose-50 text-rose-600 capitalize">{selectedDSC.dsc_type}</span>
                 )}
                 {selectedDSC?.entity_type && (
-                  <span className="text-[11px] font-semibold px-3 py-1 rounded-full bg-indigo-50 text-indigo-600 capitalize">
-                    {selectedDSC.entity_type}
-                  </span>
+                  <span className="text-[11px] font-semibold px-3 py-1 rounded-full bg-indigo-50 text-indigo-600 capitalize">{selectedDSC.entity_type}</span>
                 )}
                 {selectedDSC?.expiry_date && (
                   <span className={`text-[11px] font-semibold px-3 py-1 rounded-full ${getDSCStatus(selectedDSC.expiry_date).textColor} ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
@@ -1283,7 +1577,6 @@ export default function DSCRegister() {
                 )}
               </div>
 
-              {/* Description / Associated With */}
               <div>
                 <p className="text-[10px] font-bold tracking-[0.15em] text-slate-400 uppercase mb-1.5">Associated With</p>
                 <div className={`rounded-lg px-3 py-2.5 text-sm font-semibold capitalize ${isDark ? 'bg-slate-800/60' : 'bg-slate-50'}`}>
@@ -1291,7 +1584,6 @@ export default function DSCRegister() {
                 </div>
               </div>
 
-              {/* Meta rows with icons */}
               <div className="space-y-3 pt-1">
                 <div className="flex items-start gap-3">
                   <div className={`h-7 w-7 rounded-md flex items-center justify-center mt-0.5 ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
@@ -1331,7 +1623,6 @@ export default function DSCRegister() {
                     </p>
                   </div>
                 </div>
-                {/* Last Movement */}
                 {selectedDSC?.movement_log?.length > 0 && (() => {
                   const lastMove = selectedDSC.movement_log[selectedDSC.movement_log.length - 1];
                   return (
@@ -1347,9 +1638,7 @@ export default function DSCRegister() {
                           </Badge>
                           <p className="text-sm font-semibold capitalize">{lastMove.person_name}</p>
                         </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5">
-                          {format(new Date(lastMove.timestamp), 'dd MMM yyyy, hh:mm a')}
-                        </p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">{format(new Date(lastMove.timestamp), 'dd MMM yyyy, hh:mm a')}</p>
                         {lastMove.notes && <p className="text-xs text-slate-500 mt-0.5 italic capitalize">{lastMove.notes}</p>}
                       </div>
                     </div>
@@ -1369,15 +1658,13 @@ export default function DSCRegister() {
               </div>
             </div>
 
-            {/* Footer action buttons */}
             <div className={`px-6 py-4 border-t flex gap-2 print:hidden ${isDark ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-slate-50/50'}`}>
               <Button size="sm" variant="outline" disabled={sharing} onClick={() => handleShare('whatsapp')} className="flex-1 gap-1.5 text-emerald-600 border-emerald-200 hover:bg-emerald-50">
                 {sharing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircle className="h-3.5 w-3.5" />}
                 WhatsApp
               </Button>
               <Button size="sm" variant="outline" disabled={sharing} onClick={() => handleShare('download')} className="flex-1 gap-1.5 text-slate-700 border-slate-200 hover:bg-slate-100">
-                <Download className="h-3.5 w-3.5" />
-                Screenshot
+                <Download className="h-3.5 w-3.5" />Screenshot
               </Button>
               <Button size="sm" variant="outline" disabled={sharing} onClick={() => handleShare('email')} className="gap-1.5 text-blue-600 border-blue-200 hover:bg-blue-50">
                 <Mail className="h-3.5 w-3.5" />
@@ -1390,91 +1677,25 @@ export default function DSCRegister() {
         </DialogContent>
       </Dialog>
 
-      {/* ── USB / DSC Plug-in Prompt ──────────────────────────────────────── */}
-      {usbPromptOpen && (
-        <div
-          className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center p-4 sm:p-0"
-          style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}
-        >
-          <div
-            className={`w-full sm:max-w-sm rounded-2xl shadow-2xl border overflow-hidden ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}
-            style={{ animation: 'slideUp 0.22s cubic-bezier(0.34,1.56,0.64,1)' }}
-          >
-            {/* Accent bar */}
-            <div className="h-1 w-full" style={{ background: 'linear-gradient(90deg, #4f46e5, #6366f1, #818cf8)' }} />
-
-            {/* Header */}
-            <div className="px-5 pt-5 pb-3 flex items-start gap-4">
-              <div
-                className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md"
-                style={{ background: 'linear-gradient(135deg, #4f46e5, #6366f1)' }}
-              >
-                <Key className="h-5 w-5 text-white" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-slate-900 dark:text-slate-100 leading-tight">
-                  DSC Token Detected
-                </p>
-                <p className={`text-xs mt-1 leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  {usbDevice?.productName
-                    ? <><span className="font-semibold text-indigo-500">{usbDevice.productName}</span> was plugged in.<br /></>
-                    : usbDevice?.manufacturerName
-                      ? <><span className="font-semibold text-indigo-500">{usbDevice.manufacturerName}</span> token plugged in.<br /></>
-                      : <>A DSC token was plugged in.<br /></>}
-                  Add this DSC to the register?
-                </p>
-              </div>
-            </div>
-
-            {/* Device info pill */}
-            {(usbDevice?.manufacturerName || usbDevice?.vendorId) && (
-              <div className={`mx-5 mb-3 px-3 py-2 rounded-xl text-[11px] font-mono flex items-center gap-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
-                {usbDevice.manufacturerName ? `${usbDevice.manufacturerName} · ` : ''}
-                {usbDevice.vendorId ? `VID: 0x${usbDevice.vendorId.toString(16).toUpperCase().padStart(4,'0')}` : ''}
-                {usbDevice.productId ? ` · PID: 0x${usbDevice.productId.toString(16).toUpperCase().padStart(4,'0')}` : ''}
-              </div>
-            )}
-
-            {/* Actions */}
-            <div className="px-5 pb-5 flex gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setUsbPromptOpen(false);
-                  setUsbDismissed(true);
-                }}
-                className={`flex-1 h-9 rounded-xl text-sm font-medium transition-colors ${isDark ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-              >
-                Not a DSC
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setUsbPromptOpen(false);
-                  // Pre-fill holder name from device name if available
-                  const productName = usbDevice?.productName || '';
-                  resetForm();
-                  if (productName) {
-                    setFormData(prev => ({
-                      ...prev,
-                      notes: `USB Device: ${productName}${usbDevice?.manufacturerName ? ' · ' + usbDevice.manufacturerName : ''}`,
-                    }));
-                  }
-                  setDialogOpen(true);
-                }}
-                className="flex-1 h-9 rounded-xl text-sm font-semibold text-white shadow-sm transition-all hover:opacity-90"
-                style={{ background: 'linear-gradient(135deg, #4f46e5, #6366f1)' }}
-              >
-                Add to Register
-              </button>
-            </div>
-          </div>
-          <style>{`@keyframes slideUp { from { transform: translateY(24px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }`}</style>
-        </div>
+      {/* ── USB DSC Token Popup ── */}
+      {usbPromptOpen && usbDevice && (
+        <UsbDscPopup
+          device={usbDevice}
+          isDark={isDark}
+          onDismiss={() => {
+            setUsbPromptOpen(false);
+            setUsbDismissed(true);
+          }}
+          onSaved={() => {
+            setUsbPromptOpen(false);
+            fetchDSC();
+            // Switch to IN tab to show the newly added DSC
+            setActiveTab('in');
+          }}
+        />
       )}
 
-      {/* ── AI Duplicate Detection Dialog ─────────────────────────────── */}
+      {/* ── AI Duplicate Detection Dialog ── */}
       <AIDuplicateDialog
         open={showDupDialog}
         onClose={() => setShowDupDialog(false)}
@@ -1494,15 +1715,15 @@ export default function DSCRegister() {
           d.expiry_date ? `Exp: ${format(new Date(d.expiry_date), 'MMM yyyy')}` : null,
         ].filter(Boolean)}
         compareFields={(a, b) => [
-          { label: 'Holder',        a: a.holder_name,   b: b.holder_name },
-          { label: 'PAN',           a: a.pan,           b: b.pan },
-          { label: 'Email',         a: a.email,         b: b.email },
-          { label: 'Serial No.',    a: a.serial_number, b: b.serial_number },
-          { label: 'Type',          a: a.dsc_type,      b: b.dsc_type },
-          { label: 'Class',         a: a.dsc_class,     b: b.dsc_class },
-          { label: 'Status',        a: a.status,        b: b.status },
-          { label: 'Expiry',        a: a.expiry_date ? format(new Date(a.expiry_date), 'MMM dd, yyyy') : '—', b: b.expiry_date ? format(new Date(b.expiry_date), 'MMM dd, yyyy') : '—' },
-          { label: 'Associated',    a: a.associated_with, b: b.associated_with },
+          { label: 'Holder',     a: a.holder_name,   b: b.holder_name },
+          { label: 'PAN',        a: a.pan,           b: b.pan },
+          { label: 'Email',      a: a.email,         b: b.email },
+          { label: 'Serial No.', a: a.serial_number, b: b.serial_number },
+          { label: 'Type',       a: a.dsc_type,      b: b.dsc_type },
+          { label: 'Class',      a: a.dsc_class,     b: b.dsc_class },
+          { label: 'Status',     a: a.status,        b: b.status },
+          { label: 'Expiry',     a: a.expiry_date ? format(new Date(a.expiry_date), 'MMM dd, yyyy') : '—', b: b.expiry_date ? format(new Date(b.expiry_date), 'MMM dd, yyyy') : '—' },
+          { label: 'Associated', a: a.associated_with, b: b.associated_with },
         ]}
         onEdit={(d) => { handleEdit(d); setShowDupDialog(false); }}
         onDelete={async (d) => {
