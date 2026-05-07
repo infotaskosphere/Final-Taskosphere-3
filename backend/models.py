@@ -538,6 +538,7 @@ class DSCBase(BaseModel):
     holder_name: str
     dsc_type: Optional[str] = None
     dsc_password: Optional[str] = None
+    serial_number: Optional[str] = None
     associated_with: Optional[str] = None
     entity_type: str = "firm"
     issue_date: Any
