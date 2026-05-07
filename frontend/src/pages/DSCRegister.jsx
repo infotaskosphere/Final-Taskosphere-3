@@ -24,7 +24,7 @@ import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
 import { detectDscDuplicates } from '@/lib/aiDuplicateEngine';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
-import { readCertFromUsbToken } from '@/lib/dscTokenReader';
+import { readCertFromUsbToken, readCertFromLocalAgent, isLocalAgentAvailable } from '@/lib/dscTokenReader';
 
 // ─── Print styles ─────────────────────────────────────────────────────────────
 const PRINT_STYLE = `
@@ -261,22 +261,14 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
 
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
-  // ── Read certificate DIRECTLY IN BROWSER via WebUSB + CCID (no backend needed) ──
+  // ── Read certificate — tries WebUSB first, falls back to local PC/SC agent ──
   const handleReadCertificate = async () => {
     if (!pin.trim()) { setReadError('Enter the token PIN first.'); return; }
     if (!device) { setReadError('No USB device available.'); return; }
     setReading(true);
     setReadError('');
-    try {
-      if (!device.opened) await device.open();
-      const cert = await readCertFromUsbToken(device, pin.trim());
-      if (!cert || !cert.holder_name) {
-        setReadError(
-          'Could not read certificate data from the token. ' +
-          'Try a different PIN, or fill the form manually below.'
-        );
-        return;
-      }
+
+    const applycert = (cert) => {
       setForm(prev => ({
         ...prev,
         holder_name:     cert.holder_name   || prev.holder_name,
@@ -291,14 +283,46 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
         ].filter(Boolean).join('\n'),
       }));
       setCertFetched(true);
-      toast.success('Certificate data read from token ✓');
+      const method = cert.read_method === 'pcsc-local-agent' ? ' (via local agent)' : '';
+      toast.success(`Certificate data read from token ✓${method}`);
+    };
+
+    try {
+      // ── Attempt 1: WebUSB + CCID (works on Linux/Mac; may fail on Windows) ──
+      if (!device.opened) await device.open();
+      const cert = await readCertFromUsbToken(device, pin.trim());
+      if (cert && cert.holder_name) { applycert(cert); return; }
+      setReadError('Could not read certificate data. Try the local agent or fill the form manually.');
     } catch (err) {
-      console.error('[DSC] WebUSB read error:', err);
-      setReadError(
-        err?.message?.includes('claimInterface')
-          ? 'Browser could not claim the USB interface. Close any other software using this token and try again.'
-          : (err?.message || 'Failed to read token. Ensure the token is plugged in and try again.')
-      );
+      const isClaimError =
+        err?.message?.includes('claimInterface') ||
+        err?.message?.includes('Unable to claim interface') ||
+        err?.message?.includes('Access denied');
+
+      if (isClaimError) {
+        // ── Attempt 2: Local PC/SC agent (Windows fallback) ──────────────────
+        try {
+          const agentUp = await isLocalAgentAvailable();
+          if (agentUp) {
+            const cert = await readCertFromLocalAgent(pin.trim());
+            if (cert && cert.holder_name) { applycert(cert); return; }
+            setReadError('Local agent could not read the certificate. Check your PIN and try again.');
+          } else {
+            // Agent not running — show download instructions
+            setReadError('AGENT_REQUIRED');
+          }
+        } catch (agentErr) {
+          setReadError(
+            agentErr?.message?.includes('Incorrect PIN')
+              ? 'Incorrect PIN. Please check your token PIN and try again.'
+              : agentErr?.message?.includes('blocked')
+              ? 'Token PIN is blocked. Please unlock your token using the mToken management software.'
+              : ('Local agent error: ' + (agentErr?.message || 'Unknown error'))
+          );
+        }
+      } else {
+        setReadError(err?.message || 'Failed to read token. Ensure the token is plugged in and try again.');
+      }
     } finally {
       setReading(false);
     }
@@ -479,7 +503,24 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
                       : certFetched ? '↻ Re-read' : '⬆ Fetch Data'}
                   </button>
                 </div>
-                {readError && (
+                {readError === 'AGENT_REQUIRED' ? (
+                  <div style={{ margin: '8px 0 0', padding: '10px 12px', background: isDark ? 'rgba(251,191,36,0.08)' : '#fffbeb', borderRadius: 8, border: '1px solid rgba(251,191,36,0.4)' }}>
+                    <p style={{ margin: 0, fontSize: 11, color: '#d97706', fontWeight: 700 }}>🪟 Windows detected — Local Agent required</p>
+                    <p style={{ margin: '4px 0 6px', fontSize: 10, color: isDark ? '#fde68a' : '#92400e', lineHeight: 1.5 }}>
+                      Chrome cannot access the CCID interface on Windows because the OS driver owns it.
+                      Run the <strong>Taskosphere DSC Agent</strong> on your machine to bridge this gap:
+                    </p>
+                    <ol style={{ margin: '0 0 6px 14px', padding: 0, fontSize: 10, color: isDark ? '#fde68a' : '#92400e', lineHeight: 1.7 }}>
+                      <li>Download the <strong>dsc-agent</strong> folder from the project repo</li>
+                      <li>Open a terminal in that folder and run: <code style={{ background: isDark ? '#1e1b4b' : '#e0e7ff', padding: '1px 5px', borderRadius: 4 }}>npm install</code></li>
+                      <li>Then run: <code style={{ background: isDark ? '#1e1b4b' : '#e0e7ff', padding: '1px 5px', borderRadius: 4 }}>node index.js</code></li>
+                      <li>Keep that terminal open and click <strong>Fetch Data</strong> again</li>
+                    </ol>
+                    <p style={{ margin: 0, fontSize: 9, color: isDark ? '#9ca3af' : '#6b7280' }}>
+                      The agent runs only on your machine at localhost:7432 — no data leaves your PC.
+                    </p>
+                  </div>
+                ) : readError && (
                   <div style={{ margin: '8px 0 0', padding: '8px 10px', background: isDark ? 'rgba(239,68,68,0.12)' : '#fff1f1', borderRadius: 8, border: '1px solid rgba(239,68,68,0.3)' }}>
                     <p style={{ margin: 0, fontSize: 11, color: '#ef4444', lineHeight: 1.5, fontWeight: 600 }}>⚠ Could not read certificate</p>
                     <p style={{ margin: '3px 0 0', fontSize: 10, color: isDark ? '#fca5a5' : '#b91c1c', lineHeight: 1.5 }}>{readError}</p>
