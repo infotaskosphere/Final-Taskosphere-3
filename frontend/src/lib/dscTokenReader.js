@@ -439,57 +439,176 @@ export async function readCertFromUsbToken(device, pin) {
   }
 }
 
-// ─── Local Agent Fallback (Windows PC/SC bridge) ──────────────────────────────
+// ─── Web Smart Card API (navigator.smartCard) — Works on Windows with CCID driver ─
 /**
- * Check if the local DSC agent is running at localhost:7432.
- * The agent is a small Node.js server the user runs locally to bridge the
- * gap when WebUSB cannot claim the Windows CCID interface.
+ * Check if Chrome's Web Smart Card API is available.
+ * Available in Chrome 114+ — uses the OS PC/SC stack, NOT WebUSB.
+ * This is the correct way to access CCID tokens on Windows.
  */
-export async function isLocalAgentAvailable() {
-  try {
-    const ctrl = new AbortController();
-    const id = setTimeout(() => ctrl.abort(), 1500);
-    const res = await fetch('http://127.0.0.1:7432/health', { signal: ctrl.signal });
-    clearTimeout(id);
-    return res.ok;
-  } catch {
-    return false;
-  }
+export function isWebSmartCardSupported() {
+  return typeof navigator !== 'undefined' && 'smartCard' in navigator;
 }
 
 /**
- * Read certificate from the local PC/SC agent instead of WebUSB.
- * Falls back when WebUSB throws a claimInterface error on Windows.
+ * Send one APDU via navigator.smartCard connection and get response bytes.
+ */
+async function smartCardTransmit(connection, apdu) {
+  const view = await connection.transmit(new Uint8Array(apdu));
+  return new Uint8Array(view.buffer);
+}
+
+/**
+ * READ BINARY from current EF via smartCard connection.
+ */
+async function readBinarySmartCard(connection) {
+  const chunks = [];
+  let offset = 0;
+  while (true) {
+    const apdu = [0x00, 0xB0, (offset >> 8) & 0xFF, offset & 0xFF, 0xFF];
+    const resp = await smartCardTransmit(connection, apdu);
+    if (!resp || resp.length < 2) break;
+    const sw1 = resp[resp.length - 2];
+    const sw2 = resp[resp.length - 1];
+    const data = resp.slice(0, resp.length - 2);
+    if (sw1 === 0x90) {
+      chunks.push(...data);
+      offset += data.length;
+      if (data.length < 255) break;
+    } else if (sw1 === 0x6C) {
+      const fix = [0x00, 0xB0, (offset >> 8) & 0xFF, offset & 0xFF, sw2];
+      const fixResp = await smartCardTransmit(connection, fix);
+      if (fixResp && fixResp.length >= 2) chunks.push(...fixResp.slice(0, fixResp.length - 2));
+      break;
+    } else {
+      break;
+    }
+  }
+  return new Uint8Array(chunks);
+}
+
+// Same cert SELECT strategies as WebUSB version
+const CERT_SELECT_APDUS_SC = [
+  [
+    [0x00,0xA4,0x04,0x00,0x0C,0xA0,0x00,0x00,0x00,0x03,0x08,0x00,0x00,0x10,0x00,0x01,0x00],
+    [0x00,0xA4,0x02,0x0C,0x02,0x10,0x05],
+  ],
+  [
+    [0x00,0xA4,0x04,0x00,0x0C,0xA0,0x00,0x00,0x00,0x03,0x08,0x00,0x00,0x10,0x00,0x01,0x00],
+    [0x00,0xA4,0x02,0x0C,0x02,0x10,0x01],
+  ],
+  // Longmai mToken (your token — VID 0x055C)
+  [
+    [0x00,0xA4,0x04,0x00,0x08,0xA0,0x00,0x00,0x00,0x63,0x50,0x4B,0x43],
+    [0x00,0xA4,0x02,0x00,0x02,0x00,0x01],
+  ],
+  [
+    [0x00,0xA4,0x00,0x00,0x02,0x3F,0x00],
+    [0x00,0xA4,0x02,0x04,0x02,0x10,0x05],
+  ],
+  [
+    [0x00,0xA4,0x04,0x00,0x09,0xA0,0x00,0x00,0x00,0x18,0x0A,0x00,0x00,0x01],
+    [0x00,0xA4,0x02,0x0C,0x02,0x10,0x05],
+  ],
+];
+
+/**
+ * Read certificate from DSC token using navigator.smartCard (Chrome PC/SC API).
  *
- * @param {string} pin - Token PIN
+ * This works on Windows because it uses the OS CCID driver via WinSCard —
+ * unlike WebUSB which tries to claim the interface directly (blocked on Windows).
+ *
+ * @param {string} pin  - Token PIN
  * @returns {Promise<object|null>}
  */
-export async function readCertFromLocalAgent(pin) {
-  const url = `http://127.0.0.1:7432/read-dsc?pin=${encodeURIComponent(pin)}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Local agent HTTP error: ${res.status}`);
-  const data = await res.json();
-  if (data.success && data.cert) return data.cert;
-  throw new Error(data.error || 'Local agent could not read the certificate');
+export async function readCertFromWebSmartCard(pin) {
+  if (!isWebSmartCardSupported()) {
+    throw new Error('navigator.smartCard not supported in this browser.');
+  }
+
+  const context = await navigator.smartCard.establishContext();
+
+  let readers;
+  try {
+    readers = await context.listReaders();
+  } catch {
+    readers = [];
+  }
+
+  if (!readers || readers.length === 0) {
+    throw new Error('No smart card reader detected. Make sure your token is plugged in.');
+  }
+
+  for (const readerName of readers) {
+    let connection = null;
+    try {
+      // Connect using shared mode — OS driver stays active, we just send APDUs
+      const result = await context.connect(readerName, 'shared', { t0: true, t1: true });
+      connection = result.connection ?? result; // handle both API shapes
+
+      for (const selectApdus of CERT_SELECT_APDUS_SC) {
+        try {
+          let allOk = true;
+          for (const apdu of selectApdus) {
+            const resp = await smartCardTransmit(connection, apdu);
+            if (!resp || resp.length < 2) { allOk = false; break; }
+            const sw1 = resp[resp.length - 2];
+            if (sw1 !== 0x90 && sw1 !== 0x61 && sw1 !== 0x62) { allOk = false; break; }
+          }
+          if (!allOk) continue;
+
+          // Verify PIN
+          if (pin) {
+            const pinBytes = new TextEncoder().encode(pin);
+            const verifyApdu = [0x00, 0x20, 0x00, 0x01, pinBytes.length, ...pinBytes];
+            const verifyResp = await smartCardTransmit(connection, verifyApdu);
+            if (verifyResp && verifyResp.length >= 2) {
+              const sw1 = verifyResp[verifyResp.length - 2];
+              const sw2 = verifyResp[verifyResp.length - 1];
+              if (sw1 !== 0x90) {
+                throw new Error(
+                  sw1 === 0x69 && sw2 === 0x82 ? 'Incorrect PIN — please check your token PIN.' :
+                  sw1 === 0x69 && sw2 === 0x83 ? 'PIN blocked — token is locked. Use mToken Manager to unlock.' :
+                  `PIN verify failed (SW ${sw1.toString(16).toUpperCase()} ${sw2.toString(16).toUpperCase()})`
+                );
+              }
+            }
+          }
+
+          const rawBytes = await readBinarySmartCard(connection);
+          if (!rawBytes || rawBytes.length < 64) continue;
+
+          const derBytes = extractDerFromBlob(rawBytes);
+          const cert = parseDerCertificate(derBytes);
+          if (cert && cert.holder_name) {
+            cert.read_method = 'web-smartcard';
+            return cert;
+          }
+        } catch (e) {
+          // Re-throw PIN errors — don't silently swallow them
+          if (e.message && (e.message.includes('PIN') || e.message.includes('blocked'))) throw e;
+          continue;
+        }
+      }
+    } catch (e) {
+      if (e.message && (e.message.includes('PIN') || e.message.includes('blocked'))) throw e;
+    } finally {
+      if (connection) {
+        try { await connection.disconnect('leaveCard'); } catch {}
+      }
+    }
+  }
+
+  return null;
 }
 
-// ─── Certificate File Parser (no agent / no WebUSB needed) ───────────────────
+// ─── Certificate File Parser (ultimate fallback) ──────────────────────────────
 /**
- * Parse a .cer / .crt / .pem certificate file uploaded by the user.
- * Works entirely in the browser — no backend, no local agent required.
- *
- * Supports:
- *   - DER binary  (.cer, .crt, .der)
- *   - PEM base64  (.pem, .cer exported as text)
- *
- * @param {File} file - The File object from an <input type="file">
- * @returns {Promise<object|null>} - Parsed cert fields or null
+ * Parse a .cer / .crt / .pem file uploaded by the user.
+ * No WebUSB, no agent, no smartCard API needed.
  */
 export async function parseCertificateFile(file) {
   const arrayBuffer = await file.arrayBuffer();
   let der = new Uint8Array(arrayBuffer);
-
-  // Detect PEM format (starts with "-----BEGIN")
   const text = new TextDecoder('utf-8').decode(der.slice(0, 30));
   if (text.startsWith('-----BEGIN')) {
     const pem = new TextDecoder('utf-8').decode(der);
@@ -501,8 +620,8 @@ export async function parseCertificateFile(file) {
     der = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) der[i] = binary.charCodeAt(i);
   }
-
-  // Extract DER SEQUENCE if wrapped in extra bytes
   const clean = extractDerFromBlob(der);
-  return parseDerCertificate(clean);
+  const cert = parseDerCertificate(clean);
+  if (cert) cert.read_method = 'file-upload';
+  return cert;
 }
