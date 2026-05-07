@@ -698,6 +698,9 @@ export default function DSCRegister() {
   const [usbPromptOpen, setUsbPromptOpen] = useState(false);
   const [usbDevice,     setUsbDevice]     = useState(null);
   const [usbDismissed,  setUsbDismissed]  = useState(false);
+  const [usbSupported,  setUsbSupported]  = useState(false);
+  const [usbPermission, setUsbPermission] = useState('unknown'); // 'unknown'|'granted'|'denied'
+  const [usbGranting,   setUsbGranting]   = useState(false);
 
   // ── Status helpers ────────────────────────────────────────────────────────
   const getDSCInOutStatus = (dsc) => {
@@ -808,47 +811,106 @@ export default function DSCRegister() {
   useEffect(() => { setCurrentPageIn(1); setCurrentPageOut(1); setCurrentPageExpired(1); }, [sortOrder, searchQuery]);
 
   // ── USB DSC Token Detection ───────────────────────────────────────────────
+  // WebUSB only fires 'connect' for devices that have been previously granted
+  // permission. We must call requestDevice() at least once to get permission,
+  // then the browser remembers it and fires 'connect' on future plug-ins.
+
+  const DSC_VENDOR_IDS = [
+    { vendorId: 0x0529 }, { vendorId: 0x08E6 }, { vendorId: 0x096E },
+    { vendorId: 0x1FC9 }, { vendorId: 0x076B }, { vendorId: 0x04B9 },
+    { vendorId: 0x073D }, { vendorId: 0x072F }, { vendorId: 0x22CD },
+    { vendorId: 0x311F }, { vendorId: 0x058F }, { vendorId: 0x04E6 },
+    { vendorId: 0x0DC3 }, { vendorId: 0x1D50 },
+  ];
+
+  const DSC_NAME_KEYWORDS = [
+    'token', 'dsc', 'etoken', 'epass', 'safenet', 'feitian',
+    'watchdata', 'smart card', 'smartcard', 'crypto', 'pkcs',
+    'moser baer', 'ikey', 'crescendo', 'eutron', 'trustkey',
+    'emudhra', 'sify', 'ncode', 'capricorn', 'e-mudhra', 'proxkey',
+  ];
+
+  const isDSCDevice = useCallback((device) => {
+    if (DSC_VENDOR_IDS.some(f => f.vendorId === device.vendorId)) return true;
+    const combined = [device.productName || '', device.manufacturerName || ''].join(' ').toLowerCase();
+    if (DSC_NAME_KEYWORDS.some(kw => combined.includes(kw))) return true;
+    if (device.deviceClass === 0x0B) return true;
+    return false;
+  }, []);
+
+  // On mount: check if WebUSB is available and scan already-permitted devices
   useEffect(() => {
-    if (!navigator.usb) return;
+    if (!navigator.usb) { setUsbSupported(false); return; }
+    setUsbSupported(true);
 
-    const DSC_VENDOR_IDS = new Set([
-      0x0529, 0x08E6, 0x096E, 0x1FC9,
-      0x076B, 0x04B9, 0x073D, 0x072F,
-      0x22CD, 0x311F, 0x058F,
-    ]);
-
-    const DSC_NAME_KEYWORDS = [
-      'token', 'dsc', 'etoken', 'epass', 'safenet', 'feitian',
-      'watchdata', 'smart card', 'smartcard', 'crypto', 'pkcs',
-      'moser baer', 'ikey', 'crescendo', 'eutron', 'trustkey',
-      'emudhra', 'sify', 'ncode', 'capricorn', 'e-mudhra',
-    ];
-
-    const isDSCDevice = (device) => {
-      if (DSC_VENDOR_IDS.has(device.vendorId)) return true;
-      const combined = [device.productName || '', device.manufacturerName || ''].join(' ').toLowerCase();
-      if (DSC_NAME_KEYWORDS.some(kw => combined.includes(kw))) return true;
-      if (device.deviceClass === 0x0B) return true;
+    const scanExistingDevices = async () => {
       try {
-        for (const cfg of device.configurations || [])
-          for (const iface of cfg.interfaces || [])
-            for (const alt of iface.alternates || [])
-              if (alt.interfaceClass === 0x0B) return true;
+        const devices = await navigator.usb.getDevices();
+        if (devices.length > 0) setUsbPermission('granted');
+        if (usbDismissed) return;
+        const dscDevice = devices.find(isDSCDevice);
+        if (dscDevice) {
+          setUsbDevice(dscDevice);
+          setUsbPromptOpen(true);
+        }
       } catch (_) {}
-      return false;
     };
+    scanExistingDevices();
 
     const handleConnect = (event) => {
       if (usbDismissed) return;
       const device = event.device;
+      setUsbPermission('granted');
       if (!isDSCDevice(device)) return;
       setUsbDevice(device);
       setUsbPromptOpen(true);
     };
 
+    const handleDisconnect = (event) => {
+      if (usbDevice && event.device === usbDevice) {
+        setUsbPromptOpen(false);
+      }
+    };
+
     navigator.usb.addEventListener('connect', handleConnect);
-    return () => navigator.usb.removeEventListener('connect', handleConnect);
-  }, [usbDismissed]);
+    navigator.usb.addEventListener('disconnect', handleDisconnect);
+    return () => {
+      navigator.usb.removeEventListener('connect', handleConnect);
+      navigator.usb.removeEventListener('disconnect', handleDisconnect);
+    };
+  }, [usbDismissed, isDSCDevice]);
+
+  // Called when user clicks "Grant USB Access" button
+  const handleGrantUsbAccess = useCallback(async () => {
+    if (!navigator.usb) return;
+    setUsbGranting(true);
+    try {
+      // Show browser's device picker — user selects their token
+      // We pass all known vendor filters; browser shows matching + "all" option
+      const device = await navigator.usb.requestDevice({ filters: DSC_VENDOR_IDS });
+      setUsbPermission('granted');
+      if (isDSCDevice(device) && !usbDismissed) {
+        setUsbDevice(device);
+        setUsbPromptOpen(true);
+      } else {
+        // Permission granted for a non-DSC, still show popup for manual entry
+        if (!usbDismissed) {
+          setUsbDevice(device);
+          setUsbPromptOpen(true);
+        }
+      }
+    } catch (err) {
+      if (err.name === 'NotFoundError') {
+        // User cancelled the picker — not an error
+        toast.info('No device selected. Plug in your DSC token and try again.');
+      } else {
+        setUsbPermission('denied');
+        toast.error('USB access denied. Please allow USB access in browser settings.');
+      }
+    } finally {
+      setUsbGranting(false);
+    }
+  }, [isDSCDevice, usbDismissed]);
 
   // ── Keyboard shortcut: "/" focuses search ────────────────────────────────
   useEffect(() => {
@@ -1261,6 +1323,27 @@ export default function DSCRegister() {
               className="h-9 px-4 gap-2 rounded-xl text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 backdrop-blur-sm">
               <Printer className="h-4 w-4" />Print
             </Button>
+            {/* ── USB DSC Token Button ── */}
+            {usbSupported && (
+              <Button
+                variant="outline"
+                onClick={usbPermission === 'granted' ? () => { setUsbDismissed(false); handleGrantUsbAccess(); } : handleGrantUsbAccess}
+                disabled={usbGranting}
+                className="h-9 px-4 gap-2 rounded-xl text-sm backdrop-blur-sm font-semibold transition-all"
+                style={{
+                  backgroundColor: usbPermission === 'granted' ? 'rgba(16,185,129,0.20)' : 'rgba(99,102,241,0.20)',
+                  borderColor: usbPermission === 'granted' ? 'rgba(16,185,129,0.60)' : 'rgba(129,140,248,0.60)',
+                  color: usbPermission === 'granted' ? '#6ee7b7' : '#c7d2fe',
+                }}
+                title={usbPermission === 'granted' ? 'Scan for plugged-in DSC token' : 'Grant browser permission to detect DSC USB tokens'}
+              >
+                {usbGranting
+                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Scanning…</>
+                  : usbPermission === 'granted'
+                    ? <><Usb className="h-3.5 w-3.5" />Scan DSC Token</>
+                    : <><Usb className="h-3.5 w-3.5" />Enable DSC Detection</>}
+              </Button>
+            )}
             <Button
               variant="outline"
               onClick={handleDetectDscDuplicates}
