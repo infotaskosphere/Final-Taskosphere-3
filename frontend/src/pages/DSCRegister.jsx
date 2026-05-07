@@ -24,6 +24,7 @@ import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
 import { detectDscDuplicates } from '@/lib/aiDuplicateEngine';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
+import { readCertFromUsbToken } from '@/lib/dscTokenReader';
 
 // ─── Print styles ─────────────────────────────────────────────────────────────
 const PRINT_STYLE = `
@@ -260,21 +261,29 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
 
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
-  // ── Read certificate from token via backend ─────────────────────────────────
+  // ── Read certificate DIRECTLY IN BROWSER via WebUSB + CCID (no backend needed) ──
   const handleReadCertificate = async () => {
     if (!pin.trim()) { setReadError('Enter the token PIN first.'); return; }
+    if (!device) { setReadError('No USB device available.'); return; }
     setReading(true);
     setReadError('');
     try {
-      const res = await api.post('/dsc/read-certificate', { pin: pin.trim() });
-      const cert = res.data;
+      if (!device.opened) await device.open();
+      const cert = await readCertFromUsbToken(device, pin.trim());
+      if (!cert || !cert.holder_name) {
+        setReadError(
+          'Could not read certificate data from the token. ' +
+          'Try a different PIN, or fill the form manually below.'
+        );
+        return;
+      }
       setForm(prev => ({
         ...prev,
-        holder_name:   cert.holder_name   || prev.holder_name,
-        serial_number: cert.serial_number || prev.serial_number,
-        issue_date:    cert.issue_date    || prev.issue_date,
-        expiry_date:   cert.expiry_date   || prev.expiry_date,
-        associated_with: cert.organization || prev.associated_with,
+        holder_name:     cert.holder_name   || prev.holder_name,
+        serial_number:   cert.serial_number || prev.serial_number,
+        issue_date:      cert.issue_date    || prev.issue_date,
+        expiry_date:     cert.expiry_date   || prev.expiry_date,
+        associated_with: cert.organization  || prev.associated_with,
         notes: [
           prev.notes,
           cert.issuer ? `Issuer: ${cert.issuer}` : null,
@@ -284,8 +293,12 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
       setCertFetched(true);
       toast.success('Certificate data read from token ✓');
     } catch (err) {
-      const msg = err?.response?.data?.detail || 'Failed to read token. Check PIN and middleware.';
-      setReadError(msg);
+      console.error('[DSC] WebUSB read error:', err);
+      setReadError(
+        err?.message?.includes('claimInterface')
+          ? 'Browser could not claim the USB interface. Close any other software using this token and try again.'
+          : (err?.message || 'Failed to read token. Ensure the token is plugged in and try again.')
+      );
     } finally {
       setReading(false);
     }
@@ -468,10 +481,8 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
                 </div>
                 {readError && (
                   <div style={{ margin: '8px 0 0', padding: '8px 10px', background: isDark ? 'rgba(239,68,68,0.12)' : '#fff1f1', borderRadius: 8, border: '1px solid rgba(239,68,68,0.3)' }}>
-                    <p style={{ margin: 0, fontSize: 11, color: '#ef4444', lineHeight: 1.5, fontWeight: 600 }}>⚠ Could not auto-read the token</p>
-                    <p style={{ margin: '3px 0 0', fontSize: 10, color: isDark ? '#fca5a5' : '#b91c1c', lineHeight: 1.5 }}>
-                      The PKCS#11 middleware (opensc / eToken) is not installed on the server, or the PIN is incorrect. <strong>You can still fill in the details manually below.</strong>
-                    </p>
+                    <p style={{ margin: 0, fontSize: 11, color: '#ef4444', lineHeight: 1.5, fontWeight: 600 }}>⚠ Could not read certificate</p>
+                    <p style={{ margin: '3px 0 0', fontSize: 10, color: isDark ? '#fca5a5' : '#b91c1c', lineHeight: 1.5 }}>{readError}</p>
                   </div>
                 )}
                 {!certFetched && !readError && (
