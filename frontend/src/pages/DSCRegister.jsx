@@ -352,18 +352,20 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
       <div
         style={{
           position: 'fixed', inset: 0, zIndex: 9999,
-          display: 'flex', alignItems: 'flex-end',
+          display: 'flex', alignItems: 'center',
           justifyContent: 'center',
-          padding: '0 16px 24px',
+          padding: '16px',
           background: 'rgba(0,0,0,0.52)',
           backdropFilter: 'blur(5px)',
         }}
       >
         <div style={{
-          width: '100%', maxWidth: 480,
+          width: '100%', maxWidth: 720,
+          maxHeight: '90vh',
           background: bg, border: `1px solid ${border}`,
           borderRadius: 20, boxShadow: '0 24px 64px rgba(0,0,0,0.35)',
           overflow: 'hidden',
+          display: 'flex', flexDirection: 'column',
           animation: 'dscSlideUp 0.26s cubic-bezier(0.34,1.4,0.64,1)',
         }}>
 
@@ -430,12 +432,12 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
 
           {/* ── Form ── */}
           {!saved && (
-            <div style={{ padding: '0 20px 4px' }}>
+            <div style={{ padding: '0 20px 4px', overflowY: 'auto', flex: 1 }}>
 
               {/* ── PIN Read Section ── */}
-              <div style={{ marginBottom: 14, padding: '10px 12px', background: certFetched ? (isDark ? 'rgba(16,185,129,0.1)' : '#f0fdf4') : surface, borderRadius: 10, border: `1px solid ${certFetched ? '#10b981' : border}` }}>
-                <label style={{ ...labelStyle, marginBottom: 6, color: certFetched ? '#10b981' : labelClr }}>
-                  {certFetched ? '✓ Certificate Read from Token' : 'Read Certificate from Token'}
+              <div style={{ marginBottom: 14, padding: '10px 12px', background: certFetched ? (isDark ? 'rgba(16,185,129,0.1)' : '#f0fdf4') : surface, borderRadius: 10, border: `1px solid ${certFetched ? '#10b981' : readError ? '#ef4444' : border}` }}>
+                <label style={{ ...labelStyle, marginBottom: 6, color: certFetched ? '#10b981' : readError ? '#ef4444' : labelClr }}>
+                  {certFetched ? '✓ Certificate Read from Token' : 'Read Certificate from Token (Optional)'}
                 </label>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <input
@@ -465,29 +467,41 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
                   </button>
                 </div>
                 {readError && (
-                  <p style={{ margin: '6px 0 0', fontSize: 11, color: '#ef4444', lineHeight: 1.4 }}>⚠ {readError}</p>
+                  <div style={{ margin: '8px 0 0', padding: '8px 10px', background: isDark ? 'rgba(239,68,68,0.12)' : '#fff1f1', borderRadius: 8, border: '1px solid rgba(239,68,68,0.3)' }}>
+                    <p style={{ margin: 0, fontSize: 11, color: '#ef4444', lineHeight: 1.5, fontWeight: 600 }}>⚠ Could not auto-read the token</p>
+                    <p style={{ margin: '3px 0 0', fontSize: 10, color: isDark ? '#fca5a5' : '#b91c1c', lineHeight: 1.5 }}>
+                      The PKCS#11 middleware (opensc / eToken) is not installed on the server, or the PIN is incorrect. <strong>You can still fill in the details manually below.</strong>
+                    </p>
+                  </div>
                 )}
                 {!certFetched && !readError && (
                   <p style={{ margin: '5px 0 0', fontSize: 10, color: labelClr, lineHeight: 1.4 }}>
-                    Enter your token PIN and click "Fetch Data" to auto-fill the certificate details below.
+                    Optional — enter your token PIN and click “Fetch Data” to auto-fill. Or fill the form manually below.
                   </p>
                 )}
               </div>
 
-              {/* Holder Name — full width, prominent */}
-              <div style={{ marginBottom: 12 }}>
-                <label style={labelStyle}>Holder Name <span style={{ color: '#ef4444' }}>*</span></label>
-                <input
-                  style={{ ...inputStyle, fontSize: 14, fontWeight: 600, background: certFetched && form.holder_name ? (isDark ? 'rgba(16,185,129,0.08)' : '#f0fdf4') : inputBg, borderColor: certFetched && form.holder_name ? '#10b981' : inputBdr }}
-                  placeholder="e.g. Rajesh Kumar Sharma"
-                  value={form.holder_name}
-                  onChange={e => set('holder_name', e.target.value)}
-                  autoFocus={!certFetched}
-                />
-              </div>
-
-              {/* Row: Serial Number + DSC Type */}
-              <div style={{ ...rowStyle, marginBottom: 12 }}>
+              {/* ── 3-column compact grid ── */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+                {/* Holder Name — spans 2 cols */}
+                <div style={{ gridColumn: 'span 2' }}>
+                  <label style={labelStyle}>Holder Name <span style={{ color: '#ef4444' }}>*</span></label>
+                  <input
+                    style={{ ...inputStyle, fontSize: 13, fontWeight: 600, background: certFetched && form.holder_name ? (isDark ? 'rgba(16,185,129,0.08)' : '#f0fdf4') : inputBg, borderColor: certFetched && form.holder_name ? '#10b981' : inputBdr }}
+                    placeholder="e.g. Rajesh Kumar Sharma"
+                    value={form.holder_name}
+                    onChange={e => set('holder_name', e.target.value)}
+                    autoFocus={!certFetched}
+                  />
+                </div>
+                <div>
+                  <label style={labelStyle}>DSC Type</label>
+                  <select style={{ ...inputStyle, cursor: 'pointer' }} value={form.dsc_type} onChange={e => set('dsc_type', e.target.value)}>
+                    {['Class 3','Class 2','Signature','Encryption','Combo','DGFT'].map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
                 <div>
                   <label style={labelStyle}>Serial Number</label>
                   <input
@@ -498,78 +512,37 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
                   />
                 </div>
                 <div>
-                  <label style={labelStyle}>DSC Type</label>
-                  <select
-                    style={{ ...inputStyle, cursor: 'pointer' }}
-                    value={form.dsc_type}
-                    onChange={e => set('dsc_type', e.target.value)}
-                  >
-                    {['Class 3','Class 2','Signature','Encryption','Combo','DGFT'].map(t => (
-                      <option key={t} value={t}>{t}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Row: Type + Password */}
-              <div style={{ ...rowStyle, marginBottom: 12 }}>
-                <div>
                   <label style={labelStyle}>Associated With</label>
-                  <input
-                    style={inputStyle}
-                    placeholder="Firm / client name"
-                    value={form.associated_with}
-                    onChange={e => set('associated_with', e.target.value)}
-                  />
+                  <input style={inputStyle} placeholder="Firm / client name" value={form.associated_with} onChange={e => set('associated_with', e.target.value)} />
                 </div>
                 <div>
                   <label style={labelStyle}>
                     <Lock style={{ width: 10, height: 10, display: 'inline', marginRight: 3, verticalAlign: 'middle' }} />
-                    Token Password (stored)
+                    Token Password
                   </label>
-                  <input
-                    style={inputStyle}
-                    type="text"
-                    placeholder="e.g. 12345678"
-                    value={form.dsc_password}
-                    onChange={e => set('dsc_password', e.target.value)}
-                  />
+                  <input style={inputStyle} type="text" placeholder="e.g. 12345678" value={form.dsc_password} onChange={e => set('dsc_password', e.target.value)} />
                 </div>
-              </div>
-
-              {/* Row: Associated With + Entity Type */}
-              <div style={{ ...rowStyle, marginBottom: 12 }}>
                 <div>
                   <label style={labelStyle}>Issue Date <span style={{ color: '#ef4444' }}>*</span></label>
                   <input
                     style={{ ...inputStyle, background: certFetched && form.issue_date ? (isDark ? 'rgba(16,185,129,0.08)' : '#f0fdf4') : inputBg, borderColor: certFetched && form.issue_date ? '#10b981' : inputBdr }}
-                    type="date"
-                    value={form.issue_date}
-                    onChange={e => set('issue_date', e.target.value)}
+                    type="date" value={form.issue_date} onChange={e => set('issue_date', e.target.value)}
                   />
                 </div>
                 <div>
                   <label style={labelStyle}>Expiry Date <span style={{ color: '#ef4444' }}>*</span></label>
                   <input
                     style={{ ...inputStyle, background: certFetched && form.expiry_date ? (isDark ? 'rgba(16,185,129,0.08)' : '#f0fdf4') : inputBg, borderColor: certFetched && form.expiry_date ? '#10b981' : inputBdr }}
-                    type="date"
-                    value={form.expiry_date}
-                    onChange={e => set('expiry_date', e.target.value)}
+                    type="date" value={form.expiry_date} onChange={e => set('expiry_date', e.target.value)}
                   />
                 </div>
-              </div>
-
-              {/* Entity Type */}
-              <div style={{ marginBottom: 12 }}>
-                <label style={labelStyle}>Entity Type</label>
-                <select
-                  style={{ ...inputStyle, cursor: 'pointer' }}
-                  value={form.entity_type}
-                  onChange={e => set('entity_type', e.target.value)}
-                >
-                  <option value="firm">Firm</option>
-                  <option value="client">Client</option>
-                </select>
+                <div>
+                  <label style={labelStyle}>Entity Type</label>
+                  <select style={{ ...inputStyle, cursor: 'pointer' }} value={form.entity_type} onChange={e => set('entity_type', e.target.value)}>
+                    <option value="firm">Firm</option>
+                    <option value="client">Client</option>
+                  </select>
+                </div>
               </div>
 
               {/* Advanced — Notes (collapsible) */}
@@ -579,9 +552,7 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
                   onClick={() => setShowAdvanced(p => !p)}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: labelClr, fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, padding: 0, letterSpacing: '0.04em' }}
                 >
-                  {showAdvanced
-                    ? <ChevronUp style={{ width: 13, height: 13 }} />
-                    : <ChevronDown style={{ width: 13, height: 13 }} />}
+                  {showAdvanced ? <ChevronUp style={{ width: 13, height: 13 }} /> : <ChevronDown style={{ width: 13, height: 13 }} />}
                   {showAdvanced ? 'Hide notes' : 'Add notes'}
                 </button>
                 {showAdvanced && (
