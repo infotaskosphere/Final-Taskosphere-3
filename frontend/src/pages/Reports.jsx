@@ -226,11 +226,13 @@ export default function Reports() {
   const [dashStats,  setDashStats]  = useState(null);
   const [attendance, setAttendance] = useState([]);
   const [allUsers,   setAllUsers]   = useState([]);
+  const [companies,  setCompanies]  = useState([]);
   const [performers, setPerformers] = useState([]);
   const [rankPeriod, setRankPeriod] = useState('monthly');
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selUser,    setSelUser]    = useState('all');
+  const [selCompany, setSelCompany] = useState('all');
   const [tab,        setTab]        = useState('overview');
   const [showCustomize, setShowCustomize] = useState(false);
   const RPT_SECTIONS = ['kpi_row','tab_panels'];
@@ -241,6 +243,13 @@ export default function Reports() {
   const { order: rptOrder, moveSection: rptMove, resetOrder: rptReset } = usePageLayout('reports', RPT_SECTIONS);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
+  const fetchCompanies = async () => {
+    try {
+      const r = await api.get('/companies/list');
+      setCompanies(Array.isArray(r.data) ? r.data : []);
+    } catch { setCompanies([]); }
+  };
+
   const fetchAll = async (ref=false) => {
     ref ? setRefreshing(true) : setLoading(true);
     const [r1,r2,r3,r4] = await Promise.allSettled([
@@ -273,7 +282,7 @@ export default function Reports() {
     } catch { setPerformers([]); }
   };
 
-  useEffect(()=>{ if(user) fetchAll(); },[user]);
+  useEffect(()=>{ if(user) { fetchAll(); fetchCompanies(); } },[user]);
   useEffect(()=>{ fetchPerf(); },[rankPeriod]);
 
   // ── Derived: tasks ────────────────────────────────────────────────────────
@@ -302,8 +311,10 @@ export default function Reports() {
     if (!isAdmin && !hasCrossVisReports) return [];
     const m=new Map();
     allUsers.forEach(u=>{if(u.id&&u.full_name)m.set(u.id,u);});
-    return Array.from(m.values());
-  },[allUsers,isAdmin]);
+    const all = Array.from(m.values());
+    if (selCompany === 'all') return all;
+    return all.filter(u => u.company_id === selCompany);
+  },[allUsers,isAdmin,selCompany]);
 
   // ── Chart data ─────────────────────────────────────────────────────────────
   const statusData = useMemo(()=>[
@@ -531,6 +542,14 @@ export default function Reports() {
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+                {isAdmin && companies.length > 0 && (
+                  <select value={selCompany} onChange={e => { setSelCompany(e.target.value); setSelUser('all'); }}
+                    className="h-8 px-3 text-xs rounded-xl font-semibold focus:outline-none focus:ring-2 focus:ring-white/50"
+                    style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.25)',color:'white'}}>
+                    <option value="all" style={{color:'#1e293b'}}>All Companies</option>
+                    {companies.map(co=><option key={co.id} value={co.id} style={{color:'#1e293b'}}>{co.name}</option>)}
+                  </select>
+                )}
                 {canSwitchUser && uUsers.length>0 && (
                   <select value={selUser} onChange={e=>setSelUser(e.target.value)}
                     className="h-8 px-3 text-xs rounded-xl font-semibold focus:outline-none focus:ring-2 focus:ring-white/50"
