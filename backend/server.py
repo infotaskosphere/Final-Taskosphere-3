@@ -3751,15 +3751,143 @@ def _parse_cert_bytes(cert_bytes: bytes) -> DSCCertificateData:
     )
 
 
+def _ensure_opensc_installed() -> bool:
+    """Auto-install opensc on Linux if not already present. Returns True if available."""
+    import shutil, subprocess, os
+    if shutil.which("pkcs11-tool"):
+        return True
+    # Only attempt on Linux
+    if os.name != "nt":
+        try:
+            subprocess.run(
+                ["apt-get", "install", "-y", "--no-install-recommends", "opensc", "libccid", "pcscd"],
+                check=True, capture_output=True, timeout=120
+            )
+            return shutil.which("pkcs11-tool") is not None
+        except Exception:
+            pass
+    return False
+
+
+def _try_opensc_cli(pin: str) -> Optional[DSCCertificateData]:
+    """
+    Use the opensc CLI tool (pkcs11-tool) to read the certificate from the token.
+    This works even when PyKCS11 python bindings are not installed, as long as
+    the opensc package is available on the server.
+    """
+    import shutil, subprocess, tempfile, os
+
+    pkcs11_tool = shutil.which("pkcs11-tool")
+    if not pkcs11_tool:
+        return None
+
+    # Collect candidate PKCS#11 libs for pkcs11-tool --module
+    CANDIDATE_LIBS = [
+        "/usr/lib/x86_64-linux-gnu/pkcs11/opensc-pkcs11.so",
+        "/usr/lib/opensc-pkcs11.so",
+        "/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so",
+        "/usr/lib/libeTPkcs11.so",
+        "/usr/lib/libcastle.so.1",
+        "/usr/lib/libcryptoki.so",
+        "/usr/lib64/pkcs11/opensc-pkcs11.so",
+        None,  # let pkcs11-tool use its default
+    ]
+
+    for lib in CANDIDATE_LIBS:
+        try:
+            cmd = [pkcs11_tool, "--read-object", "--type", "cert", "--slot-index", "0", "--pin", pin]
+            if lib and os.path.exists(lib):
+                cmd += ["--module", lib]
+
+            result = subprocess.run(cmd, capture_output=True, timeout=15)
+            if result.returncode == 0 and result.stdout:
+                data = _parse_cert_bytes(result.stdout)
+                if data and data.holder_name:
+                    data.read_method = "opensc-cli"
+                    return data
+        except Exception:
+            continue
+    return None
+
+
+def _try_pyscard_read(pin: str) -> Optional[DSCCertificateData]:
+    """
+    Fallback: use pyscard (PC/SC) to communicate directly with the smart card
+    via APDU commands. Works with any CCID-compliant DSC token.
+    Sends SELECT + READ commands to extract the certificate from the token.
+    """
+    try:
+        from smartcard.System import readers
+        from smartcard.util import toHexString, toBytes
+        from smartcard.Exceptions import CardConnectionException
+    except ImportError:
+        return None
+
+    try:
+        reader_list = readers()
+        if not reader_list:
+            return None
+
+        connection = reader_list[0].createConnection()
+        connection.connect()
+
+        # SELECT MF
+        SELECT_MF = [0x00, 0xA4, 0x04, 0x00]
+        connection.transmit(SELECT_MF)
+
+        # Try standard DSC certificate EF paths (Indian DSC tokens)
+        CERT_PATHS = [
+            [0x00, 0xA4, 0x02, 0x04, 0x02, 0x10, 0x05],  # ePass2003
+            [0x00, 0xA4, 0x02, 0x04, 0x02, 0x00, 0x01],  # eToken
+            [0x00, 0xA4, 0x02, 0x04, 0x02, 0x10, 0x01],  # WatchData/ProxKey
+        ]
+
+        cert_bytes = None
+        for path_apdu in CERT_PATHS:
+            try:
+                resp, sw1, sw2 = connection.transmit(path_apdu)
+                if sw1 == 0x90:
+                    # READ BINARY — read up to 4096 bytes in chunks
+                    cert_data = []
+                    offset = 0
+                    while True:
+                        read_apdu = [0x00, 0xB0, (offset >> 8) & 0xFF, offset & 0xFF, 0xFF]
+                        data_chunk, sw1, sw2 = connection.transmit(read_apdu)
+                        if sw1 == 0x90 and data_chunk:
+                            cert_data.extend(data_chunk)
+                            offset += len(data_chunk)
+                            if len(data_chunk) < 255:
+                                break
+                        else:
+                            break
+                    if cert_data:
+                        cert_bytes = bytes(cert_data)
+                        break
+            except Exception:
+                continue
+
+        connection.disconnect()
+
+        if cert_bytes:
+            data = _parse_cert_bytes(cert_bytes)
+            if data and data.holder_name:
+                data.read_method = "pyscard"
+                return data
+    except Exception:
+        pass
+    return None
+
+
 def _try_pkcs11_read(pin: str, lib_path: Optional[str] = None) -> Optional[DSCCertificateData]:
     """Try to read certificate using PyKCS11 (python-pkcs11 wrapper)."""
-    # Common PKCS#11 library paths on Linux / Windows
+    import os
     CANDIDATE_LIBS = [
         lib_path,
         "/usr/lib/x86_64-linux-gnu/pkcs11/opensc-pkcs11.so",
         "/usr/lib/opensc-pkcs11.so",
-        "/usr/lib/libeTPkcs11.so",          # eToken / Aladdin
-        "/usr/lib/libcastle.so.1",           # Watchdata / Proxkey
+        "/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so",
+        "/usr/lib/libeTPkcs11.so",
+        "/usr/lib/libcastle.so.1",
         "/usr/lib/libcryptoki.so",
         "/usr/lib64/pkcs11/opensc-pkcs11.so",
         "C:\\Windows\\System32\\eTPKCS11.dll",
@@ -3774,6 +3902,8 @@ def _try_pkcs11_read(pin: str, lib_path: Optional[str] = None) -> Optional[DSCCe
     for lib in CANDIDATE_LIBS:
         if not lib:
             continue
+        if not os.path.exists(lib):
+            continue
         try:
             pkcs11 = PyKCS11.PyKCS11Lib()
             pkcs11.load(lib)
@@ -3787,7 +3917,6 @@ def _try_pkcs11_read(pin: str, lib_path: Optional[str] = None) -> Optional[DSCCe
                 session.logout()
                 session.closeSession()
                 continue
-            # Prefer signing certificate (CKC_X_509)
             for cert_obj in certs:
                 attrs = session.getAttributeValue(cert_obj, [PyKCS11.CKA_VALUE, PyKCS11.CKA_CERTIFICATE_TYPE])
                 cert_bytes = bytes(attrs[0])
@@ -3810,29 +3939,46 @@ async def read_dsc_certificate(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Read certificate data (holder name, expiry, serial number, etc.) from a
-    physically connected DSC USB token using the supplied PIN.
+    Read certificate data from a physically connected DSC USB token.
 
-    The backend tries PKCS#11 (via PyKCS11) with several common library paths.
-    If no hardware token is found, a 422 is returned so the frontend can
-    gracefully fall back to manual entry.
+    Tries 3 methods in order:
+      1. PyKCS11 python bindings (fastest, if installed)
+      2. opensc CLI via pkcs11-tool (auto-installs opensc if missing on Linux)
+      3. pyscard PC/SC direct APDU (broadest hardware support)
+
+    Returns holder_name, serial_number, issue_date, expiry_date, organization.
     """
     if not req.pin or not req.pin.strip():
         raise HTTPException(status_code=422, detail="PIN is required to read the DSC token.")
 
-    data = _try_pkcs11_read(req.pin.strip(), req.lib_path)
+    pin = req.pin.strip()
 
-    if data is None:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Could not read certificate from the token. "
-                "Ensure the token is plugged in, the PKCS#11 middleware is installed "
-                "(e.g. opensc, eToken middleware), and the PIN is correct."
-            )
+    # Method 1: PyKCS11 python bindings
+    data = _try_pkcs11_read(pin, req.lib_path)
+    if data and data.holder_name:
+        return data
+
+    # Method 2: opensc CLI (auto-installs on Render/Linux if missing)
+    _ensure_opensc_installed()
+    data = _try_opensc_cli(pin)
+    if data and data.holder_name:
+        return data
+
+    # Method 3: pyscard direct PC/SC APDU
+    data = _try_pyscard_read(pin)
+    if data and data.holder_name:
+        return data
+
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            "Could not read the certificate from the token. "
+            "Make sure: (1) the DSC USB token is physically plugged into the SERVER machine, "
+            "(2) pcscd (PC/SC daemon) is running, and (3) the PIN is correct. "
+            "On Render.com, the token must be plugged into your local machine and the backend "
+            "must be running locally (not on the cloud) to access USB hardware."
         )
-
-    return data
+    )
 
 
 @api_router.post("/dsc", response_model=DSC)
