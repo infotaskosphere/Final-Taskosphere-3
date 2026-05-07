@@ -486,7 +486,7 @@ export default function AttendanceReportModal({
   const [selectedDate,      setSelectedDate]      = useState(format(new Date(), 'yyyy-MM-dd'));
   const [employeeFilter,    setEmployeeFilter]    = useState('all');
   const [selectedEmployees, setSelectedEmployees] = useState([]);
-  const [companyName,       setCompanyName]       = useState('Your Company Name');
+  const [companyName,       setCompanyName]       = useState('');
   const [generating,        setGenerating]        = useState(false);
   const [companyFilter,     setCompanyFilter]     = useState('all');
 
@@ -506,6 +506,14 @@ export default function AttendanceReportModal({
     if (companyFilter === '__unassigned__') return baseUsers.filter(u => !u.company_id);
     return baseUsers.filter(u => u.company_id === companyFilter);
   }, [baseUsers, companyFilter]);
+
+  // Derive the report header company name from the current selection
+  const reportCompanyName = useMemo(() => {
+    if (companyFilter === 'all') return companyName.trim() || 'All Companies';
+    if (companyFilter === '__unassigned__') return companyName.trim() || 'Unassigned Employees';
+    const co = safeCompanies.find(c => c.id === companyFilter);
+    return co ? co.name : (companyName.trim() || 'Company');
+  }, [companyFilter, companyName, safeCompanies]);
 
   const targetUsers = useMemo(() => {
     if (employeeFilter === 'all') return availableUsers;
@@ -596,7 +604,7 @@ export default function AttendanceReportModal({
           };
         });
 
-        htmlContent = buildMonthlyHTML(companyName.trim() || 'Company', yr, mo, rows, dayHeaders, safeHolidays);
+        htmlContent = buildMonthlyHTML(reportCompanyName, yr, mo, rows, dayHeaders, safeHolidays);
         filename    = `Attendance_Monthly_${selectedMonth}_${employeeFilter === 'all' ? 'All' : 'Selected'}.html`;
 
       } else {
@@ -620,7 +628,7 @@ export default function AttendanceReportModal({
           };
         });
 
-        htmlContent = buildDatewiseHTML(companyName.trim() || 'Company', dateStr, rows);
+        htmlContent = buildDatewiseHTML(reportCompanyName, dateStr, rows);
         filename    = `Attendance_Daily_${dateStr}_${employeeFilter === 'all' ? 'All' : 'Selected'}.html`;
       }
 
@@ -715,22 +723,51 @@ export default function AttendanceReportModal({
             style={{ scrollbarWidth: 'thin', scrollbarColor: '#cbd5e1 transparent' }}
           >
 
-            {/* Company name */}
+            {/* Company selector */}
             <div>
               <label className="text-xs font-bold uppercase tracking-widest mb-2 block" style={{ color: isDark ? D.muted : '#64748b' }}>
-                Company Name <span className="normal-case font-normal">(shown in report header)</span>
+                Company <span className="normal-case font-normal">(filters employees · sets report header)</span>
               </label>
               <div className="relative">
                 <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                <select
+                  value={companyFilter}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setCompanyFilter(val);
+                    setSelectedEmployees([]);
+                    if (val !== 'all' && val !== '__unassigned__') {
+                      const co = safeCompanies.find(c => c.id === val);
+                      setCompanyName(co ? co.name : '');
+                    } else {
+                      setCompanyName('');
+                    }
+                  }}
+                  className={`${inputBase} pl-10 pr-10 appearance-none`}
+                  style={inputStyle}
+                >
+                  <option value="all">All Companies ({baseUsers.length} employees)</option>
+                  {safeCompanies.map(co => {
+                    const count = baseUsers.filter(u => u.company_id === co.id).length;
+                    return <option key={co.id} value={co.id}>{co.name} ({count} employees)</option>;
+                  })}
+                  {baseUsers.some(u => !u.company_id) && (
+                    <option value="__unassigned__">— No Company ({baseUsers.filter(u => !u.company_id).length} employees)</option>
+                  )}
+                </select>
+              </div>
+              {/* Custom header text — only when All Companies or no company list */}
+              {(companyFilter === 'all' || safeCompanies.length === 0) && (
                 <input
                   type="text"
                   value={companyName}
                   onChange={e => setCompanyName(e.target.value)}
-                  placeholder="Your Company Name"
-                  className={`${inputBase} pl-10`}
-                  style={inputStyle}
+                  placeholder="Custom report header name (optional)"
+                  className={`${inputBase} mt-2`}
+                  style={{ ...inputStyle, fontSize: '12px' }}
                 />
-              </div>
+              )}
             </div>
 
             {/* Report type */}
@@ -809,34 +846,6 @@ export default function AttendanceReportModal({
                 />
               )}
             </div>
-
-            {/* Company filter */}
-            {safeCompanies.length > 0 && (
-              <div>
-                <label className="text-xs font-bold uppercase tracking-widest mb-2 block" style={{ color: isDark ? D.muted : '#64748b' }}>
-                  Filter by Company
-                </label>
-                <div className="relative">
-                  <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-                  <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-                  <select
-                    value={companyFilter}
-                    onChange={e => { setCompanyFilter(e.target.value); setSelectedEmployees([]); }}
-                    className={`${inputBase} pl-10 pr-10 appearance-none`}
-                    style={inputStyle}
-                  >
-                    <option value="all">All Companies ({baseUsers.length} employees)</option>
-                    {safeCompanies.map(co => {
-                      const count = baseUsers.filter(u => u.company_id === co.id).length;
-                      return <option key={co.id} value={co.id}>{co.name} ({count})</option>;
-                    })}
-                    {baseUsers.some(u => !u.company_id) && (
-                      <option value="__unassigned__">— No Company ({baseUsers.filter(u => !u.company_id).length})</option>
-                    )}
-                  </select>
-                </div>
-              </div>
-            )}
 
             {/* Employee filter */}
             <div>
