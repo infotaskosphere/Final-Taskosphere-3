@@ -2179,7 +2179,7 @@ export default function Users() {
 
   const fetchCompanies = useCallback(async () => {
     try {
-      const res = await api.get('/quotations/companies');
+      const res = await api.get('/companies/list');
       setCompanies(Array.isArray(res.data) ? res.data : []);
     } catch {}
   }, []);
