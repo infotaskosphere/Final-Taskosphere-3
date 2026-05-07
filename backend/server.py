@@ -1804,6 +1804,13 @@ async def reject_user(user_id: str, current_user: User = Depends(get_current_use
 #============================================================
 # USER MANAGEMENT
 #=============================================================
+@api_router.get("/companies/list")
+async def list_companies_for_management(current_user: User = Depends(get_current_user)):
+    """Return all companies for user-association and report filtering — accessible to any authenticated user."""
+    companies = await db.companies.find({}, {"_id": 0, "id": 1, "name": 1}).sort("name", 1).to_list(500)
+    return companies
+
+
 @api_router.get("/users")
 async def get_users(
     user_id: Optional[str] = None,
