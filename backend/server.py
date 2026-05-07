@@ -5081,9 +5081,15 @@ def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
     if addr_block_m:
         chunk = addr_block_m.group(2) or addr_block_m.group(0)
         # Remove any leading "Business" label that wraps to next line
-        chunk = re.sub(r'(?i)^Business\s+', '', chunk.strip())
-        chunk = re.sub(r'(?i)\nBusiness\s+', ' ', chunk)
+        chunk = re.sub(r'(?i)^Business\s*[:\-]?\s*', '', chunk.strip())
+        chunk = re.sub(r'(?i)\nBusiness\s*[:\-]?\s*', ' ', chunk)
         addr_block_raw = re.sub(r'\s+', ' ', chunk).strip()
+        # KEY FIX: strip any "Address:" / label artifact that pdfplumber bleeds into captured text
+        addr_block_raw = re.sub(r'(?i)^Address\s*[:\-]\s*', '', addr_block_raw).strip()
+        addr_block_raw = re.sub(r'(?i)^(?:Address\s+of\s+)?(?:Principal\s+Place\s+of\s+)?Business\s*[:\-]?\s*', '', addr_block_raw).strip()
+        addr_block_raw = re.sub(r'(?i)^Address\s+of\s+Principal\s+Place\s+of\s+Business\s*[:\-]?\s*', '', addr_block_raw).strip()
+        # Remove any leading digit-dot prefix like "4." that bleeds in
+        addr_block_raw = re.sub(r'^\d+\.\s+', '', addr_block_raw).strip()
 
     address = city = state = pin = full_address = ""
 
@@ -5113,6 +5119,8 @@ def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
             raw = re.sub(r'(?i)(signature not verified|digitally signed|date:.*|goods and services tax.*)', '', addr_block_raw).strip()
 
             parts = [p.strip() for p in re.split(r',\s*', raw) if p.strip()]
+            # Strip any residual "Address:" label from any part (safety net)
+            parts = [re.sub(r'(?i)^address\s*[:\-]\s*', '', p).strip() for p in parts if p.strip()]
 
             # Extract 6-digit PIN
             for i, p in enumerate(parts):
@@ -5252,6 +5260,369 @@ async def check_gstin(
             "company_name": existing.get("company_name", ""),
         }
     return {"exists": False, "client_id": None, "company_name": None}
+
+
+# ==============================================================
+# UDYAM CERTIFICATE PDF PARSER
+# ==============================================================
+def _parse_udyam_pdf(pdf_bytes: bytes) -> dict:
+    """
+    Parse a Udyam Registration Certificate PDF.
+    Returns: udyam_number, enterprise_name, msme_type, major_activity,
+             mobile, email, date_of_incorporation, address, city, state, pin,
+             social_category, pan.
+    """
+    from io import BytesIO
+    import pdfplumber
+
+    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+        pages = [p.extract_text() or "" for p in pdf.pages]
+
+    full_text = "\n".join(pages)
+
+    def _find(pat, text, group=1, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL):
+        m = re.search(pat, text, flags)
+        return m.group(group).strip() if m else ""
+
+    # Udyam registration number
+    udyam_number = _find(r'UDYAM[- ]REGISTRATION[- ]NUMBER\s+(UDYAM-[A-Z]{2}-\d{2}-\d+)', full_text)
+    if not udyam_number:
+        udyam_number = _find(r'(UDYAM-[A-Z]{2}-\d{2}-\d+)', full_text)
+
+    # Enterprise name — strip M/S prefix
+    enterprise_name_raw = _find(r'NAME OF ENTERPRISE\s+([^\n]+)', full_text)
+    if not enterprise_name_raw:
+        enterprise_name_raw = _find(r'Name of Enterprise\s*[:\-]?\s*([^\n]+)', full_text)
+    enterprise_name = re.sub(r'(?i)^M[/\.]?S[/\.]?\s+', '', enterprise_name_raw.strip()).strip()
+
+    # MSME type — most recent year classification
+    type_matches = re.findall(r'\d{4}-\d{2,4}\s+(Micro|Small|Medium)', full_text, re.IGNORECASE)
+    msme_type = type_matches[0].title() if type_matches else _find(r'\b(Micro|Small|Medium)\b', full_text)
+
+    # Major activity
+    major_activity = _find(r'MAJOR ACTIVITY\s+([^\n]+)', full_text)
+    if not major_activity:
+        major_activity = _find(r'Major Activity\s*[:\-]?\s*([^\n]+)', full_text)
+
+    # Social category
+    social_category = _find(r'SOCIAL CATEGORY OF\s+ENTREPRENEUR\s+([^\n]+)', full_text)
+    if not social_category:
+        social_category = _find(r'Social Category.*?([^\n]+)\n', full_text)
+
+    # Mobile
+    mobile = _find(r'Mobile\s*[:\-]?\s*(\d{10})', full_text)
+    if not mobile:
+        mobile = _find(r'Mobile No\.?\s*[:\-]?\s*(\d{10})', full_text)
+
+    # Email
+    email = _find(r'Email\s*[:\-]?\s*([\w.+\-]+@[\w.\-]+\.\w+)', full_text)
+
+    # Date of incorporation
+    doi_raw = _find(
+        r'DATE OF (?:INCORPORATION|COMMENCEMENT)\s*/?\s*REGISTRATION OF ENTERPRISE\s+(\d{2}/\d{2}/\d{4})',
+        full_text
+    )
+    if not doi_raw:
+        doi_raw = _find(r'Date of Incorporation\s*[:\-]?\s*(\d{2}/\d{2}/\d{4})', full_text)
+    date_of_incorporation = ""
+    if doi_raw:
+        try:
+            from dateutil import parser as date_parser
+            date_of_incorporation = date_parser.parse(doi_raw, dayfirst=True).strftime("%Y-%m-%d")
+        except Exception:
+            date_of_incorporation = doi_raw
+
+    # PAN
+    pan = _find(r'\bPAN\s+([A-Z]{5}\d{4}[A-Z])\b', full_text)
+
+    # ── Address ───────────────────────────────────────────────────────────────
+    flat     = _find(r'Flat/Door/Block\s*No\.?\s*[:\-]?\s*([^\n,]+)', full_text)
+    building = _find(r'Name of\s*(?:Premises/\s*)?Building\s*[:\-]?\s*([^\n,]+)', full_text)
+    village  = _find(r'Village/Town\s*[:\-]?\s*([^\n]+?)(?=\s*Block\b|\s*Road\b|\n)', full_text)
+    block    = _find(r'Block\s+([^\n]+?)(?=\s*Road\b|\n)', full_text)
+    road     = _find(r'Road/Street(?:/Lane)?\s*[:\-]?\s*([^\n]+?)(?=\s*City\b|\n)', full_text)
+    city     = _find(r'City\s+([A-Z][A-Z ]+?)(?=\s*State\b|\n)', full_text)
+    state    = _find(r'State\s+([A-Z][A-Z ]+?)(?=\s*District\b|\n)', full_text)
+    pin      = _find(r'Pin\s*[:\-]?\s*(\d{6})', full_text)
+    if not pin:
+        pin = _find(r',\s*(\d{6})\b', full_text)
+
+    addr_parts = [p.strip() for p in [flat, building, village, block, road] if p.strip()]
+    address = ", ".join(addr_parts)
+
+    city  = city.strip().title()
+    state = state.strip().title()
+
+    return {
+        "udyam_number":          udyam_number,
+        "enterprise_name":       enterprise_name,
+        "msme_type":             msme_type,
+        "major_activity":        major_activity.strip().title() if major_activity else "",
+        "social_category":       social_category.strip() if social_category else "",
+        "mobile":                mobile,
+        "email":                 email,
+        "date_of_incorporation": date_of_incorporation,
+        "pan":                   pan,
+        "address":               address,
+        "city":                  city,
+        "state":                 state,
+        "pin":                   pin,
+    }
+
+
+@api_router.post("/clients/parse-udyam-pdf")
+async def parse_udyam_pdf(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Parse a Udyam Registration Certificate PDF and return extracted client fields.
+    """
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="PDF too large — max 10 MB.")
+    try:
+        result = _parse_udyam_pdf(content)
+    except Exception as e:
+        logger.error(f"parse_udyam_pdf error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=422,
+            detail="Could not extract data from this PDF. Ensure it is a valid Udyam Registration Certificate."
+        )
+    if not result.get("udyam_number") and not result.get("enterprise_name"):
+        raise HTTPException(
+            status_code=422,
+            detail="No Udyam data found. Please upload a valid Udyam Registration Certificate PDF."
+        )
+    return result
+
+
+@api_router.post("/clients/parse-multi-documents")
+async def parse_multi_documents(
+    files: list[UploadFile] = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Accept up to 3 documents (GST Certificate PDF, Udyam Certificate PDF, MCA Excel).
+    Auto-detect each document type, parse all, merge into a single client record.
+    Priority: GST > Udyam > MCA Excel.
+    """
+    gst_data: dict   = {}
+    udyam_data: dict = {}
+    mca_data: dict   = {}
+    doc_types_found: list = []
+
+    for file in files:
+        content = await file.read()
+        fname   = (file.filename or "").lower()
+        ext     = fname.rsplit(".", 1)[-1] if "." in fname else ""
+
+        if ext == "pdf":
+            try:
+                import pdfplumber
+                with pdfplumber.open(BytesIO(content)) as pdf:
+                    first_page_text = (pdf.pages[0].extract_text() or "") if pdf.pages else ""
+            except Exception:
+                first_page_text = ""
+
+            text_lower = first_page_text.lower()
+            is_gst   = ("registration number" in text_lower and
+                        bool(re.search(r'[A-Z0-9]{15}', first_page_text))) or \
+                       "gst reg" in text_lower or "form gst" in text_lower
+            is_udyam = "udyam" in text_lower or "udyam registration" in text_lower
+
+            if is_udyam and not udyam_data:
+                try:
+                    udyam_data = _parse_udyam_pdf(content)
+                    doc_types_found.append("Udyam Certificate")
+                except Exception as e:
+                    logger.warning(f"Udyam parse failed: {e}")
+            elif is_gst and not gst_data:
+                try:
+                    gst_data = _parse_gst_reg06_pdf(content)
+                    doc_types_found.append("GST Certificate")
+                except Exception as e:
+                    logger.warning(f"GST parse failed: {e}")
+
+        elif ext in ("xlsx", "xls") and not mca_data:
+            try:
+                excel = pd.ExcelFile(BytesIO(content))
+                company_info: dict = {}
+                directors: list   = []
+
+                for sheet_name in excel.sheet_names:
+                    df = pd.read_excel(excel, sheet_name=sheet_name, header=None).fillna("")
+                    sheet_lower = sheet_name.lower().strip()
+                    if any(k in sheet_lower for k in ["master", "company", "masterdata"]):
+                        for _, row in df.iterrows():
+                            key = str(row.iloc[0]).strip()
+                            val = str(row.iloc[1]).strip() if len(row) > 1 else ""
+                            if key and key not in ("", "nan") and val not in ("", "nan"):
+                                company_info[key] = val
+                    elif any(k in sheet_lower for k in ["director", "signatory", "partner"]):
+                        rows_list = df.values.tolist()
+                        header_row_idx = None
+                        for idx, row in enumerate(rows_list):
+                            row_strs = [str(c).strip() for c in row]
+                            if any(h in row_strs for h in ["Name", "DIN/PAN", "DIN"]):
+                                header_row_idx = idx
+                                break
+                        if header_row_idx is not None:
+                            headers = [str(h).strip() for h in rows_list[header_row_idx]]
+                            for row in rows_list[header_row_idx + 1:]:
+                                row_dict = {
+                                    headers[i]: str(row[i]).strip() if i < len(row) else ""
+                                    for i in range(len(headers))
+                                }
+                                name = row_dict.get("Name", "").strip()
+                                if name and name != "nan":
+                                    din = row_dict.get("DIN/PAN", "") or row_dict.get("DIN", "")
+                                    directors.append({
+                                        "name": name,
+                                        "designation": row_dict.get("Designation", "Director") or "Director",
+                                        "email": None, "phone": None, "birthday": None,
+                                        "din": din if din not in ("nan", "-", "") else None,
+                                    })
+
+                raw_addr = (
+                    company_info.get("Registered Address") or
+                    company_info.get("Registered Office Address") or
+                    company_info.get("Address") or ""
+                ).strip()
+                if raw_addr in ("-", "nan"):
+                    raw_addr = ""
+
+                mca_city = mca_state = ""
+                if raw_addr:
+                    addr_parts = [p.strip() for p in raw_addr.split(",") if p.strip()]
+                    if len(addr_parts) >= 3:
+                        mca_state = addr_parts[-3]
+                        mca_city  = addr_parts[-4] if len(addr_parts) >= 4 else ""
+
+                raw_doi = (
+                    company_info.get("Date of Incorporation") or
+                    company_info.get("Incorporation Date") or ""
+                )
+                mca_doi = ""
+                if raw_doi:
+                    try:
+                        from dateutil import parser as date_parser
+                        mca_doi = date_parser.parse(str(raw_doi)).strftime("%Y-%m-%d")
+                    except Exception:
+                        mca_doi = ""
+
+                mca_data = {
+                    "company_name": (
+                        company_info.get("Company Name") or
+                        company_info.get("LLP Name") or ""
+                    ).strip(),
+                    "email":                 company_info.get("Email Id") or company_info.get("Email") or "",
+                    "phone":                 company_info.get("Phone") or company_info.get("Mobile") or "",
+                    "date_of_incorporation": mca_doi,
+                    "address":               raw_addr,
+                    "city":                  mca_city,
+                    "state":                 mca_state,
+                    "pan":                   company_info.get("PAN") or "",
+                    "cin":                   company_info.get("CIN") or company_info.get("LLPIN") or "",
+                    "directors":             directors,
+                    "raw":                   company_info,
+                }
+                doc_types_found.append("MCA Master Data")
+            except Exception as e:
+                logger.warning(f"MCA Excel parse failed: {e}")
+
+    if not doc_types_found:
+        raise HTTPException(
+            status_code=422,
+            detail="No recognizable documents found. Upload GST Certificate (PDF), Udyam Certificate (PDF), or MCA Master Data (Excel)."
+        )
+
+    def _first(*vals):
+        return next((v for v in vals if v and str(v).strip() not in ("", "nan", "-")), "")
+
+    # Merge with priority: GST > Udyam > MCA
+    merged_name = _first(
+        gst_data.get("legal_name"),
+        gst_data.get("trade_name"),
+        udyam_data.get("enterprise_name"),
+        mca_data.get("company_name"),
+    )
+    merged_name = re.sub(r'(?i)^M[/\.]?S[/\.]?\s+', '', merged_name).strip()
+
+    constitution = gst_data.get("constitution") or ""
+    const_raw    = gst_data.get("constitution_raw") or ""
+    gstin        = gst_data.get("gstin") or ""
+    udyam_number = udyam_data.get("udyam_number") or ""
+    msme_type    = udyam_data.get("msme_type") or ""
+    pan          = _first(mca_data.get("pan"), udyam_data.get("pan"))
+    cin          = mca_data.get("cin") or ""
+
+    address = _first(gst_data.get("address"),  udyam_data.get("address"),  mca_data.get("address"))
+    city    = _first(gst_data.get("city"),     udyam_data.get("city"),     mca_data.get("city"))
+    state   = _first(gst_data.get("state"),    udyam_data.get("state"),    mca_data.get("state"))
+    pin     = _first(gst_data.get("pin"),      udyam_data.get("pin"))
+    gst_full_address = gst_data.get("full_address") or ""
+
+    # Directors: MCA (has DIN) + GST Annexure B, deduplicated
+    mca_directors = mca_data.get("directors", [])
+    gst_partners  = [
+        {"name": p["name"], "designation": p.get("designation", "Director"),
+         "email": "", "phone": "", "birthday": "", "din": ""}
+        for p in gst_data.get("partners", [])
+    ]
+    all_contacts = list(mca_directors)
+    existing_names = {c["name"].lower().strip() for c in all_contacts}
+    for c in gst_partners:
+        if c["name"].lower().strip() not in existing_names:
+            all_contacts.append(c)
+            existing_names.add(c["name"].lower().strip())
+    if not all_contacts:
+        all_contacts = [{"name": "", "designation": "", "email": "", "phone": "", "birthday": "", "din": ""}]
+
+    email = _first(udyam_data.get("email"), mca_data.get("email"))
+    phone_raw = _first(udyam_data.get("mobile"), mca_data.get("phone"))
+    phone_digits = re.sub(r"\D", "", phone_raw or "")
+    if len(phone_digits) == 12 and phone_digits.startswith("91"):
+        phone_digits = phone_digits[2:]
+    phone = phone_digits[:10] if len(phone_digits) >= 10 else phone_digits
+
+    date_of_incorporation = _first(
+        udyam_data.get("date_of_incorporation"),
+        mca_data.get("date_of_incorporation"),
+    )
+
+    notes_parts = []
+    if cin:          notes_parts.append(f"CIN/LLPIN: {cin}")
+    if udyam_number: notes_parts.append(f"Udyam: {udyam_number}")
+    if msme_type:    notes_parts.append(f"MSME Type: {msme_type}")
+    notes = "\n".join(notes_parts)
+
+    return {
+        "status":                "ok",
+        "doc_types_found":       doc_types_found,
+        "company_name":          merged_name,
+        "constitution":          constitution,
+        "constitution_raw":      const_raw,
+        "gstin":                 gstin,
+        "pan":                   pan,
+        "cin":                   cin,
+        "udyam_number":          udyam_number,
+        "msme_type":             msme_type,
+        "address":               address,
+        "city":                  city,
+        "state":                 state,
+        "pin":                   pin,
+        "gst_address":           gst_full_address,
+        "email":                 email,
+        "phone":                 phone,
+        "date_of_incorporation": date_of_incorporation,
+        "contact_persons":       all_contacts,
+        "notes":                 notes,
+        "gst_data":              gst_data,
+        "udyam_data":            udyam_data,
+    }
 
 
 # ==============================================================
