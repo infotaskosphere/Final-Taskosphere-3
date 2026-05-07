@@ -2179,6 +2179,7 @@ export default function Users() {
 
   const fetchCompanies = useCallback(async () => {
     try {
+      // Fetches companies created in the Quotations module (db.companies collection)
       const res = await api.get('/companies/list');
       setCompanies(Array.isArray(res.data) ? res.data : []);
     } catch {}
