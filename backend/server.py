@@ -5021,9 +5021,16 @@ def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
 
     # ── Core fields ──────────────────────────────────────────────────────────
     gstin      = _find(r'Registration Number\s*[:\-]?\s*([A-Z0-9]{15})', page1)
-    legal_name = _find(r'Legal Name\s+([A-Z][A-Z0-9 &.\-,]+?)(?=\n|\d+\.)', page1)
-    trade_name = _find(r'Trade Name,?\s*if any\s+([A-Z][A-Z0-9 &.\-,]+?)(?=\n|\d+\.)', page1)
-    const_raw  = _find(r'Constitution of Business\s+([A-Za-z ]+?)(?=\n|\d+\.)', page1)
+    # Patterns handle both "1. Legal Name <VALUE>" and "Legal Name\n<VALUE>" layouts
+    legal_name = _find(r'(?:^\d+\.\s+)?Legal Name\s+([A-Z3][A-Z0-9 &.\-,]+?)(?=\n\s*\d+\.\s|\Z)', page1)
+    if not legal_name:
+        legal_name = _find(r'Legal Name\s*\n\s*([A-Z3][A-Z0-9 &.\-,]+)', page1)
+    trade_name = _find(r'Trade Name,?\s*if any\s+([A-Z3][A-Z0-9 &.\-,]+?)(?=\n\s*\d+\.\s|\Z)', page1)
+    if not trade_name:
+        trade_name = _find(r'Trade Name.*?\n\s*([A-Z3][A-Z0-9 &.\-,]+)', page1)
+    const_raw  = _find(r'Constitution of Business\s+([A-Za-z ]+?)(?=\n\s*\d+\.\s|\Z)', page1)
+    if not const_raw:
+        const_raw = _find(r'Constitution of Business\s*\n\s*([A-Za-z ]+)', page1)
 
     # ── Constitution mapping — exact first, then substring ────────────────────
     _cmap = {
@@ -5304,8 +5311,10 @@ def _parse_udyam_pdf(pdf_bytes: bytes) -> dict:
     if not major_activity:
         major_activity = _find(r'Major Activity\s*[:\-]?\s*([^\n]+)', full_text)
 
-    # Social category
-    social_category = _find(r'SOCIAL CATEGORY OF\s+ENTREPRENEUR\s+([^\n]+)', full_text)
+    # Social category — layout is: "SOCIAL CATEGORY OF\nGENERAL\nENTREPRENEUR"
+    social_category = _find(r'SOCIAL CATEGORY OF\s*\n\s*([A-Z][A-Z ]+?)(?=\s*\n\s*ENTREPRENEUR|\s*ENTREPRENEUR)', full_text)
+    if not social_category:
+        social_category = _find(r'SOCIAL CATEGORY[^\n]*\n([A-Z][A-Z ]+?)(?=\n)', full_text)
     if not social_category:
         social_category = _find(r'Social Category.*?([^\n]+)\n', full_text)
 
@@ -5335,23 +5344,92 @@ def _parse_udyam_pdf(pdf_bytes: bytes) -> dict:
     # PAN
     pan = _find(r'\bPAN\s+([A-Z]{5}\d{4}[A-Z])\b', full_text)
 
-    # ── Address ───────────────────────────────────────────────────────────────
-    flat     = _find(r'Flat/Door/Block\s*No\.?\s*[:\-]?\s*([^\n,]+)', full_text)
-    building = _find(r'Name of\s*(?:Premises/\s*)?Building\s*[:\-]?\s*([^\n,]+)', full_text)
-    village  = _find(r'Village/Town\s*[:\-]?\s*([^\n]+?)(?=\s*Block\b|\s*Road\b|\n)', full_text)
-    block    = _find(r'Block\s+([^\n]+?)(?=\s*Road\b|\n)', full_text)
-    road     = _find(r'Road/Street(?:/Lane)?\s*[:\-]?\s*([^\n]+?)(?=\s*City\b|\n)', full_text)
-    city     = _find(r'City\s+([A-Z][A-Z ]+?)(?=\s*State\b|\n)', full_text)
-    state    = _find(r'State\s+([A-Z][A-Z ]+?)(?=\s*District\b|\n)', full_text)
-    pin      = _find(r'Pin\s*[:\-]?\s*(\d{6})', full_text)
+    # ── Address — handle two-column pdfplumber layout ────────────────────────
+    # pdfplumber merges two-column Udyam certificate into a single stream like:
+    # "Flat/Door/Block\n5, Premises/ ASHISH BUILDING,\nNo.\nBuilding\n
+    #  Village/Town VARACHHA Block B/H KIRAN EXPORT\n
+    #  UMIYADHAM\nRoad/Street/Lane City SURAT\nROAD\nState GUJARAT District SURAT , Pin 395006"
+    # Strategy: grab the block between "Flat/Door/Block" and "Mobile" then extract field values
+    addr_section_m = re.search(r'Flat/Door/Block(.+?)(?:Mobile\s|DATE OF INCORP)', full_text, re.DOTALL | re.IGNORECASE)
+    addr_section = addr_section_m.group(1) if addr_section_m else ""
+
+    # Flatten to single line removing label noise
+    def _grab_after(label_pat, text, stop_pat=None):
+        m = re.search(label_pat + r'\s+([^\n]+)', text, re.IGNORECASE)
+        if m:
+            val = m.group(1).strip()
+            if stop_pat:
+                val = re.split(stop_pat, val, flags=re.IGNORECASE)[0].strip()
+            return val
+        return ""
+
+    # The flat number is typically the first non-label line after "Flat/Door/Block...No."
+    flat_raw = ""
+    flat_section_m = re.search(r'Flat/Door/Block\s*\n([^\n]+)', full_text, re.IGNORECASE)
+    if flat_section_m:
+        raw_val = flat_section_m.group(1).strip()
+        # Remove label artifacts like "Premises/ ASHISH BUILDING," — flat is just the number part
+        flat_num_m = re.match(r'^(\d[\w,\s/]*?)(?:,\s*Premises/|,\s*Building|$)', raw_val)
+        flat_raw = flat_num_m.group(1).strip().rstrip(',') if flat_num_m else ""
+        # Extract building name from same line if present
+        bld_m = re.search(r'Premises/\s*(?:ASHISH )?([A-Z][A-Z0-9 ,]+?)(?:,$|,\s*$|$)', raw_val, re.IGNORECASE)
+        building = bld_m.group(0).replace('Premises/', '').strip().rstrip(',') if bld_m else ""
+        # More reliable: take everything after "Premises/ " or before first comma after it
+        bld_m2 = re.search(r'Premises/\s*([A-Z][A-Z0-9 ]+)', raw_val, re.IGNORECASE)
+        building = bld_m2.group(1).strip().rstrip(',') if bld_m2 else building
+    else:
+        flat_raw = ""
+        building = ""
+
+    # Village/Town
+    village_m = re.search(r'Village/Town\s+([A-Z][A-Z0-9 ]+?)(?=\s+Block\b|\s*\n)', full_text, re.IGNORECASE)
+    village = village_m.group(1).strip() if village_m else ""
+
+    # Block (value after "Block" on the same line)
+    block_m = re.search(r'\bBlock\s+([B/H][^\n]+?)(?=\s*\n)', full_text, re.IGNORECASE)
+    if not block_m:
+        block_m = re.search(r'\bBlock\s+([A-Z][^\n]+?)(?=\s*\n)', full_text, re.IGNORECASE)
+    block = block_m.group(1).strip() if block_m else ""
+    # Skip label-only blocks like "B" or single letters
+    if len(block) <= 2:
+        block = ""
+
+    # Road — the road name is split: line before "Road/Street/Lane" + line after it
+    # e.g. "UMIYADHAM\nRoad/Street/Lane City SURAT\nROAD"
+    road_m = re.search(r'([A-Z][A-Z0-9 ]+)\nRoad/Street(?:/Lane)?\s+City\s+[A-Z]+\s*\n([A-Z][A-Z0-9 ]+)', full_text, re.IGNORECASE)
+    if road_m:
+        road = (road_m.group(1).strip() + " " + road_m.group(2).strip()).strip()
+    else:
+        road_m = re.search(r'Road/Street(?:/Lane)?\s+City\s+[A-Z]+\s*\n([A-Z][A-Z0-9 ]+)', full_text, re.IGNORECASE)
+        if not road_m:
+            road_m = re.search(r'Road/Street(?:/Lane)?\s*\n([A-Z][A-Z0-9 ]+)', full_text, re.IGNORECASE)
+        if not road_m:
+            road_m = re.search(r'Road/Street(?:/Lane)?\s+([A-Z][A-Z0-9 ]+?)(?=\s+City\b|\s*\n)', full_text, re.IGNORECASE)
+        road = road_m.group(1).strip() if road_m else ""
+
+    city_m  = re.search(r'City\s+([A-Z][A-Z ]+?)(?=\s+State\b|\s*\n)', full_text, re.IGNORECASE)
+    city    = city_m.group(1).strip().title() if city_m else ""
+    state_m = re.search(r'State\s+([A-Z][A-Z ]+?)(?=\s+District\b|\s*\n)', full_text, re.IGNORECASE)
+    state   = state_m.group(1).strip().title() if state_m else ""
+    pin_m   = re.search(r'\bPin\s*[:\-,]?\s*(\d{6})', full_text, re.IGNORECASE)
+    pin     = pin_m.group(1) if pin_m else ""
     if not pin:
-        pin = _find(r',\s*(\d{6})\b', full_text)
+        pin_m2 = re.search(r',\s*(\d{6})\b', full_text)
+        pin = pin_m2.group(1) if pin_m2 else ""
 
-    addr_parts = [p.strip() for p in [flat, building, village, block, road] if p.strip()]
+    # Build clean address — deduplicate and skip blanks/short noise
+    addr_candidate = [flat_raw, building, village, block, road]
+    addr_parts = []
+    seen_lower = set()
+    for p in addr_candidate:
+        p = p.strip().rstrip(',')
+        if not p or len(p) <= 1:
+            continue
+        if p.lower() in seen_lower:
+            continue
+        seen_lower.add(p.lower())
+        addr_parts.append(p)
     address = ", ".join(addr_parts)
-
-    city  = city.strip().title()
-    state = state.strip().title()
 
     return {
         "udyam_number":          udyam_number,
