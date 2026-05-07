@@ -23,6 +23,7 @@ import {
   ShieldOff, Fingerprint, Download, Pencil, Inbox, X,
   Monitor, Wifi, WifiOff, RefreshCw, Radar, Loader2,
   Network, Save, ClipboardList, LayoutDashboard, AlertTriangle, MapPin, UserMinus, ArrowRight,
+  Building2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -1340,6 +1341,9 @@ const UserCard = ({ userData, onEdit, onDelete, onOffboard, onPermissions, onApp
         <div className="mt-3 space-y-1.5 text-xs text-slate-500 dark:text-slate-400">
           <div className="flex items-center gap-2 truncate"><Mail className="h-3 w-3 text-slate-400 flex-shrink-0" /><span className="truncate">{userData.email}</span></div>
           <div className="flex items-center gap-2"><Phone className="h-3 w-3 text-slate-400 flex-shrink-0" />{userData.phone || '—'}</div>
+          {userData.company_name && (
+            <div className="flex items-center gap-2 truncate"><Building2 className="h-3 w-3 text-slate-400 flex-shrink-0" /><span className="truncate">{userData.company_name}</span></div>
+          )}
           {(userData.punch_in_time || userData.punch_out_time) && (
             <div className="flex items-center gap-2"><Clock className="h-3 w-3 text-slate-400 flex-shrink-0" />{userData.punch_in_time || '—'} → {userData.punch_out_time || '—'}</div>
           )}
@@ -2129,6 +2133,7 @@ export default function Users() {
 
   const [users,                setUsers]                = useState([]);
   const [clients,              setClients]              = useState([]);
+  const [companies,            setCompanies]            = useState([]);
   const [searchQuery,          setSearchQuery]          = useState('');
   const [activeTab,            setActiveTab]            = useState('all');
   const [dialogOpen,           setDialogOpen]           = useState(false);
@@ -2149,11 +2154,12 @@ export default function Users() {
     departments: [], phone: '', birthday: '', profile_picture: '',
     punch_in_time: '10:30', grace_time: '00:10', punch_out_time: '19:00',
     telegram_id: '', is_active: true, status: 'active',
+    company_id: '', company_name: '',
   });
   const [permissions, setPermissions] = useState({ ...EMPTY_PERMISSIONS });
 
   useEffect(() => {
-    if (canViewUserPage) { fetchUsers(); fetchClients(); }
+    if (canViewUserPage) { fetchUsers(); fetchClients(); fetchCompanies(); }
   }, [canViewUserPage]);
 
   const fetchUsers = useCallback(async () => {
@@ -2168,6 +2174,13 @@ export default function Users() {
     try {
       const res = await api.get('/clients');
       setClients(Array.isArray(res.data) ? res.data : (res.data?.data || []));
+    } catch {}
+  }, []);
+
+  const fetchCompanies = useCallback(async () => {
+    try {
+      const res = await api.get('/quotations/companies');
+      setCompanies(Array.isArray(res.data) ? res.data : []);
     } catch {}
   }, []);
 
@@ -2211,6 +2224,7 @@ export default function Users() {
       punch_out_time: userData.punch_out_time || '19:00',
       telegram_id: userData.telegram_id != null ? String(userData.telegram_id) : '',
       is_active: userData.is_active !== false, status: userData.status || 'active',
+      company_id: userData.company_id || '', company_name: userData.company_name || '',
     });
     setDialogOpen(true);
   }, []);
@@ -2228,6 +2242,8 @@ export default function Users() {
           punch_out_time: formData.punch_out_time || null,
           telegram_id: formData.telegram_id !== '' ? Number(formData.telegram_id) : null,
           is_active: formData.is_active,
+          company_id: formData.company_id || null,
+          company_name: formData.company_name || null,
           ...(isAdmin && { email: formData.email.trim(), role: formData.role, status: formData.status, departments: formData.departments }),
           ...(isAdmin && formData.password.trim() && { password: formData.password.trim() }),
         };
@@ -2243,6 +2259,8 @@ export default function Users() {
           punch_out_time: formData.punch_out_time,
           telegram_id: formData.telegram_id !== '' ? Number(formData.telegram_id) : null,
           is_active: false, status: 'pending_approval',
+          company_id: formData.company_id || null,
+          company_name: formData.company_name || null,
         });
         toast.success('✓ Member registered — awaiting approval');
       }
@@ -2437,7 +2455,7 @@ export default function Users() {
                   <Button
                     onClick={() => {
                       setSelectedUser(null);
-                      setFormData({ full_name:'',email:'',password:'',role:'staff',departments:[],phone:'',birthday:'',profile_picture:'',punch_in_time:'10:30',grace_time:'00:10',punch_out_time:'19:00',telegram_id:'',is_active:true,status:'active' });
+                      setFormData({ full_name:'',email:'',password:'',role:'staff',departments:[],phone:'',birthday:'',profile_picture:'',punch_in_time:'10:30',grace_time:'00:10',punch_out_time:'19:00',telegram_id:'',is_active:true,status:'active',company_id:'',company_name:'' });
                       setDialogOpen(true);
                     }}
                     className="h-10 px-6 rounded-xl font-semibold text-sm shadow-lg bg-white/20 hover:bg-white/30 text-white border border-white/20 hover:border-white/30 transition-all">
@@ -2804,6 +2822,29 @@ export default function Users() {
                     </Select>
                   </div>
                 </div>
+                {formData.role !== 'admin' && (
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase">Associated Company</Label>
+                    <Select
+                      value={formData.company_id || '__none__'}
+                      onValueChange={v => {
+                        if (v === '__none__') {
+                          setFormData(p => ({ ...p, company_id: '', company_name: '' }));
+                        } else {
+                          const co = companies.find(c => c.id === v);
+                          setFormData(p => ({ ...p, company_id: v, company_name: co?.name || '' }));
+                        }
+                      }}>
+                      <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="No company assigned" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">— No company —</SelectItem>
+                        {companies.map(co => (
+                          <SelectItem key={co.id} value={co.id}>{co.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className="space-y-2.5">
                   <Label className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase">Assigned Departments</Label>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
