@@ -299,6 +299,8 @@ class User(BaseModel):
     status: str = "pending_approval"
     approved_by: Optional[str] = None
     approved_at: Optional[Any] = None
+    company_id: Optional[str] = None
+    company_name: Optional[str] = None
 
     @field_validator("birthday", mode="before")
     @classmethod
@@ -324,6 +326,8 @@ class UserCreate(BaseModel):
     is_active: bool = True
     permissions: Optional[Dict[str, Any]] = None
     status: Optional[str] = "pending_approval"
+    company_id: Optional[str] = None
+    company_name: Optional[str] = None
 
 
 class UserUpdate(BaseModel):
@@ -340,6 +344,8 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
     profile_picture: Optional[str] = None
     telegram_id: Optional[int] = None
+    company_id: Optional[str] = None
+    company_name: Optional[str] = None
     model_config = ConfigDict(from_attributes=True, extra="ignore")
 
 
