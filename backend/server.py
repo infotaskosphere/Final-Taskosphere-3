@@ -3752,21 +3752,54 @@ def _parse_cert_bytes(cert_bytes: bytes) -> DSCCertificateData:
 
 
 def _ensure_opensc_installed() -> bool:
-    """Auto-install opensc on Linux if not already present. Returns True if available."""
+    """Auto-install opensc + pcscd on Linux if not already present. Returns True if pkcs11-tool is available."""
     import shutil, subprocess, os
     if shutil.which("pkcs11-tool"):
         return True
-    # Only attempt on Linux
-    if os.name != "nt":
+    if os.name == "nt":
+        return False
+    try:
+        # Install opensc (provides pkcs11-tool), pcscd (PC/SC daemon), and libpcsclite-dev
+        subprocess.run(
+            ["apt-get", "install", "-y", "--no-install-recommends",
+             "opensc", "pcscd", "libpcsclite1", "libpcsclite-dev", "libccid", "pcsc-tools"],
+            check=True, capture_output=True, timeout=180
+        )
+        # Also start pcscd if it isn't running
         try:
-            subprocess.run(
-                ["apt-get", "install", "-y", "--no-install-recommends", "opensc", "libccid", "pcscd"],
-                check=True, capture_output=True, timeout=120
-            )
-            return shutil.which("pkcs11-tool") is not None
+            subprocess.run(["service", "pcscd", "start"], capture_output=True, timeout=10)
         except Exception:
             pass
+        return shutil.which("pkcs11-tool") is not None
+    except Exception:
+        pass
     return False
+
+
+def _ensure_pyscard_installed() -> bool:
+    """Install pyscard after ensuring libpcsclite-dev is present. Returns True if importable."""
+    try:
+        import smartcard  # noqa
+        return True
+    except ImportError:
+        pass
+    import subprocess, sys, os
+    if os.name == "nt":
+        return False
+    try:
+        # libpcsclite-dev must be installed first
+        subprocess.run(
+            ["apt-get", "install", "-y", "--no-install-recommends", "libpcsclite-dev", "libpcsclite1", "pcscd"],
+            check=True, capture_output=True, timeout=120
+        )
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--quiet", "pyscard>=2.0.7"],
+            check=True, capture_output=True, timeout=120
+        )
+        import smartcard  # noqa
+        return True
+    except Exception:
+        return False
 
 
 def _try_opensc_cli(pin: str) -> Optional[DSCCertificateData]:
@@ -3814,12 +3847,14 @@ def _try_pyscard_read(pin: str) -> Optional[DSCCertificateData]:
     """
     Fallback: use pyscard (PC/SC) to communicate directly with the smart card
     via APDU commands. Works with any CCID-compliant DSC token.
-    Sends SELECT + READ commands to extract the certificate from the token.
+    Installs libpcsclite-dev + pyscard at runtime if not already present.
     """
+    if not _ensure_pyscard_installed():
+        return None
     try:
         from smartcard.System import readers
-        from smartcard.util import toHexString, toBytes
-        from smartcard.Exceptions import CardConnectionException
+        from smartcard.util import toHexString, toBytes  # noqa
+        from smartcard.Exceptions import CardConnectionException  # noqa
     except ImportError:
         return None
 
