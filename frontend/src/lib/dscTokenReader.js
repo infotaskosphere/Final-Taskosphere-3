@@ -491,6 +491,21 @@ export async function checkLocalAgent() {
   }
 }
 
+/**
+ * getAgentDscStatus — poll the agent's /dsc-status endpoint.
+ * Returns { plugged, cert, reader, pushed } or null if agent not running.
+ * The agent auto-reads the cert (without PIN) when a token is inserted.
+ */
+export async function getAgentDscStatus() {
+  try {
+    const res = await fetch(`${DSC_AGENT_URL}/dsc-status`, { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 export async function readCertFromLocalAgent(pin) {
   console.log('[DSC-Agent] Trying local agent at', DSC_AGENT_URL);
   const res = await fetch(
