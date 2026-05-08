@@ -90,8 +90,9 @@ const NAV_GROUPS = [
     items: [
       // Reports — <Protected> route, visible to all roles (data scoped server-side)
       { path: '/reports',        icon: BarChart3,  label: 'Reports' },
-      { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log',  permission: 'can_view_audit_logs'  },
-      { path: '/users',          icon: Users,      label: 'Users',           permission: 'can_view_user_page'   },
+      { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log',   permission: 'can_view_audit_logs'  },
+      { path: '/users',          icon: Users,      label: 'Users',            permission: 'can_view_user_page'   },
+      { path: '/staff-activity', icon: Activity,   label: 'Staff Activity',   adminOnly: true                    },
     ],
   },
   {
@@ -219,7 +220,9 @@ const DashboardLayout = ({ children }) => {
     navigate('/login', { replace: true });
   };
 
-  const checkNavPermission = (permission) => {
+  const checkNavPermission = (item) => {
+    if (item.adminOnly) return user?.role === 'admin';
+    const permission = item.permission;
     if (!permission) return true;
     if (user?.role === 'admin') return true;
     if (Array.isArray(permission)) return permission.some(p => hasPermission(p));
@@ -227,7 +230,7 @@ const DashboardLayout = ({ children }) => {
   };
 
   const allNavItems     = NAV_GROUPS.flatMap(g => g.items);
-  const visibleNavItems = allNavItems.filter(i => checkNavPermission(i.permission));
+  const visibleNavItems = allNavItems.filter(i => checkNavPermission(i));
   const activeLabel     = visibleNavItems.find(i =>
     i.path === location.pathname ||
     (!i.exact && location.pathname.startsWith(i.path + '/') && i.path !== '/')
@@ -238,7 +241,7 @@ const DashboardLayout = ({ children }) => {
 
   /* ── Nav Item ─────────────────────────────────────────────────────── */
   const NavItem = ({ item }) => {
-    if (!checkNavPermission(item.permission)) return null;
+    if (!checkNavPermission(item)) return null;
     // exact:true items only highlight on a precise path match
     // (prevents /settings matching when the user is on /settings/email)
     const isActive = location.pathname === item.path ||
@@ -394,7 +397,7 @@ const DashboardLayout = ({ children }) => {
         >
           {NAV_GROUPS.map((group) => {
             const visibleGroupItems = group.items.filter(
-              (item) => checkNavPermission(item.permission)
+              (item) => checkNavPermission(item)
             );
             if (visibleGroupItems.length === 0) return null;
             return (
