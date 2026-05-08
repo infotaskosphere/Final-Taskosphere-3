@@ -32,6 +32,7 @@ const Reminders         = lazy(() => import("@/pages/Reminders.jsx"));
 const CompliancePage    = lazy(() => import("@/pages/CompliancePage.jsx"));
 const GSTReconciliation = lazy(() => import("@/pages/GSTReconciliation.jsx")); // ← NEW
 const AIDocumentReader = lazy(() => import("@/pages/AIDocumentReader.jsx"));
+const StaffActivity    = lazy(() => import("@/pages/StaffActivity.jsx"));
 
 
 
@@ -57,6 +58,19 @@ const Public = ({ children }) => {
   if (user) return <Navigate to="/dashboard" replace />;
 
   return children;
+};
+
+/**
+ * AdminOnly: Requires login + admin role. Redirects non-admins to dashboard.
+ */
+const AdminOnly = ({ children }) => {
+  const { user, loading } = useAuth();
+
+  if (loading) return <GifLoader />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role !== "admin") return <Navigate to="/dashboard" replace />;
+
+  return <DashboardLayout>{children}</DashboardLayout>;
 };
 
 /**
@@ -152,7 +166,8 @@ function AppRoutes() {
       <Route path="/quotations" element={<Permission permission={["can_create_quotations", "can_manage_invoices"]}><PageLoader><Quotations /></PageLoader></Permission>} />
       <Route path="/invoicing"  element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><Invoicing /></PageLoader></Permission>} />
       <Route path="/task-audit" element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
-      <Route path="/users"      element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
+      <Route path="/users"          element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
+      <Route path="/staff-activity" element={<AdminOnly><PageLoader><StaffActivity /></PageLoader></AdminOnly>} />
 
       {/* Fallback */}
       <Route path="*" element={<Navigate to="/login" replace />} />
