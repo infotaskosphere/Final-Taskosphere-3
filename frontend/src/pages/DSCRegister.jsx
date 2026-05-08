@@ -272,31 +272,40 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
   // ── Auto-fetch cert from agent /dsc-status on popup open ───────────────────
-  // The agent's dscWatcher reads the cert without PIN on plug-in.
-  // If the agent already fetched it, populate form immediately.
+  // The agent's dscWatcher reads the cert automatically (no PIN) on plug-in.
+  // We poll every 2 seconds for up to 30 seconds waiting for the cert to appear.
   useEffect(() => {
     let cancelled = false;
     async function tryAgentAutoFetch() {
       try {
+        // Quick health check first
         const agentOk = await checkLocalAgent();
         if (!agentOk || cancelled) return;
+
         setAgentAutoFetching(true);
-        // Poll a few times — agent may still be reading
-        for (let i = 0; i < 6; i++) {
+
+        // Poll /dsc-status every 2 seconds for up to 30 seconds
+        // Agent reads cert within ~3s of token being plugged in
+        for (let i = 0; i < 15; i++) {
           if (cancelled) break;
-          const res = await fetch('http://127.0.0.1:7432/dsc-status', { signal: AbortSignal.timeout(3000) });
-          if (!res.ok) break;
-          const data = await res.json();
-          if (data.cert && data.cert.holder_name) {
-            if (!cancelled) {
-              applyCert(data.cert);
-              toast.success('Token data auto-filled by local agent ✓');
+          try {
+            const res = await fetch('http://127.0.0.1:7432/dsc-status', {
+              signal: AbortSignal.timeout(3000),
+              cache: 'no-store',
+            });
+            if (!res.ok) break;
+            const data = await res.json();
+            if (data.cert && data.cert.holder_name) {
+              if (!cancelled) {
+                applyCert(data.cert);
+                toast.success('✓ Token data auto-filled — no PIN needed!');
+              }
+              return; // success — stop polling
             }
-            break;
-          }
+          } catch { /* timeout or network error — keep polling */ }
           await new Promise(r => setTimeout(r, 2000));
         }
-      } catch { /* agent not running or no cert yet */ }
+      } catch { /* agent not running */ }
       finally { if (!cancelled) setAgentAutoFetching(false); }
     }
     tryAgentAutoFetch();
@@ -583,7 +592,7 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
               {/* ── PIN Read Section ── */}
               <div style={{ marginBottom: 14, padding: '10px 12px', background: certFetched ? (isDark ? 'rgba(16,185,129,0.1)' : '#f0fdf4') : surface, borderRadius: 10, border: `1px solid ${certFetched ? '#10b981' : readError ? '#ef4444' : border}` }}>
                 <label style={{ ...labelStyle, marginBottom: 6, color: certFetched ? '#10b981' : readError ? '#ef4444' : labelClr }}>
-                  {certFetched ? '✓ Certificate Read from Token' : agentAutoFetching ? '⏳ Agent auto-reading token...' : 'Read Certificate from Token (Optional)'}
+                  {certFetched ? '✓ Certificate Read from Token' : agentAutoFetching ? '⏳ Agent reading token... (plug in your DSC token)' : 'Read Certificate from Token (Optional)'}
                 </label>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <input
