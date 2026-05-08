@@ -1,80 +1,77 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
+import React, { useState, useEffect, useCallback } from 'react';
+import { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { useDark } from '@/hooks/useDark';
-import ActivityReportPanel from '@/components/activity/ActivityReportPanel';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import {
-  BarChart3, TrendingUp, Clock, Award, Users, CheckCircle2,
-  AlertTriangle, Target, Download, RefreshCw, Activity,
-  Calendar, Star, Zap, Shield, Monitor,
-  GripVertical, Settings2,
-} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, AreaChart, Area, Legend,
-  RadarChart, Radar, PolarGrid, PolarAngleAxis,
+  Monitor, Clock, Globe, Shield, Keyboard, FolderOpen,
+  LogIn, LogOut, Lock, Wifi, AlertTriangle, RefreshCw,
+  Download, ChevronDown, ChevronUp, Users, Usb, Printer,
+  Eye, FileText, Trash2, Upload, Cloud, MousePointer2,
+  Activity, BarChart2, TrendingUp, AlertCircle, Search,
+  Calendar, Filter, X, ChevronRight, Zap, ShieldAlert,
+} from 'lucide-react';
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend, AreaChart, Area,
 } from 'recharts';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
-import LayoutCustomizer from '@/components/layout/LayoutCustomizer';
-import { usePageLayout } from '@/hooks/usePageLayout';
 
-// ─── Colors ──────────────────────────────────────────────────────────────────
-const C = {
-  deepBlue:     '#0D3B66',
-  mediumBlue:   '#1F6FB2',
-  emeraldGreen: '#1FAF5A',
-  amber:        '#F59E0B',
-  coral:        '#EF4444',
-};
-const PALETTE = ['#0D3B66','#1F6FB2','#1FAF5A','#5CCB5F','#F59E0B','#EF4444'];
-
-// ─── Animations ───────────────────────────────────────────────────────────────
-const cV = { hidden:{opacity:0}, visible:{opacity:1,transition:{staggerChildren:0.06}} };
-const iV = { hidden:{opacity:0,y:16}, visible:{opacity:1,y:0,transition:{duration:0.35,ease:[0.23,1,0.32,1]}} };
-
-// Dark mode via shared hook (imported above)
-
-// ─── Theme tokens (light / dark) ─────────────────────────────────────────────
+// ─── Theme ────────────────────────────────────────────────────────────────────
 const tok = (dark) => ({
-  pageBg:   dark ? '#0f172a' : '#f8fafc',
-  card:     dark ? '#1e293b' : '#ffffff',
-  card2:    dark ? '#263348' : '#f8fafc',
-  border:   dark ? '#334155' : '#e2e8f0',
-  border2:  dark ? '#1e293b' : '#f1f5f9',
-  text:     dark ? '#e2e8f0' : '#1e293b',
-  textSub:  dark ? '#94a3b8' : '#64748b',
-  textMute: dark ? '#475569' : '#94a3b8',
-  hover:    dark ? '#1a2942' : '#f8fafc',
-  inputBg:  dark ? '#263348' : '#ffffff',
-  inputBdr: dark ? '#334155' : '#e2e8f0',
-  shadow:   dark ? '0 1px 4px rgba(0,0,0,0.45)' : '0 1px 4px rgba(0,0,0,0.06)',
+  pageBg:   dark ? '#080f1a' : '#f0f4f8',
+  card:     dark ? '#111827' : '#ffffff',
+  card2:    dark ? '#1a2535' : '#f8fafc',
+  border:   dark ? '#1f2d42' : '#e2e8f0',
+  border2:  dark ? '#162030' : '#f1f5f9',
+  text:     dark ? '#e2e8f0' : '#0f172a',
+  textSub:  dark ? '#8899b4' : '#475569',
+  textMute: dark ? '#3d5170' : '#94a3b8',
+  hover:    dark ? '#131e2e' : '#f8fafc',
+  inputBg:  dark ? '#1a2535' : '#ffffff',
+  inputBdr: dark ? '#1f2d42' : '#e2e8f0',
+  shadow:   dark ? '0 2px 12px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.06)',
 });
 
-// ─── Format helpers ───────────────────────────────────────────────────────────
-const fmt     = m  => !m||m===0 ? '0h 0m' : `${Math.floor(m/60)}h ${m%60}m`;
-const fmtH    = h  => !h||h===0 ? '0h 0m' : `${Math.floor(h)}h ${Math.round((h%1)*60)}m`;
-// Compact: never wraps — no minutes when ≥100h
-const fmtC    = m  => {
-  if (!m||m===0) return '0h';
-  const h=Math.floor(m/60), mn=m%60;
-  return h>=100 ? `${h}h` : mn>0 ? `${h}h ${mn}m` : `${h}h`;
+const C = {
+  blue:    '#0D3B66',
+  mid:     '#1F6FB2',
+  green:   '#1FAF5A',
+  amber:   '#F59E0B',
+  red:     '#EF4444',
+  purple:  '#8B5CF6',
+  cyan:    '#06B6D4',
+  pink:    '#EC4899',
+  orange:  '#F97316',
 };
+const PALETTE = [C.blue, C.mid, C.green, C.amber, C.red, C.purple, C.cyan, C.pink];
 
-// ─── Custom chart tooltip ─────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const fmtSec = (s) => {
+  if (!s || s === 0) return '0h 0m';
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h + 'h ' + m + 'm';
+};
+const pct = (a, b) => b > 0 ? Math.round((a / b) * 100) : 0;
+
+// ─── Animations ───────────────────────────────────────────────────────────────
+const cV = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.05 } } };
+const iV = { hidden: { opacity: 0, y: 14 }, visible: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.23, 1, 0.32, 1] } } };
+
+// ─── Tooltip ──────────────────────────────────────────────────────────────────
 const ChartTip = ({ active, payload, label, dark }) => {
   const t = tok(dark);
-  if (!active||!payload?.length) return null;
+  if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-xl px-3 py-2 shadow-xl text-xs"
-      style={{background:t.card, border:`1px solid ${t.border}`, color:t.text}}>
-      {label&&<p className="font-semibold mb-1">{label}</p>}
-      {payload.map((e,i)=>(
+    <div className="rounded-xl px-3 py-2 shadow-2xl text-xs"
+      style={{ background: t.card, border: '1px solid ' + t.border, color: t.text }}>
+      {label && <p className="font-bold mb-1">{label}</p>}
+      {payload.map((e, i) => (
         <p key={i} className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{background:e.color}}/>
+          <span className="w-2 h-2 rounded-full" style={{ background: e.color }} />
           {e.name}: <strong>{e.value}</strong>
         </p>
       ))}
@@ -82,1030 +79,937 @@ const ChartTip = ({ active, payload, label, dark }) => {
   );
 };
 
-// ─── KPI Card — strict equal-height layout ────────────────────────────────────
-const KpiCard = ({ label, value, sub, color, icon:Icon, dark }) => {
+// ─── Section header ───────────────────────────────────────────────────────────
+const SectionHeader = ({ icon: Icon, label, color, count, dark }) => {
   const t = tok(dark);
   return (
-    <motion.div variants={iV} className="h-full">
-      {/* outer wrapper fills the grid cell height */}
-      <div className="rounded-xl overflow-hidden flex flex-col h-full"
-        style={{background:t.card, border:`1px solid ${t.border}`, boxShadow:t.shadow}}>
-        {/* accent stripe */}
-        <div className="h-[3px] w-full flex-shrink-0" style={{background:color}} />
-        {/* content — flex-1 so all cards stretch equally */}
-        <div className="p-3 sm:p-4 flex flex-col flex-1">
-          {/* label + icon row */}
-          <div className="flex items-start justify-between gap-1">
-            <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider leading-tight"
-              style={{color:t.textMute}}>{label}</p>
-            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-              style={{background:`${color}1a`}}>
-              <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" style={{color}} />
-            </div>
-          </div>
-          {/* value */}
-          <p className="mt-1.5 text-xl sm:text-2xl font-black leading-none tracking-tight" style={{color}}>
-            {value}
-          </p>
-          {/* sub — always renders (even empty) to keep spacing identical */}
-          <p className="mt-1 text-[10px] sm:text-xs font-medium leading-snug flex-1 break-words"
-            style={{color:t.textSub, minHeight:'1rem'}}>
-            {sub || '\u00A0'}
-          </p>
-        </div>
+    <div className="flex items-center gap-3 mb-4">
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+        style={{ background: color + '18', border: '1px solid ' + color + '30' }}>
+        <Icon className="w-4 h-4" style={{ color }} />
       </div>
-    </motion.div>
-  );
-};
-
-// ─── Section wrapper ─────────────────────────────────────────────────────────
-const Sec = ({ title, desc, children, action, dark }) => {
-  const t = tok(dark);
-  return (
-    <motion.div variants={iV}>
-      <div className="rounded-xl overflow-hidden"
-        style={{background:t.card, border:`1px solid ${t.border}`, boxShadow:t.shadow}}>
-        <div className="h-[2px] w-full"
-          style={{background:`linear-gradient(90deg,${C.deepBlue},${C.emeraldGreen})`}} />
-        <div className="px-5 pt-4 pb-3 flex items-start justify-between gap-3 flex-wrap">
-          <div>
-            <p className="text-sm font-bold" style={{color:t.text}}>{title}</p>
-            {desc&&<p className="text-xs mt-0.5" style={{color:t.textSub}}>{desc}</p>}
-          </div>
-          {action}
-        </div>
-        <div className="px-5 pb-5">{children}</div>
-      </div>
-    </motion.div>
-  );
-};
-
-// ─── Empty state ─────────────────────────────────────────────────────────────
-const Empty = ({ icon:Icon, text, dark }) => {
-  const t = tok(dark);
-  return (
-    <div className="h-44 flex flex-col items-center justify-center gap-3">
-      <div className="w-11 h-11 rounded-xl flex items-center justify-center"
-        style={{background:t.card2}}>
-        <Icon className="w-5 h-5" style={{color:t.textMute}} />
-      </div>
-      <p className="text-xs font-medium" style={{color:t.textMute}}>{text}</p>
+      <p className="text-sm font-bold tracking-tight flex-1" style={{ color: t.text }}>{label}</p>
+      {count !== undefined && (
+        <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+          style={{ background: color + '18', color }}>{count}</span>
+      )}
     </div>
   );
 };
 
-// ─── Performer row ────────────────────────────────────────────────────────────
-const PerfRow = ({ m, rank, dark }) => {
+// ─── StatRow ──────────────────────────────────────────────────────────────────
+const StatRow = ({ label, value, color, dark, flagged }) => {
   const t = tok(dark);
-  const G=rank===1, S=rank===2, B=rank===3, P=G||S||B;
-  const medal = G?'🥇':S?'🥈':B?'🥉':`#${rank}`;
-  const grad  = G?'linear-gradient(135deg,#7B5A0A,#C9920A,#FFD700)'
-              : S?'linear-gradient(135deg,#3A3A3A,#707070,#C0C0C0)'
-              : B?'linear-gradient(135deg,#5C2E00,#A0521A,#CD7F32)':undefined;
   return (
-    <div className="flex items-center justify-between p-2.5 rounded-xl"
-      style={P?{background:grad}:{background:t.card2,border:`1px solid ${t.border}`}}>
-      <div className="flex items-center gap-2.5">
-        <span className="w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold flex-shrink-0"
-          style={P?{background:'rgba(0,0,0,0.2)',color:'#fff'}:{background:t.border,color:t.textSub}}>
-          {medal}
-        </span>
-        <div className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0">
-          {m.profile_picture
-            ? <img src={m.profile_picture} alt={m.user_name} className="w-full h-full object-cover"/>
-            : <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold"
-                style={{background:`linear-gradient(135deg,${C.deepBlue},${C.mediumBlue})`}}>
-                {m.user_name?.charAt(0)?.toUpperCase()||'?'}
-              </div>}
+    <div className="flex items-center justify-between py-2.5" style={{ borderBottom: '1px solid ' + t.border2 }}>
+      <p className="text-xs font-medium" style={{ color: t.textSub }}>{label}</p>
+      <p className="text-sm font-bold" style={{ color: flagged ? C.red : (color || t.text) }}>
+        {flagged && <AlertTriangle className="inline w-3 h-3 mr-1" />}{value}
+      </p>
+    </div>
+  );
+};
+
+// ─── Card wrapper ─────────────────────────────────────────────────────────────
+const Card = ({ children, dark, className = '', accentColor }) => {
+  const t = tok(dark);
+  return (
+    <motion.div variants={iV} className={'rounded-2xl overflow-hidden ' + className}
+      style={{ background: t.card, border: '1px solid ' + t.border, boxShadow: t.shadow }}>
+      {accentColor && <div className="h-[3px] w-full" style={{ background: accentColor }} />}
+      <div className="p-5">{children}</div>
+    </motion.div>
+  );
+};
+
+// ─── App bar ──────────────────────────────────────────────────────────────────
+const AppBar = ({ name, seconds, total, dark, flagged }) => {
+  const t = tok(dark);
+  const ratio = total > 0 ? seconds / total : 0;
+  const color = flagged ? C.red : C.mid;
+  return (
+    <div className="mb-3">
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-black text-white flex-shrink-0"
+            style={{ background: flagged ? C.red : C.mid }}>
+            {(name || 'A').charAt(0).toUpperCase()}
+          </div>
+          <p className="text-xs font-semibold" style={{ color: flagged ? C.red : t.text }}>
+            {name}{flagged ? ' ⚠' : ''}
+          </p>
         </div>
-        <div className="min-w-0">
-          <p className="text-sm font-semibold leading-tight truncate max-w-[110px]"
-            style={P?{color:'#fff'}:{color:t.text}}>{m.user_name||'Unknown'}</p>
-          <p className="text-[10px]"
-            style={P?{color:'rgba(255,255,255,0.6)'}:{color:t.textMute}}>{m.badge||'Good Performer'}</p>
-        </div>
+        <p className="text-xs font-bold tabular-nums" style={{ color }}>{fmtSec(seconds)}</p>
       </div>
-      <div className="text-right flex-shrink-0">
-        <p className="text-sm font-black" style={P?{color:'#fff'}:{color:C.deepBlue}}>{m.overall_score}%</p>
-        <p className="text-[10px]" style={P?{color:'rgba(255,255,255,0.5)'}:{color:t.textMute}}>{fmtH(m.total_hours)}</p>
+      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: t.border }}>
+        <motion.div className="h-full rounded-full"
+          initial={{ width: 0 }} animate={{ width: Math.round(ratio * 100) + '%' }}
+          transition={{ duration: 0.8, ease: 'easeOut' }}
+          style={{ background: color }} />
       </div>
     </div>
   );
 };
 
-// ─── Tab button ───────────────────────────────────────────────────────────────
-const TabBtn = ({ id, label, icon:Icon, active, onClick, dark }) => {
+// ─── Score ring ───────────────────────────────────────────────────────────────
+const ScoreRing = ({ value, label, color, size = 80, dark }) => {
   const t = tok(dark);
+  const r = (size / 2) - 8;
+  const circ = 2 * Math.PI * r;
+  const dash = circ * ((value || 0) / 100);
   return (
-    <button onClick={()=>onClick(id)}
-      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap flex-shrink-0"
-      style={active
-        ?{background:C.deepBlue,color:'#fff',boxShadow:'0 2px 6px rgba(13,59,102,0.35)'}
-        :{background:t.card2,color:t.textSub,border:`1px solid ${t.border}`}}>
-      <Icon className="w-3.5 h-3.5"/>{label}
-    </button>
+    <div className="flex flex-col items-center gap-1">
+      <svg width={size} height={size}>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" strokeWidth={7} stroke={dark ? '#1f2d42' : '#f1f5f9'} />
+        <circle cx={size/2} cy={size/2} r={r} fill="none" strokeWidth={7} stroke={color} strokeLinecap="round"
+          strokeDasharray={dash + ' ' + circ} transform={'rotate(-90 ' + (size/2) + ' ' + (size/2) + ')'} />
+        <text x={size/2} y={size/2} textAnchor="middle" dominantBaseline="middle"
+          fill={color} fontSize="14" fontWeight="900">{value || 0}%</text>
+      </svg>
+      <p className="text-[10px] font-bold uppercase tracking-wider text-center" style={{ color: t.textMute }}>{label}</p>
+    </div>
   );
 };
 
-// ════════════════════════════════════════════════════════════════════════════
+// ─── Staff card ───────────────────────────────────────────────────────────────
+const StaffCard = ({ staff, selected, onClick, data, dark }) => {
+  const t = tok(dark);
+  const score = data?.productivity_percent ? Math.round(data.productivity_percent) : 0;
+  const scoreColor = score >= 70 ? C.green : score >= 40 ? C.amber : C.red;
+  return (
+    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+      onClick={onClick} className="w-full text-left rounded-xl p-3 transition-all"
+      style={{
+        background: selected ? C.mid + '15' : t.card2,
+        border: '1.5px solid ' + (selected ? C.mid : t.border),
+        boxShadow: selected ? '0 0 0 3px ' + C.mid + '18' : 'none',
+      }}>
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-black flex-shrink-0"
+          style={{ background: 'linear-gradient(135deg,' + C.blue + ',' + C.mid + ')' }}>
+          {(staff.full_name || staff.name || 'U').charAt(0).toUpperCase()}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold truncate" style={{ color: t.text }}>{staff.full_name || staff.name}</p>
+          <p className="text-[10px]" style={{ color: t.textMute }}>{staff.role || 'Staff'}</p>
+        </div>
+        {data && (
+          <div className="text-right flex-shrink-0">
+            <p className="text-sm font-black" style={{ color: scoreColor }}>{score}%</p>
+            <p className="text-[9px] font-bold uppercase" style={{ color: t.textMute }}>score</p>
+          </div>
+        )}
+      </div>
+    </motion.button>
+  );
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
 // MAIN
-// ════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 export default function StaffActivity() {
-  const { user, hasPermission } = useAuth();
+  const { user } = useAuth();
   const dark = useDark();
-  const t    = tok(dark);
+  const t = tok(dark);
+  const isAdmin = user?.role === 'admin';
 
-  const isAdmin   = user?.role === 'admin';
-
-  // Admin-only guard: redirect non-admins
   if (!isAdmin) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen gap-4"
-        style={{ background: t.pageBg }}>
-        <Shield className="w-16 h-16" style={{ color: t.textMute }} />
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4" style={{ background: t.pageBg }}>
+        <ShieldAlert className="w-16 h-16" style={{ color: t.textMute }} />
         <p className="text-lg font-bold" style={{ color: t.text }}>Admin Access Only</p>
-        <p className="text-sm" style={{ color: t.textSub }}>
-          This page is restricted to administrators.
-        </p>
+        <p className="text-sm" style={{ color: t.textSub }}>This page is restricted to administrators.</p>
       </div>
     );
   }
 
-  const canDL     = isAdmin || hasPermission('can_download_reports');
+  const [staffList,   setStaffList]   = useState([]);
+  const [selectedId,  setSelectedId]  = useState(null);
+  const [actData,     setActData]     = useState({});
+  const [rawActivity, setRawActivity] = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [loadingUser, setLoadingUser] = useState(false);
+  const [selDate,     setSelDate]     = useState(() => new Date().toISOString().slice(0, 10));
+  const [search,      setSearch]      = useState('');
+  const [activeTab,   setActiveTab]   = useState('session');
+  const [refreshing,  setRefreshing]  = useState(false);
 
-  // Cross-visibility: view_other_activity is the ONLY way non-admin users see other users' activity.
-  // Manager has NO automatic team access — must be granted via view_other_activity by admin.
-  const crossVisReports    = user?.permissions?.view_other_reports || [];
-  const hasCrossVisReports = crossVisReports.length > 0;
-  const canSwitchUser = isAdmin || hasCrossVisReports;
-
-  // ── State ──────────────────────────────────────────────────────────────────
-  const [tasks,      setTasks]      = useState([]);
-  const [dashStats,  setDashStats]  = useState(null);
-  const [attendance, setAttendance] = useState([]);
-  const [allUsers,   setAllUsers]   = useState([]);
-  const [performers, setPerformers] = useState([]);
-  const [rankPeriod, setRankPeriod] = useState('monthly');
-  const [loading,    setLoading]    = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [selUser,    setSelUser]    = useState('all');
-  const [tab,        setTab]        = useState('overview');
-  const [showCustomize, setShowCustomize] = useState(false);
-  const RPT_SECTIONS = ['kpi_row','tab_panels'];
-  const RPT_LABELS = {
-    kpi_row:    { name:'KPI Stats Row',  icon:'📊', desc:'6 summary cards — tasks, completion, attendance, DSC…' },
-    tab_panels: { name:'Tab Panels',     icon:'📑', desc:'Overview, tasks, attendance, efficiency, performers, team' },
-  };
-  const { order: rptOrder, moveSection: rptMove, resetOrder: rptReset } = usePageLayout('reports', RPT_SECTIONS);
-
-  // ── Fetch ──────────────────────────────────────────────────────────────────
-  const fetchAll = async (ref=false) => {
-    ref ? setRefreshing(true) : setLoading(true);
-    const [r1,r2,r3,r4] = await Promise.allSettled([
-      api.get('/tasks'),
-      api.get('/dashboard/stats'),
-      api.get('/attendance/history'),
-      (isAdmin || hasCrossVisReports) ? api.get('/users') : Promise.resolve({data:[]}),
-    ]);
-    if (r1.status==='fulfilled') setTasks(r1.value?.data||[]);
-    if (r2.status==='fulfilled') setDashStats(r2.value?.data||null);
-    if (r3.status==='fulfilled') setAttendance(r3.value?.data||[]);
-    if (r4.status==='fulfilled') {
-      const rawUsers = r4.value?.data || [];
-      // Admin sees all. All other roles (including manager) only see explicit cross-vis users.
-      setAllUsers(isAdmin ? rawUsers : rawUsers.filter(u => crossVisReports.includes(u.id || u._id)));
-    }
-    setLoading(false); setRefreshing(false);
-  };
-
-  const fetchPerf = async () => {
+  const fetchStaff = useCallback(async () => {
     try {
-      const p = rankPeriod==='all'?'all_time':rankPeriod;
-      const r = await api.get('/reports/performance-rankings',{params:{period:p}});
-      setPerformers(r.data||[]);
-    } catch { setPerformers([]); }
-  };
+      const res = await api.get('/users');
+      const list = (res.data || []).filter(u => u.role !== 'admin');
+      setStaffList(list);
+      if (list.length > 0) setSelectedId(id => id || (list[0].id || list[0]._id));
+    } catch { toast.error('Failed to load staff list'); }
+  }, []);
 
-  useEffect(()=>{ if(user) fetchAll(); },[user]);
-  useEffect(()=>{ fetchPerf(); },[rankPeriod]);
-
-  // ── Derived: tasks ────────────────────────────────────────────────────────
-  const fTasks = useMemo(()=>
-    selUser==='all'?tasks:tasks.filter(t=>t.assigned_to===selUser||t.created_by===selUser),
-    [tasks,selUser]);
-
-  const done   = useMemo(()=>fTasks.filter(t=>t.status==='completed'),[fTasks]);
-  const wip    = useMemo(()=>fTasks.filter(t=>t.status==='in_progress'),[fTasks]);
-  const pend   = useMemo(()=>fTasks.filter(t=>t.status==='pending'),[fTasks]);
-  const overdue= useMemo(()=>{
-    const now=new Date();
-    return fTasks.filter(t=>t.due_date&&new Date(t.due_date)<now&&t.status!=='completed');
-  },[fTasks]);
-  const compRate= fTasks.length>0?Math.round((done.length/fTasks.length)*100):0;
-
-  // ── Derived: attendance ───────────────────────────────────────────────────
-  const fAtt    = useMemo(()=>selUser==='all'?attendance:attendance.filter(a=>a.user_id===selUser),[attendance,selUser]);
-  const totMins = useMemo(()=>fAtt.reduce((s,a)=>s+(a.duration_minutes||0),0),[fAtt]);
-  const presDays= useMemo(()=>fAtt.filter(a=>a.status==='present'&&a.punch_in).length,[fAtt]);
-  const avgMins = presDays>0?Math.round(totMins/presDays):0;
-  const lateDays= useMemo(()=>fAtt.filter(a=>a.is_late).length,[fAtt]);
-
-  // ── Unique users (dropdown) ───────────────────────────────────────────────
-  const uUsers = useMemo(()=>{
-    if (!isAdmin && !hasCrossVisReports) return [];
-    const m=new Map();
-    allUsers.forEach(u=>{if(u.id&&u.full_name)m.set(u.id,u);});
-    return Array.from(m.values());
-  },[allUsers,isAdmin]);
-
-  // ── Chart data ─────────────────────────────────────────────────────────────
-  const statusData = useMemo(()=>[
-    {name:'Completed',  value:done.length, color:C.emeraldGreen},
-    {name:'In Progress',value:wip.length,  color:C.mediumBlue  },
-    {name:'Pending',    value:pend.length, color:C.amber       },
-  ].filter(d=>d.value>0),[done,wip,pend]);
-
-  const catData = useMemo(()=>{
-    const cc={};
-    fTasks.forEach(t=>{const c=t.category||'Other';cc[c]=(cc[c]||0)+1;});
-    return Object.entries(cc)
-      .map(([name,count],i)=>({name:name.replace(/_/g,' ').replace(/\b\w/g,l=>l.toUpperCase()),tasks:count,fill:PALETTE[i%PALETTE.length]}))
-      .sort((a,b)=>b.tasks-a.tasks).slice(0,7);
-  },[fTasks]);
-
-  const weeklyData = useMemo(()=>{
-    const today=new Date(), diff=today.getDay()-1;
-    const mon=new Date(today); mon.setDate(today.getDate()-(diff>=0?diff:diff+7)); mon.setHours(0,0,0,0);
-    const days=Array.from({length:7},(_,i)=>{
-      const d=new Date(mon); d.setDate(mon.getDate()+i);
-      return {name:d.toLocaleDateString('en-US',{weekday:'short'}),completed:0,pending:0};
-    });
-    fTasks.forEach(t=>{
-      const gs=ds=>{const d=new Date(ds);d.setHours(0,0,0,0);return d;};
-      if (t.status==='completed'&&t.completed_at){const i=Math.floor((gs(t.completed_at)-mon)/86400000);if(i>=0&&i<7)days[i].completed++;}
-      if (t.status!=='completed'&&t.created_at){const i=Math.floor((gs(t.created_at)-mon)/86400000);if(i>=0&&i<7)days[i].pending++;}
-    });
-    return days;
-  },[fTasks]);
-
-  const attTrend = useMemo(()=>{
-    const today=new Date();
-    const days=Array.from({length:7},(_,i)=>{
-      const d=new Date(today); d.setDate(today.getDate()-(6-i));
-      return {name:d.toLocaleDateString('en-US',{weekday:'short'}),date:d.toISOString().slice(0,10),hours:0};
-    });
-    fAtt.forEach(a=>{const day=days.find(d=>d.date===a.date);if(day)day.hours=Math.round((a.duration_minutes||0)/60*10)/10;});
-    return days;
-  },[fAtt]);
-
-  const prioData = useMemo(()=>{
-    const cc={critical:0,urgent:0,high:0,medium:0,low:0};
-    fTasks.forEach(t=>{const p=(t.priority||'medium').toLowerCase();if(cc[p]!==undefined)cc[p]++;});
-    return [
-      {name:'Critical',value:cc.critical,color:'#dc2626'},
-      {name:'Urgent',  value:cc.urgent,  color:'#ea580c'},
-      {name:'High',    value:cc.high,    color:C.amber  },
-      {name:'Medium',  value:cc.medium,  color:C.mediumBlue},
-      {name:'Low',     value:cc.low,     color:C.emeraldGreen},
-    ].filter(d=>d.value>0);
-  },[fTasks]);
-
-  const radarData = useMemo(()=>{
-    const p=performers[0]; if(!p) return [];
-    return [
-      {metric:'Attendance',score:p.attendance_percent||0},
-      {metric:'Task Done', score:p.task_completion_percent||0},
-      {metric:'On Time',   score:p.timely_punchin_percent||0},
-      {metric:'Todo Rate', score:p.todo_ontime_percent||0},
-      {metric:'Overall',   score:p.overall_score||0},
-    ];
-  },[performers]);
-
-  // ── Efficiency cards — real tasks + real attendance ───────────────────────
-  const effCards = useMemo(()=>{
-    if (!isAdmin && !hasCrossVisReports) {
-      // Own data only (staff and manager without explicit cross-vis)
-      const myT=tasks.filter(t=>t.assigned_to===user?.id);
-      const myA=attendance.filter(a=>a.user_id===user?.id);
-      const myM=myA.reduce((s,a)=>s+(a.duration_minutes||0),0);
-      const myD=myA.filter(a=>a.status==='present').length;
-      return [{
-        user_id:user?.id,user_name:user?.full_name||'You',
-        total:myT.length,done:myT.filter(t=>t.status==='completed').length,
-        pend:myT.filter(t=>t.status!=='completed').length,
-        mins:myM,days:myD,
-        pct:myT.length>0?Math.round((myT.filter(t=>t.status==='completed').length/myT.length)*100):0,
-      }];
-    }
-    // Non-admin WITH cross-vis (manager or staff with view_other_reports): own + explicitly listed
-    if (!isAdmin && hasCrossVisReports) {
-      const uMap={};
-      if (user?.id) uMap[user.id]={user_id:user.id,user_name:user.full_name||'You',total:0,done:0,pend:0,mins:0,days:0,pct:0};
-      allUsers.forEach(u=>{if(crossVisReports.includes(u.id))uMap[u.id]={user_id:u.id,user_name:u.full_name,total:0,done:0,pend:0,mins:0,days:0,pct:0};});
-      tasks.forEach(t=>{const u=t.assigned_to;if(u&&uMap[u]){uMap[u].total++;t.status==='completed'?uMap[u].done++:uMap[u].pend++;}});
-      attendance.forEach(a=>{const u=a.user_id;if(u&&uMap[u]){uMap[u].mins+=(a.duration_minutes||0);if(a.status==='present')uMap[u].days++;}});
-      Object.values(uMap).forEach(u=>{u.pct=u.total>0?Math.round((u.done/u.total)*100):0;});
-      let cards=Object.values(uMap);
-      if(selUser!=='all'&&selUser!==user?.id) cards=cards.filter(c=>c.user_id===selUser);
-      else if(selUser===user?.id) cards=cards.filter(c=>c.user_id===user?.id);
-      return cards.sort((a,b)=>b.done-a.done);
-    }
-    // Admin only: aggregate over all available users
-    const uMap={};
-    allUsers.forEach(u=>{uMap[u.id]={user_id:u.id,user_name:u.full_name,total:0,done:0,pend:0,mins:0,days:0,pct:0};});
-    tasks.forEach(t=>{const u=t.assigned_to;if(u&&uMap[u]){uMap[u].total++;t.status==='completed'?uMap[u].done++:uMap[u].pend++;}});
-    attendance.forEach(a=>{const u=a.user_id;if(u&&uMap[u]){uMap[u].mins+=(a.duration_minutes||0);if(a.status==='present')uMap[u].days++;}});
-    Object.values(uMap).forEach(u=>{u.pct=u.total>0?Math.round((u.done/u.total)*100):0;});
-    let cards=Object.values(uMap);
-    if(selUser!=='all') cards=cards.filter(c=>c.user_id===selUser);
-    return cards.sort((a,b)=>b.done-a.done);
-  },[tasks,attendance,allUsers,isAdmin,user,selUser,hasCrossVisReports,crossVisReports]);
-
-  const teamWL = useMemo(()=>(dashStats?.team_workload||[]).slice(0,12),[dashStats]);
-
-  // ── CSV export ────────────────────────────────────────────────────────────
-  const handleCsv = () => {
-    const h=['User','Total Tasks','Completed','Pending','Completion%','Screen Time(min)','Days Present'];
-    const rows=effCards.map(d=>[d.user_name,d.total,d.done,d.pend,`${d.pct}%`,d.mins,d.days]);
-    const csv=[h,...rows].map(r=>r.join(',')).join('\n');
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-    a.download='efficiency_reports.csv';a.click();
-    toast.success('CSV downloaded!');
-  };
-
-  // ── PDF export ────────────────────────────────────────────────────────────
-  const handlePdf = async () => {
+  const fetchSummaries = useCallback(async () => {
     try {
-      const doc=new jsPDF('p','mm','a4'); let y=15;
-      doc.setFontSize(20);doc.setTextColor(13,59,102);
-      doc.text('Efficiency Reports & Analytics',15,y);y+=9;
-      doc.setFontSize(10);doc.setTextColor(100,100,100);
-      doc.text(`Generated: ${new Date().toLocaleDateString()} | Period: ${rankPeriod}`,15,y);y+=10;
+      const res = await api.get('/activity/summary', { params: { date_from: selDate, date_to: selDate + 'T23:59:59' } });
+      const map = {};
+      (res.data || []).forEach(d => { map[d.user_id] = d; });
+      setActData(map);
+    } catch {}
+  }, [selDate]);
 
-      doc.setFontSize(12);doc.setTextColor(13,59,102);doc.text('Key Performance Indicators',15,y);y+=8;
-      doc.autoTable({
-        head:[['Metric','Value']],
-        body:[
-          ['Total Tasks',fTasks.length.toString()],['Completed',done.length.toString()],
-          ['In Progress',wip.length.toString()],['Overdue',overdue.length.toString()],
-          ['Completion Rate',`${compRate}%`],['Days Present',presDays.toString()],
-          ['Total Screen Time',fmt(totMins)],['Avg Daily Hours',fmt(avgMins)],
-          ['Late Punch-ins',lateDays.toString()],
-        ],
-        startY:y,margin:15,theme:'grid',
-        headStyles:{fillColor:[13,59,102],textColor:[255,255,255],fontStyle:'bold'},
-        alternateRowStyles:{fillColor:[240,240,240]},
-      });
-      y=doc.lastAutoTable.finalY+12;
+  const fetchUserActivity = useCallback(async (uid) => {
+    if (!uid) return;
+    setLoadingUser(true);
+    try {
+      const res = await api.get('/activity/user/' + uid, { params: { limit: 500 } });
+      setRawActivity(res.data || []);
+    } catch { setRawActivity([]); }
+    finally { setLoadingUser(false); }
+  }, []);
 
-      if(effCards.length>0){
-        if(y>180){doc.addPage();y=15;}
-        doc.setFontSize(12);doc.setTextColor(13,59,102);doc.text('Efficiency Breakdown',15,y);y+=8;
-        doc.autoTable({
-          head:[['User','Tasks','Completed','Pending','Completion%','Screen Time','Days']],
-          body:effCards.map(d=>[d.user_name,d.total,d.done,d.pend,`${d.pct}%`,fmt(d.mins),d.days]),
-          startY:y,margin:15,theme:'grid',
-          headStyles:{fillColor:[31,111,178],textColor:[255,255,255],fontStyle:'bold'},
-        });
-        y=doc.lastAutoTable.finalY+12;
-      }
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      await fetchStaff();
+      await fetchSummaries();
+      setLoading(false);
+    })();
+  }, [selDate]);
 
-      if(performers.length>0){
-        doc.addPage();y=15;
-        doc.setFontSize(12);doc.setTextColor(13,59,102);doc.text('Star Performers',15,y);y+=8;
-        doc.autoTable({
-          head:[['Rank','Name','Score','Attendance%','Task Done%','Punch-In%','Hours','Badge']],
-          body:performers.map((m,i)=>[`#${i+1}`,m.user_name,`${m.overall_score}%`,`${m.attendance_percent}%`,`${m.task_completion_percent}%`,`${m.timely_punchin_percent}%`,fmtH(m.total_hours),m.badge||'Good']),
-          startY:y,margin:15,theme:'grid',
-          headStyles:{fillColor:[31,111,178],textColor:[255,255,255],fontStyle:'bold'},
-        });
-      }
-      doc.save('efficiency_reports.pdf');
-      toast.success('PDF exported!');
-    } catch(e){console.error(e);toast.error('PDF failed');}
+  useEffect(() => { if (selectedId) fetchUserActivity(selectedId); }, [selectedId]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchSummaries();
+    if (selectedId) await fetchUserActivity(selectedId);
+    setRefreshing(false);
+    toast.success('Refreshed');
   };
 
-  // ── Loading ───────────────────────────────────────────────────────────────
-  if (loading) return <MiniLoader height={400} />;
+  // ── Derived ────────────────────────────────────────────────────────────────
+  const selectedStaff = staffList.find(s => (s.id || s._id) === selectedId);
+  const summary = actData[selectedId] || {};
 
-  const tabs=[
-    {id:'overview',   label:'Overview',    icon:BarChart3 },
-    {id:'tasks',      label:'Tasks',       icon:Target    },
-    {id:'attend',     label:'Attendance',  icon:Clock     },
-    {id:'efficiency', label:'Efficiency',  icon:Zap       },
-    {id:'performers', label:'Performers',  icon:Award     },
-    // Team tab: Admin only.
-    ...(isAdmin ? [{id:'team',label:'Team',icon:Users}] : []),
-    // Computer Activity tab: Admin only.
-    ...(isAdmin ? [{id:'computer',label:'Computer Activity',icon:Monitor}] : []),
+  const todayEvents = rawActivity.filter(a => {
+    const ts = a.timestamp || a.date || '';
+    return !selDate || ts.startsWith(selDate);
+  });
+
+  // SESSION
+  const loginEvents  = todayEvents.filter(a => a.type === 'login'        || a.event_type === 'login');
+  const logoutEvents = todayEvents.filter(a => a.type === 'logout'       || a.event_type === 'logout');
+  const lockEvents   = todayEvents.filter(a => a.type === 'lock'         || a.event_type === 'lock');
+  const unlockEvents = todayEvents.filter(a => a.type === 'unlock'       || a.event_type === 'unlock');
+  const remoteLogins = todayEvents.filter(a => a.remote === true         || a.event_type === 'remote_login');
+  const failedLogins = todayEvents.filter(a => a.type === 'failed_login' || a.event_type === 'failed_login');
+  const firstLogin   = loginEvents.length > 0
+    ? new Date(loginEvents[loginEvents.length - 1].timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+    : '—';
+  const lastLogout = logoutEvents.length > 0
+    ? new Date(logoutEvents[0].timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+    : '—';
+  const totalActive = summary.active_duration || todayEvents.filter(a => !a.idle).reduce((s, a) => s + (a.duration_seconds || 0), 0);
+  const totalIdle   = summary.idle_duration   || todayEvents.filter(a =>  a.idle).reduce((s, a) => s + (a.duration_seconds || 0), 0);
+  const breakDuration = Math.round(totalIdle * 0.7);
+
+  // APPS
+  const appsToShow = summary.apps_list?.length > 0
+    ? summary.apps_list.map(a => ({ name: a.name, seconds: a.duration, count: a.count }))
+    : Object.values(
+        todayEvents.reduce((m, a) => {
+          if (!a.app_name) return m;
+          if (!m[a.app_name]) m[a.app_name] = { name: a.app_name, seconds: 0, count: 0 };
+          m[a.app_name].seconds += a.duration_seconds || 0;
+          m[a.app_name].count++;
+          return m;
+        }, {})
+      ).sort((a, b) => b.seconds - a.seconds);
+  const topApps = appsToShow.slice(0, 8);
+  const totalAppTime = topApps.reduce((s, a) => s + (a.seconds || 0), 0);
+  const BANNED = ['whatsapp', 'telegram', 'facebook', 'torrent', 'gaming', 'tiktok'];
+  const unauthorizedApps = appsToShow.filter(a => BANNED.some(k => (a.name || '').toLowerCase().includes(k)));
+  const appChartData = topApps.slice(0, 6).map(a => ({
+    name: (a.name || 'App').split(' ')[0].slice(0, 10),
+    minutes: Math.round((a.seconds || 0) / 60),
+  }));
+
+  // WEBSITES
+  const webSummary = summary.websites || {};
+  const websitesToShow = Object.keys(webSummary).length > 0
+    ? Object.entries(webSummary).map(([name, s]) => ({ name, seconds: s })).sort((a, b) => b.seconds - a.seconds)
+    : Object.values(
+        todayEvents.reduce((m, a) => {
+          const k = a.website || a.domain || a.url;
+          if (!k) return m;
+          if (!m[k]) m[k] = { name: k, seconds: 0 };
+          m[k].seconds += a.duration_seconds || 0;
+          return m;
+        }, {})
+      ).sort((a, b) => b.seconds - a.seconds);
+  const PRODUCTIVE_SITES = ['github', 'stackoverflow', 'docs', 'sheets', 'drive', 'notion', 'jira', 'gmail', 'outlook'];
+  const SOCIAL_SITES     = ['facebook', 'instagram', 'twitter', 'youtube', 'tiktok', 'reddit'];
+  const SUSPECT_SITES    = ['torrent', 'vpn', 'proxy'];
+  const classifySite = (name) => {
+    const n = (name || '').toLowerCase();
+    if (SUSPECT_SITES.some(s => n.includes(s)))     return 'suspicious';
+    if (SOCIAL_SITES.some(s => n.includes(s)))      return 'social';
+    if (PRODUCTIVE_SITES.some(s => n.includes(s)))  return 'productive';
+    return 'neutral';
+  };
+  const webProductiveTime = websitesToShow.filter(w => classifySite(w.name) === 'productive').reduce((s, w) => s + w.seconds, 0);
+  const webSocialTime     = websitesToShow.filter(w => classifySite(w.name) === 'social').reduce((s, w) => s + w.seconds, 0);
+  const webNeutralTime    = websitesToShow.filter(w => classifySite(w.name) === 'neutral').reduce((s, w) => s + w.seconds, 0);
+  const webTotalTime      = websitesToShow.reduce((s, w) => s + w.seconds, 0);
+  const webPieData = [
+    { name: 'Productive', value: Math.round(webProductiveTime / 60), color: C.green },
+    { name: 'Social',     value: Math.round(webSocialTime / 60),     color: C.amber },
+    { name: 'Other',      value: Math.round(webNeutralTime / 60),    color: C.mid   },
+  ].filter(d => d.value > 0);
+
+  // INPUT
+  const keystrokeCount  = todayEvents.reduce((s, a) => s + (a.keystrokes || 0), 0);
+  const mouseClicks     = todayEvents.reduce((s, a) => s + (a.mouse_clicks || 0), 0);
+  const mouseDistance   = todayEvents.reduce((s, a) => s + (a.mouse_distance || 0), 0);
+  const idlePercent     = totalActive + totalIdle > 0 ? Math.round(totalIdle / (totalActive + totalIdle) * 100) : 0;
+  const productivityScore = summary.productivity_percent
+    ? Math.round(summary.productivity_percent)
+    : Math.min(100, Math.round(
+        ((100 - idlePercent) * 0.5) +
+        (Math.min(50, keystrokeCount / 100)) +
+        (Math.min(20, mouseClicks / 100))
+      ));
+
+  // FILES
+  const fileCreated    = todayEvents.filter(a => a.type === 'file_create'  || a.event_type === 'file_create').length;
+  const fileModified   = todayEvents.filter(a => a.type === 'file_modify'  || a.event_type === 'file_modify').length;
+  const fileDeleted    = todayEvents.filter(a => a.type === 'file_delete'  || a.event_type === 'file_delete').length;
+  const usbTransfers   = todayEvents.filter(a => a.type === 'usb_transfer' || a.event_type === 'usb_transfer').length;
+  const cloudUploads   = todayEvents.filter(a => a.type === 'cloud_upload' || a.event_type === 'cloud_upload').length;
+  const sensitiveFiles = todayEvents.filter(a => a.sensitive === true      || a.event_type === 'sensitive_access');
+
+  // SECURITY
+  const usbEvents            = todayEvents.filter(a => (a.type || a.event_type || '').includes('usb'));
+  const printEvents          = todayEvents.filter(a => a.type === 'print'            || a.event_type === 'print');
+  const avDisabled           = todayEvents.filter(a => a.type === 'av_disabled'      || a.event_type === 'av_disabled');
+  const vpnUsage             = todayEvents.filter(a => a.type === 'vpn'              || a.event_type === 'vpn' || a.vpn === true);
+  const incognitoEvents      = todayEvents.filter(a => a.incognito === true          || a.event_type === 'incognito');
+  const suspiciousTransfers  = todayEvents.filter(a => a.suspicious === true         || a.event_type === 'suspicious_transfer');
+  const unauthorizedInstalls = todayEvents.filter(a => a.type === 'software_install' || a.event_type === 'software_install');
+  const securityAlerts = avDisabled.length + suspiciousTransfers.length + unauthorizedInstalls.length + (vpnUsage.length > 0 ? 1 : 0);
+
+  const filteredStaff = staffList.filter(s =>
+    !search || (s.full_name || s.name || '').toLowerCase().includes(search.toLowerCase())
+  );
+
+  const TABS = [
+    { id: 'session',  label: 'Session',  icon: LogIn,      color: C.blue   },
+    { id: 'apps',     label: 'Apps',     icon: Monitor,    color: C.mid    },
+    { id: 'web',      label: 'Web',      icon: Globe,      color: C.cyan   },
+    { id: 'input',    label: 'Input',    icon: Keyboard,   color: C.purple },
+    { id: 'files',    label: 'Files',    icon: FolderOpen, color: C.amber  },
+    { id: 'security', label: 'Security', icon: Shield,     color: C.red    },
   ];
 
-  const cursorStyle={fill:dark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.03)'};
+  const exportPDF = async () => {
+    try {
+      const doc = new jsPDF('p', 'mm', 'a4'); let y = 15;
+      doc.setFontSize(18); doc.setTextColor(13, 59, 102);
+      doc.text('Staff Activity Report', 15, y); y += 8;
+      doc.setFontSize(10); doc.setTextColor(100);
+      doc.text('Staff: ' + (selectedStaff?.full_name || '—') + '   Date: ' + selDate, 15, y); y += 12;
+      doc.setFontSize(13); doc.setTextColor(13, 59, 102); doc.text('Session Overview', 15, y); y += 7;
+      doc.autoTable({ startY: y, margin: 15, theme: 'grid',
+        head: [['Metric', 'Value']],
+        body: [['Login Time', firstLogin], ['Logout Time', lastLogout], ['Active Hours', fmtSec(totalActive)],
+               ['Idle Time', fmtSec(totalIdle)], ['Lock/Unlock Events', lockEvents.length + ' / ' + unlockEvents.length],
+               ['Failed Logins', failedLogins.length], ['Remote Logins', remoteLogins.length]],
+        headStyles: { fillColor: [13, 59, 102], textColor: [255, 255, 255] } });
+      y = doc.lastAutoTable.finalY + 10;
+      if (topApps.length > 0) {
+        doc.setFontSize(13); doc.setTextColor(13, 59, 102); doc.text('Application Usage', 15, y); y += 7;
+        doc.autoTable({ startY: y, margin: 15, theme: 'grid', head: [['Application', 'Time Spent']],
+          body: topApps.map(a => [a.name, fmtSec(a.seconds || 0)]),
+          headStyles: { fillColor: [31, 111, 178], textColor: [255, 255, 255] } });
+        y = doc.lastAutoTable.finalY + 10;
+      }
+      doc.setFontSize(10); doc.setTextColor(100);
+      doc.text('Productivity Score: ' + productivityScore + '%   Security Alerts: ' + securityAlerts, 15, y);
+      doc.save('staff_activity_' + (selectedStaff?.full_name || 'staff').replace(/ /g, '_') + '_' + selDate + '.pdf');
+      toast.success('PDF exported!');
+    } catch { toast.error('Export failed'); }
+  };
 
-  // ── JSX ───────────────────────────────────────────────────────────────────
+  if (loading) return <MiniLoader height={400} />;
+
   return (
-   <>
-    <LayoutCustomizer
-      isOpen={showCustomize}
-      onClose={() => setShowCustomize(false)}
-      order={rptOrder}
-      sectionLabels={RPT_LABELS}
-      onDragEnd={rptMove}
-      onReset={rptReset}
-      isDark={dark}
-    />
     <motion.div variants={cV} initial="hidden" animate="visible"
-      className="space-y-4 p-4 md:p-6 min-h-screen"
-      style={{background:t.pageBg}}>
+      className="flex min-h-screen" style={{ background: t.pageBg }}>
 
-      {/* ══ HEADER ══ */}
-      <motion.div variants={iV}>
-        <div className="rounded-2xl overflow-hidden"
-          style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:t.shadow}}>
-          <div className="h-1 w-full"
-            style={{background:`linear-gradient(90deg,${C.deepBlue},${C.mediumBlue},${C.emeraldGreen})`}}/>
-          <div className="p-4 md:p-5">
-            {/* title row */}
-            <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-              <div>
-                <h1 className="text-xl font-black tracking-tight" style={{color:C.deepBlue}}>
-                  Reports &amp; Analytics
-                </h1>
-                <p className="text-sm mt-0.5 flex flex-wrap items-center gap-2" style={{color:t.textSub}}>
-                  Live metrics from tasks, attendance &amp; performance
-                  {fTasks.length>0&&(
-                    <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full"
-                      style={{background:`${C.emeraldGreen}18`,color:C.emeraldGreen}}>
-                      <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse"/>
-                      {fTasks.length} tasks
-                    </span>
-                  )}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {canSwitchUser && uUsers.length>0 && (
-                  <select value={selUser} onChange={e=>setSelUser(e.target.value)}
-                    className="h-8 px-3 text-xs rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    style={{background:t.inputBg,border:`1px solid ${t.inputBdr}`,color:t.text}}>
-                    {isAdmin  && <option value="all">All Users</option>}
-                    {!isAdmin && hasCrossVisReports && <option value={user?.id || 'all'}>My Reports</option>}
-                    {uUsers.map(u=><option key={u.id} value={u.id}>{u.full_name}</option>)}
-                  </select>
-                )}
-                <button onClick={()=>fetchAll(true)} disabled={refreshing}
-                  className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
-                  style={{background:t.card2,border:`1px solid ${t.border}`,color:t.text}}>
-                  <RefreshCw className={`w-3.5 h-3.5 ${refreshing?'animate-spin':''}`}/>
-                  {refreshing?'Refreshing…':'Refresh'}
-                </button>
-                {canDL&&(
-                  <>
-                    <button onClick={handleCsv}
-                      className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 text-white transition-all"
-                      style={{background:'#1e293b'}}>
-                      <Download className="w-3.5 h-3.5"/> CSV
-                    </button>
-                    <button onClick={handlePdf}
-                      className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 text-white transition-all"
-                      style={{background:C.deepBlue}}>
-                      <Download className="w-3.5 h-3.5"/> PDF
-                    </button>
-                  </>
-                )}
-              </div>
+      {/* ══ LEFT SIDEBAR ══ */}
+      <div className="w-72 flex-shrink-0 flex flex-col border-r"
+        style={{ background: t.card, borderColor: t.border }}>
+        <div className="p-4 border-b" style={{ borderColor: t.border }}>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: C.blue + '18' }}>
+              <Users className="w-4 h-4" style={{ color: C.blue }} />
             </div>
-            {/* tabs */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1" style={{scrollbarWidth:'none',WebkitOverflowScrolling:'touch'}}>
-              {tabs.map(tb=>(
-                <TabBtn key={tb.id} id={tb.id} label={tb.label} icon={tb.icon}
-                  active={tab===tb.id} onClick={setTab} dark={dark}/>
-              ))}
+            <div>
+              <p className="text-sm font-black" style={{ color: t.text }}>Staff Monitor</p>
+              <p className="text-[10px]" style={{ color: t.textMute }}>{staffList.length} members</p>
             </div>
           </div>
+          <input type="date" value={selDate} onChange={e => setSelDate(e.target.value)}
+            className="w-full h-8 px-3 text-xs rounded-xl font-medium focus:outline-none focus:ring-2 mb-2"
+            style={{ background: t.card2, border: '1px solid ' + t.inputBdr, color: t.text }} />
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: t.textMute }} />
+            <input placeholder="Search staff…" value={search} onChange={e => setSearch(e.target.value)}
+              className="w-full h-8 pl-8 pr-3 text-xs rounded-xl focus:outline-none focus:ring-2"
+              style={{ background: t.card2, border: '1px solid ' + t.inputBdr, color: t.text }} />
+          </div>
         </div>
-      </motion.div>
-
-      {/* CUSTOMIZE BUTTON */}
-      <motion.div variants={iV} className="flex justify-end">
-        <button
-          onClick={() => setShowCustomize(true)}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition-all hover:shadow-md ${
-            dark
-              ? 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'
-              : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
-          }`}
-        >
-          <Settings2 size={13} /> Customize Layout
-        </button>
-      </motion.div>
-
-      {/* ORDERED SECTIONS */}
-      {rptOrder.map((sectionId) => {
-        if (sectionId === 'kpi_row') return (
-      <React.Fragment key="kpi_row">
-      {/* ══ KPI ROW — 6 cards, uniform height via grid ══ */}
-      {/* grid-rows-1 + items-stretch ensures every card in the row is the same height */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-stretch">
-        {[
-          {label:'Total Tasks',   value:fTasks.length,        sub:`${compRate}% completion`,    color:C.deepBlue,     icon:Target       },
-          {label:'Completed',     value:done.length,           sub:`${done.length} of ${fTasks.length}`,color:C.emeraldGreen,icon:CheckCircle2},
-          {label:'In Progress',   value:wip.length,            sub:'Currently active',           color:C.mediumBlue,   icon:Activity     },
-          {label:'Overdue',       value:overdue.length,        sub:'Past due date',              color:C.coral,        icon:AlertTriangle},
-          {label:'Days Present',  value:presDays,              sub:`${fmt(avgMins)} avg/day`,    color:C.mediumBlue,   icon:Calendar     },
-          {label:'Screen Time',   value:fmtC(totMins),         sub:`${presDays} days logged`,   color:C.amber,        icon:Clock        },
-        ].map((k,i)=><KpiCard key={i} {...k} dark={dark}/>)}
+        <div className="flex-1 overflow-y-auto p-3 space-y-2" style={{ scrollbarWidth: 'thin' }}>
+          {filteredStaff.map(s => (
+            <StaffCard key={s.id || s._id} staff={s}
+              selected={(s.id || s._id) === selectedId}
+              onClick={() => setSelectedId(s.id || s._id)}
+              data={actData[s.id || s._id]} dark={dark} />
+          ))}
+          {filteredStaff.length === 0 && (
+            <p className="text-xs text-center py-8" style={{ color: t.textMute }}>No staff found</p>
+          )}
+        </div>
       </div>
-      </React.Fragment>
-        );
-        if (sectionId === 'tab_panels') return (
-      <React.Fragment key="tab_panels">
-      {/* ══ TAB PANELS ══ */}
-      <AnimatePresence mode="wait">
 
-        {/* ──────── OVERVIEW ──────── */}
-        {tab==='overview'&&(
-          <motion.div key="ov" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {/* ══ MAIN ══ */}
+      <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
 
-              {/* Task status donut */}
-              <Sec title="Task Status" desc="Current distribution" dark={dark}>
-                {statusData.length>0?(
-                  <ResponsiveContainer width="100%" height={220}>
-                    <PieChart>
-                      <Pie data={statusData} cx="50%" cy="50%" innerRadius={52} outerRadius={80}
-                        paddingAngle={3} dataKey="value"
-                        label={({percent})=>`${(percent*100).toFixed(0)}%`} labelLine={false}
-                        isAnimationActive={true}>
-                        {statusData.map((d,i)=><Cell key={i} fill={d.color}/>)}
-                      </Pie>
-                      <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
-                      <Legend wrapperStyle={{fontSize:10,color:t.textSub}}/>
-                    </PieChart>
-                  </ResponsiveContainer>
-                ):<Empty icon={Target} text="No task data" dark={dark}/>}
-              </Sec>
-
-              {/* Priority mix */}
-              <Sec title="Priority Mix" desc="Task urgency levels" dark={dark}>
-                {prioData.length>0?(
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={prioData} layout="vertical" barSize={12}>
-                      <XAxis type="number" tick={{fontSize:10,fill:t.textSub}} axisLine={false} tickLine={false}/>
-                      <YAxis dataKey="name" type="category" width={58} tick={{fontSize:10,fill:t.textSub}} axisLine={false} tickLine={false}/>
-                      <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
-                      <Bar dataKey="value" name="Tasks" radius={[0,6,6,0]}>
-                        {prioData.map((d,i)=><Cell key={i} fill={d.color}/>)}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                ):<Empty icon={Shield} text="No priority data" dark={dark}/>}
-              </Sec>
-
-              {/* Compliance gauge */}
-              <Sec title="Compliance Score" desc="Overall health" dark={dark}>
-                <div className="flex flex-col items-center justify-center h-[220px] gap-3">
-                  {dashStats?.compliance_status?(
-                    <>
-                      <div className="relative w-32 h-32">
-                        <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
-                          <circle cx="50" cy="50" r="42" fill="none" strokeWidth="10"
-                            style={{stroke:dark?'#1e293b':'#f1f5f9'}}/>
-                          <circle cx="50" cy="50" r="42" fill="none" strokeWidth="10" strokeLinecap="round"
-                            stroke={dashStats.compliance_status.score>=80?C.emeraldGreen:dashStats.compliance_status.score>=50?C.amber:'#dc2626'}
-                            strokeDasharray={`${2.64*dashStats.compliance_status.score} 264`}/>
-                        </svg>
-                        <div className="absolute inset-0 flex flex-col items-center justify-center">
-                          <p className="text-2xl font-black" style={{color:C.deepBlue}}>{dashStats.compliance_status.score}%</p>
-                          <p className="text-[9px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>Score</p>
-                        </div>
-                      </div>
-                      <div className="w-full space-y-1.5">
-                        {[
-                          {label:'Overdue Tasks', val:dashStats.compliance_status.overdue_tasks,         col:'#dc2626'},
-                          {label:'Expiring DSC',  val:dashStats.compliance_status.expiring_certificates, col:C.amber  },
-                          {label:'Status',        val:(dashStats.compliance_status.status||'').toUpperCase(),
-                            col:dashStats.compliance_status.score>=80?C.emeraldGreen:C.amber},
-                        ].map((it,i)=>(
-                          <div key={i} className="flex items-center justify-between text-xs">
-                            <span style={{color:t.textSub}}>{it.label}</span>
-                            <span className="font-bold" style={{color:it.col}}>{it.val}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  ):<Empty icon={Shield} text="No compliance data" dark={dark}/>}
-                </div>
-              </Sec>
-            </div>
-
-            {/* Weekly trend */}
-            <Sec title="Weekly Activity Trend" desc="Task completions vs new tasks this week" dark={dark}>
-              <ResponsiveContainer width="100%" height={220}>
-                <AreaChart data={weeklyData}>
-                  <defs>
-                    <linearGradient id="gc" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={C.emeraldGreen} stopOpacity={0.3}/>
-                      <stop offset="100%" stopColor={C.emeraldGreen} stopOpacity={0.02}/>
-                    </linearGradient>
-                    <linearGradient id="gp" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={C.mediumBlue} stopOpacity={0.25}/>
-                      <stop offset="100%" stopColor={C.mediumBlue} stopOpacity={0.02}/>
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="name" tick={{fontSize:11,fill:t.textSub}} axisLine={false} tickLine={false}/>
-                  <YAxis tick={{fontSize:11,fill:t.textSub}} axisLine={false} tickLine={false}/>
-                  <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
-                  <Legend wrapperStyle={{fontSize:11,color:t.textSub}}/>
-                  <Area type="monotone" dataKey="completed" stroke={C.emeraldGreen} strokeWidth={2} fill="url(#gc)" name="Completed"/>
-                  <Area type="monotone" dataKey="pending"   stroke={C.mediumBlue}   strokeWidth={2} fill="url(#gp)"  name="New/Pending"/>
-                </AreaChart>
-              </ResponsiveContainer>
-            </Sec>
-          </motion.div>
-        )}
-
-        {/* ──────── TASKS ──────── */}
-        {tab==='tasks'&&(
-          <motion.div key="tk" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Sec title="Tasks by Category" desc="Volume per department" dark={dark}>
-                {catData.length>0?(
-                  <ResponsiveContainer width="100%" height={260}>
-                    <BarChart data={catData} layout="vertical">
-                      <XAxis type="number" tick={{fontSize:10,fill:t.textSub}} axisLine={false} tickLine={false}/>
-                      <YAxis dataKey="name" type="category" width={100} tick={{fontSize:10,fill:t.textSub}} axisLine={false} tickLine={false}/>
-                      <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
-                      <Bar dataKey="tasks" name="Tasks" radius={[0,6,6,0]}>
-                        {catData.map((d,i)=><Cell key={i} fill={d.fill}/>)}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                ):<Empty icon={BarChart3} text="No category data" dark={dark}/>}
-              </Sec>
-
-              <Sec title="Status Distribution" dark={dark}>
-                {statusData.length>0?(
-                  <ResponsiveContainer width="100%" height={260}>
-                    <PieChart>
-                      <Pie data={statusData} cx="50%" cy="50%" innerRadius={58} outerRadius={92}
-                        paddingAngle={4} dataKey="value"
-                        label={({percent})=>`${(percent*100).toFixed(0)}%`} labelLine={false}>
-                        {statusData.map((d,i)=><Cell key={i} fill={d.color}/>)}
-                      </Pie>
-                      <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
-                      <Legend wrapperStyle={{fontSize:10,color:t.textSub}}/>
-                    </PieChart>
-                  </ResponsiveContainer>
-                ):<Empty icon={Target} text="No task data" dark={dark}/>}
-              </Sec>
-            </div>
-
-            {overdue.length>0&&(
-              <Sec title={`Overdue Tasks (${overdue.length})`} desc="Past due — immediate attention required" dark={dark}>
-                <div className="space-y-2 max-h-72 overflow-y-auto" style={{scrollbarWidth:'thin'}}>
-                  {overdue.slice(0,15).map((tk,i)=>{
-                    const days=Math.floor((new Date()-new Date(tk.due_date))/86400000);
-                    return (
-                      <div key={tk.id||i} className="flex items-center justify-between p-3 rounded-xl"
-                        style={{background:dark?'rgba(239,68,68,0.1)':'#fef2f2',border:'1px solid rgba(239,68,68,0.25)'}}>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold truncate" style={{color:t.text}}>{tk.title||'Untitled'}</p>
-                          <p className="text-xs mt-0.5" style={{color:t.textSub}}>
-                            {tk.assigned_to_name&&<><span className="font-medium">{tk.assigned_to_name}</span> · </>}
-                            Due: {tk.due_date?new Date(tk.due_date).toLocaleDateString():'—'}
-                          </p>
-                        </div>
-                        <span className="flex-shrink-0 text-xs font-bold px-2 py-0.5 rounded-lg ml-3"
-                          style={{background:'#fee2e2',color:'#dc2626'}}>{days}d overdue</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </Sec>
+        {/* Top bar */}
+        <div className="sticky top-0 z-10 px-6 py-3 flex items-center justify-between gap-4"
+          style={{ background: t.card, borderBottom: '1px solid ' + t.border }}>
+          <div>
+            <h1 className="text-base font-black" style={{ color: t.text }}>
+              {selectedStaff ? (selectedStaff.full_name || selectedStaff.name) : 'Select a staff member'}
+            </h1>
+            <p className="text-[11px]" style={{ color: t.textMute }}>
+              Activity for {selDate}
+              {loadingUser && <span className="ml-2 inline-flex items-center gap-1 opacity-60">
+                <RefreshCw className="w-3 h-3 animate-spin" /> Loading…
+              </span>}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {securityAlerts > 0 && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold"
+                style={{ background: C.red + '18', color: C.red, border: '1px solid ' + C.red + '30' }}>
+                <AlertCircle className="w-3.5 h-3.5" /> {securityAlerts} Alert{securityAlerts > 1 ? 's' : ''}
+              </div>
             )}
-          </motion.div>
-        )}
+            <button onClick={handleRefresh} disabled={refreshing}
+              className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
+              style={{ background: t.card2, border: '1px solid ' + t.border, color: t.text }}>
+              <RefreshCw className={'w-3.5 h-3.5' + (refreshing ? ' animate-spin' : '')} /> Refresh
+            </button>
+            <button onClick={exportPDF}
+              className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 text-white"
+              style={{ background: C.blue }}>
+              <Download className="w-3.5 h-3.5" /> Export PDF
+            </button>
+          </div>
+        </div>
 
-        {/* ──────── ATTENDANCE ──────── */}
-        {tab==='attend'&&(
-          <motion.div key="at" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-stretch">
+        <div className="p-6 space-y-5">
+
+          {/* Score strip */}
+          <motion.div variants={iV}>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
-                {label:'Days Present',  value:presDays,         sub:'This period',        color:C.emeraldGreen, icon:CheckCircle2},
-                {label:'Total Hours',   value:fmtC(totMins),    sub:'Logged time',         color:C.deepBlue,     icon:Clock       },
-                {label:'Avg / Day',     value:fmt(avgMins),     sub:'Per present day',     color:C.mediumBlue,   icon:Activity    },
-                {label:'Late Days',     value:lateDays,         sub:'Arrived after time',  color:C.amber,        icon:AlertTriangle},
-              ].map((k,i)=><KpiCard key={i} {...k} dark={dark}/>)}
+                { label: 'Productivity', value: productivityScore, color: productivityScore >= 70 ? C.green : C.amber },
+                { label: 'Active Time',  value: pct(totalActive, totalActive + totalIdle), color: C.mid },
+                { label: 'Web Focus',    value: webTotalTime > 0 ? pct(webProductiveTime, webTotalTime) : 0, color: C.cyan },
+                { label: 'Security',     value: securityAlerts === 0 ? 100 : Math.max(0, 100 - securityAlerts * 15), color: securityAlerts > 0 ? C.red : C.green },
+              ].map((s, i) => (
+                <Card key={i} dark={dark} className="text-center">
+                  <ScoreRing value={s.value} label={s.label} color={s.color} dark={dark} />
+                </Card>
+              ))}
             </div>
+          </motion.div>
 
-            <Sec title="Daily Hours — Last 7 Days" desc="From actual punch records" dark={dark}>
-              {attTrend.some(d=>d.hours>0)?(
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={attTrend} barSize={28}>
-                    <XAxis dataKey="name" tick={{fontSize:11,fill:t.textSub}} axisLine={false} tickLine={false}/>
-                    <YAxis tick={{fontSize:11,fill:t.textSub}} unit="h" axisLine={false} tickLine={false}/>
-                    <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
-                    <Bar dataKey="hours" name="Hours" radius={[6,6,0,0]}>
-                      {attTrend.map((d,i)=>(
-                        <Cell key={i} fill={d.hours>=8?C.emeraldGreen:d.hours>=4?C.mediumBlue:dark?'#334155':'#e2e8f0'}/>
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              ):<Empty icon={Clock} text="No attendance records for the last 7 days" dark={dark}/>}
-            </Sec>
-
-            {fAtt.length>0&&(
-              <Sec title="Attendance Log" desc="Recent punch records" dark={dark}>
-                <div className="overflow-x-auto rounded-xl" style={{border:`1px solid ${t.border}`}}>
-                  <table className="w-full text-sm min-w-[600px]">
-                    <thead>
-                      <tr style={{background:t.card2}}>
-                        {(isAdmin?['Employee','Date','In','Out','Duration','Status','Notes']:['Date','In','Out','Duration','Status','Notes']).map(h=>(
-                          <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider"
-                            style={{color:t.textMute}}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {fAtt.slice(0,20).map((a,i)=>{
-                        const pi=a.punch_in ?new Date(a.punch_in ).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}):'—';
-                        const po=a.punch_out?new Date(a.punch_out).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}):'—';
-                        const sc=a.status==='present'
-                          ?{bg:dark?'rgba(31,175,90,0.15)':'#f0fdf4',col:C.emeraldGreen}
-                          :a.status==='absent'
-                          ?{bg:dark?'rgba(239,68,68,0.12)':'#fef2f2',col:'#dc2626'}
-                          :{bg:dark?'rgba(245,158,11,0.12)':'#fffbeb',col:C.amber};
-                        const flags=[a.is_late&&'⏰ Late',a.punched_out_early&&'🚪 Early',a.auto_marked&&'🤖 Auto'].filter(Boolean);
-                        return (
-                          <tr key={i} style={{borderTop:`1px solid ${t.border2}`}}
-                            onMouseEnter={e=>e.currentTarget.style.background=t.hover}
-                            onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                            {isAdmin&&<td className="px-4 py-2.5 text-xs font-medium" style={{color:t.text}}>{a.user_name||'—'}</td>}
-                            <td className="px-4 py-2.5 font-medium text-xs" style={{color:t.text}}>{a.date}</td>
-                            <td className="px-4 py-2.5 text-xs" style={{color:t.textSub}}>{pi}</td>
-                            <td className="px-4 py-2.5 text-xs" style={{color:t.textSub}}>{po}</td>
-                            <td className="px-4 py-2.5 text-xs font-bold" style={{color:C.deepBlue}}>{fmt(a.duration_minutes||0)}</td>
-                            <td className="px-4 py-2.5">
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md capitalize"
-                                style={{background:sc.bg,color:sc.col}}>{a.status}</span>
-                            </td>
-                            <td className="px-4 py-2.5 text-[10px]" style={{color:t.textMute}}>
-                              {flags.length?flags.join(' '):<span style={{color:C.emeraldGreen}}>✓ OK</span>}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                  {fAtt.length>20&&(
-                    <p className="text-xs text-center py-2" style={{color:t.textMute}}>
-                      Showing 20 of {fAtt.length} records
-                    </p>
+          {/* Tab bar */}
+          <motion.div variants={iV}>
+            <div className="flex gap-1.5 flex-wrap">
+              {TABS.map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
+                  style={activeTab === tab.id
+                    ? { background: tab.color, color: '#fff', boxShadow: '0 2px 8px ' + tab.color + '40' }
+                    : { background: t.card2, color: t.textSub, border: '1px solid ' + t.border }}>
+                  <tab.icon className="w-3.5 h-3.5" />{tab.label}
+                  {tab.id === 'security' && securityAlerts > 0 && (
+                    <span className="w-4 h-4 rounded-full text-[9px] font-black flex items-center justify-center"
+                      style={{ background: activeTab === 'security' ? 'rgba(255,255,255,0.3)' : C.red, color: '#fff' }}>
+                      {securityAlerts}
+                    </span>
                   )}
-                </div>
-              </Sec>
-            )}
-          </motion.div>
-        )}
-
-        {/* ──────── EFFICIENCY ──────── */}
-        {tab==='efficiency'&&(
-          <motion.div key="ef" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
-            <Sec title="Efficiency Breakdown"
-              desc="Computed from real task assignments + attendance records"
-              dark={dark}>
-              {effCards.length>0?(
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {effCards.map((d,i)=>{
-                    const bc=d.pct>=70?C.emeraldGreen:d.pct>=40?C.amber:'#dc2626';
-                    return (
-                      <motion.div key={d.user_id||i} variants={iV}
-                        className="rounded-xl p-4"
-                        style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:t.shadow}}>
-                        {/* header */}
-                        <div className="flex items-center gap-3 mb-3">
-                          <div className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-white text-sm flex-shrink-0"
-                            style={{background:PALETTE[i%PALETTE.length]}}>
-                            {(d.user_name||'U').charAt(0).toUpperCase()}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-bold text-sm truncate" style={{color:t.text}}>{d.user_name}</p>
-                            <p className="text-xs" style={{color:t.textMute}}>{d.days} days present</p>
-                          </div>
-                          <div className="text-right flex-shrink-0">
-                            <p className="text-xl font-black leading-none" style={{color:bc}}>{d.pct}%</p>
-                            <p className="text-[9px] font-bold uppercase tracking-wider mt-0.5" style={{color:t.textMute}}>Done</p>
-                          </div>
-                        </div>
-                        {/* bar */}
-                        <div className="h-1.5 rounded-full overflow-hidden mb-3" style={{background:dark?'#334155':'#f1f5f9'}}>
-                          <div className="h-full rounded-full transition-all duration-700"
-                            style={{width:`${d.pct}%`,background:bc}}/>
-                        </div>
-                        {/* stats */}
-                        <div className="grid grid-cols-3 gap-2">
-                          {[
-                            {label:'Done',   val:d.done,          color:C.emeraldGreen},
-                            {label:'Pending',val:d.pend,          color:C.amber       },
-                            {label:'Hours',  val:fmtC(d.mins),    color:C.mediumBlue  },
-                          ].map((it,j)=>(
-                            <div key={j} className="rounded-lg p-2 text-center" style={{background:t.card2}}>
-                              <p className="text-[9px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>{it.label}</p>
-                              <p className="text-sm font-black mt-0.5 leading-none" style={{color:it.color}}>{it.val}</p>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="mt-2 flex items-center justify-between text-xs">
-                          <span style={{color:t.textMute}}>Total assigned</span>
-                          <span className="font-bold" style={{color:t.text}}>{d.total} tasks</span>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              ):<Empty icon={Zap} text="No efficiency data" dark={dark}/>}
-            </Sec>
-
-            {/* comparison bar */}
-            {effCards.length>1&&(
-              <Sec title="Completion Rate Comparison" desc="Side-by-side across team" dark={dark}>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={effCards.slice(0,10).map(d=>({name:d.user_name?.split(' ')[0]||'?',pct:d.pct,done:d.done}))} barSize={24}>
-                    <XAxis dataKey="name" tick={{fontSize:10,fill:t.textSub}} axisLine={false} tickLine={false}/>
-                    <YAxis tick={{fontSize:10,fill:t.textSub}} unit="%" axisLine={false} tickLine={false} domain={[0,100]}/>
-                    <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
-                    <Bar dataKey="pct" name="Completion%" radius={[6,6,0,0]}>
-                      {effCards.slice(0,10).map((d,i)=>(
-                        <Cell key={i} fill={d.pct>=70?C.emeraldGreen:d.pct>=40?C.amber:'#dc2626'}/>
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </Sec>
-            )}
-          </motion.div>
-        )}
-
-        {/* ──────── PERFORMERS ──────── */}
-        {tab==='performers'&&(
-          <motion.div key="pf" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Sec title={isAdmin?'Star Performers':'Your Rank'} desc="Ranked by overall score" dark={dark}
-                action={isAdmin&&(
-                  <div className="flex gap-1">
-                    {['all','monthly','weekly'].map(p=>(
-                      <button key={p} onClick={()=>setRankPeriod(p)}
-                        className="h-6 px-2.5 text-[10px] font-bold rounded-lg transition-all"
-                        style={rankPeriod===p
-                          ?{background:C.deepBlue,color:'#fff'}
-                          :{background:t.card2,color:t.textSub,border:`1px solid ${t.border}`}}>
-                        {p==='all'?'All Time':p.charAt(0).toUpperCase()+p.slice(1)}
-                      </button>
-                    ))}
-                  </div>
-                )}>
-                {performers.length>0?(
-                  <div className="space-y-2 max-h-[300px] overflow-y-auto" style={{scrollbarWidth:'thin'}}>
-                    {performers.map((m,i)=><PerfRow key={m.user_id||i} m={m} rank={i+1} dark={dark}/>)}
-                  </div>
-                ):<Empty icon={Award} text="No performance data" dark={dark}/>}
-              </Sec>
-
-              <Sec title="Top Performer Breakdown" desc={performers[0]?`${performers[0].user_name} — components`:'Score radar'} dark={dark}>
-                {radarData.length>0?(
-                  <ResponsiveContainer width="100%" height={260}>
-                    <RadarChart data={radarData}>
-                      <PolarGrid stroke={dark?'#334155':'#e2e8f0'}/>
-                      <PolarAngleAxis dataKey="metric" tick={{fontSize:10,fill:t.textSub}}/>
-                      <Radar name="Score" dataKey="score" stroke={C.deepBlue} fill={C.deepBlue} fillOpacity={0.18} strokeWidth={2}/>
-                      <Tooltip content={<ChartTip dark={dark}/>}/>
-                    </RadarChart>
-                  </ResponsiveContainer>
-                ):<Empty icon={Star} text="No data" dark={dark}/>}
-              </Sec>
+                </button>
+              ))}
             </div>
+          </motion.div>
 
-            {performers.length>0&&(
-              <Sec title="Full Score Breakdown" desc="All 5 performance dimensions" dark={dark}>
-                <div className="overflow-x-auto rounded-xl" style={{border:`1px solid ${t.border}`}}>
-                  <table className="w-full text-sm min-w-[700px]">
-                    <thead>
-                      <tr style={{background:t.card2}}>
-                        {['Rank','Employee','Overall','Attendance','Task Done','Punch-In','Todo','Hours','Badge'].map(h=>(
-                          <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider whitespace-nowrap"
-                            style={{color:t.textMute}}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {performers.map((m,i)=>{
-                        const sc=m.overall_score>=85?C.emeraldGreen:m.overall_score>=60?C.amber:'#dc2626';
-                        return (
-                          <tr key={m.user_id||i} style={{borderTop:`1px solid ${t.border2}`}}
-                            onMouseEnter={e=>e.currentTarget.style.background=t.hover}
-                            onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                            <td className="px-3 py-2.5 text-sm">
-                              {i===0?'🥇':i===1?'🥈':i===2?'🥉':<span style={{color:t.textMute}}>#{i+1}</span>}
-                            </td>
-                            <td className="px-3 py-2.5">
-                              <div className="flex items-center gap-2">
-                                <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                                  style={{background:`linear-gradient(135deg,${C.deepBlue},${C.mediumBlue})`}}>
-                                  {m.user_name?.charAt(0)?.toUpperCase()||'?'}
-                                </div>
-                                <span className="font-semibold text-xs whitespace-nowrap" style={{color:t.text}}>{m.user_name}</span>
-                              </div>
-                            </td>
-                            <td className="px-3 py-2.5">
-                              <span className="text-base font-black" style={{color:sc}}>{m.overall_score}%</span>
-                            </td>
-                            {[m.attendance_percent,m.task_completion_percent,m.timely_punchin_percent,m.todo_ontime_percent].map((v,j)=>(
-                              <td key={j} className="px-3 py-2.5 text-xs font-semibold" style={{color:t.textSub}}>{v}%</td>
-                            ))}
-                            <td className="px-3 py-2.5 text-xs font-semibold" style={{color:t.textSub}}>{fmtH(m.total_hours)}</td>
-                            <td className="px-3 py-2.5">
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
-                                style={m.badge==='Star Performer'?{background:'#fef9c3',color:'#854d0e'}
-                                     :m.badge==='Top Performer' ?{background:'#d1fae5',color:'#065f46'}
-                                     :{background:t.card2,color:t.textSub}}>
-                                {m.badge||'Good Performer'}
+          <AnimatePresence mode="wait">
+
+            {/* ── SESSION ── */}
+            {activeTab === 'session' && (
+              <motion.div key="session" variants={cV} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <Card dark={dark} accentColor={C.blue}>
+                    <SectionHeader icon={LogIn} label="Login & Session Times" color={C.blue} dark={dark} />
+                    <StatRow label="First Login"       value={firstLogin}                            color={C.green}  dark={dark} />
+                    <StatRow label="Last Logout"       value={lastLogout}                            color={C.mid}    dark={dark} />
+                    <StatRow label="Total Active"      value={fmtSec(totalActive)}                   color={C.blue}   dark={dark} />
+                    <StatRow label="Idle Time"         value={fmtSec(totalIdle)}                     color={C.amber}  dark={dark} />
+                    <StatRow label="Break Duration"    value={fmtSec(breakDuration)}                 color={C.purple} dark={dark} />
+                    <StatRow label="Lock Events"       value={lockEvents.length}                                      dark={dark} />
+                    <StatRow label="Unlock Events"     value={unlockEvents.length}                                    dark={dark} />
+                    <StatRow label="Remote Logins"     value={remoteLogins.length}   flagged={remoteLogins.length > 0}  dark={dark} />
+                    <StatRow label="Failed Attempts"   value={failedLogins.length}   flagged={failedLogins.length > 2}  dark={dark} />
+                  </Card>
+
+                  <Card dark={dark} accentColor={C.mid}>
+                    <SectionHeader icon={Activity} label="Session Timeline" color={C.mid} dark={dark} />
+                    <div className="flex flex-col gap-1.5 max-h-56 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+                      {[...loginEvents, ...logoutEvents, ...lockEvents, ...failedLogins, ...remoteLogins]
+                        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                        .slice(0, 15)
+                        .map((e, i) => {
+                          const type = e.type || e.event_type || 'event';
+                          const col = type.includes('login') ? C.green : type.includes('logout') ? C.mid : type.includes('lock') ? C.amber : type.includes('failed') ? C.red : C.purple;
+                          return (
+                            <div key={i} className="flex items-center gap-2 text-xs p-2 rounded-lg" style={{ background: t.card2 }}>
+                              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: col }} />
+                              <span style={{ color: t.textMute }} className="tabular-nums w-12 flex-shrink-0">
+                                {e.timestamp ? new Date(e.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}
                               </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                              <span className="font-medium capitalize" style={{ color: t.text }}>{type.replace(/_/g, ' ')}</span>
+                            </div>
+                          );
+                        })}
+                      {loginEvents.length + logoutEvents.length + lockEvents.length + failedLogins.length === 0 && (
+                        <p className="text-xs py-8 text-center" style={{ color: t.textMute }}>No events recorded for this date</p>
+                      )}
+                    </div>
+                  </Card>
                 </div>
-              </Sec>
+
+                {/* Hourly activity */}
+                <Card dark={dark} accentColor={'linear-gradient(90deg,' + C.blue + ',' + C.mid + ')'}>
+                  <SectionHeader icon={BarChart2} label="Hourly Activity Pattern" color={C.mid} dark={dark} />
+                  {(() => {
+                    const hourBuckets = Array.from({ length: 14 }, (_, i) => {
+                      const h = i + 7;
+                      return { hour: h + ':00', active: 0, idle: 0 };
+                    });
+                    todayEvents.forEach(a => {
+                      if (!a.timestamp) return;
+                      const h = new Date(a.timestamp).getHours();
+                      if (h >= 7 && h < 21) {
+                        const bucket = hourBuckets[h - 7];
+                        if (a.idle) bucket.idle   += Math.round((a.duration_seconds || 0) / 60);
+                        else        bucket.active += Math.round((a.duration_seconds || 0) / 60);
+                      }
+                    });
+                    const hasData = hourBuckets.some(h => h.active > 0 || h.idle > 0);
+                    if (!hasData) return <p className="text-xs text-center py-8" style={{ color: t.textMute }}>No hourly data for this date</p>;
+                    return (
+                      <ResponsiveContainer width="100%" height={180}>
+                        <AreaChart data={hourBuckets}>
+                          <defs>
+                            <linearGradient id="gA" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor={C.mid}   stopOpacity={0.4} />
+                              <stop offset="100%" stopColor={C.mid} stopOpacity={0.02} />
+                            </linearGradient>
+                            <linearGradient id="gI" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor={C.amber}   stopOpacity={0.3} />
+                              <stop offset="100%" stopColor={C.amber} stopOpacity={0.02} />
+                            </linearGradient>
+                          </defs>
+                          <XAxis dataKey="hour" tick={{ fontSize: 9, fill: t.textMute }} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fontSize: 9, fill: t.textMute }} axisLine={false} tickLine={false} unit="m" />
+                          <Tooltip content={<ChartTip dark={dark} />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                          <Legend wrapperStyle={{ fontSize: 10, color: t.textSub }} />
+                          <Area type="monotone" dataKey="active" stroke={C.mid}   strokeWidth={2} fill="url(#gA)" name="Active (min)" />
+                          <Area type="monotone" dataKey="idle"   stroke={C.amber} strokeWidth={1.5} fill="url(#gI)" name="Idle (min)" />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    );
+                  })()}
+                </Card>
+              </motion.div>
             )}
-          </motion.div>
-        )}
 
-        {/* ──────── TEAM (admin only) ──────── */}
-        {tab==='team'&&isAdmin&&(
-          <motion.div key="tm" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
-            {teamWL.length>0?(
-              <Sec title="Team Workload Distribution"
-                desc="Individual breakdown — live from task assignments" dark={dark}>
-                <div className="overflow-x-auto rounded-xl" style={{border:`1px solid ${t.border}`}}>
-                  <table className="w-full text-sm min-w-[520px]">
-                    <thead>
-                      <tr style={{background:t.card2}}>
-                        {['Employee','Total','Pending','Completed','Progress'].map(h=>(
-                          <th key={h} className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider"
-                            style={{color:t.textMute}}>{h}</th>
+            {/* ── APPS ── */}
+            {activeTab === 'apps' && (
+              <motion.div key="apps" variants={cV} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <Card dark={dark} accentColor={C.mid}>
+                    <SectionHeader icon={Monitor} label="Application Usage" color={C.mid} count={appsToShow.length} dark={dark} />
+                    {topApps.length > 0
+                      ? topApps.map((app, i) => (
+                          <AppBar key={i} name={app.name} seconds={app.seconds || 0}
+                            total={totalAppTime} dark={dark}
+                            flagged={unauthorizedApps.some(u => u.name === app.name)} />
+                        ))
+                      : <p className="text-xs text-center py-8" style={{ color: t.textMute }}>No app data recorded</p>
+                    }
+                    <div className="mt-4 pt-3" style={{ borderTop: '1px solid ' + t.border2 }}>
+                      <StatRow label="Total Apps Opened"     value={appsToShow.length}                     dark={dark} />
+                      <StatRow label="App Switches (est.)"   value={appsToShow.length * 4}                 dark={dark} />
+                      <StatRow label="Background Activity"   value={todayEvents.filter(a => a.background).length} dark={dark} />
+                      <StatRow label="Unauthorized Apps"     value={unauthorizedApps.length} flagged={unauthorizedApps.length > 0} dark={dark} />
+                    </div>
+                  </Card>
+
+                  <Card dark={dark} accentColor={C.purple}>
+                    <SectionHeader icon={BarChart2} label="Time per Application" color={C.purple} dark={dark} />
+                    {appChartData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={240}>
+                        <BarChart data={appChartData} layout="vertical" barSize={12}>
+                          <XAxis type="number" tick={{ fontSize: 9, fill: t.textMute }} axisLine={false} tickLine={false} unit="m" />
+                          <YAxis dataKey="name" type="category" width={85} tick={{ fontSize: 9, fill: t.textSub }} axisLine={false} tickLine={false} />
+                          <Tooltip content={<ChartTip dark={dark} />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                          <Bar dataKey="minutes" name="Minutes" radius={[0, 6, 6, 0]}>
+                            {appChartData.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : <p className="text-xs text-center py-8" style={{ color: t.textMute }}>No data</p>}
+                    {topApps.length > 0 && (
+                      <div className="mt-4 space-y-2">
+                        <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: t.textMute }}>Most-Used Software</p>
+                        {topApps.slice(0, 3).map((a, i) => (
+                          <div key={i} className="flex items-center justify-between text-xs p-2 rounded-lg"
+                            style={{ background: t.card2, border: '1px solid ' + t.border }}>
+                            <div className="flex items-center gap-2">
+                              <span className="text-base">{i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}</span>
+                              <span className="font-semibold" style={{ color: t.text }}>{a.name}</span>
+                            </div>
+                            <span className="font-bold tabular-nums" style={{ color: C.mid }}>{fmtSec(a.seconds || 0)}</span>
+                          </div>
                         ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {teamWL.map((m,i)=>{
-                        const pct=m.total_tasks>0?Math.round((m.completed_tasks/m.total_tasks)*100):0;
-                        const bc=pct>=70?C.emeraldGreen:pct>=40?C.amber:'#dc2626';
-                        return (
-                          <tr key={m.user_id||i} style={{borderTop:`1px solid ${t.border2}`}}
-                            onMouseEnter={e=>e.currentTarget.style.background=t.hover}
-                            onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                            <td className="px-5 py-3 font-semibold text-sm" style={{color:t.text}}>{m.user_name}</td>
-                            <td className="px-5 py-3 font-bold" style={{color:C.deepBlue}}>{m.total_tasks}</td>
-                            <td className="px-5 py-3 font-semibold" style={{color:C.amber}}>{m.pending_tasks}</td>
-                            <td className="px-5 py-3 font-semibold" style={{color:C.emeraldGreen}}>{m.completed_tasks}</td>
-                            <td className="px-5 py-3">
-                              <div className="flex items-center gap-3">
-                                <div className="flex-1 h-2 rounded-full overflow-hidden"
-                                  style={{background:dark?'#334155':'#f1f5f9'}}>
-                                  <div className="h-full rounded-full transition-all duration-700"
-                                    style={{width:`${pct}%`,background:bc}}/>
-                                </div>
-                                <span className="text-xs font-bold w-9 text-right" style={{color:t.textSub}}>{pct}%</span>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                      </div>
+                    )}
+                  </Card>
                 </div>
-              </Sec>
-            ):<Empty icon={Users} text="No team workload data" dark={dark}/>}
-          </motion.div>
-        )}
 
-        {/* ──────── COMPUTER ACTIVITY (admin only) ──────── */}
-        {tab==='computer'&&isAdmin&&(
-          <motion.div key="ca" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}}>
-            <ActivityReportPanel />
-          </motion.div>
-        )}
+                {unauthorizedApps.length > 0 && (
+                  <Card dark={dark} accentColor={C.red}>
+                    <SectionHeader icon={AlertTriangle} label="Unauthorized Software Detected" color={C.red} count={unauthorizedApps.length} dark={dark} />
+                    <div className="space-y-2">
+                      {unauthorizedApps.map((app, i) => (
+                        <div key={i} className="flex items-center justify-between p-2.5 rounded-xl text-xs"
+                          style={{ background: C.red + '10', border: '1px solid ' + C.red + '25' }}>
+                          <div className="flex items-center gap-2">
+                            <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: C.red }} />
+                            <span className="font-semibold" style={{ color: t.text }}>{app.name}</span>
+                          </div>
+                          <span className="font-bold" style={{ color: C.red }}>{fmtSec(app.seconds || 0)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+              </motion.div>
+            )}
 
-      </AnimatePresence>
-      </React.Fragment>
-        );
-        return null;
-      })}
+            {/* ── WEB ── */}
+            {activeTab === 'web' && (
+              <motion.div key="web" variants={cV} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <Card dark={dark} accentColor={C.cyan}>
+                    <SectionHeader icon={Globe} label="Web Usage Split" color={C.cyan} dark={dark} />
+                    {webPieData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={200}>
+                        <PieChart>
+                          <Pie data={webPieData} cx="50%" cy="50%" innerRadius={50} outerRadius={80}
+                            paddingAngle={3} dataKey="value"
+                            label={({ percent }) => (percent * 100).toFixed(0) + '%'} labelLine={false}>
+                            {webPieData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                          </Pie>
+                          <Tooltip content={<ChartTip dark={dark} />} />
+                          <Legend wrapperStyle={{ fontSize: 10, color: t.textSub }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    ) : <p className="text-xs text-center py-8" style={{ color: t.textMute }}>No web data</p>}
+                    <StatRow label="Total Web Time"   value={fmtSec(webTotalTime)}      color={C.cyan}  dark={dark} />
+                    <StatRow label="Productive Sites" value={fmtSec(webProductiveTime)} color={C.green} dark={dark} />
+                    <StatRow label="Social Media"     value={fmtSec(webSocialTime)}     color={C.amber} flagged={webSocialTime > 3600} dark={dark} />
+                    <StatRow label="File Downloads"   value={todayEvents.filter(a => a.type === 'download').length} dark={dark} />
+                    <StatRow label="Streaming"        value={websitesToShow.filter(w => /youtube|netflix|hotstar|prime/i.test(w.name)).length > 0 ? 'Detected' : 'None'} flagged={websitesToShow.filter(w => /youtube|netflix|hotstar|prime/i.test(w.name)).length > 0} dark={dark} />
+                  </Card>
+
+                  <div className="lg:col-span-2">
+                    <Card dark={dark} accentColor={C.cyan}>
+                      <SectionHeader icon={Globe} label="Websites Visited" color={C.cyan} count={websitesToShow.length} dark={dark} />
+                      <div className="space-y-2 max-h-80 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+                        {websitesToShow.slice(0, 20).map((w, i) => {
+                          const cls = classifySite(w.name);
+                          const col = cls === 'productive' ? C.green : cls === 'social' ? C.amber : cls === 'suspicious' ? C.red : t.textSub;
+                          const badge = cls === 'productive' ? '✓ Productive' : cls === 'social' ? '⚡ Social' : cls === 'suspicious' ? '⚠ Suspicious' : 'Neutral';
+                          return (
+                            <div key={i} className="flex items-center justify-between p-2.5 rounded-xl text-xs"
+                              style={{ background: t.card2, border: '1px solid ' + t.border }}>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: col }} />
+                                <span className="font-medium truncate max-w-[180px]" style={{ color: t.text }}>{w.name}</span>
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
+                                  style={{ background: col + '18', color: col }}>{badge}</span>
+                              </div>
+                              <span className="font-bold tabular-nums flex-shrink-0 ml-2" style={{ color: col }}>{fmtSec(w.seconds)}</span>
+                            </div>
+                          );
+                        })}
+                        {websitesToShow.length === 0 && (
+                          <p className="text-xs text-center py-8" style={{ color: t.textMute }}>No website data recorded</p>
+                        )}
+                      </div>
+                    </Card>
+                  </div>
+                </div>
+
+                {websitesToShow.filter(w => classifySite(w.name) === 'suspicious').length > 0 && (
+                  <Card dark={dark} accentColor={C.red}>
+                    <SectionHeader icon={ShieldAlert} label="Suspicious Websites" color={C.red}
+                      count={websitesToShow.filter(w => classifySite(w.name) === 'suspicious').length} dark={dark} />
+                    <div className="space-y-2">
+                      {websitesToShow.filter(w => classifySite(w.name) === 'suspicious').map((w, i) => (
+                        <div key={i} className="flex items-center justify-between p-2.5 rounded-xl text-xs"
+                          style={{ background: C.red + '0e', border: '1px solid ' + C.red + '20' }}>
+                          <div className="flex items-center gap-2">
+                            <ShieldAlert className="w-3.5 h-3.5" style={{ color: C.red }} />
+                            <span className="font-medium" style={{ color: t.text }}>{w.name}</span>
+                          </div>
+                          <span className="font-bold" style={{ color: C.red }}>{fmtSec(w.seconds)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+              </motion.div>
+            )}
+
+            {/* ── INPUT ── */}
+            {activeTab === 'input' && (
+              <motion.div key="input" variants={cV} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <Card dark={dark} accentColor={C.purple}>
+                    <SectionHeader icon={Keyboard} label="Keyboard Activity" color={C.purple} dark={dark} />
+                    <StatRow label="Keystrokes (Count)"  value={keystrokeCount.toLocaleString()} color={C.purple} dark={dark} />
+                    <StatRow label="Content Stored"      value="None (Privacy Protected)"        color={C.green}  dark={dark} />
+                    <StatRow label="Active Work Time"    value={fmtSec(totalActive)}             color={C.mid}    dark={dark} />
+                    <div className="mt-4">
+                      <p className="text-[10px] font-bold uppercase tracking-wider mb-2" style={{ color: t.textMute }}>Typing Intensity</p>
+                      <div className="h-3 rounded-full overflow-hidden" style={{ background: t.border }}>
+                        <motion.div className="h-full rounded-full"
+                          initial={{ width: 0 }}
+                          animate={{ width: Math.min(100, Math.round(keystrokeCount / 50)) + '%' }}
+                          transition={{ duration: 1, ease: 'easeOut' }}
+                          style={{ background: 'linear-gradient(90deg,' + C.purple + ',' + C.pink + ')' }} />
+                      </div>
+                      <div className="flex justify-between text-[9px] mt-1" style={{ color: t.textMute }}>
+                        <span>Low</span><span>Medium</span><span>High</span>
+                      </div>
+                    </div>
+                  </Card>
+
+                  <Card dark={dark} accentColor={C.cyan}>
+                    <SectionHeader icon={MousePointer2} label="Mouse Activity" color={C.cyan} dark={dark} />
+                    <StatRow label="Mouse Clicks"    value={mouseClicks.toLocaleString()}   color={C.cyan}  dark={dark} />
+                    <StatRow label="Mouse Distance"  value={mouseDistance > 0 ? Math.round(mouseDistance / 1000) + 'km' : '—'} color={C.mid} dark={dark} />
+                    <StatRow label="Total Idle Time" value={fmtSec(totalIdle)}             color={C.amber} dark={dark} />
+                    <StatRow label="Idle Percentage" value={idlePercent + '%'}             flagged={idlePercent > 40} dark={dark} />
+                    <StatRow label="Idle Detection"  value={idlePercent > 40 ? 'High Idle' : idlePercent > 20 ? 'Moderate' : 'Good'} color={idlePercent > 40 ? C.red : idlePercent > 20 ? C.amber : C.green} dark={dark} />
+                  </Card>
+                </div>
+
+                <Card dark={dark} accentColor={productivityScore >= 70 ? C.green : C.amber}>
+                  <div className="flex items-center gap-6 flex-wrap">
+                    <ScoreRing value={productivityScore} label="Productivity" size={100}
+                      color={productivityScore >= 70 ? C.green : productivityScore >= 40 ? C.amber : C.red} dark={dark} />
+                    <div className="flex-1 min-w-[200px]">
+                      <p className="text-base font-black mb-3" style={{ color: t.text }}>Engagement Score Breakdown</p>
+                      <div className="space-y-2">
+                        {[
+                          { label: 'Keyboard activity',  val: Math.min(100, Math.round(keystrokeCount / 30)),   color: C.purple },
+                          { label: 'Mouse engagement',   val: Math.min(100, Math.round(mouseClicks / 20)),      color: C.cyan   },
+                          { label: 'Active vs idle',     val: 100 - idlePercent,                               color: C.green  },
+                          { label: 'App productivity',   val: pct(
+                              appsToShow.filter(a => !BANNED.some(k => (a.name || '').toLowerCase().includes(k))).reduce((s, a) => s + (a.seconds || 0), 0),
+                              totalAppTime
+                            ), color: C.mid },
+                        ].map((m, i) => (
+                          <div key={i} className="flex items-center gap-3">
+                            <p className="text-[10px] w-36 flex-shrink-0" style={{ color: t.textSub }}>{m.label}</p>
+                            <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: t.border }}>
+                              <motion.div className="h-full rounded-full"
+                                initial={{ width: 0 }} animate={{ width: m.val + '%' }}
+                                transition={{ duration: 0.8, delay: i * 0.1 }}
+                                style={{ background: m.color }} />
+                            </div>
+                            <p className="text-[10px] font-bold w-8 text-right tabular-nums" style={{ color: m.color }}>{m.val}%</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              </motion.div>
+            )}
+
+            {/* ── FILES ── */}
+            {activeTab === 'files' && (
+              <motion.div key="files" variants={cV} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  {[
+                    { label: 'Created',        value: fileCreated,          icon: FileText,   color: C.green                              },
+                    { label: 'Modified',       value: fileModified,         icon: TrendingUp, color: C.mid                                },
+                    { label: 'Deleted',        value: fileDeleted,          icon: Trash2,     color: C.red                                },
+                    { label: 'USB Transfers',  value: usbTransfers,         icon: Usb,        color: C.amber, flagged: usbTransfers > 0   },
+                    { label: 'Cloud Uploads',  value: cloudUploads,         icon: Cloud,      color: C.cyan                               },
+                    { label: 'Sensitive Files',value: sensitiveFiles.length, icon: Eye,       color: C.purple, flagged: sensitiveFiles.length > 0 },
+                  ].map((s, i) => (
+                    <Card key={i} dark={dark}>
+                      <div className="w-8 h-8 rounded-xl flex items-center justify-center mb-2"
+                        style={{ background: s.color + '18' }}>
+                        <s.icon className="w-4 h-4" style={{ color: s.color }} />
+                      </div>
+                      <p className="text-2xl font-black" style={{ color: s.flagged && s.value > 0 ? C.red : s.color }}>
+                        {s.flagged && s.value > 0 && <AlertTriangle className="inline w-4 h-4 mr-0.5" />}{s.value}
+                      </p>
+                      <p className="text-[10px] font-bold uppercase tracking-wider mt-1" style={{ color: t.textMute }}>{s.label}</p>
+                    </Card>
+                  ))}
+                </div>
+
+                {sensitiveFiles.length > 0 && (
+                  <Card dark={dark} accentColor={C.red}>
+                    <SectionHeader icon={Eye} label="Sensitive Document Access" color={C.red} count={sensitiveFiles.length} dark={dark} />
+                    <div className="space-y-2">
+                      {sensitiveFiles.slice(0, 10).map((f, i) => (
+                        <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl text-xs"
+                          style={{ background: C.red + '0e', border: '1px solid ' + C.red + '20' }}>
+                          <Eye className="w-3.5 h-3.5 flex-shrink-0" style={{ color: C.red }} />
+                          <span className="flex-1 truncate" style={{ color: t.text }}>{f.file_name || f.path || 'Unknown file'}</span>
+                          <span style={{ color: t.textMute }}>{f.timestamp ? new Date(f.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+
+                {usbEvents.length > 0 && (
+                  <Card dark={dark} accentColor={C.amber}>
+                    <SectionHeader icon={Usb} label="External Drive / USB Activity" color={C.amber} count={usbEvents.length} dark={dark} />
+                    <div className="space-y-2">
+                      {usbEvents.slice(0, 8).map((e, i) => (
+                        <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl text-xs"
+                          style={{ background: C.amber + '10', border: '1px solid ' + C.amber + '25' }}>
+                          <Usb className="w-3.5 h-3.5 flex-shrink-0" style={{ color: C.amber }} />
+                          <span className="flex-1 capitalize" style={{ color: t.text }}>
+                            {(e.type || e.event_type || '').replace(/_/g, ' ')} — {e.device || 'USB Device'}
+                          </span>
+                          <span style={{ color: t.textMute }}>{e.timestamp ? new Date(e.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+              </motion.div>
+            )}
+
+            {/* ── SECURITY ── */}
+            {activeTab === 'security' && (
+              <motion.div key="security" variants={cV} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
+
+                {securityAlerts > 0 ? (
+                  <motion.div variants={iV} className="flex items-center gap-3 px-4 py-3 rounded-2xl"
+                    style={{ background: C.red + '12', border: '1px solid ' + C.red + '30' }}>
+                    <AlertCircle className="w-5 h-5 flex-shrink-0" style={{ color: C.red }} />
+                    <p className="text-sm font-bold" style={{ color: C.red }}>{securityAlerts} Security Alert{securityAlerts > 1 ? 's' : ''} Detected</p>
+                  </motion.div>
+                ) : (
+                  <motion.div variants={iV} className="flex items-center gap-3 px-4 py-3 rounded-2xl"
+                    style={{ background: C.green + '12', border: '1px solid ' + C.green + '30' }}>
+                    <Shield className="w-5 h-5 flex-shrink-0" style={{ color: C.green }} />
+                    <p className="text-sm font-bold" style={{ color: C.green }}>No Security Alerts — All Clear</p>
+                  </motion.div>
+                )}
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <Card dark={dark} accentColor={C.red}>
+                    <SectionHeader icon={Shield} label="Security Monitoring" color={C.red} dark={dark} />
+                    <StatRow label="USB Insertions/Removals"     value={usbEvents.length}            flagged={usbEvents.length > 0}            dark={dark} />
+                    <StatRow label="Print Jobs"                  value={printEvents.length}           color={C.amber}                           dark={dark} />
+                    <StatRow label="Antivirus Disabled"          value={avDisabled.length}            flagged={avDisabled.length > 0}           dark={dark} />
+                    <StatRow label="Unauthorized Installs"       value={unauthorizedInstalls.length}  flagged={unauthorizedInstalls.length > 0} dark={dark} />
+                    <StatRow label="VPN / Proxy Usage"           value={vpnUsage.length > 0 ? 'Detected' : 'None'} flagged={vpnUsage.length > 0} dark={dark} />
+                    <StatRow label="Incognito Browsing"          value={incognitoEvents.length > 0 ? 'Detected' : 'None'} flagged={incognitoEvents.length > 0} dark={dark} />
+                    <StatRow label="Suspicious Data Transfers"   value={suspiciousTransfers.length}  flagged={suspiciousTransfers.length > 0}  dark={dark} />
+                  </Card>
+
+                  <Card dark={dark} accentColor={C.orange}>
+                    <SectionHeader icon={ShieldAlert} label="Risk Assessment" color={C.orange} dark={dark} />
+                    <div className="flex justify-center my-2">
+                      <ScoreRing value={securityAlerts === 0 ? 100 : Math.max(0, 100 - securityAlerts * 15)}
+                        label="Security Score" size={100}
+                        color={securityAlerts === 0 ? C.green : securityAlerts < 3 ? C.amber : C.red} dark={dark} />
+                    </div>
+                    <div className="mt-4 space-y-2">
+                      {[
+                        { label: 'USB Activity',    risk: usbEvents.length > 2 ? 'High' : usbEvents.length > 0 ? 'Medium' : 'None',    color: usbEvents.length > 0 ? C.amber : C.green },
+                        { label: 'AV Status',       risk: avDisabled.length > 0 ? 'Critical' : 'OK',                                   color: avDisabled.length > 0 ? C.red : C.green },
+                        { label: 'VPN/Proxy',       risk: vpnUsage.length > 0 ? 'Flagged' : 'None',                                    color: vpnUsage.length > 0 ? C.amber : C.green },
+                        { label: 'Data Transfer',   risk: suspiciousTransfers.length > 0 ? 'Suspicious' : 'Normal',                    color: suspiciousTransfers.length > 0 ? C.red : C.green },
+                        { label: 'Private Browse',  risk: incognitoEvents.length > 0 ? 'Detected' : 'None',                           color: incognitoEvents.length > 0 ? C.amber : C.green },
+                        { label: 'Print Activity',  risk: printEvents.length > 10 ? 'High' : printEvents.length > 0 ? 'Logged' : 'None', color: printEvents.length > 10 ? C.amber : C.green },
+                      ].map((item, i) => (
+                        <div key={i} className="flex items-center justify-between text-xs p-2 rounded-lg"
+                          style={{ background: t.card2 }}>
+                          <span style={{ color: t.textSub }}>{item.label}</span>
+                          <span className="font-bold px-2 py-0.5 rounded-full text-[10px]"
+                            style={{ background: item.color + '15', color: item.color }}>{item.risk}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                </div>
+
+                {[...usbEvents, ...avDisabled, ...vpnUsage, ...suspiciousTransfers, ...unauthorizedInstalls].length > 0 && (
+                  <Card dark={dark} accentColor={C.red}>
+                    <SectionHeader icon={AlertTriangle} label="Security Event Timeline" color={C.red} dark={dark} />
+                    <div className="space-y-2 max-h-60 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+                      {[...usbEvents, ...avDisabled, ...vpnUsage, ...suspiciousTransfers, ...unauthorizedInstalls]
+                        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                        .map((e, i) => {
+                          const type = e.type || e.event_type || 'security_event';
+                          const col = type.includes('av') ? C.red : type.includes('usb') ? C.amber : type.includes('vpn') ? C.purple : C.orange;
+                          return (
+                            <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl text-xs"
+                              style={{ background: col + '0e', border: '1px solid ' + col + '20' }}>
+                              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: col }} />
+                              <span className="flex-1 capitalize font-medium" style={{ color: t.text }}>
+                                {type.replace(/_/g, ' ')}{e.device ? ' — ' + e.device : ''}
+                              </span>
+                              <span className="tabular-nums" style={{ color: t.textMute }}>
+                                {e.timestamp ? new Date(e.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                              </span>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </Card>
+                )}
+              </motion.div>
+            )}
+
+          </AnimatePresence>
+        </div>
+      </div>
     </motion.div>
-    </>
   );
 }
