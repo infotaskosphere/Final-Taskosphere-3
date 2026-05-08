@@ -40,6 +40,7 @@ try:
 except ImportError:
     _gemini_ai = None
 from backend.passwords import router as passwords_router
+from backend.activity_monitor import router as activity_monitor_router
 
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -1498,9 +1499,7 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
         "approved_by": None,
         "approved_at": None,
         "permissions": user_data.permissions if user_data.permissions else default_permissions,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "company_id": user_data.company_id or None,
-        "company_name": user_data.company_name or None,
+        "created_at": datetime.now(timezone.utc).isoformat()
     }
 
     await db.users.insert_one(new_user)
@@ -1804,13 +1803,6 @@ async def reject_user(user_id: str, current_user: User = Depends(get_current_use
 #============================================================
 # USER MANAGEMENT
 #=============================================================
-@api_router.get("/companies/list")
-async def list_companies_for_management(current_user: User = Depends(get_current_user)):
-    """Return all companies for user-association and report filtering — accessible to any authenticated user."""
-    companies = await db.companies.find({}, {"_id": 0, "id": 1, "name": 1}).sort("name", 1).to_list(500)
-    return companies
-
-
 @api_router.get("/users")
 async def get_users(
     user_id: Optional[str] = None,
@@ -1918,7 +1910,7 @@ async def update_user(
             "full_name", "email", "role", "departments", "phone",
             "birthday", "punch_in_time", "grace_time",
             "punch_out_time", "is_active", "profile_picture", "telegram_id",
-            "status", "permissions", "company_id", "company_name"
+            "status", "permissions"
         ]
     elif is_manager and has_edit_users and not is_own:
         # Manager editing a team staff member — can update profile + work settings, not role/permissions
@@ -1926,7 +1918,7 @@ async def update_user(
             "full_name", "email", "departments", "phone",
             "birthday", "punch_in_time", "grace_time",
             "punch_out_time", "is_active", "profile_picture", "telegram_id",
-            "status", "company_id", "company_name"
+            "status"
         ]
     else:
         # Self-edit: own profile fields only
@@ -7984,5 +7976,6 @@ api_router.include_router(telegram_router)
 api_router.include_router(leads_router)
 api_router.include_router(notification_router)
 api_router.include_router(email_router)
+api_router.include_router(activity_monitor_router)
 app.include_router(google_auth_router)
 app.include_router(api_router)
