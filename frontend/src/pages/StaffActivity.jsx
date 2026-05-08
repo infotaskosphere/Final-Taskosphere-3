@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import {
   BarChart3, TrendingUp, Clock, Award, Users, CheckCircle2,
   AlertTriangle, Target, Download, RefreshCw, Activity,
-  Calendar, Star, Zap, Shield,
+  Calendar, Star, Zap, Shield, Monitor,
   GripVertical, Settings2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -210,12 +210,27 @@ const TabBtn = ({ id, label, icon:Icon, active, onClick, dark }) => {
 // ════════════════════════════════════════════════════════════════════════════
 // MAIN
 // ════════════════════════════════════════════════════════════════════════════
-export default function Reports() {
+export default function StaffActivity() {
   const { user, hasPermission } = useAuth();
   const dark = useDark();
   const t    = tok(dark);
 
   const isAdmin   = user?.role === 'admin';
+
+  // Admin-only guard: redirect non-admins
+  if (!isAdmin) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4"
+        style={{ background: t.pageBg }}>
+        <Shield className="w-16 h-16" style={{ color: t.textMute }} />
+        <p className="text-lg font-bold" style={{ color: t.text }}>Admin Access Only</p>
+        <p className="text-sm" style={{ color: t.textSub }}>
+          This page is restricted to administrators.
+        </p>
+      </div>
+    );
+  }
+
   const canDL     = isAdmin || hasPermission('can_download_reports');
 
   // Cross-visibility: view_other_activity is the ONLY way non-admin users see other users' activity.
