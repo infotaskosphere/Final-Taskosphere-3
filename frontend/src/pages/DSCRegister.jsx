@@ -251,6 +251,7 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
   const [readError,    setReadError]    = useState('');
   const [certFetched,  setCertFetched]  = useState(false);
   const certFileRef = useRef(null);
+  const [agentAutoFetching, setAgentAutoFetching] = useState(false);
 
   const [form, setForm] = useState({
     holder_name:     '',
@@ -269,6 +270,38 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
   });
 
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
+
+  // ── Auto-fetch cert from agent /dsc-status on popup open ───────────────────
+  // The agent's dscWatcher reads the cert without PIN on plug-in.
+  // If the agent already fetched it, populate form immediately.
+  useEffect(() => {
+    let cancelled = false;
+    async function tryAgentAutoFetch() {
+      try {
+        const agentOk = await checkLocalAgent();
+        if (!agentOk || cancelled) return;
+        setAgentAutoFetching(true);
+        // Poll a few times — agent may still be reading
+        for (let i = 0; i < 6; i++) {
+          if (cancelled) break;
+          const res = await fetch('http://127.0.0.1:7432/dsc-status', { signal: AbortSignal.timeout(3000) });
+          if (!res.ok) break;
+          const data = await res.json();
+          if (data.cert && data.cert.holder_name) {
+            if (!cancelled) {
+              applyCert(data.cert);
+              toast.success('Token data auto-filled by local agent ✓');
+            }
+            break;
+          }
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      } catch { /* agent not running or no cert yet */ }
+      finally { if (!cancelled) setAgentAutoFetching(false); }
+    }
+    tryAgentAutoFetch();
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Apply parsed cert data to form ──────────────────────────────────────────
   const applyCert = (cert) => {
@@ -550,7 +583,7 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
               {/* ── PIN Read Section ── */}
               <div style={{ marginBottom: 14, padding: '10px 12px', background: certFetched ? (isDark ? 'rgba(16,185,129,0.1)' : '#f0fdf4') : surface, borderRadius: 10, border: `1px solid ${certFetched ? '#10b981' : readError ? '#ef4444' : border}` }}>
                 <label style={{ ...labelStyle, marginBottom: 6, color: certFetched ? '#10b981' : readError ? '#ef4444' : labelClr }}>
-                  {certFetched ? '✓ Certificate Read from Token' : 'Read Certificate from Token (Optional)'}
+                  {certFetched ? '✓ Certificate Read from Token' : agentAutoFetching ? '⏳ Agent auto-reading token...' : 'Read Certificate from Token (Optional)'}
                 </label>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <input
