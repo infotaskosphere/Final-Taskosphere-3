@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { useDark } from '@/hooks/useDark';
+import ActivityReportPanel from '@/components/activity/ActivityReportPanel';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
 import { toast } from 'sonner';
@@ -479,8 +480,10 @@ export default function Reports() {
     {id:'attend',     label:'Attendance',  icon:Clock     },
     {id:'efficiency', label:'Efficiency',  icon:Zap       },
     {id:'performers', label:'Performers',  icon:Award     },
-    // Team tab: Admin only. Non-admin users (including manager) see own + cross-vis data only.
+    // Team tab: Admin only.
     ...(isAdmin ? [{id:'team',label:'Team',icon:Users}] : []),
+    // Computer Activity tab: Admin only.
+    ...(isAdmin ? [{id:'computer',label:'Computer Activity',icon:Monitor}] : []),
   ];
 
   const cursorStyle={fill:dark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.03)'};
@@ -1072,6 +1075,13 @@ export default function Reports() {
                 </div>
               </Sec>
             ):<Empty icon={Users} text="No team workload data" dark={dark}/>}
+          </motion.div>
+        )}
+
+        {/* ──────── COMPUTER ACTIVITY (admin only) ──────── */}
+        {tab==='computer'&&isAdmin&&(
+          <motion.div key="ca" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}}>
+            <ActivityReportPanel />
           </motion.div>
         )}
 
