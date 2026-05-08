@@ -1068,3 +1068,17 @@ async def create_audit_log(
         new_data=new_data,
     )
     await db.audit_logs.insert_one(log_entry.model_dump())
+
+# ==========================================================
+# COMPATIBILITY ALIASES
+# ==========================================================
+
+async def get_db():
+    """
+    FastAPI dependency that yields the Motor database instance.
+    Provides a standard get_db() interface used by routers like activity_monitor.
+    """
+    yield db
+
+# Alias for admin_required used in some routers
+admin_required = require_admin
