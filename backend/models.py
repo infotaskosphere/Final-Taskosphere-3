@@ -105,7 +105,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_manage_settings": True,       # General Settings → VIEW, UPDATE (Own + Team)
           "can_assign_tasks": False,         # ADMIN_GRANTED_ONLY
           "can_assign_clients": False,       # ADMIN_GRANTED_ONLY
-          "can_view_staff_activity": False,  # Staff Activity module removed
+          "can_view_staff_activity": False,  # Admin-only — not grantable to manager/staff
           "can_send_reminders": False,       # ADMIN_GRANTED_ONLY
           "can_view_user_page": False,       # ADMIN_GRANTED_ONLY
           "can_view_audit_logs": False,      # ADMIN_GRANTED_ONLY
@@ -163,7 +163,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_manage_settings": True,       # General Settings → VIEW, UPDATE (Own)
           "can_assign_tasks": False,         # ADMIN_GRANTED_ONLY
           "can_assign_clients": False,       # ADMIN_GRANTED_ONLY
-          "can_view_staff_activity": False,  # Staff Activity module removed
+          "can_view_staff_activity": False,  # Admin-only — not grantable to manager/staff
           "can_send_reminders": False,       # ADMIN_GRANTED_ONLY
           "can_view_user_page": False,       # ADMIN_GRANTED_ONLY
           "can_view_audit_logs": False,      # ADMIN_GRANTED_ONLY
