@@ -312,6 +312,7 @@ function startWatcher() {
             reader.disconnect(reader.SCARD_LEAVE_CARD, () => {});
             if (cert) {
               state.cert = cert;
+              state.certReadAt = new Date().toISOString();
               console.log('[dscWatcher] Auto-read cert (no PIN):', cert.holder_name);
             } else {
               state.error = 'PIN required — click Fetch Data and enter your PIN';
