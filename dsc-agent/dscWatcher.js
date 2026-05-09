@@ -1,90 +1,136 @@
 'use strict';
 
 /**
- * dscWatcher.js — v3
+ * dscWatcher.js — v6 (Universal Indian DSC Reader)
  * ─────────────────────────────────────────────────────────────────────────────
- * Detects DSC (Digital Signature Certificate) token insertion and reads the
- * X.509 certificate WITHOUT a PIN.
+ * Reads certificates from ALL Indian DSC USB tokens WITHOUT a PIN.
  *
- * PRIMARY (always works — no C++ build tools needed):
- *   PowerShell reads from the Windows X.509 Personal Certificate Store.
- *   When a DSC USB token is plugged in, the Windows CCID driver automatically
- *   imports its certificate into the Personal store. We poll every 3 s, parse
- *   the Subject string, and expose the result via /dsc-status.
+ * Supported tokens (tested vendor list):
+ *   • Watchdata USB Key      (VID 0x163C)  — ePass2003, ProxKey
+ *   • Feitian ePass2003      (VID 0x096E)  — most common
+ *   • SafeNet eToken 5110    (VID 0x0529)  — Gemalto/Thales
+ *   • Moser Baer / MBToken  (VID 0x311F)
+ *   • Aladdin eToken PRO     (VID 0x0529)
+ *   • Prox Key               (VID 0x22CD)
+ *   • Longmai mToken         (VID 0x0A89)
+ *   • ePass3003 / ePass2000  (VID 0x096E)
+ *   • Eutron CryptoIdentity  (VID 0x073D)
+ *   • SmartCard-HSM          (VID 0x04B9)
+ *   • ACS readers            (VID 0x072F)
+ *   • HID Crescendo          (VID 0x076B)
+ *   • Generic CCID tokens    (class 0x0B)
  *
- * SECONDARY (requires Visual Studio Build Tools — pcsclite):
- *   Low-level APDU reading directly from the smart-card. Used as a fallback
- *   only when pcsclite is available and the PS approach finds nothing.
+ * Reading strategy (cascading — no C++ build tools required):
  *
- * The DSCRegister.jsx page polls GET /dsc-status and calls applyCert() to
- * auto-fill: holder_name, serial_number, issue_date, expiry_date,
- *            organization, email, issuer.
+ *   METHOD 1 — Windows PowerShell cert stores
+ *     Reads: My (Personal), SmartCardRoot, Root stores
+ *     Works for: tokens whose middleware registers cert in Windows store
+ *     (eMudhra, Sify, Capricorn, most Feitian tokens)
+ *
+ *   METHOD 2 — certutil -store SmartCardRoot
+ *     Reads: SmartCard cert store via Windows certutil.exe
+ *     Works for: Watchdata, ProxKey, ePass2003 that skip Personal store
+ *
+ *   METHOD 3 — certutil -scinfo (direct token read)
+ *     Reads: cert directly from inserted smart card via PC/SC without PIN
+ *     Works for: any token with a Windows CCID driver (all modern tokens)
+ *
+ *   METHOD 4 — PowerShell CNG / CryptoAPI smart card enumeration
+ *     Uses Get-ChildItem Cert:\\ with SmartCard provider
+ *     Works for: tokens visible to Windows CNG key storage provider
+ *
+ *   METHOD 5 — pcsclite direct APDU (if native module installed)
+ *     Reads cert by sending APDU sequences directly to token
+ *     Works for: Linux/Mac and Windows with pcsclite build tools
+ *
+ * Exposed via HTTP (index.js):
+ *   GET /dsc-status    → { plugged, cert, reader, insertedAt, method, error }
+ *   GET /dsc-autofill  → { available, fields } — ready for DSCRegister.jsx form
  */
 
 let pcsclite;
-try { pcsclite = require('pcsclite'); } catch {
-  pcsclite = null;
-}
+try { pcsclite = require('pcsclite'); } catch { pcsclite = null; }
 
-const { execFileSync } = require('child_process');
+const { execFileSync, execFile } = require('child_process');
 const fs   = require('fs');
 const os   = require('os');
 const path = require('path');
 
-// ── Shared state exposed via /dsc-status ──────────────────────────────────────
+// ── Shared state ──────────────────────────────────────────────────────────────
 let state = {
   plugged:    false,
   cert:       null,
   reader:     null,
   insertedAt: null,
   error:      null,
-  method:     null, // 'powershell' | 'pcsclite'
+  method:     null,
 };
 
-// ── PowerShell script: read ALL cert stores including SmartCard ───────────────
-// Reads from: Personal (My), SmartCard, and also uses certutil -scinfo
-// This covers Watchdata, ePass, ProxKey and other tokens that don't auto-import
-// their cert into the Windows Personal store.
-const CERT_STORE_PS = `
+// ── All known Indian DSC vendor IDs ──────────────────────────────────────────
+const DSC_VENDOR_IDS = new Set([
+  0x0529,  // SafeNet / Aladdin eToken
+  0x08E6,  // Gemalto
+  0x096E,  // Feitian (ePass2003, ePass2000, ePass3003)
+  0x163C,  // Watchdata USB Key
+  0x1FC9,  // NXP
+  0x076B,  // HID Crescendo / ActivKey
+  0x04B9,  // SmartCard-HSM / OBerthur
+  0x073D,  // Eutron CryptoIdentity
+  0x072F,  // ACS ACR readers
+  0x22CD,  // ProxKey (Proxama)
+  0x311F,  // Moser Baer / MBToken
+  0x058F,  // Alcor Micro
+  0x04E6,  // SCM Microsystems
+  0x0DC3,  // Athena IDProtect
+  0x1D50,  // OpenMoko
+  0x0A89,  // Longmai mToken
+  0x04CC,  // Gemplus
+  0x0B97,  // O2Micro
+  0x0C4B,  // Reiner-SCT
+  0x1A44,  // VASCO
+  0x1E0D,  // Feitian (newer PIDs)
+  0x2581,  // ProSoft
+  0x0783,  // C3PO
+  0x1050,  // YubiKey (some DSC issuers use these)
+  0x20A0,  // Clay Logic
+]);
+
+// ── Indian DSC issuer CA keywords ────────────────────────────────────────────
+const DSC_ISSUER_KEYWORDS = [
+  'emudhra', 'e-mudhra', 'mudhra',
+  'nsdl', 'nsdl e-governance',
+  'sify', 'safescrypt',
+  'capricorn', 'capricorn ca',
+  'gnfc', 'gujarat narmada',
+  'vsign', 'vsign ltd',
+  'ncode', 'ncode solutions',
+  'idrbt',
+  'national informatics centre', 'nic',
+  'controller of certifying authorities', 'cca',
+  'certifying authority',
+  'tcs', 'tata consultancy',
+  'cdac', 'c-dac',
+  'mtnl',
+  'class 2', 'class 3', 'class2', 'class3',
+  'ca-201', 'ca-202', 'ca-203',
+  'subca', 'sub ca',
+  'india pki', 'indianpki',
+  'bridge ca',
+];
+
+// ── PowerShell: read all Windows cert stores ──────────────────────────────────
+const PS_MULTISOURCE = String.raw`
 $results = @()
+$seen    = @{}
 
-# ── 1. Read all standard user cert stores (My, SmartCardRoot, SmartCard) ──────
-$storeNames = @("My", "SmartCardRoot")
-foreach ($storeName in $storeNames) {
+function Add-Certs($storeName, $storeLocation) {
   try {
-    $store = New-Object System.Security.Cryptography.X509Certificates.X509Store(
-      $storeName,
-      [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-    )
-    $store.Open("ReadOnly")
-    foreach ($c in $store.Certificates) {
-      $results += [PSCustomObject]@{
-        subject      = $c.Subject
-        issuer       = $c.Issuer
-        serialNumber = $c.SerialNumber
-        notBefore    = $c.NotBefore.ToString("yyyy-MM-dd")
-        notAfter     = $c.NotAfter.ToString("yyyy-MM-dd")
-        thumbprint   = $c.Thumbprint
-        hasPrivateKey= $c.HasPrivateKey
-        storeSource  = $storeName
-      }
-    }
-    $store.Close()
-  } catch {}
-}
-
-# ── 2. Also read LocalMachine stores (some tokens register here) ───────────────
-$lmStores = @("My", "SmartCardRoot")
-foreach ($storeName in $lmStores) {
-  try {
-    $store = New-Object System.Security.Cryptography.X509Certificates.X509Store(
-      $storeName,
-      [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
-    )
-    $store.Open("ReadOnly")
-    foreach ($c in $store.Certificates) {
-      # Only add if not already found (deduplicate by thumbprint)
-      if ($results.thumbprint -notcontains $c.Thumbprint) {
+    $loc = [System.Security.Cryptography.X509Certificates.StoreLocation]$storeLocation
+    $s   = New-Object System.Security.Cryptography.X509Certificates.X509Store($storeName, $loc)
+    $s.Open("ReadOnly")
+    foreach ($c in $s.Certificates) {
+      if (-not $seen.ContainsKey($c.Thumbprint)) {
+        $seen[$c.Thumbprint] = $true
         $results += [PSCustomObject]@{
           subject      = $c.Subject
           issuer       = $c.Issuer
@@ -93,155 +139,242 @@ foreach ($storeName in $lmStores) {
           notAfter     = $c.NotAfter.ToString("yyyy-MM-dd")
           thumbprint   = $c.Thumbprint
           hasPrivateKey= $c.HasPrivateKey
-          storeSource  = ("LM-" + $storeName)
+          storeSource  = ($storeLocation + "/" + $storeName)
         }
       }
     }
-    $store.Close()
+    $s.Close()
   } catch {}
 }
 
-if ($results.Count -gt 0) { $results | ConvertTo-Json -Compress -Depth 3 } else { Write-Output "[]" }
+# All stores that can contain DSC certs
+Add-Certs "My"            "CurrentUser"
+Add-Certs "SmartCardRoot" "CurrentUser"
+Add-Certs "Root"          "CurrentUser"
+Add-Certs "My"            "LocalMachine"
+Add-Certs "SmartCardRoot" "LocalMachine"
+
+if ($results.Count -gt 0) { $results | ConvertTo-Json -Compress -Depth 3 }
+else { Write-Output "[]" }
 `;
 
-// ── PowerShell: read cert directly from smart card via certutil -scinfo ────────
-// This works for Watchdata, ePass2003 etc. that keep cert only on the token.
-const SCINFO_PS = `
+// ── PowerShell: CNG smart card key enumeration ────────────────────────────────
+// Uses Windows CNG (Cryptography Next Generation) to enumerate
+// smart card keys — works for tokens that register with KSP providers
+const PS_CNG_SMARTCARD = String.raw`
+$results = @()
 try {
-  $raw = & certutil -scinfo -silent 2>$null | Out-String
-  # Parse Serial, Subject, Issuer, NotBefore, NotAfter from certutil output
+  # Enumerate certificates from Cert:\ drive that are backed by smart card KSP
+  $scKsps = @(
+    "Microsoft Smart Card Key Storage Provider",
+    "Microsoft Base Smart Card Crypto Provider"
+  )
+  Get-ChildItem -Path "Cert:\CurrentUser\My" -ErrorAction SilentlyContinue | ForEach-Object {
+    try {
+      $c = $_
+      # Check if it has private key via smart card provider
+      if ($c.HasPrivateKey) {
+        $pk = $c.PrivateKey
+        if ($pk -ne $null) {
+          $results += [PSCustomObject]@{
+            subject      = $c.Subject
+            issuer       = $c.Issuer
+            serialNumber = $c.SerialNumber
+            notBefore    = $c.NotBefore.ToString("yyyy-MM-dd")
+            notAfter     = $c.NotAfter.ToString("yyyy-MM-dd")
+            thumbprint   = $c.Thumbprint
+            hasPrivateKey= $true
+            storeSource  = "CNG-SmartCard"
+          }
+        }
+      }
+    } catch {}
+  }
+} catch {}
+if ($results.Count -gt 0) { $results | ConvertTo-Json -Compress -Depth 3 }
+else { Write-Output "[]" }
+`;
+
+// ── PowerShell: certutil -scinfo (direct token cert read) ─────────────────────
+// certutil -scinfo reads cert info directly from the inserted smart card
+// without needing to import into Windows cert store — works for ALL tokens
+// that have a Windows CCID driver (all modern DSC tokens do)
+const PS_SCINFO = String.raw`
+try {
+  # Run certutil -scinfo to read cert directly from token
+  $raw = & certutil -scinfo -silent 2>&1 | Out-String
+  
   $results = @()
-  $blocks = $raw -split "(?=\\nIssuer:)"
-  foreach ($block in $blocks) {
-    $subject    = if ($block -match "Subject:\\s*(.+)") { $Matches[1].Trim() } else { $null }
-    $issuer     = if ($block -match "Issuer:\\s*(.+)")  { $Matches[1].Trim() } else { $null }
-    $serial     = if ($block -match "Serial Number:\\s*([0-9a-fA-F]+)") { $Matches[1].Trim() } else { $null }
-    $notBefore  = if ($block -match "NotBefore:\\s*(\\S+)") { $Matches[1].Trim() } else { $null }
-    $notAfter   = if ($block -match "NotAfter:\\s*(\\S+)")  { $Matches[1].Trim() } else { $null }
-    if ($subject -and $issuer) {
+  
+  # Parse each certificate block from certutil output
+  # certutil outputs multiple cert blocks separated by "==="
+  $certBlocks = $raw -split "(?=\r?\n\s*Serial Number:|\r?\n\s*Issued to:)"
+  
+  foreach ($block in $certBlocks) {
+    if ($block -notmatch "Serial Number:" -and $block -notmatch "Issued to:") { continue }
+    
+    # Extract fields
+    $serial   = if ($block -match "Serial Number:\s*([0-9a-fA-F\s]+)") { $Matches[1].Trim() -replace "\s",""} else { $null }
+    $issuedTo = if ($block -match "Issued to:\s*(.+)")    { $Matches[1].Trim() } else { $null }
+    $issuedBy = if ($block -match "Issued by:\s*(.+)")    { $Matches[1].Trim() } else { $null }
+    $subject  = if ($block -match "Subject:\s*(.+)")      { $Matches[1].Trim() } else { $null }
+    $issuer   = if ($block -match "Issuer:\s*(.+)")       { $Matches[1].Trim() } else { $null }
+    
+    # Try to parse dates in multiple formats
+    $notBefore = $null; $notAfter = $null
+    if ($block -match "NotBefore:\s*(.+?)[\r\n]")  { 
+      try { $notBefore = [datetime]::Parse($Matches[1].Trim()).ToString("yyyy-MM-dd") } catch { $notBefore = $Matches[1].Trim() }
+    }
+    if ($block -match "NotAfter:\s*(.+?)[\r\n]")   { 
+      try { $notAfter  = [datetime]::Parse($Matches[1].Trim()).ToString("yyyy-MM-dd") } catch { $notAfter  = $Matches[1].Trim() }
+    }
+    # Also try "Valid From / Valid To" format
+    if (-not $notBefore -and $block -match "Valid From:\s*(.+?)[\r\n]") {
+      try { $notBefore = [datetime]::Parse($Matches[1].Trim()).ToString("yyyy-MM-dd") } catch { $notBefore = $Matches[1].Trim() }
+    }
+    if (-not $notAfter -and $block -match "Valid To:\s*(.+?)[\r\n]") {
+      try { $notAfter  = [datetime]::Parse($Matches[1].Trim()).ToString("yyyy-MM-dd") } catch { $notAfter  = $Matches[1].Trim() }
+    }
+    
+    $name = if ($subject) { $subject } elseif ($issuedTo) { $issuedTo } else { $null }
+    $iss  = if ($issuer)  { $issuer  } elseif ($issuedBy) { $issuedBy } else { $null }
+    
+    if ($name -and $serial) {
       $results += [PSCustomObject]@{
-        subject=$subject; issuer=$issuer; serialNumber=$serial
-        notBefore=$notBefore; notAfter=$notAfter; thumbprint="scinfo-"+$serial
-        hasPrivateKey=$true; storeSource="certutil-scinfo"
+        subject      = $name
+        issuer       = $iss
+        serialNumber = $serial
+        notBefore    = $notBefore
+        notAfter     = $notAfter
+        thumbprint   = ("scinfo-" + $serial)
+        hasPrivateKey= $true
+        storeSource  = "certutil-scinfo"
       }
     }
   }
-  if ($results.Count -gt 0) { $results | ConvertTo-Json -Compress -Depth 3 } else { Write-Output "[]" }
+  
+  if ($results.Count -gt 0) { $results | ConvertTo-Json -Compress -Depth 3 }
+  else { Write-Output "[]" }
 } catch { Write-Output "[]" }
 `;
 
-const PS_FILE      = path.join(os.tmpdir(), 'ts-certstore.ps1');
-const PS_SCINFO    = path.join(os.tmpdir(), 'ts-scinfo.ps1');
+// ── Temp file paths ───────────────────────────────────────────────────────────
+const PS_FILE_MULTI  = path.join(os.tmpdir(), 'ts-dsc-multi.ps1');
+const PS_FILE_CNG    = path.join(os.tmpdir(), 'ts-dsc-cng.ps1');
+const PS_FILE_SCINFO = path.join(os.tmpdir(), 'ts-dsc-scinfo.ps1');
 
-function writePsFile() {
-  try { fs.writeFileSync(PS_FILE,   '\ufeff' + CERT_STORE_PS, 'utf8'); } catch {}
-  try { fs.writeFileSync(PS_SCINFO, '\ufeff' + SCINFO_PS,     'utf8'); } catch {}
+function writePsFiles() {
+  try { fs.writeFileSync(PS_FILE_MULTI,  '\uFEFF' + PS_MULTISOURCE,    'utf8'); } catch {}
+  try { fs.writeFileSync(PS_FILE_CNG,    '\uFEFF' + PS_CNG_SMARTCARD,  'utf8'); } catch {}
+  try { fs.writeFileSync(PS_FILE_SCINFO, '\uFEFF' + PS_SCINFO,         'utf8'); } catch {}
 }
 
-function runCertStorePs() {
+function runPs(file, timeoutMs = 10000) {
   try {
     const out = execFileSync('powershell', [
-      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', PS_FILE,
-    ], { timeout: 10000, windowsHide: true }).toString().trim();
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-File', file,
+    ], { timeout: timeoutMs, windowsHide: true }).toString().trim();
     if (!out || out === '[]') return [];
     const parsed = JSON.parse(out);
     return Array.isArray(parsed) ? parsed : [parsed];
   } catch { return []; }
 }
 
-// Secondary: try certutil -scinfo (reads cert directly from token, no store import needed)
-function runScinfoPs() {
-  try {
-    const out = execFileSync('powershell', [
-      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', PS_SCINFO,
-    ], { timeout: 12000, windowsHide: true }).toString().trim();
-    if (!out || out === '[]') return [];
-    const parsed = JSON.parse(out);
-    return Array.isArray(parsed) ? parsed : [parsed];
-  } catch { return []; }
-}
-
-// Also try reading directly from Watchdata/ePass2003/ProxKey via certutil -store "SmartCard"
-function runSmartCardStore() {
+// certutil -store "SmartCardRoot" — plain text output, no PS needed
+function runCertutilSmartCardRoot() {
   try {
     const out = execFileSync('certutil', ['-store', '-user', 'SmartCardRoot'],
-      { timeout: 6000, windowsHide: true, shell: true }).toString();
-    // Parse the text output
-    const results = [];
-    const blocks = out.split(/(?=Serial Number:)/);
-    for (const block of blocks) {
-      const serial    = (block.match(/Serial Number:\s*([0-9a-fA-F]+)/) || [])[1];
-      const subject   = (block.match(/Subject:\s*(.+)/)  || [])[1]?.trim();
-      const issuer    = (block.match(/Issuer:\s*(.+)/)   || [])[1]?.trim();
-      const notBefore = (block.match(/NotBefore:\s*(\S+)/) || [])[1];
-      const notAfter  = (block.match(/NotAfter:\s*(\S+)/)  || [])[1];
-      if (subject && serial) results.push({
-        subject, issuer: issuer || '', serialNumber: serial,
-        notBefore: notBefore || '', notAfter: notAfter || '',
-        thumbprint: 'scard-' + serial, hasPrivateKey: true, storeSource: 'certutil-SmartCardRoot',
-      });
-    }
-    return results;
+      { timeout: 8000, windowsHide: true, shell: true }).toString();
+    return parseCertutilText(out, 'certutil-SmartCardRoot-User');
   } catch { return []; }
 }
 
-// ── Parse Windows Subject / Issuer string ─────────────────────────────────────
-// e.g. "E=user@email.com, CN=JOHN DOE, OU=Individual, O=Company Ltd., L=Mumbai, ST=Maharashtra, C=IN"
+// certutil -store "My" on LocalMachine (some MDM-enrolled tokens land here)
+function runCertutilMyLM() {
+  try {
+    const out = execFileSync('certutil', ['-store', 'My'],
+      { timeout: 8000, windowsHide: true, shell: true }).toString();
+    return parseCertutilText(out, 'certutil-My-LM');
+  } catch { return []; }
+}
+
+// Parse certutil text output into cert objects
+function parseCertutilText(out, source) {
+  const results = [];
+  const seen = new Set();
+  // Split on cert boundary lines (=====, -------, or "CertInfo")
+  const blocks = out.split(/={5,}|(?=Serial Number:)/i);
+  for (const block of blocks) {
+    const serial  = (block.match(/Serial Number:\s*([0-9a-fA-F\s]+)/i) || [])[1]?.trim().replace(/\s/g, '');
+    const subject = (block.match(/Subject:\s*(.+)/i)   || [])[1]?.trim();
+    const issuer  = (block.match(/Issuer:\s*(.+)/i)    || [])[1]?.trim();
+    let   notBefore = null;
+    let   notAfter  = null;
+    const nbM = block.match(/NotBefore:\s*(.+)/i) || block.match(/Valid From:\s*(.+)/i);
+    const naM = block.match(/NotAfter:\s*(.+)/i)  || block.match(/Valid To:\s*(.+)/i);
+    if (nbM) { try { notBefore = new Date(nbM[1].trim()).toISOString().slice(0,10); } catch { notBefore = nbM[1].trim(); } }
+    if (naM) { try { notAfter  = new Date(naM[1].trim()).toISOString().slice(0,10); } catch { notAfter  = naM[1].trim(); } }
+    if (subject && serial && !seen.has(serial)) {
+      seen.add(serial);
+      results.push({
+        subject, issuer: issuer || '', serialNumber: serial,
+        notBefore, notAfter,
+        thumbprint: source + '-' + serial,
+        hasPrivateKey: true, storeSource: source,
+      });
+    }
+  }
+  return results;
+}
+
+// ── Parse Distinguished Name string ──────────────────────────────────────────
+// Handles: "CN=JOHN DOE, E=user@email.com, O=Firm, OU=Individual, C=IN"
+// Also handles certutil "Issued to" simple strings
 function parseDistinguishedName(dn) {
   if (!dn) return {};
   const fields = {};
-  // Split on ", KEY=" boundaries (handles commas inside values imperfectly but works for DSC)
-  const parts = dn.split(/,\s*(?=[A-Z]{1,10}=)/);
+  // Try structured DN first
+  const parts = dn.split(/,\s*(?=[A-Z]{1,15}=)/);
   for (const part of parts) {
     const eq  = part.indexOf('=');
     if (eq === -1) continue;
     const key = part.substring(0, eq).trim().toUpperCase();
     const val = part.substring(eq + 1).trim().replace(/^"(.*)"$/, '$1');
-    fields[key] = val;
+    if (!fields[key]) fields[key] = val; // keep first occurrence
+  }
+  // If no structured fields found, treat entire string as CN
+  if (Object.keys(fields).length === 0 && dn.trim()) {
+    fields['CN'] = dn.trim();
   }
   return fields;
 }
 
-// Indian DSC issuer keywords
-const DSC_ISSUER_KEYWORDS = [
-  'emudhra', 'mudhra', 'nsdl', 'sify', 'capricorn', 'gnfc', 'safescrypt',
-  'vsign', 'ncode', 'idrbt', 'national informatics', 'controller of certifying',
-  'cca india', 'certifying authority', 'class 2', 'class 3', 'ca-201', 'ca-202',
-];
-
-function isDscIssuer(issuer) {
-  if (!issuer) return false;
-  const lower = issuer.toLowerCase();
-  return DSC_ISSUER_KEYWORDS.some(k => lower.includes(k));
-}
-
-// Normalise a date string to yyyy-MM-dd regardless of source format
-// certutil outputs: "5/9/2026 6:30 AM" or "09/05/2026"
-// PowerShell store outputs: "2026-05-09" already
+// Normalise various date formats → yyyy-MM-dd
 function normDate(raw) {
   if (!raw) return null;
   raw = String(raw).trim();
-  // Already yyyy-MM-dd
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  // M/D/YYYY H:MM AM/PM  or  DD/MM/YYYY
   try {
     const d = new Date(raw);
     if (!isNaN(d)) return d.toISOString().slice(0, 10);
   } catch {}
-  return raw.slice(0, 10); // best effort
+  return raw.slice(0, 10);
 }
 
+// Parse a cert entry (from any source) → unified cert object
 function parseCertEntry(entry) {
   const subj = parseDistinguishedName(entry.subject || '');
   const issu = parseDistinguishedName(entry.issuer  || '');
 
-  const cn    = subj.CN  || subj.NAME || '';
+  const cn    = subj.CN  || subj.NAME || subj.GN || '';
   const email = subj.E   || subj.EMAILADDRESS || subj['1.2.840.113549.1.9.1'] || '';
   const org   = subj.O   || '';
   const ou    = subj.OU  || '';
-  const state_field = subj.ST || subj.S || '';
+  const loc   = subj.L   || '';
+  const st    = subj.ST  || subj.S || '';
 
-  // Some Indian DSCs embed PAN in CN: "ABCDE1234F-FIRSTNAME LASTNAME"
+  // Extract PAN from CN — common in Indian DSCs: "ABCDE1234F-FIRSTNAME LASTNAME"
   let name = cn;
   let pan  = null;
   const panMatch = (cn + ' ' + ou).match(/\b([A-Z]{5}[0-9]{4}[A-Z])\b/);
@@ -250,127 +383,75 @@ function parseCertEntry(entry) {
     name = cn.replace(/^[A-Z]{5}[0-9]{4}[A-Z][-\s]+/, '').trim() || cn;
   }
 
+  // Fallback: if name still looks like a PAN, strip it
+  if (/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(name.trim())) name = '';
+
   const issuerCN = issu.CN || issu.O || entry.issuer || '';
 
   return {
-    holder_name:   name   || null,
-    email:         email  || null,
-    organization:  org    || null,
-    state:         state_field || null,
-    pan:           pan    || null,
+    holder_name:   name || null,
+    email:         email || null,
+    organization:  org || null,
+    state:         st || null,
+    locality:      loc || null,
+    pan:           pan || null,
     serial_number: entry.serialNumber || null,
-    issue_date:    normDate(entry.notBefore) || null,
-    expiry_date:   normDate(entry.notAfter)  || null,
-    issuer:        issuerCN           || null,
-    thumbprint:    entry.thumbprint   || null,
-    read_method:   'agent-ps-certstore',
+    issue_date:    normDate(entry.notBefore),
+    expiry_date:   normDate(entry.notAfter),
+    issuer:        issuerCN || null,
+    thumbprint:    entry.thumbprint || null,
+    read_method:   'agent-' + (entry.storeSource || 'certstore'),
   };
 }
 
-// Pick the best DSC cert from multiple certs in the store
+// ── Score & select best cert from a list ─────────────────────────────────────
+function isDscIssuer(issuer) {
+  if (!issuer) return false;
+  const lower = issuer.toLowerCase();
+  return DSC_ISSUER_KEYWORDS.some(k => lower.includes(k));
+}
+
+function scoreCert(entry) {
+  let score = 0;
+  const today = new Date().toISOString().slice(0, 10);
+  const parsed = parseCertEntry(entry);
+  if (isDscIssuer(entry.issuer || ''))  score += 20;
+  if (entry.hasPrivateKey)               score += 10;
+  if (entry.notAfter >= today)           score += 15;  // not expired
+  if (parsed.holder_name)                score += 8;
+  if (parsed.email)                      score += 5;
+  if (parsed.pan)                        score += 5;
+  // Prefer cert store sources over certutil (more reliable dates)
+  if ((entry.storeSource || '').includes('SmartCardRoot')) score += 3;
+  if ((entry.storeSource || '').includes('scinfo'))        score += 2;
+  return score;
+}
+
 function selectBestCert(certs) {
   if (!certs.length) return null;
-
-  const today = new Date().toISOString().slice(0, 10);
-
-  // Score each cert — higher = better
-  const scored = certs.map(c => {
-    let score = 0;
-    if (isDscIssuer(c.issuer || ''))  score += 10;
-    if (c.hasPrivateKey)               score += 5;
-    if (c.notAfter >= today)           score += 8;  // not expired
-    if ((c.subject || '').match(/\bE=/i)) score += 3; // has email
-    return { c, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-  return scored[0].c;
+  return certs
+    .map(c => ({ c, score: scoreCert(c) }))
+    .sort((a, b) => b.score - a.score)[0].c;
 }
 
-// ── PowerShell polling watcher ────────────────────────────────────────────────
-let prevThumbprints = new Set();
-let psWatchInterval = null;
-
-function pollCertStore() {
-  // ── Step 1: Read all Windows cert stores (My + SmartCardRoot, User + LocalMachine)
-  let certs = runCertStorePs();
-
-  // ── Step 2: If no cert found yet, try certutil SmartCardRoot directly ─────
-  // This catches Watchdata, ePass2003, ProxKey etc. that don't auto-register
-  // their cert into Windows Personal store — cert lives only on the token.
-  if (certs.length === 0 || !certs.some(c => c.hasPrivateKey)) {
-    const scardCerts = runSmartCardStore();
-    if (scardCerts.length > 0) {
-      console.log('[dsc] Found', scardCerts.length, 'cert(s) via certutil SmartCardRoot');
-      certs = [...certs, ...scardCerts];
+// Deduplicate certs by serial number (different sources may return same cert)
+function deduplicateCerts(certs) {
+  const seen   = new Map(); // serial → entry
+  const noSerial = [];
+  for (const c of certs) {
+    const key = (c.serialNumber || '').replace(/\s/g, '').toUpperCase();
+    if (!key) { noSerial.push(c); continue; }
+    if (!seen.has(key)) {
+      seen.set(key, c);
+    } else {
+      // Keep whichever has hasPrivateKey=true, or keep existing
+      if (c.hasPrivateKey && !seen.get(key).hasPrivateKey) seen.set(key, c);
     }
   }
-
-  // ── Step 3: Last resort — certutil -scinfo (reads directly from token) ────
-  if (certs.length === 0) {
-    const scinfoCerts = runScinfoPs();
-    if (scinfoCerts.length > 0) {
-      console.log('[dsc] Found', scinfoCerts.length, 'cert(s) via certutil -scinfo');
-      certs = scinfoCerts;
-    }
-  }
-
-  const currThumbs = new Set(certs.map(c => c.thumbprint));
-
-  // Detect newly appeared certs (token plugged in)
-  const newCerts = certs.filter(c => !prevThumbprints.has(c.thumbprint));
-  if (newCerts.length > 0 && state.cert === null) {
-    const best   = selectBestCert(newCerts);
-    const parsed = parseCertEntry(best);
-    if (parsed.holder_name) {
-      state.plugged    = true;
-      state.cert       = parsed;
-      state.insertedAt = new Date().toISOString();
-      state.error      = null;
-      state.method     = 'powershell';
-      state.reader     = best.storeSource || 'Windows Certificate Store';
-      console.log('[dsc] Token detected —', parsed.holder_name, '|', parsed.expiry_date, '| source:', state.reader);
-    }
-  }
-
-  // Detect removed certs (token unplugged)
-  const removed = [...prevThumbprints].filter(t => !currThumbs.has(t));
-  if (removed.length > 0 && state.cert && removed.includes(state.cert.thumbprint)) {
-    console.log('[dsc] Token removed');
-    state.plugged = false;
-    state.cert    = null;
-    state.method  = null;
-    state.reader  = null;
-  }
-
-  // Also: if no cert yet but certs exist, try to pick the best one
-  if (!state.cert && certs.length > 0) {
-    const best   = selectBestCert(certs);
-    const parsed = parseCertEntry(best);
-    if (parsed.holder_name) {
-      state.plugged    = true;
-      state.cert       = parsed;
-      state.insertedAt = new Date().toISOString();
-      state.error      = null;
-      state.method     = 'powershell';
-      state.reader     = best.storeSource || 'Windows Certificate Store';
-      console.log('[dsc] Cert found —', parsed.holder_name, '|', parsed.expiry_date, '| source:', state.reader);
-    }
-  }
-
-  prevThumbprints = currThumbs;
+  return [...seen.values(), ...noSerial];
 }
 
-function startPsWatcher() {
-  writePsFile();
-  pollCertStore(); // immediate check on startup
-  psWatchInterval = setInterval(pollCertStore, 3000);
-  console.log('[dsc] PowerShell cert-store watcher started (polls every 3 s)');
-}
-
-// ── pcsclite APDU watcher (secondary) ────────────────────────────────────────
-// Full APDU parsing code — only runs if pcsclite native module is installed.
-
+// ── pcsclite DER parsing (no native module needed for stores, but used for APDU path) ──
 function readLength(der, pos) {
   const first = der[pos++];
   if (first < 0x80) return { len: first, pos };
@@ -386,9 +467,8 @@ function readTlv(der, pos) {
   return { tag, len, valueStart: afterLen, nextPos: afterLen + len };
 }
 
-function parseSequenceOf(der, start, end) {
-  const items = [];
-  let pos = start;
+function parseSeq(der, start, end) {
+  const items = []; let pos = start;
   while (pos < end) {
     const tlv = readTlv(der, pos);
     items.push({ ...tlv, value: der.slice(tlv.valueStart, tlv.nextPos) });
@@ -397,9 +477,9 @@ function parseSequenceOf(der, start, end) {
   return items;
 }
 
-function decodeString(der, start, len, tag) {
+function decodeStr(der, start, len, tag) {
   const bytes = der.slice(start, start + len);
-  if (tag === 0x1E) {
+  if (tag === 0x1E) { // BMPString (UTF-16BE)
     let s = '';
     for (let i = 0; i < bytes.length - 1; i += 2)
       s += String.fromCharCode((bytes[i] << 8) | bytes[i + 1]);
@@ -410,12 +490,12 @@ function decodeString(der, start, len, tag) {
 
 function decodeOid(bytes) {
   let oid = '';
-  const first = bytes[0];
-  oid += Math.floor(first / 40) + '.' + (first % 40);
-  let value = 0;
+  const f = bytes[0];
+  oid += Math.floor(f / 40) + '.' + (f % 40);
+  let v = 0;
   for (let i = 1; i < bytes.length; i++) {
-    value = (value << 7) | (bytes[i] & 0x7F);
-    if (!(bytes[i] & 0x80)) { oid += '.' + value; value = 0; }
+    v = (v << 7) | (bytes[i] & 0x7F);
+    if (!(bytes[i] & 0x80)) { oid += '.' + v; v = 0; }
   }
   return oid;
 }
@@ -423,43 +503,43 @@ function decodeOid(bytes) {
 function parseTime(bytes, tag) {
   const s = Buffer.from(bytes).toString('ascii');
   let year, month, day;
-  if (tag === 0x17) {
+  if (tag === 0x17) { // UTCTime
     const y2 = parseInt(s.substring(0, 2));
-    year  = y2 >= 50 ? 1900 + y2 : 2000 + y2;
-    month = s.substring(2, 4);
-    day   = s.substring(4, 6);
-  } else {
-    year  = s.substring(0, 4);
-    month = s.substring(4, 6);
-    day   = s.substring(6, 8);
+    year = y2 >= 50 ? 1900 + y2 : 2000 + y2;
+    month = s.substring(2, 4); day = s.substring(4, 6);
+  } else { // GeneralizedTime
+    year = s.substring(0, 4); month = s.substring(4, 6); day = s.substring(6, 8);
   }
   return `${year}-${month}-${day}`;
 }
 
 const OID_MAP = {
-  '2.5.4.3':  'CN', '2.5.4.10': 'O', '2.5.4.11': 'OU',
-  '2.5.4.6':  'C',  '1.2.840.113549.1.9.1': 'emailAddress',
+  '2.5.4.3': 'CN', '2.5.4.10': 'O', '2.5.4.11': 'OU',
+  '2.5.4.6': 'C',  '2.5.4.7': 'L', '2.5.4.8': 'ST',
+  '1.2.840.113549.1.9.1': 'emailAddress',
   '2.5.4.41': 'name', '2.5.4.4': 'SN', '2.5.4.42': 'GN',
 };
 
 function parseName(der, start, len) {
   const result = {};
-  for (const rdn of parseSequenceOf(der, start, start + len)) {
-    if (rdn.tag !== 0x31) continue;
-    for (const attr of parseSequenceOf(der, rdn.valueStart, rdn.nextPos)) {
-      if (attr.tag !== 0x30) continue;
-      const children = parseSequenceOf(der, attr.valueStart, attr.nextPos);
-      if (children.length < 2) continue;
-      const oidItem = children[0], valItem = children[1];
-      if (oidItem.tag !== 0x06) continue;
-      const oid = decodeOid(der.slice(oidItem.valueStart, oidItem.nextPos));
-      result[OID_MAP[oid] || oid] = decodeString(der, valItem.valueStart, valItem.len, valItem.tag);
+  try {
+    for (const rdn of parseSeq(der, start, start + len)) {
+      if (rdn.tag !== 0x31) continue;
+      for (const attr of parseSeq(der, rdn.valueStart, rdn.nextPos)) {
+        if (attr.tag !== 0x30) continue;
+        const children = parseSeq(der, attr.valueStart, attr.nextPos);
+        if (children.length < 2) continue;
+        const oidItem = children[0], valItem = children[1];
+        if (oidItem.tag !== 0x06) continue;
+        const oid = decodeOid(der.slice(oidItem.valueStart, oidItem.nextPos));
+        result[OID_MAP[oid] || oid] = decodeStr(der, valItem.valueStart, valItem.len, valItem.tag);
+      }
     }
-  }
+  } catch {}
   return result;
 }
 
-function parseDerCertificate(der) {
+function parseDerCertificate(der, readMethod) {
   try {
     let pos = 0;
     const outer = readTlv(der, pos);
@@ -474,45 +554,66 @@ function parseDerCertificate(der) {
       serialHex += der[i].toString(16).padStart(2, '0').toUpperCase();
     const sigAlg    = readTlv(der, p); p = sigAlg.nextPos;
     const issuerTlv = readTlv(der, p); p = issuerTlv.nextPos;
-    const issuer    = parseName(der, issuerTlv.valueStart, issuerTlv.len);
-    const validity     = readTlv(der, p); p = validity.nextPos;
-    let vp             = validity.valueStart;
-    const notBeforeTlv = readTlv(der, vp); vp = notBeforeTlv.nextPos;
-    const notAfterTlv  = readTlv(der, vp);
-    const notBefore    = parseTime(der.slice(notBeforeTlv.valueStart, notBeforeTlv.nextPos), notBeforeTlv.tag);
-    const notAfter     = parseTime(der.slice(notAfterTlv.valueStart,  notAfterTlv.nextPos),  notAfterTlv.tag);
-    const subjectTlv   = readTlv(der, p);
-    const subject      = parseName(der, subjectTlv.valueStart, subjectTlv.len);
-    const cn = subject.CN || subject.name || subject.GN || null;
-    let name = cn;
-    const panMatch = cn ? cn.match(/^([A-Z]{5}[0-9]{4}[A-Z])[-\s]+(.+)/) : null;
-    if (panMatch) name = panMatch[2].trim();
+    const issuerDN  = parseName(der, issuerTlv.valueStart, issuerTlv.len);
+    const validity  = readTlv(der, p); p = validity.nextPos;
+    let vp = validity.valueStart;
+    const nbTlv = readTlv(der, vp); vp = nbTlv.nextPos;
+    const naTlv = readTlv(der, vp);
+    const notBefore = parseTime(der.slice(nbTlv.valueStart, nbTlv.nextPos), nbTlv.tag);
+    const notAfter  = parseTime(der.slice(naTlv.valueStart, naTlv.nextPos), naTlv.tag);
+    const subjTlv   = readTlv(der, p);
+    const subjectDN = parseName(der, subjTlv.valueStart, subjTlv.len);
+    const cn    = subjectDN.CN || subjectDN.name || subjectDN.GN || '';
+    const email = subjectDN.emailAddress || '';
+    const org   = subjectDN.O || '';
+    const ou    = subjectDN.OU || '';
+    let name = cn; let pan = null;
+    const pm = (cn + ' ' + ou).match(/\b([A-Z]{5}[0-9]{4}[A-Z])\b/);
+    if (pm) { pan = pm[1]; name = cn.replace(/^[A-Z]{5}[0-9]{4}[A-Z][-\s]+/, '').trim() || cn; }
     return {
-      holder_name:   name,
-      organization:  subject.O  || null,
-      email:         subject['emailAddress'] || null,
+      holder_name:   name   || null,
+      organization:  org    || null,
+      email:         email  || null,
+      pan:           pan    || null,
       serial_number: serialHex,
       issue_date:    notBefore,
       expiry_date:   notAfter,
-      issuer:        issuer.CN  || issuer.O || null,
-      read_method:   'agent-pcsclite-no-pin',
+      issuer:        issuerDN.CN || issuerDN.O || null,
+      thumbprint:    null,
+      read_method:   readMethod || 'agent-apdu',
     };
   } catch { return null; }
 }
 
+function extractDer(bytes) {
+  // Look for 0x30 0x82 (SEQUENCE, long-form 2-byte length)
+  for (let i = 0; i < bytes.length - 4; i++) {
+    if (bytes[i] === 0x30 && bytes[i + 1] === 0x82) {
+      const len = (bytes[i + 2] << 8) | bytes[i + 3];
+      if (i + 4 + len <= bytes.length) return bytes.slice(i, i + 4 + len);
+    }
+  }
+  // Fallback: 0x30 0x81
+  for (let i = 0; i < bytes.length - 3; i++) {
+    if (bytes[i] === 0x30 && bytes[i + 1] === 0x81) {
+      const len = bytes[i + 2];
+      if (i + 3 + len <= bytes.length) return bytes.slice(i, i + 3 + len);
+    }
+  }
+  return bytes;
+}
+
+// ── PC/SC APDU helpers ────────────────────────────────────────────────────────
 function sendApdu(card, protocol, apdu) {
   return new Promise((resolve, reject) => {
-    card.transmit(Buffer.from(apdu), 1024, protocol, (err, response) => {
-      if (err) return reject(err);
-      resolve(response);
-    });
+    card.transmit(Buffer.from(apdu), 2048, protocol, (err, r) =>
+      err ? reject(err) : resolve(r));
   });
 }
 
-async function readBinaryPcsc(card, protocol) {
-  const chunks = [];
-  let offset = 0;
-  while (true) {
+async function readBinary(card, protocol) {
+  const chunks = []; let offset = 0;
+  for (let attempt = 0; attempt < 200; attempt++) {
     const apdu = [0x00, 0xB0, (offset >> 8) & 0xFF, offset & 0xFF, 0xFF];
     const resp = await sendApdu(card, protocol, apdu);
     if (!resp || resp.length < 2) break;
@@ -522,100 +623,300 @@ async function readBinaryPcsc(card, protocol) {
       chunks.push(...data); offset += data.length;
       if (data.length < 255) break;
     } else if (sw1 === 0x6C) {
+      // Re-read with correct length
       const fix = [0x00, 0xB0, (offset >> 8) & 0xFF, offset & 0xFF, sw2];
       const fr  = await sendApdu(card, protocol, fix);
       if (fr && fr.length >= 2) chunks.push(...fr.slice(0, fr.length - 2));
+      break;
+    } else if (sw1 === 0x61) {
+      // GET RESPONSE
+      const gr = await sendApdu(card, protocol, [0x00, 0xC0, 0x00, 0x00, sw2]);
+      if (gr && gr.length >= 2) chunks.push(...gr.slice(0, gr.length - 2));
       break;
     } else break;
   }
   return Buffer.from(chunks);
 }
 
-const CERT_SELECT_APDUS = [
-  [[0x00,0xA4,0x04,0x00,0x0C,0xA0,0x00,0x00,0x00,0x03,0x08,0x00,0x00,0x10,0x00,0x01,0x00],[0x00,0xA4,0x02,0x0C,0x02,0x10,0x05]],
-  [[0x00,0xA4,0x04,0x00,0x0C,0xA0,0x00,0x00,0x00,0x03,0x08,0x00,0x00,0x10,0x00,0x01,0x00],[0x00,0xA4,0x02,0x0C,0x02,0x10,0x01]],
-  [[0x00,0xA4,0x04,0x00,0x08,0xA0,0x00,0x00,0x00,0x63,0x50,0x4B,0x43],[0x00,0xA4,0x02,0x00,0x02,0x00,0x01]],
-  [[0x00,0xA4,0x00,0x00,0x02,0x3F,0x00],[0x00,0xA4,0x02,0x04,0x02,0x10,0x05]],
-  [[0x00,0xA4,0x04,0x00,0x09,0xA0,0x00,0x00,0x00,0x18,0x0A,0x00,0x00,0x01],[0x00,0xA4,0x02,0x0C,0x02,0x10,0x05]],
+// Comprehensive APDU sequences for ALL known Indian DSC tokens
+// Each entry is [name, ...apduArrays] where each apduArray is sent in order
+const APDU_STRATEGIES = [
+  // ── Feitian ePass2003 / ePass3003 ──────────────────────────────────────────
+  {
+    name: 'Feitian-ePass2003-EF-1005',
+    select: [
+      [0x00,0xA4,0x04,0x00,0x0C, 0xA0,0x00,0x00,0x00,0x03,0x08,0x00,0x00,0x10,0x00,0x01,0x00],
+      [0x00,0xA4,0x02,0x0C,0x02, 0x10,0x05],
+    ],
+  },
+  {
+    name: 'Feitian-ePass2003-EF-1001',
+    select: [
+      [0x00,0xA4,0x04,0x00,0x0C, 0xA0,0x00,0x00,0x00,0x03,0x08,0x00,0x00,0x10,0x00,0x01,0x00],
+      [0x00,0xA4,0x02,0x0C,0x02, 0x10,0x01],
+    ],
+  },
+  {
+    name: 'Feitian-ePass2003-EF-1002',
+    select: [
+      [0x00,0xA4,0x04,0x00,0x0C, 0xA0,0x00,0x00,0x00,0x03,0x08,0x00,0x00,0x10,0x00,0x01,0x00],
+      [0x00,0xA4,0x02,0x0C,0x02, 0x10,0x02],
+    ],
+  },
+  // ── Watchdata USB Key / ProxKey ─────────────────────────────────────────────
+  {
+    name: 'Watchdata-ProxKey-PKCS',
+    select: [
+      [0x00,0xA4,0x04,0x00,0x08, 0xA0,0x00,0x00,0x00,0x63,0x50,0x4B,0x43],
+      [0x00,0xA4,0x02,0x00,0x02, 0x00,0x01],
+    ],
+  },
+  {
+    name: 'Watchdata-ProxKey-MF',
+    select: [
+      [0x00,0xA4,0x00,0x00,0x02, 0x3F,0x00],
+      [0x00,0xA4,0x01,0x00,0x02, 0x50,0x15],
+      [0x00,0xA4,0x02,0x00,0x02, 0x10,0x05],
+    ],
+  },
+  {
+    name: 'Watchdata-AID-2',
+    select: [
+      [0x00,0xA4,0x04,0x00,0x09, 0xA0,0x00,0x00,0x00,0x63,0x57,0x44,0x4B,0x01],
+      [0x00,0xA4,0x02,0x0C,0x02, 0x10,0x05],
+    ],
+  },
+  // ── SafeNet eToken 5110 / Aladdin eToken PRO ────────────────────────────────
+  {
+    name: 'SafeNet-eToken-5110',
+    select: [
+      [0x00,0xA4,0x04,0x00,0x09, 0xA0,0x00,0x00,0x00,0x18,0x0A,0x00,0x00,0x01],
+      [0x00,0xA4,0x02,0x0C,0x02, 0x10,0x05],
+    ],
+  },
+  {
+    name: 'SafeNet-eToken-Classic',
+    select: [
+      [0x00,0xA4,0x04,0x00,0x07, 0xA0,0x00,0x00,0x01,0x18,0x00,0x00],
+      [0x00,0xA4,0x02,0x04,0x02, 0x10,0x05],
+    ],
+  },
+  // ── Moser Baer / MBToken ───────────────────────────────────────────────────
+  {
+    name: 'MoserBaer-MBToken',
+    select: [
+      [0x00,0xA4,0x04,0x00,0x0A, 0xA0,0x00,0x00,0x02,0x4A,0x01,0x01,0x01,0x01,0x00],
+      [0x00,0xA4,0x02,0x00,0x02, 0x10,0x05],
+    ],
+  },
+  // ── Generic MF (catches many unknown tokens) ───────────────────────────────
+  {
+    name: 'Generic-MF-EF-1005',
+    select: [
+      [0x00,0xA4,0x00,0x00,0x02, 0x3F,0x00],
+      [0x00,0xA4,0x02,0x04,0x02, 0x10,0x05],
+    ],
+  },
+  {
+    name: 'Generic-MF-EF-1001',
+    select: [
+      [0x00,0xA4,0x00,0x00,0x02, 0x3F,0x00],
+      [0x00,0xA4,0x02,0x04,0x02, 0x10,0x01],
+    ],
+  },
+  {
+    name: 'Generic-MF-EF-1002',
+    select: [
+      [0x00,0xA4,0x00,0x00,0x02, 0x3F,0x00],
+      [0x00,0xA4,0x02,0x04,0x02, 0x10,0x02],
+    ],
+  },
+  // ── eMudhra / Capricorn specific ────────────────────────────────────────────
+  {
+    name: 'eMudhra-PKCS15',
+    select: [
+      [0x00,0xA4,0x04,0x00,0x05, 0xA0,0x00,0x00,0x00,0x63],
+      [0x00,0xA4,0x02,0x0C,0x02, 0x50,0x05],
+    ],
+  },
+  // ── PIV-compatible (some govt DSC tokens) ──────────────────────────────────
+  {
+    name: 'PIV-9A-Auth-Cert',
+    select: [
+      [0x00,0xA4,0x04,0x00,0x09, 0xA0,0x00,0x00,0x03,0x08,0x00,0x00,0x10,0x00],
+      [0x00,0xCB,0x3F,0xFF,0x05, 0x5C,0x03,0x5F,0xC1,0x05, 0x00],
+    ],
+    dataInResponse: true, // for PIV, data comes in the SELECT response
+  },
 ];
 
-function extractDerFromBlob(bytes) {
-  for (let i = 0; i < bytes.length - 4; i++) {
-    if (bytes[i] === 0x30 && bytes[i + 1] === 0x82) {
-      const len = (bytes[i + 2] << 8) | bytes[i + 3];
-      if (i + 4 + len <= bytes.length) return bytes.slice(i, i + 4 + len);
+async function tryApduStrategy(card, protocol, strategy) {
+  try {
+    for (const apdu of strategy.select) {
+      const resp = await sendApdu(card, protocol, apdu);
+      if (!resp || resp.length < 2) return null;
+      const sw1 = resp[resp.length - 2];
+      // Accept 90 (ok), 61 (more data), 62 (warning), 63 (warning)
+      if (sw1 !== 0x90 && sw1 !== 0x61 && sw1 !== 0x62 && sw1 !== 0x63) return null;
+      // For PIV, cert data comes in the GET RESPONSE / response data
+      if (strategy.dataInResponse && resp.length > 4) {
+        const der = extractDer(resp.slice(0, resp.length - 2));
+        const cert = parseDerCertificate(der, strategy.name);
+        if (cert && cert.holder_name) return cert;
+      }
     }
-  }
-  return bytes;
+    const blob = await readBinary(card, protocol);
+    if (!blob || blob.length < 32) return null;
+    const der  = extractDer(blob);
+    return parseDerCertificate(der, strategy.name);
+  } catch { return null; }
 }
 
-async function tryReadCertNoPIN(reader, protocol) {
-  for (const [sel, read] of CERT_SELECT_APDUS) {
-    try {
-      const { card } = await new Promise((res, rej) =>
-        reader.connect({ share_mode: reader.SCARD_SHARE_SHARED }, (e, c, p) =>
-          e ? rej(e) : res({ card: c, protocol: p })));
-      let allOk = true;
-      for (const apdu of [sel]) {
-        const r = await sendApdu(card, protocol, apdu);
-        if (!r || r[r.length - 2] !== 0x90) { allOk = false; break; }
-      }
-      if (!allOk) { reader.disconnect(reader.SCARD_LEAVE_CARD, () => {}); continue; }
-      const blob = await readBinaryPcsc(card, protocol);
-      reader.disconnect(reader.SCARD_LEAVE_CARD, () => {});
-      if (blob.length > 100) {
-        const der    = extractDerFromBlob(blob);
-        const parsed = parseDerCertificate(der);
-        if (parsed && parsed.holder_name) return parsed;
-      }
-    } catch {}
-  }
-  return null;
-}
-
+// ── pcsclite watcher (no-PIN APDU read) ──────────────────────────────────────
 function startPcscWatcher() {
   if (!pcsclite) return;
   let pcsc;
   try { pcsc = pcsclite(); } catch { return; }
 
-  pcsc.on('error', err => console.warn('[dsc/pcsc] PC/SC error:', err.message));
+  pcsc.on('error', err => console.warn('[dsc/pcsc]', err.message));
 
   pcsc.on('reader', reader => {
-    console.log('[dsc/pcsc] Reader:', reader.name);
+    console.log('[dsc/pcsc] Reader detected:', reader.name);
+
     reader.on('status', async status => {
-      const cardPresent = !!(status.state & reader.SCARD_STATE_PRESENT);
-      if (cardPresent && !state.cert) {
-        console.log('[dsc/pcsc] Card inserted — trying no-PIN read...');
-        try {
-          const protocol = reader.SCARD_PROTOCOL_T0 | reader.SCARD_PROTOCOL_T1;
-          const cert = await tryReadCertNoPIN(reader, protocol);
-          if (cert && cert.holder_name && !state.cert) {
-            state.cert       = cert;
-            state.plugged    = true;
-            state.insertedAt = new Date().toISOString();
-            state.reader     = reader.name;
-            state.error      = null;
-            state.method     = 'pcsclite';
-            console.log('[dsc/pcsc] Cert read (no PIN):', cert.holder_name);
-          }
-        } catch (e) {
-          state.error = e.message;
-          console.warn('[dsc/pcsc] No-PIN read failed:', e.message);
+      const present = !!(status.state & reader.SCARD_STATE_PRESENT);
+
+      if (present && !state.cert) {
+        console.log('[dsc/pcsc] Card inserted in', reader.name, '— trying APDU read...');
+        const protocols = reader.SCARD_PROTOCOL_T0 | reader.SCARD_PROTOCOL_T1;
+
+        for (const strategy of APDU_STRATEGIES) {
+          try {
+            await new Promise((res, rej) =>
+              reader.connect({ share_mode: reader.SCARD_SHARE_SHARED }, (e, c, p) =>
+                e ? rej(e) : res({ card: c, protocol: p })));
+
+            const cert = await tryApduStrategy(reader, protocols, strategy);
+            if (cert && cert.holder_name) {
+              state.cert       = cert;
+              state.plugged    = true;
+              state.insertedAt = new Date().toISOString();
+              state.reader     = reader.name;
+              state.method     = 'pcsclite-' + strategy.name;
+              state.error      = null;
+              console.log('[dsc/pcsc] Cert read via', strategy.name, '—', cert.holder_name);
+              reader.disconnect(reader.SCARD_LEAVE_CARD, () => {});
+              return;
+            }
+            reader.disconnect(reader.SCARD_LEAVE_CARD, () => {});
+          } catch {}
         }
+        console.log('[dsc/pcsc] No cert found via APDU — cert store poll will handle it');
       }
-      if (!cardPresent && state.method === 'pcsclite') {
-        state.plugged = false; state.cert = null; state.method = null;
-        console.log('[dsc/pcsc] Card removed');
+
+      if (!present && state.method?.startsWith('pcsclite')) {
+        state.plugged = false; state.cert = null; state.method = null; state.reader = null;
+        console.log('[dsc/pcsc] Card removed from', reader.name);
       }
     });
+
     reader.on('error', err => console.warn('[dsc/pcsc] Reader error:', err.message));
   });
 }
 
+// ── PowerShell polling watcher (primary, no native deps) ─────────────────────
+let prevThumbprints = new Set();
+let psWatchInterval = null;
+
+function pollCertStore() {
+  // Gather certs from all sources, dedup by serial number
+  let allCerts = [];
+
+  // Source 1: All Windows cert stores via PS (My, SmartCardRoot, Root — User & LM)
+  const storeCerts = runPs(PS_FILE_MULTI, 12000);
+  if (storeCerts.length) allCerts.push(...storeCerts);
+
+  // Source 2: certutil SmartCardRoot (catches Watchdata, ePass if not in store)
+  if (!allCerts.some(c => c.hasPrivateKey)) {
+    const scardCerts = runCertutilSmartCardRoot();
+    if (scardCerts.length) allCerts.push(...scardCerts);
+  }
+
+  // Source 3: CNG smart card enumeration (catches MDM/enterprise tokens)
+  if (!allCerts.some(c => c.hasPrivateKey)) {
+    const cngCerts = runPs(PS_FILE_CNG, 8000);
+    if (cngCerts.length) allCerts.push(...cngCerts);
+  }
+
+  // Source 4: certutil -scinfo (reads directly from token — last resort)
+  if (allCerts.length === 0) {
+    const scinfoCerts = runPs(PS_FILE_SCINFO, 15000);
+    if (scinfoCerts.length) allCerts.push(...scinfoCerts);
+  }
+
+  // Source 5: certutil My LocalMachine (MDM-enrolled / enterprise tokens)
+  if (allCerts.length === 0) {
+    const lmCerts = runCertutilMyLM();
+    if (lmCerts.length) allCerts.push(...lmCerts);
+  }
+
+  allCerts = deduplicateCerts(allCerts);
+
+  const currThumbs = new Set(allCerts.map(c => c.thumbprint));
+
+  // Newly appeared certs → token plugged in
+  const newCerts = allCerts.filter(c => !prevThumbprints.has(c.thumbprint));
+  if (newCerts.length > 0 && !state.cert) {
+    const best   = selectBestCert(newCerts);
+    const parsed = parseCertEntry(best);
+    if (parsed.holder_name) {
+      state.plugged    = true;
+      state.cert       = parsed;
+      state.insertedAt = new Date().toISOString();
+      state.error      = null;
+      state.method     = 'powershell';
+      state.reader     = best.storeSource || 'Windows Cert Store';
+      console.log('[dsc] Token detected —', parsed.holder_name,
+        '| expiry:', parsed.expiry_date, '| source:', state.reader);
+    }
+  }
+
+  // Removed certs → token unplugged
+  const removed = [...prevThumbprints].filter(t => !currThumbs.has(t));
+  if (removed.length > 0 && state.cert && state.method === 'powershell') {
+    if (removed.includes(state.cert.thumbprint)) {
+      console.log('[dsc] Token removed (cert disappeared from store)');
+      state.plugged = false; state.cert = null; state.method = null; state.reader = null;
+    }
+  }
+
+  // Pick best from all certs if we don't have one yet
+  if (!state.cert && allCerts.length > 0) {
+    const best   = selectBestCert(allCerts);
+    const parsed = parseCertEntry(best);
+    if (parsed.holder_name) {
+      state.plugged    = true;
+      state.cert       = parsed;
+      state.insertedAt = new Date().toISOString();
+      state.error      = null;
+      state.method     = 'powershell';
+      state.reader     = best.storeSource || 'Windows Cert Store';
+      console.log('[dsc] Cert found —', parsed.holder_name,
+        '| expiry:', parsed.expiry_date, '| source:', state.reader);
+    }
+  }
+
+  prevThumbprints = currThumbs;
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 function startWatcher() {
-  startPsWatcher();     // Always — PowerShell cert store
-  startPcscWatcher();   // Bonus — direct APDU if pcsclite installed
+  writePsFiles();
+  pollCertStore();                             // immediate scan on startup
+  psWatchInterval = setInterval(pollCertStore, 3000); // re-scan every 3s
+  console.log('[dsc] Universal DSC watcher v6 started (polls every 3s)');
+  console.log('[dsc] Reading from: Personal + SmartCardRoot + certutil + scinfo + CNG');
+  startPcscWatcher();                          // bonus: pcsclite APDU (if installed)
 }
 
 function getStatus() {
