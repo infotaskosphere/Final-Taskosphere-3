@@ -37,12 +37,20 @@ app.use(express.json());
 
 // ── CORS — allow Taskosphere web-app (deployed + local dev) ──────────────────
 app.use(cors({
-  origin: [
-    'https://final-taskosphere-frontend.onrender.com',
-    /^https?:\/\/localhost(:\d+)?$/,
-    /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
-  ],
-  methods: ['GET', 'POST'],
+  origin: (origin, callback) => {
+    // Allow requests with no origin (Electron, curl, same-origin, Postman)
+    if (!origin) return callback(null, true);
+    // Allow any localhost / 127.0.0.1 port (dev servers on any port)
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return callback(null, true);
+    // Allow deployed Taskosphere frontend
+    if (origin === 'https://final-taskosphere-frontend.onrender.com') return callback(null, true);
+    // Allow any *.onrender.com preview / staging builds
+    if (/^https:\/\/.*\.onrender\.com$/.test(origin)) return callback(null, true);
+    callback(new Error('CORS: origin not allowed: ' + origin));
+  },
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false,
 }));
 
 // ── Health check ──────────────────────────────────────────────────────────────
