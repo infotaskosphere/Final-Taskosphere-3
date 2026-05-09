@@ -237,7 +237,8 @@ export default function StaffActivity() {
   const fetchStaff = useCallback(async () => {
     try {
       const res = await api.get('/users');
-      const list = (res.data || []).filter(u => u.role !== 'admin');
+      // Include ALL users (staff + admin) so admin activity is also visible
+      const list = (res.data || []);
       setStaffList(list);
       if (list.length > 0) setSelectedId(id => id || (list[0].id || list[0]._id));
     } catch { toast.error('Failed to load staff list'); }
