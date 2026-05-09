@@ -1,33 +1,375 @@
 'use strict';
 
 /**
- * dscWatcher.js
+ * dscWatcher.js — v3
  * ─────────────────────────────────────────────────────────────────────────────
- * Continuously watches PC/SC readers for DSC token insertion / removal.
+ * Detects DSC (Digital Signature Certificate) token insertion and reads the
+ * X.509 certificate WITHOUT a PIN.
  *
- * When a token is inserted it attempts to read the X.509 certificate WITHOUT
- * a PIN (using only SELECT + READ BINARY APDUs). The parsed cert is stored
- * in memory and served by the /dsc-status HTTP endpoint so the Taskosphere
- * web-app can auto-populate the DSC register popup without the user having
- * to click anything.
+ * PRIMARY (always works — no C++ build tools needed):
+ *   PowerShell reads from the Windows X.509 Personal Certificate Store.
+ *   When a DSC USB token is plugged in, the Windows CCID driver automatically
+ *   imports its certificate into the Personal store. We poll every 3 s, parse
+ *   the Subject string, and expose the result via /dsc-status.
  *
- * If the cert file is PIN-protected the auto-read will fail silently —
- * the popup will still appear but the user will need to enter their PIN
- * and click "Fetch Data" (which calls /read-dsc?pin=… as before).
+ * SECONDARY (requires Visual Studio Build Tools — pcsclite):
+ *   Low-level APDU reading directly from the smart-card. Used as a fallback
+ *   only when pcsclite is available and the PS approach finds nothing.
+ *
+ * The DSCRegister.jsx page polls GET /dsc-status and calls applyCert() to
+ * auto-fill: holder_name, serial_number, issue_date, expiry_date,
+ *            organization, email, issuer.
  */
 
-const pcsclite = require('pcsclite');
+let pcsclite;
+try { pcsclite = require('pcsclite'); } catch {
+  pcsclite = null;
+}
 
-// ── State ─────────────────────────────────────────────────────────────────────
+const { execFileSync } = require('child_process');
+const fs   = require('fs');
+const os   = require('os');
+const path = require('path');
+
+// ── Shared state exposed via /dsc-status ──────────────────────────────────────
 let state = {
   plugged:    false,
   cert:       null,
   reader:     null,
   insertedAt: null,
   error:      null,
+  method:     null, // 'powershell' | 'pcsclite'
 };
 
-// ── DER / ASN.1 parsing helpers ───────────────────────────────────────────────
+// ── PowerShell script: read ALL cert stores including SmartCard ───────────────
+// Reads from: Personal (My), SmartCard, and also uses certutil -scinfo
+// This covers Watchdata, ePass, ProxKey and other tokens that don't auto-import
+// their cert into the Windows Personal store.
+const CERT_STORE_PS = `
+$results = @()
+
+# ── 1. Read all standard user cert stores (My, SmartCardRoot, SmartCard) ──────
+$storeNames = @("My", "SmartCardRoot")
+foreach ($storeName in $storeNames) {
+  try {
+    $store = New-Object System.Security.Cryptography.X509Certificates.X509Store(
+      $storeName,
+      [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+    )
+    $store.Open("ReadOnly")
+    foreach ($c in $store.Certificates) {
+      $results += [PSCustomObject]@{
+        subject      = $c.Subject
+        issuer       = $c.Issuer
+        serialNumber = $c.SerialNumber
+        notBefore    = $c.NotBefore.ToString("yyyy-MM-dd")
+        notAfter     = $c.NotAfter.ToString("yyyy-MM-dd")
+        thumbprint   = $c.Thumbprint
+        hasPrivateKey= $c.HasPrivateKey
+        storeSource  = $storeName
+      }
+    }
+    $store.Close()
+  } catch {}
+}
+
+# ── 2. Also read LocalMachine stores (some tokens register here) ───────────────
+$lmStores = @("My", "SmartCardRoot")
+foreach ($storeName in $lmStores) {
+  try {
+    $store = New-Object System.Security.Cryptography.X509Certificates.X509Store(
+      $storeName,
+      [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
+    )
+    $store.Open("ReadOnly")
+    foreach ($c in $store.Certificates) {
+      # Only add if not already found (deduplicate by thumbprint)
+      if ($results.thumbprint -notcontains $c.Thumbprint) {
+        $results += [PSCustomObject]@{
+          subject      = $c.Subject
+          issuer       = $c.Issuer
+          serialNumber = $c.SerialNumber
+          notBefore    = $c.NotBefore.ToString("yyyy-MM-dd")
+          notAfter     = $c.NotAfter.ToString("yyyy-MM-dd")
+          thumbprint   = $c.Thumbprint
+          hasPrivateKey= $c.HasPrivateKey
+          storeSource  = ("LM-" + $storeName)
+        }
+      }
+    }
+    $store.Close()
+  } catch {}
+}
+
+if ($results.Count -gt 0) { $results | ConvertTo-Json -Compress -Depth 3 } else { Write-Output "[]" }
+`;
+
+// ── PowerShell: read cert directly from smart card via certutil -scinfo ────────
+// This works for Watchdata, ePass2003 etc. that keep cert only on the token.
+const SCINFO_PS = `
+try {
+  $raw = & certutil -scinfo -silent 2>$null | Out-String
+  # Parse Serial, Subject, Issuer, NotBefore, NotAfter from certutil output
+  $results = @()
+  $blocks = $raw -split "(?=\\nIssuer:)"
+  foreach ($block in $blocks) {
+    $subject    = if ($block -match "Subject:\\s*(.+)") { $Matches[1].Trim() } else { $null }
+    $issuer     = if ($block -match "Issuer:\\s*(.+)")  { $Matches[1].Trim() } else { $null }
+    $serial     = if ($block -match "Serial Number:\\s*([0-9a-fA-F]+)") { $Matches[1].Trim() } else { $null }
+    $notBefore  = if ($block -match "NotBefore:\\s*(\\S+)") { $Matches[1].Trim() } else { $null }
+    $notAfter   = if ($block -match "NotAfter:\\s*(\\S+)")  { $Matches[1].Trim() } else { $null }
+    if ($subject -and $issuer) {
+      $results += [PSCustomObject]@{
+        subject=$subject; issuer=$issuer; serialNumber=$serial
+        notBefore=$notBefore; notAfter=$notAfter; thumbprint="scinfo-"+$serial
+        hasPrivateKey=$true; storeSource="certutil-scinfo"
+      }
+    }
+  }
+  if ($results.Count -gt 0) { $results | ConvertTo-Json -Compress -Depth 3 } else { Write-Output "[]" }
+} catch { Write-Output "[]" }
+`;
+
+const PS_FILE      = path.join(os.tmpdir(), 'ts-certstore.ps1');
+const PS_SCINFO    = path.join(os.tmpdir(), 'ts-scinfo.ps1');
+
+function writePsFile() {
+  try { fs.writeFileSync(PS_FILE,   '\ufeff' + CERT_STORE_PS, 'utf8'); } catch {}
+  try { fs.writeFileSync(PS_SCINFO, '\ufeff' + SCINFO_PS,     'utf8'); } catch {}
+}
+
+function runCertStorePs() {
+  try {
+    const out = execFileSync('powershell', [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', PS_FILE,
+    ], { timeout: 10000, windowsHide: true }).toString().trim();
+    if (!out || out === '[]') return [];
+    const parsed = JSON.parse(out);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch { return []; }
+}
+
+// Secondary: try certutil -scinfo (reads cert directly from token, no store import needed)
+function runScinfoPs() {
+  try {
+    const out = execFileSync('powershell', [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', PS_SCINFO,
+    ], { timeout: 12000, windowsHide: true }).toString().trim();
+    if (!out || out === '[]') return [];
+    const parsed = JSON.parse(out);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch { return []; }
+}
+
+// Also try reading directly from Watchdata/ePass2003/ProxKey via certutil -store "SmartCard"
+function runSmartCardStore() {
+  try {
+    const out = execFileSync('certutil', ['-store', '-user', 'SmartCardRoot'],
+      { timeout: 6000, windowsHide: true, shell: true }).toString();
+    // Parse the text output
+    const results = [];
+    const blocks = out.split(/(?=Serial Number:)/);
+    for (const block of blocks) {
+      const serial    = (block.match(/Serial Number:\s*([0-9a-fA-F]+)/) || [])[1];
+      const subject   = (block.match(/Subject:\s*(.+)/)  || [])[1]?.trim();
+      const issuer    = (block.match(/Issuer:\s*(.+)/)   || [])[1]?.trim();
+      const notBefore = (block.match(/NotBefore:\s*(\S+)/) || [])[1];
+      const notAfter  = (block.match(/NotAfter:\s*(\S+)/)  || [])[1];
+      if (subject && serial) results.push({
+        subject, issuer: issuer || '', serialNumber: serial,
+        notBefore: notBefore || '', notAfter: notAfter || '',
+        thumbprint: 'scard-' + serial, hasPrivateKey: true, storeSource: 'certutil-SmartCardRoot',
+      });
+    }
+    return results;
+  } catch { return []; }
+}
+
+// ── Parse Windows Subject / Issuer string ─────────────────────────────────────
+// e.g. "E=user@email.com, CN=JOHN DOE, OU=Individual, O=Company Ltd., L=Mumbai, ST=Maharashtra, C=IN"
+function parseDistinguishedName(dn) {
+  if (!dn) return {};
+  const fields = {};
+  // Split on ", KEY=" boundaries (handles commas inside values imperfectly but works for DSC)
+  const parts = dn.split(/,\s*(?=[A-Z]{1,10}=)/);
+  for (const part of parts) {
+    const eq  = part.indexOf('=');
+    if (eq === -1) continue;
+    const key = part.substring(0, eq).trim().toUpperCase();
+    const val = part.substring(eq + 1).trim().replace(/^"(.*)"$/, '$1');
+    fields[key] = val;
+  }
+  return fields;
+}
+
+// Indian DSC issuer keywords
+const DSC_ISSUER_KEYWORDS = [
+  'emudhra', 'mudhra', 'nsdl', 'sify', 'capricorn', 'gnfc', 'safescrypt',
+  'vsign', 'ncode', 'idrbt', 'national informatics', 'controller of certifying',
+  'cca india', 'certifying authority', 'class 2', 'class 3', 'ca-201', 'ca-202',
+];
+
+function isDscIssuer(issuer) {
+  if (!issuer) return false;
+  const lower = issuer.toLowerCase();
+  return DSC_ISSUER_KEYWORDS.some(k => lower.includes(k));
+}
+
+// Normalise a date string to yyyy-MM-dd regardless of source format
+// certutil outputs: "5/9/2026 6:30 AM" or "09/05/2026"
+// PowerShell store outputs: "2026-05-09" already
+function normDate(raw) {
+  if (!raw) return null;
+  raw = String(raw).trim();
+  // Already yyyy-MM-dd
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  // M/D/YYYY H:MM AM/PM  or  DD/MM/YYYY
+  try {
+    const d = new Date(raw);
+    if (!isNaN(d)) return d.toISOString().slice(0, 10);
+  } catch {}
+  return raw.slice(0, 10); // best effort
+}
+
+function parseCertEntry(entry) {
+  const subj = parseDistinguishedName(entry.subject || '');
+  const issu = parseDistinguishedName(entry.issuer  || '');
+
+  const cn    = subj.CN  || subj.NAME || '';
+  const email = subj.E   || subj.EMAILADDRESS || subj['1.2.840.113549.1.9.1'] || '';
+  const org   = subj.O   || '';
+  const ou    = subj.OU  || '';
+  const state_field = subj.ST || subj.S || '';
+
+  // Some Indian DSCs embed PAN in CN: "ABCDE1234F-FIRSTNAME LASTNAME"
+  let name = cn;
+  let pan  = null;
+  const panMatch = (cn + ' ' + ou).match(/\b([A-Z]{5}[0-9]{4}[A-Z])\b/);
+  if (panMatch) {
+    pan  = panMatch[1];
+    name = cn.replace(/^[A-Z]{5}[0-9]{4}[A-Z][-\s]+/, '').trim() || cn;
+  }
+
+  const issuerCN = issu.CN || issu.O || entry.issuer || '';
+
+  return {
+    holder_name:   name   || null,
+    email:         email  || null,
+    organization:  org    || null,
+    state:         state_field || null,
+    pan:           pan    || null,
+    serial_number: entry.serialNumber || null,
+    issue_date:    normDate(entry.notBefore) || null,
+    expiry_date:   normDate(entry.notAfter)  || null,
+    issuer:        issuerCN           || null,
+    thumbprint:    entry.thumbprint   || null,
+    read_method:   'agent-ps-certstore',
+  };
+}
+
+// Pick the best DSC cert from multiple certs in the store
+function selectBestCert(certs) {
+  if (!certs.length) return null;
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Score each cert — higher = better
+  const scored = certs.map(c => {
+    let score = 0;
+    if (isDscIssuer(c.issuer || ''))  score += 10;
+    if (c.hasPrivateKey)               score += 5;
+    if (c.notAfter >= today)           score += 8;  // not expired
+    if ((c.subject || '').match(/\bE=/i)) score += 3; // has email
+    return { c, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0].c;
+}
+
+// ── PowerShell polling watcher ────────────────────────────────────────────────
+let prevThumbprints = new Set();
+let psWatchInterval = null;
+
+function pollCertStore() {
+  // ── Step 1: Read all Windows cert stores (My + SmartCardRoot, User + LocalMachine)
+  let certs = runCertStorePs();
+
+  // ── Step 2: If no cert found yet, try certutil SmartCardRoot directly ─────
+  // This catches Watchdata, ePass2003, ProxKey etc. that don't auto-register
+  // their cert into Windows Personal store — cert lives only on the token.
+  if (certs.length === 0 || !certs.some(c => c.hasPrivateKey)) {
+    const scardCerts = runSmartCardStore();
+    if (scardCerts.length > 0) {
+      console.log('[dsc] Found', scardCerts.length, 'cert(s) via certutil SmartCardRoot');
+      certs = [...certs, ...scardCerts];
+    }
+  }
+
+  // ── Step 3: Last resort — certutil -scinfo (reads directly from token) ────
+  if (certs.length === 0) {
+    const scinfoCerts = runScinfoPs();
+    if (scinfoCerts.length > 0) {
+      console.log('[dsc] Found', scinfoCerts.length, 'cert(s) via certutil -scinfo');
+      certs = scinfoCerts;
+    }
+  }
+
+  const currThumbs = new Set(certs.map(c => c.thumbprint));
+
+  // Detect newly appeared certs (token plugged in)
+  const newCerts = certs.filter(c => !prevThumbprints.has(c.thumbprint));
+  if (newCerts.length > 0 && state.cert === null) {
+    const best   = selectBestCert(newCerts);
+    const parsed = parseCertEntry(best);
+    if (parsed.holder_name) {
+      state.plugged    = true;
+      state.cert       = parsed;
+      state.insertedAt = new Date().toISOString();
+      state.error      = null;
+      state.method     = 'powershell';
+      state.reader     = best.storeSource || 'Windows Certificate Store';
+      console.log('[dsc] Token detected —', parsed.holder_name, '|', parsed.expiry_date, '| source:', state.reader);
+    }
+  }
+
+  // Detect removed certs (token unplugged)
+  const removed = [...prevThumbprints].filter(t => !currThumbs.has(t));
+  if (removed.length > 0 && state.cert && removed.includes(state.cert.thumbprint)) {
+    console.log('[dsc] Token removed');
+    state.plugged = false;
+    state.cert    = null;
+    state.method  = null;
+    state.reader  = null;
+  }
+
+  // Also: if no cert yet but certs exist, try to pick the best one
+  if (!state.cert && certs.length > 0) {
+    const best   = selectBestCert(certs);
+    const parsed = parseCertEntry(best);
+    if (parsed.holder_name) {
+      state.plugged    = true;
+      state.cert       = parsed;
+      state.insertedAt = new Date().toISOString();
+      state.error      = null;
+      state.method     = 'powershell';
+      state.reader     = best.storeSource || 'Windows Certificate Store';
+      console.log('[dsc] Cert found —', parsed.holder_name, '|', parsed.expiry_date, '| source:', state.reader);
+    }
+  }
+
+  prevThumbprints = currThumbs;
+}
+
+function startPsWatcher() {
+  writePsFile();
+  pollCertStore(); // immediate check on startup
+  psWatchInterval = setInterval(pollCertStore, 3000);
+  console.log('[dsc] PowerShell cert-store watcher started (polls every 3 s)');
+}
+
+// ── pcsclite APDU watcher (secondary) ────────────────────────────────────────
+// Full APDU parsing code — only runs if pcsclite native module is installed.
 
 function readLength(der, pos) {
   const first = der[pos++];
@@ -124,62 +466,39 @@ function parseDerCertificate(der) {
     if (outer.tag !== 0x30) return null;
     const tbs = readTlv(der, outer.valueStart);
     if (tbs.tag !== 0x30) return null;
-
     let p = tbs.valueStart;
     if (der[p] === 0xA0) { const v = readTlv(der, p); p = v.nextPos; }
-
     const serial = readTlv(der, p); p = serial.nextPos;
     let serialHex = '';
     for (let i = serial.valueStart; i < serial.nextPos; i++)
       serialHex += der[i].toString(16).padStart(2, '0').toUpperCase();
-
     const sigAlg    = readTlv(der, p); p = sigAlg.nextPos;
     const issuerTlv = readTlv(der, p); p = issuerTlv.nextPos;
     const issuer    = parseName(der, issuerTlv.valueStart, issuerTlv.len);
-
     const validity     = readTlv(der, p); p = validity.nextPos;
     let vp             = validity.valueStart;
     const notBeforeTlv = readTlv(der, vp); vp = notBeforeTlv.nextPos;
     const notAfterTlv  = readTlv(der, vp);
     const notBefore    = parseTime(der.slice(notBeforeTlv.valueStart, notBeforeTlv.nextPos), notBeforeTlv.tag);
     const notAfter     = parseTime(der.slice(notAfterTlv.valueStart,  notAfterTlv.nextPos),  notAfterTlv.tag);
-
-    const subjectTlv = readTlv(der, p);
-    const subject    = parseName(der, subjectTlv.valueStart, subjectTlv.len);
-
+    const subjectTlv   = readTlv(der, p);
+    const subject      = parseName(der, subjectTlv.valueStart, subjectTlv.len);
+    const cn = subject.CN || subject.name || subject.GN || null;
+    let name = cn;
+    const panMatch = cn ? cn.match(/^([A-Z]{5}[0-9]{4}[A-Z])[-\s]+(.+)/) : null;
+    if (panMatch) name = panMatch[2].trim();
     return {
-      holder_name:   subject.CN || subject.name || subject.GN || null,
+      holder_name:   name,
       organization:  subject.O  || null,
-      email:         subject['emailAddress']   || null,
+      email:         subject['emailAddress'] || null,
       serial_number: serialHex,
       issue_date:    notBefore,
       expiry_date:   notAfter,
-      issuer:        issuer.CN  || issuer.O    || null,
-      read_method:   'agent-auto-no-pin',
+      issuer:        issuer.CN  || issuer.O || null,
+      read_method:   'agent-pcsclite-no-pin',
     };
-  } catch (e) {
-    console.error('[dscWatcher] DER parse error:', e.message);
-    return null;
-  }
+  } catch { return null; }
 }
-
-function extractDerFromBlob(bytes) {
-  for (let i = 0; i < bytes.length - 4; i++) {
-    if (bytes[i] === 0x30 && bytes[i + 1] === 0x82) {
-      const len = (bytes[i + 2] << 8) | bytes[i + 3];
-      if (i + 4 + len <= bytes.length) return bytes.slice(i, i + 4 + len);
-    }
-  }
-  for (let i = 0; i < bytes.length - 3; i++) {
-    if (bytes[i] === 0x30 && bytes[i + 1] === 0x81) {
-      const len = bytes[i + 2];
-      if (i + 3 + len <= bytes.length) return bytes.slice(i, i + 3 + len);
-    }
-  }
-  return bytes;
-}
-
-// ── APDU helpers ──────────────────────────────────────────────────────────────
 
 function sendApdu(card, protocol, apdu) {
   return new Promise((resolve, reject) => {
@@ -190,33 +509,6 @@ function sendApdu(card, protocol, apdu) {
   });
 }
 
-const CERT_SELECT_APDUS = [
-  // ePass2003 / Feitian
-  [
-    [0x00, 0xA4, 0x04, 0x00, 0x0C, 0xA0,0x00,0x00,0x00,0x03,0x08,0x00,0x00,0x10,0x00,0x01,0x00],
-    [0x00, 0xA4, 0x02, 0x0C, 0x02, 0x10, 0x05],
-  ],
-  [
-    [0x00, 0xA4, 0x04, 0x00, 0x0C, 0xA0,0x00,0x00,0x00,0x03,0x08,0x00,0x00,0x10,0x00,0x01,0x00],
-    [0x00, 0xA4, 0x02, 0x0C, 0x02, 0x10, 0x01],
-  ],
-  // WatchData / ProxKey / Longmai mToken
-  [
-    [0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0,0x00,0x00,0x00,0x63,0x50,0x4B,0x43],
-    [0x00, 0xA4, 0x02, 0x00, 0x02, 0x00, 0x01],
-  ],
-  // Generic MF
-  [
-    [0x00, 0xA4, 0x00, 0x00, 0x02, 0x3F, 0x00],
-    [0x00, 0xA4, 0x02, 0x04, 0x02, 0x10, 0x05],
-  ],
-  // eToken (Gemalto/SafeNet)
-  [
-    [0x00, 0xA4, 0x04, 0x00, 0x09, 0xA0,0x00,0x00,0x00,0x18,0x0A,0x00,0x00,0x01],
-    [0x00, 0xA4, 0x02, 0x0C, 0x02, 0x10, 0x05],
-  ],
-];
-
 async function readBinaryPcsc(card, protocol) {
   const chunks = [];
   let offset = 0;
@@ -224,124 +516,117 @@ async function readBinaryPcsc(card, protocol) {
     const apdu = [0x00, 0xB0, (offset >> 8) & 0xFF, offset & 0xFF, 0xFF];
     const resp = await sendApdu(card, protocol, apdu);
     if (!resp || resp.length < 2) break;
-    const sw1  = resp[resp.length - 2];
-    const sw2  = resp[resp.length - 1];
+    const sw1 = resp[resp.length - 2], sw2 = resp[resp.length - 1];
     const data = resp.slice(0, resp.length - 2);
     if (sw1 === 0x90) {
-      chunks.push(...data);
-      offset += data.length;
+      chunks.push(...data); offset += data.length;
       if (data.length < 255) break;
     } else if (sw1 === 0x6C) {
       const fix = [0x00, 0xB0, (offset >> 8) & 0xFF, offset & 0xFF, sw2];
       const fr  = await sendApdu(card, protocol, fix);
       if (fr && fr.length >= 2) chunks.push(...fr.slice(0, fr.length - 2));
       break;
-    } else { break; }
+    } else break;
   }
   return Buffer.from(chunks);
 }
 
-// ── Try to read cert without PIN ──────────────────────────────────────────────
+const CERT_SELECT_APDUS = [
+  [[0x00,0xA4,0x04,0x00,0x0C,0xA0,0x00,0x00,0x00,0x03,0x08,0x00,0x00,0x10,0x00,0x01,0x00],[0x00,0xA4,0x02,0x0C,0x02,0x10,0x05]],
+  [[0x00,0xA4,0x04,0x00,0x0C,0xA0,0x00,0x00,0x00,0x03,0x08,0x00,0x00,0x10,0x00,0x01,0x00],[0x00,0xA4,0x02,0x0C,0x02,0x10,0x01]],
+  [[0x00,0xA4,0x04,0x00,0x08,0xA0,0x00,0x00,0x00,0x63,0x50,0x4B,0x43],[0x00,0xA4,0x02,0x00,0x02,0x00,0x01]],
+  [[0x00,0xA4,0x00,0x00,0x02,0x3F,0x00],[0x00,0xA4,0x02,0x04,0x02,0x10,0x05]],
+  [[0x00,0xA4,0x04,0x00,0x09,0xA0,0x00,0x00,0x00,0x18,0x0A,0x00,0x00,0x01],[0x00,0xA4,0x02,0x0C,0x02,0x10,0x05]],
+];
+
+function extractDerFromBlob(bytes) {
+  for (let i = 0; i < bytes.length - 4; i++) {
+    if (bytes[i] === 0x30 && bytes[i + 1] === 0x82) {
+      const len = (bytes[i + 2] << 8) | bytes[i + 3];
+      if (i + 4 + len <= bytes.length) return bytes.slice(i, i + 4 + len);
+    }
+  }
+  return bytes;
+}
 
 async function tryReadCertNoPIN(reader, protocol) {
-  for (const selectApdus of CERT_SELECT_APDUS) {
+  for (const [sel, read] of CERT_SELECT_APDUS) {
     try {
+      const { card } = await new Promise((res, rej) =>
+        reader.connect({ share_mode: reader.SCARD_SHARE_SHARED }, (e, c, p) =>
+          e ? rej(e) : res({ card: c, protocol: p })));
       let allOk = true;
-      for (const apdu of selectApdus) {
-        const resp = await sendApdu(reader, protocol, apdu);
-        if (!resp || resp.length < 2) { allOk = false; break; }
-        const sw1 = resp[resp.length - 2];
-        if (sw1 !== 0x90 && sw1 !== 0x61 && sw1 !== 0x62) { allOk = false; break; }
+      for (const apdu of [sel]) {
+        const r = await sendApdu(card, protocol, apdu);
+        if (!r || r[r.length - 2] !== 0x90) { allOk = false; break; }
       }
-      if (!allOk) continue;
-
-      const raw  = await readBinaryPcsc(reader, protocol);
-      if (!raw || raw.length < 64) continue;
-
-      const der  = extractDerFromBlob(raw);
-      const cert = parseDerCertificate(der);
-      if (cert && cert.holder_name) return cert;
-    } catch { continue; }
+      if (!allOk) { reader.disconnect(reader.SCARD_LEAVE_CARD, () => {}); continue; }
+      const blob = await readBinaryPcsc(card, protocol);
+      reader.disconnect(reader.SCARD_LEAVE_CARD, () => {});
+      if (blob.length > 100) {
+        const der    = extractDerFromBlob(blob);
+        const parsed = parseDerCertificate(der);
+        if (parsed && parsed.holder_name) return parsed;
+      }
+    } catch {}
   }
   return null;
 }
 
-// ── Watcher ───────────────────────────────────────────────────────────────────
+function startPcscWatcher() {
+  if (!pcsclite) return;
+  let pcsc;
+  try { pcsc = pcsclite(); } catch { return; }
 
-let pcsc = null;
-
-function startWatcher() {
-  try {
-    pcsc = pcsclite();
-  } catch (e) {
-    console.warn('[dscWatcher] pcsclite unavailable:', e.message);
-    return;
-  }
-
-  pcsc.on('error', err => {
-    console.warn('[dscWatcher] PC/SC service error:', err.message);
-  });
+  pcsc.on('error', err => console.warn('[dsc/pcsc] PC/SC error:', err.message));
 
   pcsc.on('reader', reader => {
-    console.log('[dscWatcher] Reader detected:', reader.name);
-
-    reader.on('status', async (status) => {
-      const changes     = reader.state ^ status.state;
+    console.log('[dsc/pcsc] Reader:', reader.name);
+    reader.on('status', async status => {
       const cardPresent = !!(status.state & reader.SCARD_STATE_PRESENT);
-      const cardChanged = !!(changes     & reader.SCARD_STATE_PRESENT);
-      if (!cardChanged) return;
-
-      if (cardPresent) {
-        console.log('[dscWatcher] DSC token inserted into:', reader.name);
-        state = {
-          plugged:    true,
-          cert:       null,
-          reader:     reader.name,
-          insertedAt: new Date().toISOString(),
-          error:      null,
-        };
-
-        reader.connect({ share_mode: reader.SCARD_SHARE_SHARED }, async (err, protocol) => {
-          if (err) {
-            state.error = 'Could not connect to card: ' + err.message;
-            console.warn('[dscWatcher] Connect error:', err.message);
-            return;
+      if (cardPresent && !state.cert) {
+        console.log('[dsc/pcsc] Card inserted — trying no-PIN read...');
+        try {
+          const protocol = reader.SCARD_PROTOCOL_T0 | reader.SCARD_PROTOCOL_T1;
+          const cert = await tryReadCertNoPIN(reader, protocol);
+          if (cert && cert.holder_name && !state.cert) {
+            state.cert       = cert;
+            state.plugged    = true;
+            state.insertedAt = new Date().toISOString();
+            state.reader     = reader.name;
+            state.error      = null;
+            state.method     = 'pcsclite';
+            console.log('[dsc/pcsc] Cert read (no PIN):', cert.holder_name);
           }
-          try {
-            const cert = await tryReadCertNoPIN(reader, protocol);
-            reader.disconnect(reader.SCARD_LEAVE_CARD, () => {});
-            if (cert) {
-              state.cert = cert;
-              state.certReadAt = new Date().toISOString();
-              console.log('[dscWatcher] Auto-read cert (no PIN):', cert.holder_name);
-            } else {
-              state.error = 'PIN required — click Fetch Data and enter your PIN';
-              console.log('[dscWatcher] Cert requires PIN; popup will prompt for it');
-            }
-          } catch (e) {
-            reader.disconnect(reader.SCARD_LEAVE_CARD, () => {});
-            state.error = e.message;
-            console.warn('[dscWatcher] Auto-read failed:', e.message);
-          }
-        });
-
-      } else {
-        console.log('[dscWatcher] DSC token removed from:', reader.name);
-        state = { plugged: false, cert: null, reader: reader.name, insertedAt: null, error: null };
+        } catch (e) {
+          state.error = e.message;
+          console.warn('[dsc/pcsc] No-PIN read failed:', e.message);
+        }
+      }
+      if (!cardPresent && state.method === 'pcsclite') {
+        state.plugged = false; state.cert = null; state.method = null;
+        console.log('[dsc/pcsc] Card removed');
       }
     });
-
-    reader.on('error', err => { console.error('[dscWatcher] Reader error:', err.message); });
-    reader.on('end',   ()  => {
-      if (state.reader === reader.name) {
-        state = { plugged: false, cert: null, reader: reader.name, insertedAt: null, error: null };
-      }
-    });
+    reader.on('error', err => console.warn('[dsc/pcsc] Reader error:', err.message));
   });
-
-  console.log('[dscWatcher] Watching for DSC tokens…');
 }
 
-function getStatus() { return { ...state }; }
+// ── Public API ────────────────────────────────────────────────────────────────
+function startWatcher() {
+  startPsWatcher();     // Always — PowerShell cert store
+  startPcscWatcher();   // Bonus — direct APDU if pcsclite installed
+}
+
+function getStatus() {
+  return {
+    plugged:    state.plugged,
+    cert:       state.cert,
+    reader:     state.reader,
+    insertedAt: state.insertedAt,
+    error:      state.error,
+    method:     state.method,
+  };
+}
 
 module.exports = { startWatcher, getStatus };
