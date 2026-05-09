@@ -252,6 +252,8 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
   const [certFetched,  setCertFetched]  = useState(false);
   const certFileRef = useRef(null);
   const [agentAutoFetching, setAgentAutoFetching] = useState(false);
+  const [agentConnected,   setAgentConnected]   = useState(false); // v5: agent reachable
+  const [autoFillDone,     setAutoFillDone]     = useState(false); // v5: autofill succeeded
 
   const [form, setForm] = useState({
     holder_name:     '',
@@ -271,108 +273,103 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
 
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
-  // ── Agent status tracking ────────────────────────────────────────────────
-  const [agentStatus, setAgentStatus] = useState('checking'); // 'checking'|'running'|'offline'|'mixed-content'
-
-  // ── Auto-fetch cert from agent /dsc-status — polls indefinitely while popup open ──
-  // Strategy:
-  //   1. Try the agent health check. If it fails due to mixed-content (HTTPS→HTTP),
-  //      show a clear message. If truly offline, show install hint.
-  //   2. Once agent is reachable, poll /dsc-status every 1.5s until cert appears.
-  //      No arbitrary 30s limit — keep polling until popup closes or cert is found.
-  //   3. If cert is PIN-protected (agent returns plugged=true but cert=null),
-  //      show the PIN field prominently so the user knows what to do.
+  // ── v5: Auto-fetch cert from agent — tries /dsc-autofill first (direct field map),
+  //   then falls back to polling /dsc-status. No PIN required.
   useEffect(() => {
     let cancelled = false;
-    let pollTimer = null;
 
-    async function pollAgentStatus() {
-      if (cancelled) return;
-
-      // ── Step 1: health check with mixed-content detection ────────────────
+    async function tryAgentAutoFetch() {
       try {
-        const res = await fetch('http://127.0.0.1:7432/health', {
-          signal: AbortSignal.timeout(2000),
-          cache: 'no-store',
-        });
-        if (!res.ok) { setAgentStatus('offline'); scheduleNext(3000); return; }
-        const data = await res.json();
-        if (data?.status !== 'ok') { setAgentStatus('offline'); scheduleNext(3000); return; }
-        if (!cancelled) setAgentStatus('running');
-      } catch (err) {
-        if (cancelled) return;
-        // Mixed-content block: TypeError with no useful message but fetch fails
-        // immediately (not a timeout). Distinguish from "agent not running".
-        const isMixedContent = window.location.protocol === 'https:' &&
-          (err instanceof TypeError) && err.message.toLowerCase().includes('fetch');
-        if (isMixedContent) {
-          setAgentStatus('mixed-content');
-          // Mixed-content can't be fixed at runtime — stop polling
-          return;
-        }
-        setAgentStatus('offline');
-        scheduleNext(3000); // retry health check every 3s
-        return;
-      }
+        // ── Step 1: Check agent is reachable ────────────────────────────────
+        const agentOk = await checkLocalAgent();
+        if (!agentOk || cancelled) return;
+        if (!cancelled) setAgentConnected(true);
 
-      // ── Step 2: poll /dsc-status for cert ───────────────────────────────
-      try {
-        const res = await fetch('http://127.0.0.1:7432/dsc-status', {
-          signal: AbortSignal.timeout(3000),
-          cache: 'no-store',
-        });
-        if (!res.ok) { scheduleNext(1500); return; }
-        const data = await res.json();
+        setAgentAutoFetching(true);
 
-        if (data.cert && data.cert.holder_name) {
-          if (!cancelled) {
-            setAgentAutoFetching(false);
-            applyCert(data.cert);
-            toast.success('✓ Token data auto-filled from DSC token!');
+        // ── Step 2: Try /dsc-autofill first — returns fields directly mapped
+        //   to form state; fills everything in one shot including dsc_type, pan, etc.
+        try {
+          const autofillRes = await fetch('http://127.0.0.1:7432/dsc-autofill', {
+            signal: AbortSignal.timeout(4000),
+            cache:  'no-store',
+          });
+          if (autofillRes.ok) {
+            const autofillData = await autofillRes.json();
+            if (autofillData.available && autofillData.fields?.holder_name) {
+              if (!cancelled) {
+                applyAutofill(autofillData.fields);
+                toast.success('✓ DSC token auto-filled — no PIN needed!');
+                setAutoFillDone(true);
+              }
+              return; // done — no need to poll
+            }
           }
-          return; // success — stop polling
-        }
+        } catch { /* /dsc-autofill not available (agent < v5), fall through */ }
 
-        // Token is plugged but cert is PIN-protected (agent couldn't read it)
-        if (data.plugged && data.error) {
-          if (!cancelled) setAgentAutoFetching(false);
-          // Keep polling in case user re-plugs, but slow down
-          scheduleNext(3000);
-          return;
+        // ── Step 3: Fall back — poll /dsc-status every 2s for up to 30s ────
+        for (let i = 0; i < 15; i++) {
+          if (cancelled) break;
+          try {
+            const res = await fetch('http://127.0.0.1:7432/dsc-status', {
+              signal: AbortSignal.timeout(3000),
+              cache:  'no-store',
+            });
+            if (!res.ok) break;
+            const data = await res.json();
+            if (data.cert && data.cert.holder_name) {
+              if (!cancelled) {
+                applyCert(data.cert);
+                toast.success('✓ Token data auto-filled — no PIN needed!');
+              }
+              return;
+            }
+          } catch { /* keep polling */ }
+          await new Promise(r => setTimeout(r, 2000));
         }
-      } catch { /* network hiccup — keep polling */ }
-
-      scheduleNext(1500); // poll every 1.5s while waiting
+      } catch { /* agent not running */ }
+      finally { if (!cancelled) setAgentAutoFetching(false); }
     }
 
-    function scheduleNext(delay) {
-      if (!cancelled) pollTimer = setTimeout(pollAgentStatus, delay);
-    }
-
-    // Start immediately
-    setAgentAutoFetching(true);
-    pollAgentStatus();
-
-    return () => {
-      cancelled = true;
-      if (pollTimer) clearTimeout(pollTimer);
-      setAgentAutoFetching(false);
-    };
+    tryAgentAutoFetch();
+    return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Apply parsed cert data to form ──────────────────────────────────────────
+  // ── v5: Apply structured autofill from /dsc-autofill (direct field mapping) ──
+  const applyAutofill = (fields) => {
+    setForm(prev => ({
+      ...prev,
+      holder_name:     fields.holder_name     || prev.holder_name,
+      serial_number:   fields.serial_number   || prev.serial_number,
+      issue_date:      fields.issue_date      || prev.issue_date,
+      expiry_date:     fields.expiry_date     || prev.expiry_date,
+      associated_with: fields.associated_with || prev.associated_with,
+      dsc_type:        fields.dsc_type        || prev.dsc_type,
+      notes: [
+        prev.notes,
+        fields.issuer ? `Issuer: ${fields.issuer}` : null,
+        fields.email  ? `Email: ${fields.email}`   : null,
+        fields.pan    ? `PAN: ${fields.pan}`        : null,
+      ].filter(Boolean).join('\n'),
+    }));
+    setCertFetched(true);
+  };
+
+  // ── Apply parsed cert data to form (legacy /dsc-status path) ─────────────────
   const applyCert = (cert) => {
     setForm(prev => ({
       ...prev,
-      holder_name:     cert.holder_name   || prev.holder_name,
-      serial_number:   cert.serial_number || prev.serial_number,
-      issue_date:      cert.issue_date    || prev.issue_date,
-      expiry_date:     cert.expiry_date   || prev.expiry_date,
-      associated_with: cert.organization  || prev.associated_with,
+      holder_name:     cert.holder_name                             || prev.holder_name,
+      serial_number:   cert.serial_number                           || prev.serial_number,
+      issue_date:      cert.issue_date                              || prev.issue_date,
+      expiry_date:     cert.expiry_date                             || prev.expiry_date,
+      associated_with: cert.associated_with || cert.organization    || prev.associated_with,
+      dsc_type:        cert.dsc_type                                || prev.dsc_type,
       notes: [
         prev.notes,
         cert.issuer ? `Issuer: ${cert.issuer}` : null,
         cert.email  ? `Email: ${cert.email}`   : null,
+        cert.pan    ? `PAN: ${cert.pan}`        : null,
       ].filter(Boolean).join('\n'),
     }));
     setCertFetched(true);
@@ -637,54 +634,103 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
           {!saved && (
             <div style={{ padding: '0 20px 4px', overflowY: 'auto', flex: 1 }}>
 
+              {/* ── Agent Status Banner (v5) ── */}
+              {agentConnected && !certFetched && (
+                <div style={{
+                  marginBottom: 10, padding: '8px 12px',
+                  background: isDark ? 'rgba(99,102,241,0.12)' : '#eef2ff',
+                  borderRadius: 8, border: '1px solid rgba(99,102,241,0.35)',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}>
+                  <span style={{
+                    width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                    background: agentAutoFetching ? '#f59e0b' : '#10b981',
+                    animation: agentAutoFetching ? 'dscPulse 1s ease-in-out infinite' : 'none',
+                  }} />
+                  <span style={{ fontSize: 11, color: isDark ? '#a5b4fc' : '#4338ca', fontWeight: 600, flex: 1 }}>
+                    {agentAutoFetching
+                      ? '⏳ DSC Agent connected — reading token certificate…'
+                      : '✓ DSC Agent connected — plug in your DSC token to auto-fill all fields'}
+                  </span>
+                  {!agentAutoFetching && (
+                    <button
+                      onClick={async () => {
+                        setAgentAutoFetching(true);
+                        try {
+                          const res = await fetch('http://127.0.0.1:7432/dsc-autofill', {
+                            signal: AbortSignal.timeout(4000), cache: 'no-store',
+                          });
+                          if (res.ok) {
+                            const d = await res.json();
+                            if (d.available && d.fields?.holder_name) {
+                              applyAutofill(d.fields);
+                              setAutoFillDone(true);
+                              toast.success('✓ DSC data auto-filled!');
+                              return;
+                            }
+                          }
+                          // fallback to /dsc-status
+                          const r2 = await fetch('http://127.0.0.1:7432/dsc-status', {
+                            signal: AbortSignal.timeout(3000), cache: 'no-store',
+                          });
+                          if (r2.ok) {
+                            const d2 = await r2.json();
+                            if (d2.cert?.holder_name) { applyCert(d2.cert); return; }
+                          }
+                          toast.info('No DSC token detected yet — plug in your token and try again.');
+                        } catch { toast.error('Could not reach agent.'); }
+                        finally { setAgentAutoFetching(false); }
+                      }}
+                      style={{
+                        fontSize: 10, fontWeight: 700, padding: '3px 10px',
+                        borderRadius: 5, border: '1px solid rgba(99,102,241,0.5)',
+                        background: 'transparent', color: isDark ? '#a5b4fc' : '#4338ca',
+                        cursor: 'pointer', whiteSpace: 'nowrap',
+                      }}
+                    >
+                      ↻ Re-fetch
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* ── Auto-fill success banner ── */}
+              {autoFillDone && certFetched && (
+                <div style={{
+                  marginBottom: 10, padding: '8px 12px',
+                  background: isDark ? 'rgba(16,185,129,0.10)' : '#f0fdf4',
+                  borderRadius: 8, border: '1px solid rgba(16,185,129,0.4)',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}>
+                  <span style={{ fontSize: 13 }}>✅</span>
+                  <span style={{ fontSize: 11, color: '#10b981', fontWeight: 700, flex: 1 }}>
+                    All fields auto-filled from DSC token — verify and save.
+                  </span>
+                  <button
+                    onClick={() => { setAutoFillDone(false); setCertFetched(false); setAgentAutoFetching(false); }}
+                    style={{ fontSize: 10, background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer' }}
+                  >
+                    ✕ Clear
+                  </button>
+                </div>
+              )}
+
               {/* ── PIN Read Section ── */}
               <div style={{ marginBottom: 14, padding: '10px 12px', background: certFetched ? (isDark ? 'rgba(16,185,129,0.1)' : '#f0fdf4') : surface, borderRadius: 10, border: `1px solid ${certFetched ? '#10b981' : readError ? '#ef4444' : border}` }}>
-
-                {/* ── Agent status banner ── */}
-                {!certFetched && agentStatus === 'running' && agentAutoFetching && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8, padding: '6px 10px', background: isDark ? 'rgba(99,102,241,0.12)' : '#eef2ff', borderRadius: 7, border: '1px solid rgba(99,102,241,0.3)' }}>
-                    <span style={{ width: 10, height: 10, border: '2px solid rgba(99,102,241,0.35)', borderTopColor: '#6366f1', borderRadius: '50%', display: 'inline-block', animation: 'dscSpin 0.8s linear infinite', flexShrink: 0 }} />
-                    <span style={{ fontSize: 10.5, color: isDark ? '#a5b4fc' : '#4338ca', fontWeight: 600 }}>
-                      DSC Agent connected — plug in your DSC token to auto-fill all fields
-                    </span>
-                  </div>
-                )}
-                {!certFetched && agentStatus === 'offline' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8, padding: '6px 10px', background: isDark ? 'rgba(148,163,184,0.08)' : '#f8fafc', borderRadius: 7, border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : '#e2e8f0'}` }}>
-                    <span style={{ fontSize: 11, flexShrink: 0 }}>⚪</span>
-                    <span style={{ fontSize: 10, color: isDark ? '#94a3b8' : '#64748b', lineHeight: 1.5 }}>
-                      <strong>DSC Agent not running.</strong> Start it: open a terminal in the <code style={{ background: isDark ? '#1e293b' : '#f1f5f9', padding: '1px 3px', borderRadius: 2 }}>dsc-agent</code> folder and run <code style={{ background: isDark ? '#1e293b' : '#f1f5f9', padding: '1px 3px', borderRadius: 2 }}>node index.js</code> — then re-plug your token.
-                    </span>
-                  </div>
-                )}
-                {!certFetched && agentStatus === 'mixed-content' && (
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7, marginBottom: 8, padding: '8px 10px', background: isDark ? 'rgba(251,191,36,0.08)' : '#fffbeb', borderRadius: 7, border: '1px solid rgba(251,191,36,0.35)' }}>
-                    <span style={{ fontSize: 12, flexShrink: 0, marginTop: 1 }}>⚠️</span>
-                    <div>
-                      <p style={{ margin: '0 0 2px', fontSize: 10.5, color: '#d97706', fontWeight: 700 }}>Browser mixed-content blocked</p>
-                      <p style={{ margin: 0, fontSize: 10, color: isDark ? '#fde68a' : '#92400e', lineHeight: 1.5 }}>
-                        Chrome blocks HTTP requests from an HTTPS page. To fix: open <code style={{ background: isDark ? '#1e1b4b' : '#e0e7ff', padding: '1px 3px', borderRadius: 2 }}>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>, add <code style={{ background: isDark ? '#1e1b4b' : '#e0e7ff', padding: '1px 3px', borderRadius: 2 }}>http://127.0.0.1:7432</code>, restart Chrome. Or use the PIN + Fetch Data below, or upload a .cer file.
-                      </p>
-                    </div>
-                  </div>
-                )}
-                {!certFetched && agentStatus === 'running' && !agentAutoFetching && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8, padding: '6px 10px', background: isDark ? 'rgba(16,185,129,0.08)' : '#f0fdf4', borderRadius: 7, border: '1px solid rgba(16,185,129,0.3)' }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', flexShrink: 0 }} />
-                    <span style={{ fontSize: 10.5, color: isDark ? '#6ee7b7' : '#059669', fontWeight: 600 }}>
-                      Agent running — token is PIN-protected. Enter your PIN below and click Fetch Data.
-                    </span>
-                  </div>
-                )}
-
                 <label style={{ ...labelStyle, marginBottom: 6, color: certFetched ? '#10b981' : readError ? '#ef4444' : labelClr }}>
-                  {certFetched ? '✓ Certificate Read from Token' : 'Read Certificate from Token (Optional)'}
+                  {certFetched
+                    ? '✓ Certificate Read from Token'
+                    : agentAutoFetching
+                      ? '⏳ Reading certificate from token…'
+                      : agentConnected
+                        ? 'PIN required? Enter below to force-read:'
+                        : 'Read Certificate from Token (Optional)'}
                 </label>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <input
                     style={{ ...inputStyle, flex: 1, letterSpacing: pin ? '0.2em' : 'normal' }}
                     type="password"
-                    placeholder="Enter token PIN / password"
+                    placeholder={agentConnected ? 'PIN only needed if auto-fill failed above' : 'Enter token PIN / password'}
                     value={pin}
                     onChange={e => { setPin(e.target.value); setReadError(''); }}
                     onKeyDown={e => { if (e.key === 'Enter') handleReadCertificate(); }}
