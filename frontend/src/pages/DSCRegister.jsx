@@ -307,22 +307,44 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
           }
         } catch { /* /dsc-autofill not available (agent < v5), fall through */ }
 
-        // ── Step 3: Fall back — poll /dsc-status every 2s for up to 30s ────
+        // ── Step 3: Poll both /dsc-autofill AND /dsc-status every 2s for up to 30s ────
+        // The agent may still be parsing the cert when the popup first opens,
+        // so we keep retrying until cert data is available (up to 30s).
         for (let i = 0; i < 15; i++) {
           if (cancelled) break;
+          // Prefer /dsc-autofill (direct field mapping, available in agent v5+)
+          try {
+            const afRes = await fetch('http://127.0.0.1:7432/dsc-autofill', {
+              signal: AbortSignal.timeout(3000),
+              cache:  'no-store',
+            });
+            if (afRes.ok) {
+              const afData = await afRes.json();
+              if (afData.available && afData.fields?.holder_name) {
+                if (!cancelled) {
+                  applyAutofill(afData.fields);
+                  toast.success('✓ DSC token auto-filled — no PIN needed!');
+                  setAutoFillDone(true);
+                }
+                return;
+              }
+            }
+          } catch { /* keep polling */ }
+          // Also try /dsc-status as fallback
           try {
             const res = await fetch('http://127.0.0.1:7432/dsc-status', {
               signal: AbortSignal.timeout(3000),
               cache:  'no-store',
             });
-            if (!res.ok) break;
-            const data = await res.json();
-            if (data.cert && data.cert.holder_name) {
-              if (!cancelled) {
-                applyCert(data.cert);
-                toast.success('✓ Token data auto-filled — no PIN needed!');
+            if (res.ok) {
+              const data = await res.json();
+              if (data.cert && data.cert.holder_name) {
+                if (!cancelled) {
+                  applyCert(data.cert);
+                  toast.success('✓ Token data auto-filled — no PIN needed!');
+                }
+                return;
               }
-              return;
             }
           } catch { /* keep polling */ }
           await new Promise(r => setTimeout(r, 2000));
