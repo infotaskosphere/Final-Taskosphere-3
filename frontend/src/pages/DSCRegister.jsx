@@ -219,6 +219,7 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
 
 // ─── Guess DSC type from device info ─────────────────────────────────────────
 function guessDscType(device) {
+  if (!device) return 'Class 3';
   const combined = [device.productName || '', device.manufacturerName || ''].join(' ').toLowerCase();
   if (combined.includes('class 3') || combined.includes('cl3'))  return 'Class 3';
   if (combined.includes('class 2') || combined.includes('cl2'))  return 'Class 2';
@@ -239,11 +240,31 @@ function todayStr() {
   return format(new Date(), 'yyyy-MM-dd');
 }
 
+// ─── Entity / Client type options ────────────────────────────────────────────
+// Mirrors CLIENT_TYPES in src/pages/Clients.jsx so the DSC form's "Entity Type"
+// matches every type a client can be created with (plus a "Firm" option for
+// in-house DSCs that aren't tied to a client record).
+const ENTITY_TYPE_OPTIONS = [
+  { value: 'firm',        label: 'Firm (in-house)' },
+  { value: 'proprietor',  label: 'Proprietor' },
+  { value: 'pvt_ltd',     label: 'Private Limited' },
+  { value: 'llp',         label: 'LLP' },
+  { value: 'partnership', label: 'Partnership' },
+  { value: 'huf',         label: 'HUF' },
+  { value: 'trust',       label: 'Trust' },
+  { value: 'client',      label: 'Client (any)' },
+  { value: 'other',       label: 'Other' },
+];
+
 // ─── USB DSC Popup Component ──────────────────────────────────────────────────
-function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
+function UsbDscPopup({ device, isDark, onDismiss, onSaved, clients = [] }) {
   const [saving, setSaving]             = useState(false);
   const [saved,  setSaved]              = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Whether the current "Associated With" value is a free-text "Other" entry
+  // (vs. a client picked from the dropdown).
+  const [assocOther, setAssocOther] = useState(false);
 
   // Certificate reading state
   const [pin,          setPin]          = useState('');
@@ -264,96 +285,50 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
     entity_type:     'firm',
     issue_date:      todayStr(),
     expiry_date:     defaultExpiry(),
-    notes:           [
+    notes:           device ? [
       device.productName      ? `Device: ${device.productName}`      : null,
       device.manufacturerName ? `Maker: ${device.manufacturerName}`   : null,
       device.vendorId         ? `VID: 0x${device.vendorId.toString(16).toUpperCase().padStart(4,'0')}` : null,
-    ].filter(Boolean).join(' · '),
+    ].filter(Boolean).join(' · ') : '',
   });
 
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
-  // ── v5: Auto-fetch cert from agent — tries /dsc-autofill first (direct field map),
-  //   then falls back to polling /dsc-status. No PIN required.
+  // Is the selected entity type a client-style entity? (anything except "firm")
+  const isClientEntity = form.entity_type && form.entity_type !== 'firm';
+
+  // Filter the client list to those whose client_type matches the selected
+  // entity type — but if the user picked the generic "client" or "other",
+  // show every client.
+  const filteredClients = React.useMemo(() => {
+    if (!Array.isArray(clients)) return [];
+    if (!isClientEntity) return [];
+    if (form.entity_type === 'client' || form.entity_type === 'other') return clients;
+    return clients.filter(c => (c.client_type || 'proprietor') === form.entity_type);
+  }, [clients, form.entity_type, isClientEntity]);
+
+  // When entity type changes, clear the associated_with selection if the current
+  // value is no longer in the filtered list (avoid stale orphan picks).
+  useEffect(() => {
+    if (!isClientEntity) { setAssocOther(false); return; }
+    if (assocOther) return;
+    if (!form.associated_with) return;
+    const stillThere = filteredClients.some(c => c.company_name === form.associated_with);
+    if (!stillThere) setForm(prev => ({ ...prev, associated_with: '' }));
+  }, [form.entity_type]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── v5: Only check whether the local DSC Agent is reachable. We DO NOT
+  //   auto-fill any data on mount — the user must explicitly click "Fetch Data"
+  //   (with their token PIN) or the "↻ Re-fetch" button. This prevents stale /
+  //   wrong data (e.g. a previous user's email) from auto-populating the form.
   useEffect(() => {
     let cancelled = false;
-
-    async function tryAgentAutoFetch() {
+    (async () => {
       try {
-        // ── Step 1: Check agent is reachable ────────────────────────────────
         const agentOk = await checkLocalAgent();
-        if (!agentOk || cancelled) return;
-        if (!cancelled) setAgentConnected(true);
-
-        setAgentAutoFetching(true);
-
-        // ── Step 2: Try /dsc-autofill first — returns fields directly mapped
-        //   to form state; fills everything in one shot including dsc_type, pan, etc.
-        try {
-          const autofillRes = await fetch('http://127.0.0.1:7432/dsc-autofill', {
-            signal: AbortSignal.timeout(4000),
-            cache:  'no-store',
-          });
-          if (autofillRes.ok) {
-            const autofillData = await autofillRes.json();
-            if (autofillData.available && autofillData.fields?.holder_name) {
-              if (!cancelled) {
-                applyAutofill(autofillData.fields);
-                toast.success('✓ DSC token auto-filled — no PIN needed!');
-                setAutoFillDone(true);
-              }
-              return; // done — no need to poll
-            }
-          }
-        } catch { /* /dsc-autofill not available (agent < v5), fall through */ }
-
-        // ── Step 3: Poll both /dsc-autofill AND /dsc-status every 2s for up to 30s ────
-        // The agent may still be parsing the cert when the popup first opens,
-        // so we keep retrying until cert data is available (up to 30s).
-        for (let i = 0; i < 15; i++) {
-          if (cancelled) break;
-          // Prefer /dsc-autofill (direct field mapping, available in agent v5+)
-          try {
-            const afRes = await fetch('http://127.0.0.1:7432/dsc-autofill', {
-              signal: AbortSignal.timeout(3000),
-              cache:  'no-store',
-            });
-            if (afRes.ok) {
-              const afData = await afRes.json();
-              if (afData.available && afData.fields?.holder_name) {
-                if (!cancelled) {
-                  applyAutofill(afData.fields);
-                  toast.success('✓ DSC token auto-filled — no PIN needed!');
-                  setAutoFillDone(true);
-                }
-                return;
-              }
-            }
-          } catch { /* keep polling */ }
-          // Also try /dsc-status as fallback
-          try {
-            const res = await fetch('http://127.0.0.1:7432/dsc-status', {
-              signal: AbortSignal.timeout(3000),
-              cache:  'no-store',
-            });
-            if (res.ok) {
-              const data = await res.json();
-              if (data.cert && data.cert.holder_name) {
-                if (!cancelled) {
-                  applyCert(data.cert);
-                  toast.success('✓ Token data auto-filled — no PIN needed!');
-                }
-                return;
-              }
-            }
-          } catch { /* keep polling */ }
-          await new Promise(r => setTimeout(r, 2000));
-        }
-      } catch { /* agent not running */ }
-      finally { if (!cancelled) setAgentAutoFetching(false); }
-    }
-
-    tryAgentAutoFetch();
+        if (!cancelled && agentOk) setAgentConnected(true);
+      } catch { /* agent not running — silent */ }
+    })();
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -612,7 +587,7 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: textClr, lineHeight: 1.2 }}>
-                  {saved ? 'DSC Added ✓' : 'DSC Token Detected'}
+                  {saved ? 'DSC Added ✓' : (device ? 'DSC Token Detected' : 'Add New DSC')}
                 </p>
                 {/* Live USB dot */}
                 {!saved && (
@@ -622,9 +597,9 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
               <p style={{ margin: '3px 0 0', fontSize: 12, color: labelClr, lineHeight: 1.5 }}>
                 {saved
                   ? `"${form.holder_name}" added to DSC Register & marked IN`
-                  : device.productName
+                  : device?.productName
                       ? <><span style={{ color: '#818cf8', fontWeight: 600 }}>{device.productName}</span> — fill details below</>
-                      : 'Fill details to add this certificate to the register'}
+                      : (device ? 'Fill details to add this certificate to the register' : 'Add a new digital signature certificate')}
               </p>
             </div>
 
@@ -639,7 +614,7 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
           </div>
 
           {/* ── Device info pill ── */}
-          {(device.manufacturerName || device.vendorId) && !saved && (
+          {device && (device.manufacturerName || device.vendorId) && !saved && (
             <div style={{ margin: '0 20px 12px', padding: '7px 12px', background: surface, borderRadius: 10, border: `1px solid ${border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
               <Usb style={{ width: 13, height: 13, color: '#818cf8', flexShrink: 0 }} />
               <span style={{ fontSize: 11, color: labelClr, fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -872,7 +847,50 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
                 </div>
                 <div>
                   <label style={labelStyle}>Associated With</label>
-                  <input style={inputStyle} placeholder="Firm / client name" value={form.associated_with} onChange={e => set('associated_with', e.target.value)} />
+                  {isClientEntity ? (
+                    <>
+                      <select
+                        style={{ ...inputStyle, cursor: 'pointer' }}
+                        value={assocOther ? '__other__' : (form.associated_with || '')}
+                        onChange={e => {
+                          const v = e.target.value;
+                          if (v === '__other__') {
+                            setAssocOther(true);
+                            set('associated_with', '');
+                          } else {
+                            setAssocOther(false);
+                            set('associated_with', v);
+                          }
+                        }}
+                      >
+                        <option value="">
+                          {filteredClients.length === 0 ? 'No clients found — add via Clients page' : 'Select client…'}
+                        </option>
+                        {filteredClients.map(c => (
+                          <option key={c.id} value={c.company_name}>
+                            {c.company_name}{c.client_type_label ? ` (${c.client_type_label})` : ''}
+                          </option>
+                        ))}
+                        <option value="__other__">Other (type manually)…</option>
+                      </select>
+                      {assocOther && (
+                        <input
+                          style={{ ...inputStyle, marginTop: 6 }}
+                          placeholder="Enter client / entity name"
+                          value={form.associated_with}
+                          onChange={e => set('associated_with', e.target.value)}
+                          autoFocus
+                        />
+                      )}
+                    </>
+                  ) : (
+                    <input
+                      style={inputStyle}
+                      placeholder="Firm / department name"
+                      value={form.associated_with}
+                      onChange={e => set('associated_with', e.target.value)}
+                    />
+                  )}
                 </div>
                 <div>
                   <label style={labelStyle}>
@@ -897,9 +915,14 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
                 </div>
                 <div>
                   <label style={labelStyle}>Entity Type</label>
-                  <select style={{ ...inputStyle, cursor: 'pointer' }} value={form.entity_type} onChange={e => set('entity_type', e.target.value)}>
-                    <option value="firm">Firm</option>
-                    <option value="client">Client</option>
+                  <select
+                    style={{ ...inputStyle, cursor: 'pointer' }}
+                    value={form.entity_type}
+                    onChange={e => set('entity_type', e.target.value)}
+                  >
+                    {ENTITY_TYPE_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -939,7 +962,7 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
                   cursor: 'pointer', transition: 'opacity 0.15s',
                 }}
               >
-                Not a DSC
+                {device ? 'Not a DSC' : 'Cancel'}
               </button>
               <button
                 type="button"
@@ -986,6 +1009,10 @@ export default function DSCRegister() {
   const searchRef = useRef(null);
 
   const [dscList, setDscList]                       = useState([]);
+  // Client list for the unified DSC popup's "Associated With" dropdown.
+  // Lazily fetched once on mount; failures are silent (the dropdown just
+  // shows "No clients found — add via Clients page").
+  const [clients, setClients]                       = useState([]);
   const [loading, setLoading]                       = useState(false);
   const [dialogOpen, setDialogOpen]                 = useState(false);
   const [movementDialogOpen, setMovementDialogOpen] = useState(false);
@@ -1138,6 +1165,18 @@ export default function DSCRegister() {
   };
 
   useEffect(() => { fetchDSC(); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get('/clients');
+        if (cancelled) return;
+        const list = Array.isArray(r.data) ? r.data : (r.data?.items || r.data?.data || []);
+        setClients(list);
+      } catch { /* silent — popup falls back to "No clients found" */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
   useEffect(() => { setCurrentPageIn(1); setCurrentPageOut(1); setCurrentPageExpired(1); }, [sortOrder, searchQuery]);
 
   // ── USB DSC Token Detection ───────────────────────────────────────────────
@@ -1178,9 +1217,11 @@ export default function DSCRegister() {
         const devices = await navigator.usb.getDevices();
         if (devices.length > 0) {
           setUsbPermission('granted');
-          // Show popup for any previously-permitted device (user selected it, so it's their DSC)
-          if (!usbDismissed) {
-            setUsbDevice(devices[0]);
+          // Only auto-popup if a previously-permitted device looks like a real DSC token.
+          // (A USB mouse / wireless receiver / generic HID should NOT trigger the popup.)
+          const dscDev = devices.find(isDSCDevice);
+          if (dscDev && !usbDismissed) {
+            setUsbDevice(dscDev);
             setUsbPromptOpen(true);
           }
         }
@@ -1191,7 +1232,8 @@ export default function DSCRegister() {
     const handleConnect = (event) => {
       if (usbDismissed) return;
       setUsbPermission('granted');
-      // Show popup for ANY newly plugged-in permitted device
+      // Only show popup for plugged-in devices that look like a DSC token.
+      if (!isDSCDevice(event.device)) return;
       setUsbDevice(event.device);
       setUsbPromptOpen(true);
     };
@@ -1218,6 +1260,10 @@ export default function DSCRegister() {
       // isn't in our list. The user picks their DSC token from the full list.
       const device = await navigator.usb.requestDevice({ filters: [] });
       setUsbPermission('granted');
+      if (!isDSCDevice(device)) {
+        toast.info('Selected device does not look like a DSC token. Use “Add DSC” to enter details manually.');
+        return;
+      }
       if (!usbDismissed) {
         setUsbDevice(device);
         setUsbPromptOpen(true);
@@ -1678,12 +1724,22 @@ export default function DSCRegister() {
                 ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Scanning…</>
                 : <><Sparkles className="h-3.5 w-3.5" />AI Duplicates</>}
             </Button>
-            <Dialog open={dialogOpen} onOpenChange={open => { setDialogOpen(open); if (!open) resetForm(); }}>
-              <DialogTrigger asChild>
-                <Button className="bg-white text-indigo-700 hover:bg-blue-50 font-semibold rounded-xl px-5 shadow-lg transition-all hover:scale-105 active:scale-95" data-testid="add-dsc-btn">
-                  <Plus className="mr-2 h-4 w-4" />Add DSC
-                </Button>
-              </DialogTrigger>
+            {/* "Add DSC" opens the SAME unified popup as USB token detection
+                (with device=null for manual entry). The legacy Dialog below is
+                only used for editing existing DSCs. */}
+            <Button
+              onClick={() => {
+                resetForm();
+                setUsbDevice(null);
+                setUsbDismissed(false);
+                setUsbPromptOpen(true);
+              }}
+              className="bg-white text-indigo-700 hover:bg-blue-50 font-semibold rounded-xl px-5 shadow-lg transition-all hover:scale-105 active:scale-95"
+              data-testid="add-dsc-btn"
+            >
+              <Plus className="mr-2 h-4 w-4" />Add DSC
+            </Button>
+            <Dialog open={dialogOpen && !!editingDSC} onOpenChange={open => { setDialogOpen(open); if (!open) resetForm(); }}>
               <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle className="font-outfit text-2xl">{editingDSC ? 'Edit DSC' : 'Add New DSC'}</DialogTitle>
@@ -2190,11 +2246,13 @@ export default function DSCRegister() {
         </DialogContent>
       </Dialog>
 
-      {/* ── USB DSC Token Popup ── */}
-      {usbPromptOpen && usbDevice && (
+      {/* ── Unified Add DSC / USB Token Popup ──
+          Renders for both manual "Add DSC" (device=null) and auto-detected USB tokens. */}
+      {usbPromptOpen && (
         <UsbDscPopup
           device={usbDevice}
           isDark={isDark}
+          clients={clients}
           onDismiss={() => {
             setUsbPromptOpen(false);
             setUsbDismissed(true);
