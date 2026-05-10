@@ -58,14 +58,24 @@ app.get('/health', (req, res) => {
   res.json({
     status:   'ok',
     agent:    'taskosphere-dsc-agent',
-    version:  '2.0.0',
-    features: ['dsc-watch', 'dsc-read', 'activity-tracking'],
+    version:  '3.0.0',
+    features: ['dsc-watch', 'dsc-autofill', 'dsc-read', 'activity-tracking'],
   });
 });
 
 // ── DSC status (auto-read cert on plug-in, no PIN required) ──────────────────
 app.get('/dsc-status', (req, res) => {
   res.json(dscWatcher.getStatus());
+});
+
+// ── DSC autofill — returns form-ready fields from the inserted token cert ─────
+// This is the primary endpoint polled by DSCRegister.jsx popup.
+// Returns { available: bool, fields: { holder_name, serial_number, issue_date,
+//   expiry_date, associated_with, dsc_type, ca_provider, token_provider,
+//   issuer, email, pan } }
+app.get('/dsc-autofill', (req, res) => {
+  const result = dscWatcher.getAutofillFields();
+  res.json(result);
 });
 
 // ── DSC read with PIN (full certificate read via VERIFY PIN APDU) ─────────────
@@ -115,11 +125,12 @@ app.post('/activity/push', async (req, res) => {
 app.listen(PORT, '127.0.0.1', () => {
   console.log('');
   console.log('╔══════════════════════════════════════════════════════╗');
-  console.log('║     Taskosphere Agent v2 — Running ✓                 ║');
+  console.log('║     Taskosphere Agent v3 — Running ✓                 ║');
   console.log(`║     Listening on http://127.0.0.1:${PORT}              ║`);
   console.log('║                                                      ║');
   console.log('║  Features:                                           ║');
   console.log('║    ✓ DSC token auto-detection (no PIN needed)        ║');
+  console.log('║    ✓ DSC autofill /dsc-autofill (all Indian CAs)     ║');
   console.log('║    ✓ DSC certificate read with PIN (/read-dsc)       ║');
   console.log('║    ✓ Activity tracking → pushed to backend           ║');
   console.log('║                                                      ║');
