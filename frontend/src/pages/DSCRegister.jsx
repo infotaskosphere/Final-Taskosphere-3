@@ -721,11 +721,19 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved, clients = [] }) {
                   <input
                     style={{ ...inputStyle, flex: 1, letterSpacing: pin ? '0.2em' : 'normal' }}
                     type="password"
+                    name="dsc-token-pin"
                     placeholder={agentConnected ? 'PIN only needed if auto-fill failed above' : 'Enter token PIN / password'}
                     value={pin}
                     onChange={e => { setPin(e.target.value); setReadError(''); }}
                     onKeyDown={e => { if (e.key === 'Enter') handleReadCertificate(); }}
                     disabled={reading}
+                    autoComplete="new-password"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    data-form-type="other"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
                   />
                   <button
                     type="button"
@@ -1952,6 +1960,14 @@ export default function DSCRegister() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <Input ref={searchRef} type="text" placeholder='Search… (press "/" to focus)' value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
+              name="dsc-search-query"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-form-type="other"
+              data-lpignore="true"
+              data-1p-ignore="true"
               className={`pl-10 pr-16 focus:border-indigo-500 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white border-slate-200'}`}
               data-testid="dsc-search-input" />
             {!searchQuery && (
