@@ -240,19 +240,17 @@ function todayStr() {
   return format(new Date(), 'yyyy-MM-dd');
 }
 
-// ─── Entity / Client type options ────────────────────────────────────────────
-// Mirrors CLIENT_TYPES in src/pages/Clients.jsx so the DSC form's "Entity Type"
-// matches every type a client can be created with (plus a "Firm" option for
-// in-house DSCs that aren't tied to a client record).
+// ─── Entity type options ─────────────────────────────────────────────────────
+// Mirrors CLIENT_TYPES in src/pages/Clients.jsx. "Firm (in-house)" and the
+// generic "Client (any)" have been removed — every DSC must be linked to a
+// real client (or "Other" with a manually-typed entity name).
 const ENTITY_TYPE_OPTIONS = [
-  { value: 'firm',        label: 'Firm (in-house)' },
   { value: 'proprietor',  label: 'Proprietor' },
   { value: 'pvt_ltd',     label: 'Private Limited' },
   { value: 'llp',         label: 'LLP' },
   { value: 'partnership', label: 'Partnership' },
   { value: 'huf',         label: 'HUF' },
   { value: 'trust',       label: 'Trust' },
-  { value: 'client',      label: 'Client (any)' },
   { value: 'other',       label: 'Other' },
 ];
 
@@ -282,7 +280,7 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved, clients = [] }) {
     dsc_password:    '',
     serial_number:   '',
     associated_with: '',
-    entity_type:     'firm',
+    entity_type:     'proprietor',
     issue_date:      todayStr(),
     expiry_date:     defaultExpiry(),
     notes:           device ? [
@@ -294,23 +292,19 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved, clients = [] }) {
 
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
-  // Is the selected entity type a client-style entity? (anything except "firm")
-  const isClientEntity = form.entity_type && form.entity_type !== 'firm';
+  // "Other" entity type → user types a custom entity name.
+  const isOtherEntity = form.entity_type === 'other';
 
-  // Filter the client list to those whose client_type matches the selected
-  // entity type — but if the user picked the generic "client" or "other",
-  // show every client.
+  // Associated With is ALWAYS a dropdown of every client created on the
+  // Clients page, plus an "Other" option for free-text entry.
   const filteredClients = React.useMemo(() => {
     if (!Array.isArray(clients)) return [];
-    if (!isClientEntity) return [];
-    if (form.entity_type === 'client' || form.entity_type === 'other') return clients;
-    return clients.filter(c => (c.client_type || 'proprietor') === form.entity_type);
-  }, [clients, form.entity_type, isClientEntity]);
+    return clients;
+  }, [clients]);
 
-  // When entity type changes, clear the associated_with selection if the current
-  // value is no longer in the filtered list (avoid stale orphan picks).
+  // When entity type changes, clear associated_with if the current pick is
+  // no longer valid (e.g. switched to "Other" → keep manual entry going).
   useEffect(() => {
-    if (!isClientEntity) { setAssocOther(false); return; }
     if (assocOther) return;
     if (!form.associated_with) return;
     const stillThere = filteredClients.some(c => c.company_name === form.associated_with);
@@ -498,7 +492,7 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved, clients = [] }) {
         dsc_password:    form.dsc_password,
         serial_number:   form.serial_number,
         associated_with: form.associated_with,
-        entity_type:     form.entity_type,
+        entity_type:     form.entity_type === 'other' ? (form.entity_type_other || 'other') : form.entity_type,
         issue_date:      new Date(form.issue_date).toISOString(),
         expiry_date:     new Date(form.expiry_date).toISOString(),
         notes:           form.notes,
@@ -847,48 +841,37 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved, clients = [] }) {
                 </div>
                 <div>
                   <label style={labelStyle}>Associated With</label>
-                  {isClientEntity ? (
-                    <>
-                      <select
-                        style={{ ...inputStyle, cursor: 'pointer' }}
-                        value={assocOther ? '__other__' : (form.associated_with || '')}
-                        onChange={e => {
-                          const v = e.target.value;
-                          if (v === '__other__') {
-                            setAssocOther(true);
-                            set('associated_with', '');
-                          } else {
-                            setAssocOther(false);
-                            set('associated_with', v);
-                          }
-                        }}
-                      >
-                        <option value="">
-                          {filteredClients.length === 0 ? 'No clients found — add via Clients page' : 'Select client…'}
-                        </option>
-                        {filteredClients.map(c => (
-                          <option key={c.id} value={c.company_name}>
-                            {c.company_name}{c.client_type_label ? ` (${c.client_type_label})` : ''}
-                          </option>
-                        ))}
-                        <option value="__other__">Other (type manually)…</option>
-                      </select>
-                      {assocOther && (
-                        <input
-                          style={{ ...inputStyle, marginTop: 6 }}
-                          placeholder="Enter client / entity name"
-                          value={form.associated_with}
-                          onChange={e => set('associated_with', e.target.value)}
-                          autoFocus
-                        />
-                      )}
-                    </>
-                  ) : (
+                  <select
+                    style={{ ...inputStyle, cursor: 'pointer' }}
+                    value={assocOther ? '__other__' : (form.associated_with || '')}
+                    onChange={e => {
+                      const v = e.target.value;
+                      if (v === '__other__') {
+                        setAssocOther(true);
+                        set('associated_with', '');
+                      } else {
+                        setAssocOther(false);
+                        set('associated_with', v);
+                      }
+                    }}
+                  >
+                    <option value="">
+                      {filteredClients.length === 0 ? 'No clients found — add via Clients page' : 'Select client…'}
+                    </option>
+                    {filteredClients.map(c => (
+                      <option key={c.id} value={c.company_name}>
+                        {c.company_name}{c.client_type_label ? ` (${c.client_type_label})` : ''}
+                      </option>
+                    ))}
+                    <option value="__other__">Other (type manually)…</option>
+                  </select>
+                  {assocOther && (
                     <input
-                      style={inputStyle}
-                      placeholder="Firm / department name"
+                      style={{ ...inputStyle, marginTop: 6 }}
+                      placeholder="Enter client / entity name"
                       value={form.associated_with}
                       onChange={e => set('associated_with', e.target.value)}
+                      autoFocus
                     />
                   )}
                 </div>
@@ -924,6 +907,15 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved, clients = [] }) {
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
                   </select>
+                  {isOtherEntity && (
+                    <input
+                      style={{ ...inputStyle, marginTop: 6 }}
+                      placeholder="Enter entity type (e.g. Society, AOP…)"
+                      value={form.entity_type_other || ''}
+                      onChange={e => set('entity_type_other', e.target.value)}
+                      autoFocus
+                    />
+                  )}
                 </div>
               </div>
 
@@ -1043,7 +1035,8 @@ export default function DSCRegister() {
 
   const [formData, setFormData] = useState({
     holder_name: '', dsc_type: '', dsc_password: '', serial_number: '',
-    associated_with: '', entity_type: 'firm',
+    associated_with: '', entity_type: 'proprietor', entity_type_other: '',
+    _assocOther: false,
     issue_date: '', expiry_date: '', notes: '',
   });
   const [movementData, setMovementData]         = useState({ movement_type: 'IN', person_name: '', notes: '' });
@@ -1364,7 +1357,7 @@ export default function DSCRegister() {
         dsc_password:    formData.dsc_password,
         serial_number:   formData.serial_number || '',
         associated_with: formData.associated_with,
-        entity_type:     formData.entity_type,
+        entity_type:     formData.entity_type === 'other' ? (formData.entity_type_other || 'other') : formData.entity_type,
         notes:           formData.notes,
         issue_date:      new Date(formData.issue_date).toISOString(),
         expiry_date:     new Date(formData.expiry_date).toISOString(),
@@ -1455,13 +1448,20 @@ export default function DSCRegister() {
   // ── Edit / Delete ─────────────────────────────────────────────────────────
   const handleEdit = (dsc) => {
     setEditingDSC(dsc);
+    const knownTypes = ENTITY_TYPE_OPTIONS.map(o => o.value);
+    const isKnown    = knownTypes.includes(dsc.entity_type);
+    const isAssocOther = dsc.associated_with
+      && Array.isArray(clients)
+      && !clients.some(c => c.company_name === dsc.associated_with);
     setFormData({
       holder_name:     dsc.holder_name,
       dsc_type:        dsc.dsc_type || '',
       dsc_password:    dsc.dsc_password || '',
       serial_number:   dsc.serial_number || '',
       associated_with: dsc.associated_with || '',
-      entity_type:     dsc.entity_type || 'firm',
+      entity_type:     isKnown ? dsc.entity_type : (dsc.entity_type ? 'other' : 'proprietor'),
+      entity_type_other: isKnown ? '' : (dsc.entity_type || ''),
+      _assocOther:     !!isAssocOther,
       issue_date:      format(new Date(dsc.issue_date), 'yyyy-MM-dd'),
       expiry_date:     format(new Date(dsc.expiry_date), 'yyyy-MM-dd'),
       notes:           dsc.notes || '',
@@ -1483,7 +1483,7 @@ export default function DSCRegister() {
   };
 
   const resetForm = () => {
-    setFormData({ holder_name: '', dsc_type: '', dsc_password: '', serial_number: '', associated_with: '', entity_type: 'firm', issue_date: '', expiry_date: '', notes: '' });
+    setFormData({ holder_name: '', dsc_type: '', dsc_password: '', serial_number: '', associated_with: '', entity_type: 'proprietor', entity_type_other: '', _assocOther: false, issue_date: '', expiry_date: '', notes: '' });
     setEditingDSC(null);
   };
 
@@ -1592,27 +1592,74 @@ export default function DSCRegister() {
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="entity_type">Entity Type</Label>
-          <Select value={formData.entity_type} onValueChange={v => setFormData({ ...formData, entity_type: v })}>
+          <Select
+            value={formData.entity_type}
+            onValueChange={v => setFormData({ ...formData, entity_type: v })}
+          >
             <SelectTrigger data-testid="dsc-entity-type-select"><SelectValue /></SelectTrigger>
             <SelectContent className="max-h-60 overflow-y-auto">
-              <SelectItem value="firm">Firm</SelectItem>
-              <SelectItem value="client">Client</SelectItem>
+              {ENTITY_TYPE_OPTIONS.map(opt => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
+          {formData.entity_type === 'other' && (
+            <Input
+              placeholder="Enter entity type (e.g. Society, AOP…)"
+              value={formData.entity_type_other || ''}
+              onChange={e => setFormData({ ...formData, entity_type_other: e.target.value })}
+              autoFocus
+            />
+          )}
         </div>
+        <div className="space-y-2">
+          <Label htmlFor="associated_with">Associated With</Label>
+          <Select
+            value={formData._assocOther ? '__other__' : (formData.associated_with || '__none__')}
+            onValueChange={v => {
+              if (v === '__other__') {
+                setFormData({ ...formData, _assocOther: true, associated_with: '' });
+              } else if (v === '__none__') {
+                setFormData({ ...formData, _assocOther: false, associated_with: '' });
+              } else {
+                setFormData({ ...formData, _assocOther: false, associated_with: v });
+              }
+            }}
+          >
+            <SelectTrigger data-testid="dsc-associated-with-select"><SelectValue /></SelectTrigger>
+            <SelectContent className="max-h-60 overflow-y-auto">
+              <SelectItem value="__none__">
+                {clients.length === 0 ? 'No clients found — add via Clients page' : 'Select client…'}
+              </SelectItem>
+              {clients.map(c => (
+                <SelectItem key={c.id} value={c.company_name}>
+                  {c.company_name}{c.client_type_label ? ` (${c.client_type_label})` : ''}
+                </SelectItem>
+              ))}
+              <SelectItem value="__other__">Other (type manually)…</SelectItem>
+            </SelectContent>
+          </Select>
+          {formData._assocOther && (
+            <Input
+              placeholder="Enter client / entity name"
+              value={formData.associated_with}
+              onChange={e => setFormData({ ...formData, associated_with: e.target.value })}
+              autoFocus
+            />
+          )}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="issue_date">Issue Date <span className="text-red-500">*</span></Label>
           <Input id="issue_date" type="date" value={formData.issue_date}
             onChange={e => setFormData({ ...formData, issue_date: e.target.value })} required data-testid="dsc-issue-date-input" />
         </div>
-      </div>
-      <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="expiry_date">Expiry Date <span className="text-red-500">*</span></Label>
           <Input id="expiry_date" type="date" value={formData.expiry_date}
             onChange={e => setFormData({ ...formData, expiry_date: e.target.value })} required data-testid="dsc-expiry-date-input" />
         </div>
-        <div />
       </div>
       <div className="space-y-2">
         <Label htmlFor="notes">Notes</Label>
