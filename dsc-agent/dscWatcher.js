@@ -98,7 +98,7 @@ const DSC_VENDOR_IDS = new Set([
 // ── Indian DSC issuer CA keywords ────────────────────────────────────────────
 const DSC_ISSUER_KEYWORDS = [
   'emudhra', 'e-mudhra', 'mudhra',
-  'nsdl', 'nsdl e-governance',
+  'nsdl', 'nsdl e-governance', 'protean',
   'sify', 'safescrypt',
   'capricorn', 'capricorn ca',
   'gnfc', 'gujarat narmada',
@@ -116,7 +116,127 @@ const DSC_ISSUER_KEYWORDS = [
   'subca', 'sub ca',
   'india pki', 'indianpki',
   'bridge ca',
+  'pantasign', 'panta sign',
+  'idsign', 'id sign',
+  'xtratrust', 'xtra trust',
+  'prodigisign', 'prodi',
+  'signx', 'sign x',
+  'care4sign', 'care 4 sign',
+  'risl', 'rajcomp',
 ];
+
+// ── CA Provider canonical name map ────────────────────────────────────────────
+// Maps keywords found in issuer/subject to a human-readable CA provider name
+const CA_PROVIDER_MAP = [
+  { keywords: ['emudhra', 'e-mudhra', 'mudhra'],                        name: 'eMudhra CA' },
+  { keywords: ['safescrypt', 'sify'],                                    name: 'Safescrypt (Sify) CA' },
+  { keywords: ['idrbt'],                                                 name: 'IDRBT CA' },
+  { keywords: ['ncode', 'ncode solutions'],                              name: 'nCode Solutions CA' },
+  { keywords: ['cdac', 'c-dac'],                                        name: 'C-DAC CA' },
+  { keywords: ['capricorn'],                                             name: 'Capricorn CA' },
+  { keywords: ['nsdl', 'protean', 'nsdl e-governance'],                 name: 'Protean eGov (NSDL) CA' },
+  { keywords: ['vsign'],                                                 name: 'VSign CA' },
+  { keywords: ['pantasign', 'panta sign'],                              name: 'PantaSign CA' },
+  { keywords: ['idsign', 'id sign'],                                     name: 'IDSign CA' },
+  { keywords: ['xtratrust', 'xtra trust'],                              name: 'XtraTrust CA' },
+  { keywords: ['prodigisign'],                                           name: 'ProDigiSign CA' },
+  { keywords: ['signx'],                                                 name: 'SignX CA' },
+  { keywords: ['care4sign'],                                             name: 'Care4Sign CA' },
+  { keywords: ['risl', 'rajcomp'],                                       name: 'RISL (RajComp) CA' },
+  { keywords: ['gnfc', 'gujarat narmada'],                              name: 'GNFC CA' },
+  { keywords: ['mtnl'],                                                  name: 'MTNL CA' },
+  { keywords: ['nic', 'national informatics'],                           name: 'NIC CA' },
+  { keywords: ['tcs', 'tata consultancy'],                              name: 'TCS CA' },
+  { keywords: ['idrbt'],                                                 name: 'IDRBT CA' },
+];
+
+// ── Token/USB Hardware Provider Map ──────────────────────────────────────────
+// Maps USB reader name or known VID-based identifiers to token provider
+const TOKEN_PROVIDER_MAP = [
+  { keywords: ['proxkey', 'prox key', 'watchdata', 'wd proxkey', '163c'], name: 'WatchData ProxKey' },
+  { keywords: ['epass2003', 'epass 2003', 'feitian', 'ftsafe', '096e'],   name: 'Feitian ePass2003' },
+  { keywords: ['epass3003', 'epass 3003'],                                 name: 'Feitian ePass3003' },
+  { keywords: ['safenet', 'etoken', 'gemalto', 'thales', '0529'],         name: 'SafeNet eToken' },
+  { keywords: ['starkey', 'star key', 'starco', 'cdac'],                  name: 'StarKey Token (C-DAC)' },
+  { keywords: ['hypersecu', 'hyp2003', '2034'],                           name: 'Hypersecu HYP2003' },
+  { keywords: ['trustkey', 'trust key'],                                   name: 'TrustKey Token' },
+  { keywords: ['moser baer', 'mbtoken', 'mtoken', '311f'],                name: 'Moser Baer mToken' },
+  { keywords: ['longmai', 'long mai', '0a89'],                             name: 'Longmai mToken' },
+  { keywords: ['eutron', '073d'],                                          name: 'Eutron CryptoIdentity' },
+  { keywords: ['acs', 'acr', '072f'],                                      name: 'ACS Smart Card Reader' },
+  { keywords: ['hid crescendo', 'activkey', '076b'],                      name: 'HID Crescendo' },
+  { keywords: ['scm microsystems', '04e6'],                                name: 'SCM Microsystems' },
+  { keywords: ['aladdin', '0529'],                                         name: 'Aladdin eToken PRO' },
+];
+
+/**
+ * Resolve CA Provider from issuer string
+ * @param {string} issuerStr - raw issuer DN or CN string
+ * @returns {string|null}
+ */
+function resolveCAProvider(issuerStr) {
+  if (!issuerStr) return null;
+  const lower = issuerStr.toLowerCase();
+  for (const { keywords, name } of CA_PROVIDER_MAP) {
+    if (keywords.some(k => lower.includes(k))) return name;
+  }
+  return null;
+}
+
+/**
+ * Resolve token/hardware provider from reader name or known info
+ * @param {string} readerName
+ * @returns {string|null}
+ */
+function resolveTokenProvider(readerName) {
+  if (!readerName) return null;
+  const lower = readerName.toLowerCase();
+  for (const { keywords, name } of TOKEN_PROVIDER_MAP) {
+    if (keywords.some(k => lower.includes(k))) return name;
+  }
+  return null;
+}
+
+/**
+ * Determine DSC type (Signing / Encryption / Both) from cert data.
+ * Indian DSCs commonly encode this in:
+ *   - OU field: "Signing", "Encryption", "Signing and Encryption"
+ *   - CN prefix: "S-", "E-"
+ *   - KeyUsage extension bits (when available via certutil output)
+ * We also use a scoring heuristic when the field is ambiguous.
+ * @param {Object} subjectFields - parsed DN fields
+ * @param {Object} raw - raw cert entry from Windows cert store
+ * @returns {'Signing'|'Encryption'|'Signing & Encryption'|'Class 3'|null}
+ */
+function detectDscType(subjectFields, raw) {
+  // Check OU field first — most Indian DSCs embed type here
+  const ou = (subjectFields.OU || '').toLowerCase();
+  const cn = (subjectFields.CN || '').toLowerCase();
+  const rawSubject = JSON.stringify(subjectFields).toLowerCase();
+  const rawIssuer  = (raw.issuer || '').toLowerCase();
+  const storeSource = (raw.storeSource || '').toLowerCase();
+
+  // Explicit type from OU
+  if (/sign\s*&?\s*encrypt|signing\s*and\s*enc/i.test(ou)) return 'Signing & Encryption';
+  if (/\bencrypt/i.test(ou) && /\bsign/i.test(ou))          return 'Signing & Encryption';
+  if (/\bencrypt/i.test(ou))                                 return 'Encryption';
+  if (/\bsign/i.test(ou))                                    return 'Signing';
+
+  // CN prefix patterns used by some CAs: "S-PANNAME", "E-PANNAME", "DS-"
+  if (/^(s|ds|sig)[_\-\s]/i.test(cn))  return 'Signing';
+  if (/^(e|enc)[_\-\s]/i.test(cn))     return 'Encryption';
+
+  // Check full subject JSON for type keywords
+  if (/sign.*encrypt|encrypt.*sign/i.test(rawSubject)) return 'Signing & Encryption';
+  if (/\bencrypt/i.test(rawSubject))                   return 'Encryption';
+  if (/\bsign/i.test(rawSubject))                      return 'Signing';
+
+  // Fallback: class hint from issuer (Class 3 is most common for Indian DSC)
+  if (/class\s*3/i.test(rawIssuer)) return 'Class 3';
+  if (/class\s*2/i.test(rawIssuer)) return 'Class 2';
+
+  return 'Class 3'; // safe default for Indian DSC tokens
+}
 
 // ── PowerShell: read all Windows cert stores ──────────────────────────────────
 const PS_MULTISOURCE = String.raw`
@@ -388,19 +508,27 @@ function parseCertEntry(entry) {
 
   const issuerCN = issu.CN || issu.O || entry.issuer || '';
 
+  // ── NEW: DSC type, CA provider, token provider ─────────────────────────────
+  const dscType      = detectDscType(subj, entry);
+  const caProvider   = resolveCAProvider(issuerCN) || resolveCAProvider(entry.issuer || '');
+  const tokenProvider = resolveTokenProvider(entry.storeSource || state.reader || '');
+
   return {
-    holder_name:   name || null,
-    email:         email || null,
-    organization:  org || null,
-    state:         st || null,
-    locality:      loc || null,
-    pan:           pan || null,
-    serial_number: entry.serialNumber || null,
-    issue_date:    normDate(entry.notBefore),
-    expiry_date:   normDate(entry.notAfter),
-    issuer:        issuerCN || null,
-    thumbprint:    entry.thumbprint || null,
-    read_method:   'agent-' + (entry.storeSource || 'certstore'),
+    holder_name:    name || null,
+    email:          email || null,
+    organization:   org || null,
+    state:          st || null,
+    locality:       loc || null,
+    pan:            pan || null,
+    serial_number:  entry.serialNumber || null,
+    issue_date:     normDate(entry.notBefore),
+    expiry_date:    normDate(entry.notAfter),
+    issuer:         issuerCN || null,
+    thumbprint:     entry.thumbprint || null,
+    read_method:    'agent-' + (entry.storeSource || 'certstore'),
+    dsc_type:       dscType,
+    ca_provider:    caProvider,
+    token_provider: tokenProvider,
   };
 }
 
@@ -570,17 +698,24 @@ function parseDerCertificate(der, readMethod) {
     let name = cn; let pan = null;
     const pm = (cn + ' ' + ou).match(/\b([A-Z]{5}[0-9]{4}[A-Z])\b/);
     if (pm) { pan = pm[1]; name = cn.replace(/^[A-Z]{5}[0-9]{4}[A-Z][-\s]+/, '').trim() || cn; }
+    const issuerCN = issuerDN.CN || issuerDN.O || null;
+    const dscType     = detectDscType(subjectDN, { issuer: issuerCN || '', storeSource: readMethod });
+    const caProvider  = resolveCAProvider(issuerCN);
+    const tokenProv   = resolveTokenProvider(state.reader || '');
     return {
-      holder_name:   name   || null,
-      organization:  org    || null,
-      email:         email  || null,
-      pan:           pan    || null,
-      serial_number: serialHex,
-      issue_date:    notBefore,
-      expiry_date:   notAfter,
-      issuer:        issuerDN.CN || issuerDN.O || null,
-      thumbprint:    null,
-      read_method:   readMethod || 'agent-apdu',
+      holder_name:    name   || null,
+      organization:   org    || null,
+      email:          email  || null,
+      pan:            pan    || null,
+      serial_number:  serialHex,
+      issue_date:     notBefore,
+      expiry_date:    notAfter,
+      issuer:         issuerCN,
+      thumbprint:     null,
+      read_method:    readMethod || 'agent-apdu',
+      dsc_type:       dscType,
+      ca_provider:    caProvider,
+      token_provider: tokenProv,
     };
   } catch { return null; }
 }
@@ -930,4 +1065,28 @@ function getStatus() {
   };
 }
 
-module.exports = { startWatcher, getStatus };
+function getAutofillFields() {
+  if (!state.plugged || !state.cert) {
+    return { available: false, fields: null };
+  }
+  const cert = state.cert;
+  return {
+    available: true,
+    fields: {
+      holder_name:    cert.holder_name    || '',
+      serial_number:  cert.serial_number  || '',
+      issue_date:     cert.issue_date     || '',
+      expiry_date:    cert.expiry_date    || '',
+      associated_with: cert.organization || '',
+      dsc_type:       cert.dsc_type       || 'Class 3',
+      ca_provider:    cert.ca_provider    || cert.issuer || '',
+      token_provider: cert.token_provider || '',
+      issuer:         cert.issuer         || '',
+      email:          cert.email          || '',
+      pan:            cert.pan            || '',
+      read_method:    cert.read_method    || '',
+    },
+  };
+}
+
+module.exports = { startWatcher, getStatus, getAutofillFields };
