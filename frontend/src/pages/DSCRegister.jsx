@@ -239,106 +239,112 @@ function todayStr() {
   return format(new Date(), 'yyyy-MM-dd');
 }
 
-// ─── Unified DSC Popup — merges "Add New DSC" + "DSC Token Detected" ─────────
-// Props:
-//   device      — WebUSB device object (null when opened manually via Add DSC button)
-//   isDark      — dark mode flag
-//   editingDSC  — DSC object when editing (null for new)
-//   onDismiss   — called when user dismisses / cancels
-//   onSaved     — called after successful save
-//   onSubmit    — called with formData for edit flow (replaces internal API call)
-function UnifiedDscPopup({ device, isDark, editingDSC, onDismiss, onSaved, onSubmit }) {
-  const isTokenMode = !!device;         // true = triggered by USB plug-in
-  const isEditMode  = !!editingDSC;     // true = editing existing DSC
+// ─── USB DSC Popup Component ──────────────────────────────────────────────────
+function UsbDscPopup({ device, isDark, onDismiss, onSaved }) {
+  const [saving, setSaving]             = useState(false);
+  const [saved,  setSaved]              = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
-  const [saving,        setSaving]        = useState(false);
-  const [saved,         setSaved]         = useState(false);
-  const [showNotes,     setShowNotes]     = useState(isEditMode);
-  const [pin,           setPin]           = useState('');
-  const [reading,       setReading]       = useState(false);
-  const [readError,     setReadError]     = useState('');
-  const [certFetched,   setCertFetched]   = useState(false);
-  const [agentAutoFetching, setAgentAutoFetching] = useState(false);
-  const [agentConnected,    setAgentConnected]    = useState(false);
-  const [autoFillDone,      setAutoFillDone]      = useState(false);
+  // Certificate reading state
+  const [pin,          setPin]          = useState('');
+  const [reading,      setReading]      = useState(false);
+  const [readError,    setReadError]    = useState('');
+  const [certFetched,  setCertFetched]  = useState(false);
   const certFileRef = useRef(null);
+  const [agentAutoFetching, setAgentAutoFetching] = useState(false);
+  const [agentConnected,   setAgentConnected]   = useState(false); // v5: agent reachable
+  const [autoFillDone,     setAutoFillDone]     = useState(false); // v5: autofill succeeded
 
-  // ── Initial form state ────────────────────────────────────────────────────
-  const initForm = () => {
-    if (isEditMode) {
-      return {
-        holder_name:     editingDSC.holder_name     || '',
-        dsc_type:        editingDSC.dsc_type        || '',
-        dsc_password:    editingDSC.dsc_password    || '',
-        serial_number:   editingDSC.serial_number   || '',
-        associated_with: editingDSC.associated_with || '',
-        entity_type:     editingDSC.entity_type     || 'firm',
-        issue_date:      editingDSC.issue_date ? format(new Date(editingDSC.issue_date), 'yyyy-MM-dd') : todayStr(),
-        expiry_date:     editingDSC.expiry_date ? format(new Date(editingDSC.expiry_date), 'yyyy-MM-dd') : defaultExpiry(),
-        notes:           editingDSC.notes           || '',
-      };
-    }
-    return {
-      holder_name:     '',
-      dsc_type:        guessDscType(device),
-      dsc_password:    '',
-      serial_number:   '',
-      associated_with: '',
-      entity_type:     'firm',
-      issue_date:      todayStr(),
-      expiry_date:     defaultExpiry(),
-      notes: device ? [
-        device.productName      ? `Device: ${device.productName}`      : null,
-        device.manufacturerName ? `Maker: ${device.manufacturerName}`  : null,
-        device.vendorId         ? `VID: 0x${device.vendorId.toString(16).toUpperCase().padStart(4,'0')}` : null,
-      ].filter(Boolean).join(' · ') : '',
-    };
-  };
+  const [form, setForm] = useState({
+    holder_name:     '',
+    dsc_type:        guessDscType(device),
+    dsc_password:    '',
+    serial_number:   '',
+    associated_with: '',
+    entity_type:     'firm',
+    issue_date:      todayStr(),
+    expiry_date:     defaultExpiry(),
+    notes:           [
+      device.productName      ? `Device: ${device.productName}`      : null,
+      device.manufacturerName ? `Maker: ${device.manufacturerName}`   : null,
+      device.vendorId         ? `VID: 0x${device.vendorId.toString(16).toUpperCase().padStart(4,'0')}` : null,
+    ].filter(Boolean).join(' · '),
+  });
 
-  const [form, setForm] = useState(initForm);
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
-  // ── Auto-fetch from agent on mount ────────────────────────────────────────
+  // ── v5: Auto-fetch cert from agent — tries /dsc-autofill first (direct field map),
+  //   then falls back to polling /dsc-status. No PIN required.
   useEffect(() => {
-    if (isEditMode) return; // no auto-fetch when editing
     let cancelled = false;
 
     async function tryAgentAutoFetch() {
       try {
+        // ── Step 1: Check agent is reachable ────────────────────────────────
         const agentOk = await checkLocalAgent();
         if (!agentOk || cancelled) return;
-        if (!cancelled) { setAgentConnected(true); setAgentAutoFetching(true); }
+        if (!cancelled) setAgentConnected(true);
 
-        // Immediate attempt
+        setAgentAutoFetching(true);
+
+        // ── Step 2: Try /dsc-autofill first — returns fields directly mapped
+        //   to form state; fills everything in one shot including dsc_type, pan, etc.
         try {
-          const r = await fetch('http://127.0.0.1:7432/dsc-autofill', { signal: AbortSignal.timeout(4000), cache: 'no-store' });
-          if (r.ok) {
-            const d = await r.json();
-            if (d.available && d.fields?.holder_name) {
-              if (!cancelled) { applyAutofill(d.fields); toast.success('✓ DSC token auto-filled — no PIN needed!'); setAutoFillDone(true); }
-              return;
+          const autofillRes = await fetch('http://127.0.0.1:7432/dsc-autofill', {
+            signal: AbortSignal.timeout(4000),
+            cache:  'no-store',
+          });
+          if (autofillRes.ok) {
+            const autofillData = await autofillRes.json();
+            if (autofillData.available && autofillData.fields?.holder_name) {
+              if (!cancelled) {
+                applyAutofill(autofillData.fields);
+                toast.success('✓ DSC token auto-filled — no PIN needed!');
+                setAutoFillDone(true);
+              }
+              return; // done — no need to poll
             }
           }
-        } catch { /* fall through to polling */ }
+        } catch { /* /dsc-autofill not available (agent < v5), fall through */ }
 
-        // Poll up to 30s (15 × 2s)
+        // ── Step 3: Poll both /dsc-autofill AND /dsc-status every 2s for up to 30s ────
+        // The agent may still be parsing the cert when the popup first opens,
+        // so we keep retrying until cert data is available (up to 30s).
         for (let i = 0; i < 15; i++) {
           if (cancelled) break;
+          // Prefer /dsc-autofill (direct field mapping, available in agent v5+)
           try {
-            const r = await fetch('http://127.0.0.1:7432/dsc-autofill', { signal: AbortSignal.timeout(3000), cache: 'no-store' });
-            if (r.ok) {
-              const d = await r.json();
-              if (d.available && d.fields?.holder_name) {
-                if (!cancelled) { applyAutofill(d.fields); toast.success('✓ DSC token auto-filled!'); setAutoFillDone(true); }
+            const afRes = await fetch('http://127.0.0.1:7432/dsc-autofill', {
+              signal: AbortSignal.timeout(3000),
+              cache:  'no-store',
+            });
+            if (afRes.ok) {
+              const afData = await afRes.json();
+              if (afData.available && afData.fields?.holder_name) {
+                if (!cancelled) {
+                  applyAutofill(afData.fields);
+                  toast.success('✓ DSC token auto-filled — no PIN needed!');
+                  setAutoFillDone(true);
+                }
                 return;
               }
             }
           } catch { /* keep polling */ }
+          // Also try /dsc-status as fallback
           try {
-            const r2 = await fetch('http://127.0.0.1:7432/dsc-status', { signal: AbortSignal.timeout(3000), cache: 'no-store' });
-            if (r2.ok) {
-              const d2 = await r2.json();
-              if (d2.cert?.holder_name) { if (!cancelled) applyCert(d2.cert); return; }
+            const res = await fetch('http://127.0.0.1:7432/dsc-status', {
+              signal: AbortSignal.timeout(3000),
+              cache:  'no-store',
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.cert && data.cert.holder_name) {
+                if (!cancelled) {
+                  applyCert(data.cert);
+                  toast.success('✓ Token data auto-filled — no PIN needed!');
+                }
+                return;
+              }
             }
           } catch { /* keep polling */ }
           await new Promise(r => setTimeout(r, 2000));
@@ -351,6 +357,7 @@ function UnifiedDscPopup({ device, isDark, editingDSC, onDismiss, onSaved, onSub
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── v5: Apply structured autofill from /dsc-autofill (direct field mapping) ──
   const applyAutofill = (fields) => {
     setForm(prev => ({
       ...prev,
@@ -362,89 +369,140 @@ function UnifiedDscPopup({ device, isDark, editingDSC, onDismiss, onSaved, onSub
       dsc_type:        fields.dsc_type        || prev.dsc_type,
       notes: [
         prev.notes,
-        fields.issuer         ? `Issuer: ${fields.issuer}`              : null,
-        fields.ca_provider    ? `CA Provider: ${fields.ca_provider}`    : null,
-        fields.token_provider ? `Token: ${fields.token_provider}`       : null,
-        fields.email          ? `Email: ${fields.email}`                : null,
-        fields.pan            ? `PAN: ${fields.pan}`                    : null,
+        fields.issuer ? `Issuer: ${fields.issuer}` : null,
+        fields.email  ? `Email: ${fields.email}`   : null,
+        fields.pan    ? `PAN: ${fields.pan}`        : null,
       ].filter(Boolean).join('\n'),
     }));
     setCertFetched(true);
   };
 
+  // ── Apply parsed cert data to form (legacy /dsc-status path) ─────────────────
   const applyCert = (cert) => {
     setForm(prev => ({
       ...prev,
-      holder_name:     cert.holder_name                          || prev.holder_name,
-      serial_number:   cert.serial_number                        || prev.serial_number,
-      issue_date:      cert.issue_date                           || prev.issue_date,
-      expiry_date:     cert.expiry_date                          || prev.expiry_date,
-      associated_with: cert.associated_with || cert.organization || prev.associated_with,
-      dsc_type:        cert.dsc_type                             || prev.dsc_type,
+      holder_name:     cert.holder_name                             || prev.holder_name,
+      serial_number:   cert.serial_number                           || prev.serial_number,
+      issue_date:      cert.issue_date                              || prev.issue_date,
+      expiry_date:     cert.expiry_date                             || prev.expiry_date,
+      associated_with: cert.associated_with || cert.organization    || prev.associated_with,
+      dsc_type:        cert.dsc_type                                || prev.dsc_type,
       notes: [
         prev.notes,
-        cert.issuer         ? `Issuer: ${cert.issuer}`              : null,
-        cert.ca_provider    ? `CA Provider: ${cert.ca_provider}`    : null,
-        cert.token_provider ? `Token: ${cert.token_provider}`       : null,
-        cert.email          ? `Email: ${cert.email}`                : null,
-        cert.pan            ? `PAN: ${cert.pan}`                    : null,
+        cert.issuer ? `Issuer: ${cert.issuer}` : null,
+        cert.email  ? `Email: ${cert.email}`   : null,
+        cert.pan    ? `PAN: ${cert.pan}`        : null,
       ].filter(Boolean).join('\n'),
     }));
     setCertFetched(true);
   };
 
-  // ── 4-tier cert read with PIN ─────────────────────────────────────────────
+  // ── 4-Tier certificate reading strategy ──────────────────────────────────────
+  // Tier 1: navigator.smartCard  — Chrome PC/SC API (Windows + fixed API shape)
+  // Tier 2: Local DSC Agent      — node process on localhost:7432 (most reliable on Windows)
+  // Tier 3: WebUSB + CCID        — direct USB (Linux/Mac only)
+  // Tier 4: File upload fallback — always works (.cer export from mToken Manager)
   const handleReadCertificate = async () => {
     if (!pin.trim()) { setReadError('Enter the token PIN first.'); return; }
-    setReading(true); setReadError('');
-    const errs = [];
+    setReading(true);
+    setReadError('');
 
+    const tierErrors = [];
+
+    // ── TIER 1: navigator.smartCard (Chrome 114+ on Windows) ─────────────────
     if (isWebSmartCardSupported()) {
+      console.log('[DSC] Tier 1: trying navigator.smartCard…');
       try {
         const cert = await readCertFromWebSmartCard(pin.trim());
-        if (cert?.holder_name) { applyCert(cert); toast.success(`Certificate read ✓ (${cert.read_method})`); setReading(false); return; }
-        errs.push('Tier 1: no cert found');
-      } catch (err) {
-        if (err?.message?.includes('PIN') || err?.message?.includes('blocked') || err?.message?.includes('attempt')) {
-          setReadError(err.message); setReading(false); return;
+        if (cert && cert.holder_name) {
+          applyCert(cert);
+          toast.success(`Certificate read from token ✓ (method: ${cert.read_method})`);
+          setReading(false);
+          return;
         }
-        errs.push(`Tier 1: ${err.message}`);
+        tierErrors.push('Tier 1 (smartCard): no certificate found');
+      } catch (err) {
+        console.warn('[DSC] Tier 1 smartCard error:', err.message);
+        // PIN / block errors are definitive — stop here
+        if (err?.message?.includes('PIN') || err?.message?.includes('blocked') || err?.message?.includes('attempt')) {
+          setReadError(err.message);
+          setReading(false);
+          return;
+        }
+        tierErrors.push(`Tier 1 (smartCard): ${err.message}`);
       }
+    } else {
+      tierErrors.push('Tier 1 (smartCard): not available in this browser');
+      console.log('[DSC] Tier 1: navigator.smartCard not supported, skipping');
     }
 
+    // ── TIER 2: Local DSC Agent (node on localhost:7432) ──────────────────────
+    console.log('[DSC] Tier 2: checking local DSC agent…');
     const agentRunning = await checkLocalAgent();
     if (agentRunning) {
       try {
         const cert = await readCertFromLocalAgent(pin.trim());
-        if (cert?.holder_name) { applyCert(cert); toast.success('Certificate read via agent ✓'); setReading(false); return; }
-        errs.push('Tier 2: no cert found');
-      } catch (err) {
-        if (err?.message?.includes('PIN') || err?.message?.includes('blocked') || err?.message?.includes('Incorrect')) {
-          setReadError(err.message); setReading(false); return;
+        if (cert && cert.holder_name) {
+          applyCert(cert);
+          toast.success('Certificate read via local agent ✓');
+          setReading(false);
+          return;
         }
-        errs.push(`Tier 2: ${err.message}`);
+        tierErrors.push('Tier 2 (local agent): no certificate found');
+      } catch (err) {
+        console.warn('[DSC] Tier 2 local agent error:', err.message);
+        if (err?.message?.includes('PIN') || err?.message?.includes('blocked') || err?.message?.includes('Incorrect')) {
+          setReadError(err.message);
+          setReading(false);
+          return;
+        }
+        tierErrors.push(`Tier 2 (local agent): ${err.message}`);
       }
+    } else {
+      tierErrors.push('Tier 2 (local agent): not running on localhost:7432');
+      console.log('[DSC] Tier 2: local agent not running');
     }
 
+    // ── TIER 3: WebUSB + CCID (Linux / Mac) ───────────────────────────────────
     if (device) {
+      console.log('[DSC] Tier 3: trying WebUSB…');
       try {
         if (!device.opened) await device.open();
         const cert = await readCertFromUsbToken(device, pin.trim());
-        if (cert?.holder_name) { applyCert(cert); toast.success('Certificate read via WebUSB ✓'); setReading(false); return; }
-        errs.push('Tier 3: no cert found');
-      } catch (err) { errs.push(`Tier 3: ${err.message}`); }
+        if (cert && cert.holder_name) {
+          applyCert(cert);
+          toast.success('Certificate read via WebUSB ✓');
+          setReading(false);
+          return;
+        }
+        tierErrors.push('Tier 3 (WebUSB): no certificate found');
+      } catch (err) {
+        console.warn('[DSC] Tier 3 WebUSB error:', err.message);
+        tierErrors.push(`Tier 3 (WebUSB): ${err.message}`);
+      }
+    } else {
+      tierErrors.push('Tier 3 (WebUSB): no USB device available');
     }
 
-    setReadError('FILE_UPLOAD_NEEDED'); setReading(false);
+    // ── TIER 4: File upload (universal fallback) ──────────────────────────────
+    console.log('[DSC] All tiers failed — showing file upload fallback');
+    console.log('[DSC] Tier errors:\n' + tierErrors.join('\n'));
+    setReadError('FILE_UPLOAD_NEEDED');
+    setReading(false);
   };
 
+  // ── Handle .cer / .pem file upload ───────────────────────────────────────────
   const handleCertFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setReadError(''); setReading(true);
+    setReadError('');
+    setReading(true);
     try {
       const cert = await parseCertificateFile(file);
-      if (!cert?.holder_name) { setReadError('Could not read certificate. Make sure it is a valid .cer or .pem file.'); return; }
+      if (!cert || !cert.holder_name) {
+        setReadError('Could not read certificate from this file. Make sure it is a valid .cer or .pem file.');
+        return;
+      }
       applyCert(cert);
       toast.success(`Certificate read from ${file.name} ✓`);
     } catch (err) {
@@ -456,7 +514,7 @@ function UnifiedDscPopup({ device, isDark, editingDSC, onDismiss, onSaved, onSub
   };
 
   const handleSave = async () => {
-    if (!form.holder_name.trim() || !form.issue_date || !form.expiry_date) return;
+    if (!form.holder_name.trim()) { return; }
     setSaving(true);
     try {
       const payload = {
@@ -470,265 +528,445 @@ function UnifiedDscPopup({ device, isDark, editingDSC, onDismiss, onSaved, onSub
         expiry_date:     new Date(form.expiry_date).toISOString(),
         notes:           form.notes,
       };
-
-      if (isEditMode && onSubmit) {
-        await onSubmit(payload);
-        setSaved(true);
-        setTimeout(() => onSaved(), 900);
-        return;
-      }
-
       const res = await api.post('/dsc', payload);
       const newId = res.data?.id || res.data?.data?.id;
-      if (newId && isTokenMode) {
+
+      // Auto-mark as IN immediately
+      if (newId) {
         await api.post(`/dsc/${newId}/movement`, {
-          movement_type: 'IN', person_name: 'Token Inserted',
-          notes: 'Auto-detected via USB — marked IN on plug-in',
+          movement_type: 'IN',
+          person_name:   'Token Inserted',
+          notes:         'Auto-detected via USB — marked IN on plug-in',
         });
       }
+
       setSaved(true);
-      toast.success(`DSC for "${form.holder_name}" ${isTokenMode ? 'added & marked IN' : 'added'} ✓`);
-      setTimeout(() => onSaved(), 1200);
+      toast.success(`DSC for "${form.holder_name}" added & marked IN ✓`);
+      setTimeout(() => { onSaved(); }, 1200);
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Failed to save DSC');
       setSaving(false);
     }
   };
 
-  // ── Styles ────────────────────────────────────────────────────────────────
-  const bg       = isDark ? '#0f172a' : '#ffffff';
-  const surface  = isDark ? '#1e293b' : '#f8fafc';
-  const border   = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
-  const labelClr = isDark ? '#94a3b8' : '#64748b';
-  const textClr  = isDark ? '#f1f5f9' : '#0f172a';
-  const inputBg  = isDark ? '#0f172a' : '#ffffff';
-  const inputBdr = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.14)';
+  // ── colour palette ──────────────────────────────────────────────────────────
+  const bg        = isDark ? '#0f172a' : '#ffffff';
+  const surface   = isDark ? '#1e293b' : '#f8fafc';
+  const border    = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+  const labelClr  = isDark ? '#94a3b8' : '#64748b';
+  const textClr   = isDark ? '#f1f5f9' : '#0f172a';
+  const inputBg   = isDark ? '#0f172a' : '#ffffff';
+  const inputBdr  = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.14)';
 
-  const inp = {
+  const inputStyle = {
     width: '100%', boxSizing: 'border-box',
     background: inputBg, border: `1px solid ${inputBdr}`,
     borderRadius: 8, padding: '7px 10px',
-    fontSize: 13, color: textClr, outline: 'none', fontFamily: 'inherit',
+    fontSize: 13, color: textClr,
+    outline: 'none', fontFamily: 'inherit',
   };
-  const lbl = { fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: labelClr, display: 'block', marginBottom: 4 };
-  const autoInp = (filled) => ({ ...inp, background: certFetched && filled ? (isDark ? 'rgba(16,185,129,0.08)' : '#f0fdf4') : inputBg, borderColor: certFetched && filled ? '#10b981' : inputBdr });
-
-  // ── Title / subtitle for header ───────────────────────────────────────────
-  const headerTitle = saved
-    ? (isEditMode ? 'DSC Updated ✓' : 'DSC Added ✓')
-    : isEditMode ? `Edit DSC — ${editingDSC.holder_name}`
-    : isTokenMode ? 'DSC Token Detected'
-    : 'Add New DSC';
-
-  const headerSub = saved
-    ? `"${form.holder_name}" ${isEditMode ? 'updated' : isTokenMode ? 'added & marked IN' : 'added'} successfully`
-    : isEditMode ? 'Update certificate details below'
-    : isTokenMode
-      ? (device?.productName
-          ? <><span style={{ color: '#818cf8', fontWeight: 600 }}>{device.productName}</span> — fill details below</>
-          : 'USB token detected — fill details to register')
-      : 'Fill details or plug in your DSC token to auto-fill';
+  const labelStyle = { fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: labelClr, display: 'block', marginBottom: 4 };
+  const rowStyle   = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 };
 
   return (
     <>
       <style>{USB_POPUP_STYLE}</style>
-      <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(0,0,0,0.52)', backdropFilter: 'blur(5px)' }}>
-        <div style={{ width: '100%', maxWidth: 680, maxHeight: '92vh', background: bg, border: `1px solid ${border}`, borderRadius: 20, boxShadow: '0 24px 64px rgba(0,0,0,0.35)', overflow: 'hidden', display: 'flex', flexDirection: 'column', animation: 'dscSlideUp 0.26s cubic-bezier(0.34,1.4,0.64,1)' }}>
+      <div
+        style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          display: 'flex', alignItems: 'center',
+          justifyContent: 'center',
+          padding: '16px',
+          background: 'rgba(0,0,0,0.52)',
+          backdropFilter: 'blur(5px)',
+        }}
+      >
+        <div style={{
+          width: '100%', maxWidth: 720,
+          maxHeight: '90vh',
+          background: bg, border: `1px solid ${border}`,
+          borderRadius: 20, boxShadow: '0 24px 64px rgba(0,0,0,0.35)',
+          overflow: 'hidden',
+          display: 'flex', flexDirection: 'column',
+          animation: 'dscSlideUp 0.26s cubic-bezier(0.34,1.4,0.64,1)',
+        }}>
 
-          {/* Accent bar */}
+          {/* ── Accent bar ── */}
           <div style={{ height: 3, background: 'linear-gradient(90deg,#4f46e5,#6366f1,#818cf8,#4f46e5)', backgroundSize: '200% 100%' }} />
 
-          {/* Header */}
-          <div style={{ padding: '16px 18px 10px', display: 'flex', alignItems: 'flex-start', gap: 12, flexShrink: 0 }}>
-            <div style={{ width: 44, height: 44, borderRadius: 12, flexShrink: 0, background: saved ? 'linear-gradient(135deg,#10b981,#059669)' : isTokenMode ? 'linear-gradient(135deg,#4f46e5,#6366f1)' : 'linear-gradient(135deg,#6366f1,#818cf8)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 14px rgba(79,70,229,0.3)', transition: 'background 0.4s' }}>
-              {saved ? <CheckCircle2 style={{ width: 21, height: 21, color: '#fff' }} /> : isTokenMode ? <Usb style={{ width: 21, height: 21, color: '#fff' }} /> : <Key style={{ width: 21, height: 21, color: '#fff' }} />}
+          {/* ── Header ── */}
+          <div style={{ padding: '18px 20px 12px', display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+            {/* Icon */}
+            <div style={{
+              width: 46, height: 46, borderRadius: 13, flexShrink: 0,
+              background: saved ? 'linear-gradient(135deg,#10b981,#059669)' : 'linear-gradient(135deg,#4f46e5,#6366f1)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 4px 14px rgba(79,70,229,0.35)',
+              transition: 'background 0.4s',
+            }}>
+              {saved
+                ? <CheckCircle2 style={{ width: 22, height: 22, color: '#fff' }} />
+                : <Key style={{ width: 22, height: 22, color: '#fff' }} />}
             </div>
+
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: textClr }}>{headerTitle}</p>
-                {isTokenMode && !saved && <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', animation: 'dscPulse 1.4s ease-in-out infinite', flexShrink: 0 }} />}
+                <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: textClr, lineHeight: 1.2 }}>
+                  {saved ? 'DSC Added ✓' : 'DSC Token Detected'}
+                </p>
+                {/* Live USB dot */}
+                {!saved && (
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', animation: 'dscPulse 1.4s ease-in-out infinite', flexShrink: 0 }} />
+                )}
               </div>
-              <p style={{ margin: '3px 0 0', fontSize: 11, color: labelClr, lineHeight: 1.5 }}>{headerSub}</p>
+              <p style={{ margin: '3px 0 0', fontSize: 12, color: labelClr, lineHeight: 1.5 }}>
+                {saved
+                  ? `"${form.holder_name}" added to DSC Register & marked IN`
+                  : device.productName
+                      ? <><span style={{ color: '#818cf8', fontWeight: 600 }}>{device.productName}</span> — fill details below</>
+                      : 'Fill details to add this certificate to the register'}
+              </p>
             </div>
+
+            {/* Dismiss × */}
             {!saved && (
-              <button onClick={onDismiss} style={{ background: 'none', border: 'none', cursor: 'pointer', color: labelClr, padding: 4, borderRadius: 6, fontSize: 18, lineHeight: 1, flexShrink: 0 }} title="Close">×</button>
+              <button
+                onClick={onDismiss}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: labelClr, padding: 4, borderRadius: 6, lineHeight: 1, fontSize: 18, flexShrink: 0 }}
+                title="Dismiss"
+              >×</button>
             )}
           </div>
 
-          {/* Token device pill — only in token mode */}
-          {isTokenMode && !saved && (device?.manufacturerName || device?.vendorId) && (
-            <div style={{ margin: '0 18px 10px', padding: '6px 12px', background: surface, borderRadius: 10, border: `1px solid ${border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Usb style={{ width: 12, height: 12, color: '#818cf8', flexShrink: 0 }} />
-              <span style={{ fontSize: 11, color: labelClr, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {[device.manufacturerName, device.vendorId ? `VID 0x${device.vendorId.toString(16).toUpperCase().padStart(4,'0')}` : null, device.productId ? `PID 0x${device.productId.toString(16).toUpperCase().padStart(4,'0')}` : null].filter(Boolean).join(' · ')}
+          {/* ── Device info pill ── */}
+          {(device.manufacturerName || device.vendorId) && !saved && (
+            <div style={{ margin: '0 20px 12px', padding: '7px 12px', background: surface, borderRadius: 10, border: `1px solid ${border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Usb style={{ width: 13, height: 13, color: '#818cf8', flexShrink: 0 }} />
+              <span style={{ fontSize: 11, color: labelClr, fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {[
+                  device.manufacturerName || null,
+                  device.vendorId  ? `VID 0x${device.vendorId.toString(16).toUpperCase().padStart(4,'0')}`  : null,
+                  device.productId ? `PID 0x${device.productId.toString(16).toUpperCase().padStart(4,'0')}` : null,
+                ].filter(Boolean).join(' · ')}
               </span>
             </div>
           )}
 
-          {/* Scrollable form body */}
+          {/* ── Form ── */}
           {!saved && (
-            <div style={{ padding: '0 18px 4px', overflowY: 'auto', flex: 1 }}>
+            <div style={{ padding: '0 20px 4px', overflowY: 'auto', flex: 1 }}>
 
-              {/* ── Agent status / auto-fill banner ── */}
-              {!isEditMode && agentConnected && !certFetched && (
-                <div style={{ marginBottom: 10, padding: '8px 12px', background: isDark ? 'rgba(99,102,241,0.12)' : '#eef2ff', borderRadius: 8, border: '1px solid rgba(99,102,241,0.3)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: agentAutoFetching ? '#f59e0b' : '#10b981', animation: agentAutoFetching ? 'dscPulse 1s ease-in-out infinite' : 'none' }} />
+              {/* ── Agent Status Banner (v5) ── */}
+              {agentConnected && !certFetched && (
+                <div style={{
+                  marginBottom: 10, padding: '8px 12px',
+                  background: isDark ? 'rgba(99,102,241,0.12)' : '#eef2ff',
+                  borderRadius: 8, border: '1px solid rgba(99,102,241,0.35)',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}>
+                  <span style={{
+                    width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                    background: agentAutoFetching ? '#f59e0b' : '#10b981',
+                    animation: agentAutoFetching ? 'dscPulse 1s ease-in-out infinite' : 'none',
+                  }} />
                   <span style={{ fontSize: 11, color: isDark ? '#a5b4fc' : '#4338ca', fontWeight: 600, flex: 1 }}>
-                    {agentAutoFetching ? '⏳ DSC Agent connected — reading certificate from token…' : '✓ DSC Agent connected — plug in token to auto-fill all fields'}
+                    {agentAutoFetching
+                      ? '⏳ DSC Agent connected — reading token certificate…'
+                      : '✓ DSC Agent connected — plug in your DSC token to auto-fill all fields'}
                   </span>
                   {!agentAutoFetching && (
                     <button
                       onClick={async () => {
                         setAgentAutoFetching(true);
                         try {
-                          const r = await fetch('http://127.0.0.1:7432/dsc-autofill', { signal: AbortSignal.timeout(4000), cache: 'no-store' });
-                          if (r.ok) { const d = await r.json(); if (d.available && d.fields?.holder_name) { applyAutofill(d.fields); setAutoFillDone(true); toast.success('✓ DSC data auto-filled!'); return; } }
-                          const r2 = await fetch('http://127.0.0.1:7432/dsc-status', { signal: AbortSignal.timeout(3000), cache: 'no-store' });
-                          if (r2.ok) { const d2 = await r2.json(); if (d2.cert?.holder_name) { applyCert(d2.cert); return; } }
-                          toast.info('No token detected yet — plug in your DSC token and try again.');
+                          const res = await fetch('http://127.0.0.1:7432/dsc-autofill', {
+                            signal: AbortSignal.timeout(4000), cache: 'no-store',
+                          });
+                          if (res.ok) {
+                            const d = await res.json();
+                            if (d.available && d.fields?.holder_name) {
+                              applyAutofill(d.fields);
+                              setAutoFillDone(true);
+                              toast.success('✓ DSC data auto-filled!');
+                              return;
+                            }
+                          }
+                          // fallback to /dsc-status
+                          const r2 = await fetch('http://127.0.0.1:7432/dsc-status', {
+                            signal: AbortSignal.timeout(3000), cache: 'no-store',
+                          });
+                          if (r2.ok) {
+                            const d2 = await r2.json();
+                            if (d2.cert?.holder_name) { applyCert(d2.cert); return; }
+                          }
+                          toast.info('No DSC token detected yet — plug in your token and try again.');
                         } catch { toast.error('Could not reach agent.'); }
                         finally { setAgentAutoFetching(false); }
                       }}
-                      style={{ fontSize: 10, fontWeight: 700, padding: '3px 10px', borderRadius: 5, border: '1px solid rgba(99,102,241,0.5)', background: 'transparent', color: isDark ? '#a5b4fc' : '#4338ca', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                    >↻ Re-fetch</button>
+                      style={{
+                        fontSize: 10, fontWeight: 700, padding: '3px 10px',
+                        borderRadius: 5, border: '1px solid rgba(99,102,241,0.5)',
+                        background: 'transparent', color: isDark ? '#a5b4fc' : '#4338ca',
+                        cursor: 'pointer', whiteSpace: 'nowrap',
+                      }}
+                    >
+                      ↻ Re-fetch
+                    </button>
                   )}
                 </div>
               )}
 
-              {/* Auto-fill success banner */}
+              {/* ── Auto-fill success banner ── */}
               {autoFillDone && certFetched && (
-                <div style={{ marginBottom: 10, padding: '8px 12px', background: isDark ? 'rgba(16,185,129,0.10)' : '#f0fdf4', borderRadius: 8, border: '1px solid rgba(16,185,129,0.4)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{
+                  marginBottom: 10, padding: '8px 12px',
+                  background: isDark ? 'rgba(16,185,129,0.10)' : '#f0fdf4',
+                  borderRadius: 8, border: '1px solid rgba(16,185,129,0.4)',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}>
                   <span style={{ fontSize: 13 }}>✅</span>
-                  <span style={{ fontSize: 11, color: '#10b981', fontWeight: 700, flex: 1 }}>All fields auto-filled from DSC token — verify and save.</span>
-                  <button onClick={() => { setAutoFillDone(false); setCertFetched(false); }} style={{ fontSize: 10, background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer' }}>✕</button>
+                  <span style={{ fontSize: 11, color: '#10b981', fontWeight: 700, flex: 1 }}>
+                    All fields auto-filled from DSC token — verify and save.
+                  </span>
+                  <button
+                    onClick={() => { setAutoFillDone(false); setCertFetched(false); setAgentAutoFetching(false); }}
+                    style={{ fontSize: 10, background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer' }}
+                  >
+                    ✕ Clear
+                  </button>
                 </div>
               )}
 
-              {/* ── PIN / Fetch Data section ── */}
-              {!isEditMode && (
-                <div style={{ marginBottom: 14, padding: '10px 12px', background: certFetched ? (isDark ? 'rgba(16,185,129,0.1)' : '#f0fdf4') : surface, borderRadius: 10, border: `1px solid ${certFetched ? '#10b981' : readError ? '#ef4444' : border}` }}>
-                  <label style={{ ...lbl, marginBottom: 6, color: certFetched ? '#10b981' : readError ? '#ef4444' : labelClr }}>
-                    {certFetched ? '✓ Certificate Read from Token' : agentAutoFetching ? '⏳ Reading certificate…' : 'Read Certificate from Token (Optional)'}
-                  </label>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {/* ── PIN Read Section ── */}
+              <div style={{ marginBottom: 14, padding: '10px 12px', background: certFetched ? (isDark ? 'rgba(16,185,129,0.1)' : '#f0fdf4') : surface, borderRadius: 10, border: `1px solid ${certFetched ? '#10b981' : readError ? '#ef4444' : border}` }}>
+                <label style={{ ...labelStyle, marginBottom: 6, color: certFetched ? '#10b981' : readError ? '#ef4444' : labelClr }}>
+                  {certFetched
+                    ? '✓ Certificate Read from Token'
+                    : agentAutoFetching
+                      ? '⏳ Reading certificate from token…'
+                      : agentConnected
+                        ? 'PIN required? Enter below to force-read:'
+                        : 'Read Certificate from Token (Optional)'}
+                </label>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    style={{ ...inputStyle, flex: 1, letterSpacing: pin ? '0.2em' : 'normal' }}
+                    type="password"
+                    placeholder={agentConnected ? 'PIN only needed if auto-fill failed above' : 'Enter token PIN / password'}
+                    value={pin}
+                    onChange={e => { setPin(e.target.value); setReadError(''); }}
+                    onKeyDown={e => { if (e.key === 'Enter') handleReadCertificate(); }}
+                    disabled={reading}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleReadCertificate}
+                    disabled={reading || !pin.trim()}
+                    style={{
+                      height: 34, padding: '0 14px', borderRadius: 8, border: 'none',
+                      background: certFetched ? 'linear-gradient(135deg,#10b981,#059669)' : 'linear-gradient(135deg,#4f46e5,#6366f1)',
+                      color: '#fff', fontSize: 12, fontWeight: 700, cursor: reading || !pin.trim() ? 'not-allowed' : 'pointer',
+                      opacity: !pin.trim() ? 0.5 : 1,
+                      display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {reading
+                      ? <><span style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.35)', borderTopColor: '#fff', borderRadius: '50%', display: 'inline-block', animation: 'dscSpin 0.7s linear infinite' }} />Reading…</>
+                      : certFetched ? '↻ Re-read' : '⬆ Fetch Data'}
+                  </button>
+                </div>
+                {readError === 'FILE_UPLOAD_NEEDED' ? (
+                  /* ── Fallback: .cer file upload + local agent option ── */
+                  <div style={{ margin: '8px 0 0', padding: '10px 12px', background: isDark ? 'rgba(251,191,36,0.08)' : '#fffbeb', borderRadius: 8, border: '1px solid rgba(251,191,36,0.35)' }}>
+                    <p style={{ margin: '0 0 4px', fontSize: 11, color: '#d97706', fontWeight: 700 }}>
+                      🪟 Auto-read failed — upload your certificate file instead
+                    </p>
+                    <p style={{ margin: '0 0 6px', fontSize: 10, color: isDark ? '#fde68a' : '#92400e', lineHeight: 1.6 }}>
+                      Export from <strong>mToken Manager</strong> → Certificate tab → <strong>Export</strong> → save as <code style={{ background: isDark ? '#1e1b4b' : '#e0e7ff', padding: '1px 4px', borderRadius: 3 }}>.cer</code>, then upload:
+                    </p>
                     <input
-                      style={{ ...inp, flex: 1, letterSpacing: pin ? '0.2em' : 'normal' }}
-                      type="password"
-                      placeholder={agentConnected ? 'PIN only needed if auto-fill failed' : 'Enter token PIN to fetch certificate data'}
-                      value={pin}
-                      onChange={e => { setPin(e.target.value); setReadError(''); }}
-                      onKeyDown={e => { if (e.key === 'Enter') handleReadCertificate(); }}
-                      disabled={reading}
+                      ref={certFileRef}
+                      type="file"
+                      accept=".cer,.crt,.pem,.der"
+                      style={{ display: 'none' }}
+                      onChange={handleCertFileUpload}
                     />
-                    <button
-                      type="button"
-                      onClick={handleReadCertificate}
-                      disabled={reading || !pin.trim()}
-                      style={{ height: 34, padding: '0 14px', borderRadius: 8, border: 'none', background: certFetched ? 'linear-gradient(135deg,#10b981,#059669)' : 'linear-gradient(135deg,#4f46e5,#6366f1)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: reading || !pin.trim() ? 'not-allowed' : 'pointer', opacity: !pin.trim() ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}
-                    >
-                      {reading ? <><span style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.35)', borderTopColor: '#fff', borderRadius: '50%', display: 'inline-block', animation: 'dscSpin 0.7s linear infinite' }} />Reading…</> : certFetched ? '↻ Re-read' : '⬆ Fetch Data'}
-                    </button>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => certFileRef.current?.click()}
+                        disabled={reading}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                          padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                          background: 'linear-gradient(135deg,#f59e0b,#d97706)',
+                          color: '#fff', fontSize: 11, fontWeight: 700,
+                        }}
+                      >
+                        📂 Upload .cer / .pem File
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const report = await diagnoseDscReader();
+                          alert('DSC Diagnostic Report\n\n' + report + '\n\nThis report was also printed to the DevTools console.');
+                        }}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                          padding: '6px 12px', borderRadius: 6, border: `1px solid ${isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)'}`,
+                          background: 'transparent', cursor: 'pointer',
+                          color: isDark ? '#94a3b8' : '#64748b', fontSize: 10, fontWeight: 600,
+                        }}
+                        title="Run full diagnostic to see why auto-read failed"
+                      >
+                        🔍 Run Diagnostic
+                      </button>
+                    </div>
+                    <p style={{ margin: '8px 0 2px', fontSize: 9.5, color: isDark ? '#6b7280' : '#9ca3af', lineHeight: 1.5 }}>
+                      💡 <strong>For Windows users:</strong> Run the <code style={{ background: isDark ? '#1e293b' : '#f1f5f9', padding: '1px 3px', borderRadius: 2 }}>dsc-agent</code> locally with <code style={{ background: isDark ? '#1e293b' : '#f1f5f9', padding: '1px 3px', borderRadius: 2 }}>node index.js</code> for automatic reading.
+                    </p>
+                    <p style={{ margin: '2px 0 0', fontSize: 9, color: isDark ? '#6b7280' : '#9ca3af' }}>
+                      Your private key is never exported — only the public certificate (name, dates, serial).
+                    </p>
                   </div>
-                  {readError === 'FILE_UPLOAD_NEEDED' ? (
-                    <div style={{ margin: '8px 0 0', padding: '10px 12px', background: isDark ? 'rgba(251,191,36,0.08)' : '#fffbeb', borderRadius: 8, border: '1px solid rgba(251,191,36,0.35)' }}>
-                      <p style={{ margin: '0 0 4px', fontSize: 11, color: '#d97706', fontWeight: 700 }}>Auto-read failed — upload your certificate file instead</p>
-                      <p style={{ margin: '0 0 6px', fontSize: 10, color: isDark ? '#fde68a' : '#92400e', lineHeight: 1.6 }}>
-                        Export from <strong>mToken Manager</strong> → Certificate → <strong>Export</strong> → save as <code style={{ background: isDark ? '#1e1b4b' : '#e0e7ff', padding: '1px 4px', borderRadius: 3 }}>.cer</code>
-                      </p>
-                      <input ref={certFileRef} type="file" accept=".cer,.crt,.pem,.der" style={{ display: 'none' }} onChange={handleCertFileUpload} />
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button onClick={() => certFileRef.current?.click()} disabled={reading} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg,#f59e0b,#d97706)', color: '#fff', fontSize: 11, fontWeight: 700 }}>
-                          📂 Upload .cer / .pem File
-                        </button>
-                        <button onClick={async () => { const r = await diagnoseDscReader(); alert('DSC Diagnostic\n\n' + r); }} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 6, border: `1px solid ${border}`, background: 'transparent', cursor: 'pointer', color: labelClr, fontSize: 10, fontWeight: 600 }}>
-                          🔍 Diagnose
-                        </button>
-                      </div>
-                    </div>
-                  ) : readError ? (
-                    <div style={{ margin: '8px 0 0', padding: '8px 10px', background: isDark ? 'rgba(239,68,68,0.12)' : '#fff1f1', borderRadius: 8, border: '1px solid rgba(239,68,68,0.3)' }}>
-                      <p style={{ margin: 0, fontSize: 11, color: '#ef4444', fontWeight: 600 }}>⚠ {readError}</p>
-                    </div>
-                  ) : !certFetched ? (
-                    <p style={{ margin: '5px 0 0', fontSize: 10, color: labelClr }}>Optional — enter PIN and click "Fetch Data" to auto-fill. Or fill the form manually.</p>
-                  ) : null}
-                </div>
-              )}
+                ) : readError ? (
+                  <div style={{ margin: '8px 0 0', padding: '8px 10px', background: isDark ? 'rgba(239,68,68,0.12)' : '#fff1f1', borderRadius: 8, border: '1px solid rgba(239,68,68,0.3)' }}>
+                    <p style={{ margin: 0, fontSize: 11, color: '#ef4444', lineHeight: 1.5, fontWeight: 600 }}>⚠ Could not read certificate</p>
+                    <p style={{ margin: '3px 0 0', fontSize: 10, color: isDark ? '#fca5a5' : '#b91c1c', lineHeight: 1.5 }}>{readError}</p>
+                  </div>
+                ) : null}
+                {!certFetched && !readError && (
+                  <p style={{ margin: '5px 0 0', fontSize: 10, color: labelClr, lineHeight: 1.4 }}>
+                    Optional — enter your token PIN and click “Fetch Data” to auto-fill. Or fill the form manually below.
+                  </p>
+                )}
+              </div>
 
-              {/* ── Form fields — 3-column compact grid ── */}
+              {/* ── 3-column compact grid ── */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+                {/* Holder Name — spans 2 cols */}
                 <div style={{ gridColumn: 'span 2' }}>
-                  <label style={lbl}>Holder Name <span style={{ color: '#ef4444' }}>*</span></label>
-                  <input style={autoInp(form.holder_name)} placeholder="e.g. Rajesh Kumar Sharma" value={form.holder_name} onChange={e => set('holder_name', e.target.value)} autoFocus={!certFetched && !isEditMode} />
+                  <label style={labelStyle}>Holder Name <span style={{ color: '#ef4444' }}>*</span></label>
+                  <input
+                    style={{ ...inputStyle, fontSize: 13, fontWeight: 600, background: certFetched && form.holder_name ? (isDark ? 'rgba(16,185,129,0.08)' : '#f0fdf4') : inputBg, borderColor: certFetched && form.holder_name ? '#10b981' : inputBdr }}
+                    placeholder="e.g. Rajesh Kumar Sharma"
+                    value={form.holder_name}
+                    onChange={e => set('holder_name', e.target.value)}
+                    autoFocus={!certFetched}
+                  />
                 </div>
                 <div>
-                  <label style={lbl}>DSC Type</label>
-                  <select style={{ ...inp, cursor: 'pointer' }} value={form.dsc_type} onChange={e => set('dsc_type', e.target.value)}>
-                    {['Class 3','Class 2','Signing','Encryption','Signing & Encryption','DGFT'].map(t => <option key={t} value={t}>{t}</option>)}
+                  <label style={labelStyle}>DSC Type</label>
+                  <select style={{ ...inputStyle, cursor: 'pointer' }} value={form.dsc_type} onChange={e => set('dsc_type', e.target.value)}>
+                    {['Class 3','Class 2','Signature','Encryption','Combo','DGFT'].map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
-                  <label style={lbl}>Serial Number</label>
-                  <input style={{ ...autoInp(form.serial_number), fontFamily: 'monospace', fontSize: 11 }} placeholder="Auto-filled from token" value={form.serial_number} onChange={e => set('serial_number', e.target.value)} />
+                  <label style={labelStyle}>Serial Number</label>
+                  <input
+                    style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 11, background: certFetched && form.serial_number ? (isDark ? 'rgba(16,185,129,0.08)' : '#f0fdf4') : inputBg, borderColor: certFetched && form.serial_number ? '#10b981' : inputBdr }}
+                    placeholder="Auto-filled from token"
+                    value={form.serial_number}
+                    onChange={e => set('serial_number', e.target.value)}
+                  />
                 </div>
                 <div>
-                  <label style={lbl}>Associated With</label>
-                  <input style={inp} placeholder="Firm / client name" value={form.associated_with} onChange={e => set('associated_with', e.target.value)} />
+                  <label style={labelStyle}>Associated With</label>
+                  <input style={inputStyle} placeholder="Firm / client name" value={form.associated_with} onChange={e => set('associated_with', e.target.value)} />
                 </div>
                 <div>
-                  <label style={lbl}><Lock style={{ width: 10, height: 10, display: 'inline', marginRight: 3, verticalAlign: 'middle' }} />Token Password</label>
-                  <input style={inp} type="text" placeholder="e.g. 12345678" value={form.dsc_password} onChange={e => set('dsc_password', e.target.value)} />
+                  <label style={labelStyle}>
+                    <Lock style={{ width: 10, height: 10, display: 'inline', marginRight: 3, verticalAlign: 'middle' }} />
+                    Token Password
+                  </label>
+                  <input style={inputStyle} type="text" placeholder="e.g. 12345678" value={form.dsc_password} onChange={e => set('dsc_password', e.target.value)} />
                 </div>
                 <div>
-                  <label style={lbl}>Issue Date <span style={{ color: '#ef4444' }}>*</span></label>
-                  <input style={autoInp(form.issue_date)} type="date" value={form.issue_date} onChange={e => set('issue_date', e.target.value)} />
+                  <label style={labelStyle}>Issue Date <span style={{ color: '#ef4444' }}>*</span></label>
+                  <input
+                    style={{ ...inputStyle, background: certFetched && form.issue_date ? (isDark ? 'rgba(16,185,129,0.08)' : '#f0fdf4') : inputBg, borderColor: certFetched && form.issue_date ? '#10b981' : inputBdr }}
+                    type="date" value={form.issue_date} onChange={e => set('issue_date', e.target.value)}
+                  />
                 </div>
                 <div>
-                  <label style={lbl}>Expiry Date <span style={{ color: '#ef4444' }}>*</span></label>
-                  <input style={autoInp(form.expiry_date)} type="date" value={form.expiry_date} onChange={e => set('expiry_date', e.target.value)} />
+                  <label style={labelStyle}>Expiry Date <span style={{ color: '#ef4444' }}>*</span></label>
+                  <input
+                    style={{ ...inputStyle, background: certFetched && form.expiry_date ? (isDark ? 'rgba(16,185,129,0.08)' : '#f0fdf4') : inputBg, borderColor: certFetched && form.expiry_date ? '#10b981' : inputBdr }}
+                    type="date" value={form.expiry_date} onChange={e => set('expiry_date', e.target.value)}
+                  />
                 </div>
                 <div>
-                  <label style={lbl}>Entity Type</label>
-                  <select style={{ ...inp, cursor: 'pointer' }} value={form.entity_type} onChange={e => set('entity_type', e.target.value)}>
+                  <label style={labelStyle}>Entity Type</label>
+                  <select style={{ ...inputStyle, cursor: 'pointer' }} value={form.entity_type} onChange={e => set('entity_type', e.target.value)}>
                     <option value="firm">Firm</option>
                     <option value="client">Client</option>
                   </select>
                 </div>
               </div>
 
-              {/* Notes — collapsible */}
+              {/* Advanced — Notes (collapsible) */}
               <div style={{ marginBottom: 14 }}>
-                <button type="button" onClick={() => setShowNotes(p => !p)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: labelClr, fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, padding: 0 }}>
-                  {showNotes ? <ChevronUp style={{ width: 13, height: 13 }} /> : <ChevronDown style={{ width: 13, height: 13 }} />}
-                  {showNotes ? 'Hide notes' : 'Add notes'}
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanced(p => !p)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: labelClr, fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, padding: 0, letterSpacing: '0.04em' }}
+                >
+                  {showAdvanced ? <ChevronUp style={{ width: 13, height: 13 }} /> : <ChevronDown style={{ width: 13, height: 13 }} />}
+                  {showAdvanced ? 'Hide notes' : 'Add notes'}
                 </button>
-                {showNotes && <textarea style={{ ...inp, marginTop: 8, resize: 'vertical', minHeight: 56 }} placeholder="Additional notes, CA provider, token info…" value={form.notes} onChange={e => set('notes', e.target.value)} rows={2} />}
+                {showAdvanced && (
+                  <textarea
+                    style={{ ...inputStyle, marginTop: 8, resize: 'vertical', minHeight: 60 }}
+                    placeholder="Additional notes…"
+                    value={form.notes}
+                    onChange={e => set('notes', e.target.value)}
+                    rows={2}
+                  />
+                )}
               </div>
             </div>
           )}
 
-          {/* Footer */}
+          {/* ── Footer actions ── */}
           {!saved && (
-            <div style={{ padding: '0 18px 18px', display: 'flex', gap: 10, flexShrink: 0 }}>
-              <button type="button" onClick={onDismiss} style={{ flex: 1, height: 40, borderRadius: 10, border: `1px solid ${border}`, background: surface, color: labelClr, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-                {isTokenMode ? 'Not a DSC' : 'Cancel'}
+            <div style={{ padding: '0 20px 20px', display: 'flex', gap: 10 }}>
+              <button
+                type="button"
+                onClick={onDismiss}
+                style={{
+                  flex: 1, height: 40, borderRadius: 10, border: `1px solid ${border}`,
+                  background: surface, color: labelClr, fontSize: 13, fontWeight: 600,
+                  cursor: 'pointer', transition: 'opacity 0.15s',
+                }}
+              >
+                Not a DSC
               </button>
-              <button type="button" onClick={handleSave} disabled={saving || !form.holder_name.trim() || !form.issue_date || !form.expiry_date}
-                style={{ flex: 2, height: 40, borderRadius: 10, border: 'none', background: saving ? '#6366f1' : 'linear-gradient(135deg,#4f46e5,#6366f1)', color: '#fff', fontSize: 13, fontWeight: 700, cursor: saving || !form.holder_name.trim() ? 'not-allowed' : 'pointer', opacity: (!form.holder_name.trim() || !form.issue_date || !form.expiry_date) ? 0.55 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving || !form.holder_name.trim() || !form.issue_date || !form.expiry_date}
+                style={{
+                  flex: 2, height: 40, borderRadius: 10, border: 'none',
+                  background: saving ? '#6366f1' : 'linear-gradient(135deg,#4f46e5,#6366f1)',
+                  color: '#fff', fontSize: 13, fontWeight: 700,
+                  cursor: saving || !form.holder_name.trim() ? 'not-allowed' : 'pointer',
+                  opacity: (!form.holder_name.trim() || !form.issue_date || !form.expiry_date) ? 0.55 : 1,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  transition: 'opacity 0.2s',
+                }}
+              >
                 {saving
                   ? <><span style={{ width: 14, height: 14, border: '2px solid rgba(255,255,255,0.35)', borderTopColor: '#fff', borderRadius: '50%', display: 'inline-block', animation: 'dscSpin 0.7s linear infinite' }} />Saving…</>
-                  : isEditMode ? <><CheckCircle2 style={{ width: 15, height: 15 }} />Update DSC</>
-                  : isTokenMode ? <><ArrowDownCircle style={{ width: 15, height: 15 }} />Add to Register & Mark IN</>
-                  : <><Plus style={{ width: 15, height: 15 }} />Add DSC</>}
+                  : <><ArrowDownCircle style={{ width: 15, height: 15 }} />Add to Register & Mark IN</>}
               </button>
             </div>
           )}
 
-          {/* Success footer */}
+          {/* ── Success state footer ── */}
           {saved && (
-            <div style={{ padding: '8px 18px 22px', textAlign: 'center' }}>
+            <div style={{ padding: '8px 20px 22px', textAlign: 'center' }}>
               <p style={{ margin: 0, fontSize: 12, color: '#10b981', fontWeight: 600 }}>
-                {isEditMode ? '✓ DSC updated successfully' : isTokenMode ? '✓ Certificate saved and marked as IN' : '✓ DSC added to register'}
+                ✓ Certificate saved and automatically marked as IN
               </p>
             </div>
           )}
@@ -737,6 +975,7 @@ function UnifiedDscPopup({ device, isDark, editingDSC, onDismiss, onSaved, onSub
     </>
   );
 }
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function DSCRegister() {
   const isDark    = useDark();
@@ -792,9 +1031,6 @@ export default function DSCRegister() {
   const [usbSupported,  setUsbSupported]  = useState(false);
   const [usbPermission, setUsbPermission] = useState('unknown'); // 'unknown'|'granted'|'denied'
   const [usbGranting,   setUsbGranting]   = useState(false);
-
-  // ── Unified DSC popup (Add / Edit / Token-detected) ───────────────────────
-  const [unifiedPopupOpen, setUnifiedPopupOpen] = useState(false);
 
   // ── Status helpers ────────────────────────────────────────────────────────
   const getDSCInOutStatus = (dsc) => {
@@ -1173,7 +1409,20 @@ export default function DSCRegister() {
   // ── Edit / Delete ─────────────────────────────────────────────────────────
   const handleEdit = (dsc) => {
     setEditingDSC(dsc);
-    setUnifiedPopupOpen(true);
+    setFormData({
+      holder_name:     dsc.holder_name,
+      dsc_type:        dsc.dsc_type || '',
+      dsc_password:    dsc.dsc_password || '',
+      serial_number:   dsc.serial_number || '',
+      associated_with: dsc.associated_with || '',
+      entity_type:     dsc.entity_type || 'firm',
+      issue_date:      format(new Date(dsc.issue_date), 'yyyy-MM-dd'),
+      expiry_date:     format(new Date(dsc.expiry_date), 'yyyy-MM-dd'),
+      notes:           dsc.notes || '',
+    });
+    setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
+    setEditingMovement(null);
+    setDialogOpen(true);
   };
 
   const handleDelete = async (dscId) => {
@@ -1429,13 +1678,102 @@ export default function DSCRegister() {
                 ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Scanning…</>
                 : <><Sparkles className="h-3.5 w-3.5" />AI Duplicates</>}
             </Button>
-            <Button
-              onClick={() => { setEditingDSC(null); setUnifiedPopupOpen(true); }}
-              className="bg-white text-indigo-700 hover:bg-blue-50 font-semibold rounded-xl px-5 shadow-lg transition-all hover:scale-105 active:scale-95"
-              data-testid="add-dsc-btn"
-            >
-              <Plus className="mr-2 h-4 w-4" />Add DSC
-            </Button>
+            <Dialog open={dialogOpen} onOpenChange={open => { setDialogOpen(open); if (!open) resetForm(); }}>
+              <DialogTrigger asChild>
+                <Button className="bg-white text-indigo-700 hover:bg-blue-50 font-semibold rounded-xl px-5 shadow-lg transition-all hover:scale-105 active:scale-95" data-testid="add-dsc-btn">
+                  <Plus className="mr-2 h-4 w-4" />Add DSC
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle className="font-outfit text-2xl">{editingDSC ? 'Edit DSC' : 'Add New DSC'}</DialogTitle>
+                  <DialogDescription>{editingDSC ? 'Update DSC details and view movement history' : 'Add a new digital signature certificate'}</DialogDescription>
+                </DialogHeader>
+                {editingDSC ? (
+                  <Tabs defaultValue="details" className="w-full">
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="details">Details</TabsTrigger>
+                      <TabsTrigger value="history">Movement History ({editingDSC?.movement_log?.length || 0})</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="details">
+                      <form onSubmit={handleSubmit} className="space-y-4">{renderFormBody(true)}</form>
+                    </TabsContent>
+                    <TabsContent value="history">
+                      <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+                        {editingDSC?.movement_log?.length > 0
+                          ? [...editingDSC.movement_log].reverse().map((movement, idx) => {
+                              const isEditing = editingMovement === (movement.id || movement.timestamp);
+                              return (
+                                <Card key={movement.id || idx} className="p-3">
+                                  {isEditing ? (
+                                    <div className="space-y-3">
+                                      <div className="grid grid-cols-2 gap-3">
+                                        <div className="space-y-1">
+                                          <Label className="text-xs">Movement Type</Label>
+                                          <Select value={editMovementData.movement_type} onValueChange={v => setEditMovementData({ ...editMovementData, movement_type: v })}>
+                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value="IN">IN</SelectItem>
+                                              <SelectItem value="OUT">OUT</SelectItem>
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                        <div className="space-y-1">
+                                          <Label className="text-xs">Person Name</Label>
+                                          <Input value={editMovementData.person_name} onChange={e => setEditMovementData({ ...editMovementData, person_name: e.target.value })} />
+                                        </div>
+                                      </div>
+                                      <div className="space-y-1">
+                                        <Label className="text-xs">Notes</Label>
+                                        <Textarea value={editMovementData.notes} onChange={e => setEditMovementData({ ...editMovementData, notes: e.target.value })} rows={2} />
+                                      </div>
+                                      <div className="flex gap-2 justify-end">
+                                        <Button type="button" size="sm" variant="outline" onClick={() => setEditingMovement(null)}>Cancel</Button>
+                                        <Button type="button" size="sm" className="bg-indigo-600 hover:bg-indigo-700"
+                                          onClick={() => handleUpdateMovement(movement.id)} disabled={loading || !editMovementData.person_name}>
+                                          {loading ? 'Saving...' : 'Save'}
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-start justify-between">
+                                      <div className="flex-1">
+                                        <div className="flex items-center gap-2 mb-1">
+                                          <Badge className={movement.movement_type === 'IN' ? 'bg-emerald-600 text-xs' : 'bg-red-600 text-xs'}>{movement.movement_type}</Badge>
+                                          <span className="text-sm font-medium">{movement.person_name}</span>
+                                        </div>
+                                        {movement.notes && <p className="text-xs text-slate-600">{movement.notes}</p>}
+                                        {movement.edited_at && (
+                                          <p className="text-xs text-slate-400 mt-1">Edited by {movement.edited_by} on {format(new Date(movement.edited_at), 'MMM dd, yyyy')}</p>
+                                        )}
+                                      </div>
+                                      <div className="flex flex-col items-end gap-2">
+                                        <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                          {format(new Date(movement.timestamp), 'MMM dd, yyyy hh:mm a')}
+                                        </span>
+                                        {movement.id && (
+                                          <Button type="button" size="sm" variant="ghost"
+                                            className="h-7 px-2 text-xs text-slate-500 hover:text-indigo-600"
+                                            onClick={() => startEditingMovement(movement)}>
+                                            <Edit className="h-3 w-3 mr-1" />Edit
+                                          </Button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </Card>
+                              );
+                            })
+                          : <div className="text-center py-8 text-slate-500"><History className="h-12 w-12 mx-auto mb-3 text-slate-300" /><p>No movement history yet</p></div>
+                        }
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+                ) : (
+                  <form onSubmit={handleSubmit} className="space-y-4">{renderFormBody(false)}</form>
+                )}
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
 
@@ -1852,12 +2190,11 @@ export default function DSCRegister() {
         </DialogContent>
       </Dialog>
 
-      {/* ── USB DSC Token Popup (unified with Add DSC) ── */}
+      {/* ── USB DSC Token Popup ── */}
       {usbPromptOpen && usbDevice && (
-        <UnifiedDscPopup
+        <UsbDscPopup
           device={usbDevice}
           isDark={isDark}
-          editingDSC={null}
           onDismiss={() => {
             setUsbPromptOpen(false);
             setUsbDismissed(true);
@@ -1865,23 +2202,9 @@ export default function DSCRegister() {
           onSaved={() => {
             setUsbPromptOpen(false);
             fetchDSC();
+            // Switch to IN tab to show the newly added DSC
             setActiveTab('in');
           }}
-        />
-      )}
-
-      {/* ── Add / Edit DSC Popup (unified) ── */}
-      {unifiedPopupOpen && !usbPromptOpen && (
-        <UnifiedDscPopup
-          device={null}
-          isDark={isDark}
-          editingDSC={editingDSC}
-          onDismiss={() => { setUnifiedPopupOpen(false); setEditingDSC(null); }}
-          onSaved={() => { setUnifiedPopupOpen(false); setEditingDSC(null); fetchDSC(); }}
-          onSubmit={editingDSC ? async (payload) => {
-            await api.put(`/dsc/${editingDSC.id}`, payload);
-            toast.success('DSC updated successfully!');
-          } : null}
         />
       )}
 
