@@ -1554,8 +1554,6 @@ function LinkActionButton({ q, onUpdated, isDark, compact = false }) {
     </Popover>
   );
 }
-  );
-}
 
 // ════════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
