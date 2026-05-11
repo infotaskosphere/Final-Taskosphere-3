@@ -1,4 +1,7 @@
-// QuotationTemplates.jsx  — v3.0
+// QuotationTemplates.jsx  — v3.1
+// Quotation generator that REUSES invoice templates so every theme/template
+// renders a visually distinct layout (was: identical for all themes).
+import { generateInvoiceHTML } from './InvoiceTemplates';
 // ─── Theme colour map (mirrors InvoiceTemplates COLOR_THEMES) ─────────────────
 var QTN_THEME_MAP = {
   ocean:        '#0D3B66',
@@ -99,11 +102,81 @@ var QTN_SERVICE_CHECKLISTS = {
   "Other / Custom Service": ["PAN Card","Aadhaar Card","Address Proof","Bank Account Details","Photograph","Any specific document advised by our team"],
 };
 
+// ─── Build the quotation-only extras block (scope, terms, checklist, notes) ──
+// Returns an HTML fragment that gets appended into invoice templates so that
+// quotation-specific data still appears even when we delegate to an invoice
+// layout for "design theme" parity with invoices.
+function buildQuotationExtrasHTML(qtn, opts) {
+  const brandLight = opts.brandLight;
+  const brandRgb   = opts.brandRgb;
+  const attachChecklist = opts.attachChecklist !== false;
+
+  const scopeItems = Array.isArray(qtn.scope_of_work)
+    ? qtn.scope_of_work.filter(Boolean)
+    : (qtn.scope_of_work ? [qtn.scope_of_work] : []);
+  const extraTerms = (qtn.extra_terms || []).filter(Boolean);
+
+  var allTerms = [];
+  if (qtn.validity_days) allTerms.push('Validity of Quotation: '+qtn.validity_days+' days');
+  if (qtn.payment_terms) allTerms.push('Payment Terms: '+qtn.payment_terms);
+  if (qtn.timeline)      allTerms.push('Timeline: '+qtn.timeline);
+  if (qtn.advance_terms) allTerms.push('Advance: '+qtn.advance_terms);
+  extraTerms.forEach(function(t){ allTerms.push(t); });
+
+  var html = '<div style="max-width:820px;margin:0 auto;padding:0 28px 24px;font-family:Arial,Helvetica,sans-serif;">';
+
+  if (scopeItems.length) {
+    html += '<div style="margin:14px 0;padding:12px 14px;background:'+brandLight+';border-radius:6px;">'
+      + '<p style="margin:0 0 6px;font-size:11px;font-weight:700;color:rgb('+brandRgb+');text-transform:uppercase;letter-spacing:.08em;">Scope of Work / Services</p>'
+      + scopeItems.map(function(s){ return '<p style="margin:0 0 4px;font-size:12px;color:#1e293b;"><span style="color:rgb('+brandRgb+');font-weight:700;">- </span>'+s+'</p>'; }).join('')
+      + '</div>';
+  }
+
+  if (allTerms.length) {
+    html += '<div style="margin:14px 0;padding-top:10px;border-top:2px solid '+brandLight+';">'
+      + '<p style="margin:0 0 6px;font-size:11px;font-weight:700;color:rgb('+brandRgb+');text-transform:uppercase;letter-spacing:.08em;">Terms &amp; Conditions</p>'
+      + allTerms.map(function(t,i){ return '<p style="margin:0 0 3px;font-size:12px;color:#475569;">'+(i+1)+'. '+t+'</p>'; }).join('')
+      + '</div>';
+  }
+
+  if (qtn.notes) {
+    html += '<p style="margin:10px 0 0;font-size:11px;color:#64748b;font-style:italic;">'+qtn.notes+'</p>';
+  }
+
+  if (attachChecklist) {
+    var _svc      = qtn.service || 'Other / Custom Service';
+    var _baseDocs = QTN_SERVICE_CHECKLISTS[_svc] || QTN_SERVICE_CHECKLISTS['Other / Custom Service'] || [];
+    var _extras   = (qtn.extra_checklist_items || []).filter(function(e){ return e && String(e).trim(); });
+    var _allDocs  = _baseDocs.concat(_extras);
+    if (_allDocs.length > 0) {
+      var _rows = _allDocs.map(function(doc, i) {
+        var bg = i % 2 === 0 ? '#ffffff' : brandLight;
+        return '<tr style="background:'+bg+'">'
+          + '<td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:center;font-size:11px;color:#64748b;width:32px;">'+(i+1)+'</td>'
+          + '<td style="padding:5px 8px;border:1px solid #e2e8f0;font-size:11px;color:#1e293b;">'+doc+'</td>'
+          + '</tr>';
+      }).join('');
+      html += '<div style="margin:14px 0;padding-top:10px;border-top:2px solid '+brandLight+';">'
+        + '<p style="margin:0 0 6px;font-size:11px;font-weight:700;color:rgb('+brandRgb+');text-transform:uppercase;letter-spacing:.08em;">Document Checklist</p>'
+        + '<table style="width:100%;border-collapse:collapse;">'
+        + '<thead><tr style="background:rgb('+brandRgb+');">'
+        + '<th style="padding:6px 8px;border:1px solid #e2e8f0;text-align:center;color:#fff;font-size:10px;font-weight:700;width:36px;">Sr</th>'
+        + '<th style="padding:6px 8px;border:1px solid #e2e8f0;text-align:left;color:#fff;font-size:10px;font-weight:700;">Document Required</th>'
+        + '</tr></thead><tbody>'+_rows+'</tbody></table></div>';
+    }
+  }
+
+  html += '</div>';
+  return html;
+}
+
 // ─── main export ─────────────────────────────────────────────────────────────
 export function generateQuotationHTML(qtn, options) {
   if (!options) options = {};
   const company = options.company || {};
   const customColor = options.customColor;
+  const attachChecklist = options.attachChecklist !== false;
+  const requestedTemplate = options.template || 'classic_quotation';
 
   var _themeColor = null;
   if (options.theme && options.theme !== 'custom' && QTN_THEME_MAP[options.theme]) {
@@ -112,6 +185,71 @@ export function generateQuotationHTML(qtn, options) {
   var brandColor = customColor || _themeColor || qtn.invoice_custom_color || company.invoice_custom_color || company.brand_color || '#0D3B66';
   const brandLight = lighten(brandColor, 0.92);
   const brandRgb   = hexToRgb(brandColor);
+
+  // ── Delegate non-classic templates to the invoice template engine so each
+  //    template/theme produces a visibly different layout. We map quotation
+  //    fields → invoice fields and append quotation-only extras (scope,
+  //    terms, checklist) before </body>. The built-in classic_quotation
+  //    layout below is used when the user picks "classic" in settings.
+  if (requestedTemplate && requestedTemplate !== 'classic_quotation') {
+    try {
+      const today = qtn.date || new Date().toISOString().slice(0,10);
+      const validDays = parseInt(qtn.validity_days || 30, 10) || 30;
+      const _due = new Date(today + 'T00:00:00');
+      _due.setDate(_due.getDate() + validDays);
+      const gstRateQ = parseFloat(qtn.gst_rate || 0);
+      const mappedItems = (qtn.items || []).filter(function(it){ return it.description || it.unit_price; }).map(function(it){
+        const qty = parseFloat(it.quantity)||1;
+        const price = parseFloat(it.unit_price)||0;
+        return {
+          description: it.description || '',
+          hsn_sac: it.hsn_sac || '',
+          quantity: qty,
+          unit: it.unit || 'service',
+          unit_price: price,
+          discount_pct: 0,
+          gst_rate: gstRateQ,
+        };
+      });
+      const invShape = {
+        invoice_no:    qtn.quotation_no || 'QUOTATION',
+        invoice_type:  'quotation',
+        invoice_date:  today,
+        due_date:      _due.toISOString().slice(0,10),
+        client_name:   qtn.client_name || '',
+        client_address:qtn.client_address || '',
+        client_email:  qtn.client_email || '',
+        client_phone:  qtn.client_phone || '',
+        client_gstin:  qtn.client_gstin || '',
+        client_state:  qtn.client_state || '',
+        is_interstate: !!qtn.is_interstate,
+        items:         mappedItems,
+        amount_paid:   0,
+        notes:         qtn.subject ? ('Subject: ' + qtn.subject) : '',
+        terms_conditions: qtn.payment_terms || '',
+      };
+      var html = generateInvoiceHTML(invShape, {
+        company: company,
+        template: requestedTemplate,
+        theme: options.theme,
+        customColor: brandColor,
+      });
+      html = html.replace(/>\s*INVOICE\s*</g, '>QUOTATION<')
+                 .replace(/>\s*Tax Invoice\s*</gi, '>Quotation<');
+      const extras = buildQuotationExtrasHTML(qtn, {
+        brandLight: brandLight, brandRgb: brandRgb,
+        attachChecklist: attachChecklist,
+      });
+      if (html.indexOf('</body>') !== -1) {
+        html = html.replace('</body>', extras + '</body>');
+      } else {
+        html = html + extras;
+      }
+      return html;
+    } catch (e) {
+      // Fall through to the built-in classic quotation layout on any failure.
+    }
+  }
 
   // ── Compute totals ─────────────────────────────────────────────────────────
   const items = (qtn.items || []).filter(function(it){ return it.description || it.unit_price; });
@@ -206,7 +344,7 @@ export function generateQuotationHTML(qtn, options) {
   var _extras   = (qtn.extra_checklist_items || []).filter(function(e){ return e && String(e).trim(); });
   var _allDocs  = _baseDocs.concat(_extras);
   var checklistHTML = '';
-  if (_allDocs.length > 0) {
+  if (attachChecklist && _allDocs.length > 0) {
     var _rows = _allDocs.map(function(doc, i) {
       var bg = i % 2 === 0 ? '#ffffff' : brandLight;
       return '<tr style="background:'+bg+'">'
