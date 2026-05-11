@@ -2705,22 +2705,43 @@ async def convert_quotation(qtn_id: str, current_user: User = Depends(check_modu
         invoice_custom_color=inv_color,
         payment_terms=q.get("payment_terms", ""), notes=q.get("notes", ""), status="draft")
     invoice = await create_invoice(create_data, current_user)
-    # Backlink: store invoice_id + status on the source quotation so the UI
-    # knows it's been converted and can prevent duplicate conversion.
-    inv_id = invoice.get("id") if isinstance(invoice, dict) else None
-    inv_no = invoice.get("invoice_no") if isinstance(invoice, dict) else None
+    # Normalise: create_invoice may return a plain dict or a Pydantic model
+    # depending on FastAPI version / call-site.  Handle both.
+    if isinstance(invoice, dict):
+        inv_dict = invoice
+    else:
+        try:
+            inv_dict = invoice.model_dump()
+        except AttributeError:
+            inv_dict = dict(invoice)
+    inv_id = inv_dict.get("id")
+    inv_no = inv_dict.get("invoice_no")
+    # Backlink: store invoice_id + invoice_no + status on the source quotation
+    # so the UI knows it's been converted and can prevent duplicate conversion.
     if inv_id:
-        await db.quotations.update_one(
-            {"id": qtn_id},
-            {"$set": {
-                "status": "converted",
-                "invoice_id": inv_id,
-                "invoice_no": inv_no,
-                "converted_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }},
+        try:
+            await db.quotations.update_one(
+                {"id": qtn_id},
+                {"$set": {
+                    "status": "converted",
+                    "invoice_id": inv_id,
+                    "invoice_no": inv_no,
+                    "converted_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }},
+            )
+        except Exception as backlink_err:
+            logger.error(
+                f"convert_quotation: failed to write backlink on qtn {qtn_id} "
+                f"(invoice {inv_id}): {backlink_err}",
+                exc_info=True,
+            )
+    else:
+        logger.error(
+            f"convert_quotation: create_invoice returned no 'id' for qtn {qtn_id}; "
+            f"backlink NOT saved.  invoice payload: {inv_dict!r}"
         )
-    return invoice
+    return inv_dict
 
 
 # ═══════════════════════════════════════════════════════════
