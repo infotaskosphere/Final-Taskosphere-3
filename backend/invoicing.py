@@ -2674,6 +2674,21 @@ async def convert_quotation(qtn_id: str, current_user: User = Depends(check_modu
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     q = await db.quotations.find_one({"id": qtn_id}, {"_id": 0})
     if not q: raise HTTPException(404, "Quotation not found")
+
+    # Prevent duplicate conversion — return the existing invoice if one is already linked.
+    if q.get("invoice_id"):
+        existing = await db.invoices.find_one({"id": q["invoice_id"]}, {"_id": 0})
+        if existing:
+            existing.pop("_id", None)
+            return existing
+
+    # Resolve template/theme: prefer values stored on the quotation, then fall
+    # back to the company's defaults so the converted invoice keeps its identity.
+    company = await db.companies.find_one({"id": q.get("company_id")}, {"_id": 0}) or {}
+    inv_template = q.get("invoice_template") or company.get("invoice_template") or "prestige"
+    inv_theme    = q.get("invoice_theme")    or company.get("invoice_theme")    or "classic_blue"
+    inv_color    = q.get("invoice_custom_color") or company.get("invoice_custom_color") or "#0D3B66"
+
     inv_items = [InvoiceItem(description=it.get("description", ""),
         quantity=float(it.get("quantity", 1)), unit=it.get("unit", "service"),
         unit_price=float(it.get("unit_price", 0)), gst_rate=float(q.get("gst_rate", 18)))
@@ -2683,9 +2698,29 @@ async def convert_quotation(qtn_id: str, current_user: User = Depends(check_modu
         quotation_id=qtn_id, lead_id=q.get("lead_id"), client_id=q.get("client_id"),
         client_name=q.get("client_name", ""), client_address=q.get("client_address", ""),
         client_email=q.get("client_email", ""), client_phone=q.get("client_phone", ""),
+        client_gstin=q.get("client_gstin", "") or "",
+        client_state=q.get("client_state", "") or "",
         items=inv_items, gst_rate=q.get("gst_rate", 18),
+        invoice_template=inv_template, invoice_theme=inv_theme,
+        invoice_custom_color=inv_color,
         payment_terms=q.get("payment_terms", ""), notes=q.get("notes", ""), status="draft")
-    return await create_invoice(create_data, current_user)
+    invoice = await create_invoice(create_data, current_user)
+    # Backlink: store invoice_id + status on the source quotation so the UI
+    # knows it's been converted and can prevent duplicate conversion.
+    inv_id = invoice.get("id") if isinstance(invoice, dict) else None
+    inv_no = invoice.get("invoice_no") if isinstance(invoice, dict) else None
+    if inv_id:
+        await db.quotations.update_one(
+            {"id": qtn_id},
+            {"$set": {
+                "status": "converted",
+                "invoice_id": inv_id,
+                "invoice_no": inv_no,
+                "converted_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+    return invoice
 
 
 # ═══════════════════════════════════════════════════════════
