@@ -269,6 +269,15 @@ class QuotationCreate(BaseModel):
     extra_checklist_items: List[str] = []
     attach_checklist: bool = True
     status: str = "draft"
+    # Theme/template selection — persists per quotation so PDF, preview and the
+    # converted invoice all stay visually consistent. Falls back to the
+    # company's defaults when not set.
+    invoice_template: str = ""
+    invoice_theme: str = ""
+    invoice_custom_color: str = ""
+    invoice_id: Optional[str] = None
+    invoice_no: Optional[str] = None
+    converted_at: Optional[str] = None
 
 
 class QuotationOut(QuotationCreate):
