@@ -1236,18 +1236,28 @@ const QuotationDetailPanel = ({
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// LINK ACTION BUTTON  — link a quotation to a Lead or jump to its Invoice(s)
+// LINK ACTION BUTTON  — link a quotation to a Lead or an existing Invoice
 // ════════════════════════════════════════════════════════════════════════════════
 function LinkActionButton({ q, onUpdated, isDark, compact = false }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+
+  // ── Lead state ────────────────────────────────────────────────────────────
   const [leads, setLeads] = useState([]);
   const [loadingLeads, setLoadingLeads] = useState(false);
   const [savingLead, setSavingLead] = useState(false);
   const [pickingLead, setPickingLead] = useState(false);
   const [selectedLeadId, setSelectedLeadId] = useState(q.lead_id || '');
 
-  // Lazy-load leads the first time the popover opens (only if user wants to link/change).
+  // ── Invoice link state ────────────────────────────────────────────────────
+  const [pickingInvoice, setPickingInvoice] = useState(false);
+  const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [invoiceResults, setInvoiceResults] = useState([]);
+  const [searchingInv, setSearchingInv] = useState(false);
+  const [savingInvoice, setSavingInvoice] = useState(false);
+  const invSearchRef = useRef(null);
+
+  // Lazy-load leads the first time the popover opens.
   const ensureLeads = async () => {
     if (leads.length || loadingLeads) return;
     setLoadingLeads(true);
@@ -1288,24 +1298,66 @@ function LinkActionButton({ q, onUpdated, isDark, compact = false }) {
     navigate(`/leads?lead_id=${encodeURIComponent(q.lead_id)}`);
   };
 
-  const goToInvoice = () => {
-    setOpen(false);
-    // No invoice list filter by quotation_id exists, so we deep-link with both
-    // the quotation_no (for search) and the quotation_id (for any future filter).
-    const qNo = q.quotation_no || '';
-    navigate(`/invoicing?quotation_id=${encodeURIComponent(q.id)}&search=${encodeURIComponent(qNo)}`);
+  // ── Invoice helpers ────────────────────────────────────────────────────────
+  const searchInvoices = useCallback(async (term) => {
+    if (!term || term.length < 2) { setInvoiceResults([]); return; }
+    setSearchingInv(true);
+    try {
+      const res = await api.get('/invoices', { params: { search: term, page_size: 8 } });
+      setInvoiceResults(Array.isArray(res.data?.invoices) ? res.data.invoices : []);
+    } catch { setInvoiceResults([]); }
+    finally { setSearchingInv(false); }
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => searchInvoices(invoiceSearch), 300);
+    return () => clearTimeout(t);
+  }, [invoiceSearch, searchInvoices]);
+
+  const openInvoicePicker = () => {
+    setPickingInvoice(true); setInvoiceSearch(''); setInvoiceResults([]);
+    setTimeout(() => invSearchRef.current?.focus(), 50);
+  };
+  const cancelInvoicePicker = () => { setPickingInvoice(false); setInvoiceSearch(''); setInvoiceResults([]); };
+
+  const saveInvoiceLink = async (inv) => {
+    setSavingInvoice(true);
+    try {
+      await api.post(`/quotations/${q.id}/link-invoice`, { invoice_id: inv.id });
+      toast.success(`Linked to invoice ${inv.invoice_no}`);
+      cancelInvoicePicker(); setOpen(false); onUpdated && onUpdated();
+    } catch (err) { toast.error(getErrMsg(err, 'Failed to link invoice')); }
+    finally { setSavingInvoice(false); }
   };
 
+  const unlinkInvoice = async () => {
+    if (!window.confirm('Remove the invoice link from this quotation?')) return;
+    setSavingInvoice(true);
+    try {
+      await api.delete(`/quotations/${q.id}/link-invoice`);
+      toast.success('Invoice link removed');
+      setOpen(false); onUpdated && onUpdated();
+    } catch (err) { toast.error(getErrMsg(err, 'Failed to remove link')); }
+    finally { setSavingInvoice(false); }
+  };
+
+  const goToInvoice = () => {
+    setOpen(false);
+    if (q.invoice_id) navigate(`/invoicing?invoice_id=${encodeURIComponent(q.invoice_id)}`);
+    else navigate(`/invoicing?search=${encodeURIComponent(q.quotation_no || '')}`);
+  };
+
+  const hasAnyLink = q.lead_id || q.invoice_id;
   const btnClass = compact
-    ? `w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${q.lead_id ? (isDark ? 'text-amber-400 hover:bg-amber-900/30' : 'text-amber-600 hover:bg-amber-50') : (isDark ? 'text-slate-400 hover:text-amber-400 hover:bg-amber-900/30' : 'text-slate-400 hover:text-amber-600 hover:bg-amber-50')}`
+    ? `w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${hasAnyLink ? (isDark ? 'text-amber-400 hover:bg-amber-900/30' : 'text-amber-600 hover:bg-amber-50') : (isDark ? 'text-slate-400 hover:text-amber-400 hover:bg-amber-900/30' : 'text-slate-400 hover:text-amber-600 hover:bg-amber-50')}`
     : 'h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold';
 
   return (
-    <Popover open={open} onOpenChange={(v) => { setOpen(v); if (v) ensureLeads(); }}>
+    <Popover open={open} onOpenChange={(v) => { setOpen(v); if (v) { ensureLeads(); setPickingInvoice(false); } }}>
       <PopoverTrigger asChild>
         {compact ? (
           <button
-            title={q.lead_id ? 'Linked to a lead — manage links' : 'Link to lead / open invoice'}
+            title={hasAnyLink ? 'Manage links (lead / invoice)' : 'Link to lead or invoice'}
             className={btnClass}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1320,7 +1372,7 @@ function LinkActionButton({ q, onUpdated, isDark, compact = false }) {
       </PopoverTrigger>
       <PopoverContent
         align="end"
-        className="w-72 p-3 space-y-3"
+        className="w-80 p-3 space-y-3"
         onClick={(e) => e.stopPropagation()}
       >
         {/* ── Lead section ─────────────────────────────────────────────── */}
@@ -1398,22 +1450,110 @@ function LinkActionButton({ q, onUpdated, isDark, compact = false }) {
           )}
         </div>
 
-        {/* ── Invoice section ──────────────────────────────────────────── */}
-        <div className="border-t pt-2 space-y-2">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
-            <Receipt className="h-3 w-3" /> Linked Invoice
-          </p>
-          <p className="text-[11px] text-slate-500 leading-snug">
-            Open Invoicing filtered by this quotation. If none exists yet, use “Convert to Invoice”.
-          </p>
-          <Button size="sm" variant="default"
-            className="h-7 px-2 text-[11px] gap-1 bg-purple-600 hover:bg-purple-700 text-white w-full"
-            onClick={goToInvoice}>
-            <ExternalLink className="h-3 w-3" /> Open in Invoicing
-          </Button>
+        {/* ── INVOICE SECTION ──────────────────────────────────────────── */}
+        <div className="border-t pt-2.5 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
+              <Receipt className="h-3 w-3" /> Linked Invoice
+            </p>
+            {q.invoice_id && !pickingInvoice && (
+              <button onClick={openInvoicePicker}
+                className="text-[10px] font-semibold text-blue-600 hover:underline">
+                Change
+              </button>
+            )}
+          </div>
+
+          {/* Already linked */}
+          {q.invoice_id && !pickingInvoice ? (
+            <div className="rounded-lg border border-purple-200 bg-purple-50/60 p-2.5 space-y-2">
+              <div className="flex items-center gap-2">
+                <Receipt className="h-3.5 w-3.5 text-purple-500 flex-shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-slate-800 truncate">{q.invoice_no || q.invoice_id}</p>
+                  <p className="text-[10px] text-slate-500">Invoice linked</p>
+                </div>
+              </div>
+              <div className="flex gap-1.5">
+                <Button size="sm" variant="default"
+                  className="h-7 px-2 text-[11px] gap-1 bg-purple-600 hover:bg-purple-700 text-white"
+                  onClick={goToInvoice}>
+                  <ExternalLink className="h-3 w-3" /> Open Invoice
+                </Button>
+                <Button size="sm" variant="ghost"
+                  className="h-7 px-2 text-[11px] text-red-500 hover:bg-red-50"
+                  disabled={savingInvoice}
+                  onClick={unlinkInvoice}>
+                  {savingInvoice ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Unlink'}
+                </Button>
+              </div>
+            </div>
+
+          ) : pickingInvoice ? (
+            /* Invoice search picker */
+            <div className="space-y-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400 pointer-events-none" />
+                <input
+                  ref={invSearchRef}
+                  value={invoiceSearch}
+                  onChange={e => setInvoiceSearch(e.target.value)}
+                  placeholder="Search by invoice no. or client…"
+                  className={`w-full pl-7 pr-7 h-8 text-xs rounded-lg border outline-none focus:ring-1 focus:ring-purple-400 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400' : 'bg-white border-slate-200 text-slate-800 placeholder:text-slate-400'}`}
+                />
+                {searchingInv && (
+                  <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400 animate-spin" />
+                )}
+              </div>
+
+              {invoiceSearch.length >= 2 && (
+                <div className={`rounded-lg border max-h-44 overflow-y-auto divide-y ${isDark ? 'bg-slate-800 border-slate-700 divide-slate-700' : 'bg-white border-slate-200 divide-slate-100'}`}>
+                  {invoiceResults.length === 0 && !searchingInv ? (
+                    <p className="px-3 py-3 text-[11px] text-slate-400 text-center">No invoices found</p>
+                  ) : invoiceResults.map(inv => (
+                    <button key={inv.id} disabled={savingInvoice}
+                      onClick={() => saveInvoiceLink(inv)}
+                      className={`w-full flex items-center justify-between px-3 py-2 text-left transition-colors ${isDark ? 'hover:bg-purple-900/20' : 'hover:bg-purple-50'}`}>
+                      <div className="min-w-0">
+                        <p className={`text-xs font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                          {inv.invoice_no}
+                        </p>
+                        <p className="text-[10px] text-slate-400 truncate">
+                          {inv.client_name}{inv.invoice_date ? ` · ${inv.invoice_date}` : ''}
+                        </p>
+                      </div>
+                      <span className="text-[10px] font-bold text-purple-600 flex-shrink-0 ml-2">
+                        {savingInvoice ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Link'}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px] w-full"
+                onClick={cancelInvoicePicker}>
+                Cancel
+              </Button>
+            </div>
+
+          ) : (
+            /* No invoice linked yet */
+            <div className="space-y-2">
+              <p className="text-[11px] text-slate-500 leading-snug">
+                No invoice linked. Convert this quotation to create a new invoice, or link it to an existing one below.
+              </p>
+              <Button size="sm" variant="default"
+                className="h-7 px-2 text-[11px] gap-1 bg-purple-600 hover:bg-purple-700 text-white w-full"
+                onClick={openInvoicePicker}>
+                <Link2 className="h-3 w-3" /> Link Existing Invoice
+              </Button>
+            </div>
+          )}
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
   );
 }
 
