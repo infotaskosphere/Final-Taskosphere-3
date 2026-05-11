@@ -246,6 +246,8 @@ export default function QuotationSettings({ open, onClose, companies = [], isDar
 
     const html = generateQuotationHTML(sampleQtn, {
       company,
+      template:    form.template || company.invoice_template || 'classic',
+      theme:       form.theme    || 'custom',
       customColor: resolvedColor,
     });
 
