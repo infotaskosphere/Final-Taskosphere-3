@@ -200,12 +200,13 @@ const TypePill = ({ type, customLabel }) => {
 };
 
 // ─── ActiveFilterChips ────────────────────────────────────────────────────────
-const ActiveFilterChips = ({ statusFilter, clientTypeFilter, serviceFilter, assignedToFilter, users, onClear, onClearAll }) => {
+const ActiveFilterChips = ({ statusFilter, clientTypeFilter, serviceFilter, assignedToFilter, referredByFilter, users, onClear, onClearAll }) => {
   const chips = [];
   if (statusFilter !== 'all') chips.push({ key: 'status', label: statusFilter === 'active' ? 'Active' : 'Archived', onRemove: () => onClear('status') });
   if (clientTypeFilter !== 'all') { const t = CLIENT_TYPES.find(x => x.value === clientTypeFilter); chips.push({ key: 'type', label: t?.label || clientTypeFilter, onRemove: () => onClear('clientType') }); }
   if (serviceFilter !== 'all') chips.push({ key: 'service', label: serviceFilter, onRemove: () => onClear('service') });
   if (assignedToFilter !== 'all') { const u = users.find(x => x.id === assignedToFilter); chips.push({ key: 'assigned', label: u?.full_name || u?.name || 'User', onRemove: () => onClear('assigned') }); }
+  if (referredByFilter !== 'all') chips.push({ key: 'referredBy', label: `Referred: ${referredByFilter}`, onRemove: () => onClear('referredBy') });
   if (chips.length === 0) return null;
   return (
     <div className="flex items-center gap-2 px-3.5 py-2 flex-wrap">
@@ -2222,6 +2223,7 @@ export default function Clients() {
   const [statusFilter, setStatusFilter]       = useState('all');
   const [assignedToFilter, setAssignedToFilter] = useState('all');
   const [clientTypeFilter, setClientTypeFilter] = useState('all');
+  const [referredByFilter, setReferredByFilter] = useState('all');
 
   // Debounced search — inlined to avoid custom hook bundler issues
   const [searchTerm, setSearchTerm] = useState('');
@@ -2347,6 +2349,7 @@ export default function Clients() {
     if (serviceFilter !== 'all' && !(c?.services ?? []).some(s => (s || '').toLowerCase().includes(serviceFilter.toLowerCase()))) return false;
     if (statusFilter !== 'all' && (c?.status || 'active') !== statusFilter) return false;
     if (clientTypeFilter !== 'all' && (c?.client_type || 'proprietor') !== clientTypeFilter) return false;
+    if (referredByFilter !== 'all' && (c?.referred_by || '') !== referredByFilter) return false;
     if (assignedToFilter !== 'all') {
       const assignments = c?.assignments || [];
       const legacy = c?.assigned_to;
@@ -2354,7 +2357,7 @@ export default function Clients() {
       if (!matched) return false;
     }
     return true;
-  }), [clients, searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter]);
+  }), [clients, searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, referredByFilter]);
 
   const sortedClients = useMemo(() => {
     const arr = [...filteredClients];
@@ -2367,7 +2370,7 @@ export default function Clients() {
     });
   }, [filteredClients, sortOrder]);
 
-  useEffect(() => { setBoardPage(1); setListPage(1); }, [searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, sortOrder, clients]);
+  useEffect(() => { setBoardPage(1); setListPage(1); }, [searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, referredByFilter, sortOrder, clients]);
 
   // ── Stats ────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
@@ -2996,8 +2999,9 @@ export default function Clients() {
     if (which === 'clientType') setClientTypeFilter('all');
     if (which === 'service')    setServiceFilter('all');
     if (which === 'assigned')   setAssignedToFilter('all');
+    if (which === 'referredBy') setReferredByFilter('all');
   }, []);
-  const clearAllFilters = useCallback(() => { setStatusFilter('all'); setClientTypeFilter('all'); setServiceFilter('all'); setAssignedToFilter('all'); setSearchInput(''); }, []);
+  const clearAllFilters = useCallback(() => { setStatusFilter('all'); setClientTypeFilter('all'); setServiceFilter('all'); setAssignedToFilter('all'); setReferredByFilter('all'); setSearchInput(''); }, []);
 
   // ── List row — using itemData pattern so it doesn't recreate per-render ──
   const ListRow = useCallback(({ index, style, data }) => {
@@ -3849,11 +3853,17 @@ export default function Clients() {
               <SelectContent><SelectItem value="all">All Users</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name || u.name || u.email}</SelectItem>)}</SelectContent>
             </Select>
           )}
+          {savedReferrers.length > 0 && (
+            <Select value={referredByFilter} onValueChange={setReferredByFilter}>
+              <SelectTrigger className={`h-9 w-[140px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue placeholder="All Referrers" /></SelectTrigger>
+              <SelectContent><SelectItem value="all">All Referrers</SelectItem>{savedReferrers.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+            </Select>
+          )}
         </div>
         {/* Row 3: active filter chips */}
         <ActiveFilterChips
           statusFilter={statusFilter} clientTypeFilter={clientTypeFilter}
-          serviceFilter={serviceFilter} assignedToFilter={assignedToFilter}
+          serviceFilter={serviceFilter} assignedToFilter={assignedToFilter} referredByFilter={referredByFilter}
           users={users} onClear={clearFilter} onClearAll={clearAllFilters}
         />
       </div>
@@ -3868,7 +3878,7 @@ export default function Clients() {
           <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center mb-4 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-100'}`}><Users className="h-7 w-7 opacity-30" /></div>
           <p className="text-base font-semibold text-slate-500">No clients match your filters</p>
           <p className="mt-1 text-sm text-slate-400">Try changing your search or filters</p>
-          {(searchInput || statusFilter !== 'all' || clientTypeFilter !== 'all' || serviceFilter !== 'all' || assignedToFilter !== 'all') && (
+          {(searchInput || statusFilter !== 'all' || clientTypeFilter !== 'all' || serviceFilter !== 'all' || assignedToFilter !== 'all' || referredByFilter !== 'all') && (
             <button onClick={clearAllFilters} className="mt-3 text-sm font-semibold text-blue-600 hover:underline">Clear all filters</button>
           )}
         </div>
