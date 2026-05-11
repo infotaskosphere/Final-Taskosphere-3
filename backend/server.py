@@ -5838,13 +5838,194 @@ async def parse_udyam_pdf(
     return result
 
 
+def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
+    """
+    Parse an MCA (Ministry of Corporate Affairs) company information PDF.
+    Handles the real MCA website print format where:
+      - Address label appears AFTER the first address line
+      - Director names are split across separate lines from the row data
+    """
+    from io import BytesIO
+    import pdfplumber
+    from dateutil import parser as date_parser
+
+    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+        pages = [p.extract_text() or "" for p in pdf.pages]
+
+    full_text = "\n".join(pages)
+    lines = [l.rstrip() for l in full_text.splitlines()]
+
+    def _find(pat, text, group=1, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL):
+        m = re.search(pat, text, flags)
+        return m.group(group).strip() if m else ""
+
+    def _line_val(label, default=""):
+        """Extract value on the SAME line as label: 'Label VALUE'"""
+        pat = re.compile(r'^\s*' + re.escape(label) + r'\s+(.+)$', re.IGNORECASE)
+        for line in lines:
+            m = pat.match(line)
+            if m:
+                val = m.group(1).strip()
+                return val if val not in ("-", "nan", "") else default
+        return default
+
+    # ── CIN / LLPIN ──────────────────────────────────────────────────────────
+    cin = _find(r'\bCIN\s+([UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6})\b', full_text)
+    if not cin:
+        cin = _find(r'\bCIN\b\s+([A-Z0-9]{21})\b', full_text)
+    llpin = _find(r'\bLLPIN\s+([A-Z]{3}-\d{4,})\b', full_text)
+
+    # ── Company Name ─────────────────────────────────────────────────────────
+    company_name = _line_val("Company Name")
+    if not company_name:
+        company_name = _line_val("LLP Name")
+
+    # ── Date of Incorporation ─────────────────────────────────────────────────
+    doi_raw = _line_val("Date of Incorporation")
+    date_of_incorporation = ""
+    if doi_raw:
+        try:
+            date_of_incorporation = date_parser.parse(doi_raw, dayfirst=True).strftime("%Y-%m-%d")
+        except Exception:
+            date_of_incorporation = ""
+
+    # ── Email (MCA obfuscates with [at] and [dot]) ───────────────────────────
+    email_raw = _line_val("Email Id") or _line_val("Email")
+    email = re.sub(r'\[at\]', '@', email_raw, flags=re.IGNORECASE)
+    email = re.sub(r'\[dot\]', '.', email, flags=re.IGNORECASE).strip()
+    if not re.match(r'[\w.+\-]+@[\w.\-]+\.\w+', email):
+        email = ""
+
+    # ── Registered Address ───────────────────────────────────────────────────
+    # In real MCA PDFs the address is BEFORE the "Registered Address" label:
+    #   "SHOP-528, AVADH KONTINA, ..."   ← address line 1
+    #   "Registered Address"             ← label (alone on next line)
+    #   "Surat, Gujarat, India, 395007"  ← address continuation
+    address = ""
+    city = state = pin = ""
+    for i, line in enumerate(lines):
+        if re.match(r'^\s*Registered Address\s*$', line, re.IGNORECASE):
+            # Line before label is the first part of address
+            part1 = lines[i - 1].strip() if i > 0 else ""
+            # Line after label is continuation
+            part2 = lines[i + 1].strip() if i + 1 < len(lines) else ""
+            # Exclude non-address noise lines
+            skip_pat = re.compile(
+                r'^(Address at which|Listed in|Authorised|Date of|Company Status|Small Company|'
+                r'Category of|Subcategory|Class of|ACTIVE|No Records|Director|Sr\.|DIN)', re.IGNORECASE
+            )
+            if skip_pat.match(part2):
+                part2 = ""
+            # Combine
+            if part1 and part2:
+                address = part1.rstrip(",") + ", " + part2
+            elif part1:
+                address = part1
+            elif part2:
+                address = part2
+            break
+        # Fallback: label and value on same line
+        m = re.match(r'^\s*Registered Address\s+(.+)$', line, re.IGNORECASE)
+        if m:
+            address = m.group(1).strip()
+            break
+
+    if address:
+        pin_m = re.search(r'\b(\d{6})\b', address)
+        pin = pin_m.group(1) if pin_m else ""
+        addr_clean = re.sub(r',?\s*\d{6}\s*$', '', address).strip()
+        addr_clean = re.sub(r',?\s*India\s*$', '', addr_clean, flags=re.IGNORECASE).strip()
+        parts = [p.strip() for p in addr_clean.split(",") if p.strip()]
+        if len(parts) >= 2:
+            state = parts[-1]
+            city = parts[-2]
+
+    # ── Company Status ────────────────────────────────────────────────────────
+    company_status = _line_val("Company Status")
+
+    # ── Directors ─────────────────────────────────────────────────────────────
+    # Real MCA PDF format splits director name across lines:
+    #   "RRITESH"                              ← name part 1 (line before row)
+    #   "1 08839383 Director Promoter 06/05/2026 - Yes"
+    #   "SIPANY"                               ← name part 2 (line after row)
+    directors = []
+    dir_start = None
+    for i, line in enumerate(lines):
+        if re.search(r'Director/Signatory Details', line, re.IGNORECASE):
+            dir_start = i + 1
+            break
+
+    if dir_start is not None:
+        dir_lines = lines[dir_start:]
+        # Row pattern: "N DIN/PAN Designation Category DATE - Signatory"
+        # Name parts appear on surrounding lines
+        row_re = re.compile(
+            r'^\s*(\d+)\s+'                               # Sr. No
+            r'(\d{8}|[A-Z]{5}\d{4}[A-Z])\s+'            # DIN or PAN
+            r'(Director|Partner|Designated Partner|Manager|Secretary|Chief|Chairman|Managing)\s*'
+            r'(Promoter|Independent|[A-Z][a-z]+[A-Za-z ]*)?\s*'
+            r'(\d{2}/\d{2}/\d{4})',                       # Date of appointment
+            re.IGNORECASE
+        )
+        for j, line in enumerate(dir_lines):
+            m = row_re.match(line)
+            if m:
+                din   = m.group(2).strip()
+                desig = m.group(3).strip()
+                date_appt = m.group(5).strip()
+
+                # Name: line before (first name part) + line after (surname)
+                name_before = dir_lines[j - 1].strip() if j > 0 else ""
+                name_after  = dir_lines[j + 1].strip() if j + 1 < len(dir_lines) else ""
+
+                # Validate name parts — skip lines that look like headers/noise
+                noise_re = re.compile(
+                    r'^(Sr\.|No|DIN|PAN|Name|Designation|Category|Date|Signatory|Cessation|\d+|-)$',
+                    re.IGNORECASE
+                )
+                if noise_re.match(name_before):
+                    name_before = ""
+                if noise_re.match(name_after) or row_re.match(name_after):
+                    name_after = ""
+
+                full_name = (name_before + " " + name_after).strip().title()
+                if not full_name:
+                    full_name = "Unknown"
+
+                directors.append({
+                    "name":        full_name,
+                    "designation": desig,
+                    "email":       None,
+                    "phone":       None,
+                    "birthday":    None,
+                    "din":         din if din not in ("-", "") else None,
+                })
+
+    return {
+        "company_name":          company_name,
+        "cin":                   cin or llpin,
+        "email":                 email,
+        "phone":                 "",
+        "date_of_incorporation": date_of_incorporation,
+        "address":               address,
+        "city":                  city,
+        "state":                 state,
+        "pin":                   pin,
+        "company_status":        company_status,
+        "directors":             directors,
+        "pan":                   "",
+        "raw":                   {},
+    }
+
+
 @api_router.post("/clients/parse-multi-documents")
 async def parse_multi_documents(
     files: list[UploadFile] = File(...),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Accept up to 3 documents (GST Certificate PDF, Udyam Certificate PDF, MCA Excel).
+    Accept up to 3 documents (GST Certificate PDF, Udyam Certificate PDF,
+    MCA Master Data Excel OR MCA PDF from the MCA website).
     Auto-detect each document type, parse all, merge into a single client record.
     Priority: GST > Udyam > MCA Excel.
     """
@@ -5867,10 +6048,18 @@ async def parse_multi_documents(
                 first_page_text = ""
 
             text_lower = first_page_text.lower()
-            is_gst   = ("registration number" in text_lower and
-                        bool(re.search(r'[A-Z0-9]{15}', first_page_text))) or \
-                       "gst reg" in text_lower or "form gst" in text_lower
+            is_gst   = (("registration number" in text_lower and
+                        bool(re.search(r'[A-Z0-9]{15}', first_page_text))) or
+                       "gst reg" in text_lower or "form gst" in text_lower)
             is_udyam = "udyam" in text_lower or "udyam registration" in text_lower
+            is_mca   = (
+                "ministry of corporate affairs" in text_lower or
+                "mca services" in text_lower or
+                (
+                    "company information" in text_lower and
+                    bool(re.search(r'\b(CIN|LLPIN)\b', first_page_text))
+                )
+            )
 
             if is_udyam and not udyam_data:
                 try:
@@ -5878,6 +6067,12 @@ async def parse_multi_documents(
                     doc_types_found.append("Udyam Certificate")
                 except Exception as e:
                     logger.warning(f"Udyam parse failed: {e}")
+            elif is_mca and not mca_data:
+                try:
+                    mca_data = _parse_mca_pdf(content)
+                    doc_types_found.append("MCA Master Data")
+                except Exception as e:
+                    logger.warning(f"MCA PDF parse failed: {e}")
             elif is_gst and not gst_data:
                 try:
                     gst_data = _parse_gst_reg06_pdf(content)
@@ -5975,7 +6170,7 @@ async def parse_multi_documents(
     if not doc_types_found:
         raise HTTPException(
             status_code=422,
-            detail="No recognizable documents found. Upload GST Certificate (PDF), Udyam Certificate (PDF), or MCA Master Data (Excel)."
+            detail="No recognizable documents found. Upload GST Certificate (PDF), Udyam Certificate (PDF), MCA Master Data (Excel .xlsx/.xls), or MCA Company Info PDF from the MCA website."
         )
 
     def _first(*vals):
