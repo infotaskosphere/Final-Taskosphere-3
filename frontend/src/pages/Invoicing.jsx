@@ -4921,6 +4921,24 @@ const fetchAll = useCallback(async () => {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  // Deep-link: when navigated with ?invoice_id=… (e.g. just-converted from a
+  // quotation), open that invoice's detail drawer as soon as it's loaded.
+  useEffect(() => {
+    if (loading) return;
+    const params = new URLSearchParams(window.location.search);
+    const targetId = params.get('invoice_id');
+    if (!targetId) return;
+    const target = invoices.find(i => i.id === targetId);
+    if (target) {
+      setDetailInv(target);
+      setDetailOpen(true);
+      // Clean the URL so refresh doesn't keep re-opening it.
+      const url = new URL(window.location.href);
+      url.searchParams.delete('invoice_id');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [loading, invoices]);
+
   // Reset list page whenever filters or search change
   useEffect(() => { setListPage(1); setOutstandingPage(1); setReceivedPage(1); }, [statusFilter, typeFilter, companyFilter, yearFilter, fromDate, toDate, searchTerm]);
 
