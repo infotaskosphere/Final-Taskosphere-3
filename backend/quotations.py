@@ -1303,6 +1303,112 @@ async def update_quotation(
     return updated
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# MANUAL INVOICE LINK / UNLINK
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/quotations/{quotation_id}/link-invoice")
+async def link_invoice_to_quotation(
+    quotation_id: str,
+    payload: dict,
+    current_user: User = Depends(check_module_permission("quotations", "edit")),
+):
+    """
+    Manually link an existing invoice to a quotation (two-way).
+    Body: { "invoice_id": "<invoice_uuid>" }
+
+    Writes:
+      quotation.invoice_id  = invoice.id
+      quotation.invoice_no  = invoice.invoice_no
+      invoice.quotation_id  = quotation.id
+    """
+    invoice_id = (payload.get("invoice_id") or "").strip()
+    if not invoice_id:
+        raise HTTPException(400, "invoice_id is required")
+
+    qtn = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
+    if not qtn:
+        raise HTTPException(404, "Quotation not found")
+    if current_user.role != "admin" and qtn.get("created_by") != current_user.id:
+        raise HTTPException(403, "Not authorized")
+
+    inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(404, "Invoice not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # If this invoice was previously linked to a different quotation, clear that link.
+    old_qtn_id = inv.get("quotation_id")
+    if old_qtn_id and old_qtn_id != quotation_id:
+        await db.quotations.update_one(
+            {"id": old_qtn_id},
+            {"$set": {"invoice_id": None, "invoice_no": None, "updated_at": now}},
+        )
+
+    # If this quotation was previously linked to a different invoice, clear that link.
+    old_inv_id = qtn.get("invoice_id")
+    if old_inv_id and old_inv_id != invoice_id:
+        await db.invoices.update_one(
+            {"id": old_inv_id},
+            {"$set": {"quotation_id": None, "updated_at": now}},
+        )
+
+    # Write the forward link on the quotation.
+    await db.quotations.update_one(
+        {"id": quotation_id},
+        {"$set": {
+            "invoice_id": invoice_id,
+            "invoice_no": inv.get("invoice_no", ""),
+            "updated_at": now,
+        }},
+    )
+
+    # Write the reverse link on the invoice.
+    await db.invoices.update_one(
+        {"id": invoice_id},
+        {"$set": {"quotation_id": quotation_id, "updated_at": now}},
+    )
+
+    updated = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
+    return updated
+
+
+@router.delete("/quotations/{quotation_id}/link-invoice")
+async def unlink_invoice_from_quotation(
+    quotation_id: str,
+    current_user: User = Depends(check_module_permission("quotations", "edit")),
+):
+    """
+    Remove the manual (or converted) invoice link from a quotation (two-way).
+    Clears quotation.invoice_id / quotation.invoice_no and invoice.quotation_id.
+    """
+    qtn = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
+    if not qtn:
+        raise HTTPException(404, "Quotation not found")
+    if current_user.role != "admin" and qtn.get("created_by") != current_user.id:
+        raise HTTPException(403, "Not authorized")
+
+    now = datetime.now(timezone.utc).isoformat()
+    linked_inv_id = qtn.get("invoice_id")
+
+    # Clear the forward link on the quotation.
+    await db.quotations.update_one(
+        {"id": quotation_id},
+        {"$set": {"invoice_id": None, "invoice_no": None, "updated_at": now}},
+    )
+
+    # Clear the reverse link on the invoice (if we know which invoice it was).
+    if linked_inv_id:
+        await db.invoices.update_one(
+            {"id": linked_inv_id},
+            {"$set": {"quotation_id": None, "updated_at": now}},
+        )
+
+    updated = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
+    return updated
+
+
 @router.delete("/quotations/{quotation_id}")
 async def delete_quotation(quotation_id: str, current_user: User = Depends(check_module_permission("quotations", "delete"))):
     existing = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
