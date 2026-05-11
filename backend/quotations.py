@@ -267,6 +267,7 @@ class QuotationCreate(BaseModel):
     extra_terms: List[str] = []
     notes: str = ""
     extra_checklist_items: List[str] = []
+    attach_checklist: bool = True
     status: str = "draft"
 
 
@@ -840,7 +841,7 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
     _extras   = [e for e in (q.get("extra_checklist_items") or []) if str(e).strip()]
     _all_docs = _base + _extras
 
-    if _all_docs:
+    if _all_docs and q.get("attach_checklist", True):
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(*BRAND)
         _cell(pdf, 0, 5, "Document Checklist", nl=True)
@@ -1359,6 +1360,8 @@ async def export_checklist_pdf(
         raise HTTPException(404, "Quotation not found")
     if current_user.role != "admin" and q.get("created_by") != current_user.id:
         raise HTTPException(403, "Not authorized")
+    if not q.get("attach_checklist", True):
+        raise HTTPException(400, "Document checklist is disabled for this quotation")
 
     company = await db.companies.find_one({"id": q.get("company_id")}, {"_id": 0})
     if not company:
