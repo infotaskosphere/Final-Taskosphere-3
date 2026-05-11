@@ -3139,17 +3139,30 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       }
       toast.success(editingInv?.id ? 'Invoice updated successfully' : 'Invoice created successfully');
       saveItemMemory(form.items);
-      // Auto-sync new client data back to client record (non-fatal)
+      // Auto-sync client details back to the client record AND all invoices (non-fatal)
       if (form.client_id) {
         try {
-          const syncFields = {};
-          if (form.client_gstin)  syncFields.gstin   = form.client_gstin;
-          if (form.client_phone)  syncFields.phone   = form.client_phone.replace(/\D/g, '');
-          if (form.client_email)  syncFields.email   = form.client_email;
-          if (form.client_address) syncFields.address = form.client_address;
-          if (form.client_state)  syncFields.state   = form.client_state;
-          if (Object.keys(syncFields).length > 0) {
-            await api.put(`/clients/${form.client_id}`, syncFields);
+          // 1. Update client record in clients DB
+          const clientRecordFields = {};
+          if (form.client_name)    clientRecordFields.company_name = form.client_name;
+          if (form.client_gstin)   clientRecordFields.gstin        = form.client_gstin;
+          if (form.client_phone)   clientRecordFields.phone        = form.client_phone.replace(/\D/g, '');
+          if (form.client_email)   clientRecordFields.email        = form.client_email;
+          if (form.client_address) clientRecordFields.address      = form.client_address;
+          if (form.client_state)   clientRecordFields.state        = form.client_state;
+          if (Object.keys(clientRecordFields).length > 0) {
+            await api.put(`/clients/${form.client_id}`, clientRecordFields);
+          }
+          // 2. Propagate the same client details to ALL invoices for this client
+          const invoiceClientFields = {};
+          if (form.client_name)    invoiceClientFields.client_name    = form.client_name;
+          if (form.client_gstin)   invoiceClientFields.client_gstin   = form.client_gstin;
+          if (form.client_phone)   invoiceClientFields.client_phone   = form.client_phone;
+          if (form.client_email)   invoiceClientFields.client_email   = form.client_email;
+          if (form.client_address) invoiceClientFields.client_address = form.client_address;
+          if (form.client_state)   invoiceClientFields.client_state   = form.client_state;
+          if (Object.keys(invoiceClientFields).length > 0) {
+            await api.patch(`/invoices/sync-client/${form.client_id}`, invoiceClientFields);
           }
         } catch { /* non-fatal */ }
       }
@@ -4116,7 +4129,6 @@ const ProductModal = ({ open, onClose, isDark, onSaved }) => {
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════════
 const LIST_PAGE_SIZE = 20;
-const SECTION_PAGE_SIZE = 10; // rows per page inside Outstanding / Received sections
 function Invoicing() {
   // ── A. ALL useState (top of component) ──────────────────────────────────────
   const [invoices, setInvoices] = useState([]);
@@ -4148,8 +4160,7 @@ function Invoicing() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
   const [listPage, setListPage] = useState(1);
-  const [outstandingPage, setOutstandingPage] = useState(1);
-  const [receivedPage, setReceivedPage] = useState(1);
+  const [listViewFilter, setListViewFilter] = useState('all'); // 'all' | 'outstanding' | 'received'
 
   // ── B. ALL useRef ─────────────────────────────────────────────────────────
   const iframeRef = useRef(null);
@@ -4206,16 +4217,21 @@ function Invoicing() {
       if (fy && (inv.invoice_date < fy.from || inv.invoice_date > fy.to)) return false;
       if (searchTerm && !inv.invoice_no?.toLowerCase().includes(searchTerm.toLowerCase()) && !inv.client_name?.toLowerCase().includes(searchTerm.toLowerCase())) return false;
       if (statusFilter === 'outstanding') {
-        // Outstanding = anything with balance due OR draft (not cancelled, not paid)
         if (inv.status === 'paid' || inv.status === 'cancelled') return false;
         if (calcDue(inv) <= 0 && inv.status !== 'draft') return false;
       } else if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
+      if (listViewFilter === 'outstanding') {
+        if (inv.status === 'paid' || inv.status === 'cancelled') return false;
+        if (calcDue(inv) <= 0 && inv.status !== 'draft') return false;
+      } else if (listViewFilter === 'received') {
+        if (!(inv.status === 'paid' || (calcDue(inv) <= 0 && inv.status !== 'draft' && inv.status !== 'cancelled'))) return false;
+      }
       if (typeFilter !== 'all' && inv.invoice_type !== typeFilter) return false;
       if (fromDate && inv.invoice_date < fromDate) return false;
       if (toDate && inv.invoice_date > toDate) return false;
       return true;
     });
-  }, [invoices, companyFilter, yearFilter, searchTerm, statusFilter, typeFilter, fromDate, toDate]);
+  }, [invoices, companyFilter, yearFilter, searchTerm, statusFilter, typeFilter, fromDate, toDate, listViewFilter]);
 
   // ── F. ALL useMemo: TOTALS / AGGREGATIONS ────────────────────────────────
 
@@ -4242,37 +4258,14 @@ function Invoicing() {
     [enrichedFiltered]
   );
 
-  // ── Split invoices into Received and Outstanding sections ─────────────────
-  // amount_due in enrichedFiltered is the freshly recomputed value, so these
-  // splits stay in sync with what the rows actually display.
-  const receivedInvoices = useMemo(() =>
-    enrichedFiltered.filter(inv => inv.status === 'paid' || (calcDue(inv) <= 0 && inv.status !== 'draft' && inv.status !== 'cancelled')),
+  // ── Quick view summary counts (for pill labels) ──────────────────────────
+  const outstandingCount = useMemo(() =>
+    enrichedFiltered.filter(inv => inv.status !== 'paid' && (calcDue(inv) > 0 || inv.status === 'draft' || inv.status === 'cancelled')).length,
     [enrichedFiltered]
   );
-  const outstandingInvoices = useMemo(() =>
-    enrichedFiltered.filter(inv => inv.status !== 'paid' && (calcDue(inv) > 0 || inv.status === 'draft' || inv.status === 'cancelled')),
+  const receivedCount = useMemo(() =>
+    enrichedFiltered.filter(inv => inv.status === 'paid' || (calcDue(inv) <= 0 && inv.status !== 'draft' && inv.status !== 'cancelled')).length,
     [enrichedFiltered]
-  );
-
-  // ── Paginated slices for each section ─────────────────────────────────────
-  const paginatedOutstanding = useMemo(() => {
-    const start = (outstandingPage - 1) * SECTION_PAGE_SIZE;
-    return outstandingInvoices.slice(start, start + SECTION_PAGE_SIZE);
-  }, [outstandingInvoices, outstandingPage]);
-
-  const totalOutstandingPages = useMemo(
-    () => Math.max(1, Math.ceil(outstandingInvoices.length / SECTION_PAGE_SIZE)),
-    [outstandingInvoices]
-  );
-
-  const paginatedReceived = useMemo(() => {
-    const start = (receivedPage - 1) * SECTION_PAGE_SIZE;
-    return receivedInvoices.slice(start, start + SECTION_PAGE_SIZE);
-  }, [receivedInvoices, receivedPage]);
-
-  const totalReceivedPages = useMemo(
-    () => Math.max(1, Math.ceil(receivedInvoices.length / SECTION_PAGE_SIZE)),
-    [receivedInvoices]
   );
 
   // ── G. ALL useCallback (AFTER ALL MEMOS) ─────────────────────────────────
@@ -4617,7 +4610,7 @@ const fetchAll = useCallback(async () => {
         )}
       </div>
 
-      {/* INVOICE LIST — split into Outstanding and Received */}
+      {/* INVOICE LIST — unified with pill filter */}
       <div ref={invoiceListRef} className="scroll-mt-4" />
       {/* ── Active-filter banner ── */}
       {(statusFilter !== 'all' || fromDate || toDate) && (
@@ -4662,352 +4655,173 @@ const fetchAll = useCallback(async () => {
           </Button>
         </div>
       ) : (
-        <div className="space-y-4">
-          {/* ── OUTSTANDING SECTION ───────────────────────────── */}
-          {outstandingInvoices.length > 0 && (
-            <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-              {/* Section header */}
-              <div className={`flex items-center gap-3 px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-700/30' : 'border-slate-100 bg-amber-50/60'}`}>
-                <div className="w-2 h-6 rounded-full" style={{ background: 'linear-gradient(180deg, #FF6B6B, #F59E0B)' }} />
-                <AlertCircle className="h-4 w-4 text-amber-500" />
-                <span className={`text-sm font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Outstanding</span>
-                <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${isDark ? 'bg-amber-900/40 text-amber-300' : 'bg-amber-100 text-amber-700'}`}>{outstandingInvoices.length}</span>
-                <span className={`ml-auto text-xs font-bold ${isDark ? 'text-red-400' : 'text-red-600'}`}>
-                  {fmtC(outstandingInvoices.reduce((s, i) => s + calcDue(i), 0))} due
+        <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          {/* ── View filter pills + summary ── */}
+          <div className={`flex items-center gap-2 px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-700/20' : 'border-slate-100 bg-slate-50/60'}`}>
+            {[
+              { key: 'all',         label: 'All',         count: enrichedFiltered.length, color: isDark ? 'bg-slate-600 text-slate-100' : 'bg-slate-700 text-white' },
+              { key: 'outstanding', label: 'Outstanding', count: outstandingCount,         color: 'bg-amber-500 text-white' },
+              { key: 'received',    label: 'Received',    count: receivedCount,            color: 'bg-emerald-500 text-white' },
+            ].map(({ key, label, count, color }) => (
+              <button
+                key={key}
+                onClick={() => { setListViewFilter(key); setListPage(1); }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  listViewFilter === key
+                    ? color
+                    : isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-slate-500 hover:bg-slate-100'
+                }`}
+              >
+                {label}
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  listViewFilter === key ? 'bg-white/20' : isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-200 text-slate-600'
+                }`}>{count}</span>
+              </button>
+            ))}
+            <div className="ml-auto flex items-center gap-3 text-xs">
+              {listViewFilter === 'outstanding' && (
+                <span className={`font-bold ${isDark ? 'text-red-400' : 'text-red-600'}`}>
+                  {fmtC(enrichedFiltered.reduce((s, i) => s + calcDue(i), 0))} due
                 </span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full" style={{minWidth:700}}>
-                  <thead>
-                    <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
-                      <th className="w-1 p-0" style={{ width: 4, padding: 0 }} />
-                      <th className={`px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sr</th>
-                      <th className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
-                        <input type="checkbox"
-                          className="w-4 h-4 rounded cursor-pointer accent-blue-600"
-                          checked={outstandingInvoices.length > 0 && outstandingInvoices.every(i => selectedIds.has(i.id))}
-                          onChange={() => {
-                            const allSelected = outstandingInvoices.every(i => selectedIds.has(i.id));
-                            setSelectedIds(prev => {
-                              const next = new Set(prev);
-                              outstandingInvoices.forEach(i => allSelected ? next.delete(i.id) : next.add(i.id));
-                              return next;
-                            });
-                          }}
-                        />
-                      </th>
-                      {['Invoice', 'Client', 'Date', 'Type', 'Amount', 'Status', 'Actions'].map(h => (
-                        <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginatedOutstanding.map((inv, idx) => {
-                      const srNo = (outstandingPage - 1) * SECTION_PAGE_SIZE + idx + 1;
-                      const isSelected = selectedIds.has(inv.id);
-                      return (
-                    <tr key={inv.id}
-                      className={`border-b last:border-0 transition-colors cursor-pointer relative ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
-                      onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
-                      {/* Company-wise color strip */}
-                      <td className="w-1 p-0" style={{ width: 4, padding: 0 }}>
-                        <div style={{ width: 4, minHeight: 48, background: getCompanyStripColor(inv.company_id, companies), borderRadius: '0 4px 4px 0' }} />
-                      </td>
-                      <td className={`px-3 py-3.5 text-xs font-mono w-10 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{srNo}</td>
-                      <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
-                        <input type="checkbox"
-                          className="w-4 h-4 rounded cursor-pointer accent-blue-600"
-                          checked={isSelected}
-                          onChange={() => toggleSelect(inv.id)}
-                        />
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                          <Hl text={inv.invoice_no || '—'} query={searchTerm} />
-                        </p>
-                        {(() => { const co = (companies||[]).find(c=>c.id===inv.company_id); return co ? (
-                          <p className="text-[10px] mt-0.5 font-semibold truncate max-w-[180px]" style={{color: getCompanyStripColor(inv.company_id, companies)}}>{co.name}</p>
-                        ) : null; })()}
-                        {inv.reference_no && <p className="text-[10px] text-slate-400 mt-0.5">Ref: {inv.reference_no}</p>}
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                            style={{ background: avatarGrad(inv.client_name) }}>
-                            {(inv.client_name || '?').charAt(0).toUpperCase()}
-                          </div>
-                          <div className="min-w-0">
-                            <p className={`text-sm font-medium truncate max-w-[180px] ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-                              <Hl text={inv.client_name || '—'} query={searchTerm} />
-                            </p>
-                            {inv.client_gstin && <p className="text-[10px] text-slate-400 font-mono truncate">{inv.client_gstin}</p>}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{inv.invoice_date}</p>
-                        {inv.due_date && <p className="text-[10px] text-slate-400">Due: {inv.due_date}</p>}
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
-                          {INV_TYPES.find(t => t.value === inv.invoice_type)?.label || inv.invoice_type}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(inv.grand_total)}</p>
-                        {(() => {
-                          const due = calcDue(inv);
-                          const paid = calcPaid(inv);
-                          const partial = paid > 0.009 && due > 0.009;
-                          if (due > 0.009) {
-                            return (
-                              <>
-                                <p
-                                  className={`text-[10px] font-bold mt-0.5 inline-block px-1.5 py-0.5 rounded ${isDark ? 'bg-red-900/30' : 'bg-red-50'}`}
-                                  style={{ color: getInvoiceStripe(inv).color }}
-                                  title={partial ? `Advance/Paid: ${fmtC(paid)}  •  Outstanding: ${fmtC(due)}` : `Outstanding: ${fmtC(due)}`}
-                                >
-                                  Due: {fmtC(due)}
-                                </p>
-                                {partial && (
-                                  <p className={`text-[10px] font-medium mt-0.5 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                                    Adv: {fmtC(paid)}
-                                  </p>
-                                )}
-                              </>
-                            );
-                          }
-                          if (num(inv.grand_total) > 0) {
-                            return (
-                              <p className={`text-[10px] font-semibold mt-0.5 inline-block px-1.5 py-0.5 rounded ${isDark ? 'bg-emerald-900/30 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
-                                Settled
-                              </p>
-                            );
-                          }
-                          return null;
-                        })()}
-                      </td>
-                      <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
-                        <InlineStatusDropdown inv={inv} onStatusChange={handleStatusChange} isDark={isDark} />
-                      </td>
-                      <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => { setEditingInv(inv); setFormOpen(true); }} title="Edit" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}><Edit className="h-3.5 w-3.5" /></button>
-                          <button onClick={() => handleDuplicateInv(inv)} title="Duplicate" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-purple-400 hover:bg-purple-900/30' : 'text-slate-400 hover:text-purple-600 hover:bg-purple-50'}`}><Copy className="h-3.5 w-3.5" /></button>
-                          <button onClick={() => handleDownloadPdf(inv)} title="Download PDF" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}><Download className="h-3.5 w-3.5" /></button>
-                          <button onClick={() => handleDelete(inv)} title="Delete" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}><Trash2 className="h-3.5 w-3.5" /></button>
-                        </div>
-                      </td>
-                    </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              {/* ── Outstanding pagination ── */}
-              {totalOutstandingPages > 1 && (
-                <div className={`flex items-center justify-between px-5 py-3 border-t ${
-                  isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-amber-50/40'
-                }`}>
-                  <span className={`text-xs ${ isDark ? 'text-slate-400' : 'text-slate-500' }`}>
-                    Showing {((outstandingPage - 1) * SECTION_PAGE_SIZE) + 1}–{Math.min(outstandingPage * SECTION_PAGE_SIZE, outstandingInvoices.length)} of {outstandingInvoices.length}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      disabled={outstandingPage === 1}
-                      onClick={() => setOutstandingPage(p => Math.max(1, p - 1))}
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors disabled:opacity-30 ${
-                        isDark ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-amber-100 text-slate-600'
-                      }`}
-                    >‹</button>
-                    {Array.from({ length: totalOutstandingPages }, (_, i) => i + 1)
-                      .filter(p => p === 1 || p === totalOutstandingPages || Math.abs(p - outstandingPage) <= 1)
-                      .reduce((acc, p, idx, arr) => {
-                        if (idx > 0 && p - arr[idx - 1] > 1) acc.push('...');
-                        acc.push(p); return acc;
-                      }, [])
-                      .map((p, i) => p === '...' ? (
-                        <span key={`od-ellipsis-${i}`} className="px-1 text-xs text-slate-400">…</span>
-                      ) : (
-                        <button key={p} onClick={() => setOutstandingPage(p)}
-                          className={`w-7 h-7 rounded-lg text-xs font-bold transition-colors ${
-                            outstandingPage === p
-                              ? 'text-white shadow-sm'
-                              : isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600 hover:bg-amber-100'
-                          }`}
-                          style={outstandingPage === p ? { background: 'linear-gradient(135deg, #F59E0B, #D97706)' } : {}}
-                        >{p}</button>
-                      ))
-                    }
-                    <button
-                      disabled={outstandingPage === totalOutstandingPages}
-                      onClick={() => setOutstandingPage(p => Math.min(totalOutstandingPages, p + 1))}
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors disabled:opacity-30 ${
-                        isDark ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-amber-100 text-slate-600'
-                      }`}
-                    >›</button>
-                  </div>
-                </div>
+              )}
+              {listViewFilter === 'received' && (
+                <span className={`font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                  {fmtC(enrichedFiltered.reduce((s, i) => s + (i.amount_paid || 0), 0))} collected
+                </span>
               )}
             </div>
-          )}
+          </div>
 
-          {/* ── RECEIVED SECTION ──────────────────────────────── */}
-          {receivedInvoices.length > 0 && (
-            <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-              {/* Section header */}
-              <div className={`flex items-center gap-3 px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-700/30' : 'border-slate-100 bg-emerald-50/60'}`}>
-                <div className="w-2 h-6 rounded-full bg-emerald-500" />
-                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                <span className={`text-sm font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Received</span>
-                <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${isDark ? 'bg-emerald-900/40 text-emerald-300' : 'bg-emerald-100 text-emerald-700'}`}>{receivedInvoices.length}</span>
-                <span className={`ml-auto text-xs font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                  {fmtC(receivedInvoices.reduce((s, i) => s + (i.grand_total || 0), 0))} collected
-                </span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full" style={{minWidth:700}}>
-                  <thead>
-                    <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
-                      <th className="w-1 p-0" style={{ width: 4, padding: 0 }} />
-                      <th className={`px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sr</th>
-                      <th className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
-                        <input type="checkbox"
-                          className="w-4 h-4 rounded cursor-pointer accent-blue-600"
-                          checked={receivedInvoices.length > 0 && receivedInvoices.every(i => selectedIds.has(i.id))}
-                          onChange={() => {
-                            const allSelected = receivedInvoices.every(i => selectedIds.has(i.id));
-                            setSelectedIds(prev => {
-                              const next = new Set(prev);
-                              receivedInvoices.forEach(i => allSelected ? next.delete(i.id) : next.add(i.id));
-                              return next;
-                            });
-                          }}
-                        />
-                      </th>
-                      {['Invoice', 'Client', 'Date', 'Type', 'Amount', 'Status', 'Actions'].map(h => (
-                        <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginatedReceived.map((inv, idx) => {
-                      const srNo = (receivedPage - 1) * SECTION_PAGE_SIZE + idx + 1;
-                      const isSelected = selectedIds.has(inv.id);
-                      return (
-                    <tr key={inv.id}
-                      className={`border-b last:border-0 transition-colors cursor-pointer ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
-                      onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
-                      {/* Company-wise color strip */}
-                      <td className="w-1 p-0" style={{ width: 4, padding: 0 }}>
-                        <div style={{ width: 4, minHeight: 48, background: getCompanyStripColor(inv.company_id, companies), borderRadius: '0 4px 4px 0' }} />
-                      </td>
-                      <td className={`px-3 py-3.5 text-xs font-mono w-10 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{srNo}</td>
-                      <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
-                        <input type="checkbox"
-                          className="w-4 h-4 rounded cursor-pointer accent-blue-600"
-                          checked={isSelected}
-                          onChange={() => toggleSelect(inv.id)}
-                        />
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                          <Hl text={inv.invoice_no || '—'} query={searchTerm} />
+          {/* ── Table ── */}
+          <div className="overflow-x-auto">
+            <table className="w-full" style={{minWidth:700}}>
+              <thead>
+                <tr className={`border-b ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50/60'}`}>
+                  <th className="w-1 p-0" style={{ width: 4, padding: 0 }} />
+                  <th className={`px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sr</th>
+                  <th className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
+                    <input type="checkbox"
+                      className="w-4 h-4 rounded cursor-pointer accent-blue-600"
+                      checked={enrichedFiltered.length > 0 && enrichedFiltered.every(i => selectedIds.has(i.id))}
+                      onChange={toggleSelectAll}
+                    />
+                  </th>
+                  {['Invoice', 'Client', 'Date', 'Type', 'Amount', 'Status', 'Actions'].map(h => (
+                    <th key={h} className={`px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedFiltered.map((inv, idx) => {
+                  const srNo = (listPage - 1) * LIST_PAGE_SIZE + idx + 1;
+                  const isSelected = selectedIds.has(inv.id);
+                  const due = calcDue(inv);
+                  const paid = calcPaid(inv);
+                  const isReceived = inv.status === 'paid' || (due <= 0 && inv.status !== 'draft' && inv.status !== 'cancelled');
+                  return (
+                  <tr key={inv.id}
+                    className={`border-b last:border-0 transition-colors cursor-pointer relative ${isSelected ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/60') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50')}`}
+                    onClick={() => { setDetailInv(inv); setDetailOpen(true); }}>
+                    <td className="w-1 p-0" style={{ width: 4, padding: 0 }}>
+                      <div style={{ width: 4, minHeight: 48, background: getCompanyStripColor(inv.company_id, companies), borderRadius: '0 4px 4px 0' }} />
+                    </td>
+                    <td className={`px-3 py-3.5 text-xs font-mono w-10 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{srNo}</td>
+                    <td className="px-4 py-3.5 w-10" onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" className="w-4 h-4 rounded cursor-pointer accent-blue-600" checked={isSelected} onChange={() => toggleSelect(inv.id)} />
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                        <Hl text={inv.invoice_no || '—'} query={searchTerm} />
+                      </p>
+                      {(() => { const co = (companies||[]).find(c=>c.id===inv.company_id); return co ? (
+                        <p className="text-[10px] mt-0.5 font-semibold truncate max-w-[180px]" style={{color: getCompanyStripColor(inv.company_id, companies)}}>{co.name}</p>
+                      ) : null; })()}
+                      {inv.reference_no && <p className="text-[10px] text-slate-400 mt-0.5">Ref: {inv.reference_no}</p>}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                          style={{ background: avatarGrad(inv.client_name) }}>
+                          {(inv.client_name || '?').charAt(0).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <p className={`text-sm font-medium truncate max-w-[180px] ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                            <Hl text={inv.client_name || '—'} query={searchTerm} />
+                          </p>
+                          {inv.client_gstin && <p className="text-[10px] text-slate-400 font-mono truncate">{inv.client_gstin}</p>}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{inv.invoice_date}</p>
+                      {inv.due_date && <p className="text-[10px] text-slate-400">Due: {inv.due_date}</p>}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                        {INV_TYPES.find(t => t.value === inv.invoice_type)?.label || inv.invoice_type}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(inv.grand_total)}</p>
+                      {isReceived ? (
+                        <p className={`text-[10px] font-semibold mt-0.5 inline-block px-1.5 py-0.5 rounded ${isDark ? 'bg-emerald-900/30 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
+                          Paid in full
                         </p>
-                        {(() => { const co = (companies||[]).find(c=>c.id===inv.company_id); return co ? (
-                          <p className="text-[10px] mt-0.5 font-semibold truncate max-w-[180px]" style={{color: getCompanyStripColor(inv.company_id, companies)}}>{co.name}</p>
-                        ) : null; })()}
-                        {inv.reference_no && <p className="text-[10px] text-slate-400 mt-0.5">Ref: {inv.reference_no}</p>}
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                            style={{ background: avatarGrad(inv.client_name) }}>
-                            {(inv.client_name || '?').charAt(0).toUpperCase()}
-                          </div>
-                          <div className="min-w-0">
-                            <p className={`text-sm font-medium truncate max-w-[180px] ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-                              <Hl text={inv.client_name || '—'} query={searchTerm} />
-                            </p>
-                            {inv.client_gstin && <p className="text-[10px] text-slate-400 font-mono truncate">{inv.client_gstin}</p>}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{inv.invoice_date}</p>
-                        {inv.due_date && <p className="text-[10px] text-slate-400">Due: {inv.due_date}</p>}
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
-                          {INV_TYPES.find(t => t.value === inv.invoice_type)?.label || inv.invoice_type}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fmtC(inv.grand_total)}</p>
-                        <p className="text-[10px] text-emerald-500 font-semibold mt-0.5">Paid in full</p>
-                      </td>
-                      <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
-                        <InlineStatusDropdown inv={inv} onStatusChange={handleStatusChange} isDark={isDark} />
-                      </td>
-                      <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => { setEditingInv(inv); setFormOpen(true); }} title="Edit" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}><Edit className="h-3.5 w-3.5" /></button>
-                          <button onClick={() => handleDuplicateInv(inv)} title="Duplicate" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-purple-400 hover:bg-purple-900/30' : 'text-slate-400 hover:text-purple-600 hover:bg-purple-50'}`}><Copy className="h-3.5 w-3.5" /></button>
-                          <button onClick={() => handleDownloadPdf(inv)} title="Download PDF" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}><Download className="h-3.5 w-3.5" /></button>
-                          <button onClick={() => handleDelete(inv)} title="Delete" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}><Trash2 className="h-3.5 w-3.5" /></button>
-                        </div>
-                      </td>
-                    </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      ) : due > 0.009 ? (
+                        <>
+                          <p className={`text-[10px] font-bold mt-0.5 inline-block px-1.5 py-0.5 rounded ${isDark ? 'bg-red-900/30' : 'bg-red-50'}`}
+                            style={{ color: getInvoiceStripe(inv).color }}
+                            title={paid > 0.009 ? `Advance/Paid: ${fmtC(paid)}  •  Outstanding: ${fmtC(due)}` : `Outstanding: ${fmtC(due)}`}>
+                            Due: {fmtC(due)}
+                          </p>
+                          {paid > 0.009 && (
+                            <p className={`text-[10px] font-medium mt-0.5 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>Adv: {fmtC(paid)}</p>
+                          )}
+                        </>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
+                      <InlineStatusDropdown inv={inv} onStatusChange={handleStatusChange} isDark={isDark} />
+                    </td>
+                    <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => { setEditingInv(inv); setFormOpen(true); }} title="Edit" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}><Edit className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => handleDuplicateInv(inv)} title="Duplicate" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-purple-400 hover:bg-purple-900/30' : 'text-slate-400 hover:text-purple-600 hover:bg-purple-50'}`}><Copy className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => handleDownloadPdf(inv)} title="Download PDF" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}><Download className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => handleDelete(inv)} title="Delete" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {/* ── Pagination ── */}
+          {totalListPages > 1 && (
+            <div className={`flex items-center justify-between px-5 py-3 border-t ${
+              isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-slate-50/40'
+            }`}>
+              <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Showing {((listPage - 1) * LIST_PAGE_SIZE) + 1}–{Math.min(listPage * LIST_PAGE_SIZE, enrichedFiltered.length)} of {enrichedFiltered.length}
+              </span>
+              <div className="flex items-center gap-1">
+                <button disabled={listPage === 1} onClick={() => setListPage(p => Math.max(1, p - 1))}
+                  className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors disabled:opacity-30 ${isDark ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}`}>‹</button>
+                {Array.from({ length: totalListPages }, (_, i) => i + 1)
+                  .filter(p => p === 1 || p === totalListPages || Math.abs(p - listPage) <= 1)
+                  .reduce((acc, p, idx, arr) => { if (idx > 0 && p - arr[idx - 1] > 1) acc.push('...'); acc.push(p); return acc; }, [])
+                  .map((p, i) => p === '...' ? (
+                    <span key={`pg-ellipsis-${i}`} className="px-1 text-xs text-slate-400">…</span>
+                  ) : (
+                    <button key={p} onClick={() => setListPage(p)}
+                      className={`w-7 h-7 rounded-lg text-xs font-bold transition-colors ${listPage === p ? 'text-white shadow-sm' : isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-100'}`}
+                      style={listPage === p ? { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` } : {}}
+                    >{p}</button>
+                  ))}
+                <button disabled={listPage === totalListPages} onClick={() => setListPage(p => Math.min(totalListPages, p + 1))}
+                  className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors disabled:opacity-30 ${isDark ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}`}>›</button>
               </div>
-              {/* ── Received pagination ── */}
-              {totalReceivedPages > 1 && (
-                <div className={`flex items-center justify-between px-5 py-3 border-t ${
-                  isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-emerald-50/40'
-                }`}>
-                  <span className={`text-xs ${ isDark ? 'text-slate-400' : 'text-slate-500' }`}>
-                    Showing {((receivedPage - 1) * SECTION_PAGE_SIZE) + 1}–{Math.min(receivedPage * SECTION_PAGE_SIZE, receivedInvoices.length)} of {receivedInvoices.length}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      disabled={receivedPage === 1}
-                      onClick={() => setReceivedPage(p => Math.max(1, p - 1))}
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors disabled:opacity-30 ${
-                        isDark ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-emerald-100 text-slate-600'
-                      }`}
-                    >‹</button>
-                    {Array.from({ length: totalReceivedPages }, (_, i) => i + 1)
-                      .filter(p => p === 1 || p === totalReceivedPages || Math.abs(p - receivedPage) <= 1)
-                      .reduce((acc, p, idx, arr) => {
-                        if (idx > 0 && p - arr[idx - 1] > 1) acc.push('...');
-                        acc.push(p); return acc;
-                      }, [])
-                      .map((p, i) => p === '...' ? (
-                        <span key={`rc-ellipsis-${i}`} className="px-1 text-xs text-slate-400">…</span>
-                      ) : (
-                        <button key={p} onClick={() => setReceivedPage(p)}
-                          className={`w-7 h-7 rounded-lg text-xs font-bold transition-colors ${
-                            receivedPage === p
-                              ? 'text-white shadow-sm'
-                              : isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600 hover:bg-emerald-100'
-                          }`}
-                          style={receivedPage === p ? { background: 'linear-gradient(135deg, #10B981, #059669)' } : {}}
-                        >{p}</button>
-                      ))
-                    }
-                    <button
-                      disabled={receivedPage === totalReceivedPages}
-                      onClick={() => setReceivedPage(p => Math.min(totalReceivedPages, p + 1))}
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors disabled:opacity-30 ${
-                        isDark ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-emerald-100 text-slate-600'
-                      }`}
-                    >›</button>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </div>
