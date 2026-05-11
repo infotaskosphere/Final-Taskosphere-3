@@ -748,6 +748,14 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
     if (!form.service.trim()) { toast.error('Service is required — please select a service in Step 2'); setStep(2); return; }
     setSaving(true);
     try {
+      // Snapshot the active template/theme so the quotation always renders
+      // with the same look in preview, PDF, print and the converted invoice
+      // (independent of later company-default changes).
+      const _qtnSettingsForSave = getQtnSettings(form.company_id);
+      const _companyForSave = companies.find(c => c.id === form.company_id) || {};
+      const _resolvedColorForSave = _qtnSettingsForSave.theme === 'custom'
+        ? (_qtnSettingsForSave.custom_color || '#0D3B66')
+        : (_qtnSettingsForSave.custom_color || _companyForSave.invoice_custom_color || '#0D3B66');
       const payload = {
         ...form,
         scope_of_work: form.scope_of_work.filter(s => s.trim()),
@@ -755,6 +763,9 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
         extra_checklist_items: form.extra_checklist_items.filter(c => c.trim()),
         lead_id: form.lead_id || null,
         client_id: form.client_id || null,
+        invoice_template:     _qtnSettingsForSave.template || _companyForSave.invoice_template || 'classic',
+        invoice_theme:        _qtnSettingsForSave.theme    || 'custom',
+        invoice_custom_color: _resolvedColorForSave,
       };
       editingQuotation
         ? await api.put(`/quotations/${editingQuotation.id}`, payload)
@@ -1551,12 +1562,26 @@ export default function Quotations() {
   };
 
   const handleConvertToInvoice = async (qtnId) => {
+    const existing = quotations.find(x => x.id === qtnId);
+    if (existing && existing.invoice_id) {
+      if (!window.confirm('This quotation has already been converted. Open the existing invoice?')) return;
+      navigate(`/invoicing?invoice_id=${existing.invoice_id}`);
+      return;
+    }
     if (!window.confirm('Convert this quotation to a Tax Invoice?')) return;
     setConvertingId(qtnId);
     try {
-      await api.post(`/invoices/from-quotation/${qtnId}`);
-      toast.success('Converted to invoice! Redirecting…');
-      setTimeout(() => navigate('/invoicing'), 1200);
+      const { data: invoice } = await api.post(`/invoices/from-quotation/${qtnId}`);
+      // Optimistically reflect status change locally so the button hides immediately.
+      setQuotations(prev => prev.map(q => q.id === qtnId
+        ? { ...q, status: 'converted', invoice_id: invoice?.id, invoice_no: invoice?.invoice_no }
+        : q));
+      toast.success(`Invoice ${invoice?.invoice_no || ''} created`);
+      if (invoice?.id) {
+        navigate(`/invoicing?invoice_id=${invoice.id}`);
+      } else {
+        navigate('/invoicing');
+      }
     } catch (err) { toast.error(getErrMsg(err, 'Conversion failed')); }
     finally { setConvertingId(null); }
   };
@@ -1564,13 +1589,14 @@ export default function Quotations() {
   const handlePreview = (q) => {
     const company  = getCompany(q.company_id) || {};
     const settings = getQtnSettings(q.company_id);
-    const activeColor = settings.theme === 'custom'
-      ? settings.custom_color
-      : (settings.custom_color || company.invoice_custom_color || '#0D3B66');
+    const activeColor = q.invoice_custom_color
+      || (settings.theme === 'custom'
+            ? settings.custom_color
+            : (settings.custom_color || company.invoice_custom_color || '#0D3B66'));
     const html = generateQuotationHTML(q, {
       company,
-      template:    settings.template    || company.invoice_template    || 'classic',
-      theme:       settings.theme       || 'custom',
+      template:    q.invoice_template || settings.template || company.invoice_template || 'classic',
+      theme:       q.invoice_theme    || settings.theme    || 'custom',
       customColor: activeColor,
       attachChecklist: q.attach_checklist !== false,
     });
@@ -1580,13 +1606,14 @@ export default function Quotations() {
   const handlePrint = (q) => {
     const company  = getCompany(q.company_id) || {};
     const settings = getQtnSettings(q.company_id);
-    const activeColor = settings.theme === 'custom'
-      ? settings.custom_color
-      : (settings.custom_color || company.invoice_custom_color || '#0D3B66');
+    const activeColor = q.invoice_custom_color
+      || (settings.theme === 'custom'
+            ? settings.custom_color
+            : (settings.custom_color || company.invoice_custom_color || '#0D3B66'));
     const html = generateQuotationHTML(q, {
       company,
-      template:    settings.template    || company.invoice_template    || 'classic',
-      theme:       settings.theme       || 'custom',
+      template:    q.invoice_template || settings.template || company.invoice_template || 'classic',
+      theme:       q.invoice_theme    || settings.theme    || 'custom',
       customColor: activeColor,
       attachChecklist: q.attach_checklist !== false,
     });
