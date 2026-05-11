@@ -821,7 +821,7 @@ const ClientSearchCombobox = ({ clients = [], value, onSelect, onAddNew, isDark 
 // ════════════════════════════════════════════════════════════════════════════════
 // GST REPORTS MODAL
 // ════════════════════════════════════════════════════════════════════════════════
-const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark }) => {
+const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], clients = [], isDark }) => {
   const [tab, setTab] = useState('gstr1');
   const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
   const [companyFilter, setCompanyFilter] = useState('all');
@@ -843,13 +843,22 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], isDark 
     const b2b = [], b2cL = [], b2cS = [], cdnr = [];
     const hsnMap = {};
 
+    // Build a fallback map: client_id → gstin, for invoices where client_gstin was not saved
+    const clientGstinMap = {};
+    for (const c of clients) {
+      const gstin = (c.client_gstin || c.gstin || '').trim();
+      if (c.id && gstin) clientGstinMap[c.id] = gstin;
+    }
+
     for (const inv of baseInvoices) {
-      const hasGstin = !!inv.client_gstin?.trim();
+      // Use gstin directly on invoice; fall back to clients list if blank
+      const gstin = inv.client_gstin?.trim() || (inv.client_id ? clientGstinMap[inv.client_id] : '') || '';
+      const hasGstin = !!gstin;
       const isCDN = ['credit_note', 'debit_note'].includes(inv.invoice_type);
       const total = inv.grand_total || 0;
 
-      if (isCDN && hasGstin) cdnr.push(inv);
-      else if (hasGstin) b2b.push(inv);
+      if (isCDN && hasGstin) cdnr.push({ ...inv, client_gstin: gstin });
+      else if (hasGstin) b2b.push({ ...inv, client_gstin: gstin });
       else if (total > 250000) b2cL.push(inv);
       else b2cS.push(inv);
 
@@ -5046,7 +5055,7 @@ const fetchAll = useCallback(async () => {
         previewHtml={invoicePreviewHtml}
         isDark={isDark}
       />
-      <GSTReportsModal open={gstOpen} onClose={() => setGstOpen(false)} invoices={invoices} companies={companies} isDark={isDark} />
+      <GSTReportsModal open={gstOpen} onClose={() => setGstOpen(false)} invoices={invoices} companies={companies} clients={clients} isDark={isDark} />
       {settingsOpen && <InvoiceSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} companies={companies} isDark={isDark} />}
       {ledgerOpen && <PartyLedger open={ledgerOpen} onClose={() => setLedgerOpen(false)} invoices={invoices} clients={clients} companies={companies} isDark={isDark} initialClient={ledgerClient} />}
     </div>
