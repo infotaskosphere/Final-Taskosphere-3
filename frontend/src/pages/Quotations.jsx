@@ -1620,22 +1620,28 @@ export default function Quotations() {
     const win = window.open('', '_blank'); win.document.write(html); win.document.close(); win.print();
   };
 
-  const handleDownloadPdf = async (qtnId, qtnNo, companyId) => {
-    setDownloading(qtnId + '-pdf');
-    try {
-      const token   = getToken();
-      const baseURL = (api.defaults?.baseURL ?? '/api').toString().replace(/\/$/, '');
-      const response = await axios.get(`${baseURL}/quotations/${qtnId}/pdf`, { responseType: 'blob', headers: { Authorization: `Bearer ${token}` } });
-      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
-      const a   = document.createElement('a'); a.href = url;
-      const co  = companies.find(c => c.id === companyId);
-      const companySlug = (co?.name || '').replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_');
-      const qtnSlug = (qtnNo || qtnId).replace(/\//g, '-');
-      a.download = companySlug ? `${companySlug}_${qtnSlug}.pdf` : `quotation-${qtnSlug}.pdf`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a); window.URL.revokeObjectURL(url);
-      toast.success('Quotation PDF downloaded');
-    } catch (err) { toast.error(await extractBlobError(err)); }
-    finally { setDownloading(null); }
+  const handleDownloadPdf = (qtnId, qtnNo, companyId) => {
+    const q = quotations.find(x => x.id === qtnId);
+    if (!q) { toast.error('Quotation not found'); return; }
+    const company  = getCompany(q.company_id) || {};
+    const settings = getQtnSettings(q.company_id);
+    const activeColor = q.invoice_custom_color
+      || (settings.theme === 'custom'
+            ? settings.custom_color
+            : (settings.custom_color || company.invoice_custom_color || '#0D3B66'));
+    const html = generateQuotationHTML(q, {
+      company,
+      template:    q.invoice_template || settings.template || company.invoice_template || 'classic',
+      theme:       q.invoice_theme    || settings.theme    || 'custom',
+      customColor: activeColor,
+      attachChecklist: q.attach_checklist !== false,
+    });
+    const win = window.open('', '_blank');
+    if (!win) { toast.error('Pop-up blocked — please allow pop-ups for this site'); return; }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    win.print();
   };
 
   const handleDownloadChecklistPdf = async (qtnId, qtnNo, companyId) => {
@@ -1661,9 +1667,8 @@ export default function Quotations() {
     <div className="flex flex-wrap gap-1">
       <Button variant="outline" size="sm" title="Download PDF"
         onClick={() => handleDownloadPdf(q.id, q.quotation_no)}
-        disabled={downloading === q.id + '-pdf'}
         className={cn('rounded-lg gap-1 text-xs text-blue-600 border-blue-200 hover:bg-blue-50', compact && 'h-7 px-2')}>
-        {downloading === q.id + '-pdf' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}{!compact && 'PDF'}
+        <Download className="h-3 w-3" />{!compact && 'PDF'}
       </Button>
       <Button variant="outline" size="sm" title="Preview Quotation"
         onClick={() => handlePreview(q)}
@@ -1738,9 +1743,8 @@ export default function Quotations() {
             <Edit className="h-3.5 w-3.5" />
           </button>
           <button onClick={() => handleDownloadPdf(q.id, q.quotation_no, q.company_id)} title="Download PDF"
-            disabled={downloading === q.id + '-pdf'}
             className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}>
-            {downloading === q.id + '-pdf' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            <Download className="h-3.5 w-3.5" />
           </button>
           {q.attach_checklist !== false && (
             <button onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no, q.company_id)} title="Checklist PDF"
