@@ -4567,6 +4567,8 @@ function Invoicing() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
   const [listPage, setListPage] = useState(1);
+  const [outstandingPage, setOutstandingPage] = useState(1);
+  const [receivedPage, setReceivedPage] = useState(1);
   const [listViewFilter, setListViewFilter] = useState('all'); // 'all' | 'outstanding' | 'received'
 
   // ── B. ALL useRef ─────────────────────────────────────────────────────────
