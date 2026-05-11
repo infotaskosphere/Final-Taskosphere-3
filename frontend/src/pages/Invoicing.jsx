@@ -917,131 +917,529 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], clients
     };
   }, [baseInvoices]);
 
+  // ── Indian state-code map (POS code) ───────────────────────────────────
+  const STATE_CODE = {
+    'jammu and kashmir':'01','himachal pradesh':'02','punjab':'03','chandigarh':'04','uttarakhand':'05',
+    'haryana':'06','delhi':'07','rajasthan':'08','uttar pradesh':'09','bihar':'10','sikkim':'11',
+    'arunachal pradesh':'12','nagaland':'13','manipur':'14','mizoram':'15','tripura':'16','meghalaya':'17',
+    'assam':'18','west bengal':'19','jharkhand':'20','odisha':'21','orissa':'21','chhattisgarh':'22',
+    'madhya pradesh':'23','gujarat':'24','daman and diu':'25','dadra and nagar haveli':'26',
+    'dadra and nagar haveli and daman and diu':'26','maharashtra':'27','karnataka':'29','goa':'30',
+    'lakshadweep':'31','kerala':'32','tamil nadu':'33','puducherry':'34','andaman and nicobar islands':'35',
+    'telangana':'36','andhra pradesh':'37','ladakh':'38','other territory':'97',
+  };
+  const stateCode = (s) => {
+    if (!s) return '';
+    const k = String(s).trim().toLowerCase();
+    if (STATE_CODE[k]) return STATE_CODE[k];
+    // also accept "24-Gujarat" / "24" inputs
+    const m = k.match(/^(\d{2})/);
+    return m ? m[1] : '';
+  };
+  const posLabel = (s) => {
+    const code = stateCode(s);
+    const name = (s||'').replace(/^\d+[-\s]*/, '').trim();
+    return code ? `${code}-${name || Object.keys(STATE_CODE).find(k=>STATE_CODE[k]===code) || ''}`.trim() : (name || '');
+  };
+  const fmtDDMMYYYY = (d) => {
+    if (!d) return '';
+    // accept yyyy-mm-dd or dd/mm/yyyy or dd-mm-yyyy
+    const m1 = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m1) return `${m1[3]}-${m1[2]}-${m1[1]}`;
+    const m2 = String(d).match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})/);
+    if (m2) return `${m2[1]}-${m2[2]}-${m2[3]}`;
+    return String(d);
+  };
+  const fmtMon = (d) => { // 01-Feb-2026
+    if (!d) return '';
+    const dt = new Date(d);
+    if (isNaN(dt)) return d;
+    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getMonth()];
+    return `${String(dt.getDate()).padStart(2,'0')}-${mon}-${dt.getFullYear()}`;
+  };
+
+  // Build per-rate item rows for a single invoice (groups items by gst_rate)
+  const itemsByRate = (inv) => {
+    const map = {};
+    for (const it of (inv.items || [])) {
+      const rate = Number(it.gst_rate || 0);
+      if (!map[rate]) map[rate] = { rate, taxable:0, cgst:0, sgst:0, igst:0, cess:0 };
+      map[rate].taxable += Number(it.taxable_value || 0);
+      map[rate].cgst    += Number(it.cgst_amount  || 0);
+      map[rate].sgst    += Number(it.sgst_amount  || 0);
+      map[rate].igst    += Number(it.igst_amount  || 0);
+      map[rate].cess    += Number(it.cess_amount  || 0);
+    }
+    if (Object.keys(map).length === 0) {
+      // fallback to invoice totals at gst_rate
+      const rate = Number(inv.gst_rate || 18);
+      map[rate] = {
+        rate,
+        taxable: Number(inv.total_taxable || 0),
+        cgst: Number(inv.total_cgst || 0),
+        sgst: Number(inv.total_sgst || 0),
+        igst: Number(inv.total_igst || 0),
+        cess: 0,
+      };
+    }
+    return Object.values(map);
+  };
+
   // ── Export helpers ──────────────────────────────────────────────────────
   const handleExport = (exportFormat = 'excel') => {
     setExporting(exportFormat);
     try {
-      const companyName = companyFilter === 'all'
-        ? 'All'
-        : (companies.find(c => c.id === companyFilter)?.name || companyFilter);
+      const co = companies.find(c => c.id === companyFilter);
+      const companyName = companyFilter === 'all' ? 'All' : (co?.name || companyFilter);
+      const supplierGSTIN = (co?.gstin || co?.gst_number || '24AALCP5501B1ZW').toUpperCase();
+      const supplierState = co?.state || 'Gujarat';
+      const supplierStateCode = stateCode(supplierState);
+      const periodLabel = (() => {
+        const [y,m] = month.split('-');
+        const mn = ['January','February','March','April','May','June','July','August','September','October','November','December'][parseInt(m,10)-1];
+        return `${mn} ${y} - ${mn} ${y}`;
+      })();
+      const fp = (() => { const [y,m] = month.split('-'); return `${m}${y}`; })(); // GSTN fp = MMYYYY
 
+      // ─────────── JSON (GSTN schema) for GSTR-1 ────────────
       if (exportFormat === 'json') {
-        const jsonData = {
-          generated_at: new Date().toISOString(),
-          month,
-          company: companyName,
-          gstr1: {
-            b2b: gstr1.b2b.map(inv => ({
-              invoice_no: inv.invoice_no,
-              invoice_date: inv.invoice_date,
-              client_name: inv.client_name,
-              client_gstin: inv.client_gstin,
-              total_taxable: inv.total_taxable,
-              total_cgst: inv.total_cgst,
-              total_sgst: inv.total_sgst,
-              total_igst: inv.total_igst,
-              grand_total: inv.grand_total,
+        // group b2b by ctin
+        const b2bMap = {};
+        for (const inv of gstr1.b2b) {
+          const ctin = (inv.client_gstin||'').toUpperCase();
+          if (!b2bMap[ctin]) b2bMap[ctin] = [];
+          const pos = stateCode(inv.client_state) || stateCode(inv.client_address) || supplierStateCode;
+          const rates = itemsByRate(inv);
+          b2bMap[ctin].push({
+            inum: inv.invoice_no,
+            idt:  fmtDDMMYYYY(inv.invoice_date),
+            val:  Number((inv.grand_total||0).toFixed(2)),
+            pos,
+            rchrg: 'N',
+            inv_typ: 'R',
+            itms: rates.map((r,i)=>({
+              num: i+1,
+              itm_det: {
+                txval: Number(r.taxable.toFixed(2)),
+                rt:    r.rate,
+                camt:  Number(r.cgst.toFixed(2)),
+                samt:  Number(r.sgst.toFixed(2)),
+                iamt:  Number(r.igst.toFixed(2)),
+                csamt: Number(r.cess.toFixed(2)),
+              }
             })),
-            b2c_large: gstr1.b2cL.map(inv => ({
-              invoice_no: inv.invoice_no,
-              invoice_date: inv.invoice_date,
-              client_name: inv.client_name,
-              total_taxable: inv.total_taxable,
-              total_cgst: inv.total_cgst,
-              total_sgst: inv.total_sgst,
-              total_igst: inv.total_igst,
-              grand_total: inv.grand_total,
+          });
+        }
+        const b2b = Object.entries(b2bMap).map(([ctin, inv]) => ({ ctin, inv }));
+
+        // b2cl: invoice value > 2.5L AND interstate (no gstin)
+        const b2cl = {};
+        for (const inv of gstr1.b2cL) {
+          const pos = stateCode(inv.client_state) || stateCode(inv.client_address) || supplierStateCode;
+          if (!b2cl[pos]) b2cl[pos] = { pos, inv: [] };
+          const rates = itemsByRate(inv);
+          b2cl[pos].inv.push({
+            inum: inv.invoice_no,
+            idt:  fmtDDMMYYYY(inv.invoice_date),
+            val:  Number((inv.grand_total||0).toFixed(2)),
+            itms: rates.map((r,i)=>({
+              num: i+1,
+              itm_det: { txval: Number(r.taxable.toFixed(2)), rt: r.rate, iamt: Number(r.igst.toFixed(2)), csamt: Number(r.cess.toFixed(2)) }
             })),
-            b2c_small_summary: gstr1.b2cSTotal,
-            hsn_summary: gstr1.hsnSummary,
-            cdnr: gstr1.cdnr.map(inv => ({
-              invoice_no: inv.invoice_no,
-              invoice_date: inv.invoice_date,
-              client_name: inv.client_name,
-              client_gstin: inv.client_gstin,
-              grand_total: inv.grand_total,
-            })),
-          },
-          gstr3b: {
-            outward_supplies: gstr3b.outward,
-            credit_note_adjustments: gstr3b.credits,
-            net_igst: gstr3b.netIGST,
-            net_cgst: gstr3b.netCGST,
-            net_sgst: gstr3b.netSGST,
-            total_tax_liability: gstr3b.netTotal,
-          },
-          all_invoices: baseInvoices.map(inv => ({
-            invoice_no: inv.invoice_no,
-            invoice_type: inv.invoice_type,
-            invoice_date: inv.invoice_date,
-            client_name: inv.client_name,
-            client_gstin: inv.client_gstin || '',
-            total_taxable: inv.total_taxable,
-            total_cgst: inv.total_cgst,
-            total_sgst: inv.total_sgst,
-            total_igst: inv.total_igst,
-            grand_total: inv.grand_total,
-            status: inv.status,
-          })),
+          });
+        }
+
+        // b2cs: aggregated by rate + POS + supply type
+        const b2csMap = {};
+        for (const inv of gstr1.b2cS) {
+          const pos = stateCode(inv.client_state) || stateCode(inv.client_address) || supplierStateCode;
+          const sply = pos === supplierStateCode ? 'INTRA' : 'INTER';
+          for (const r of itemsByRate(inv)) {
+            const key = `${pos}|${r.rate}|${sply}`;
+            if (!b2csMap[key]) b2csMap[key] = { sply_ty: sply, pos, typ: 'OE', rt: r.rate, txval: 0, iamt: 0, camt: 0, samt: 0, csamt: 0 };
+            b2csMap[key].txval += r.taxable;
+            b2csMap[key].iamt  += r.igst;
+            b2csMap[key].camt  += r.cgst;
+            b2csMap[key].samt  += r.sgst;
+            b2csMap[key].csamt += r.cess;
+          }
+        }
+        const b2cs = Object.values(b2csMap).map(x => ({
+          ...x,
+          txval: Number(x.txval.toFixed(2)),
+          iamt:  Number(x.iamt.toFixed(2)),
+          camt:  Number(x.camt.toFixed(2)),
+          samt:  Number(x.samt.toFixed(2)),
+          csamt: Number(x.csamt.toFixed(2)),
+        }));
+
+        // hsn data
+        const hsnData = [];
+        let hsnNum = 1;
+        for (const h of gstr1.hsnSummary) {
+          hsnData.push({
+            num: hsnNum++,
+            hsn_sc: h.hsn_sac && h.hsn_sac !== '—' ? h.hsn_sac : '',
+            desc: h.description || '',
+            uqc: 'NA',
+            qty: Number(h.quantity || 0),
+            txval: Number((h.taxable||0).toFixed(2)),
+            iamt: Number((h.igst||0).toFixed(2)),
+            camt: Number((h.cgst||0).toFixed(2)),
+            samt: Number((h.sgst||0).toFixed(2)),
+            csamt: 0,
+          });
+        }
+
+        // doc_issue (13)
+        const docs = baseInvoices
+          .filter(i => i.invoice_type === 'tax_invoice')
+          .map(i => i.invoice_no)
+          .sort();
+        const doc_issue = {
+          doc_det: docs.length ? [{
+            doc_num: 1,
+            doc_typ: 'Invoices for outward supply',
+            docs: [{ num: 1, from: docs[0], to: docs[docs.length-1], totnum: docs.length, cancel: 0, net_issue: docs.length }]
+          }] : []
         };
-        const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: 'application/json' });
+
+        const json = {
+          gstin: supplierGSTIN,
+          fp,
+          version: 'GST3.2.2',
+          hash: 'hash',
+          ...(b2b.length    ? { b2b }    : {}),
+          ...(b2cl.length   ? { b2cl: Object.values(b2cl) } : {}),
+          ...(b2cs.length   ? { b2cs }   : {}),
+          ...(hsnData.length? { hsn: { data: hsnData } } : {}),
+          ...(docs.length   ? { doc_issue } : {}),
+        };
+
+        const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = `GST_${month}_${companyName.replace(/\s+/g,'_')}.json`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        link.download = `GSTR1_Report_${fp.slice(0,2)}_${fp.slice(2)}.json`;
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
         URL.revokeObjectURL(link.href);
-        toast.success('GST data exported as JSON!');
+        toast.success('GSTR-1 JSON (GSTN schema) exported!');
         return;
       }
-      if (tab === 'gstr1') {
+
+      // ─────────── SALE REPORT (matches SaleReport sample) ───────────
+      if (exportFormat === 'sale') {
         const rows = [
-          ['GSTR-1 Export', `Month: ${month}`, `Company: ${companyFilter === 'all' ? 'All' : (companies.find(c=>c.id===companyFilter)?.name || companyFilter)}`],
+          [`Generated on ${format(new Date(),'MMMM d, yyyy')} at ${format(new Date(),'h:mm a').toLowerCase()}`],
           [],
-          ['== B2B Invoices =='],
-          ['Invoice No', 'Date', 'Client', 'GSTIN', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total'],
-          ...gstr1.b2b.map(inv => [
-            inv.invoice_no, inv.invoice_date, inv.client_name, inv.client_gstin,
-            inv.total_taxable, inv.total_cgst, inv.total_sgst, inv.total_igst, inv.grand_total,
-          ]),
-          [],
-          ['== B2C Large (>2.5L) =='],
-          ['Invoice No', 'Date', 'Client', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total'],
-          ...gstr1.b2cL.map(inv => [
-            inv.invoice_no, inv.invoice_date, inv.client_name,
-            inv.total_taxable, inv.total_cgst, inv.total_sgst, inv.total_igst, inv.grand_total,
-          ]),
-          [],
-          ['== B2C Small Summary =='],
-          ['Taxable', 'CGST', 'SGST', 'IGST'],
-          [gstr1.b2cSTotal.taxable, gstr1.b2cSTotal.cgst, gstr1.b2cSTotal.sgst, gstr1.b2cSTotal.igst],
-          [],
-          ['== HSN Summary =='],
-          ['HSN/SAC', 'Description', 'Quantity', 'Taxable', 'CGST', 'SGST', 'IGST'],
-          ...gstr1.hsnSummary.map(h => [h.hsn_sac, h.description, h.quantity, h.taxable, h.cgst, h.sgst, h.igst]),
+          ['Date','Invoice No','Party Name','GSTIN','Transaction Type','Total Amount','Payment Type','Received/Paid Amount','Balance Due'],
         ];
+        for (const inv of baseInvoices) {
+          const paid = Number(inv.amount_paid || inv.advance_received || 0);
+          const total = Number(inv.grand_total || 0);
+          const bal = Math.max(0, total - paid);
+          rows.push([
+            fmtDDMMYYYY(inv.invoice_date).replace(/-/g,'/'),
+            inv.invoice_no,
+            inv.client_name || '',
+            inv.client_gstin || '',
+            inv.invoice_type === 'credit_note' ? 'Credit Note' : inv.invoice_type === 'debit_note' ? 'Debit Note' : 'Sale ',
+            total,
+            (companies.find(c=>c.id===inv.company_id)?.name || '').toUpperCase(),
+            paid,
+            bal,
+          ]);
+        }
         const ws = XLSX.utils.aoa_to_sheet(rows);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'GSTR-1');
-        XLSX.writeFile(wb, `GSTR1_${month}.xlsx`);
-      } else {
-        const rows = [
-          ['GSTR-3B Export', `Month: ${month}`],
-          [],
-          ['Section', 'Taxable Value', 'IGST', 'CGST', 'SGST'],
-          ['3.1 Outward Taxable Supplies', gstr3b.outward.taxable, gstr3b.outward.igst, gstr3b.outward.cgst, gstr3b.outward.sgst],
-          ['Credit Notes Adjustment', gstr3b.credits.taxable, gstr3b.credits.igst, gstr3b.credits.cgst, gstr3b.credits.sgst],
-          ['Net Tax Liability', '', gstr3b.netIGST, gstr3b.netCGST, gstr3b.netSGST],
-        ];
-        const ws = XLSX.utils.aoa_to_sheet(rows);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'GSTR-3B');
-        XLSX.writeFile(wb, `GSTR3B_${month}.xlsx`);
+        XLSX.utils.book_append_sheet(wb, ws, 'Sale Report');
+        const [y,m] = month.split('-');
+        XLSX.writeFile(wb, `SaleReport_01_${m}_${y.slice(2)}_to_28_${m}_${y.slice(2)}.xlsx`);
+        toast.success('Sale Report exported!');
+        return;
       }
-      toast.success('GST report exported!');
+
+      // ─────────── EXCEL EXPORT (GSTR-1 official multi-sheet) ───────────
+      if (tab === 'gstr1') {
+        const wb = XLSX.utils.book_new();
+
+        // Sheet: GSTR1 Report (header)
+        const hdr = [
+          ['Period', periodLabel],
+          [],
+          ['1. GSTIN', supplierGSTIN],
+          ['2.a Legal name of the registered person.', (co?.legal_name || co?.name || companyName).toUpperCase()],
+          ['2.b Trade name, if any', co?.trade_name || ''],
+          ['3.a Aggregate turnover of the preceeding Financial Year', ''],
+          ['3.b Aggregate turnover, April to June 2017', ''],
+          [],
+        ];
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(hdr), 'GSTR1 Report');
+
+        // b2b,sez,de
+        const b2bRows = [
+          ['Summary For B2B, SEZ, DE (4A, 4B, 6B, 6C)'],
+          ['No. of Recipients', null, 'No. of Invoices', null, 'Total Invoice Value', null, null, null, null, null, null, 'Total Taxable Value', 'Total Cess'],
+          [
+            new Set(gstr1.b2b.map(i=>i.client_gstin)).size,
+            null,
+            gstr1.b2b.length,
+            null,
+            gstr1.b2b.reduce((s,i)=>s+Number(i.grand_total||0),0),
+            null,null,null,null,null,null,
+            gstr1.b2b.reduce((s,i)=>s+Number(i.total_taxable||0),0),
+            0,
+          ],
+          ['GSTIN/UIN of Recipient','Receiver Name','Invoice Number','Invoice date','Invoice Value','Place Of Supply','Reverse Charge','Applicable % of Tax Rate','Invoice Type','E-Commerce GSTIN','Rate','Taxable Value','Cess Amount'],
+        ];
+        for (const inv of gstr1.b2b) {
+          const pos = posLabel(inv.client_state) || posLabel(supplierState);
+          for (const r of itemsByRate(inv)) {
+            b2bRows.push([
+              (inv.client_gstin||'').toUpperCase(),
+              (inv.client_name||'').toUpperCase(),
+              inv.invoice_no,
+              fmtMon(inv.invoice_date),
+              Number(inv.grand_total||0),
+              pos,
+              'N',
+              null,
+              'Regular B2B',
+              null,
+              r.rate,
+              Number(r.taxable.toFixed(2)),
+              Number(r.cess.toFixed(2)),
+            ]);
+          }
+        }
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(b2bRows), 'b2b,sez,de');
+
+        // b2cl
+        const b2clRows = [
+          ['Summary For B2CL(5)'],
+          ['No. of Invoices', null, 'Total Invoice Value', null, null, null, 'Total Taxable Value', 'Total Cess'],
+          [gstr1.b2cL.length, null, gstr1.b2cL.reduce((s,i)=>s+Number(i.grand_total||0),0), null, null, null, gstr1.b2cL.reduce((s,i)=>s+Number(i.total_taxable||0),0), 0],
+          ['Invoice Number','Invoice date','Invoice Value','Place Of Supply','Applicable % of Tax Rate','Rate','Taxable Value','Cess Amount','E-Commerce GSTIN'],
+        ];
+        for (const inv of gstr1.b2cL) {
+          for (const r of itemsByRate(inv)) {
+            b2clRows.push([inv.invoice_no, fmtMon(inv.invoice_date), Number(inv.grand_total||0), posLabel(inv.client_state), null, r.rate, Number(r.taxable.toFixed(2)), Number(r.cess.toFixed(2)), null]);
+          }
+        }
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(b2clRows), 'b2cl');
+
+        // b2cs (aggregated by rate+pos)
+        const b2csAgg = {};
+        for (const inv of gstr1.b2cS) {
+          const pos = posLabel(inv.client_state) || posLabel(supplierState);
+          const intra = stateCode(inv.client_state) === supplierStateCode || !inv.client_state;
+          for (const r of itemsByRate(inv)) {
+            const k = `${pos}|${r.rate}|${intra?'OE':'OE'}`;
+            if (!b2csAgg[k]) b2csAgg[k] = { type:'OE', pos, rate: r.rate, taxable: 0, cess: 0 };
+            b2csAgg[k].taxable += r.taxable; b2csAgg[k].cess += r.cess;
+          }
+        }
+        const b2csList = Object.values(b2csAgg);
+        const b2csRows = [
+          ['Summary For B2CS(7)'],
+          [null, null, null, null, 'Total Taxable Value', 'Total Cess'],
+          [null, null, null, null, b2csList.reduce((s,x)=>s+x.taxable,0), b2csList.reduce((s,x)=>s+x.cess,0)],
+          ['Type','Place Of Supply','Applicable % of Tax Rate','Rate','Taxable Value','Cess Amount','E-Commerce GSTIN'],
+          ...b2csList.map(x => [x.type, x.pos, null, x.rate, Number(x.taxable.toFixed(2)), Number(x.cess.toFixed(2)), null]),
+        ];
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(b2csRows), 'b2cs');
+
+        // cdnr
+        const cdnrRows = [
+          ['Summary For CDNR(9B)'],
+          ['No. of Recipients', null, 'No. of Notes', null, null, null, null, null, 'Total Note Value', null, null, 'Total Taxable Value', 'Total Cess'],
+          [
+            new Set(gstr1.cdnr.map(i=>i.client_gstin)).size, null,
+            gstr1.cdnr.length, null, null, null, null, null,
+            gstr1.cdnr.reduce((s,i)=>s+Number(i.grand_total||0),0), null, null,
+            gstr1.cdnr.reduce((s,i)=>s+Number(i.total_taxable||0),0), 0,
+          ],
+          ['GSTIN/UIN of Recipient','Receiver Name','Note Number','Note Date','Note Type','Place Of Supply','Reverse Charge','Note Supply Type','Note Value','Applicable % of Tax Rate','Rate','Taxable Value','Cess Amount'],
+        ];
+        for (const inv of gstr1.cdnr) {
+          for (const r of itemsByRate(inv)) {
+            cdnrRows.push([
+              (inv.client_gstin||'').toUpperCase(),
+              (inv.client_name||'').toUpperCase(),
+              inv.invoice_no, fmtMon(inv.invoice_date),
+              inv.invoice_type === 'credit_note' ? 'C' : 'D',
+              posLabel(inv.client_state) || posLabel(supplierState),
+              'N','Regular',
+              Number(inv.grand_total||0), null, r.rate,
+              Number(r.taxable.toFixed(2)), Number(r.cess.toFixed(2)),
+            ]);
+          }
+        }
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cdnrRows), 'cdnr');
+
+        // cdnur (empty placeholder)
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+          ['Summary For CDNUR(9B)'],
+          [null, 'No. of Notes/Vouchers', null, null, null, 'Total Note Value', null, null, 'Total Taxable Value', 'Total Cess'],
+          [null, 0, null, null, null, 0, null, null, 0, 0],
+          ['UR Type','Note Number','Note Date','Note Type','Place Of Supply','Note Value','Applicable % of Tax Rate','Rate','Taxable Value','Cess Amount'],
+        ]), 'cdnur');
+
+        // exp / at / atadj / exemp (empty placeholders matching official template)
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+          ['Summary For EXP(6)'],
+          [null,'No. of Invoices', null,'Total Invoice Value', null,'No. of Shipping Bill', null, null, 'Total Taxable Value'],
+          [],
+          ['Export Type','Invoice Number','Invoice date','Invoice Value','Port Code','Shipping Bill Number','Shipping Bill Date','Rate','Taxable Value'],
+        ]), 'exp');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+          ['Summary For Advance Received(11B)'],
+          [null,null,null,'Total Advance Received','Total Cess'],
+          [],
+          ['Place Of Supply','Applicable % of Tax Rate','Rate','Gross Advance Received','Cess Amount'],
+        ]), 'at');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+          ['Summary For Advance Adjusted(11B)'],
+          [null,null,null,'Total Advance Adjusted','Total Cess'],
+          [],
+          ['Place Of Supply','Applicable % of Tax Rate','Rate','Gross Advance Adjusted','Cess Amount'],
+        ]), 'atadj');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+          ['Summary For Nil rated, exempted and non GST outward supplies (8)'],
+          [null,'Total Nil Rated Supplies','Total Exempted Supplies','Total Non-GST Supplies'],
+          [null, 0, 0, 0],
+          ['Description','Nil Rated Supplies','Exempted(other than nil rated/non GST supply)','Non-GST Supplies'],
+          ['Inter-State supplies to registered persons', 0, 0, 0],
+          ['Intra-State supplies to registered persons', 0, 0, 0],
+          ['Inter-State supplies to unregistered persons', 0, 0, 0],
+          ['Intra-State supplies to unregistered persons', 0, 0, 0],
+        ]), 'exemp');
+
+        // hsn(b2b), hsn(b2c), itemSummary
+        const hsnB2bAgg = {};
+        for (const inv of gstr1.b2b) {
+          for (const r of itemsByRate(inv)) {
+            const k = `${r.rate}`;
+            if (!hsnB2bAgg[k]) hsnB2bAgg[k] = { rate:r.rate, value:0, taxable:0, igst:0, cgst:0, sgst:0, cess:0, qty:0 };
+            hsnB2bAgg[k].value   += Number(inv.grand_total || 0) * (r.taxable / Math.max(1, Number(inv.total_taxable||0) || r.taxable));
+            hsnB2bAgg[k].taxable += r.taxable;
+            hsnB2bAgg[k].igst    += r.igst;
+            hsnB2bAgg[k].cgst    += r.cgst;
+            hsnB2bAgg[k].sgst    += r.sgst;
+            hsnB2bAgg[k].cess    += r.cess;
+          }
+        }
+        const buildHsnSheet = (agg, title) => [
+          ['Summary For HSN(12)'],
+          ['No. of HSN', null, null, null, 'Total Value', null, 'Total Taxable Value', 'Total Integrated Tax', 'Total Central Tax', 'Total State/UT Tax', 'Total Cess'],
+          [Object.keys(agg).length, null, null, null,
+            Object.values(agg).reduce((s,x)=>s+x.value,0), null,
+            Object.values(agg).reduce((s,x)=>s+x.taxable,0),
+            Object.values(agg).reduce((s,x)=>s+x.igst,0),
+            Object.values(agg).reduce((s,x)=>s+x.cgst,0),
+            Object.values(agg).reduce((s,x)=>s+x.sgst,0),
+            Object.values(agg).reduce((s,x)=>s+x.cess,0)],
+          ['HSN','Description','UQC','Total Quantity','Total Value','Rate','Taxable Value','Integrated Tax Amount','Central Tax Amount','State/UT Tax Amount','Cess Amount'],
+          ...Object.values(agg).map(x => [null, null, 'NA-NOT APPLICABLE', 0, Number(x.value.toFixed(2)), x.rate, Number(x.taxable.toFixed(2)), Number(x.igst.toFixed(2)), Number(x.cgst.toFixed(2)), Number(x.sgst.toFixed(2)), Number(x.cess.toFixed(2))]),
+        ];
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(buildHsnSheet(hsnB2bAgg)), 'hsn(b2b)');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(buildHsnSheet({})), 'hsn(b2c)');
+
+        // itemSummary
+        const itemAgg = {};
+        for (const inv of [...gstr1.b2b, ...gstr1.b2cL, ...gstr1.b2cS]) {
+          for (const it of (inv.items || [])) {
+            const desc = (it.description || '').trim().toUpperCase();
+            const rate = Number(it.gst_rate || 0);
+            const k = `${desc}|${rate}`;
+            if (!itemAgg[k]) itemAgg[k] = { desc, rate, value:0, taxable:0, igst:0, cgst:0, sgst:0, cess:0 };
+            const tx = Number(it.taxable_value || 0);
+            const cgst = Number(it.cgst_amount || 0), sgst = Number(it.sgst_amount || 0), igst = Number(it.igst_amount || 0);
+            itemAgg[k].taxable += tx;
+            itemAgg[k].cgst    += cgst;
+            itemAgg[k].sgst    += sgst;
+            itemAgg[k].igst    += igst;
+            itemAgg[k].value   += tx + cgst + sgst + igst;
+          }
+        }
+        const itemRows = [
+          ['Summary For HSN(12)'],
+          ['No. of HSN', null, null, null, 'Total Value', null, 'Total Taxable Value', 'Total Integrated Tax', 'Total Central Tax', 'Total State/UT Tax', 'Total Cess'],
+          [Object.keys(itemAgg).length, null, null, null,
+            Object.values(itemAgg).reduce((s,x)=>s+x.value,0), null,
+            Object.values(itemAgg).reduce((s,x)=>s+x.taxable,0),
+            Object.values(itemAgg).reduce((s,x)=>s+x.igst,0),
+            Object.values(itemAgg).reduce((s,x)=>s+x.cgst,0),
+            Object.values(itemAgg).reduce((s,x)=>s+x.sgst,0),
+            Object.values(itemAgg).reduce((s,x)=>s+x.cess,0)],
+          ['HSN','Description','UQC','Total Quantity','Total Value','Rate','Taxable Value','Integrated Tax Amount','Central Tax Amount','State/UT Tax Amount','Cess Amount'],
+          ...Object.values(itemAgg).map(x => [null, x.desc, 'NA-NOT APPLICABLE', 0, Number(x.value.toFixed(2)), x.rate, Number(x.taxable.toFixed(2)), Number(x.igst.toFixed(2)), Number(x.cgst.toFixed(2)), Number(x.sgst.toFixed(2)), Number(x.cess.toFixed(2))]),
+        ];
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(itemRows), 'itemSummary');
+
+        // docs (13)
+        const taxDocs = baseInvoices.filter(i => i.invoice_type === 'tax_invoice')
+          .map(i => i.invoice_no).sort();
+        const cnDocs = baseInvoices.filter(i => i.invoice_type === 'credit_note')
+          .map(i => i.invoice_no).sort();
+        const docsRows = [
+          ['Summary of documents issued during the tax period (13)'],
+          [null, null, null, 'Total Number', 'Total Cancelled'],
+          [null, null, null, String(taxDocs.length + cnDocs.length), '0'],
+          ['Nature of Document','Sr. No. From','Sr. No. To','Total Number','Cancelled'],
+        ];
+        if (taxDocs.length) docsRows.push(['Invoices for outward supply', taxDocs[0], taxDocs[taxDocs.length-1], String(taxDocs.length), '0']);
+        if (cnDocs.length)  docsRows.push(['Credit Note', cnDocs[0], cnDocs[cnDocs.length-1], String(cnDocs.length), '0']);
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(docsRows), 'docs');
+
+        const [yy,mm] = month.split('-');
+        XLSX.writeFile(wb, `GSTR1_Report_${mm}_${yy.slice(2)}_to_${mm}_${yy.slice(2)}.xlsx`);
+        toast.success('GSTR-1 (official format) exported!');
+        return;
+      }
+
+      // ─────────── GSTR-3B official format ───────────
+      const wb = XLSX.utils.book_new();
+      const [yy, mm] = month.split('-');
+      const fpDisp = `${mm}/${yy}`;
+
+      const r31 = [
+        ['From', fpDisp],
+        ['To',   fpDisp],
+        ['Nature of Supplies','Total Taxable Value','Integrated Tax','Central Tax','State/UT Tax','Cess'],
+        [],
+        ['(a) Outward taxable supplies (other than zero rated, nil rated and exempted', gstr3b.outward.taxable, gstr3b.outward.igst, gstr3b.outward.cgst, gstr3b.outward.sgst, 0],
+        ['(b) Outward taxable supplies (zero rated)', 0, 0, 0, 0, 0],
+        ['(c) Other outward supplies (nil rated, exempted)', 0, 0, 0, 0, 0],
+        ['(d) Inward supplies (liable to reverse charge)', 0, 0, 0, 0, 0],
+        ['(e) Non-GST outward supplies', 0, 0, 0, 0, 0],
+      ];
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(r31), '3.1 Report');
+
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+        ['Place of Supply (State/UT)','Supplies Made To Unregistered Persons', null, 'Supplies Made To Composition Taxable Persons', null, 'Supplies Made To UIN Holders', null],
+        [],
+        [null,'Total taxable value','Amount of integrated tax','Total taxable value','Amount of integrated tax','Total taxable value','Amount of integrated tax'],
+      ]), '3.2 Report');
+
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+        ['Details','Integrated Tax','Central Tax','State/UT Tax','Cess'],
+        [],
+        ['(A) ITC Available (Whether in full or part)', 0, 0, 0, 0],
+        ['(1) Import of goods', 0, 0, 0, 0],
+        ['(2) Import of services', 0, 0, 0, 0],
+        ['(3) Inward supplies liable to reverse charge', 0, 0, 0, 0],
+        ['(4) Inward supplies from ISD', 0, 0, 0, 0],
+        ['(5) All other ITC', 0, 0, 0, 0],
+        ['(B) ITC Reversed', 0, 0, 0, 0],
+        ['(C) Net ITC available (A-B)', 0, 0, 0, 0],
+        ['(D) Other Details', 0, 0, 0, 0],
+      ]), '4 Report');
+
+      XLSX.writeFile(wb, `GSTR3B_Report_${mm}_${yy.slice(2)}_to_${mm}_${yy.slice(2)}.xlsx`);
+      toast.success('GSTR-3B (official format) exported!');
     } catch (e) {
-      toast.error('Export failed');
+      console.error(e);
+      toast.error('Export failed: ' + (e.message || e));
     } finally {
       setExporting(null);
     }
@@ -1108,6 +1506,15 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], clients
             >
               <FileText className="h-3.5 w-3.5" />
               {exporting === 'json' ? 'Exporting…' : 'JSON'}
+            </button>
+            <button
+              onClick={() => handleExport('sale')}
+              disabled={exporting}
+              className="h-9 px-3 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-semibold flex items-center gap-1.5 border border-white/20 transition-colors disabled:opacity-50"
+              title="Sale Report (Tally-style)"
+            >
+              <FileSpreadsheet className="h-3.5 w-3.5" />
+              {exporting === 'sale' ? 'Exporting…' : 'Sale Report'}
             </button>
             {/* ✅ FIX 3: Close button */}
             <button
@@ -4656,39 +5063,26 @@ const fetchAll = useCallback(async () => {
         </div>
       ) : (
         <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          {/* ── View filter pills + summary ── */}
-          <div className={`flex items-center gap-2 px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-700/20' : 'border-slate-100 bg-slate-50/60'}`}>
-            {[
-              { key: 'all',         label: 'All',         count: enrichedFiltered.length, color: isDark ? 'bg-slate-600 text-slate-100' : 'bg-slate-700 text-white' },
-              { key: 'outstanding', label: 'Outstanding', count: outstandingCount,         color: 'bg-amber-500 text-white' },
-              { key: 'received',    label: 'Received',    count: receivedCount,            color: 'bg-emerald-500 text-white' },
-            ].map(({ key, label, count, color }) => (
-              <button
-                key={key}
-                onClick={() => { setListViewFilter(key); setListPage(1); }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  listViewFilter === key
-                    ? color
-                    : isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-slate-500 hover:bg-slate-100'
-                }`}
-              >
-                {label}
-                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                  listViewFilter === key ? 'bg-white/20' : isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-200 text-slate-600'
-                }`}>{count}</span>
-              </button>
-            ))}
-            <div className="ml-auto flex items-center gap-3 text-xs">
-              {listViewFilter === 'outstanding' && (
-                <span className={`font-bold ${isDark ? 'text-red-400' : 'text-red-600'}`}>
-                  {fmtC(enrichedFiltered.reduce((s, i) => s + calcDue(i), 0))} due
-                </span>
-              )}
-              {listViewFilter === 'received' && (
-                <span className={`font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                  {fmtC(enrichedFiltered.reduce((s, i) => s + (i.amount_paid || 0), 0))} collected
-                </span>
-              )}
+          {/* ── Single unified list — receive/outstanding via filter dropdown ── */}
+          <div className={`flex items-center gap-3 px-5 py-2.5 border-b ${isDark ? 'border-slate-700 bg-slate-700/20' : 'border-slate-100 bg-slate-50/60'}`}>
+            <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Filter</span>
+            <Select value={listViewFilter} onValueChange={(v) => { setListViewFilter(v); setListPage(1); }}>
+              <SelectTrigger className={`h-8 w-[180px] rounded-lg text-xs font-semibold border-none ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white text-slate-700'}`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Invoices ({enrichedFiltered.length})</SelectItem>
+                <SelectItem value="outstanding">Outstanding ({outstandingCount})</SelectItem>
+                <SelectItem value="received">Received ({receivedCount})</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="ml-auto flex items-center gap-4 text-xs">
+              <span className={`font-bold ${isDark ? 'text-red-400' : 'text-red-600'}`}>
+                {fmtC(enrichedFiltered.reduce((s, i) => s + calcDue(i), 0))} due
+              </span>
+              <span className={`font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                {fmtC(enrichedFiltered.reduce((s, i) => s + (i.amount_paid || 0), 0))} collected
+              </span>
             </div>
           </div>
 
