@@ -13,7 +13,7 @@ import {
   Plus, Edit, Trash2, Download, Search, Building2, FileText,
   ChevronRight, ChevronLeft, Check, X, Loader2, Receipt,
   Phone, Mail, Globe, CreditCard, User, Tag, Info,
-  IndianRupee, Percent, Hash, Calendar, Link, ExternalLink,
+  IndianRupee, Percent, Hash, Calendar, Link, Link2, ExternalLink,
   Send, MessageCircle, Settings, Eye, ArrowRight, Users,
   Printer, LayoutGrid, List, Filter, TrendingUp, AlertCircle,
   CheckCircle2, Clock, ArrowUpRight, RefreshCw, FileCheck,
@@ -28,6 +28,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { generateQuotationHTML } from './QuotationTemplates';
 import QuotationSettings, { getQtnSettings } from './QuotationSettings';
 
@@ -63,14 +64,39 @@ const fmtC = (n) => `₹${fmt(n)}`;
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const getToken = () => localStorage.getItem('token') || sessionStorage.getItem('token') || '';
 
+// ── Safe error-message extractor (handles FastAPI/Pydantic array `detail`) ───
+const stringifyDetail = (d) => {
+  if (d == null) return '';
+  if (typeof d === 'string') return d;
+  if (Array.isArray(d)) {
+    return d.map((e) => {
+      if (typeof e === 'string') return e;
+      if (e && typeof e === 'object') {
+        const loc = Array.isArray(e.loc) ? e.loc.filter(x => x !== 'body').join('.') : '';
+        return [loc, e.msg || e.message || ''].filter(Boolean).join(': ');
+      }
+      return String(e);
+    }).filter(Boolean).join(' • ');
+  }
+  if (typeof d === 'object') return d.msg || d.message || JSON.stringify(d);
+  return String(d);
+};
+const getErrMsg = (err, fallback = 'Something went wrong') => {
+  const data = err?.response?.data;
+  if (!data) return err?.message || fallback;
+  return stringifyDetail(data.detail) || stringifyDetail(data.message) || err?.message || fallback;
+};
+
 const extractBlobError = async (error) => {
   try {
     if (error?.response?.data instanceof Blob) {
       const text = await error.response.data.text();
-      try { const json = JSON.parse(text); return json?.detail || json?.message || text || 'PDF generation failed'; }
-      catch { return text || 'PDF generation failed'; }
+      try {
+        const json = JSON.parse(text);
+        return stringifyDetail(json?.detail) || stringifyDetail(json?.message) || text || 'PDF generation failed';
+      } catch { return text || 'PDF generation failed'; }
     }
-    return error?.response?.data?.detail || error?.response?.data?.message || error?.message || 'PDF generation failed';
+    return getErrMsg(error, 'PDF generation failed');
   } catch { return 'PDF generation failed due to an unknown error.'; }
 };
 
@@ -228,7 +254,7 @@ function EmailModal({ open, onClose, quotation, company, pdfType = 'quotation' }
     try {
       await api.post(`/quotations/${quotation.id}/send-email`, { to_email: toEmail, subject, body, pdf_type: pdfType });
       toast.success(`Email sent to ${toEmail}`); onClose();
-    } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to send email'); }
+    } catch (err) { toast.error(getErrMsg(err, 'Failed to send email')); }
     finally { setSending(false); }
   };
 
@@ -384,7 +410,7 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
         : await api.post('/companies', form);
       toast.success(editingCompany ? 'Company updated' : 'Company created');
       onSaved(); onClose();
-    } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to save company'); }
+    } catch (err) { toast.error(getErrMsg(err, 'Failed to save company')); }
     finally { setSaving(false); }
   };
 
@@ -527,7 +553,7 @@ function CompanyListModal({ open, onClose, onRefresh }) {
     if (!window.confirm(`Delete company "${name}"?`)) return;
     setDeletingId(id);
     try { await api.delete(`/companies/${id}`); toast.success('Company deleted'); fetchCompanies(); onRefresh(); }
-    catch (err) { toast.error(err?.response?.data?.detail || 'Failed to delete'); }
+    catch (err) { toast.error(getErrMsg(err, 'Failed to delete')); }
     finally { setDeletingId(null); }
   };
 
@@ -612,6 +638,7 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
     items: [{ description: '', quantity: 1, unit: 'service', unit_price: 0, amount: 0 }],
     gst_rate: 18.0, payment_terms: '', timeline: '', validity_days: 30,
     advance_terms: '', extra_terms: [''], notes: '', extra_checklist_items: [''],
+    attach_checklist: true,
     status: 'draft',
   });
   const [companies, setCompanies] = useState([]);
@@ -652,12 +679,13 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
             extra_terms: editingQuotation.extra_terms?.length ? editingQuotation.extra_terms : [''],
             notes: editingQuotation.notes || '',
             extra_checklist_items: editingQuotation.extra_checklist_items?.length ? editingQuotation.extra_checklist_items : [''],
+            attach_checklist: editingQuotation.attach_checklist !== false,
             status: editingQuotation.status || 'draft',
           });
         } else if (cRes.data.length > 0) {
           setForm(prev => ({ ...prev, company_id: cRes.data[0].id }));
         }
-      } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to load data'); }
+      } catch (err) { toast.error(getErrMsg(err, 'Failed to load data')); }
       finally { setLoading(false); }
     };
     fetchData();
@@ -734,7 +762,7 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
       if (!editingQuotation) { try { localStorage.removeItem(QTN_DRAFT_KEY); } catch {} }
       toast.success(editingQuotation ? 'Quotation updated' : 'Quotation created');
       onSaved(); onClose();
-    } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to save quotation'); }
+    } catch (err) { toast.error(getErrMsg(err, 'Failed to save quotation')); }
     finally { setSaving(false); }
   };
 
@@ -905,16 +933,28 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
                 <Label className="text-xs font-semibold">Notes</Label>
                 <Textarea name="notes" value={form.notes} onChange={handleChange} rows={2} className="resize-none rounded-xl text-sm" />
               </div>
-              <div className="md:col-span-2 space-y-2">
-                <Label className="text-xs font-semibold">Extra Document Checklist Items</Label>
-                {form.extra_checklist_items.map((item, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <Input value={item} onChange={e => handleListChange('extra_checklist_items', i, e.target.value)} className="h-9 rounded-xl text-sm" placeholder="e.g., Latest Bank Statement" />
-                    {form.extra_checklist_items.length > 1 && <Button variant="ghost" size="icon" onClick={() => removeListItem('extra_checklist_items', i)}><Trash2 className="h-4 w-4 text-red-400" /></Button>}
-                  </div>
-                ))}
-                <Button variant="outline" size="sm" onClick={() => addListItem('extra_checklist_items')} className="rounded-xl gap-1 text-blue-600 border-blue-200 hover:bg-blue-50"><Plus className="h-3.5 w-3.5" />Add Checklist Item</Button>
+              <div className="md:col-span-2 flex items-center justify-between gap-3 p-3 rounded-xl border border-blue-100 bg-blue-50/50">
+                <div className="space-y-0.5">
+                  <Label className="text-xs font-semibold flex items-center gap-1.5"><FileCheck className="h-3.5 w-3.5 text-blue-600" />Attach Document Checklist</Label>
+                  <p className="text-[11px] text-slate-500">When ON, the document checklist for this service is included in the quotation PDF, preview, and print.</p>
+                </div>
+                <Switch
+                  checked={!!form.attach_checklist}
+                  onCheckedChange={(v) => setForm(prev => ({ ...prev, attach_checklist: !!v }))}
+                />
               </div>
+              {form.attach_checklist && (
+                <div className="md:col-span-2 space-y-2">
+                  <Label className="text-xs font-semibold">Extra Document Checklist Items</Label>
+                  {form.extra_checklist_items.map((item, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <Input value={item} onChange={e => handleListChange('extra_checklist_items', i, e.target.value)} className="h-9 rounded-xl text-sm" placeholder="e.g., Latest Bank Statement" />
+                      {form.extra_checklist_items.length > 1 && <Button variant="ghost" size="icon" onClick={() => removeListItem('extra_checklist_items', i)}><Trash2 className="h-4 w-4 text-red-400" /></Button>}
+                    </div>
+                  ))}
+                  <Button variant="outline" size="sm" onClick={() => addListItem('extra_checklist_items')} className="rounded-xl gap-1 text-blue-600 border-blue-200 hover:bg-blue-50"><Plus className="h-3.5 w-3.5" />Add Checklist Item</Button>
+                </div>
+              )}
             </div>
           )}
 
@@ -935,6 +975,7 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
               template:    _qtnSettings.template    || previewCompany.invoice_template    || 'classic',
               theme:       _qtnSettings.theme       || 'custom',
               customColor: _activeColor,
+              attachChecklist: form.attach_checklist !== false,
             });
             return (
               <div className="space-y-3">
@@ -1155,10 +1196,12 @@ const QuotationDetailPanel = ({
             className="h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold">
             {downloading === q.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} PDF
           </Button>
-          <Button size="sm" variant="outline" title="Download Document Checklist" onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no)} disabled={downloading === q.id + '-checklist'}
-            className="h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold">
-            {downloading === q.id + '-checklist' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCheck className="h-3.5 w-3.5" />} Checklist
-          </Button>
+          {q.attach_checklist !== false && (
+            <Button size="sm" variant="outline" title="Download Document Checklist" onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no)} disabled={downloading === q.id + '-checklist'}
+              className="h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold">
+              {downloading === q.id + '-checklist' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCheck className="h-3.5 w-3.5" />} Checklist
+            </Button>
+          )}
           <Button size="sm" variant="outline" title="Send via Email" onClick={() => { setEmailModalQuotation(q); setEmailModalPdfType('quotation'); setIsEmailModalOpen(true); onClose(); }}
             className="h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold">
             <Mail className="h-3.5 w-3.5" /> Email
@@ -1180,6 +1223,188 @@ const QuotationDetailPanel = ({
     </Dialog>
   );
 };
+
+// ════════════════════════════════════════════════════════════════════════════════
+// LINK ACTION BUTTON  — link a quotation to a Lead or jump to its Invoice(s)
+// ════════════════════════════════════════════════════════════════════════════════
+function LinkActionButton({ q, onUpdated, isDark, compact = false }) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [leads, setLeads] = useState([]);
+  const [loadingLeads, setLoadingLeads] = useState(false);
+  const [savingLead, setSavingLead] = useState(false);
+  const [pickingLead, setPickingLead] = useState(false);
+  const [selectedLeadId, setSelectedLeadId] = useState(q.lead_id || '');
+
+  // Lazy-load leads the first time the popover opens (only if user wants to link/change).
+  const ensureLeads = async () => {
+    if (leads.length || loadingLeads) return;
+    setLoadingLeads(true);
+    try {
+      const res = await api.get('/leads');
+      setLeads(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      toast.error(getErrMsg(err, 'Failed to load leads'));
+    } finally {
+      setLoadingLeads(false);
+    }
+  };
+
+  const linkedLead = useMemo(
+    () => leads.find(l => l.id === q.lead_id) || null,
+    [leads, q.lead_id]
+  );
+
+  const saveLeadLink = async (leadId) => {
+    setSavingLead(true);
+    try {
+      // Partial PUT — backend merges into existing quotation.
+      await api.put(`/quotations/${q.id}`, { lead_id: leadId || null });
+      toast.success(leadId ? 'Quotation linked to lead' : 'Lead link removed');
+      setPickingLead(false);
+      setOpen(false);
+      onUpdated && onUpdated();
+    } catch (err) {
+      toast.error(getErrMsg(err, 'Failed to update link'));
+    } finally {
+      setSavingLead(false);
+    }
+  };
+
+  const goToLead = () => {
+    setOpen(false);
+    // /leads is the Lead Management page in AppRoutes.jsx
+    navigate(`/leads?lead_id=${encodeURIComponent(q.lead_id)}`);
+  };
+
+  const goToInvoice = () => {
+    setOpen(false);
+    // No invoice list filter by quotation_id exists, so we deep-link with both
+    // the quotation_no (for search) and the quotation_id (for any future filter).
+    const qNo = q.quotation_no || '';
+    navigate(`/invoicing?quotation_id=${encodeURIComponent(q.id)}&search=${encodeURIComponent(qNo)}`);
+  };
+
+  const btnClass = compact
+    ? `w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${q.lead_id ? (isDark ? 'text-amber-400 hover:bg-amber-900/30' : 'text-amber-600 hover:bg-amber-50') : (isDark ? 'text-slate-400 hover:text-amber-400 hover:bg-amber-900/30' : 'text-slate-400 hover:text-amber-600 hover:bg-amber-50')}`
+    : 'h-9 px-4 rounded-xl gap-1.5 text-xs font-semibold';
+
+  return (
+    <Popover open={open} onOpenChange={(v) => { setOpen(v); if (v) ensureLeads(); }}>
+      <PopoverTrigger asChild>
+        {compact ? (
+          <button
+            title={q.lead_id ? 'Linked to a lead — manage links' : 'Link to lead / open invoice'}
+            className={btnClass}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Link2 className="h-3.5 w-3.5" />
+          </button>
+        ) : (
+          <Button size="sm" variant="outline" title="Link" className={btnClass}
+            onClick={(e) => e.stopPropagation()}>
+            <Link2 className="h-3.5 w-3.5" /> Link
+          </Button>
+        )}
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        className="w-72 p-3 space-y-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* ── Lead section ─────────────────────────────────────────────── */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
+              <Users className="h-3 w-3" /> Linked Lead
+            </p>
+            {q.lead_id && !pickingLead && (
+              <button
+                onClick={() => setPickingLead(true)}
+                className="text-[10px] font-semibold text-blue-600 hover:underline"
+              >
+                Change
+              </button>
+            )}
+          </div>
+
+          {q.lead_id && !pickingLead ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-2.5 space-y-2">
+              <p className="text-xs font-semibold text-slate-800 truncate">
+                {linkedLead
+                  ? (linkedLead.company_name || linkedLead.name || 'Lead')
+                  : (loadingLeads ? 'Loading lead…' : 'Lead linked')}
+              </p>
+              <div className="flex gap-1.5">
+                <Button size="sm" variant="default"
+                  className="h-7 px-2 text-[11px] gap-1 bg-amber-600 hover:bg-amber-700 text-white"
+                  onClick={goToLead}>
+                  <ExternalLink className="h-3 w-3" /> Open Lead
+                </Button>
+                <Button size="sm" variant="ghost"
+                  className="h-7 px-2 text-[11px] text-red-500 hover:bg-red-50"
+                  disabled={savingLead}
+                  onClick={() => saveLeadLink('')}>
+                  Unlink
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Select
+                value={selectedLeadId || 'none'}
+                onValueChange={(v) => setSelectedLeadId(v === 'none' ? '' : v)}
+                disabled={loadingLeads || savingLead}
+              >
+                <SelectTrigger className="h-8 text-xs rounded-lg">
+                  <SelectValue placeholder={loadingLeads ? 'Loading leads…' : 'Select a lead…'} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— No lead —</SelectItem>
+                  {leads.map(l => (
+                    <SelectItem key={l.id} value={l.id}>
+                      {(l.company_name || l.name || 'Lead')}
+                      {l.phone ? ` · ${l.phone}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="flex gap-1.5">
+                <Button size="sm" className="h-7 px-2 text-[11px] gap-1 bg-blue-600 hover:bg-blue-700 text-white"
+                  disabled={savingLead || (selectedLeadId === (q.lead_id || ''))}
+                  onClick={() => saveLeadLink(selectedLeadId)}>
+                  {savingLead ? <Loader2 className="h-3 w-3 animate-spin" /> : <Link2 className="h-3 w-3" />}
+                  Save Link
+                </Button>
+                {pickingLead && (
+                  <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]"
+                    onClick={() => { setPickingLead(false); setSelectedLeadId(q.lead_id || ''); }}>
+                    Cancel
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Invoice section ──────────────────────────────────────────── */}
+        <div className="border-t pt-2 space-y-2">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
+            <Receipt className="h-3 w-3" /> Linked Invoice
+          </p>
+          <p className="text-[11px] text-slate-500 leading-snug">
+            Open Invoicing filtered by this quotation. If none exists yet, use “Convert to Invoice”.
+          </p>
+          <Button size="sm" variant="default"
+            className="h-7 px-2 text-[11px] gap-1 bg-purple-600 hover:bg-purple-700 text-white w-full"
+            onClick={goToInvoice}>
+            <ExternalLink className="h-3 w-3" /> Open in Invoicing
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 // ════════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
@@ -1236,7 +1461,7 @@ export default function Quotations() {
     try {
       const res = await api.get('/quotations');
       setQuotations(res.data);
-    } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to fetch quotations'); }
+    } catch (err) { toast.error(getErrMsg(err, 'Failed to fetch quotations')); }
     finally { setLoading(false); }
   };
 
@@ -1322,7 +1547,7 @@ export default function Quotations() {
       await api.delete(`/quotations/${id}`);
       toast.success('Quotation deleted');
       setQuotations(prev => prev.filter(q => q.id !== id));
-    } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to delete quotation'); }
+    } catch (err) { toast.error(getErrMsg(err, 'Failed to delete quotation')); }
   };
 
   const handleConvertToInvoice = async (qtnId) => {
@@ -1332,7 +1557,7 @@ export default function Quotations() {
       await api.post(`/invoices/from-quotation/${qtnId}`);
       toast.success('Converted to invoice! Redirecting…');
       setTimeout(() => navigate('/invoicing'), 1200);
-    } catch (err) { toast.error(err?.response?.data?.detail || 'Conversion failed'); }
+    } catch (err) { toast.error(getErrMsg(err, 'Conversion failed')); }
     finally { setConvertingId(null); }
   };
 
@@ -1347,6 +1572,7 @@ export default function Quotations() {
       template:    settings.template    || company.invoice_template    || 'classic',
       theme:       settings.theme       || 'custom',
       customColor: activeColor,
+      attachChecklist: q.attach_checklist !== false,
     });
     const win = window.open('', '_blank'); win.document.write(html); win.document.close();
   };
@@ -1362,6 +1588,7 @@ export default function Quotations() {
       template:    settings.template    || company.invoice_template    || 'classic',
       theme:       settings.theme       || 'custom',
       customColor: activeColor,
+      attachChecklist: q.attach_checklist !== false,
     });
     const win = window.open('', '_blank'); win.document.write(html); win.document.close(); win.print();
   };
@@ -1488,16 +1715,19 @@ export default function Quotations() {
             className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}>
             {downloading === q.id + '-pdf' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
           </button>
-          <button onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no, q.company_id)} title="Checklist PDF"
-            disabled={downloading === q.id + '-checklist'}
-            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}>
-            {downloading === q.id + '-checklist' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCheck className="h-3.5 w-3.5" />}
-          </button>
+          {q.attach_checklist !== false && (
+            <button onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no, q.company_id)} title="Checklist PDF"
+              disabled={downloading === q.id + '-checklist'}
+              className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}>
+              {downloading === q.id + '-checklist' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCheck className="h-3.5 w-3.5" />}
+            </button>
+          )}
           <button onClick={() => handleConvertToInvoice(q.id)} title="Convert to Invoice"
             disabled={convertingId === q.id}
             className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-purple-400 hover:bg-purple-900/30' : 'text-slate-400 hover:text-purple-600 hover:bg-purple-50'}`}>
             {convertingId === q.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />}
           </button>
+          <LinkActionButton q={q} onUpdated={fetchQuotations} isDark={isDark} compact />
           <button onClick={() => handleDelete(q.id)} title="Delete"
             className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}>
             <Trash2 className="h-3.5 w-3.5" />
@@ -1842,12 +2072,14 @@ export default function Quotations() {
                         </div>
 
                         <div className="flex items-center gap-1 border-t pt-2" style={{ borderColor: isDark ? '#334155' : '#f1f5f9' }}>
-                          <Button variant="outline" size="sm" title="Download Document Checklist"
-                            onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no)}
-                            disabled={downloading === q.id + '-checklist'}
-                            className="h-6 px-1.5 rounded-md text-[10px] text-slate-600 border-slate-200 flex-1">
-                            {downloading === q.id + '-checklist' ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <FileCheck className="h-2.5 w-2.5" />} Checklist
-                          </Button>
+                          {q.attach_checklist !== false && (
+                            <Button variant="outline" size="sm" title="Download Document Checklist"
+                              onClick={() => handleDownloadChecklistPdf(q.id, q.quotation_no)}
+                              disabled={downloading === q.id + '-checklist'}
+                              className="h-6 px-1.5 rounded-md text-[10px] text-slate-600 border-slate-200 flex-1">
+                              {downloading === q.id + '-checklist' ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <FileCheck className="h-2.5 w-2.5" />} Checklist
+                            </Button>
+                          )}
                           <Button variant="outline" size="sm" title="Convert to Invoice"
                             onClick={() => handleConvertToInvoice(q.id)}
                             disabled={convertingId === q.id}
