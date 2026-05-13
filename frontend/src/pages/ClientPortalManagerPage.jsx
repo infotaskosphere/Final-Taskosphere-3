@@ -1,17 +1,20 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import { useDark } from '@/hooks/useDark.jsx';
 import api from '@/lib/api.js';
 import { toast } from 'sonner';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import ClientPortalHeader from '@/components/layout/ClientPortalHeader.jsx';
 import ClientPortalManager from '@/components/ClientPortalManager.jsx';
 import {
   Building2, Users, Shield, FileText, ExternalLink,
   Search, Globe, Lock, CreditCard, ClipboardList,
   ChevronRight, RefreshCw, UserCheck, Loader2, AlertCircle,
-  Settings, MessageSquare, Mail, FolderOpen,
+  Settings, MessageSquare, Mail, FolderOpen, FolderTree,
+  Plus, Trash2, GripVertical, FolderPlus, CheckCircle2,
+  XCircle, Play, RotateCcw, Check, X, ChevronDown, ChevronUp,
+  Folder, FolderCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -306,6 +309,564 @@ function ClientsTab({ portalUsers, loading, onManage, isAdmin, isDark }) {
     </div>
   );
 }
+
+/* ── All Clients Tab ────────────────────────────────────────────────────────── */
+function AllClientsTab({ isDark, isAdmin }) {
+  const navigate = useNavigate();
+  const [clients, setClients] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [manageTarget, setManageTarget] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/client-portal/all-clients');
+      setClients(res.data || []);
+    } catch { toast.error('Failed to load clients'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = clients.filter((c) => {
+    const q = search.toLowerCase();
+    const name = (c.company_name || c.name || '').toLowerCase();
+    const matchSearch = !q || name.includes(q) || (c.email || '').toLowerCase().includes(q);
+    if (!matchSearch) return false;
+    if (filter === 'portal') return c.has_portal;
+    if (filter === 'no-portal') return !c.has_portal;
+    if (filter === 'drive') return c.has_drive;
+    if (filter === 'no-drive') return !c.has_drive;
+    return true;
+  });
+
+  const stats = {
+    total: clients.length,
+    portal: clients.filter(c => c.has_portal).length,
+    drive: clients.filter(c => c.has_drive).length,
+    noPortal: clients.filter(c => !c.has_portal).length,
+  };
+
+  const STATUS_FILTERS = [
+    { key: 'all', label: 'All' },
+    { key: 'portal', label: 'Has Portal' },
+    { key: 'no-portal', label: 'No Portal' },
+    { key: 'drive', label: 'Drive Linked' },
+    { key: 'no-drive', label: 'No Drive' },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {/* Summary row */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: 'Total Clients', value: stats.total, color: COLORS.deepBlue },
+          { label: 'Portal Connected', value: stats.portal, color: COLORS.emeraldGreen },
+          { label: 'Drive Linked', value: stats.drive, color: '#3B82F6' },
+          { label: 'No Portal Yet', value: stats.noPortal, color: '#94a3b8' },
+        ].map(({ label, value, color }) => (
+          <div key={label} className={`rounded-xl border p-4 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <p className="text-2xl font-bold" style={{ color }}>{value}</p>
+            <p className="text-xs text-slate-500 mt-0.5">{label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <div className={`flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          <div className="flex items-center gap-2 flex-wrap">
+            {STATUS_FILTERS.map(f => (
+              <button key={f.key} onClick={() => setFilter(f.key)}
+                className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all ${
+                  filter === f.key
+                    ? 'text-white border-transparent'
+                    : isDark ? 'border-slate-600 text-slate-400 hover:border-slate-500' : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                }`}
+                style={filter === f.key ? { background: GRADIENT } : {}}
+              >{f.label}</button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Input placeholder="Search clients…" value={search} onChange={e => setSearch(e.target.value)} className="pl-8 h-8 text-xs w-48" />
+            </div>
+            <Button variant="ghost" size="sm" onClick={load} className="h-8 w-8 p-0">
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-20 gap-2 text-slate-400">
+            <Loader2 className="h-5 w-5 animate-spin" /><span className="text-sm">Loading clients…</span>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <Building2 className="h-8 w-8 text-slate-300 mb-3" />
+            <p className="text-sm font-medium text-slate-600 dark:text-slate-300">{search || filter !== 'all' ? 'No clients match your filter' : 'No clients found'}</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                  {['Client', 'Type', 'Contact', 'Portal', 'Drive', ...(isAdmin ? ['Actions'] : [])].map(h => (
+                    <th key={h} className="text-left py-2 px-3 text-xs font-semibold text-slate-500">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((c) => {
+                  const name = c.company_name || c.name || '—';
+                  const portalUser = c.portal_users?.[0];
+                  return (
+                    <tr key={c.id} className={`border-b last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                      <td className="py-3 px-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: GRADIENT }}>
+                            {name[0]?.toUpperCase() || '?'}
+                          </div>
+                          <span className="font-medium text-xs text-slate-800 dark:text-slate-200">{name}</span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-3">
+                        <span className="text-xs text-slate-500 capitalize">{c.client_type || c.type || '—'}</span>
+                      </td>
+                      <td className="py-3 px-3">
+                        <div className="text-xs text-slate-500 space-y-0.5">
+                          {c.email && <p className="truncate max-w-[160px]">{c.email}</p>}
+                          {c.phone && <p>{c.phone}</p>}
+                        </div>
+                      </td>
+                      <td className="py-3 px-3">
+                        {c.has_portal ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            {portalUser?.portal_username ? `@${portalUser.portal_username}` : 'Connected'}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500 dark:bg-slate-700">
+                            <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                            Not connected
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3">
+                        {c.has_drive ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400">
+                            <FolderCheck className="h-3 w-3" /> Linked
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-400">—</span>
+                        )}
+                      </td>
+                      {isAdmin && (
+                        <td className="py-3 px-3">
+                          <button
+                            onClick={() => setManageTarget({ clientId: c.id, clientName: c.company_name || c.name })}
+                            className="text-xs text-blue-600 hover:underline flex items-center gap-0.5"
+                          >
+                            <Settings className="h-3.5 w-3.5" /> Manage Portal
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {manageTarget && (
+        <ClientPortalManager
+          clientId={manageTarget.clientId}
+          clientName={manageTarget.clientName}
+          onClose={() => { setManageTarget(null); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+
+/* ── Folder Architect Tab ───────────────────────────────────────────────────── */
+function FolderArchitectTab({ isDark, isAdmin }) {
+  const [subfolders, setSubfolders] = useState([]);
+  const [parentId, setParentId] = useState('');
+  const [newFolder, setNewFolder] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [loadingTemplate, setLoadingTemplate] = useState(true);
+
+  const [clients, setClients] = useState([]);
+  const [loadingClients, setLoadingClients] = useState(true);
+  const [selectedClients, setSelectedClients] = useState([]);
+  const [bulkMode, setBulkMode] = useState('all');
+  const [applying, setApplying] = useState(false);
+  const [bulkResults, setBulkResults] = useState(null);
+
+  const [singleClient, setSingleClient] = useState('');
+  const [applyingSingle, setApplyingSingle] = useState(null);
+
+  const loadTemplate = useCallback(async () => {
+    setLoadingTemplate(true);
+    try {
+      const res = await api.get('/client-portal/folder-template');
+      setSubfolders(res.data.subfolders || []);
+      setParentId(res.data.parent_folder_id || '');
+    } catch { toast.error('Failed to load template'); }
+    finally { setLoadingTemplate(false); }
+  }, []);
+
+  const loadClients = useCallback(async () => {
+    setLoadingClients(true);
+    try {
+      const res = await api.get('/client-portal/all-clients');
+      setClients(res.data || []);
+    } catch {}
+    finally { setLoadingClients(false); }
+  }, []);
+
+  useEffect(() => { loadTemplate(); loadClients(); }, [loadTemplate, loadClients]);
+
+  const addFolder = () => {
+    const trimmed = newFolder.trim();
+    if (!trimmed) return;
+    if (subfolders.includes(trimmed)) { toast.error('Folder already exists'); return; }
+    setSubfolders(p => [...p, trimmed]);
+    setNewFolder('');
+  };
+
+  const removeFolder = (name) => setSubfolders(p => p.filter(f => f !== name));
+
+  const moveFolder = (idx, dir) => {
+    const arr = [...subfolders];
+    const target = idx + dir;
+    if (target < 0 || target >= arr.length) return;
+    [arr[idx], arr[target]] = [arr[target], arr[idx]];
+    setSubfolders(arr);
+  };
+
+  const saveTemplate = async () => {
+    if (subfolders.length === 0) { toast.error('Add at least one subfolder'); return; }
+    setSaving(true);
+    try {
+      await api.put('/client-portal/folder-template', { subfolders, parent_folder_id: parentId });
+      toast.success('Folder template saved!');
+    } catch { toast.error('Failed to save template'); }
+    finally { setSaving(false); }
+  };
+
+  const applyToClient = async (clientId, clientName) => {
+    setApplyingSingle(clientId);
+    try {
+      const res = await api.post('/client-portal/drive/create-folders', {
+        client_name: clientName,
+        client_id: clientId,
+        parent_folder_id: parentId || null,
+        subfolders,
+      });
+      if (res.data.folder_link) {
+        toast.success(`Folder created for ${clientName}!`);
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || `Failed for ${clientName}`);
+    } finally {
+      setApplyingSingle(null);
+      loadClients();
+    }
+  };
+
+  const applyBulk = async () => {
+    if (subfolders.length === 0) { toast.error('Save the template first'); return; }
+    const clientIds = bulkMode === 'selected' ? selectedClients : [];
+    if (bulkMode === 'selected' && clientIds.length === 0) { toast.error('Select at least one client'); return; }
+    setApplying(true);
+    setBulkResults(null);
+    try {
+      const res = await api.post('/client-portal/drive/bulk-create-folders', {
+        client_ids: clientIds.length > 0 ? clientIds : null,
+        parent_folder_id: parentId || null,
+        subfolders,
+      });
+      setBulkResults(res.data);
+      toast.success(`Done! ${res.data.succeeded}/${res.data.total} folders created.`);
+      loadClients();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Bulk creation failed');
+    } finally { setApplying(false); }
+  };
+
+  const toggleClient = (id) => {
+    setSelectedClients(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+  };
+
+  const PRESET_TEMPLATES = {
+    'CA Firm': ['Documents', 'Invoices', 'Compliance', 'Income Tax', 'GST Returns', 'Audit Reports', 'Bank Statements', 'Correspondence'],
+    'CS Firm': ['Documents', 'ROC Filings', 'Board Minutes', 'Compliance', 'Invoices', 'Correspondence', 'Agreements'],
+    'Standard': ['Documents', 'Invoices', 'Compliance', 'Correspondence', 'Reports', 'Bank Statements'],
+    'Minimal': ['Documents', 'Invoices', 'Misc'],
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        {/* Left: Folder Structure Designer */}
+        <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <div className={`flex items-center gap-2.5 px-5 py-4 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+            <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.deepBlue}12` }}>
+              <FolderTree className="h-4 w-4" style={{ color: COLORS.deepBlue }} />
+            </div>
+            <div>
+              <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Folder Architecture</h3>
+              <p className="text-xs text-slate-400">Design the subfolder template for client Drive folders</p>
+            </div>
+          </div>
+
+          <div className="p-5 space-y-4">
+            {/* Preset Templates */}
+            <div>
+              <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2">Quick Presets</p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(PRESET_TEMPLATES).map(([name, folders]) => (
+                  <button key={name} onClick={() => setSubfolders(folders)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-all ${isDark ? 'border-slate-600 text-slate-300 hover:border-blue-500' : 'border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600'}`}
+                  >{name}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Parent Folder */}
+            <div>
+              <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block mb-1">
+                Parent Folder ID <span className="font-normal text-slate-400">(optional – leave blank for Drive root)</span>
+              </label>
+              <Input value={parentId} onChange={e => setParentId(e.target.value)} placeholder="Paste Drive folder ID…" className="text-xs font-mono" />
+            </div>
+
+            {/* Subfolder List */}
+            <div>
+              <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2">Subfolders <span className="font-normal text-slate-400">({subfolders.length})</span></p>
+              {loadingTemplate ? (
+                <div className="flex items-center gap-2 py-6 text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-xs">Loading…</span></div>
+              ) : (
+                <div className="space-y-1.5 mb-3">
+                  {subfolders.length === 0 && (
+                    <p className="text-xs text-slate-400 text-center py-4">No subfolders yet. Add one below or pick a preset.</p>
+                  )}
+                  {subfolders.map((name, idx) => (
+                    <div key={idx} className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-slate-100 bg-slate-50'}`}>
+                      <Folder className="h-3.5 w-3.5 text-blue-400 flex-shrink-0" />
+                      <span className="flex-1 text-xs font-medium text-slate-700 dark:text-slate-300">{name}</span>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => moveFolder(idx, -1)} disabled={idx === 0} className="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-slate-600 disabled:opacity-30">
+                          <ChevronUp className="h-3 w-3" />
+                        </button>
+                        <button onClick={() => moveFolder(idx, 1)} disabled={idx === subfolders.length - 1} className="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-slate-600 disabled:opacity-30">
+                          <ChevronDown className="h-3 w-3" />
+                        </button>
+                        <button onClick={() => removeFolder(name)} className="w-5 h-5 flex items-center justify-center rounded text-red-400 hover:text-red-600">
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add folder input */}
+              <div className="flex gap-2">
+                <Input
+                  value={newFolder}
+                  onChange={e => setNewFolder(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addFolder()}
+                  placeholder="New subfolder name…"
+                  className="text-xs flex-1"
+                />
+                <Button size="sm" onClick={addFolder} className="text-white px-3" style={{ background: GRADIENT }}>
+                  <Plus className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Preview */}
+            {subfolders.length > 0 && (
+              <div className={`rounded-xl p-3 border ${isDark ? 'border-slate-600 bg-slate-700/30' : 'border-blue-100 bg-blue-50'}`}>
+                <p className="text-[10px] font-bold text-blue-700 dark:text-blue-400 uppercase tracking-wider mb-2">Preview</p>
+                <div className="font-mono text-xs text-slate-600 dark:text-slate-300 space-y-0.5">
+                  <p>📁 [Client Name]</p>
+                  {subfolders.map((f, i) => (
+                    <p key={i} className="ml-4">├── 📁 {f}</p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {isAdmin && (
+              <Button onClick={saveTemplate} disabled={saving || subfolders.length === 0} className="w-full text-white text-xs" style={{ background: GRADIENT }}>
+                {saving ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />Saving…</> : <><Check className="h-3.5 w-3.5 mr-1" />Save Template</>}
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Right: Apply to Clients */}
+        <div className="space-y-4">
+          {/* Individual Apply */}
+          <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <div className={`flex items-center gap-2.5 px-5 py-4 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+              <div className="p-1.5 rounded-lg" style={{ background: '#3B82F612' }}>
+                <Folder className="h-4 w-4 text-blue-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Apply to Individual Client</h3>
+                <p className="text-xs text-slate-400">Create a Drive folder for one client using the template above</p>
+              </div>
+            </div>
+            <div className="p-5">
+              {loadingClients ? (
+                <div className="flex items-center gap-2 py-4 text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-xs">Loading clients…</span></div>
+              ) : (
+                <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+                  {clients.map(c => {
+                    const name = c.company_name || c.name || '—';
+                    return (
+                      <div key={c.id} className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border ${isDark ? 'border-slate-700 bg-slate-700/30' : 'border-slate-100 bg-slate-50'}`}>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" style={{ background: GRADIENT }}>
+                            {name[0]?.toUpperCase() || '?'}
+                          </div>
+                          <span className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate">{name}</span>
+                          {c.has_drive && <FolderCheck className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />}
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={applyingSingle === c.id || subfolders.length === 0}
+                          onClick={() => applyToClient(c.id, name)}
+                          className="text-[10px] h-6 px-2 flex-shrink-0"
+                        >
+                          {applyingSingle === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FolderPlus className="h-3 w-3 mr-0.5" />}
+                          {c.has_drive ? 'Re-apply' : 'Create'}
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Bulk Apply */}
+          {isAdmin && (
+            <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              <div className={`flex items-center gap-2.5 px-5 py-4 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.emeraldGreen}15` }}>
+                  <FolderPlus className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Bulk Apply to All / Selected</h3>
+                  <p className="text-xs text-slate-400">Create Drive folders for multiple clients at once</p>
+                </div>
+              </div>
+              <div className="p-5 space-y-4">
+                <div className="flex gap-2">
+                  {[['all','All Clients'],['selected','Selected Clients']].map(([k,l]) => (
+                    <button key={k} onClick={() => setBulkMode(k)}
+                      className={`flex-1 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                        bulkMode === k ? 'text-white border-transparent' : isDark ? 'border-slate-600 text-slate-400' : 'border-slate-200 text-slate-500'
+                      }`}
+                      style={bulkMode === k ? { background: GRADIENT } : {}}
+                    >{l}</button>
+                  ))}
+                </div>
+
+                {bulkMode === 'selected' && (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {clients.map(c => {
+                      const name = c.company_name || c.name || '—';
+                      const checked = selectedClients.includes(c.id);
+                      return (
+                        <label key={c.id} className={`flex items-center gap-2.5 px-3 py-2 rounded-xl border cursor-pointer transition-colors ${
+                          checked
+                            ? isDark ? 'border-blue-600 bg-blue-900/30' : 'border-blue-300 bg-blue-50'
+                            : isDark ? 'border-slate-700 hover:border-slate-600' : 'border-slate-100 hover:border-slate-200'
+                        }`}>
+                          <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${checked ? 'bg-blue-600 border-blue-600' : isDark ? 'border-slate-600' : 'border-slate-300'}`}
+                            onClick={() => toggleClient(c.id)}>
+                            {checked && <Check className="h-2.5 w-2.5 text-white" />}
+                          </div>
+                          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{name}</span>
+                          {c.has_drive && <FolderCheck className="h-3 w-3 text-emerald-500 flex-shrink-0 ml-auto" />}
+                        </label>
+                      );
+                    })}
+                    {clients.length > 0 && (
+                      <div className="flex gap-2 pt-1">
+                        <button onClick={() => setSelectedClients(clients.map(c => c.id))} className="text-xs text-blue-600 hover:underline">Select all</button>
+                        <span className="text-slate-300">·</span>
+                        <button onClick={() => setSelectedClients([])} className="text-xs text-slate-400 hover:underline">Clear</button>
+                        <span className="text-xs text-slate-400 ml-auto">{selectedClients.length} selected</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <Button
+                  onClick={applyBulk}
+                  disabled={applying || subfolders.length === 0}
+                  className="w-full text-white text-xs"
+                  style={{ background: GRADIENT }}
+                >
+                  {applying ? (
+                    <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Creating folders…</>
+                  ) : (
+                    <><Play className="h-3.5 w-3.5 mr-1.5" />
+                    {bulkMode === 'all' ? `Create Folders for All ${clients.length} Clients` : `Create Folders for ${selectedClients.length} Client${selectedClients.length !== 1 ? 's' : ''}`}
+                    </>
+                  )}
+                </Button>
+
+                {bulkResults && (
+                  <div className={`rounded-xl p-4 border space-y-2 ${isDark ? 'border-slate-600 bg-slate-700/30' : 'border-slate-200 bg-slate-50'}`}>
+                    <div className="flex items-center gap-4">
+                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Bulk Result</span>
+                      <span className="text-[10px] text-emerald-600 font-semibold">{bulkResults.succeeded} succeeded</span>
+                      {bulkResults.failed > 0 && <span className="text-[10px] text-red-500 font-semibold">{bulkResults.failed} failed</span>}
+                    </div>
+                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                      {bulkResults.results.map((r, i) => (
+                        <div key={i} className="flex items-center gap-2 text-xs">
+                          {r.success
+                            ? <CheckCircle2 className="h-3 w-3 text-emerald-500 flex-shrink-0" />
+                            : <XCircle className="h-3 w-3 text-red-500 flex-shrink-0" />}
+                          <span className="text-slate-600 dark:text-slate-300 truncate">{r.client_name}</span>
+                          {r.success && r.folder_link && (
+                            <a href={r.folder_link} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline ml-auto flex-shrink-0">
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )}
+                          {!r.success && <span className="text-red-400 text-[10px] ml-auto">{r.error}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 /* ── Documents Tab ──────────────────────────────────────────────────────────── */
 function DocumentsTab({ portalUsers, loading, isDark }) {
@@ -604,10 +1165,12 @@ export default function ClientPortalManagerPage() {
   // Determine active tab from path
   const path = location.pathname;
   let activeTab = 'overview';
-  if (path.endsWith('/clients'))   activeTab = 'clients';
-  if (path.endsWith('/documents')) activeTab = 'documents';
-  if (path.endsWith('/messages'))  activeTab = 'messages';
-  if (path.endsWith('/settings'))  activeTab = 'settings';
+  if (path.endsWith('/all-clients'))      activeTab = 'all-clients';
+  if (path.endsWith('/clients'))          activeTab = 'clients';
+  if (path.endsWith('/folder-architect')) activeTab = 'folder-architect';
+  if (path.endsWith('/documents'))        activeTab = 'documents';
+  if (path.endsWith('/messages'))         activeTab = 'messages';
+  if (path.endsWith('/settings'))         activeTab = 'settings';
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -659,19 +1222,23 @@ export default function ClientPortalManagerPage() {
         <div className={`mb-5 flex items-start gap-3 p-4 rounded-xl border ${isDark ? 'bg-slate-700/50 border-slate-600 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
           <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-slate-400" />
           <p className="text-xs leading-relaxed">
-            <strong>Tip:</strong> To create a new portal account, go to the{' '}
-            <button onClick={() => navigate('/clients')} className="underline font-semibold text-blue-600 dark:text-blue-400">Clients page</button>
-            , open a client, and use the Portal Access panel. Use the <Settings className="inline h-3 w-3" /> button on each card below to manage an existing account.
+            <strong>Tip:</strong> Use{' '}
+            <button onClick={() => navigate('/client-portal-manager/all-clients')} className="underline font-semibold text-blue-600 dark:text-blue-400">All Clients</button>{' '}
+            to view and manage portal access for every client. Use{' '}
+            <button onClick={() => navigate('/client-portal-manager/folder-architect')} className="underline font-semibold text-blue-600 dark:text-blue-400">Folder Architect</button>{' '}
+            to design your Drive folder structure and bulk-create folders. When a portal user is created, their Drive folder is created automatically.
           </p>
         </div>
       )}
 
       {/* ── Active Tab Content ── */}
-      {activeTab === 'overview'  && <OverviewTab   portalUsers={portalUsers} loading={loading} navigate={navigate} isAdmin={isAdmin} isDark={isDark} onManage={handleManage} />}
-      {activeTab === 'clients'   && <ClientsTab    portalUsers={portalUsers} loading={loading} onManage={handleManage} isAdmin={isAdmin} isDark={isDark} />}
-      {activeTab === 'documents' && <DocumentsTab  portalUsers={portalUsers} loading={loading} isDark={isDark} />}
-      {activeTab === 'messages'  && <MessagesTab   portalUsers={portalUsers} isDark={isDark} />}
-      {activeTab === 'settings'  && <SettingsTab   isDark={isDark} />}
+      {activeTab === 'overview'         && <OverviewTab        portalUsers={portalUsers} loading={loading} navigate={navigate} isAdmin={isAdmin} isDark={isDark} onManage={handleManage} />}
+      {activeTab === 'all-clients'      && <AllClientsTab      isDark={isDark} isAdmin={isAdmin} />}
+      {activeTab === 'clients'          && <ClientsTab         portalUsers={portalUsers} loading={loading} onManage={handleManage} isAdmin={isAdmin} isDark={isDark} />}
+      {activeTab === 'folder-architect' && <FolderArchitectTab isDark={isDark} isAdmin={isAdmin} />}
+      {activeTab === 'documents'        && <DocumentsTab       portalUsers={portalUsers} loading={loading} isDark={isDark} />}
+      {activeTab === 'messages'         && <MessagesTab        portalUsers={portalUsers} isDark={isDark} />}
+      {activeTab === 'settings'         && <SettingsTab        isDark={isDark} />}
 
       {/* ── Manage modal ── */}
       {manageTarget && (
