@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import GoogleDriveConnect from "@/components/GoogleDriveConnect";
 
 const COLORS = {
   deepBlue:     "#0D3B66",
@@ -407,6 +408,32 @@ export default function GeneralSettings() {
         </motion.div>
 
       </div>
+
+      {/* INTEGRATIONS SECTION */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15 }}
+      >
+        <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          {/* Section header */}
+          <div className={`flex items-center gap-2.5 px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-800/70' : 'border-slate-100 bg-slate-50/60'}`}>
+            <div className={`p-1.5 rounded-lg ${isDark ? 'bg-blue-900/40' : 'bg-blue-50'}`}>
+              <Settings className="h-3.5 w-3.5 text-blue-500" />
+            </div>
+            <div>
+              <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Integrations</p>
+              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Connect external services</p>
+            </div>
+          </div>
+
+          {/* Content */}
+          <div className="p-5">
+            <GoogleDriveConnect isDark={isDark} />
+          </div>
+        </div>
+      </motion.div>
+
     </div>
   );
 }
