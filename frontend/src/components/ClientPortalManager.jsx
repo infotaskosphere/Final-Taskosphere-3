@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import api from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import DriveFolderVisibility from "@/components/DriveFolderVisibility";
 
 // ── helpers ────────────────────────────────────────────────────────────────
-const initForm = (clientId = "") => ({
+const initForm = (clientId = "", folderId = "", folderName = "") => ({
   client_id: clientId,
   portal_username: "",
   portal_password: "",
@@ -14,8 +14,8 @@ const initForm = (clientId = "") => ({
   can_view_documents: true,
   can_view_invoices: true,
   can_view_compliance: false,
-  google_drive_folder_id: "",
-  google_drive_folder_name: "",
+  google_drive_folder_id: folderId,
+  google_drive_folder_name: folderName,
 });
 
 function Toggle({ checked, onChange, label }) {
@@ -45,7 +45,6 @@ function ShareLinkPanel({ portalUser }) {
       setCopied(key);
       setTimeout(() => setCopied(null), 2000);
     } catch {
-      // fallback
       const ta = document.createElement("textarea");
       ta.value = text;
       document.body.appendChild(ta);
@@ -131,11 +130,17 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [createFolderResult, setCreateFolderResult] = useState(null);
 
+  // Ref to scroll the credentials form into view after auto-open
+  const credFormRef = useRef(null);
+
   const loadUsers = useCallback(async () => {
     try {
       const res = await api.get("/client-portal/users", { params: { client_id: clientId } });
       setPortalUsers(res.data);
-    } catch { /* handled silently */ }
+      return res.data;
+    } catch {
+      return [];
+    }
   }, [clientId]);
 
   useEffect(() => { loadUsers(); }, [loadUsers]);
@@ -172,9 +177,11 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
               google_drive_folder_id: folderRes.data.folder_id,
               google_drive_folder_name: folderRes.data.folder_name,
             }));
+          } else {
+            setSuccess("Portal credentials created!");
           }
         } catch {
-          // Drive not configured or template empty – not a fatal error
+          setSuccess("Portal credentials created!");
         }
       }
       await loadUsers();
@@ -227,9 +234,29 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
         client_id: clientId,
         parent_folder_id: createFolderParentId.trim() || null,
       });
+
       setCreateFolderResult(res.data);
-      setForm(f => ({ ...f, google_drive_folder_id: res.data.folder_id, google_drive_folder_name: res.data.folder_name }));
-      await loadUsers();
+
+      // Always pre-fill the credentials form with the new folder details
+      setForm(f => ({
+        ...f,
+        google_drive_folder_id: res.data.folder_id,
+        google_drive_folder_name: res.data.folder_name || clientName,
+      }));
+
+      const latestUsers = await loadUsers();
+
+      // If no portal user exists yet (folder wasn't auto-linked to anyone),
+      // automatically open the credentials form so the admin can fill in
+      // username + password — the Drive folder ID is already pre-filled.
+      if (!res.data.auto_linked_portal && latestUsers.length === 0) {
+        setShowForm(true);
+        setEditingId(null);
+        // Scroll to the credentials form after a short delay so it's rendered
+        setTimeout(() => {
+          credFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 150);
+      }
     } catch (err) {
       setCreateFolderResult({ error: err?.response?.data?.detail || "Failed to create folder." });
     } finally {
@@ -376,19 +403,32 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
                           <a href={createFolderResult.folder_link} target="_blank" rel="noopener noreferrer" className="ml-2 text-blue-600 underline">Open in Drive ↗</a>
                         )}
                       </p>
-                      {createFolderResult.sub_folders_created.length > 0 && (
+                      {createFolderResult.sub_folders_created?.length > 0 && (
                         <p>Created sub-folders: {createFolderResult.sub_folders_created.join(", ")}</p>
                       )}
-                      {createFolderResult.sub_folders_existing.length > 0 && (
+                      {createFolderResult.sub_folders_existing?.length > 0 && (
                         <p className="text-green-600">Already existed: {createFolderResult.sub_folders_existing.join(", ")}</p>
                       )}
-                      {createFolderResult.auto_linked_portal && (
-                        <p className="font-semibold text-green-700">✓ Auto-linked to this client's portal account</p>
+                      {createFolderResult.auto_linked_portal ? (
+                        <p className="font-semibold text-green-700">✓ Folder auto-linked to this client's existing portal account</p>
+                      ) : (
+                        <p className="font-semibold text-indigo-700">
+                          ↓ Folder ID pre-filled below — just add a username &amp; password to complete portal setup
+                        </p>
                       )}
                       <p className="text-gray-500 font-mono text-[10px] select-all">Folder ID: {createFolderResult.folder_id}</p>
                     </div>
                   </div>
                 )}
+
+                {/* Visual "next step" nudge when folder was created but no portal user exists yet */}
+                {createFolderResult && !createFolderResult.error && !createFolderResult.auto_linked_portal && portalUsers.length === 0 && (
+                  <div className="flex items-center gap-2 text-xs text-indigo-600 font-medium mt-1">
+                    <span className="text-lg leading-none">↓</span>
+                    <span>Credentials form opened below with the Drive folder pre-filled — add username &amp; password to finish.</span>
+                  </div>
+                )}
+
                 {createFolderResult?.error && (
                   <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
                     ⚠️ {createFolderResult.error}
@@ -398,125 +438,145 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
             )}
           </div>
 
-          {/* Toggle form */}
-          {!showForm ? (
-            <button
-              onClick={() => { setShowForm(true); setEditingId(null); setShareUser(null); setForm(initForm(clientId)); }}
-              className="w-full border-2 border-dashed border-indigo-200 text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50 rounded-xl py-3 text-sm font-medium transition"
-            >
-              + Create Portal Credentials
-            </button>
-          ) : (
-            <div className="border border-gray-200 rounded-xl p-5 space-y-4">
-              <p className="font-semibold text-gray-800 text-sm">
-                {editingId ? "Edit Portal User" : "New Portal User"}
-              </p>
+          {/* Toggle form / credentials form */}
+          <div ref={credFormRef}>
+            {!showForm ? (
+              <button
+                onClick={() => {
+                  setShowForm(true);
+                  setEditingId(null);
+                  setShareUser(null);
+                  // Keep any folder ID already pre-filled from folder creation; reset everything else
+                  setForm(f => initForm(clientId, f.google_drive_folder_id, f.google_drive_folder_name));
+                }}
+                className="w-full border-2 border-dashed border-indigo-200 text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50 rounded-xl py-3 text-sm font-medium transition"
+              >
+                + Create Portal Credentials
+              </button>
+            ) : (
+              <div className="border border-gray-200 rounded-xl p-5 space-y-4">
+                <p className="font-semibold text-gray-800 text-sm">
+                  {editingId ? "Edit Portal User" : "New Portal User"}
+                </p>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-medium text-gray-600 block mb-1">Username *</label>
-                  <input
-                    value={form.portal_username}
-                    onChange={e => setField("portal_username", e.target.value)}
-                    disabled={!!editingId}
-                    placeholder="clientname"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:bg-gray-50"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-600 block mb-1">
-                    Password {editingId ? "(leave blank to keep)" : "*"}
-                  </label>
-                  <input
-                    type="password"
-                    value={form.portal_password}
-                    onChange={e => setField("portal_password", e.target.value)}
-                    placeholder={editingId ? "New password (optional)" : "Min 6 chars"}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-600 block mb-1">Display Name</label>
-                  <input
-                    value={form.display_name}
-                    onChange={e => setField("display_name", e.target.value)}
-                    placeholder="Company / Person name"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-600 block mb-1">Email</label>
-                  <input
-                    type="email"
-                    value={form.email}
-                    onChange={e => setField("email", e.target.value)}
-                    placeholder="client@example.com"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                  />
-                </div>
-              </div>
-
-              {/* Google Drive */}
-              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 space-y-3">
-                <p className="text-xs font-semibold text-blue-800 flex items-center gap-1.5">☁️ Google Drive Folder</p>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-xs font-medium text-gray-600 block mb-1">
-                      Folder ID <span className="font-normal text-gray-400">(from Drive URL)</span>
-                    </label>
+                    <label className="text-xs font-medium text-gray-600 block mb-1">Username *</label>
                     <input
-                      value={form.google_drive_folder_id}
-                      onChange={e => setField("google_drive_folder_id", e.target.value)}
-                      placeholder="1BxiMVs0XRA5nFMdKv…"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      value={form.portal_username}
+                      onChange={e => setField("portal_username", e.target.value)}
+                      disabled={!!editingId}
+                      placeholder="clientname"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:bg-gray-50"
                     />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-gray-600 block mb-1">
-                      Folder Label <span className="font-normal text-gray-400">(shown to client)</span>
+                      Password {editingId ? "(leave blank to keep)" : "*"}
                     </label>
                     <input
-                      value={form.google_drive_folder_name}
-                      onChange={e => setField("google_drive_folder_name", e.target.value)}
-                      placeholder="My Documents"
+                      type="password"
+                      value={form.portal_password}
+                      onChange={e => setField("portal_password", e.target.value)}
+                      placeholder={editingId ? "New password (optional)" : "Min 6 chars"}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 block mb-1">Display Name</label>
+                    <input
+                      value={form.display_name}
+                      onChange={e => setField("display_name", e.target.value)}
+                      placeholder="Company / Person name"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 block mb-1">Email</label>
+                    <input
+                      type="email"
+                      value={form.email}
+                      onChange={e => setField("email", e.target.value)}
+                      placeholder="client@example.com"
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
                     />
                   </div>
                 </div>
-                <p className="text-xs text-blue-600">
-                  Open the folder in Google Drive → copy the ID from the URL. Share the folder with your service account email first.
-                  The client will only see <strong>their assigned folder</strong> and cannot access other clients' files.
-                </p>
-              </div>
 
-              {/* Permissions */}
-              <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Data Access</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <Toggle checked={form.can_view_tasks}      onChange={v => setField("can_view_tasks", v)}      label="Tasks" />
-                  <Toggle checked={form.can_view_documents}  onChange={v => setField("can_view_documents", v)}  label="Documents" />
-                  <Toggle checked={form.can_view_invoices}   onChange={v => setField("can_view_invoices", v)}   label="Invoices" />
-                  <Toggle checked={form.can_view_compliance} onChange={v => setField("can_view_compliance", v)} label="Compliance" />
+                {/* Google Drive */}
+                <div className={`border rounded-xl p-4 space-y-3 ${form.google_drive_folder_id ? "bg-green-50 border-green-200" : "bg-blue-50 border-blue-100"}`}>
+                  <p className={`text-xs font-semibold flex items-center gap-1.5 ${form.google_drive_folder_id ? "text-green-800" : "text-blue-800"}`}>
+                    {form.google_drive_folder_id ? "✅ Google Drive Folder (pre-filled)" : "☁️ Google Drive Folder"}
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-medium text-gray-600 block mb-1">
+                        Folder ID <span className="font-normal text-gray-400">(from Drive URL)</span>
+                      </label>
+                      <input
+                        value={form.google_drive_folder_id}
+                        onChange={e => setField("google_drive_folder_id", e.target.value)}
+                        placeholder="1BxiMVs0XRA5nFMdKv…"
+                        className={`w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 ${
+                          form.google_drive_folder_id
+                            ? "border-green-300 bg-white focus:ring-green-400"
+                            : "border-gray-300 focus:ring-indigo-400"
+                        }`}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-600 block mb-1">
+                        Folder Label <span className="font-normal text-gray-400">(shown to client)</span>
+                      </label>
+                      <input
+                        value={form.google_drive_folder_name}
+                        onChange={e => setField("google_drive_folder_name", e.target.value)}
+                        placeholder="My Documents"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      />
+                    </div>
+                  </div>
+                  {form.google_drive_folder_id ? (
+                    <p className="text-xs text-green-700">
+                      Folder ID was automatically filled from the Drive folder you just created. You can edit it if needed.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-blue-600">
+                      Open the folder in Google Drive → copy the ID from the URL. Share the folder with your service account email first.
+                      The client will only see <strong>their assigned folder</strong> and cannot access other clients' files.
+                    </p>
+                  )}
+                </div>
+
+                {/* Permissions */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Data Access</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Toggle checked={form.can_view_tasks}      onChange={v => setField("can_view_tasks", v)}      label="Tasks" />
+                    <Toggle checked={form.can_view_documents}  onChange={v => setField("can_view_documents", v)}  label="Documents" />
+                    <Toggle checked={form.can_view_invoices}   onChange={v => setField("can_view_invoices", v)}   label="Invoices" />
+                    <Toggle checked={form.can_view_compliance} onChange={v => setField("can_view_compliance", v)} label="Compliance" />
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={save}
+                    disabled={loading}
+                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-semibold py-2 rounded-lg transition"
+                  >
+                    {loading ? "Saving…" : editingId ? "Update" : "Create"}
+                  </button>
+                  <button
+                    onClick={() => { setShowForm(false); setEditingId(null); setForm(initForm(clientId)); }}
+                    className="px-4 py-2 border border-gray-200 text-gray-600 text-sm rounded-lg hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
                 </div>
               </div>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={save}
-                  disabled={loading}
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-semibold py-2 rounded-lg transition"
-                >
-                  {loading ? "Saving…" : editingId ? "Update" : "Create"}
-                </button>
-                <button
-                  onClick={() => { setShowForm(false); setEditingId(null); setForm(initForm(clientId)); }}
-                  className="px-4 py-2 border border-gray-200 text-gray-600 text-sm rounded-lg hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Portal URL hint (when no users yet or form collapsed) */}
           {!showForm && portalUsers.length === 0 && (
