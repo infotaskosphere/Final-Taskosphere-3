@@ -16,21 +16,33 @@ export default function ClientPortalLogin() {
     setLoading(true);
     try {
       const res = await API.post("/client-portal/login", form);
-      const { access_token, user } = res.data;
+
+      // Validate the response has the expected shape before storing anything
+      const data = res?.data;
+      const access_token = data?.access_token;
+      const user = data?.user;
+
+      if (!access_token) {
+        // This can happen if the backend is restarting — ask user to retry
+        setError("Could not connect to the server. Please wait a moment and try again.");
+        return;
+      }
+
       sessionStorage.setItem("client_portal_token", access_token);
-      // Safely serialise user — never store the string "undefined"
+      // Safely serialise — never write the string "undefined" to sessionStorage
       sessionStorage.setItem(
         "client_portal_user",
         user && typeof user === "object" ? JSON.stringify(user) : "null"
       );
       navigate("/client-portal/dashboard");
     } catch (err) {
-      // Pydantic v2 returns detail as an array of objects, not always a string
+      // Pydantic v2 may return detail as an array of objects, not a plain string
       const detail = err?.response?.data?.detail;
       let msg = "Invalid credentials. Please try again.";
       if (typeof detail === "string") msg = detail;
       else if (Array.isArray(detail)) msg = detail.map(d => d.msg || JSON.stringify(d)).join(" | ");
       else if (detail) msg = JSON.stringify(detail);
+      else if (!err?.response) msg = "Could not reach the server. Please check your connection and try again.";
       setError(msg);
     } finally {
       setLoading(false);
