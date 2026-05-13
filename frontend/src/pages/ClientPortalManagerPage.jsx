@@ -6,10 +6,12 @@ import api from '@/lib/api.js';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import ClientPortalHeader from '@/components/layout/ClientPortalHeader.jsx';
+import ClientPortalManager from '@/components/ClientPortalManager.jsx';
 import {
   Building2, Users, Shield, FileText, ExternalLink,
   Search, Globe, Lock, CreditCard, ClipboardList,
   ChevronRight, RefreshCw, UserCheck, Loader2, AlertCircle,
+  Settings,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,7 +20,6 @@ const COLORS = {
   deepBlue:     '#0D3B66',
   mediumBlue:   '#1F6FB2',
   emeraldGreen: '#1FAF5A',
-  lightGreen:   '#5CCB5F',
 };
 const GRADIENT = `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`;
 const springCard = { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 };
@@ -57,9 +58,9 @@ function StatCard({ icon: Icon, label, value, color, bg }) {
 }
 
 /* ── Portal User Card ──────────────────────────────────────────────────────── */
-function PortalUserCard({ pu, onRevoke }) {
+function PortalUserCard({ pu, onManage, isAdmin }) {
   const { isDark } = useDark();
-  const perm = pu.permissions || {};
+  const perm = pu.permissions || pu; // support flat or nested permissions
 
   return (
     <motion.div
@@ -148,14 +149,15 @@ function PortalUserCard({ pu, onRevoke }) {
           >
             <ExternalLink className="h-3.5 w-3.5 mr-1" /> Open Portal
           </Button>
-          {onRevoke && (
+          {isAdmin && onManage && (
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => onRevoke(pu.id)}
-              className="text-xs text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+              onClick={() => onManage(pu)}
+              className="text-xs"
+              title="Manage this client's portal"
             >
-              Revoke
+              <Settings className="h-3.5 w-3.5" />
             </Button>
           )}
         </div>
@@ -174,6 +176,9 @@ export default function ClientPortalManagerPage() {
   const [loading, setLoading]         = useState(true);
   const [search, setSearch]           = useState('');
 
+  // State for opening the existing ClientPortalManager modal
+  const [manageTarget, setManageTarget] = useState(null); // { clientId, clientName }
+
   const isAdmin = user?.role === 'admin';
 
   const loadUsers = useCallback(async () => {
@@ -190,15 +195,9 @@ export default function ClientPortalManagerPage() {
 
   useEffect(() => { loadUsers(); }, [loadUsers]);
 
-  const handleRevoke = async (id) => {
-    if (!window.confirm('Revoke this portal access?')) return;
-    try {
-      await api.delete(`/client-portal/users/${id}`);
-      toast.success('Access revoked');
-      loadUsers();
-    } catch {
-      toast.error('Failed to revoke access');
-    }
+  // Open existing ClientPortalManager modal for a specific client
+  const handleManage = (pu) => {
+    setManageTarget({ clientId: pu.client_id, clientName: pu.client_name || pu.portal_username });
   };
 
   const filtered = portalUsers.filter((pu) => {
@@ -284,6 +283,28 @@ export default function ClientPortalManagerPage() {
         </div>
       )}
 
+      {/* ── Tip for admins: portal accounts created from Clients page ── */}
+      {isAdmin && (
+        <div className={`mb-5 flex items-start gap-3 p-4 rounded-xl border ${
+          isDark
+            ? 'bg-slate-700/50 border-slate-600 text-slate-300'
+            : 'bg-slate-50 border-slate-200 text-slate-600'
+        }`}>
+          <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-slate-400" />
+          <p className="text-xs leading-relaxed">
+            <strong>Tip:</strong> To create a new portal account, go to the{' '}
+            <button
+              onClick={() => navigate('/clients')}
+              className="underline font-semibold text-blue-600 dark:text-blue-400"
+            >
+              Clients page
+            </button>
+            , open a client, and use the Portal Access panel. Use the{' '}
+            <Settings className="inline h-3 w-3" /> button on each card below to manage an existing account.
+          </p>
+        </div>
+      )}
+
       {/* ── User List Card ── */}
       <div className={`rounded-2xl border overflow-hidden shadow-sm ${
         isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
@@ -361,13 +382,26 @@ export default function ClientPortalManagerPage() {
                 <PortalUserCard
                   key={pu.id}
                   pu={pu}
-                  onRevoke={isAdmin ? handleRevoke : null}
+                  isAdmin={isAdmin}
+                  onManage={handleManage}
                 />
               ))}
             </motion.div>
           )}
         </div>
       </div>
+
+      {/* ── Existing ClientPortalManager modal (reused, not duplicated) ── */}
+      {manageTarget && (
+        <ClientPortalManager
+          clientId={manageTarget.clientId}
+          clientName={manageTarget.clientName}
+          onClose={() => {
+            setManageTarget(null);
+            loadUsers(); // refresh list after modal closes
+          }}
+        />
+      )}
     </div>
   );
 }
