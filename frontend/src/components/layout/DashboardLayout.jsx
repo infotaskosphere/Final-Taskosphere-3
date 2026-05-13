@@ -8,6 +8,7 @@ import {
   PanelLeftClose, PanelLeftOpen, Target, Sun, Moon, MapPin,
   Settings, Mail, Receipt, X, KeyRound, BrainCircuit,
   CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight,
+  Building2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -93,6 +94,7 @@ const NAV_GROUPS = [
       { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log',   permission: 'can_view_audit_logs'  },
       { path: '/users',          icon: Users,      label: 'Users',            permission: 'can_view_user_page'   },
       { path: '/staff-activity', icon: Activity,   label: 'Staff Activity',   adminOnly: true                    },
+      { path: '/client-portal-manager', icon: Building2, label: 'Client Portal', permission: 'can_view_client_portal' },
     ],
   },
   {
