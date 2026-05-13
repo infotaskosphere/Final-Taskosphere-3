@@ -132,6 +132,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_edit_attendance: true, can_view_compliance: true, can_manage_compliance: true,
       can_view_gst_reconciliation: true,
       can_view_all_visits: true, can_edit_visits: true, can_delete_visits: true, can_delete_own_visits: true,
+      can_view_client_portal: true,
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [],
       view_other_activity: [], view_other_visits: [],
@@ -262,6 +263,7 @@ const EMPTY_PERMISSIONS = {
   can_view_gst_reconciliation: false,
   can_view_all_visits: false, can_edit_visits: false,
   can_delete_visits: false, can_delete_own_visits: true,
+  can_view_client_portal: false,
   view_password_departments: [], assigned_clients: [], view_other_tasks: [],
   view_other_attendance: [], view_other_reports: [], view_other_todos: [],
   view_other_activity: [], view_other_visits: [],
@@ -284,6 +286,7 @@ const GLOBAL_PERMS = [
   { key: 'can_view_compliance',             label: 'Compliance Tracker',           desc: 'Access the Compliance Tracker page',                     icon: ShieldCheck },
   { key: 'can_view_gst_reconciliation',     label: 'GST Reconciliation',           desc: 'Access the GST Reconciliation module (GST dept users)',  icon: FileText    },
   { key: 'can_create_quotations',           label: 'Quotations Module',            desc: 'Create, edit, export and share quotations',              icon: Receipt     },
+  { key: 'can_view_client_portal',          label: 'Client Portal Manager',        desc: 'Access the Client Portal Manager (admin-level module)',   icon: Building2   },
 ];
 
 const OPS_PERMS = [
@@ -433,6 +436,7 @@ const ModuleAccessBadges = ({ userData }) => {
       color:  p.can_edit_passwords ? '#B45309' : '#0F766E',
       icon: KeyRound,
     },
+    { label: 'Client Portal', active: !!p.can_view_client_portal, color: '#0D3B66', icon: Building2 },
   ];
   return (
     <div className="flex flex-wrap gap-1.5 mt-3">
@@ -455,7 +459,7 @@ const ModuleAccessBadges = ({ userData }) => {
 
 const PermissionMatrixSummary = ({ permissions }) => {
   // Include module-level perms (managed from the Modules tab) so coverage % is accurate
-  const MODULE_PERM_KEYS = ['can_manage_invoices', 'can_view_passwords', 'can_edit_passwords', 'can_view_gst_reconciliation', 'can_view_trademark_sphere'];
+  const MODULE_PERM_KEYS = ['can_manage_invoices', 'can_view_passwords', 'can_edit_passwords', 'can_view_gst_reconciliation', 'can_view_trademark_sphere', 'can_view_client_portal'];
   const allPerms = [...GLOBAL_PERMS, ...OPS_PERMS, ...EDIT_PERMS];
   const granted  = allPerms.filter(p => permissions[p.key]).length
                  + MODULE_PERM_KEYS.filter(k => permissions[k]).length;
@@ -3037,6 +3041,18 @@ export default function Users() {
                     setPermissions={setPermissions}
                     accentColor="#1D4ED8"
                     badge={permissions.can_view_trademark_sphere ? 'Full Access' : undefined}
+                  />
+
+                  {/* ── Client Portal ─────────────────────────────────── */}
+                  <ModuleAccessCard
+                    icon={Building2}
+                    title="Client Portal Manager"
+                    desc="Access the Client Portal Manager to create and manage client portal accounts, permissions and document visibility."
+                    permKey="can_view_client_portal"
+                    permissions={permissions}
+                    setPermissions={setPermissions}
+                    accentColor="#0D3B66"
+                    badge={permissions.can_view_client_portal ? 'Full Access' : undefined}
                   />
                 </div>
               </div>
