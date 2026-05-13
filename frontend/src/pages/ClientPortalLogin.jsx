@@ -17,11 +17,22 @@ export default function ClientPortalLogin() {
     try {
       const res = await API.post("/client-portal/login", form);
       const { access_token, user } = res.data;
+      // Guard: never store undefined — that serialises to the string "undefined"
+      // which breaks JSON.parse on the dashboard
+      if (!access_token || !user) {
+        setError("Login failed: unexpected server response. Please try again.");
+        return;
+      }
       sessionStorage.setItem("client_portal_token", access_token);
       sessionStorage.setItem("client_portal_user", JSON.stringify(user));
       navigate("/client-portal/dashboard");
     } catch (err) {
-      setError(err?.response?.data?.detail || "Invalid credentials. Please try again.");
+      const detail = err?.response?.data?.detail;
+      let msg = "Invalid credentials. Please try again.";
+      if (typeof detail === "string") msg = detail;
+      else if (Array.isArray(detail)) msg = detail.map(d => d.msg || JSON.stringify(d)).join(" | ");
+      else if (detail) msg = JSON.stringify(detail);
+      setError(msg);
     } finally {
       setLoading(false);
     }
