@@ -32,7 +32,9 @@ const Reminders         = lazy(() => import("@/pages/Reminders.jsx"));
 const CompliancePage    = lazy(() => import("@/pages/CompliancePage.jsx"));
 const GSTReconciliation = lazy(() => import("@/pages/GSTReconciliation.jsx")); // ← NEW
 const AIDocumentReader = lazy(() => import("@/pages/AIDocumentReader.jsx"));
-const StaffActivity    = lazy(() => import("@/pages/StaffActivity.jsx"));
+const StaffActivity         = lazy(() => import("@/pages/StaffActivity.jsx"));
+const ClientPortalLogin     = lazy(() => import("@/pages/ClientPortalLogin.jsx"));
+const ClientPortalDashboard = lazy(() => import("@/pages/ClientPortalDashboard.jsx"));
 
 
 
@@ -168,6 +170,10 @@ function AppRoutes() {
       <Route path="/task-audit" element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
       <Route path="/users"          element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
       <Route path="/staff-activity" element={<AdminOnly><PageLoader><StaffActivity /></PageLoader></AdminOnly>} />
+
+      {/* Client Portal — completely standalone, no main-app auth */}
+      <Route path="/client-portal"           element={<PageLoader isPublic><ClientPortalLogin /></PageLoader>} />
+      <Route path="/client-portal/dashboard" element={<PageLoader isPublic><ClientPortalDashboard /></PageLoader>} />
 
       {/* Fallback */}
       <Route path="*" element={<Navigate to="/login" replace />} />
