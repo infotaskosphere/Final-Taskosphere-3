@@ -509,6 +509,8 @@ function FolderArchitectTab({ isDark, isAdmin }) {
   const [bulkMode, setBulkMode] = useState('all');
   const [applying, setApplying] = useState(false);
   const [bulkResults, setBulkResults] = useState(null);
+  const [bulkSearch, setBulkSearch] = useState('');
+  const [bulkFilter, setBulkFilter] = useState('all');
 
   const [singleClient, setSingleClient] = useState('');
   const [applyingSingle, setApplyingSingle] = useState(null);
@@ -776,6 +778,7 @@ function FolderArchitectTab({ isDark, isAdmin }) {
                 </div>
               </div>
               <div className="p-5 space-y-4">
+                {/* Mode Toggle */}
                 <div className="flex gap-2">
                   {[['all','All Clients'],['selected','Selected Clients']].map(([k,l]) => (
                     <button key={k} onClick={() => setBulkMode(k)}
@@ -787,37 +790,141 @@ function FolderArchitectTab({ isDark, isAdmin }) {
                   ))}
                 </div>
 
-                {bulkMode === 'selected' && (
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                    {clients.map(c => {
-                      const name = c.company_name || c.name || '—';
-                      const checked = selectedClients.includes(c.id);
-                      return (
-                        <label key={c.id} className={`flex items-center gap-2.5 px-3 py-2 rounded-xl border cursor-pointer transition-colors ${
-                          checked
-                            ? isDark ? 'border-blue-600 bg-blue-900/30' : 'border-blue-300 bg-blue-50'
-                            : isDark ? 'border-slate-700 hover:border-slate-600' : 'border-slate-100 hover:border-slate-200'
-                        }`}>
-                          <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${checked ? 'bg-blue-600 border-blue-600' : isDark ? 'border-slate-600' : 'border-slate-300'}`}
-                            onClick={() => toggleClient(c.id)}>
-                            {checked && <Check className="h-2.5 w-2.5 text-white" />}
-                          </div>
-                          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{name}</span>
-                          {c.has_drive && <FolderCheck className="h-3 w-3 text-emerald-500 flex-shrink-0 ml-auto" />}
-                        </label>
-                      );
-                    })}
-                    {clients.length > 0 && (
+                {/* Search + Filter row */}
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+                    <input
+                      value={bulkSearch}
+                      onChange={e => setBulkSearch(e.target.value)}
+                      placeholder="Search clients…"
+                      className={`w-full pl-8 pr-3 py-1.5 rounded-lg border text-xs focus:outline-none focus:ring-2 focus:ring-blue-400 ${
+                        isDark ? 'bg-slate-700 border-slate-600 text-slate-200 placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800 placeholder-slate-400'
+                      }`}
+                    />
+                  </div>
+                  <select
+                    value={bulkFilter}
+                    onChange={e => setBulkFilter(e.target.value)}
+                    className={`border rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-400 ${
+                      isDark ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-white border-slate-200 text-slate-700'
+                    }`}
+                  >
+                    <option value="all">All statuses</option>
+                    <option value="no-portal">No Portal</option>
+                    <option value="has-portal">Has Portal</option>
+                    <option value="no-drive">No Drive</option>
+                    <option value="has-drive">Drive Linked</option>
+                    <option value="pvt_ltd">Pvt Ltd</option>
+                    <option value="llp">LLP</option>
+                    <option value="partnership">Partnership</option>
+                    <option value="proprietor">Proprietor</option>
+                    <option value="huf">HUF</option>
+                    <option value="trust">Trust</option>
+                  </select>
+                </div>
+
+                {/* Client list (selected mode) */}
+                {bulkMode === 'selected' && (() => {
+                  const q = bulkSearch.toLowerCase();
+                  const visibleClients = clients.filter(c => {
+                    const name = (c.company_name || c.name || '').toLowerCase();
+                    if (q && !name.includes(q)) return false;
+                    if (bulkFilter === 'no-portal') return !c.has_portal;
+                    if (bulkFilter === 'has-portal') return c.has_portal;
+                    if (bulkFilter === 'no-drive') return !c.has_drive;
+                    if (bulkFilter === 'has-drive') return c.has_drive;
+                    if (['pvt_ltd','llp','partnership','proprietor','huf','trust'].includes(bulkFilter))
+                      return (c.client_type || c.type || '') === bulkFilter;
+                    return true;
+                  });
+                  return (
+                    <div className="space-y-1">
+                      {visibleClients.length === 0 ? (
+                        <p className="text-center py-6 text-xs text-slate-400">No clients match your search / filter.</p>
+                      ) : (
+                        <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                          {visibleClients.map(c => {
+                            const name = c.company_name || c.name || '—';
+                            const checked = selectedClients.includes(c.id);
+                            return (
+                              <label key={c.id} onClick={() => toggleClient(c.id)} className={`flex items-center gap-2.5 px-3 py-2 rounded-xl border cursor-pointer transition-colors ${
+                                checked
+                                  ? isDark ? 'border-blue-600 bg-blue-900/30' : 'border-blue-300 bg-blue-50'
+                                  : isDark ? 'border-slate-700 hover:border-slate-600' : 'border-slate-100 hover:border-slate-200'
+                              }`}>
+                                <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${checked ? 'bg-blue-600 border-blue-600' : isDark ? 'border-slate-600' : 'border-slate-300'}`}>
+                                  {checked && <Check className="h-2.5 w-2.5 text-white" />}
+                                </div>
+                                <span className="text-xs font-medium text-slate-700 dark:text-slate-300 flex-1 truncate">{name}</span>
+                                {c.client_type && (
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 capitalize flex-shrink-0">
+                                    {c.client_type.replace('_', ' ')}
+                                  </span>
+                                )}
+                                {c.has_drive && <FolderCheck className="h-3 w-3 text-emerald-500 flex-shrink-0" />}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
                       <div className="flex gap-2 pt-1">
-                        <button onClick={() => setSelectedClients(clients.map(c => c.id))} className="text-xs text-blue-600 hover:underline">Select all</button>
+                        <button
+                          onClick={() => setSelectedClients(visibleClients.map(c => c.id))}
+                          className="text-xs text-blue-600 hover:underline"
+                        >
+                          Select visible
+                        </button>
+                        <span className="text-slate-300">·</span>
+                        <button
+                          onClick={() => setSelectedClients(clients.map(c => c.id))}
+                          className="text-xs text-blue-500 hover:underline"
+                        >
+                          Select all
+                        </button>
                         <span className="text-slate-300">·</span>
                         <button onClick={() => setSelectedClients([])} className="text-xs text-slate-400 hover:underline">Clear</button>
-                        <span className="text-xs text-slate-400 ml-auto">{selectedClients.length} selected</span>
+                        <span className="text-xs text-slate-400 ml-auto">
+                          {selectedClients.length} / {clients.length} selected
+                        </span>
                       </div>
-                    )}
-                  </div>
-                )}
+                    </div>
+                  );
+                })()}
 
+                {/* All mode – show filtered count info */}
+                {bulkMode === 'all' && (bulkSearch || bulkFilter !== 'all') && (() => {
+                  const q = bulkSearch.toLowerCase();
+                  const visible = clients.filter(c => {
+                    const name = (c.company_name || c.name || '').toLowerCase();
+                    if (q && !name.includes(q)) return false;
+                    if (bulkFilter === 'no-portal') return !c.has_portal;
+                    if (bulkFilter === 'has-portal') return c.has_portal;
+                    if (bulkFilter === 'no-drive') return !c.has_drive;
+                    if (bulkFilter === 'has-drive') return c.has_drive;
+                    if (['pvt_ltd','llp','partnership','proprietor','huf','trust'].includes(bulkFilter))
+                      return (c.client_type || c.type || '') === bulkFilter;
+                    return true;
+                  });
+                  return (
+                    <div className={`flex items-center justify-between px-3 py-2 rounded-lg text-xs ${isDark ? 'bg-slate-700/50' : 'bg-blue-50'}`}>
+                      <span className="text-slate-500 dark:text-slate-400">
+                        Filter active — <strong className="text-blue-600 dark:text-blue-400">{visible.length}</strong> of {clients.length} clients match
+                      </span>
+                      <button
+                        onClick={() => {
+                          setBulkMode('selected');
+                          setSelectedClients(visible.map(c => c.id));
+                        }}
+                        className="text-blue-600 dark:text-blue-400 font-semibold hover:underline ml-2"
+                      >
+                        Switch to selected →
+                      </button>
+                    </div>
+                  );
+                })()}
+
+                {/* Create button */}
                 <Button
                   onClick={applyBulk}
                   disabled={applying || subfolders.length === 0}
@@ -828,11 +935,15 @@ function FolderArchitectTab({ isDark, isAdmin }) {
                     <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Creating folders…</>
                   ) : (
                     <><Play className="h-3.5 w-3.5 mr-1.5" />
-                    {bulkMode === 'all' ? `Create Folders for All ${clients.length} Clients` : `Create Folders for ${selectedClients.length} Client${selectedClients.length !== 1 ? 's' : ''}`}
+                    {bulkMode === 'all'
+                      ? `Create Folders for All ${clients.length} Clients`
+                      : `Create Folders for ${selectedClients.length} Client${selectedClients.length !== 1 ? 's' : ''}`
+                    }
                     </>
                   )}
                 </Button>
 
+                {/* Results */}
                 {bulkResults && (
                   <div className={`rounded-xl p-4 border space-y-2 ${isDark ? 'border-slate-600 bg-slate-700/30' : 'border-slate-200 bg-slate-50'}`}>
                     <div className="flex items-center gap-4">
