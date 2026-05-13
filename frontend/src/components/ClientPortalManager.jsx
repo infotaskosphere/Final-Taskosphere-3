@@ -123,7 +123,13 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [driveVisUser, setDriveVisUser] = useState(null);
-  const [shareUser, setShareUser] = useState(null); // show share panel for this user
+  const [shareUser, setShareUser] = useState(null);
+
+  // ── Create Drive Folder state ─────────────────────────────────────────
+  const [showCreateFolder, setShowCreateFolder] = useState(false);
+  const [createFolderParentId, setCreateFolderParentId] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [createFolderResult, setCreateFolderResult] = useState(null);
 
   const loadUsers = useCallback(async () => {
     try {
@@ -188,6 +194,25 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
     if (!window.confirm("Delete this portal user?")) return;
     await api.delete(`/client-portal/users/${id}`);
     loadUsers();
+  };
+
+  const createDriveFolder = async () => {
+    setCreatingFolder(true);
+    setCreateFolderResult(null);
+    try {
+      const res = await api.post("/client-portal/drive/create-folders", {
+        client_name: clientName,
+        client_id: clientId,
+        parent_folder_id: createFolderParentId.trim() || null,
+      });
+      setCreateFolderResult(res.data);
+      setForm(f => ({ ...f, google_drive_folder_id: res.data.folder_id, google_drive_folder_name: res.data.folder_name }));
+      await loadUsers();
+    } catch (err) {
+      setCreateFolderResult({ error: err?.response?.data?.detail || "Failed to create folder." });
+    } finally {
+      setCreatingFolder(false);
+    }
   };
 
   if (user?.role !== "admin" && user?.role !== "manager") return null;
@@ -279,6 +304,77 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
               ))}
             </div>
           )}
+
+          {/* ── Create Drive Folder Panel ────────────────────────────────── */}
+          <div className="border border-blue-200 rounded-xl overflow-hidden">
+            <button
+              onClick={() => { setShowCreateFolder(v => !v); setCreateFolderResult(null); }}
+              className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 hover:bg-blue-100 transition text-left"
+            >
+              <span className="flex items-center gap-2 text-sm font-semibold text-blue-800">
+                📁 Create Client Drive Folder
+              </span>
+              <span className="text-blue-400 text-xs">{showCreateFolder ? "▲ Hide" : "▼ Expand"}</span>
+            </button>
+
+            {showCreateFolder && (
+              <div className="p-4 space-y-3 bg-white">
+                <p className="text-xs text-gray-500">
+                  Creates a folder named <strong>"{clientName}"</strong> in Google Drive with predefined sub-folders:
+                  Documents, Invoices, Compliance, Correspondence, Reports, Bank Statements.
+                  If a portal user exists for this client, the folder will be auto-linked.
+                </p>
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">
+                    Parent Folder ID <span className="font-normal text-gray-400">(optional – leave blank for Drive root)</span>
+                  </label>
+                  <input
+                    value={createFolderParentId}
+                    onChange={e => setCreateFolderParentId(e.target.value)}
+                    placeholder="Paste parent folder ID from Drive URL…"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+                </div>
+                <button
+                  onClick={createDriveFolder}
+                  disabled={creatingFolder}
+                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-semibold py-2 rounded-lg transition flex items-center justify-center gap-2"
+                >
+                  {creatingFolder ? (
+                    <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Creating…</>
+                  ) : "📁 Create Folder Structure"}
+                </button>
+
+                {createFolderResult && !createFolderResult.error && (
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-3 space-y-2">
+                    <p className="text-sm font-semibold text-green-800">✅ Folder structure ready!</p>
+                    <div className="text-xs text-green-700 space-y-1">
+                      <p>📁 <strong>{createFolderResult.folder_name}</strong>
+                        {createFolderResult.folder_link && (
+                          <a href={createFolderResult.folder_link} target="_blank" rel="noopener noreferrer" className="ml-2 text-blue-600 underline">Open in Drive ↗</a>
+                        )}
+                      </p>
+                      {createFolderResult.sub_folders_created.length > 0 && (
+                        <p>Created sub-folders: {createFolderResult.sub_folders_created.join(", ")}</p>
+                      )}
+                      {createFolderResult.sub_folders_existing.length > 0 && (
+                        <p className="text-green-600">Already existed: {createFolderResult.sub_folders_existing.join(", ")}</p>
+                      )}
+                      {createFolderResult.auto_linked_portal && (
+                        <p className="font-semibold text-green-700">✓ Auto-linked to this client's portal account</p>
+                      )}
+                      <p className="text-gray-500 font-mono text-[10px] select-all">Folder ID: {createFolderResult.folder_id}</p>
+                    </div>
+                  </div>
+                )}
+                {createFolderResult?.error && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
+                    ⚠️ {createFolderResult.error}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* Toggle form */}
           {!showForm ? (
