@@ -124,6 +124,20 @@ async def create_portal_user(
     if existing:
         raise HTTPException(409, "Username already taken")
 
+    # Auto-fill Drive folder if one was already created for this client
+    # and the admin didn't explicitly provide one in the form
+    drive_folder_id = _extract_folder_id(body.google_drive_folder_id)
+    drive_folder_name = body.google_drive_folder_name
+    if not drive_folder_id:
+        saved = client_doc.get("drive_folder_id")
+        if saved:
+            drive_folder_id = saved
+            drive_folder_name = (
+                client_doc.get("drive_folder_name")
+                or client_doc.get("company_name")
+                or "My Documents"
+            )
+
     portal_doc = {
         "id": str(uuid.uuid4()),
         "client_id": body.client_id,
@@ -136,8 +150,8 @@ async def create_portal_user(
         "can_view_documents": body.can_view_documents,
         "can_view_invoices": body.can_view_invoices,
         "can_view_compliance": body.can_view_compliance,
-        "google_drive_folder_id": body.google_drive_folder_id,
-        "google_drive_folder_name": body.google_drive_folder_name or "My Documents",
+        "google_drive_folder_id": drive_folder_id,
+        "google_drive_folder_name": drive_folder_name or client_doc.get("company_name") or "My Documents",
         "created_by": current_user.id,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -709,17 +723,40 @@ async def create_client_drive_folders(
     service = _get_drive_service()
     subfolders = body.subfolders if body.subfolders is not None else await _resolve_subfolders()
 
-    result = _create_drive_folder_sync(service, body.client_name, body.parent_folder_id, subfolders)
-    root_id = result["folder_id"]
-    safe_name = result["folder_name"]
+    # Always use company name from DB as the folder name
+    client_doc = await db.clients.find_one({"id": body.client_id}, {"_id": 0, "company_name": 1, "name": 1})
+    folder_name = (
+        (client_doc.get("company_name") or client_doc.get("name") if client_doc else None)
+        or body.client_name
+    ).strip()
 
+    result = _create_drive_folder_sync(service, folder_name, body.parent_folder_id, subfolders)
+    root_id = result["folder_id"]
+    folder_link = result.get("folder_link", "")
+
+    # Always save folder info to the clients collection so it persists
+    # even if the portal user doesn't exist yet
+    await db.clients.update_one(
+        {"id": body.client_id},
+        {"$set": {
+            "drive_folder_id":   root_id,
+            "drive_folder_name": folder_name,
+            "drive_folder_link": folder_link,
+        }},
+    )
+
+    # Also update portal user record if one already exists
     portal_user_doc = await db.client_portal_users.find_one({"client_id": body.client_id}, {"_id": 0})
     if portal_user_doc:
         await db.client_portal_users.update_one(
             {"client_id": body.client_id},
-            {"$set": {"google_drive_folder_id": root_id, "google_drive_folder_name": safe_name}},
+            {"$set": {
+                "google_drive_folder_id":   root_id,
+                "google_drive_folder_name": folder_name,
+            }},
         )
     result["auto_linked_portal"] = bool(portal_user_doc)
+    result["folder_name"] = folder_name
     return result
 
 
@@ -768,18 +805,34 @@ async def bulk_create_client_drive_folders(
         try:
             res = _create_drive_folder_sync(service, client_name, parent_id, subfolders)
             root_id = res["folder_id"]
+            folder_link = res.get("folder_link", "")
+
+            # Always persist folder info to the clients collection
+            await db.clients.update_one(
+                {"id": client_id},
+                {"$set": {
+                    "drive_folder_id":   root_id,
+                    "drive_folder_name": client_name,
+                    "drive_folder_link": folder_link,
+                }},
+            )
+
+            # Also update existing portal user if one exists
             portal_user_doc = await db.client_portal_users.find_one({"client_id": client_id}, {"_id": 0})
             if portal_user_doc:
                 await db.client_portal_users.update_one(
                     {"client_id": client_id},
-                    {"$set": {"google_drive_folder_id": root_id, "google_drive_folder_name": client_name}},
+                    {"$set": {
+                        "google_drive_folder_id":   root_id,
+                        "google_drive_folder_name": client_name,
+                    }},
                 )
             results.append({
                 "client_id": client_id,
                 "client_name": client_name,
                 "success": True,
                 "folder_id": root_id,
-                "folder_link": res.get("folder_link", ""),
+                "folder_link": folder_link,
                 "auto_linked_portal": bool(portal_user_doc),
                 "sub_folders_created": res.get("sub_folders_created", []),
             })
