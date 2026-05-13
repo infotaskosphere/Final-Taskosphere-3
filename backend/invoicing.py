@@ -85,6 +85,17 @@ DRIVE_FOLDERS = {
 }
 
 
+# ═══════════════════════════════════════════════════════════
+# DRIVE SCOPES
+# ═══════════════════════════════════════════════════════════
+
+DRIVE_SCOPES = [
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/drive.metadata.readonly",
+]
+
+
 def _get_drive_refresh_token() -> str | None:
     """
     Return the Google Drive refresh token from:
@@ -143,36 +154,132 @@ def _drive_configured() -> bool:
 # AUTH — OAuth (REFRESH TOKEN BASED)
 # ═══════════════════════════════════════════════════════════
 
+
 def _get_drive_service():
-    try:
-        refresh_token = _get_drive_refresh_token()
-        client_id     = os.getenv("GOOGLE_CLIENT_ID")
-        client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    """
+    Build and return an authenticated Google Drive v3 service.
+    Handles stale/cached env tokens by falling back to DB and
+    auto-clears invalid tokens so the UI shows the correct status.
+    """
+    import google.auth.exceptions
 
-        if not refresh_token:
-            raise HTTPException(
-                500,
-                "Google Drive is not connected. Go to Settings → Integrations → Connect Google Drive."
-            )
+    client_id     = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
 
-        if not client_id or not client_secret:
-            raise HTTPException(500, "Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        raise HTTPException(500, "Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET")
 
+    def _build_from_token(token: str):
         creds = Credentials(
             None,
-            refresh_token=refresh_token,
+            refresh_token=token,
             token_uri="https://oauth2.googleapis.com/token",
             client_id=client_id,
             client_secret=client_secret,
+            scopes=DRIVE_SCOPES,
         )
-
         creds.refresh(Request())
-
         return build("drive", "v3", credentials=creds)
 
+    def _fetch_db_token_sync():
+        import asyncio
+        from backend.dependencies import db as _db
+
+        async def _fetch():
+            doc = await _db["app_settings"].find_one({"_id": "google_drive"})
+            return doc.get("refresh_token") if (doc and doc.get("connected")) else None
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    return pool.submit(asyncio.run, _fetch()).result(timeout=5)
+            else:
+                return loop.run_until_complete(_fetch())
+        except Exception:
+            return None
+
+    def _mark_drive_disconnected_sync():
+        import asyncio
+        from backend.dependencies import db as _db
+
+        async def _update():
+            await _db["app_settings"].update_one(
+                {"_id": "google_drive"},
+                {"$set": {"connected": False, "refresh_token": None, "access_token": None}},
+            )
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    pool.submit(asyncio.run, _update()).result(timeout=5)
+            else:
+                loop.run_until_complete(_update())
+        except Exception:
+            pass
+
+    # Step 1: Try token from env-var cache or DB
+    refresh_token = _get_drive_refresh_token()
+
+    if not refresh_token:
+        raise HTTPException(
+            500,
+            "Google Drive is not connected. Go to Settings -> Integrations -> Connect Google Drive.",
+        )
+
+    try:
+        return _build_from_token(refresh_token)
+
+    except google.auth.exceptions.RefreshError as e:
+        err_msg = str(e).lower()
+
+        if "invalid_grant" not in err_msg:
+            logger.error(f"DRIVE REFRESH ERROR: {e}", exc_info=True)
+            raise HTTPException(500, f"Google Drive auth failed: {str(e)}")
+
+        # --- invalid_grant: cached token is stale or revoked ---
+        logger.warning(
+            "Google Drive refresh token is invalid (invalid_grant). "
+            "Clearing env cache and checking DB for a newer token."
+        )
+
+        # Clear the stale env-var cache
+        os.environ.pop("GOOGLE_REFRESH_TOKEN", None)
+
+        # Try fetching a fresh token directly from DB
+        # (user may have reconnected via UI after the env var was cached)
+        db_token = _fetch_db_token_sync()
+
+        if db_token and db_token != refresh_token:
+            try:
+                svc = _build_from_token(db_token)
+                # Cache the working token
+                os.environ["GOOGLE_REFRESH_TOKEN"] = db_token
+                return svc
+            except Exception as db_err:
+                logger.warning(f"DB token also failed: {db_err}")
+
+        # Both tokens are invalid: mark Drive as disconnected in DB
+        # so Settings page shows the correct disconnected state
+        _mark_drive_disconnected_sync()
+
+        raise HTTPException(
+            500,
+            "Google Drive refresh token has expired or been revoked. "
+            "Please go to Settings -> General Settings -> Google Drive "
+            "and click Reconnect to re-authorize.",
+        )
+
+    except HTTPException:
+        raise
+
     except Exception as e:
-        logger.error(f"❌ DRIVE AUTH ERROR: {e}", exc_info=True)
+        logger.error(f"DRIVE AUTH ERROR: {e}", exc_info=True)
         raise HTTPException(500, f"Google Drive auth failed: {str(e)}")
+
 # ═══════════════════════════════════════════════════════════
 # UPLOAD
 # ═══════════════════════════════════════════════════════════
