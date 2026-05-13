@@ -263,8 +263,24 @@ export default function ClientPortalDashboard() {
   // Auth check
   useEffect(() => {
     const stored = sessionStorage.getItem("client_portal_user");
-    if (!stored) { navigate("/client-portal"); return; }
-    const u = JSON.parse(stored);
+    // Guard against missing, null, or the literal string "undefined"
+    if (!stored || stored === "undefined" || stored === "null") {
+      sessionStorage.removeItem("client_portal_user");
+      sessionStorage.removeItem("client_portal_token");
+      navigate("/client-portal");
+      return;
+    }
+    let u;
+    try {
+      u = JSON.parse(stored);
+    } catch {
+      // Corrupt / non-JSON value — clear and redirect to login
+      sessionStorage.removeItem("client_portal_user");
+      sessionStorage.removeItem("client_portal_token");
+      navigate("/client-portal");
+      return;
+    }
+    if (!u) { navigate("/client-portal"); return; }
     setUser(u);
     // Set default tab based on permissions
     if (u.can_view_tasks) setActiveTab("tasks");
