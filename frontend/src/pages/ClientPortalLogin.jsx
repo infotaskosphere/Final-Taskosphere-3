@@ -17,14 +17,18 @@ export default function ClientPortalLogin() {
     try {
       const res = await API.post("/client-portal/login", form);
       const { access_token, user } = res.data;
-      // Guard: never store undefined — that serialises to the string "undefined"
-      // which breaks JSON.parse on the dashboard
-      if (!access_token || !user) {
-        setError("Login failed: unexpected server response. Please try again.");
+      // Guard: only block if there's no token at all
+      if (!access_token) {
+        setError("Login failed: no access token received. Please try again.");
         return;
       }
       sessionStorage.setItem("client_portal_token", access_token);
-      sessionStorage.setItem("client_portal_user", JSON.stringify(user));
+      // Use JSON.stringify only when user is a valid object; otherwise store null
+      // so the dashboard safely redirects back to login instead of crashing
+      sessionStorage.setItem(
+        "client_portal_user",
+        user && typeof user === "object" ? JSON.stringify(user) : "null"
+      );
       navigate("/client-portal/dashboard");
     } catch (err) {
       const detail = err?.response?.data?.detail;
