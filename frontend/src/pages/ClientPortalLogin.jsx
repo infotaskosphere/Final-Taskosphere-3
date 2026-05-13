@@ -17,26 +17,22 @@ export default function ClientPortalLogin() {
     try {
       const res = await API.post("/client-portal/login", form);
 
-      // Validate the response has the expected shape before storing anything
       const data = res?.data;
       const access_token = data?.access_token;
       const user = data?.user;
 
       if (!access_token) {
-        // This can happen if the backend is restarting — ask user to retry
         setError("Could not connect to the server. Please wait a moment and try again.");
         return;
       }
 
       sessionStorage.setItem("client_portal_token", access_token);
-      // Safely serialise — never write the string "undefined" to sessionStorage
       sessionStorage.setItem(
         "client_portal_user",
         user && typeof user === "object" ? JSON.stringify(user) : "null"
       );
       navigate("/client-portal/dashboard");
     } catch (err) {
-      // Pydantic v2 may return detail as an array of objects, not a plain string
       const detail = err?.response?.data?.detail;
       let msg = "Invalid credentials. Please try again.";
       if (typeof detail === "string") msg = detail;
@@ -52,7 +48,6 @@ export default function ClientPortalLogin() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Logo / Brand */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl mb-4 shadow-lg">
             <svg className="w-9 h-9 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -64,7 +59,6 @@ export default function ClientPortalLogin() {
           <p className="text-sm text-gray-500 mt-1">Sign in to access your documents & updates</p>
         </div>
 
-        {/* Card */}
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
