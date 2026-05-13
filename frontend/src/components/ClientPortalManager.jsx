@@ -4,6 +4,29 @@ import { useAuth } from "@/contexts/AuthContext";
 import DriveFolderVisibility from "@/components/DriveFolderVisibility";
 
 // ── helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * FastAPI / Pydantic v2 returns `detail` as either:
+ *   - a plain string  (HTTP exceptions)
+ *   - an array of objects  [{type, loc, msg, input, ctx}, …]  (validation errors)
+ * React cannot render objects as children, so we always convert to a string.
+ */
+function extractErrorMessage(err, fallback = "Something went wrong. Please try again.") {
+  const detail = err?.response?.data?.detail;
+  if (!detail) return fallback;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map(d => {
+        const field = Array.isArray(d.loc) ? d.loc.filter(p => p !== "body").join(" → ") : "";
+        const msg = d.msg || JSON.stringify(d);
+        return field ? `${field}: ${msg}` : msg;
+      })
+      .join(" | ");
+  }
+  return JSON.stringify(detail);
+}
+
 const initForm = (clientId = "", folderId = "", folderName = "") => ({
   client_id: clientId,
   portal_username: "",
@@ -147,17 +170,26 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
 
   const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
+  // Pydantic v2 rejects empty string "" for Optional[EmailStr] — send null instead.
+  const sanitizePayload = (data) => ({
+    ...data,
+    email: data.email?.trim() || null,
+    display_name: data.display_name?.trim() || null,
+    google_drive_folder_id: data.google_drive_folder_id?.trim() || null,
+    google_drive_folder_name: data.google_drive_folder_name?.trim() || null,
+  });
+
   const save = async () => {
     setError(""); setSuccess("");
     setLoading(true);
     try {
       if (editingId) {
-        const payload = { ...form };
+        const payload = sanitizePayload({ ...form });
         if (!payload.portal_password) delete payload.portal_password;
         await api.put(`/client-portal/users/${editingId}`, payload);
         setSuccess("Portal user updated!");
       } else {
-        await api.post("/client-portal/users", form);
+        await api.post("/client-portal/users", sanitizePayload(form));
         setSuccess("Portal credentials created! Auto-creating Drive folder…");
         // Auto-create Drive folder using saved template
         try {
@@ -189,7 +221,7 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
       setEditingId(null);
       setForm(initForm(clientId));
     } catch (err) {
-      setError(err?.response?.data?.detail || "Failed to save.");
+      setError(extractErrorMessage(err, "Failed to save. Please check all fields and try again."));
     } finally {
       setLoading(false);
     }
@@ -258,7 +290,7 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
         }, 150);
       }
     } catch (err) {
-      setCreateFolderResult({ error: err?.response?.data?.detail || "Failed to create folder." });
+      setCreateFolderResult({ error: extractErrorMessage(err, "Failed to create folder.") });
     } finally {
       setCreatingFolder(false);
     }
