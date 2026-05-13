@@ -35,6 +35,7 @@ const AIDocumentReader = lazy(() => import("@/pages/AIDocumentReader.jsx"));
 const StaffActivity         = lazy(() => import("@/pages/StaffActivity.jsx"));
 const ClientPortalLogin     = lazy(() => import("@/pages/ClientPortalLogin.jsx"));
 const ClientPortalDashboard = lazy(() => import("@/pages/ClientPortalDashboard.jsx"));
+const ClientPortalManagerPage = lazy(() => import("@/pages/ClientPortalManagerPage.jsx"));
 
 
 
@@ -170,6 +171,10 @@ function AppRoutes() {
       <Route path="/task-audit" element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
       <Route path="/users"          element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
       <Route path="/staff-activity" element={<AdminOnly><PageLoader><StaffActivity /></PageLoader></AdminOnly>} />
+
+      {/* Client Portal Manager — admin always, other users with can_view_client_portal */}
+      <Route path="/client-portal-manager" element={<Permission permission="can_view_client_portal"><PageLoader><ClientPortalManagerPage /></PageLoader></Permission>} />
+      <Route path="/client-portal-manager/*" element={<Permission permission="can_view_client_portal"><PageLoader><ClientPortalManagerPage /></PageLoader></Permission>} />
 
       {/* Client Portal — completely standalone, no main-app auth */}
       <Route path="/client-portal"           element={<PageLoader isPublic><ClientPortalLogin /></PageLoader>} />
