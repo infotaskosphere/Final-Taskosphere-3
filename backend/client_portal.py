@@ -334,32 +334,29 @@ async def portal_compliance(portal_user=Depends(get_current_portal_client)):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-def _extract_folder_id(value: Optional[str]) -> Optional[str]:
-      """
-      Accepts either a bare Drive folder ID or a full Google Drive URL and
-      always returns just the folder ID.
+def _extract_folder_id(value):
+    """
+    Accept a bare Drive folder ID or any Google Drive share URL and
+    return just the folder ID string. Returns None if value is empty.
 
-      Examples:
-        "1nYpYErhuHLGjYWaUUMt7ZDT2sFhAa7FB"            → same
-        "https://drive.google.com/drive/folders/1nYpY…"  → "1nYpY…"
-        "https://drive.google.com/open?id=1nYpY…"        → "1nYpY…"
-      """
-      if not value:
-          return None
-      value = value.strip()
-      # Full URL pattern: /folders/<id>
-      m = re.search(r'/folders/([a-zA-Z0-9_-]+)', value)
-      if m:
-          return m.group(1)
-      # open?id=<id> pattern
-      m = re.search(r'[?&]id=([a-zA-Z0-9_-]+)', value)
-      if m:
-          return m.group(1)
-      # Already a bare ID (no slashes/dots)
-      return value
+    Examples:
+      "1nYpYErhuHLGjYWaUUMt7ZDT2sFhAa7FB"                            -> same
+      "https://drive.google.com/drive/folders/1nYp…?usp=drive_link"   -> "1nYp…"
+      "https://drive.google.com/open?id=1nYp…"                        -> "1nYp…"
+    """
+    if not value:
+        return None
+    value = str(value).strip()
+    m = re.search(r'/folders/([a-zA-Z0-9_-]+)', value)
+    if m:
+        return m.group(1)
+    m = re.search(r'[?&]id=([a-zA-Z0-9_-]+)', value)
+    if m:
+        return m.group(1)
+    return value
 
 
-  def _fetch_drive_files_raw(folder_id: str, include_subfolders: bool = True) -> list:
+def _fetch_drive_files_raw(folder_id: str, include_subfolders: bool = True) -> list:
     """
     Lists files and folders inside a given Drive folder.
     Returns both regular files and subfolders so the client can navigate.
