@@ -295,56 +295,28 @@ async def portal_compliance(portal_user=Depends(get_current_portal_client)):
 # Google Drive  –  Visibility management (admin)
 # ═══════════════════════════════════════════════════════════════════════════
 
-async def _fetch_drive_files_raw(folder_id: str) -> list:
+def _fetch_drive_files_raw(folder_id: str) -> list:
     """
-    Internal helper: fetch all files in a Drive folder using service-account
-    or bearer-token credentials. Returns raw file list or raises HTTPException.
+    Reuses the same OAuth Drive service already wired up in invoicing.py.
+    Requires GOOGLE_REFRESH_TOKEN + GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET
+    in the environment — exactly the same variables the app already uses.
     """
-    import os, json as _json
+    from backend.invoicing import _get_drive_service, _drive_configured
 
-    sa_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-    access_token = os.environ.get("GOOGLE_DRIVE_TOKEN")
+    if not _drive_configured():
+        raise HTTPException(
+            503,
+            "Google Drive not configured. Set GOOGLE_REFRESH_TOKEN, "
+            "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your environment."
+        )
 
-    if sa_json:
-        try:
-            from google.oauth2 import service_account
-            from googleapiclient.discovery import build
-
-            sa_info = _json.loads(sa_json)
-            creds = service_account.Credentials.from_service_account_info(
-                sa_info,
-                scopes=["https://www.googleapis.com/auth/drive.readonly"]
-            )
-            service = build("drive", "v3", credentials=creds, cache_discovery=False)
-            query = f"'{folder_id}' in parents and trashed = false"
-            result = service.files().list(
-                q=query,
-                fields="files(id,name,mimeType,size,modifiedTime,webViewLink,iconLink)",
-                pageSize=200
-            ).execute()
-            return result.get("files", [])
-        except Exception as e:
-            logger.warning(f"Drive service-account fetch failed: {e}")
-            raise HTTPException(502, "Failed to connect to Google Drive.")
-
-    elif access_token:
-        import httpx
-        params = {
-            "q": f"'{folder_id}' in parents and trashed = false",
-            "fields": "files(id,name,mimeType,size,modifiedTime,webViewLink,iconLink)",
-            "pageSize": 200,
-        }
-        async with httpx.AsyncClient(timeout=10) as http:
-            resp = await http.get(
-                "https://www.googleapis.com/drive/v3/files",
-                headers={"Authorization": f"Bearer {access_token}"},
-                params=params
-            )
-        if resp.status_code == 200:
-            return resp.json().get("files", [])
-        raise HTTPException(502, f"Drive API error {resp.status_code}")
-
-    raise HTTPException(503, "Google Drive not configured on server.")
+    service = _get_drive_service()
+    result = service.files().list(
+        q=f"'{folder_id}' in parents and trashed = false",
+        fields="files(id,name,mimeType,size,modifiedTime,webViewLink,iconLink)",
+        pageSize=200
+    ).execute()
+    return result.get("files", [])
 
 
 @router.get("/drive/admin/files/{portal_user_id}")
@@ -367,7 +339,7 @@ async def admin_list_drive_files(
     if not folder_id:
         return {"files": [], "message": "No Google Drive folder linked to this portal user."}
 
-    files = await _fetch_drive_files_raw(folder_id)
+    files = _fetch_drive_files_raw(folder_id)
 
     # Load existing visibility config
     vis_doc = await db.client_drive_visibility.find_one(
@@ -489,7 +461,7 @@ async def portal_drive_files(portal_user=Depends(get_current_portal_client)):
         return {"files": [], "message": "No Google Drive folder linked to this client."}
 
     try:
-        all_files = await _fetch_drive_files_raw(folder_id)
+        all_files = _fetch_drive_files_raw(folder_id)
     except HTTPException as e:
         if e.status_code == 503:
             return {"files": [], "message": "Google Drive integration not configured. Contact support."}
