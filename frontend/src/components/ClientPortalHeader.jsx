@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Building2, Users, FileText, MessageSquare, Settings, ExternalLink, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { useDark } from '@/hooks/useDark';
+import { useDark } from '@/hooks/useDark.jsx';
 
 const COLORS = {
   deepBlue:     '#0D3B66',
@@ -41,10 +41,14 @@ const ClientPortalHeader = ({ title, subtitle, actions }) => {
         style={{ background: GRADIENT }}
       >
         {/* decorative circles */}
-        <div className="absolute -right-10 -top-10 w-48 h-48 rounded-full opacity-10"
-          style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
-        <div className="absolute right-24 bottom-0 w-28 h-28 rounded-full opacity-5"
-          style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+        <div
+          className="absolute -right-10 -top-10 w-48 h-48 rounded-full opacity-10"
+          style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }}
+        />
+        <div
+          className="absolute right-24 bottom-0 w-28 h-28 rounded-full opacity-5"
+          style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }}
+        />
 
         <div className="relative px-6 py-5 flex items-center justify-between gap-4">
           {/* Left: icon + text */}
