@@ -85,12 +85,59 @@ DRIVE_FOLDERS = {
 }
 
 
+def _get_drive_refresh_token() -> str | None:
+    """
+    Return the Google Drive refresh token from:
+      1. GOOGLE_REFRESH_TOKEN env var (fastest — checked first)
+      2. MongoDB app_settings collection (set by the frontend Connect flow)
+    Caches the DB token into os.environ so subsequent calls in the same
+    process skip the DB round-trip.
+    """
+    env_token = os.getenv("GOOGLE_REFRESH_TOKEN")
+    if env_token:
+        return env_token
+
+    # Lazy import to avoid circular dependency at module load time
+    try:
+        import asyncio
+        from backend.dependencies import db as _db
+
+        async def _fetch():
+            doc = await _db["app_settings"].find_one({"_id": "google_drive"})
+            if doc and doc.get("connected") and doc.get("refresh_token"):
+                return doc["refresh_token"]
+            return None
+
+        # Run synchronously — safe to call from sync helper functions
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Inside an async context (FastAPI route) — use a new thread
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    token = pool.submit(asyncio.run, _fetch()).result(timeout=5)
+            else:
+                token = loop.run_until_complete(_fetch())
+        except Exception:
+            token = asyncio.run(_fetch())
+
+        if token:
+            # Cache in env so the next call in this process is instant
+            os.environ["GOOGLE_REFRESH_TOKEN"] = token
+            return token
+    except Exception as e:
+        logger.warning(f"Could not read Drive token from DB: {e}")
+
+    return None
+
+
 def _drive_configured() -> bool:
     return bool(
-        os.getenv("GOOGLE_REFRESH_TOKEN") and
+        _get_drive_refresh_token() and
         os.getenv("GOOGLE_CLIENT_ID") and
         os.getenv("GOOGLE_CLIENT_SECRET")
     )
+
 
 # ═══════════════════════════════════════════════════════════
 # AUTH — OAuth (REFRESH TOKEN BASED)
@@ -98,12 +145,15 @@ def _drive_configured() -> bool:
 
 def _get_drive_service():
     try:
-        refresh_token = os.getenv("GOOGLE_REFRESH_TOKEN")
-        client_id = os.getenv("GOOGLE_CLIENT_ID")
+        refresh_token = _get_drive_refresh_token()
+        client_id     = os.getenv("GOOGLE_CLIENT_ID")
         client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
 
         if not refresh_token:
-            raise HTTPException(500, "Missing GOOGLE_REFRESH_TOKEN")
+            raise HTTPException(
+                500,
+                "Google Drive is not connected. Go to Settings → Integrations → Connect Google Drive."
+            )
 
         if not client_id or not client_secret:
             raise HTTPException(500, "Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET")
