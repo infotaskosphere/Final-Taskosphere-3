@@ -153,7 +153,29 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
         setSuccess("Portal user updated!");
       } else {
         await api.post("/client-portal/users", form);
-        setSuccess("Portal credentials created!");
+        setSuccess("Portal credentials created! Auto-creating Drive folder…");
+        // Auto-create Drive folder using saved template
+        try {
+          const tmpl = await api.get("/client-portal/folder-template");
+          const subfolders = tmpl.data?.subfolders || [];
+          const parentId   = tmpl.data?.parent_folder_id || null;
+          if (subfolders.length > 0 && !form.google_drive_folder_id) {
+            const folderRes = await api.post("/client-portal/drive/create-folders", {
+              client_name: form.display_name || clientName,
+              client_id: clientId,
+              parent_folder_id: parentId || null,
+              subfolders,
+            });
+            setSuccess(`Portal created! Drive folder ready: "${folderRes.data.folder_name}"`);
+            setForm(f => ({
+              ...f,
+              google_drive_folder_id: folderRes.data.folder_id,
+              google_drive_folder_name: folderRes.data.folder_name,
+            }));
+          }
+        } catch {
+          // Drive not configured or template empty – not a fatal error
+        }
       }
       await loadUsers();
       setShowForm(false);
