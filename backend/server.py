@@ -40,6 +40,7 @@ try:
 except ImportError:
     _gemini_ai = None
 from backend.passwords import router as passwords_router
+from backend.client_portal import router as client_portal_router
 from backend.activity_monitor import router as activity_monitor_router
 
 from zoneinfo import ZoneInfo
@@ -8172,5 +8173,6 @@ api_router.include_router(leads_router)
 api_router.include_router(notification_router)
 api_router.include_router(email_router)
 api_router.include_router(activity_monitor_router)
+api_router.include_router(client_portal_router)
 app.include_router(google_auth_router)
 app.include_router(api_router)
