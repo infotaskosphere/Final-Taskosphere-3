@@ -12,7 +12,6 @@ function portalApi() {
   });
 }
 
-// ── helpers ────────────────────────────────────────────────────────────────
 const fmtDate = (d) => {
   if (!d) return "—";
   try {
@@ -43,7 +42,6 @@ function Badge({ status }) {
   );
 }
 
-// ── Drive icon helper ──────────────────────────────────────────────────────
 const DRIVE_ICONS = {
   "application/vnd.google-apps.folder":       { icon: "📁", color: "text-yellow-500" },
   "application/vnd.google-apps.document":     { icon: "📄", color: "text-blue-500" },
@@ -63,7 +61,6 @@ const fmtSize = (bytes) => {
   return `${(n / 1048576).toFixed(1)} MB`;
 };
 
-// ── Section wrapper ────────────────────────────────────────────────────────
 function Section({ title, icon, children, count }) {
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -87,7 +84,6 @@ function Empty({ message }) {
   return <div className="text-center py-8 text-gray-400 text-sm">{message}</div>;
 }
 
-// ── Breadcrumb ─────────────────────────────────────────────────────────────
 function Breadcrumb({ crumbs, onNavigate }) {
   return (
     <nav className="flex items-center gap-1 text-sm mb-4 flex-wrap">
@@ -110,14 +106,11 @@ function Breadcrumb({ crumbs, onNavigate }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Google Drive Tab (full component with folder navigation)
-// ═══════════════════════════════════════════════════════════════════════════
 function DriveTab({ user }) {
   const [driveData, setDriveData] = useState({ files: [], folders: [], breadcrumb: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [currentFolderId, setCurrentFolderId] = useState(null); // null = root
+  const [currentFolderId, setCurrentFolderId] = useState(null);
 
   const fetchFolder = useCallback(async (folderId) => {
     setLoading(true);
@@ -136,7 +129,7 @@ function DriveTab({ user }) {
 
   useEffect(() => {
     fetchFolder(currentFolderId);
-  }, []); // Only on mount; navigation is triggered manually
+  }, []);
 
   const navigateToFolder = (folderId) => {
     setCurrentFolderId(folderId);
@@ -144,7 +137,6 @@ function DriveTab({ user }) {
   };
 
   const navigateToBreadcrumb = (folderId) => {
-    // If navigating to root (first crumb), pass null
     const isRoot = driveData.breadcrumb.length > 0 && driveData.breadcrumb[0].id === folderId;
     const targetId = isRoot && driveData.breadcrumb.length === 1 ? null : folderId;
     setCurrentFolderId(targetId);
@@ -155,7 +147,6 @@ function DriveTab({ user }) {
 
   return (
     <Section title="My Documents" icon="☁️" count={totalItems}>
-      {/* Info / error banners */}
       {driveData.message && (
         <div className="bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-xl px-4 py-3 mb-4">
           ℹ️ {driveData.message}
@@ -167,7 +158,6 @@ function DriveTab({ user }) {
         </div>
       )}
 
-      {/* Breadcrumb navigation */}
       {driveData.breadcrumb?.length > 0 && (
         <Breadcrumb crumbs={driveData.breadcrumb} onNavigate={navigateToBreadcrumb} />
       )}
@@ -178,7 +168,6 @@ function DriveTab({ user }) {
         </div>
       ) : (
         <>
-          {/* Folders */}
           {driveData.folders?.length > 0 && (
             <div className="mb-5">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Folders</p>
@@ -205,7 +194,6 @@ function DriveTab({ user }) {
             </div>
           )}
 
-          {/* Files */}
           {driveData.files?.length > 0 && (
             <div>
               {driveData.folders?.length > 0 && (
@@ -249,9 +237,6 @@ function DriveTab({ user }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Main Dashboard
-// ═══════════════════════════════════════════════════════════════════════════
 export default function ClientPortalDashboard() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
@@ -260,10 +245,8 @@ export default function ClientPortalDashboard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Auth check
   useEffect(() => {
     const stored = sessionStorage.getItem("client_portal_user");
-    // Guard against missing, null, or the literal string "undefined"
     if (!stored || stored === "undefined" || stored === "null") {
       sessionStorage.removeItem("client_portal_user");
       sessionStorage.removeItem("client_portal_token");
@@ -274,7 +257,6 @@ export default function ClientPortalDashboard() {
     try {
       u = JSON.parse(stored);
     } catch {
-      // Corrupt / non-JSON value — clear and redirect to login
       sessionStorage.removeItem("client_portal_user");
       sessionStorage.removeItem("client_portal_token");
       navigate("/client-portal");
@@ -282,7 +264,6 @@ export default function ClientPortalDashboard() {
     }
     if (!u) { navigate("/client-portal"); return; }
     setUser(u);
-    // Set default tab based on permissions
     if (u.can_view_tasks) setActiveTab("tasks");
     else if (u.can_view_documents) setActiveTab("documents");
     else if (u.can_view_invoices) setActiveTab("invoices");
@@ -342,14 +323,12 @@ export default function ClientPortalDashboard() {
     user.google_drive_folder_id && { id: "drive", label: "My Drive", icon: "☁️" },
   ].filter(Boolean);
 
-  // If no drive folder, still show drive tab for message
   if (!tabs.find(t => t.id === "drive")) {
     tabs.push({ id: "drive", label: "My Drive", icon: "☁️" });
   }
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-10">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -371,7 +350,6 @@ export default function ClientPortalDashboard() {
       </header>
 
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* Welcome */}
         <div className="bg-gradient-to-r from-indigo-600 to-blue-500 rounded-2xl p-6 text-white">
           <h1 className="text-xl font-bold">Welcome back, {user.display_name} 👋</h1>
           <p className="text-indigo-200 text-sm mt-1">
@@ -379,7 +357,6 @@ export default function ClientPortalDashboard() {
           </p>
         </div>
 
-        {/* Tabs */}
         <div className="flex gap-2 flex-wrap">
           {tabs.map(t => (
             <button
@@ -396,14 +373,12 @@ export default function ClientPortalDashboard() {
           ))}
         </div>
 
-        {/* Error */}
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
             {error}
           </div>
         )}
 
-        {/* Content */}
         {activeTab === "drive" ? (
           <DriveTab user={user} />
         ) : loading ? (
@@ -412,7 +387,6 @@ export default function ClientPortalDashboard() {
           </div>
         ) : (
           <>
-            {/* TASKS */}
             {activeTab === "tasks" && (
               <Section title="Tasks" icon="✅" count={data.tasks.length}>
                 {data.tasks.length === 0 ? (
@@ -443,7 +417,6 @@ export default function ClientPortalDashboard() {
               </Section>
             )}
 
-            {/* DOCUMENTS */}
             {activeTab === "documents" && (
               <Section title="Documents" icon="📂" count={data.documents.length}>
                 {data.documents.length === 0 ? (
@@ -475,7 +448,6 @@ export default function ClientPortalDashboard() {
               </Section>
             )}
 
-            {/* INVOICES */}
             {activeTab === "invoices" && (
               <Section title="Invoices" icon="🧾" count={data.invoices.length}>
                 {data.invoices.length === 0 ? (
@@ -504,7 +476,6 @@ export default function ClientPortalDashboard() {
               </Section>
             )}
 
-            {/* COMPLIANCE */}
             {activeTab === "compliance" && (
               <Section title="Compliance" icon="📋" count={data.compliance.length}>
                 {data.compliance.length === 0 ? (
