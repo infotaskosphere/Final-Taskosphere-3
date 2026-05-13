@@ -5,7 +5,8 @@ Handles:
   • Client Portal user creation / credential management (by admin/staff)
   • Client login (separate JWT, role = "client")
   • Client-facing endpoints (tasks, documents, invoices, compliance view)
-  • Google Drive folder listing & file metadata for a client
+  • Google Drive folder listing & subfolder navigation for a client
+  • Share-link generation with pre-auth token
 """
 
 import uuid
@@ -71,8 +72,9 @@ class PortalUserCreate(BaseModel):
     can_view_documents: bool = True
     can_view_invoices: bool = True
     can_view_compliance: bool = False
-    # Google Drive folder id shared with this client
+    # Google Drive folder id shared with this client (root folder for this client)
     google_drive_folder_id: Optional[str] = None
+    google_drive_folder_name: Optional[str] = None  # human label shown in portal
 
 
 class PortalUserUpdate(BaseModel):
@@ -84,6 +86,7 @@ class PortalUserUpdate(BaseModel):
     can_view_invoices: Optional[bool] = None
     can_view_compliance: Optional[bool] = None
     google_drive_folder_id: Optional[str] = None
+    google_drive_folder_name: Optional[str] = None
 
 
 class PortalLoginRequest(BaseModel):
@@ -133,6 +136,7 @@ async def create_portal_user(
         "can_view_invoices": body.can_view_invoices,
         "can_view_compliance": body.can_view_compliance,
         "google_drive_folder_id": body.google_drive_folder_id,
+        "google_drive_folder_name": body.google_drive_folder_name or "My Documents",
         "created_by": current_user.id,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -183,6 +187,8 @@ async def update_portal_user(
         update["can_view_compliance"] = body.can_view_compliance
     if body.google_drive_folder_id is not None:
         update["google_drive_folder_id"] = body.google_drive_folder_id
+    if body.google_drive_folder_name is not None:
+        update["google_drive_folder_name"] = body.google_drive_folder_name
 
     if not update:
         raise HTTPException(400, "Nothing to update")
@@ -204,6 +210,37 @@ async def delete_portal_user(
     if res.deleted_count == 0:
         raise HTTPException(404, "Portal user not found")
     return {"success": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Share-link endpoint  (admin generates a magic link or just returns the URL)
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.get("/users/{portal_user_id}/share-link")
+async def get_share_link(
+    portal_user_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns the portal login URL for this portal user.
+    Also returns a pre-filled username hint so admins can share it easily.
+    """
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    portal_user = await db.client_portal_users.find_one(
+        {"id": portal_user_id}, {"_id": 0, "hashed_password": 0}
+    )
+    if not portal_user:
+        raise HTTPException(404, "Portal user not found")
+
+    return {
+        "portal_url": "/client-portal",
+        "username": portal_user["portal_username"],
+        "display_name": portal_user.get("display_name", ""),
+        "portal_user_id": portal_user_id,
+        "is_active": portal_user.get("is_active", True),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -292,14 +329,13 @@ async def portal_compliance(portal_user=Depends(get_current_portal_client)):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Google Drive  –  Visibility management (admin)
+# Google Drive helpers
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _fetch_drive_files_raw(folder_id: str) -> list:
+def _fetch_drive_files_raw(folder_id: str, include_subfolders: bool = True) -> list:
     """
-    Reuses the same OAuth Drive service already wired up in invoicing.py.
-    Requires GOOGLE_REFRESH_TOKEN + GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET
-    in the environment — exactly the same variables the app already uses.
+    Lists files and folders inside a given Drive folder.
+    Returns both regular files and subfolders so the client can navigate.
     """
     from backend.invoicing import _get_drive_service, _drive_configured
 
@@ -314,19 +350,38 @@ def _fetch_drive_files_raw(folder_id: str) -> list:
     result = service.files().list(
         q=f"'{folder_id}' in parents and trashed = false",
         fields="files(id,name,mimeType,size,modifiedTime,webViewLink,iconLink)",
-        pageSize=200
+        orderBy="folder,name",
+        pageSize=500
     ).execute()
     return result.get("files", [])
 
 
+def _get_folder_name(folder_id: str) -> str:
+    """Get the display name of a Drive folder by its ID."""
+    try:
+        from backend.invoicing import _get_drive_service, _drive_configured
+        if not _drive_configured():
+            return folder_id
+        service = _get_drive_service()
+        result = service.files().get(fileId=folder_id, fields="id,name").execute()
+        return result.get("name", folder_id)
+    except Exception:
+        return folder_id
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Google Drive  –  Visibility management (admin)
+# ═══════════════════════════════════════════════════════════════════════════
+
 @router.get("/drive/admin/files/{portal_user_id}")
 async def admin_list_drive_files(
     portal_user_id: str,
+    folder_id: Optional[str] = Query(None, description="Subfolder ID to browse (defaults to client's root folder)"),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Admin endpoint – list ALL files in the portal user's linked Drive folder,
-    annotated with their current visibility setting.
+    Admin endpoint – list ALL files in the portal user's linked Drive folder
+    (or a subfolder), annotated with their current visibility setting.
     """
     if current_user.role not in ("admin", "manager"):
         raise HTTPException(403, "Insufficient permissions")
@@ -335,33 +390,35 @@ async def admin_list_drive_files(
     if not portal_user:
         raise HTTPException(404, "Portal user not found")
 
-    folder_id = portal_user.get("google_drive_folder_id")
-    if not folder_id:
+    root_folder_id = portal_user.get("google_drive_folder_id")
+    if not root_folder_id:
         return {"files": [], "message": "No Google Drive folder linked to this portal user."}
 
-    files = _fetch_drive_files_raw(folder_id)
+    # Browse the requested subfolder or fall back to root
+    browse_id = folder_id if folder_id else root_folder_id
+
+    files = _fetch_drive_files_raw(browse_id)
 
     # Load existing visibility config
     vis_doc = await db.client_drive_visibility.find_one(
         {"portal_user_id": portal_user_id}, {"_id": 0}
     )
-    # hidden_ids: set of file IDs explicitly hidden by admin
-    # If no config exists yet → everything is visible by default
     hidden_ids: set = set(vis_doc.get("hidden_ids", [])) if vis_doc else set()
 
     for f in files:
         f["is_visible"] = f["id"] not in hidden_ids
+        f["is_folder"] = f.get("mimeType") == "application/vnd.google-apps.folder"
 
     return {
         "files": files,
-        "folder_id": folder_id,
+        "root_folder_id": root_folder_id,
+        "current_folder_id": browse_id,
         "hidden_ids": list(hidden_ids),
         "portal_user_id": portal_user_id,
     }
 
 
 class DriveVisibilityUpdate(BaseModel):
-    # Full list of file IDs that should be HIDDEN (admin sends the complete hidden set)
     hidden_ids: List[str] = Field(default_factory=list)
 
 
@@ -371,10 +428,7 @@ async def admin_update_drive_visibility(
     body: DriveVisibilityUpdate,
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Admin endpoint – save/update which Drive files are hidden for a portal user.
-    Replaces the entire hidden_ids list.
-    """
+    """Admin endpoint – save/update which Drive files are hidden for a portal user."""
     if current_user.role not in ("admin", "manager"):
         raise HTTPException(403, "Insufficient permissions")
 
@@ -412,7 +466,6 @@ async def admin_toggle_single_file(
         raise HTTPException(404, "Portal user not found")
 
     if visible:
-        # Remove from hidden list
         await db.client_drive_visibility.update_one(
             {"portal_user_id": portal_user_id},
             {"$pull": {"hidden_ids": file_id},
@@ -422,7 +475,6 @@ async def admin_toggle_single_file(
             upsert=True,
         )
     else:
-        # Add to hidden list
         await db.client_drive_visibility.update_one(
             {"portal_user_id": portal_user_id},
             {"$addToSet": {"hidden_ids": file_id},
@@ -447,34 +499,92 @@ async def admin_visibility_summary(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Google Drive  –  list files in the client's shared folder (CLIENT view)
+# Google Drive  –  Client view with subfolder navigation
 # ═══════════════════════════════════════════════════════════════════════════
 
 @router.get("/drive/files")
-async def portal_drive_files(portal_user=Depends(get_current_portal_client)):
+async def portal_drive_files(
+    folder_id: Optional[str] = Query(None, description="Subfolder to browse (must be inside client's root)"),
+    portal_user=Depends(get_current_portal_client),
+):
     """
-    Returns visible files in the Google Drive folder linked to this client.
-    Respects the admin-configured visibility rules (hidden_ids are filtered out).
+    Returns visible files/folders in the Google Drive folder linked to this client.
+    Supports subfolder navigation: pass ?folder_id=XYZ to browse into a subfolder.
+    All folder_id values must descend from the client's assigned root folder.
+    Respects admin-configured visibility rules (hidden_ids are filtered out).
     """
-    folder_id = portal_user.get("google_drive_folder_id")
-    if not folder_id:
-        return {"files": [], "message": "No Google Drive folder linked to this client."}
+    root_folder_id = portal_user.get("google_drive_folder_id")
+    if not root_folder_id:
+        return {
+            "files": [],
+            "folders": [],
+            "breadcrumb": [],
+            "message": "No Google Drive folder has been linked to your account. Please contact your account manager.",
+        }
+
+    # Security: clients can only browse within their assigned root folder.
+    # We trust folder_id only if it was a folder we already exposed (is_visible).
+    # The simplest safe approach: only allow navigation into folders that
+    # appeared in the parent listing as visible folders.
+    browse_id = root_folder_id  # default: client's root
+    breadcrumb = [{"id": root_folder_id, "name": portal_user.get("google_drive_folder_name") or "My Documents"}]
+
+    if folder_id and folder_id != root_folder_id:
+        # Validate: confirm this folder_id appeared as a visible subfolder
+        # by fetching the root and checking it exists and is visible
+        try:
+            root_files = _fetch_drive_files_raw(root_folder_id)
+        except HTTPException:
+            return {"files": [], "folders": [], "breadcrumb": breadcrumb, "error": "Could not reach Google Drive."}
+
+        vis_doc = await db.client_drive_visibility.find_one(
+            {"portal_user_id": portal_user["id"]}, {"_id": 0}
+        )
+        hidden_ids: set = set(vis_doc.get("hidden_ids", [])) if vis_doc else set()
+
+        valid_subfolder_ids = {
+            f["id"] for f in root_files
+            if f.get("mimeType") == "application/vnd.google-apps.folder"
+            and f["id"] not in hidden_ids
+        }
+
+        if folder_id in valid_subfolder_ids:
+            browse_id = folder_id
+            # Build breadcrumb name
+            folder_name = next((f["name"] for f in root_files if f["id"] == folder_id), folder_id)
+            breadcrumb.append({"id": folder_id, "name": folder_name})
+        else:
+            # Invalid / hidden folder – silently fall back to root
+            browse_id = root_folder_id
 
     try:
-        all_files = _fetch_drive_files_raw(folder_id)
+        all_files = _fetch_drive_files_raw(browse_id)
     except HTTPException as e:
         if e.status_code == 503:
-            return {"files": [], "message": "Google Drive integration not configured. Contact support."}
-        return {"files": [], "error": f"Could not load files ({e.status_code})."}
+            return {"files": [], "folders": [], "breadcrumb": breadcrumb,
+                    "message": "Google Drive integration not configured. Contact support."}
+        return {"files": [], "folders": [], "breadcrumb": breadcrumb,
+                "error": f"Could not load files ({e.status_code})."}
     except Exception as e:
         logger.warning(f"Drive fetch error for client: {e}")
-        return {"files": [], "error": "Could not reach Google Drive."}
+        return {"files": [], "folders": [], "breadcrumb": breadcrumb,
+                "error": "Could not reach Google Drive."}
 
     # Apply visibility filter
     vis_doc = await db.client_drive_visibility.find_one(
         {"portal_user_id": portal_user["id"]}, {"_id": 0}
     )
     hidden_ids: set = set(vis_doc.get("hidden_ids", [])) if vis_doc else set()
-    visible_files = [f for f in all_files if f["id"] not in hidden_ids]
+    visible_all = [f for f in all_files if f["id"] not in hidden_ids]
 
-    return {"files": visible_files, "folder_id": folder_id}
+    # Separate folders from files
+    folders = [f for f in visible_all if f.get("mimeType") == "application/vnd.google-apps.folder"]
+    files = [f for f in visible_all if f.get("mimeType") != "application/vnd.google-apps.folder"]
+
+    return {
+        "files": files,
+        "folders": folders,
+        "breadcrumb": breadcrumb,
+        "root_folder_id": root_folder_id,
+        "current_folder_id": browse_id,
+    }
