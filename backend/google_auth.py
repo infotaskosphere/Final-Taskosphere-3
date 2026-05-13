@@ -7,6 +7,7 @@ Routes
                                    → Redirect to frontend with ?drive=connected
   GET  /auth/google/status       → Return current Drive connection status
   POST /auth/google/disconnect   → Remove stored refresh token from DB
+  GET  /auth/google/reconnect    → Force re-consent to get a fresh refresh token
 ─────────────────────────────────────────────────────────────────────────────
 Storage: `app_settings` collection, document _id = "google_drive"
 """
@@ -28,8 +29,9 @@ BACKEND_URL   = os.getenv("BACKEND_URL",  "https://final-taskosphere-backend.onr
 REDIRECT_URI  = f"{BACKEND_URL}/auth/google/callback"
 
 SCOPES = [
-    "https://www.googleapis.com/auth/drive.file",
-    "https://www.googleapis.com/auth/drive.metadata.readonly",
+    "https://www.googleapis.com/auth/drive",                    # Full Drive access (needed for creating folders anywhere)
+    "https://www.googleapis.com/auth/drive.file",               # App-created files
+    "https://www.googleapis.com/auth/drive.metadata.readonly",  # Read file metadata
 ]
 
 SETTINGS_COLLECTION = "app_settings"
@@ -159,3 +161,32 @@ async def disconnect_drive(
     )
     os.environ.pop("GOOGLE_REFRESH_TOKEN", None)
     return {"ok": True, "message": "Google Drive disconnected"}
+
+
+# ── 5. Reconnect (force new consent to get a fresh refresh token) ─────────
+@router.get("/auth/google/reconnect")
+async def reconnect_drive(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Forces a full re-consent flow so Google issues a brand-new refresh token.
+    Use this when the existing token has expired or been revoked (invalid_grant).
+    Equivalent to Disconnect followed by Connect, in a single step.
+    """
+    if not CLIENT_ID or not CLIENT_SECRET:
+        raise HTTPException(500, "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set")
+
+    # Wipe the old (possibly invalid) token first
+    await db[SETTINGS_COLLECTION].update_one(
+        {"_id": DRIVE_DOC_ID},
+        {"$set": {"refresh_token": None, "access_token": None, "connected": False}},
+        upsert=True,
+    )
+    os.environ.pop("GOOGLE_REFRESH_TOKEN", None)
+
+    flow = _build_flow()
+    auth_url, _ = flow.authorization_url(
+        prompt="consent",    # Always show consent screen so Google gives a NEW refresh_token
+        access_type="offline",
+    )
+    return RedirectResponse(auth_url)
