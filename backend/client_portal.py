@@ -11,6 +11,7 @@ Handles:
 
 import uuid
 import logging
+import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
@@ -332,7 +333,33 @@ async def portal_compliance(portal_user=Depends(get_current_portal_client)):
 # Google Drive helpers
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _fetch_drive_files_raw(folder_id: str, include_subfolders: bool = True) -> list:
+
+def _extract_folder_id(value: Optional[str]) -> Optional[str]:
+      """
+      Accepts either a bare Drive folder ID or a full Google Drive URL and
+      always returns just the folder ID.
+
+      Examples:
+        "1nYpYErhuHLGjYWaUUMt7ZDT2sFhAa7FB"            → same
+        "https://drive.google.com/drive/folders/1nYpY…"  → "1nYpY…"
+        "https://drive.google.com/open?id=1nYpY…"        → "1nYpY…"
+      """
+      if not value:
+          return None
+      value = value.strip()
+      # Full URL pattern: /folders/<id>
+      m = re.search(r'/folders/([a-zA-Z0-9_-]+)', value)
+      if m:
+          return m.group(1)
+      # open?id=<id> pattern
+      m = re.search(r'[?&]id=([a-zA-Z0-9_-]+)', value)
+      if m:
+          return m.group(1)
+      # Already a bare ID (no slashes/dots)
+      return value
+
+
+  def _fetch_drive_files_raw(folder_id: str, include_subfolders: bool = True) -> list:
     """
     Lists files and folders inside a given Drive folder.
     Returns both regular files and subfolders so the client can navigate.
@@ -582,7 +609,7 @@ async def save_folder_template(
         {},
         {"$set": {
             "subfolders": body.subfolders,
-            "parent_folder_id": body.parent_folder_id or "",
+            "parent_folder_id": _extract_folder_id(body.parent_folder_id) or "",
             "updated_by": current_user.id,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }},
@@ -608,6 +635,8 @@ def _create_drive_folder_sync(service, client_name: str, parent_folder_id: Optio
     Synchronous helper that creates (or reuses) a root folder + subfolders in Drive.
     Returns a result dict.
     """
+    # Accept full Drive URLs or bare IDs — always normalise to a bare ID
+    parent_folder_id = _extract_folder_id(parent_folder_id)
     safe_name = client_name.strip()
 
     query_parts = [
