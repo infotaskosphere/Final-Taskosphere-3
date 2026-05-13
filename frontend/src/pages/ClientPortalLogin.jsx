@@ -17,20 +17,15 @@ export default function ClientPortalLogin() {
     try {
       const res = await API.post("/client-portal/login", form);
       const { access_token, user } = res.data;
-      // Guard: only block if there's no token at all
-      if (!access_token) {
-        setError("Login failed: no access token received. Please try again.");
-        return;
-      }
       sessionStorage.setItem("client_portal_token", access_token);
-      // Use JSON.stringify only when user is a valid object; otherwise store null
-      // so the dashboard safely redirects back to login instead of crashing
+      // Safely serialise user — never store the string "undefined"
       sessionStorage.setItem(
         "client_portal_user",
         user && typeof user === "object" ? JSON.stringify(user) : "null"
       );
       navigate("/client-portal/dashboard");
     } catch (err) {
+      // Pydantic v2 returns detail as an array of objects, not always a string
       const detail = err?.response?.data?.detail;
       let msg = "Invalid credentials. Please try again.";
       if (typeof detail === "string") msg = detail;
