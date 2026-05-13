@@ -295,6 +295,46 @@ async def portal_me(portal_user=Depends(get_current_portal_client)):
     return portal_user
 
 
+class PortalSelfUpdate(BaseModel):
+    display_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    current_password: Optional[str] = None
+    new_password: Optional[str] = Field(None, min_length=6)
+
+
+@router.put("/me")
+async def update_portal_self(
+    body: PortalSelfUpdate,
+    portal_user=Depends(get_current_portal_client),
+):
+    """Allow a logged-in client to update their own display name, email, or password."""
+    update: dict = {}
+
+    if body.display_name is not None:
+        update["display_name"] = body.display_name.strip() or portal_user.get("display_name", "")
+
+    if body.email is not None:
+        update["email"] = body.email
+
+    if body.new_password:
+        if not body.current_password:
+            raise HTTPException(400, "Current password is required to set a new password.")
+        doc = await db.client_portal_users.find_one({"id": portal_user["id"]}, {"_id": 0})
+        if not doc or not pwd_context.verify(body.current_password, doc["hashed_password"]):
+            raise HTTPException(400, "Current password is incorrect.")
+        update["hashed_password"] = pwd_context.hash(body.new_password)
+
+    if not update:
+        raise HTTPException(400, "Nothing to update.")
+
+    await db.client_portal_users.update_one({"id": portal_user["id"]}, {"$set": update})
+
+    updated = await db.client_portal_users.find_one(
+        {"id": portal_user["id"]}, {"_id": 0, "hashed_password": 0}
+    )
+    return updated
+
+
 @router.get("/tasks")
 async def portal_tasks(portal_user=Depends(get_current_portal_client)):
     if not portal_user.get("can_view_tasks"):
