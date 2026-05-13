@@ -15,6 +15,7 @@ const initForm = (clientId = "") => ({
   can_view_invoices: true,
   can_view_compliance: false,
   google_drive_folder_id: "",
+  google_drive_folder_name: "",
 });
 
 function Toggle({ checked, onChange, label }) {
@@ -32,6 +33,85 @@ function Toggle({ checked, onChange, label }) {
   );
 }
 
+// ── Share Link Panel ───────────────────────────────────────────────────────
+function ShareLinkPanel({ portalUser }) {
+  const [copied, setCopied] = useState(null);
+  const origin = window.location.origin;
+  const portalUrl = `${origin}/client-portal`;
+
+  const copyText = async (text, key) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(key);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      // fallback
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setCopied(key);
+      setTimeout(() => setCopied(null), 2000);
+    }
+  };
+
+  const fullMessage = `Hi ${portalUser.display_name || portalUser.portal_username},\n\nYou can access your documents and updates on our Client Portal:\n\n🔗 Portal Link: ${portalUrl}\n👤 Username: ${portalUser.portal_username}\n\nPlease use the password we shared with you to log in.`;
+
+  return (
+    <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 space-y-3">
+      <p className="font-semibold text-indigo-800 text-sm flex items-center gap-2">
+        🔗 Share Portal Access
+      </p>
+
+      {/* Portal URL */}
+      <div>
+        <p className="text-xs text-indigo-600 mb-1 font-medium">Portal Link</p>
+        <div className="flex items-center gap-2">
+          <code className="flex-1 text-indigo-700 bg-white border border-indigo-200 px-3 py-1.5 rounded-lg text-xs font-mono truncate">
+            {portalUrl}
+          </code>
+          <button
+            onClick={() => copyText(portalUrl, "url")}
+            className="flex-shrink-0 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 transition font-medium"
+          >
+            {copied === "url" ? "✓ Copied!" : "Copy"}
+          </button>
+        </div>
+      </div>
+
+      {/* Username */}
+      <div>
+        <p className="text-xs text-indigo-600 mb-1 font-medium">Client Username</p>
+        <div className="flex items-center gap-2">
+          <code className="flex-1 text-indigo-700 bg-white border border-indigo-200 px-3 py-1.5 rounded-lg text-xs font-mono">
+            {portalUser.portal_username}
+          </code>
+          <button
+            onClick={() => copyText(portalUser.portal_username, "user")}
+            className="flex-shrink-0 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 transition font-medium"
+          >
+            {copied === "user" ? "✓ Copied!" : "Copy"}
+          </button>
+        </div>
+      </div>
+
+      {/* Copy complete message */}
+      <button
+        onClick={() => copyText(fullMessage, "msg")}
+        className="w-full text-xs bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-100 px-3 py-2 rounded-lg transition font-medium flex items-center justify-center gap-2"
+      >
+        {copied === "msg" ? "✓ Message Copied!" : "📋 Copy Complete Share Message"}
+      </button>
+
+      <p className="text-xs text-indigo-500">
+        Share the link + username with your client. They'll need the password you set.
+      </p>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 export default function ClientPortalManager({ clientId, clientName, onClose }) {
   const { user } = useAuth();
@@ -42,7 +122,8 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [driveVisUser, setDriveVisUser] = useState(null); // portal user for drive vis modal
+  const [driveVisUser, setDriveVisUser] = useState(null);
+  const [shareUser, setShareUser] = useState(null); // show share panel for this user
 
   const loadUsers = useCallback(async () => {
     try {
@@ -81,6 +162,7 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
 
   const startEdit = (u) => {
     setEditingId(u.id);
+    setShareUser(null);
     setForm({
       client_id: u.client_id,
       portal_username: u.portal_username,
@@ -92,6 +174,7 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
       can_view_invoices: u.can_view_invoices,
       can_view_compliance: u.can_view_compliance,
       google_drive_folder_id: u.google_drive_folder_id || "",
+      google_drive_folder_name: u.google_drive_folder_name || "",
     });
     setShowForm(true);
   };
@@ -110,7 +193,10 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
   if (user?.role !== "admin" && user?.role !== "manager") return null;
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={e => e.target === e.currentTarget && onClose?.()}>
+    <div
+      className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+      onClick={e => e.target === e.currentTarget && onClose?.()}
+    >
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
 
         {/* Header */}
@@ -133,32 +219,62 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
           {/* Existing users */}
           {portalUsers.length > 0 && !showForm && (
             <div className="space-y-2">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Existing Portal Users</p>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Portal Users</p>
               {portalUsers.map(u => (
-                <div key={u.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-100">
-                  <div>
-                    <p className="font-medium text-gray-800 text-sm">{u.portal_username}</p>
-                    <p className="text-xs text-gray-400">{u.display_name}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${u.is_active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-                      {u.is_active ? "Active" : "Inactive"}
-                    </span>
-                    <button onClick={() => startEdit(u)} className="text-xs text-indigo-600 hover:underline">Edit</button>
-                    <button onClick={() => toggleActive(u)} className="text-xs text-yellow-600 hover:underline">
-                      {u.is_active ? "Disable" : "Enable"}
-                    </button>
-                    {u.google_drive_folder_id && (
+                <div key={u.id} className="border border-gray-100 rounded-xl overflow-hidden">
+                  {/* User row */}
+                  <div className="flex items-center justify-between p-3 bg-gray-50">
+                    <div>
+                      <p className="font-medium text-gray-800 text-sm">{u.display_name || u.portal_username}</p>
+                      <p className="text-xs text-gray-400">@{u.portal_username}{u.email ? ` · ${u.email}` : ""}</p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${u.is_active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                        {u.is_active ? "Active" : "Inactive"}
+                      </span>
                       <button
-                        onClick={() => setDriveVisUser(u)}
-                        className="text-xs text-blue-600 hover:underline flex items-center gap-0.5"
-                        title="Manage which Drive files this client can see"
+                        onClick={() => setShareUser(shareUser?.id === u.id ? null : u)}
+                        className={`text-xs px-2 py-0.5 rounded-full font-medium border transition ${
+                          shareUser?.id === u.id
+                            ? "bg-indigo-600 text-white border-indigo-600"
+                            : "text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                        }`}
                       >
-                        ☁️ Drive
+                        🔗 Share Link
                       </button>
-                    )}
-                    <button onClick={() => deleteUser(u.id)} className="text-xs text-red-500 hover:underline">Delete</button>
+                      <button onClick={() => startEdit(u)} className="text-xs text-blue-600 hover:underline">Edit</button>
+                      <button onClick={() => toggleActive(u)} className="text-xs text-yellow-600 hover:underline">
+                        {u.is_active ? "Disable" : "Enable"}
+                      </button>
+                      {u.google_drive_folder_id && (
+                        <button
+                          onClick={() => setDriveVisUser(u)}
+                          className="text-xs text-blue-600 hover:underline flex items-center gap-0.5"
+                          title="Manage which Drive files this client can see"
+                        >
+                          ☁️ Drive Files
+                        </button>
+                      )}
+                      <button onClick={() => deleteUser(u.id)} className="text-xs text-red-500 hover:underline">Delete</button>
+                    </div>
                   </div>
+
+                  {/* Inline share panel */}
+                  {shareUser?.id === u.id && (
+                    <div className="p-3 border-t border-gray-100">
+                      <ShareLinkPanel portalUser={u} />
+                    </div>
+                  )}
+
+                  {/* Drive folder info if linked */}
+                  {u.google_drive_folder_id && shareUser?.id !== u.id && (
+                    <div className="px-3 py-2 border-t border-gray-100 bg-blue-50 flex items-center gap-2">
+                      <span className="text-sm">📁</span>
+                      <span className="text-xs text-blue-700 font-medium">
+                        Drive folder linked: {u.google_drive_folder_name || "My Documents"}
+                      </span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -167,7 +283,7 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
           {/* Toggle form */}
           {!showForm ? (
             <button
-              onClick={() => { setShowForm(true); setEditingId(null); setForm(initForm(clientId)); }}
+              onClick={() => { setShowForm(true); setEditingId(null); setShareUser(null); setForm(initForm(clientId)); }}
               className="w-full border-2 border-dashed border-indigo-200 text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50 rounded-xl py-3 text-sm font-medium transition"
             >
               + Create Portal Credentials
@@ -223,19 +339,35 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
               </div>
 
               {/* Google Drive */}
-              <div>
-                <label className="text-xs font-medium text-gray-600 block mb-1">
-                  Google Drive Folder ID
-                  <span className="font-normal text-gray-400 ml-1">(from the folder URL)</span>
-                </label>
-                <input
-                  value={form.google_drive_folder_id}
-                  onChange={e => setField("google_drive_folder_id", e.target.value)}
-                  placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs…"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                />
-                <p className="text-xs text-gray-400 mt-1">
-                  Share this folder with your service account email in Google Drive, then paste the folder ID here.
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 space-y-3">
+                <p className="text-xs font-semibold text-blue-800 flex items-center gap-1.5">☁️ Google Drive Folder</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 block mb-1">
+                      Folder ID <span className="font-normal text-gray-400">(from Drive URL)</span>
+                    </label>
+                    <input
+                      value={form.google_drive_folder_id}
+                      onChange={e => setField("google_drive_folder_id", e.target.value)}
+                      placeholder="1BxiMVs0XRA5nFMdKv…"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 block mb-1">
+                      Folder Label <span className="font-normal text-gray-400">(shown to client)</span>
+                    </label>
+                    <input
+                      value={form.google_drive_folder_name}
+                      onChange={e => setField("google_drive_folder_name", e.target.value)}
+                      placeholder="My Documents"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-blue-600">
+                  Open the folder in Google Drive → copy the ID from the URL. Share the folder with your service account email first.
+                  The client will only see <strong>their assigned folder</strong> and cannot access other clients' files.
                 </p>
               </div>
 
@@ -243,9 +375,9 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
               <div>
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Data Access</p>
                 <div className="grid grid-cols-2 gap-2">
-                  <Toggle checked={form.can_view_tasks} onChange={v => setField("can_view_tasks", v)} label="Tasks" />
-                  <Toggle checked={form.can_view_documents} onChange={v => setField("can_view_documents", v)} label="Documents" />
-                  <Toggle checked={form.can_view_invoices} onChange={v => setField("can_view_invoices", v)} label="Invoices" />
+                  <Toggle checked={form.can_view_tasks}      onChange={v => setField("can_view_tasks", v)}      label="Tasks" />
+                  <Toggle checked={form.can_view_documents}  onChange={v => setField("can_view_documents", v)}  label="Documents" />
+                  <Toggle checked={form.can_view_invoices}   onChange={v => setField("can_view_invoices", v)}   label="Invoices" />
                   <Toggle checked={form.can_view_compliance} onChange={v => setField("can_view_compliance", v)} label="Compliance" />
                 </div>
               </div>
@@ -268,20 +400,22 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
             </div>
           )}
 
-          {/* Portal URL hint */}
-          <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 text-sm">
-            <p className="font-medium text-indigo-800 mb-1">📌 Portal URL for clients</p>
-            <code className="text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded text-xs">
-              {window.location.origin}/client-portal
-            </code>
-            <p className="text-indigo-600 text-xs mt-1">
-              Share the above URL along with the username & password with your client.
-            </p>
-          </div>
+          {/* Portal URL hint (when no users yet or form collapsed) */}
+          {!showForm && portalUsers.length === 0 && (
+            <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 text-sm">
+              <p className="font-medium text-indigo-800 mb-1">📌 Portal URL for clients</p>
+              <code className="text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded text-xs">
+                {window.location.origin}/client-portal
+              </code>
+              <p className="text-indigo-600 text-xs mt-1">
+                Create portal credentials above, then use the "Share Link" button to share access with your client.
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Drive Visibility Modal – rendered outside the main modal so it stacks on top */}
+      {/* Drive Visibility Modal */}
       {driveVisUser && (
         <DriveFolderVisibility
           portalUserId={driveVisUser.id}
