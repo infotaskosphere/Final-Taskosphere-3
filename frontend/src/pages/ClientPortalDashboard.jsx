@@ -309,7 +309,14 @@ export default function ClientPortalDashboard() {
     navigate("/client-portal");
   };
 
-  if (!user) return null;
+  if (!user) return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-sm text-gray-400">Loading portal…</p>
+      </div>
+    </div>
+  );
 
   const tabs = [
     user.can_view_tasks      && { id: "tasks",      label: "Tasks",      icon: "✅" },
