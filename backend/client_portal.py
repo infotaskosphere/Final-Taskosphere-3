@@ -508,54 +508,134 @@ async def admin_visibility_summary(
 # Google Drive  –  Create predefined client folder structure (admin)
 # ═══════════════════════════════════════════════════════════════════════════
 
-PREDEFINED_SUBFOLDERS = [
+DEFAULT_SUBFOLDERS = [
     "Documents", "Invoices", "Compliance",
     "Correspondence", "Reports", "Bank Statements",
 ]
 
 
-class CreateFolderRequest(BaseModel):
-    client_name: str
-    client_id: str
-    parent_folder_id: Optional[str] = None
+# ═══════════════════════════════════════════════════════════════════════════
+# All Clients  –  returns every client with their portal connection status
+# ═══════════════════════════════════════════════════════════════════════════
 
-
-@router.post("/drive/create-folders")
-async def create_client_drive_folders(
-    body: CreateFolderRequest,
+@router.get("/all-clients")
+async def list_all_clients(
     current_user: User = Depends(get_current_user),
 ):
-    """Creates root + predefined sub-folders in Drive, auto-links to portal user."""
+    """Returns all clients enriched with their portal connection status."""
     if current_user.role not in ("admin", "manager"):
         raise HTTPException(403, "Insufficient permissions")
 
-    from backend.invoicing import _get_drive_service, _drive_configured
-    if not _drive_configured():
-        raise HTTPException(503, "Google Drive not configured.")
+    clients = await db.clients.find({}, {"_id": 0}).to_list(2000)
+    portal_users = await db.client_portal_users.find(
+        {}, {"_id": 0, "hashed_password": 0}
+    ).to_list(2000)
 
-    service = _get_drive_service()
-    safe_name = body.client_name.strip()
+    portal_by_client: dict = {}
+    for pu in portal_users:
+        cid = pu.get("client_id")
+        if cid:
+            portal_by_client.setdefault(cid, []).append(pu)
 
-    query_parts = [f"name='{safe_name}'", "mimeType='application/vnd.google-apps.folder'", "trashed=false"]
-    if body.parent_folder_id:
-        query_parts.insert(0, f"'{body.parent_folder_id}' in parents")
+    result = []
+    for c in clients:
+        cid = c.get("id", "")
+        c["portal_users"] = portal_by_client.get(cid, [])
+        c["has_portal"] = bool(c["portal_users"])
+        c["has_drive"] = any(pu.get("google_drive_folder_id") for pu in c["portal_users"])
+        result.append(c)
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Folder Template  –  save / load a reusable subfolder architecture
+# ═══════════════════════════════════════════════════════════════════════════
+
+class FolderTemplate(BaseModel):
+    subfolders: List[str] = Field(default_factory=list)
+    parent_folder_id: Optional[str] = None
+
+
+@router.get("/folder-template")
+async def get_folder_template(
+    current_user: User = Depends(get_current_user),
+):
+    """Returns the saved folder architecture template."""
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+    doc = await db.portal_folder_template.find_one({}, {"_id": 0})
+    if not doc:
+        return {"subfolders": DEFAULT_SUBFOLDERS, "parent_folder_id": ""}
+    return doc
+
+
+@router.put("/folder-template")
+async def save_folder_template(
+    body: FolderTemplate,
+    current_user: User = Depends(get_current_user),
+):
+    """Saves (upserts) the folder architecture template."""
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+    await db.portal_folder_template.update_one(
+        {},
+        {"$set": {
+            "subfolders": body.subfolders,
+            "parent_folder_id": body.parent_folder_id or "",
+            "updated_by": current_user.id,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+    return {"success": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Drive Folder Creation  –  single + bulk
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def _resolve_subfolders() -> List[str]:
+    """Return the saved template subfolders or fall back to defaults."""
+    doc = await db.portal_folder_template.find_one({}, {"_id": 0})
+    if doc and doc.get("subfolders"):
+        return doc["subfolders"]
+    return DEFAULT_SUBFOLDERS
+
+
+def _create_drive_folder_sync(service, client_name: str, parent_folder_id: Optional[str], subfolders: List[str]):
+    """
+    Synchronous helper that creates (or reuses) a root folder + subfolders in Drive.
+    Returns a result dict.
+    """
+    safe_name = client_name.strip()
+
+    query_parts = [
+        f"name='{safe_name}'",
+        "mimeType='application/vnd.google-apps.folder'",
+        "trashed=false",
+    ]
+    if parent_folder_id:
+        query_parts.insert(0, f"'{parent_folder_id}' in parents")
 
     existing = service.files().list(
-        q=" and ".join(query_parts), fields="files(id,name,webViewLink)", spaces="drive",
+        q=" and ".join(query_parts),
+        fields="files(id,name,webViewLink)",
+        spaces="drive",
     ).execute().get("files", [])
 
     if existing:
         root_folder, created_root = existing[0], False
     else:
         root_meta = {"name": safe_name, "mimeType": "application/vnd.google-apps.folder"}
-        if body.parent_folder_id:
-            root_meta["parents"] = [body.parent_folder_id]
+        if parent_folder_id:
+            root_meta["parents"] = [parent_folder_id]
         root_folder = service.files().create(body=root_meta, fields="id,name,webViewLink").execute()
         created_root = True
 
     root_id = root_folder["id"]
     sub_created, sub_existing = [], []
-    for sub_name in PREDEFINED_SUBFOLDERS:
+    for sub_name in subfolders:
         sub_exists = service.files().list(
             q=f"'{root_id}' in parents and name='{sub_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false",
             fields="files(id,name)",
@@ -569,13 +649,6 @@ async def create_client_drive_folders(
             ).execute()
             sub_created.append(sub_name)
 
-    portal_user_doc = await db.client_portal_users.find_one({"client_id": body.client_id}, {"_id": 0})
-    if portal_user_doc:
-        await db.client_portal_users.update_one(
-            {"client_id": body.client_id},
-            {"$set": {"google_drive_folder_id": root_id, "google_drive_folder_name": safe_name}},
-        )
-
     return {
         "success": True,
         "folder_id": root_id,
@@ -584,7 +657,114 @@ async def create_client_drive_folders(
         "created_root": created_root,
         "sub_folders_created": sub_created,
         "sub_folders_existing": sub_existing,
-        "auto_linked_portal": bool(portal_user_doc),
+    }
+
+
+class CreateFolderRequest(BaseModel):
+    client_name: str
+    client_id: str
+    parent_folder_id: Optional[str] = None
+    subfolders: Optional[List[str]] = None
+
+
+@router.post("/drive/create-folders")
+async def create_client_drive_folders(
+    body: CreateFolderRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Creates root + sub-folders in Drive using custom or template subfolders, auto-links to portal user."""
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    from backend.invoicing import _get_drive_service, _drive_configured
+    if not _drive_configured():
+        raise HTTPException(503, "Google Drive not configured.")
+
+    service = _get_drive_service()
+    subfolders = body.subfolders if body.subfolders is not None else await _resolve_subfolders()
+
+    result = _create_drive_folder_sync(service, body.client_name, body.parent_folder_id, subfolders)
+    root_id = result["folder_id"]
+    safe_name = result["folder_name"]
+
+    portal_user_doc = await db.client_portal_users.find_one({"client_id": body.client_id}, {"_id": 0})
+    if portal_user_doc:
+        await db.client_portal_users.update_one(
+            {"client_id": body.client_id},
+            {"$set": {"google_drive_folder_id": root_id, "google_drive_folder_name": safe_name}},
+        )
+    result["auto_linked_portal"] = bool(portal_user_doc)
+    return result
+
+
+class BulkCreateFolderRequest(BaseModel):
+    client_ids: Optional[List[str]] = None
+    parent_folder_id: Optional[str] = None
+    subfolders: Optional[List[str]] = None
+
+
+@router.post("/drive/bulk-create-folders")
+async def bulk_create_client_drive_folders(
+    body: BulkCreateFolderRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Bulk-creates Drive folders for multiple clients (or all clients if client_ids is empty).
+    Uses the saved folder template unless subfolders are explicitly provided.
+    """
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    from backend.invoicing import _get_drive_service, _drive_configured
+    if not _drive_configured():
+        raise HTTPException(503, "Google Drive not configured.")
+
+    service = _get_drive_service()
+    subfolders = body.subfolders if body.subfolders is not None else await _resolve_subfolders()
+
+    # Resolve parent_folder_id: prefer explicit, else fall back to template
+    parent_id = body.parent_folder_id
+    if not parent_id:
+        tmpl = await db.portal_folder_template.find_one({}, {"_id": 0})
+        if tmpl:
+            parent_id = tmpl.get("parent_folder_id") or None
+
+    # Fetch clients
+    query = {}
+    if body.client_ids:
+        query = {"id": {"$in": body.client_ids}}
+    clients = await db.clients.find(query, {"_id": 0, "id": 1, "company_name": 1, "name": 1}).to_list(2000)
+
+    results = []
+    for client in clients:
+        client_id = client.get("id", "")
+        client_name = client.get("company_name") or client.get("name") or "Unknown"
+        try:
+            res = _create_drive_folder_sync(service, client_name, parent_id, subfolders)
+            root_id = res["folder_id"]
+            portal_user_doc = await db.client_portal_users.find_one({"client_id": client_id}, {"_id": 0})
+            if portal_user_doc:
+                await db.client_portal_users.update_one(
+                    {"client_id": client_id},
+                    {"$set": {"google_drive_folder_id": root_id, "google_drive_folder_name": client_name}},
+                )
+            results.append({
+                "client_id": client_id,
+                "client_name": client_name,
+                "success": True,
+                "folder_id": root_id,
+                "folder_link": res.get("folder_link", ""),
+                "auto_linked_portal": bool(portal_user_doc),
+                "sub_folders_created": res.get("sub_folders_created", []),
+            })
+        except Exception as exc:
+            results.append({"client_id": client_id, "client_name": client_name, "success": False, "error": str(exc)})
+
+    return {
+        "total": len(results),
+        "succeeded": sum(1 for r in results if r["success"]),
+        "failed": sum(1 for r in results if not r["success"]),
+        "results": results,
     }
 
 
