@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
@@ -66,12 +66,45 @@ const fmtSize = (bytes) => {
   return `${(n / 1048576).toFixed(1)} MB`;
 };
 
+// ── Google Drive download helper ──────────────────────────────────────────
+// Google Docs/Sheets/Slides have no direct binary — export as PDF/xlsx instead.
 const EXPORT_MIME = {
   "application/vnd.google-apps.document":     "application/pdf",
   "application/vnd.google-apps.spreadsheet":  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.google-apps.presentation": "application/pdf",
   "application/vnd.google-apps.form":         "application/pdf",
 };
+
+function getDownloadUrl(file) {
+  const exportMime = EXPORT_MIME[file.mimeType];
+  if (exportMime) {
+    return `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=${encodeURIComponent(exportMime)}`;
+  }
+  return `https://drive.google.com/uc?export=download&id=${file.id}`;
+}
+
+function DownloadBtn({ file }) {
+  const isFolder = file.mimeType === "application/vnd.google-apps.folder";
+  if (isFolder) return null;
+
+  const handleDownload = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    window.open(getDownloadUrl(file), "_blank", "noopener,noreferrer");
+  };
+
+  return (
+    <button
+      onClick={handleDownload}
+      title="Download file"
+      className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition opacity-0 group-hover:opacity-100"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
+      </svg>
+    </button>
+  );
+}
 
 function Section({ title, icon, children, count }) {
   return (
@@ -96,197 +129,40 @@ function Empty({ message }) {
   return <div className="text-center py-8 text-gray-400 text-sm">{message}</div>;
 }
 
-// ── Windows Explorer-style Folder Sidebar ─────────────────────────────────
-// Each tree node: { id, name, children: [ids], expanded, loading, loaded }
-// nodeKey: "root" for root level, or folder's Google Drive id
-
-async function fetchFolderChildren(folderId) {
-  const api = portalApi();
-  const params = {};
-  if (folderId) params.folder_id = folderId;
-  const res = await api.get("/client-portal/drive/files", { params });
-  return res.data.folders || [];
-}
-
-function FolderSidebar({ selectedId, onFolderSelect, sidebarOpen, setSidebarOpen }) {
-  const [tree, setTree] = useState({
-    root: {
-      id: null,
-      name: "My Documents",
-      children: [],
-      expanded: true,
-      loading: true,
-      loaded: false,
-    },
-  });
-
-  const loadNode = useCallback(async (nodeKey, folderId) => {
-    setTree(prev => ({
-      ...prev,
-      [nodeKey]: { ...prev[nodeKey], loading: true },
-    }));
-    try {
-      const folders = await fetchFolderChildren(folderId);
-      setTree(prev => {
-        const next = { ...prev };
-        next[nodeKey] = {
-          ...next[nodeKey],
-          loading: false,
-          loaded: true,
-          children: folders.map(f => f.id),
-        };
-        folders.forEach(f => {
-          if (!next[f.id]) {
-            next[f.id] = {
-              id: f.id,
-              name: f.name,
-              children: [],
-              expanded: false,
-              loading: false,
-              loaded: false,
-            };
-          }
-        });
-        return next;
-      });
-    } catch {
-      setTree(prev => ({
-        ...prev,
-        [nodeKey]: { ...prev[nodeKey], loading: false, loaded: true },
-      }));
-    }
-  }, []);
-
-  useEffect(() => {
-    loadNode("root", null);
-  }, [loadNode]);
-
-  const handleToggle = (e, nodeKey, node) => {
-    e.stopPropagation();
-    if (!node.loaded) {
-      loadNode(nodeKey, node.id);
-    } else {
-      setTree(prev => ({
-        ...prev,
-        [nodeKey]: { ...prev[nodeKey], expanded: !prev[nodeKey].expanded },
-      }));
-    }
-  };
-
-  const handleSelect = (node) => {
-    // Expand if not expanded
-    if (!node.expanded && !node.loaded) {
-      loadNode(node.id || "root", node.id);
-    }
-    onFolderSelect(node.id, node.name);
-    // On mobile: close sidebar after selecting
-    if (window.innerWidth < 768) setSidebarOpen(false);
-  };
-
-  function renderNode(nodeKey, depth = 0) {
-    const node = tree[nodeKey];
-    if (!node) return null;
-    const isSelected = selectedId === node.id;
-    const hasChildren = !node.loaded || node.children.length > 0;
-
-    return (
-      <div key={nodeKey}>
-        <div
-          className={`flex items-center gap-1 rounded-lg cursor-pointer select-none transition-colors duration-100 ${
-            isSelected
-              ? "bg-blue-100 text-blue-800"
-              : "hover:bg-gray-100 text-gray-700"
-          }`}
-          style={{ paddingLeft: `${6 + depth * 14}px`, paddingRight: "6px", paddingTop: "5px", paddingBottom: "5px" }}
-          onClick={() => handleSelect(node)}
-        >
-          {/* Expand / collapse chevron */}
-          <button
-            className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded hover:bg-gray-200"
-            onClick={(e) => handleToggle(e, nodeKey, node)}
-            tabIndex={-1}
-          >
-            {node.loading ? (
-              <div className="w-3 h-3 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
-            ) : hasChildren ? (
-              <svg
-                className={`w-3 h-3 text-gray-400 transition-transform duration-150 ${node.expanded ? "rotate-90" : ""}`}
-                fill="currentColor"
-                viewBox="0 0 20 20"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            ) : (
-              <span className="w-3 h-3 inline-block" />
-            )}
-          </button>
-
-          {/* Folder icon */}
-          <span className="text-sm flex-shrink-0 leading-none">
-            {isSelected ? "📂" : "📁"}
-          </span>
-
-          {/* Folder name */}
-          <span className={`text-xs font-medium truncate flex-1 ${isSelected ? "text-blue-800" : ""}`}>
-            {node.name}
-          </span>
-        </div>
-
-        {/* Children — only render if expanded */}
-        {node.expanded && node.children.map(childId => renderNode(childId, depth + 1))}
-      </div>
-    );
-  }
-
+function Breadcrumb({ crumbs, onNavigate }) {
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm flex flex-col overflow-hidden h-full">
-      {/* Sidebar header */}
-      <div className="flex items-center justify-between px-3 py-3 border-b border-gray-100 bg-gray-50 flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-yellow-500" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
-          </svg>
-          <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Folders</p>
-        </div>
-        {/* Close button (mobile) */}
-        <button
-          className="md:hidden p-1 rounded hover:bg-gray-200 text-gray-500"
-          onClick={() => setSidebarOpen(false)}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Tree area */}
-      <div className="overflow-y-auto flex-1 p-2 space-y-0.5">
-        {renderNode("root")}
-      </div>
-    </div>
+    <nav className="flex items-center gap-1 text-sm mb-4 flex-wrap">
+      {crumbs.map((c, i) => (
+        <React.Fragment key={c.id}>
+          {i > 0 && <span className="text-gray-300 mx-1">/</span>}
+          {i < crumbs.length - 1 ? (
+            <button
+              onClick={() => onNavigate(c.id)}
+              className="text-blue-600 hover:underline font-medium truncate max-w-[180px]"
+            >
+              {c.name}
+            </button>
+          ) : (
+            <span className="text-gray-700 font-semibold truncate max-w-[220px]">{c.name}</span>
+          )}
+        </React.Fragment>
+      ))}
+    </nav>
   );
 }
 
-// ── Main DriveTab ──────────────────────────────────────────────────────────
 function DriveTab({ user }) {
   const [driveData, setDriveData] = useState({ files: [], folders: [], breadcrumb: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [selectedFolderId, setSelectedFolderId] = useState(null);      // currently selected in sidebar
-  const [selectedFolderName, setSelectedFolderName] = useState("My Documents"); // display name
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [currentFolderId, setCurrentFolderId] = useState(null);
 
   const fetchFolder = useCallback(async (folderId) => {
     setLoading(true);
     setError("");
     const api = portalApi();
     try {
-      const params = {};
-      if (folderId) params.folder_id = folderId;
+      const params = folderId ? { folder_id: folderId } : {};
       const res = await api.get("/client-portal/drive/files", { params });
       setDriveData(res.data);
     } catch (err) {
@@ -296,207 +172,128 @@ function DriveTab({ user }) {
     }
   }, []);
 
-  // Load root on mount
-  useEffect(() => { fetchFolder(null); }, [fetchFolder]);
+  useEffect(() => { fetchFolder(null); }, []);
 
-  const handleFolderSelect = (folderId, folderName) => {
-    setSelectedFolderId(folderId);
-    setSelectedFolderName(folderName || "My Documents");
+  const navigateToFolder = (folderId) => {
+    setCurrentFolderId(folderId);
     fetchFolder(folderId);
   };
 
-  const navigateToSubFolder = (folderId, folderName) => {
-    setSelectedFolderId(folderId);
-    setSelectedFolderName(folderName);
-    fetchFolder(folderId);
-  };
-
-  // Proxy download via backend — avoids 403 on private Drive files
-  const handleDownload = async (e, file) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const token = sessionStorage.getItem("client_portal_token");
-    try {
-      const res = await fetch(
-        `${API_BASE}/client-portal/drive/download?file_id=${file.id}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (!res.ok) throw new Error("Download failed");
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = file.name || "download";
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
-    } catch {
-      alert("Download failed. Please try again.");
-    }
+  const navigateToBreadcrumb = (folderId) => {
+    const isRoot = driveData.breadcrumb.length > 0 && driveData.breadcrumb[0].id === folderId;
+    const targetId = isRoot && driveData.breadcrumb.length === 1 ? null : folderId;
+    setCurrentFolderId(targetId);
+    fetchFolder(targetId);
   };
 
   const totalItems = (driveData.folders?.length || 0) + (driveData.files?.length || 0);
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-      {/* Top bar */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 bg-white">
-        {/* Sidebar toggle */}
-        <button
-          onClick={() => setSidebarOpen(v => !v)}
-          className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition"
-          title={sidebarOpen ? "Hide folders" : "Show folders"}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
-          </svg>
-        </button>
-
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <span className="text-lg">📂</span>
-          <h2 className="font-semibold text-gray-800 truncate">{selectedFolderName}</h2>
-          {totalItems > 0 && (
-            <span className="bg-blue-100 text-blue-700 text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0">
-              {totalItems}
-            </span>
-          )}
+    <Section title="My Documents" icon="☁️" count={totalItems}>
+      {driveData.message && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-xl px-4 py-3 mb-4">
+          ℹ️ {driveData.message}
         </div>
-      </div>
+      )}
+      {(error || driveData.error) && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3 mb-4">
+          ⚠️ {error || driveData.error}
+        </div>
+      )}
 
-      {/* Body: sidebar + content */}
-      <div className="flex" style={{ minHeight: "400px" }}>
-        {/* ── Folder Sidebar ── */}
-        {sidebarOpen && (
-          <div
-            className="border-r border-gray-100 flex-shrink-0"
-            style={{ width: "220px" }}
-          >
-            <FolderSidebar
-              selectedId={selectedFolderId}
-              onFolderSelect={handleFolderSelect}
-              sidebarOpen={sidebarOpen}
-              setSidebarOpen={setSidebarOpen}
-            />
-          </div>
-        )}
+      {driveData.breadcrumb?.length > 0 && (
+        <Breadcrumb crumbs={driveData.breadcrumb} onNavigate={navigateToBreadcrumb} />
+      )}
 
-        {/* ── Main Content ── */}
-        <div className="flex-1 min-w-0 p-5 overflow-auto">
-          {driveData.message && (
-            <div className="bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-xl px-4 py-3 mb-4">
-              ℹ️ {driveData.message}
+      {loading ? (
+        <div className="flex justify-center py-10">
+          <div className="w-7 h-7 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+        </div>
+      ) : (
+        <>
+          {driveData.folders?.length > 0 && (
+            <div className="mb-5">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Folders</p>
+              <div className="grid sm:grid-cols-2 gap-2">
+                {driveData.folders.map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => navigateToFolder(f.id)}
+                    className="flex items-center gap-3 p-3 bg-yellow-50 rounded-xl border border-yellow-100 hover:border-yellow-300 hover:bg-yellow-100 transition text-left group w-full"
+                  >
+                    <span className="text-2xl flex-shrink-0">📁</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-800 truncate group-hover:text-yellow-800">
+                        {f.name}
+                      </p>
+                      {f.modifiedTime && (
+                        <p className="text-xs text-gray-400">{fmtDate(f.modifiedTime)}</p>
+                      )}
+                    </div>
+                    <span className="text-gray-300 group-hover:text-yellow-500 text-xs flex-shrink-0">→</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
-          {(error || driveData.error) && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3 mb-4">
-              ⚠️ {error || driveData.error}
-            </div>
-          )}
 
-          {loading ? (
-            <div className="flex justify-center py-16">
-              <div className="w-7 h-7 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
-            </div>
-          ) : (
-            <>
-              {/* Sub-folders grid */}
+          {driveData.files?.length > 0 && (
+            <div>
               {driveData.folders?.length > 0 && (
-                <div className="mb-5">
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Folders</p>
-                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                    {driveData.folders.map((f) => (
-                      <button
-                        key={f.id}
-                        onClick={() => navigateToSubFolder(f.id, f.name)}
-                        className="flex items-center gap-3 p-3 bg-yellow-50 rounded-xl border border-yellow-100 hover:border-yellow-300 hover:bg-yellow-100 transition text-left group w-full"
-                      >
-                        <span className="text-2xl flex-shrink-0">📁</span>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-gray-800 truncate group-hover:text-yellow-800">
-                            {f.name}
-                          </p>
-                          {f.modifiedTime && (
-                            <p className="text-xs text-gray-400">{fmtDate(f.modifiedTime)}</p>
-                          )}
-                        </div>
-                        <span className="text-gray-300 group-hover:text-yellow-500 text-xs flex-shrink-0">→</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Files</p>
               )}
+              <div className="space-y-2">
+                {driveData.files.map((f) => {
+                  const meta = driveIcon(f.mimeType);
+                  return (
+                    <div
+                      key={f.id}
+                      className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50 transition group"
+                    >
+                      <span className={`text-2xl flex-shrink-0 ${meta.color}`}>{meta.icon}</span>
 
-              {/* Files list */}
-              {driveData.files?.length > 0 && (
-                <div>
-                  {driveData.folders?.length > 0 && (
-                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Files</p>
-                  )}
-                  <div className="space-y-2">
-                    {driveData.files.map((f) => {
-                      const meta = driveIcon(f.mimeType);
-                      return (
-                        <div
-                          key={f.id}
-                          className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50 transition group"
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-800 truncate group-hover:text-blue-700">
+                          {f.name}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          {f.modifiedTime ? fmtDate(f.modifiedTime) : ""}
+                          {f.size ? ` · ${fmtSize(f.size)}` : ""}
+                        </p>
+                      </div>
+
+                      {/* Action buttons — visible on hover */}
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {/* Download */}
+                        <DownloadBtn file={f} />
+
+                        {/* Open in Drive */}
+                        <a
+                          href={f.webViewLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          title="Open in Google Drive"
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-100 transition opacity-0 group-hover:opacity-100"
                         >
-                          <span className={`text-2xl flex-shrink-0 ${meta.color}`}>{meta.icon}</span>
-
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-gray-800 truncate group-hover:text-blue-700">
-                              {f.name}
-                            </p>
-                            <p className="text-xs text-gray-400">
-                              {f.modifiedTime ? fmtDate(f.modifiedTime) : ""}
-                              {f.size ? ` · ${fmtSize(f.size)}` : ""}
-                            </p>
-                          </div>
-
-                          {/* Action buttons — visible on hover */}
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            <button
-                              onClick={(e) => handleDownload(e, f)}
-                              title="Download file"
-                              className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition opacity-0 group-hover:opacity-100"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
-                              </svg>
-                            </button>
-
-                            <a
-                              href={f.webViewLink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              title="Open in Google Drive"
-                              className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-100 transition opacity-0 group-hover:opacity-100"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                              </svg>
-                            </a>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {!driveData.files?.length && !driveData.folders?.length && !driveData.message && !driveData.error && !error && (
-                <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12 mb-3 text-gray-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                  </svg>
-                  <p className="text-sm">This folder is empty</p>
-                </div>
-              )}
-            </>
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                          </svg>
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           )}
-        </div>
-      </div>
-    </div>
+
+          {!driveData.files?.length && !driveData.folders?.length && !driveData.message && !driveData.error && !error && (
+            <Empty message="No files found in this folder." />
+          )}
+        </>
+      )}
+    </Section>
   );
 }
 
@@ -526,6 +323,7 @@ export default function ClientPortalDashboard() {
     if (!u) { navigate("/client-portal"); return; }
     setUser(u);
     if (u.can_view_tasks) setActiveTab("tasks");
+    else if (u.can_view_documents) setActiveTab("documents");
     else if (u.can_view_invoices) setActiveTab("invoices");
     else setActiveTab("drive");
   }, [navigate]);
@@ -586,17 +384,19 @@ export default function ClientPortalDashboard() {
 
   const tabs = [
     user.can_view_tasks      && { id: "tasks",      label: "Tasks",      icon: "✅" },
+    user.can_view_documents  && { id: "documents",  label: "Documents",  icon: "📂" },
     user.can_view_invoices   && { id: "invoices",   label: "Invoices",   icon: "🧾" },
     user.can_view_compliance && { id: "compliance", label: "Compliance", icon: "📋" },
-    { id: "drive", label: "My Documents", icon: "📁" },
+    user.google_drive_folder_id && { id: "drive",  label: "My Drive",   icon: "☁️" },
   ].filter(Boolean);
+  if (!tabs.find(t => t.id === "drive")) tabs.push({ id: "drive", label: "My Drive", icon: "☁️" });
 
   return (
     <div className="min-h-screen bg-[#f0f4f8]">
 
       {/* ── Header ── */}
       <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center shadow-sm">
               <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -617,9 +417,9 @@ export default function ClientPortalDashboard() {
         </div>
       </header>
 
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-5">
 
-        {/* ── Hero banner ── */}
+        {/* ── Hero banner — matches app's deep blue dashboard gradient ── */}
         <div
           className="rounded-2xl p-6 text-white relative overflow-hidden"
           style={{ background: "linear-gradient(135deg, #1e3a5f 0%, #1a56a0 55%, #2563eb 100%)" }}
