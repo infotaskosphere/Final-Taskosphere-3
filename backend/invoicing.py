@@ -120,17 +120,14 @@ def _get_drive_refresh_token() -> str | None:
             return None
 
         # Run synchronously — safe to call from sync helper functions
+        # NOTE: pool.submit must receive a callable, not a coroutine.
+        # We pass a lambda so asyncio.run() is called inside the new thread.
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Inside an async context (FastAPI route) — use a new thread
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    token = pool.submit(asyncio.run, _fetch()).result(timeout=5)
-            else:
-                token = loop.run_until_complete(_fetch())
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                token = pool.submit(lambda: asyncio.run(_fetch())).result(timeout=5)
         except Exception:
-            token = asyncio.run(_fetch())
+            token = None
 
         if token:
             # Cache in env so the next call in this process is instant
@@ -190,13 +187,9 @@ def _get_drive_service():
             return doc.get("refresh_token") if (doc and doc.get("connected")) else None
 
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    return pool.submit(asyncio.run, _fetch()).result(timeout=5)
-            else:
-                return loop.run_until_complete(_fetch())
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(lambda: asyncio.run(_fetch())).result(timeout=5)
         except Exception:
             return None
 
@@ -211,13 +204,9 @@ def _get_drive_service():
             )
 
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    pool.submit(asyncio.run, _update()).result(timeout=5)
-            else:
-                loop.run_until_complete(_update())
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                pool.submit(lambda: asyncio.run(_update())).result(timeout=5)
         except Exception:
             pass
 
