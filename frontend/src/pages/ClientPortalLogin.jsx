@@ -2,13 +2,18 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
-// Ensure baseURL always ends with /api regardless of how VITE_API_URL is set in Render
-const _raw = import.meta?.env?.VITE_API_URL || "/api";
-const _base = _raw.replace(/\/+$/, "");
-const API_BASE = _base.endsWith("/api") ? _base : _base + "/api";
+// ── Use the same backend URL resolution as the rest of the app (api.js) ──────
+// VITE_API_URL may be the full backend base (e.g. https://final-taskosphere-backend.onrender.com)
+// or may be unset — in both cases we always fall back to the absolute backend URL so that
+// the built production bundle (served from the frontend Render service) never POSTs to itself.
+let _raw = import.meta?.env?.VITE_API_URL || "https://final-taskosphere-backend.onrender.com";
+_raw = _raw.replace(/\/+$/, "");
+if (!_raw.endsWith("/api")) _raw += "/api";
+const API_BASE = _raw;
 const API = axios.create({ baseURL: API_BASE });
 
-const BACKEND_URL = "https://final-taskosphere-backend.onrender.com";
+// Bare backend root (no /api) — used only for the wake-up health ping
+const BACKEND_URL = API_BASE.replace(/\/api$/, "");
 
 export default function ClientPortalLogin() {
   const navigate = useNavigate();
@@ -58,7 +63,7 @@ export default function ClientPortalLogin() {
       const user = data?.user;
 
       if (!access_token) {
-        setError("Could not connect to the server. Please wait a moment and try again.");
+        setError("Login failed: server did not return an access token. Please contact your account manager.");
         return;
       }
 
