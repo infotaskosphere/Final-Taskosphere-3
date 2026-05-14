@@ -200,6 +200,7 @@ function FolderSidebar({ selectedId, onFolderSelect }) {
           ...next[nodeKey],
           loading: false,
           loaded: true,
+          expanded: true,
           children: folders.map(f => f.id),
         };
         folders.forEach(f => {
@@ -241,8 +242,14 @@ function FolderSidebar({ selectedId, onFolderSelect }) {
   };
 
   const handleSelect = (node) => {
-    if (!node.expanded && !node.loaded) {
-      loadNode(node.id || "root", node.id);
+    const nodeKey = node.id || "root";
+    if (!node.loaded) {
+      loadNode(nodeKey, node.id);
+    } else {
+      setTree(prev => ({
+        ...prev,
+        [nodeKey]: { ...prev[nodeKey], expanded: true },
+      }));
     }
     onFolderSelect(node.id, node.name);
   };
@@ -759,11 +766,6 @@ export default function ClientPortalDashboard() {
         {/* Nav */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden py-4">
           <div className={`mt-2 mb-2 ${collapsed ? "px-2" : "px-3"}`}>
-            {!collapsed && (
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1 mb-2">
-                Portal
-              </p>
-            )}
             <div className={`space-y-0.5 ${collapsed ? "px-2" : ""}`}>
               {navItems.map((item) => {
                 const isActive = activeTab === item.id;
@@ -897,7 +899,7 @@ export default function ClientPortalDashboard() {
           minHeight: "100vh",
         }}
       >
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+        <div className="w-full px-4 sm:px-6 lg:px-8 py-6 space-y-5">
 
           {/* Hero banner */}
           <div
@@ -937,7 +939,7 @@ export default function ClientPortalDashboard() {
           )}
 
           {activeTab === "drive" ? (
-            <DriveTab user={user} />
+            <DriveTab user={user} selectedFolderId={selectedFolderId} selectedFolderName={selectedFolderName} />
           ) : loading ? (
             <div className="flex justify-center py-16">
               <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
