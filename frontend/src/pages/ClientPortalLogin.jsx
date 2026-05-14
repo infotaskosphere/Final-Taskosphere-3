@@ -2,7 +2,11 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
-const API = axios.create({ baseURL: import.meta?.env?.VITE_API_URL || "/api" });
+// Ensure baseURL always ends with /api regardless of how VITE_API_URL is set in Render
+const _raw = import.meta?.env?.VITE_API_URL || "/api";
+const _base = _raw.replace(/\/+$/, "");
+const API_BASE = _base.endsWith("/api") ? _base : _base + "/api";
+const API = axios.create({ baseURL: API_BASE });
 
 const BACKEND_URL = "https://final-taskosphere-backend.onrender.com";
 
