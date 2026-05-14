@@ -52,11 +52,12 @@ const DRIVE_ICONS = {
   "application/vnd.google-apps.spreadsheet":  { icon: "📊", color: "text-green-500" },
   "application/vnd.google-apps.presentation": { icon: "📽️", color: "text-orange-500" },
   "application/vnd.google-apps.form":         { icon: "📝", color: "text-purple-500" },
-  "application/pdf":                           { icon: "📑", color: "text-red-500" },
-  "image/jpeg":                                { icon: "🖼️", color: "text-pink-500" },
-  "image/png":                                 { icon: "🖼️", color: "text-pink-500" },
+  "application/pdf":                          { icon: "📑", color: "text-red-500" },
+  "image/jpeg":                               { icon: "🖼️", color: "text-pink-500" },
+  "image/png":                                { icon: "🖼️", color: "text-pink-500" },
 };
 const driveIcon = (mime) => DRIVE_ICONS[mime] || { icon: "📎", color: "text-gray-500" };
+
 const fmtSize = (bytes) => {
   if (!bytes) return "";
   const n = Number(bytes);
@@ -64,6 +65,46 @@ const fmtSize = (bytes) => {
   if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1048576).toFixed(1)} MB`;
 };
+
+// ── Google Drive download helper ──────────────────────────────────────────
+// Google Docs/Sheets/Slides have no direct binary — export as PDF/xlsx instead.
+const EXPORT_MIME = {
+  "application/vnd.google-apps.document":     "application/pdf",
+  "application/vnd.google-apps.spreadsheet":  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.google-apps.presentation": "application/pdf",
+  "application/vnd.google-apps.form":         "application/pdf",
+};
+
+function getDownloadUrl(file) {
+  const exportMime = EXPORT_MIME[file.mimeType];
+  if (exportMime) {
+    return `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=${encodeURIComponent(exportMime)}`;
+  }
+  return `https://drive.google.com/uc?export=download&id=${file.id}`;
+}
+
+function DownloadBtn({ file }) {
+  const isFolder = file.mimeType === "application/vnd.google-apps.folder";
+  if (isFolder) return null;
+
+  const handleDownload = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    window.open(getDownloadUrl(file), "_blank", "noopener,noreferrer");
+  };
+
+  return (
+    <button
+      onClick={handleDownload}
+      title="Download file"
+      className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition opacity-0 group-hover:opacity-100"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
+      </svg>
+    </button>
+  );
+}
 
 function Section({ title, icon, children, count }) {
   return (
@@ -73,7 +114,7 @@ function Section({ title, icon, children, count }) {
           <span className="text-xl">{icon}</span>
           <h2 className="font-semibold text-gray-800">{title}</h2>
           {count !== undefined && (
-            <span className="bg-indigo-100 text-indigo-700 text-xs font-medium px-2 py-0.5 rounded-full">
+            <span className="bg-blue-100 text-blue-700 text-xs font-medium px-2 py-0.5 rounded-full">
               {count}
             </span>
           )}
@@ -97,7 +138,7 @@ function Breadcrumb({ crumbs, onNavigate }) {
           {i < crumbs.length - 1 ? (
             <button
               onClick={() => onNavigate(c.id)}
-              className="text-indigo-600 hover:underline font-medium truncate max-w-[180px]"
+              className="text-blue-600 hover:underline font-medium truncate max-w-[180px]"
             >
               {c.name}
             </button>
@@ -131,9 +172,7 @@ function DriveTab({ user }) {
     }
   }, []);
 
-  useEffect(() => {
-    fetchFolder(currentFolderId);
-  }, []);
+  useEffect(() => { fetchFolder(null); }, []);
 
   const navigateToFolder = (folderId) => {
     setCurrentFolderId(folderId);
@@ -168,7 +207,7 @@ function DriveTab({ user }) {
 
       {loading ? (
         <div className="flex justify-center py-10">
-          <div className="w-7 h-7 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
+          <div className="w-7 h-7 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
         </div>
       ) : (
         <>
@@ -203,20 +242,18 @@ function DriveTab({ user }) {
               {driveData.folders?.length > 0 && (
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Files</p>
               )}
-              <div className="grid sm:grid-cols-2 gap-2">
+              <div className="space-y-2">
                 {driveData.files.map((f) => {
                   const meta = driveIcon(f.mimeType);
                   return (
-                    <a
+                    <div
                       key={f.id}
-                      href={f.webViewLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100 hover:border-indigo-300 hover:bg-indigo-50 transition group"
+                      className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50 transition group"
                     >
                       <span className={`text-2xl flex-shrink-0 ${meta.color}`}>{meta.icon}</span>
+
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-gray-800 truncate group-hover:text-indigo-700">
+                        <p className="text-sm font-medium text-gray-800 truncate group-hover:text-blue-700">
                           {f.name}
                         </p>
                         <p className="text-xs text-gray-400">
@@ -224,8 +261,27 @@ function DriveTab({ user }) {
                           {f.size ? ` · ${fmtSize(f.size)}` : ""}
                         </p>
                       </div>
-                      <span className="text-gray-300 group-hover:text-indigo-400 text-xs flex-shrink-0">↗</span>
-                    </a>
+
+                      {/* Action buttons — visible on hover */}
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {/* Download */}
+                        <DownloadBtn file={f} />
+
+                        {/* Open in Drive */}
+                        <a
+                          href={f.webViewLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          title="Open in Google Drive"
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-100 transition opacity-0 group-hover:opacity-100"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                          </svg>
+                        </a>
+                      </div>
+                    </div>
                   );
                 })}
               </div>
@@ -258,9 +314,7 @@ export default function ClientPortalDashboard() {
       return;
     }
     let u;
-    try {
-      u = JSON.parse(stored);
-    } catch {
+    try { u = JSON.parse(stored); } catch {
       sessionStorage.removeItem("client_portal_user");
       sessionStorage.removeItem("client_portal_token");
       navigate("/client-portal");
@@ -314,10 +368,15 @@ export default function ClientPortalDashboard() {
     navigate("/client-portal");
   };
 
+  const greeting = () => {
+    const h = new Date().getHours();
+    return h < 12 ? "Good Morning" : h < 17 ? "Good Afternoon" : "Good Evening";
+  };
+
   if (!user) return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+    <div className="min-h-screen bg-[#f0f4f8] flex items-center justify-center">
       <div className="text-center">
-        <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-3" />
+        <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-3" />
         <p className="text-sm text-gray-400">Loading portal…</p>
       </div>
     </div>
@@ -328,20 +387,21 @@ export default function ClientPortalDashboard() {
     user.can_view_documents  && { id: "documents",  label: "Documents",  icon: "📂" },
     user.can_view_invoices   && { id: "invoices",   label: "Invoices",   icon: "🧾" },
     user.can_view_compliance && { id: "compliance", label: "Compliance", icon: "📋" },
-    user.google_drive_folder_id && { id: "drive", label: "My Drive", icon: "☁️" },
+    user.google_drive_folder_id && { id: "drive",  label: "My Drive",   icon: "☁️" },
   ].filter(Boolean);
-
-  if (!tabs.find(t => t.id === "drive")) {
-    tabs.push({ id: "drive", label: "My Drive", icon: "☁️" });
-  }
+  if (!tabs.find(t => t.id === "drive")) tabs.push({ id: "drive", label: "My Drive", icon: "☁️" });
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#f0f4f8]">
+
+      {/* ── Header ── */}
       <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-10">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center">
-              <span className="text-white text-lg">🏢</span>
+            <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center shadow-sm">
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+              </svg>
             </div>
             <div>
               <p className="text-sm font-semibold text-gray-900">{user.display_name}</p>
@@ -357,14 +417,40 @@ export default function ClientPortalDashboard() {
         </div>
       </header>
 
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-        <div className="bg-gradient-to-r from-indigo-600 to-blue-500 rounded-2xl p-6 text-white">
-          <h1 className="text-xl font-bold">Welcome back, {user.display_name} 👋</h1>
-          <p className="text-indigo-200 text-sm mt-1">
-            Here's an overview of your account information and documents.
-          </p>
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+
+        {/* ── Hero banner — matches app's deep blue dashboard gradient ── */}
+        <div
+          className="rounded-2xl p-6 text-white relative overflow-hidden"
+          style={{ background: "linear-gradient(135deg, #1e3a5f 0%, #1a56a0 55%, #2563eb 100%)" }}
+        >
+          <div
+            className="absolute inset-0 opacity-10 pointer-events-none"
+            style={{
+              backgroundImage: "radial-gradient(circle at 1px 1px, rgba(255,255,255,0.5) 1px, transparent 0)",
+              backgroundSize: "28px 28px",
+            }}
+          />
+          <div className="relative z-10 flex items-start justify-between flex-wrap gap-4">
+            <div>
+              <p className="text-blue-300 text-xs font-semibold uppercase tracking-widest mb-1">Client Portal</p>
+              <h1 className="text-xl font-bold">{greeting()}, {user.display_name} 👋</h1>
+              <p className="text-blue-200 text-sm mt-1">
+                Here's an overview of your account information and documents.
+              </p>
+            </div>
+            <div className="bg-white/10 rounded-xl px-4 py-2 text-right backdrop-blur-sm">
+              <p className="text-blue-200 text-xs">
+                {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}
+              </p>
+              <p className="text-white font-semibold text-sm mt-0.5">
+                {new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })} IST
+              </p>
+            </div>
+          </div>
         </div>
 
+        {/* ── Tab bar ── */}
         <div className="flex gap-2 flex-wrap">
           {tabs.map(t => (
             <button
@@ -372,8 +458,8 @@ export default function ClientPortalDashboard() {
               onClick={() => setActiveTab(t.id)}
               className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition ${
                 activeTab === t.id
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "bg-white text-gray-600 border border-gray-200 hover:border-indigo-300"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "bg-white text-gray-600 border border-gray-200 hover:border-blue-300 hover:text-blue-600"
               }`}
             >
               <span>{t.icon}</span> {t.label}
@@ -391,7 +477,7 @@ export default function ClientPortalDashboard() {
           <DriveTab user={user} />
         ) : loading ? (
           <div className="flex justify-center py-16">
-            <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
+            <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
           </div>
         ) : (
           <>
@@ -402,7 +488,7 @@ export default function ClientPortalDashboard() {
                 ) : (
                   <div className="space-y-3">
                     {(data.tasks || []).map((t, i) => (
-                      <div key={i} className="flex items-start justify-between p-4 bg-gray-50 rounded-xl border border-gray-100 hover:border-indigo-200 transition">
+                      <div key={i} className="flex items-start justify-between p-4 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 transition">
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-gray-900 text-sm truncate">{t.title}</p>
                           {t.description && (
@@ -463,7 +549,7 @@ export default function ClientPortalDashboard() {
                 ) : (
                   <div className="space-y-3">
                     {(data.invoices || []).map((inv, i) => (
-                      <div key={i} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-100">
+                      <div key={i} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-100 transition">
                         <div>
                           <p className="font-semibold text-gray-900 text-sm">{inv.invoice_number}</p>
                           <p className="text-xs text-gray-500 mt-0.5">
