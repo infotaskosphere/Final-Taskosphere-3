@@ -156,6 +156,8 @@ function DriveTab({ user }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [currentFolderId, setCurrentFolderId] = useState(null);
+  // Stack of previous folder IDs for back navigation
+  const [folderHistory, setFolderHistory] = useState([]);
 
   const fetchFolder = useCallback(async (folderId) => {
     setLoading(true);
@@ -175,21 +177,48 @@ function DriveTab({ user }) {
   useEffect(() => { fetchFolder(null); }, []);
 
   const navigateToFolder = (folderId) => {
+    setFolderHistory(prev => [...prev, currentFolderId]);
     setCurrentFolderId(folderId);
     fetchFolder(folderId);
   };
 
+  const navigateBack = () => {
+    if (folderHistory.length === 0) return;
+    const prev = [...folderHistory];
+    const parentId = prev.pop();
+    setFolderHistory(prev);
+    setCurrentFolderId(parentId);
+    fetchFolder(parentId);
+  };
+
   const navigateToBreadcrumb = (folderId) => {
-    const isRoot = driveData.breadcrumb.length > 0 && driveData.breadcrumb[0].id === folderId;
-    const targetId = isRoot && driveData.breadcrumb.length === 1 ? null : folderId;
+    const idx = (driveData.breadcrumb || []).findIndex(c => c.id === folderId);
+    const newHistory = idx > 0 ? folderHistory.slice(0, idx) : [];
+    setFolderHistory(newHistory);
+    const isRoot = idx === 0;
+    const targetId = isRoot ? null : folderId;
     setCurrentFolderId(targetId);
     fetchFolder(targetId);
   };
 
+  const isAtRoot = folderHistory.length === 0;
   const totalItems = (driveData.folders?.length || 0) + (driveData.files?.length || 0);
 
   return (
-    <Section title="My Documents" icon="☁️" count={totalItems}>
+    <Section title="My Documents" icon="📁" count={totalItems}>
+      {/* Back button — shown whenever we are inside a subfolder */}
+      {!isAtRoot && (
+        <button
+          onClick={navigateBack}
+          className="flex items-center gap-2 mb-4 px-3 py-1.5 rounded-lg text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition w-fit"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          Back
+        </button>
+      )}
+
       {driveData.message && (
         <div className="bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-xl px-4 py-3 mb-4">
           ℹ️ {driveData.message}
@@ -201,7 +230,7 @@ function DriveTab({ user }) {
         </div>
       )}
 
-      {driveData.breadcrumb?.length > 0 && (
+      {driveData.breadcrumb?.length > 1 && (
         <Breadcrumb crumbs={driveData.breadcrumb} onNavigate={navigateToBreadcrumb} />
       )}
 
@@ -323,7 +352,6 @@ export default function ClientPortalDashboard() {
     if (!u) { navigate("/client-portal"); return; }
     setUser(u);
     if (u.can_view_tasks) setActiveTab("tasks");
-    else if (u.can_view_documents) setActiveTab("documents");
     else if (u.can_view_invoices) setActiveTab("invoices");
     else setActiveTab("drive");
   }, [navigate]);
@@ -384,12 +412,10 @@ export default function ClientPortalDashboard() {
 
   const tabs = [
     user.can_view_tasks      && { id: "tasks",      label: "Tasks",      icon: "✅" },
-    user.can_view_documents  && { id: "documents",  label: "Documents",  icon: "📂" },
     user.can_view_invoices   && { id: "invoices",   label: "Invoices",   icon: "🧾" },
     user.can_view_compliance && { id: "compliance", label: "Compliance", icon: "📋" },
-    user.google_drive_folder_id && { id: "drive",  label: "My Drive",   icon: "☁️" },
+    { id: "drive", label: "My Documents", icon: "📁" },
   ].filter(Boolean);
-  if (!tabs.find(t => t.id === "drive")) tabs.push({ id: "drive", label: "My Drive", icon: "☁️" });
 
   return (
     <div className="min-h-screen bg-[#f0f4f8]">
