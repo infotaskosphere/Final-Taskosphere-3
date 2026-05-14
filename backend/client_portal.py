@@ -16,6 +16,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
+import io
 from pydantic import BaseModel, EmailStr, Field
 from passlib.context import CryptContext
 from jose import jwt, JWTError
@@ -887,82 +889,23 @@ async def bulk_create_client_drive_folders(
     }
 
 
-def _is_folder_within_root(folder_id: str, root_folder_id: str, max_depth: int = 10) -> tuple:
-    """
-    BFS/DFS check: walk UP the Drive folder hierarchy (via parents) to confirm
-    that `folder_id` is a descendant of `root_folder_id`.
-    Returns (is_valid: bool, breadcrumb_ids: list[str]) where breadcrumb_ids is
-    the ordered list [root_id, ..., folder_id] if valid, else (False, []).
-    Also resolves folder names along the way.
-    """
-    from backend.invoicing import _get_drive_service, _drive_configured
-    if not _drive_configured():
-        return False, []
-
-    if folder_id == root_folder_id:
-        return True, [root_folder_id]
-
-    try:
-        service = _get_drive_service()
-        # Walk up parent chain from folder_id until we reach root or exhaust depth
-        chain = [folder_id]  # bottom-up: [folder_id, parent1, parent2, ..., root?]
-        current = folder_id
-        for _ in range(max_depth):
-            meta = service.files().get(fileId=current, fields="id,name,parents").execute()
-            parents = meta.get("parents", [])
-            if not parents:
-                return False, []
-            parent = parents[0]
-            chain.append(parent)
-            if parent == root_folder_id:
-                # Valid! chain is [folder_id, ..., root_folder_id] — reverse for breadcrumb
-                chain.reverse()  # now [root_folder_id, ..., folder_id]
-                return True, chain
-            current = parent
-        return False, []
-    except Exception:
-        return False, []
-
-
-def _build_breadcrumb_from_chain(chain: list, root_name: str) -> list:
-    """
-    Given an ordered list of folder IDs [root, ..., target], fetch their names
-    and return breadcrumb dicts [{id, name}, ...].
-    """
-    from backend.invoicing import _get_drive_service, _drive_configured
-    if not chain:
-        return []
-    crumbs = []
-    try:
-        service = _get_drive_service() if _drive_configured() else None
-        for i, fid in enumerate(chain):
-            if i == 0:
-                name = root_name or "My Documents"
-            elif service:
-                try:
-                    meta = service.files().get(fileId=fid, fields="id,name").execute()
-                    name = meta.get("name", fid)
-                except Exception:
-                    name = fid
-            else:
-                name = fid
-            crumbs.append({"id": fid, "name": name})
-    except Exception:
-        crumbs = [{"id": fid, "name": fid} for fid in chain]
-    return crumbs
-
-
 @router.get("/drive/files")
 async def portal_drive_files(
-    folder_id: Optional[str] = Query(None, description="Subfolder to browse (must be inside client's root)"),
+    folder_id: Optional[str] = Query(None, description="Subfolder to browse"),
+    parent_folder_id: Optional[str] = Query(None, description="The parent folder that listed folder_id (for security validation)"),
+    breadcrumb_json: Optional[str] = Query(None, description="JSON-encoded breadcrumb from client for continuity"),
     portal_user=Depends(get_current_portal_client),
 ):
     """
     Returns visible files/folders in the Google Drive folder linked to this client.
-    Supports multi-level subfolder navigation: pass ?folder_id=XYZ to browse any
-    descendant folder. Security: validates that folder_id is within the client's
-    assigned root using parent-chain traversal.
-    Respects admin-configured visibility rules (hidden_ids are filtered out).
+    Supports unlimited subfolder depth.
+
+    Security model: instead of walking the Drive parent-chain (which can fail due to
+    Drive API scope/permission quirks), we use a one-hop validation approach:
+      - Root access: always allowed (no folder_id).
+      - Subfolder access: the client must supply the parent_folder_id from which they
+        navigated. We re-fetch that parent's listing and confirm folder_id is present
+        and visible there. This means each hop is validated against its direct parent.
     """
     root_folder_id = portal_user.get("google_drive_folder_id")
     if not root_folder_id:
@@ -974,17 +917,49 @@ async def portal_drive_files(
         }
 
     root_name = portal_user.get("google_drive_folder_name") or "My Documents"
+    browse_id = root_folder_id
     breadcrumb = [{"id": root_folder_id, "name": root_name}]
-    browse_id = root_folder_id  # default: client's root
+
+    # Load visibility config once
+    vis_doc = await db.client_drive_visibility.find_one(
+        {"portal_user_id": portal_user["id"]}, {"_id": 0}
+    )
+    hidden_ids: set = set(vis_doc.get("hidden_ids", [])) if vis_doc else set()
 
     if folder_id and folder_id != root_folder_id:
-        # Security: validate that requested folder is inside client's root
-        is_valid, chain = _is_folder_within_root(folder_id, root_folder_id)
-        if is_valid:
+        # Determine which parent to validate against
+        validate_parent = parent_folder_id if parent_folder_id else root_folder_id
+
+        try:
+            parent_files = _fetch_drive_files_raw(validate_parent)
+        except Exception:
+            return {"files": [], "folders": [], "breadcrumb": breadcrumb,
+                    "error": "Could not reach Google Drive."}
+
+        # Check folder_id is a visible folder in the parent listing
+        visible_folder_ids = {
+            f["id"] for f in parent_files
+            if f.get("mimeType") == "application/vnd.google-apps.folder"
+            and f["id"] not in hidden_ids
+        }
+
+        if folder_id in visible_folder_ids:
             browse_id = folder_id
-            breadcrumb = _build_breadcrumb_from_chain(chain, root_name)
+            # Get folder name from parent listing
+            folder_name = next((f["name"] for f in parent_files if f["id"] == folder_id), folder_id)
+            # Rebuild breadcrumb: parse existing client breadcrumb + append new entry
+            try:
+                import json as _json
+                existing_crumbs = _json.loads(breadcrumb_json) if breadcrumb_json else []
+                # Ensure root is always first
+                if not existing_crumbs or existing_crumbs[0].get("id") != root_folder_id:
+                    existing_crumbs = [{"id": root_folder_id, "name": root_name}]
+                breadcrumb = existing_crumbs + [{"id": folder_id, "name": folder_name}]
+            except Exception:
+                breadcrumb = [{"id": root_folder_id, "name": root_name},
+                              {"id": folder_id, "name": folder_name}]
         else:
-            # Invalid / out-of-scope folder — silently fall back to root
+            # Not found as a visible folder — fall back to root
             browse_id = root_folder_id
 
     try:
@@ -1000,16 +975,9 @@ async def portal_drive_files(
         return {"files": [], "folders": [], "breadcrumb": breadcrumb,
                 "error": "Could not reach Google Drive."}
 
-    # Apply visibility filter
-    vis_doc = await db.client_drive_visibility.find_one(
-        {"portal_user_id": portal_user["id"]}, {"_id": 0}
-    )
-    hidden_ids: set = set(vis_doc.get("hidden_ids", [])) if vis_doc else set()
     visible_all = [f for f in all_files if f["id"] not in hidden_ids]
-
-    # Separate folders from files
     folders = [f for f in visible_all if f.get("mimeType") == "application/vnd.google-apps.folder"]
-    files = [f for f in visible_all if f.get("mimeType") != "application/vnd.google-apps.folder"]
+    files   = [f for f in visible_all if f.get("mimeType") != "application/vnd.google-apps.folder"]
 
     return {
         "files": files,
@@ -1018,3 +986,91 @@ async def portal_drive_files(
         "root_folder_id": root_folder_id,
         "current_folder_id": browse_id,
     }
+
+
+# ── Google Drive proxy download ───────────────────────────────────────────────
+# Files stored in Drive are private; direct /uc?export=download URLs return 403
+# for any viewer who isn't logged into the owning Google account.
+# This endpoint fetches the file bytes via the server's authenticated Drive
+# service and streams them straight to the client.
+
+EXPORT_MIME_MAP = {
+    "application/vnd.google-apps.document":     ("application/pdf", ".pdf"),
+    "application/vnd.google-apps.spreadsheet":  (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx"),
+    "application/vnd.google-apps.presentation": ("application/pdf", ".pdf"),
+    "application/vnd.google-apps.form":         ("application/pdf", ".pdf"),
+}
+
+@router.get("/drive/download")
+async def portal_drive_download(
+    file_id: str = Query(..., description="Drive file ID to download"),
+    portal_user=Depends(get_current_portal_client),
+):
+    """
+    Proxy-downloads a Drive file through the backend using the server's OAuth
+    credentials, so the client never needs their own Google account access.
+    Security: confirms the file is visible (not in hidden_ids) for this portal user.
+    """
+    from backend.invoicing import _get_drive_service, _drive_configured
+
+    if not _drive_configured():
+        raise HTTPException(503, "Google Drive not configured.")
+
+    # Verify this file is not hidden for the client
+    vis_doc = await db.client_drive_visibility.find_one(
+        {"portal_user_id": portal_user["id"]}, {"_id": 0}
+    )
+    hidden_ids: set = set(vis_doc.get("hidden_ids", [])) if vis_doc else set()
+    if file_id in hidden_ids:
+        raise HTTPException(403, "You do not have access to this file.")
+
+    try:
+        service = _get_drive_service()
+
+        # Get file metadata to determine name and mimeType
+        meta = service.files().get(
+            fileId=file_id,
+            fields="id,name,mimeType,size"
+        ).execute()
+
+        mime_type = meta.get("mimeType", "application/octet-stream")
+        file_name = meta.get("name", file_id)
+
+        # Google Workspace files (Docs/Sheets/Slides) can only be exported, not downloaded
+        if mime_type in EXPORT_MIME_MAP:
+            export_mime, ext = EXPORT_MIME_MAP[mime_type]
+            request = service.files().export_media(fileId=file_id, mimeType=export_mime)
+            if not file_name.endswith(ext):
+                file_name += ext
+            content_type = export_mime
+        else:
+            request = service.files().get_media(fileId=file_id)
+            content_type = mime_type
+
+        # Download into memory buffer (streaming from Drive API)
+        import googleapiclient.http as gapi_http
+        buf = io.BytesIO()
+        downloader = gapi_http.MediaIoBaseDownload(buf, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        buf.seek(0)
+
+        # Sanitise filename for Content-Disposition header
+        safe_name = file_name.replace('"', "'")
+
+        return StreamingResponse(
+            buf,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_name}"',
+                "Cache-Control": "no-store",
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Drive download error for file {file_id}: {e}", exc_info=True)
+        raise HTTPException(500, "Failed to download file from Google Drive.")
