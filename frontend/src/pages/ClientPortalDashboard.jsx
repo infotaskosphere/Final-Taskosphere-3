@@ -2,7 +2,11 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
-const API_BASE = import.meta?.env?.VITE_API_URL || "/api";
+// Always resolve to the absolute backend URL — same logic as api.js and ClientPortalLogin.jsx
+let _raw = import.meta?.env?.VITE_API_URL || "https://final-taskosphere-backend.onrender.com";
+_raw = _raw.replace(/\/+$/, "");
+if (!_raw.endsWith("/api")) _raw += "/api";
+const API_BASE = _raw;
 
 function portalApi() {
   const token = sessionStorage.getItem("client_portal_token");
@@ -278,16 +282,20 @@ export default function ClientPortalDashboard() {
     try {
       if (tab === "tasks" && user.can_view_tasks) {
         const res = await api.get("/client-portal/tasks");
-        setData(d => ({ ...d, tasks: res.data }));
+        const tasks = Array.isArray(res.data) ? res.data : [];
+        setData(d => ({ ...d, tasks }));
       } else if (tab === "documents" && user.can_view_documents) {
         const res = await api.get("/client-portal/documents");
-        setData(d => ({ ...d, documents: res.data }));
+        const documents = Array.isArray(res.data) ? res.data : [];
+        setData(d => ({ ...d, documents }));
       } else if (tab === "invoices" && user.can_view_invoices) {
         const res = await api.get("/client-portal/invoices");
-        setData(d => ({ ...d, invoices: res.data }));
+        const invoices = Array.isArray(res.data) ? res.data : [];
+        setData(d => ({ ...d, invoices }));
       } else if (tab === "compliance" && user.can_view_compliance) {
         const res = await api.get("/client-portal/compliance");
-        setData(d => ({ ...d, compliance: res.data }));
+        const compliance = Array.isArray(res.data) ? res.data : [];
+        setData(d => ({ ...d, compliance }));
       }
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed to load data.");
@@ -388,12 +396,12 @@ export default function ClientPortalDashboard() {
         ) : (
           <>
             {activeTab === "tasks" && (
-              <Section title="Tasks" icon="✅" count={data.tasks.length}>
-                {data.tasks.length === 0 ? (
+              <Section title="Tasks" icon="✅" count={(data.tasks || []).length}>
+                {(data.tasks || []).length === 0 ? (
                   <Empty message="No tasks found for your account." />
                 ) : (
                   <div className="space-y-3">
-                    {data.tasks.map((t, i) => (
+                    {(data.tasks || []).map((t, i) => (
                       <div key={i} className="flex items-start justify-between p-4 bg-gray-50 rounded-xl border border-gray-100 hover:border-indigo-200 transition">
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-gray-900 text-sm truncate">{t.title}</p>
@@ -418,8 +426,8 @@ export default function ClientPortalDashboard() {
             )}
 
             {activeTab === "documents" && (
-              <Section title="Documents" icon="📂" count={data.documents.length}>
-                {data.documents.length === 0 ? (
+              <Section title="Documents" icon="📂" count={(data.documents || []).length}>
+                {(data.documents || []).length === 0 ? (
                   <Empty message="No documents found." />
                 ) : (
                   <div className="overflow-x-auto">
@@ -433,7 +441,7 @@ export default function ClientPortalDashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
-                        {data.documents.map((d, i) => (
+                        {(data.documents || []).map((d, i) => (
                           <tr key={i} className="hover:bg-gray-50">
                             <td className="py-3 font-medium text-gray-800">{d.name}</td>
                             <td className="py-3 text-gray-500">{d.doc_type || "—"}</td>
@@ -449,12 +457,12 @@ export default function ClientPortalDashboard() {
             )}
 
             {activeTab === "invoices" && (
-              <Section title="Invoices" icon="🧾" count={data.invoices.length}>
-                {data.invoices.length === 0 ? (
+              <Section title="Invoices" icon="🧾" count={(data.invoices || []).length}>
+                {(data.invoices || []).length === 0 ? (
                   <Empty message="No invoices found." />
                 ) : (
                   <div className="space-y-3">
-                    {data.invoices.map((inv, i) => (
+                    {(data.invoices || []).map((inv, i) => (
                       <div key={i} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-100">
                         <div>
                           <p className="font-semibold text-gray-900 text-sm">{inv.invoice_number}</p>
@@ -477,12 +485,12 @@ export default function ClientPortalDashboard() {
             )}
 
             {activeTab === "compliance" && (
-              <Section title="Compliance" icon="📋" count={data.compliance.length}>
-                {data.compliance.length === 0 ? (
+              <Section title="Compliance" icon="📋" count={(data.compliance || []).length}>
+                {(data.compliance || []).length === 0 ? (
                   <Empty message="No compliance records found." />
                 ) : (
                   <div className="space-y-3">
-                    {data.compliance.map((c, i) => (
+                    {(data.compliance || []).map((c, i) => (
                       <div key={i} className="flex items-start justify-between p-4 bg-gray-50 rounded-xl border border-gray-100">
                         <div>
                           <p className="font-medium text-gray-900 text-sm">{c.compliance_name}</p>
