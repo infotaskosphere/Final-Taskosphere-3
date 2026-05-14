@@ -175,7 +175,7 @@ async function fetchFolderChildren(folderId) {
   return res.data.folders || [];
 }
 
-function FolderSidebar({ selectedId, onFolderSelect, sidebarOpen, setSidebarOpen, companyName }) {
+function FolderSidebar({ selectedId, onFolderSelect }) {
   const [tree, setTree] = useState({
     root: {
       id: null,
@@ -245,7 +245,6 @@ function FolderSidebar({ selectedId, onFolderSelect, sidebarOpen, setSidebarOpen
       loadNode(node.id || "root", node.id);
     }
     onFolderSelect(node.id, node.name);
-    if (window.innerWidth < 768) setSidebarOpen(false);
   };
 
   function renderNode(nodeKey, depth = 0) {
@@ -304,45 +303,17 @@ function FolderSidebar({ selectedId, onFolderSelect, sidebarOpen, setSidebarOpen
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm flex flex-col overflow-hidden h-full">
-      {/* Sidebar header — uses COMPANY NAME instead of "Folders" */}
-      <div className="flex items-center justify-between px-3 py-3 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-white flex-shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-xs font-bold"
-            style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
-          >
-            {companyName?.[0]?.toUpperCase() || "C"}
-          </div>
-          <p className="text-xs font-semibold text-gray-700 truncate" title={companyName}>
-            {companyName || "Client"}
-          </p>
-        </div>
-        <button
-          className="md:hidden p-1 rounded hover:bg-gray-200 text-gray-500"
-          onClick={() => setSidebarOpen(false)}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-
-      <div className="overflow-y-auto flex-1 p-2 space-y-0.5">
-        {renderNode("root")}
-      </div>
+    <div className="overflow-y-auto flex-1 p-2 space-y-0.5">
+      {renderNode("root")}
     </div>
   );
 }
 
 // ── Main DriveTab ──────────────────────────────────────────────────────────
-function DriveTab({ user }) {
+function DriveTab({ user, selectedFolderId, selectedFolderName }) {
   const [driveData, setDriveData] = useState({ files: [], folders: [], breadcrumb: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [selectedFolderId, setSelectedFolderId] = useState(null);
-  const [selectedFolderName, setSelectedFolderName] = useState("My Documents");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [shareOpenId, setShareOpenId] = useState(null);
 
   const fetchFolder = useCallback(async (folderId) => {
@@ -363,17 +334,10 @@ function DriveTab({ user }) {
 
   useEffect(() => { fetchFolder(null); }, [fetchFolder]);
 
-  const handleFolderSelect = (folderId, folderName) => {
-    setSelectedFolderId(folderId);
-    setSelectedFolderName(folderName || "My Documents");
-    fetchFolder(folderId);
-  };
-
-  const navigateToSubFolder = (folderId, folderName) => {
-    setSelectedFolderId(folderId);
-    setSelectedFolderName(folderName);
-    fetchFolder(folderId);
-  };
+  // Re-fetch whenever the selected folder changes
+  useEffect(() => {
+    fetchFolder(selectedFolderId ?? null);
+  }, [selectedFolderId, fetchFolder]);
 
   const handleDownload = async (e, file) => {
     e.preventDefault();
@@ -405,16 +369,6 @@ function DriveTab({ user }) {
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
       <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 bg-white">
-        <button
-          onClick={() => setSidebarOpen(v => !v)}
-          className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition"
-          title={sidebarOpen ? "Hide folders" : "Show folders"}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
-          </svg>
-        </button>
-
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <span className="text-lg">📂</span>
           <h2 className="font-semibold text-gray-800 truncate">{selectedFolderName}</h2>
@@ -426,23 +380,7 @@ function DriveTab({ user }) {
         </div>
       </div>
 
-      <div className="flex" style={{ minHeight: "400px" }}>
-        {sidebarOpen && (
-          <div
-            className="border-r border-gray-100 flex-shrink-0"
-            style={{ width: "220px" }}
-          >
-            <FolderSidebar
-              selectedId={selectedFolderId}
-              onFolderSelect={handleFolderSelect}
-              sidebarOpen={sidebarOpen}
-              setSidebarOpen={setSidebarOpen}
-              companyName={user?.display_name}
-            />
-          </div>
-        )}
-
-        <div className="flex-1 min-w-0 p-5 overflow-auto">
+      <div className="p-5 overflow-auto">
           {driveData.message && (
             <div className="bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-xl px-4 py-3 mb-4">
               ℹ️ {driveData.message}
@@ -468,7 +406,6 @@ function DriveTab({ user }) {
                     {driveData.folders.map((f) => (
                       <div key={f.id} className="relative group">
                         <button
-                          onClick={() => navigateToSubFolder(f.id, f.name)}
                           className="flex items-center gap-3 p-3 bg-yellow-50 rounded-xl border border-yellow-100 hover:border-yellow-300 hover:bg-yellow-100 transition text-left w-full"
                         >
                           <span className="text-2xl flex-shrink-0">📁</span>
@@ -601,7 +538,6 @@ function DriveTab({ user }) {
             </>
           )}
         </div>
-      </div>
     </div>
   );
 }
@@ -626,6 +562,16 @@ export default function ClientPortalDashboard() {
   const [isDesktop, setIsDesktop] = useState(
     () => typeof window !== "undefined" && window.innerWidth >= 1024
   );
+
+  // Folder navigation state — shared between sidebar tree and DriveTab
+  const [selectedFolderId, setSelectedFolderId] = useState(null);
+  const [selectedFolderName, setSelectedFolderName] = useState("My Documents");
+
+  const handleFolderSelect = (folderId, folderName) => {
+    setSelectedFolderId(folderId);
+    setSelectedFolderName(folderName || "My Documents");
+    if (!isDesktop) setSidebarOpen(false);
+  };
 
   useEffect(() => {
     localStorage.setItem("clientPortalSidebarCollapsed", String(collapsed));
@@ -822,40 +768,51 @@ export default function ClientPortalDashboard() {
               {navItems.map((item) => {
                 const isActive = activeTab === item.id;
                 return (
-                  <button
-                    key={item.id}
-                    onClick={() => {
-                      setActiveTab(item.id);
-                      if (!isDesktop) setSidebarOpen(false);
-                    }}
-                    title={collapsed ? item.label : undefined}
-                    className={`relative flex items-center gap-3 min-w-0 w-full
-                      ${collapsed ? "justify-center px-0 py-2.5" : "px-3 py-2"}
-                      rounded-xl transition-all duration-200 group
-                      ${isActive ? "text-white" : "text-slate-500 hover:text-slate-800 hover:bg-slate-100/80"}`}
-                    style={isActive ? {
-                      background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`,
-                      boxShadow: "0 4px 14px rgba(13,59,102,0.28)",
-                    } : {}}
-                  >
-                    {isActive && !collapsed && (
-                      <span
-                        className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full"
-                        style={{ background: "rgba(255,255,255,0.6)" }}
-                      />
-                    )}
-                    <span className={`flex-shrink-0 ${isActive ? "text-white" : "text-slate-400 group-hover:text-slate-600"}`}>
-                      {item.icon}
-                    </span>
-                    {!collapsed && (
-                      <span className="font-medium text-sm whitespace-nowrap tracking-tight truncate">
-                        {item.label}
+                  <div key={item.id}>
+                    <button
+                      onClick={() => {
+                        setActiveTab(item.id);
+                        if (!isDesktop) setSidebarOpen(false);
+                      }}
+                      title={collapsed ? item.label : undefined}
+                      className={`relative flex items-center gap-3 min-w-0 w-full
+                        ${collapsed ? "justify-center px-0 py-2.5" : "px-3 py-2"}
+                        rounded-xl transition-all duration-200 group
+                        ${isActive ? "text-white" : "text-slate-500 hover:text-slate-800 hover:bg-slate-100/80"}`}
+                      style={isActive ? {
+                        background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`,
+                        boxShadow: "0 4px 14px rgba(13,59,102,0.28)",
+                      } : {}}
+                    >
+                      {isActive && !collapsed && (
+                        <span
+                          className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full"
+                          style={{ background: "rgba(255,255,255,0.6)" }}
+                        />
+                      )}
+                      <span className={`flex-shrink-0 ${isActive ? "text-white" : "text-slate-400 group-hover:text-slate-600"}`}>
+                        {item.icon}
                       </span>
+                      {!collapsed && (
+                        <span className="font-medium text-sm whitespace-nowrap tracking-tight truncate">
+                          {item.label}
+                        </span>
+                      )}
+                      {isActive && collapsed && (
+                        <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-white/70" />
+                      )}
+                    </button>
+
+                    {/* Inline folder tree — shown under My Documents when active and not collapsed */}
+                    {item.id === "drive" && isActive && !collapsed && (
+                      <div className="mt-1 ml-2 border-l-2 border-blue-100 pl-2">
+                        <FolderSidebar
+                          selectedId={selectedFolderId}
+                          onFolderSelect={handleFolderSelect}
+                        />
+                      </div>
                     )}
-                    {isActive && collapsed && (
-                      <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-white/70" />
-                    )}
-                  </button>
+                  </div>
                 );
               })}
             </div>
