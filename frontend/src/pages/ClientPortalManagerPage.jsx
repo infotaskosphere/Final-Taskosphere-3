@@ -991,7 +991,9 @@ function DocumentsTab({ portalUsers, loading, isDark }) {
     setDocsLoading(true);
     try {
       const res = await api.get(`/client-portal/drive/admin/files/${userId}`);
-      setDocs(res.data || []);
+      // Backend returns { files: [...], hidden_ids: [...] } — extract the files array
+      const raw = res.data;
+      setDocs(Array.isArray(raw) ? raw : (raw?.files ?? []));
     } catch { setDocs([]); toast.error('Failed to load documents'); }
     finally { setDocsLoading(false); }
   }, []);
@@ -1287,7 +1289,7 @@ export default function ClientPortalManagerPage() {
     setLoading(true);
     try {
       const res = await api.get('/client-portal/users');
-      setPortalUsers(res.data || []);
+      setPortalUsers(Array.isArray(res.data) ? res.data : (res.data?.users ?? res.data?.items ?? []));
     } catch { toast.error('Failed to load portal users'); }
     finally { setLoading(false); }
   }, []);
