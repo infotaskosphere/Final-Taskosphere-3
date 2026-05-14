@@ -83,28 +83,7 @@ function getDownloadUrl(file) {
   return `https://drive.google.com/uc?export=download&id=${file.id}`;
 }
 
-function DownloadBtn({ file }) {
-  const isFolder = file.mimeType === "application/vnd.google-apps.folder";
-  if (isFolder) return null;
-
-  const handleDownload = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    window.open(getDownloadUrl(file), "_blank", "noopener,noreferrer");
-  };
-
-  return (
-    <button
-      onClick={handleDownload}
-      title="Download file"
-      className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition opacity-0 group-hover:opacity-100"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
-      </svg>
-    </button>
-  );
-}
+// DownloadBtn removed — downloads now go through portal proxy (handleDownload in DriveTab)
 
 function Section({ title, icon, children, count }) {
   return (
@@ -156,15 +135,22 @@ function DriveTab({ user }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [currentFolderId, setCurrentFolderId] = useState(null);
-  // Stack of previous folder IDs for back navigation
+  // Stack of { folderId, breadcrumb } snapshots for back navigation
   const [folderHistory, setFolderHistory] = useState([]);
 
-  const fetchFolder = useCallback(async (folderId) => {
+  // fetchFolder now accepts optional parentFolderId + current breadcrumb for
+  // the new backend security model (one-hop validation).
+  const fetchFolder = useCallback(async (folderId, parentFolderId, currentBreadcrumb) => {
     setLoading(true);
     setError("");
     const api = portalApi();
     try {
-      const params = folderId ? { folder_id: folderId } : {};
+      const params = {};
+      if (folderId) params.folder_id = folderId;
+      if (parentFolderId) params.parent_folder_id = parentFolderId;
+      if (currentBreadcrumb && currentBreadcrumb.length > 0) {
+        params.breadcrumb_json = JSON.stringify(currentBreadcrumb);
+      }
       const res = await api.get("/client-portal/drive/files", { params });
       setDriveData(res.data);
     } catch (err) {
@@ -174,31 +160,75 @@ function DriveTab({ user }) {
     }
   }, []);
 
-  useEffect(() => { fetchFolder(null); }, []);
+  useEffect(() => { fetchFolder(null, null, null); }, []);
 
   const navigateToFolder = (folderId) => {
-    setFolderHistory(prev => [...prev, currentFolderId]);
+    // Save current state to history stack before navigating
+    setFolderHistory(prev => [...prev, {
+      folderId: currentFolderId,
+      breadcrumb: driveData.breadcrumb || [],
+    }]);
+    const parentId = currentFolderId;
     setCurrentFolderId(folderId);
-    fetchFolder(folderId);
+    fetchFolder(folderId, parentId, driveData.breadcrumb || []);
   };
 
   const navigateBack = () => {
     if (folderHistory.length === 0) return;
     const prev = [...folderHistory];
-    const parentId = prev.pop();
+    const { folderId: parentId, breadcrumb: parentBreadcrumb } = prev.pop();
     setFolderHistory(prev);
     setCurrentFolderId(parentId);
-    fetchFolder(parentId);
+    // When going back, restore the parent's breadcrumb state
+    if (parentId) {
+      const grandParentId = prev.length > 0 ? prev[prev.length - 1].folderId : null;
+      fetchFolder(parentId, grandParentId, parentBreadcrumb);
+    } else {
+      fetchFolder(null, null, null);
+    }
   };
 
   const navigateToBreadcrumb = (folderId) => {
-    const idx = (driveData.breadcrumb || []).findIndex(c => c.id === folderId);
-    const newHistory = idx > 0 ? folderHistory.slice(0, idx) : [];
+    const crumbs = driveData.breadcrumb || [];
+    const idx = crumbs.findIndex(c => c.id === folderId);
+    if (idx === 0) {
+      // Navigate to root
+      setFolderHistory([]);
+      setCurrentFolderId(null);
+      fetchFolder(null, null, null);
+      return;
+    }
+    // Trim history to the depth of the clicked crumb
+    const newHistory = folderHistory.slice(0, idx);
     setFolderHistory(newHistory);
-    const isRoot = idx === 0;
-    const targetId = isRoot ? null : folderId;
-    setCurrentFolderId(targetId);
-    fetchFolder(targetId);
+    setCurrentFolderId(folderId);
+    const targetBreadcrumb = crumbs.slice(0, idx);
+    const parentId = idx > 0 ? crumbs[idx - 1].id : null;
+    fetchFolder(folderId, parentId, targetBreadcrumb);
+  };
+
+  // Proxy download via backend — avoids 403 on private Drive files
+  const handleDownload = async (e, file) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const token = sessionStorage.getItem("client_portal_token");
+    try {
+      const res = await fetch(
+        `${API_BASE}/client-portal/drive/download?file_id=${file.id}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) throw new Error("Download failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = file.name || "download";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+    } catch (err) {
+      alert("Download failed. Please try again.");
+    }
   };
 
   const isAtRoot = folderHistory.length === 0;
@@ -293,8 +323,16 @@ function DriveTab({ user }) {
 
                       {/* Action buttons — visible on hover */}
                       <div className="flex items-center gap-1 flex-shrink-0">
-                        {/* Download */}
-                        <DownloadBtn file={f} />
+                        {/* Download via backend proxy (avoids 403 on private Drive files) */}
+                        <button
+                          onClick={(e) => handleDownload(e, f)}
+                          title="Download file"
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition opacity-0 group-hover:opacity-100"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
+                          </svg>
+                        </button>
 
                         {/* Open in Drive */}
                         <a
