@@ -159,8 +159,9 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
   const loadUsers = useCallback(async () => {
     try {
       const res = await api.get("/client-portal/users", { params: { client_id: clientId } });
-      setPortalUsers(res.data);
-      return res.data;
+      const users = Array.isArray(res.data) ? res.data : (res.data?.users ?? res.data?.items ?? []);
+      setPortalUsers(users);
+      return users;
     } catch {
       return [];
     }
