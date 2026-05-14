@@ -26,7 +26,9 @@ CLIENT_ID     = os.getenv("GOOGLE_CLIENT_ID")
 CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 FRONTEND_URL  = os.getenv("FRONTEND_URL", "https://final-taskosphere-frontend.onrender.com")
 BACKEND_URL   = os.getenv("BACKEND_URL",  "https://final-taskosphere-backend.onrender.com")
-REDIRECT_URI  = f"{BACKEND_URL}/auth/google/callback"
+# Use GOOGLE_REDIRECT_URI if explicitly set in Render env (takes priority),
+# otherwise fall back to constructing it from BACKEND_URL.
+REDIRECT_URI  = os.getenv("GOOGLE_REDIRECT_URI") or f"{BACKEND_URL}/auth/google/callback"
 
 SCOPES = [
     "https://www.googleapis.com/auth/drive",                    # Full Drive access (needed for creating folders anywhere)
