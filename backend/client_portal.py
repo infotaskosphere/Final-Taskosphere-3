@@ -887,6 +887,71 @@ async def bulk_create_client_drive_folders(
     }
 
 
+def _is_folder_within_root(folder_id: str, root_folder_id: str, max_depth: int = 10) -> tuple:
+    """
+    BFS/DFS check: walk UP the Drive folder hierarchy (via parents) to confirm
+    that `folder_id` is a descendant of `root_folder_id`.
+    Returns (is_valid: bool, breadcrumb_ids: list[str]) where breadcrumb_ids is
+    the ordered list [root_id, ..., folder_id] if valid, else (False, []).
+    Also resolves folder names along the way.
+    """
+    from backend.invoicing import _get_drive_service, _drive_configured
+    if not _drive_configured():
+        return False, []
+
+    if folder_id == root_folder_id:
+        return True, [root_folder_id]
+
+    try:
+        service = _get_drive_service()
+        # Walk up parent chain from folder_id until we reach root or exhaust depth
+        chain = [folder_id]  # bottom-up: [folder_id, parent1, parent2, ..., root?]
+        current = folder_id
+        for _ in range(max_depth):
+            meta = service.files().get(fileId=current, fields="id,name,parents").execute()
+            parents = meta.get("parents", [])
+            if not parents:
+                return False, []
+            parent = parents[0]
+            chain.append(parent)
+            if parent == root_folder_id:
+                # Valid! chain is [folder_id, ..., root_folder_id] — reverse for breadcrumb
+                chain.reverse()  # now [root_folder_id, ..., folder_id]
+                return True, chain
+            current = parent
+        return False, []
+    except Exception:
+        return False, []
+
+
+def _build_breadcrumb_from_chain(chain: list, root_name: str) -> list:
+    """
+    Given an ordered list of folder IDs [root, ..., target], fetch their names
+    and return breadcrumb dicts [{id, name}, ...].
+    """
+    from backend.invoicing import _get_drive_service, _drive_configured
+    if not chain:
+        return []
+    crumbs = []
+    try:
+        service = _get_drive_service() if _drive_configured() else None
+        for i, fid in enumerate(chain):
+            if i == 0:
+                name = root_name or "My Documents"
+            elif service:
+                try:
+                    meta = service.files().get(fileId=fid, fields="id,name").execute()
+                    name = meta.get("name", fid)
+                except Exception:
+                    name = fid
+            else:
+                name = fid
+            crumbs.append({"id": fid, "name": name})
+    except Exception:
+        crumbs = [{"id": fid, "name": fid} for fid in chain]
+    return crumbs
+
+
 @router.get("/drive/files")
 async def portal_drive_files(
     folder_id: Optional[str] = Query(None, description="Subfolder to browse (must be inside client's root)"),
@@ -894,8 +959,9 @@ async def portal_drive_files(
 ):
     """
     Returns visible files/folders in the Google Drive folder linked to this client.
-    Supports subfolder navigation: pass ?folder_id=XYZ to browse into a subfolder.
-    All folder_id values must descend from the client's assigned root folder.
+    Supports multi-level subfolder navigation: pass ?folder_id=XYZ to browse any
+    descendant folder. Security: validates that folder_id is within the client's
+    assigned root using parent-chain traversal.
     Respects admin-configured visibility rules (hidden_ids are filtered out).
     """
     root_folder_id = portal_user.get("google_drive_folder_id")
@@ -907,39 +973,18 @@ async def portal_drive_files(
             "message": "No Google Drive folder has been linked to your account. Please contact your account manager.",
         }
 
-    # Security: clients can only browse within their assigned root folder.
-    # We trust folder_id only if it was a folder we already exposed (is_visible).
-    # The simplest safe approach: only allow navigation into folders that
-    # appeared in the parent listing as visible folders.
+    root_name = portal_user.get("google_drive_folder_name") or "My Documents"
+    breadcrumb = [{"id": root_folder_id, "name": root_name}]
     browse_id = root_folder_id  # default: client's root
-    breadcrumb = [{"id": root_folder_id, "name": portal_user.get("google_drive_folder_name") or "My Documents"}]
 
     if folder_id and folder_id != root_folder_id:
-        # Validate: confirm this folder_id appeared as a visible subfolder
-        # by fetching the root and checking it exists and is visible
-        try:
-            root_files = _fetch_drive_files_raw(root_folder_id)
-        except HTTPException:
-            return {"files": [], "folders": [], "breadcrumb": breadcrumb, "error": "Could not reach Google Drive."}
-
-        vis_doc = await db.client_drive_visibility.find_one(
-            {"portal_user_id": portal_user["id"]}, {"_id": 0}
-        )
-        hidden_ids: set = set(vis_doc.get("hidden_ids", [])) if vis_doc else set()
-
-        valid_subfolder_ids = {
-            f["id"] for f in root_files
-            if f.get("mimeType") == "application/vnd.google-apps.folder"
-            and f["id"] not in hidden_ids
-        }
-
-        if folder_id in valid_subfolder_ids:
+        # Security: validate that requested folder is inside client's root
+        is_valid, chain = _is_folder_within_root(folder_id, root_folder_id)
+        if is_valid:
             browse_id = folder_id
-            # Build breadcrumb name
-            folder_name = next((f["name"] for f in root_files if f["id"] == folder_id), folder_id)
-            breadcrumb.append({"id": folder_id, "name": folder_name})
+            breadcrumb = _build_breadcrumb_from_chain(chain, root_name)
         else:
-            # Invalid / hidden folder – silently fall back to root
+            # Invalid / out-of-scope folder — silently fall back to root
             browse_id = root_folder_id
 
     try:
