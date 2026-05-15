@@ -1087,9 +1087,9 @@ class PortalMessageCreate(BaseModel):
 
 @router.get("/messages")
 async def list_messages_admin(current_user: User = Depends(get_current_user)):
-    """Admin: list all messages sent from this org."""
+    """Admin: list all portal messages (scoped to this deployment)."""
     docs = await db.portal_messages.find(
-        {"org_id": str(current_user.org_id)}, {"_id": 0}
+        {}, {"_id": 0}
     ).sort("created_at", -1).to_list(200)
     return docs
 
@@ -1099,27 +1099,47 @@ async def send_portal_message(
     current_user: User = Depends(get_current_user),
 ):
     """Admin: send a message to a portal client."""
-    portal_user = await db.client_portal_users.find_one({"id": payload.to_portal_user_id}, {"_id": 0})
-    if not portal_user:
-        raise HTTPException(404, "Portal user not found")
+    try:
+        portal_user = await db.client_portal_users.find_one({"id": payload.to_portal_user_id}, {"_id": 0})
+        if not portal_user:
+            raise HTTPException(404, "Portal user not found")
 
-    msg = {
-        "id": str(uuid.uuid4()),
-        "org_id": str(current_user.org_id),
-        "from_user_id": str(current_user.id),
-        "from_user_name": current_user.full_name or current_user.email,
-        "to_portal_user_id": payload.to_portal_user_id,
-        "to_display_name": portal_user.get("display_name") or portal_user.get("portal_username"),
-        "client_id": portal_user.get("client_id"),
-        "client_name": portal_user.get("client_name"),
-        "subject": payload.subject or "",
-        "body": payload.body,
-        "message_type": payload.message_type or "general",
-        "is_read": False,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.portal_messages.insert_one(msg)
-    return {"ok": True, "id": msg["id"]}
+        # Try to fetch client name from clients collection as fallback
+        client_name = portal_user.get("client_name") or portal_user.get("display_name") or ""
+        client_id = portal_user.get("client_id")
+        if client_id and not client_name:
+            client_doc = await db.clients.find_one({"id": client_id}, {"_id": 0, "company_name": 1, "name": 1})
+            if client_doc:
+                client_name = client_doc.get("company_name") or client_doc.get("name") or ""
+
+        from_name = ""
+        try:
+            from_name = current_user.full_name or current_user.email or ""
+        except Exception:
+            from_name = "Team"
+
+        msg = {
+            "id": str(uuid.uuid4()),
+            "org_id": str(getattr(current_user, "company_id", "") or ""),
+            "from_user_id": str(current_user.id),
+            "from_user_name": from_name,
+            "to_portal_user_id": payload.to_portal_user_id,
+            "to_display_name": portal_user.get("display_name") or portal_user.get("portal_username") or "",
+            "client_id": client_id or "",
+            "client_name": client_name,
+            "subject": payload.subject or "",
+            "body": payload.body,
+            "message_type": payload.message_type or "general",
+            "is_read": False,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.portal_messages.insert_one(msg)
+        return {"ok": True, "id": msg["id"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"send_portal_message error: {e}", exc_info=True)
+        raise HTTPException(500, f"Failed to send message: {str(e)}")
 
 @router.get("/my-messages")
 async def get_my_messages(current_client=Depends(get_current_portal_client)):
@@ -1141,7 +1161,7 @@ async def mark_message_read(msg_id: str, current_client=Depends(get_current_port
 @router.delete("/messages/{msg_id}")
 async def delete_portal_message(msg_id: str, current_user: User = Depends(get_current_user)):
     """Admin: delete a message."""
-    await db.portal_messages.delete_one({"id": msg_id, "org_id": str(current_user.org_id)})
+    await db.portal_messages.delete_one({"id": msg_id})
     return {"ok": True}
 
 # ── Individual Folder endpoint ─────────────────────────────────────────────
