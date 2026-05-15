@@ -56,40 +56,72 @@ def _to_num(val):
         return 0.0
 
 def _normalise_invoice(val):
-    """Normalise invoice number to canonical serial for matching.
+    """Normalise invoice number to canonical serial for matching (v2 — mirrors frontend logic).
 
-    Strategy: the actual invoice serial is the LAST purely-numeric segment
-    after any / or - separator. If no separator, strip leading alpha prefix.
+    Strategy:
+    1. Strip common software prefixes (INV-, BILL-, PO-, GST-, etc.)
+    2. Split by / - . # separators into numeric parts
+    3. Remove noise parts: months (1-12), 2-digit FY (13-35), 4-digit years (2000-2035)
+    4. Among remaining candidates, pick the LONGEST (most digits = most specific serial)
+    5. Ties → last wins
+    6. Fallback: extract trailing numeric block from alphanumeric string
 
-      "4930"       → "4930"
-      "DB-T/4930"  → "4930"   (complex multi-part prefix)
-      "DB-T/4812"  → "4812"
-      "SW-60134"   → "60134"
-      "INV/1234"   → "1234"
-      "12/0033902" → "33902"
-      "T1326"      → "1326"   (alpha directly attached)
-      "INV1234"    → "1234"
+    Examples:
+      "4930"             → "4930"    (pure numeric)
+      "DB-T/4930"        → "4930"    (complex prefix)
+      "T/0004930/26"     → "4930"    (FY suffix discarded)
+      "GST/24-25/4930"   → "4930"    (FY range discarded)
+      "INV-2024-001234"  → "1234"    (year discarded, serial wins)
+      "12/0033902"       → "33902"   (month prefix discarded)
+      "001/2026"         → "1"       (year discarded)
+      "T1326"            → "1326"    (alpha attached)
+      "INV/1234"         → "1234"    (simple prefix/serial)
     """
     import re as _re
     s = _to_str(val).upper().replace(" ", "")
     if not s:
         return ""
-    # Purely numeric
     if s.isdigit():
         return s.lstrip("0") or "0"
-    # Last-separator strategy: find last / or - and check if trailing part is numeric
-    last_slash = s.rfind("/")
-    last_dash  = s.rfind("-")
-    last_sep   = max(last_slash, last_dash)
-    if last_sep >= 0:
-        after_sep = s[last_sep + 1:]
-        if after_sep and after_sep.isdigit():
-            return after_sep.lstrip("0") or "0"
-    # Alpha directly attached (no separator): "T1326" → "1326"
-    m = _re.match(r'^([A-Z]+)(\d+)$', s)
-    if m:
-        return m.group(2).lstrip("0") or "0"
-    return s
+
+    # Strip common accounting software prefixes before splitting
+    cleaned = _re.sub(
+        r'^(INV|INVOICE|BILL|PO|TAX|GST|B2B|PURCHASE|PUR|RCV|RCPT|RECEIPT|VCH|VOUCHER|DR|CR|DN|CN)[/\-#]*',
+        '', s
+    )
+    if cleaned.isdigit():
+        return cleaned.lstrip("0") or "0"
+
+    parts = _re.split(r'[/\-\.#]', s)
+    numeric_parts = [p for p in parts if p.isdigit()]
+
+    if not numeric_parts:
+        # Try to extract trailing digits e.g. "T1326" → "1326"
+        m = _re.search(r'(\d{3,})$', s)
+        if m:
+            return m.group(1).lstrip("0") or "0"
+        m2 = _re.match(r'^[A-Z]+(\d+)$', s)
+        if m2:
+            return m2.group(1).lstrip("0") or "0"
+        return s
+
+    if len(numeric_parts) == 1:
+        return numeric_parts[0].lstrip("0") or "0"
+
+    def _is_noise(p):
+        v = int(p)
+        l = len(p)
+        if l <= 2 and 1 <= v <= 12:   return True   # month
+        if l <= 2 and 13 <= v <= 35:  return True   # 2-digit FY
+        if l == 4 and 2000 <= v <= 2035: return True # 4-digit year
+        return False
+
+    serials = [p for p in numeric_parts if not _is_noise(p)]
+    pool = serials if serials else numeric_parts
+
+    # Longest stripped serial wins; rightmost on ties
+    best = max(pool, key=lambda p: len(p.lstrip("0") or "0"))
+    return best.lstrip("0") or "0"
 
 def _normalise_gstin(val):
     return _to_str(val).upper()
@@ -1189,8 +1221,68 @@ async def delete_session(session_id:str, current_user: User=Depends(get_current_
     if current_user.role!="admin" and doc.get("created_by")!=current_user.id:
         raise HTTPException(403,"Not authorised to delete this session")
     await db.gst_reconciliation_sessions.delete_one({"id":session_id})
+
     await _log_audit("delete_session",current_user,{"session_id":session_id})
     return {"deleted":True}
+
+
+# ─── SHARED TRADE NAMES (NEW) — one user updates = all users see it ───────────
+
+class TradeNameBody(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    gstin: str
+    name: str
+
+class TradeNamesBatchBody(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    names: Dict[str, str] = Field(default_factory=dict)
+
+@router.get("/trade-names")
+async def get_trade_names(current_user: User = Depends(get_current_user)):
+    """Return all shared GSTIN→party name mappings (shared across all users in the org)."""
+    docs = await db.gst_trade_names.find({}, {"_id": 0, "gstin": 1, "name": 1}).to_list(10000)
+    return {"names": {d["gstin"]: d["name"] for d in docs if d.get("gstin") and d.get("name")}}
+
+
+@router.post("/trade-names")
+async def save_trade_name(body: TradeNameBody, current_user: User = Depends(get_current_user)):
+    """Upsert a single GSTIN→name mapping. Shared: all users will see this update."""
+    gstin = body.gstin.strip().upper()
+    name  = body.name.strip()
+    if not gstin or not name:
+        raise HTTPException(400, "gstin and name are required")
+    await db.gst_trade_names.update_one(
+        {"gstin": gstin},
+        {"$set": {"gstin": gstin, "name": name, "updated_at": _now(), "updated_by": current_user.id,
+                  "updated_by_name": getattr(current_user, "full_name", "")}},
+        upsert=True,
+    )
+    await _log_audit("save_trade_name", current_user, {"gstin": gstin, "name": name})
+    return {"ok": True, "gstin": gstin, "name": name}
+
+
+@router.post("/trade-names/batch")
+async def save_trade_names_batch(body: TradeNamesBatchBody, current_user: User = Depends(get_current_user)):
+    """Bulk-upsert GSTIN→name mappings (up to 500 entries). Used on first load to sync localStorage → backend."""
+    import pymongo as _pymongo
+    entries = [
+        (k.strip().upper(), v.strip())
+        for k, v in (body.names or {}).items()
+        if k and k.strip() and v and v.strip()
+    ][:500]
+    if not entries:
+        return {"ok": True, "count": 0}
+    ops = [
+        _pymongo.UpdateOne(
+            {"gstin": g},
+            {"$set": {"gstin": g, "name": n, "updated_at": _now(), "updated_by": current_user.id,
+                      "updated_by_name": getattr(current_user, "full_name", "")}},
+            upsert=True,
+        )
+        for g, n in entries
+    ]
+    await db.gst_trade_names.bulk_write(ops)
+    return {"ok": True, "count": len(entries)}
 
 
 # ─── AUDIT LOG (NEW) ──────────────────────────────────────────────────────────
