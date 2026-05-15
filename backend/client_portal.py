@@ -1074,3 +1074,125 @@ async def portal_drive_download(
     except Exception as e:
         logger.error(f"Drive download error for file {file_id}: {e}", exc_info=True)
         raise HTTPException(500, "Failed to download file from Google Drive.")
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Portal Messages  –  Admin sends, Client reads
+# ═══════════════════════════════════════════════════════════════════════════
+
+class PortalMessageCreate(BaseModel):
+    to_portal_user_id: str
+    subject: Optional[str] = None
+    body: str
+    message_type: Optional[str] = "general"   # general | dsc_expiry | compliance_due | invoice_reminder | custom
+
+@router.get("/messages")
+async def list_messages_admin(current_user: User = Depends(get_current_user)):
+    """Admin: list all messages sent from this org."""
+    docs = await db.portal_messages.find(
+        {"org_id": str(current_user.org_id)}, {"_id": 0}
+    ).sort("created_at", -1).to_list(200)
+    return docs
+
+@router.post("/messages", status_code=201)
+async def send_portal_message(
+    payload: PortalMessageCreate,
+    current_user: User = Depends(get_current_user),
+):
+    """Admin: send a message to a portal client."""
+    portal_user = await db.client_portal_users.find_one({"id": payload.to_portal_user_id}, {"_id": 0})
+    if not portal_user:
+        raise HTTPException(404, "Portal user not found")
+
+    msg = {
+        "id": str(uuid.uuid4()),
+        "org_id": str(current_user.org_id),
+        "from_user_id": str(current_user.id),
+        "from_user_name": current_user.full_name or current_user.email,
+        "to_portal_user_id": payload.to_portal_user_id,
+        "to_display_name": portal_user.get("display_name") or portal_user.get("portal_username"),
+        "client_id": portal_user.get("client_id"),
+        "client_name": portal_user.get("client_name"),
+        "subject": payload.subject or "",
+        "body": payload.body,
+        "message_type": payload.message_type or "general",
+        "is_read": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.portal_messages.insert_one(msg)
+    return {"ok": True, "id": msg["id"]}
+
+@router.get("/my-messages")
+async def get_my_messages(current_client=Depends(get_current_portal_client)):
+    """Client: get messages sent to me."""
+    docs = await db.portal_messages.find(
+        {"to_portal_user_id": current_client["id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    return docs
+
+@router.put("/my-messages/{msg_id}/read")
+async def mark_message_read(msg_id: str, current_client=Depends(get_current_portal_client)):
+    """Client: mark a message as read."""
+    await db.portal_messages.update_one(
+        {"id": msg_id, "to_portal_user_id": current_client["id"]},
+        {"$set": {"is_read": True, "read_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"ok": True}
+
+@router.delete("/messages/{msg_id}")
+async def delete_portal_message(msg_id: str, current_user: User = Depends(get_current_user)):
+    """Admin: delete a message."""
+    await db.portal_messages.delete_one({"id": msg_id, "org_id": str(current_user.org_id)})
+    return {"ok": True}
+
+# ── Individual Folder endpoint ─────────────────────────────────────────────
+
+class IndividualFolderRequest(BaseModel):
+    client_id: str
+    client_name: str
+    custom_folder_name: Optional[str] = None   # override folder name; defaults to client_name
+    parent_folder_id: Optional[str] = None
+    subfolders: Optional[List[str]] = None
+
+@router.post("/drive/create-individual-folder")
+async def create_individual_folder(
+    payload: IndividualFolderRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Admin: create a Drive folder for a specific client with optional custom name and subfolders."""
+    import asyncio
+    folder_name = payload.custom_folder_name or payload.client_name
+
+    # Resolve subfolders from template if not provided
+    subfolders = payload.subfolders
+    if subfolders is None:
+        subfolders = await _resolve_subfolders()
+
+    loop = asyncio.get_event_loop()
+    try:
+        service = _get_drive_service()
+        result = await loop.run_in_executor(
+            None,
+            _create_drive_folder_sync,
+            service, folder_name, payload.parent_folder_id, subfolders,
+        )
+    except Exception as e:
+        logger.error(f"Drive folder creation failed: {e}", exc_info=True)
+        raise HTTPException(500, f"Drive error: {e}")
+
+    # Persist folder_id to portal user and client
+    folder_id = result.get("folder_id")
+    if folder_id:
+        await db.client_portal_users.update_many(
+            {"client_id": payload.client_id},
+            {"$set": {"google_drive_folder_id": folder_id, "google_drive_folder_name": folder_name}},
+        )
+        await db.clients.update_one(
+            {"id": payload.client_id},
+            {"$set": {"google_drive_folder_id": folder_id, "has_drive": True}},
+        )
+
+    return {
+        **result,
+        "folder_name": folder_name,
+        "subfolders_created": subfolders,
+    }
