@@ -67,7 +67,6 @@ const fmtSize = (bytes) => {
 };
 
 // ── Google Drive download helper ──────────────────────────────────────────
-// Google Docs/Sheets/Slides have no direct binary — export as PDF/xlsx instead.
 const EXPORT_MIME = {
   "application/vnd.google-apps.document":     "application/pdf",
   "application/vnd.google-apps.spreadsheet":  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -81,6 +80,58 @@ function getDownloadUrl(file) {
     return `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=${encodeURIComponent(exportMime)}`;
   }
   return `https://drive.google.com/uc?export=download&id=${file.id}`;
+}
+
+// ── Share Link Button ─────────────────────────────────────────────────────
+function ShareBtn({ file }) {
+  const [copied, setCopied] = useState(false);
+
+  // Build a shareable link: for folders use Drive folder URL, for files use webViewLink or direct link
+  const getShareUrl = () => {
+    if (file.mimeType === "application/vnd.google-apps.folder") {
+      return `https://drive.google.com/drive/folders/${file.id}`;
+    }
+    if (file.webViewLink) return file.webViewLink;
+    return `https://drive.google.com/file/d/${file.id}/view`;
+  };
+
+  const handleShare = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const url = getShareUrl();
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback: open in new tab if clipboard fails
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  };
+
+  return (
+    <button
+      onClick={handleShare}
+      title={copied ? "Link copied!" : "Copy shareable link"}
+      className={`flex-shrink-0 p-1.5 rounded-lg transition opacity-0 group-hover:opacity-100 ${
+        copied
+          ? "text-green-600 bg-green-50"
+          : "text-gray-400 hover:text-purple-600 hover:bg-purple-50"
+      }`}
+    >
+      {copied ? (
+        // Checkmark icon
+        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+      ) : (
+        // Link/share icon
+        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+        </svg>
+      )}
+    </button>
+  );
 }
 
 function DownloadBtn({ file }) {
@@ -137,7 +188,7 @@ function Breadcrumb({ crumbs, onNavigate }) {
           {i > 0 && <span className="text-gray-300 mx-1">/</span>}
           {i < crumbs.length - 1 ? (
             <button
-              onClick={() => onNavigate(c.id)}
+              onClick={() => onNavigate(i)}
               className="text-blue-600 hover:underline font-medium truncate max-w-[180px]"
             >
               {c.name}
@@ -153,18 +204,40 @@ function Breadcrumb({ crumbs, onNavigate }) {
 
 function DriveTab({ user }) {
   const [driveData, setDriveData] = useState({ files: [], folders: [], breadcrumb: [] });
+  // Local breadcrumb stack: array of { id, name } representing current navigation path
+  const [crumbStack, setCrumbStack] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [currentFolderId, setCurrentFolderId] = useState(null);
 
-  const fetchFolder = useCallback(async (folderId) => {
+  // fetchFolder: folderId = null means root.
+  // parentFolderId = the folder we navigated FROM (needed by backend security check).
+  // newCrumbStack = the breadcrumb stack to save after this fetch succeeds.
+  const fetchFolder = useCallback(async (folderId, newCrumbStack) => {
     setLoading(true);
     setError("");
     const api = portalApi();
     try {
-      const params = folderId ? { folder_id: folderId } : {};
+      const params = {};
+      if (folderId) {
+        params.folder_id = folderId;
+        // Send the parent (second-to-last in the stack) for security validation
+        if (newCrumbStack && newCrumbStack.length >= 2) {
+          params.parent_folder_id = newCrumbStack[newCrumbStack.length - 2].id;
+        }
+        // Send existing breadcrumb so backend can rebuild it
+        const existingCrumbs = newCrumbStack ? newCrumbStack.slice(0, -1) : [];
+        if (existingCrumbs.length > 0) {
+          params.breadcrumb_json = JSON.stringify(existingCrumbs);
+        }
+      }
       const res = await api.get("/client-portal/drive/files", { params });
       setDriveData(res.data);
+      // Use the breadcrumb returned by backend (authoritative), or fall back to local stack
+      if (res.data.breadcrumb && res.data.breadcrumb.length > 0) {
+        setCrumbStack(res.data.breadcrumb);
+      } else if (newCrumbStack) {
+        setCrumbStack(newCrumbStack);
+      }
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed to load Drive files.");
     } finally {
@@ -172,18 +245,26 @@ function DriveTab({ user }) {
     }
   }, []);
 
-  useEffect(() => { fetchFolder(null); }, []);
+  // Initial load: root folder
+  useEffect(() => { fetchFolder(null, []); }, [fetchFolder]);
 
-  const navigateToFolder = (folderId) => {
-    setCurrentFolderId(folderId);
-    fetchFolder(folderId);
+  // Navigate INTO a subfolder
+  const navigateToFolder = (folder) => {
+    const newStack = [...crumbStack, { id: folder.id, name: folder.name }];
+    fetchFolder(folder.id, newStack);
   };
 
-  const navigateToBreadcrumb = (folderId) => {
-    const isRoot = driveData.breadcrumb.length > 0 && driveData.breadcrumb[0].id === folderId;
-    const targetId = isRoot && driveData.breadcrumb.length === 1 ? null : folderId;
-    setCurrentFolderId(targetId);
-    fetchFolder(targetId);
+  // Navigate via breadcrumb — crumbIndex is the index in crumbStack to go back to
+  const navigateToBreadcrumb = (crumbIndex) => {
+    if (crumbIndex === 0) {
+      // Go to root
+      setCrumbStack([]);
+      fetchFolder(null, []);
+    } else {
+      const newStack = crumbStack.slice(0, crumbIndex + 1);
+      const targetId = newStack[newStack.length - 1].id;
+      fetchFolder(targetId, newStack);
+    }
   };
 
   const totalItems = (driveData.folders?.length || 0) + (driveData.files?.length || 0);
@@ -201,8 +282,9 @@ function DriveTab({ user }) {
         </div>
       )}
 
-      {driveData.breadcrumb?.length > 0 && (
-        <Breadcrumb crumbs={driveData.breadcrumb} onNavigate={navigateToBreadcrumb} />
+      {/* Breadcrumb navigation */}
+      {crumbStack.length > 0 && (
+        <Breadcrumb crumbs={crumbStack} onNavigate={navigateToBreadcrumb} />
       )}
 
       {loading ? (
@@ -214,24 +296,32 @@ function DriveTab({ user }) {
           {driveData.folders?.length > 0 && (
             <div className="mb-5">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Folders</p>
-              <div className="grid sm:grid-cols-2 gap-2">
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {driveData.folders.map((f) => (
-                  <button
+                  <div
                     key={f.id}
-                    onClick={() => navigateToFolder(f.id)}
-                    className="flex items-center gap-3 p-3 bg-yellow-50 rounded-xl border border-yellow-100 hover:border-yellow-300 hover:bg-yellow-100 transition text-left group w-full"
+                    className="flex items-center gap-3 p-3 bg-yellow-50 rounded-xl border border-yellow-100 hover:border-yellow-300 hover:bg-yellow-100 transition text-left group w-full relative"
                   >
-                    <span className="text-2xl flex-shrink-0">📁</span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-gray-800 truncate group-hover:text-yellow-800">
-                        {f.name}
-                      </p>
-                      {f.modifiedTime && (
-                        <p className="text-xs text-gray-400">{fmtDate(f.modifiedTime)}</p>
-                      )}
-                    </div>
-                    <span className="text-gray-300 group-hover:text-yellow-500 text-xs flex-shrink-0">→</span>
-                  </button>
+                    {/* Clickable area to enter folder */}
+                    <button
+                      onClick={() => navigateToFolder(f)}
+                      className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                    >
+                      <span className="text-2xl flex-shrink-0">📁</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-800 truncate group-hover:text-yellow-800">
+                          {f.name}
+                        </p>
+                        {f.modifiedTime && (
+                          <p className="text-xs text-gray-400">{fmtDate(f.modifiedTime)}</p>
+                        )}
+                      </div>
+                      <span className="text-gray-300 group-hover:text-yellow-500 text-xs flex-shrink-0 mr-1">→</span>
+                    </button>
+
+                    {/* Share button for folder */}
+                    <ShareBtn file={f} />
+                  </div>
                 ))}
               </div>
             </div>
@@ -264,6 +354,9 @@ function DriveTab({ user }) {
 
                       {/* Action buttons — visible on hover */}
                       <div className="flex items-center gap-1 flex-shrink-0">
+                        {/* Share link */}
+                        <ShareBtn file={f} />
+
                         {/* Download */}
                         <DownloadBtn file={f} />
 
@@ -392,11 +485,12 @@ export default function ClientPortalDashboard() {
   if (!tabs.find(t => t.id === "drive")) tabs.push({ id: "drive", label: "My Drive", icon: "☁️" });
 
   return (
+    // ── FULL-WIDTH layout: removed max-w-5xl constraint ──
     <div className="min-h-screen bg-[#f0f4f8]">
 
       {/* ── Header ── */}
       <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+        <div className="w-full px-6 sm:px-10 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center shadow-sm">
               <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -417,9 +511,10 @@ export default function ClientPortalDashboard() {
         </div>
       </header>
 
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+      {/* ── Full-width content area ── */}
+      <div className="w-full px-6 sm:px-10 py-6 space-y-5">
 
-        {/* ── Hero banner — matches app's deep blue dashboard gradient ── */}
+        {/* ── Hero banner ── */}
         <div
           className="rounded-2xl p-6 text-white relative overflow-hidden"
           style={{ background: "linear-gradient(135deg, #1e3a5f 0%, #1a56a0 55%, #2563eb 100%)" }}
