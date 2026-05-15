@@ -4216,7 +4216,7 @@ const HistoryView = ({ onOpenSession, clients = [] }) => {
     </div>
   );
 
-  return (
+  return (<>
     <div>
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm text-slate-500">{sessions.length} reconciliation{sessions.length !== 1 ? 's' : ''} saved</p>
@@ -4347,7 +4347,7 @@ const HistoryView = ({ onOpenSession, clients = [] }) => {
         />
       )}
     </AnimatePresence>
-  );
+  </>);
 };
 /* ═══════════════════════════════════════════════════════════════════════════
    ITC DETAIL MODAL — full invoice list for ITC Claimable / ITC to Book / ITC at Risk
