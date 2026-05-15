@@ -1172,40 +1172,40 @@ const MSG_TEMPLATES = [
     type: "dsc_expiry",
     label: "🔐 DSC Expiry Alert",
     subject: "Your DSC is expiring soon",
-    body: "Dear {client},
+    body: `Dear {client},
 
 We would like to inform you that your Digital Signature Certificate (DSC) is due to expire soon. Please arrange for its renewal at the earliest to avoid any disruptions in your compliance filings and digital transactions.
 
 Kindly contact us or our team to initiate the renewal process.
 
 Regards,
-Your CA / CS Team",
+Your CA / CS Team`,
   },
   {
     type: "compliance_due",
     label: "📋 Compliance Due Date",
     subject: "Upcoming compliance due dates",
-    body: "Dear {client},
+    body: `Dear {client},
 
 This is a reminder that the following compliance filing(s) are due soon. Please ensure that all required documents and data are shared with us at the earliest so that filings can be completed on time and penalties are avoided.
 
 Please reach out to us if you have any queries.
 
 Regards,
-Your CA / CS Team",
+Your CA / CS Team`,
   },
   {
     type: "invoice_reminder",
     label: "🧾 Invoice Reminder",
     subject: "Professional fee invoice pending",
-    body: "Dear {client},
+    body: `Dear {client},
 
 This is a gentle reminder that you have an outstanding professional fee invoice. Request you to kindly arrange the payment at the earliest.
 
 Please feel free to contact us for any queries regarding the invoice.
 
 Regards,
-Your CA / CS Team",
+Your CA / CS Team`,
   },
   {
     type: "general",
