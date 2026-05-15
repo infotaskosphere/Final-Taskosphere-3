@@ -12,7 +12,7 @@ import {
   Phone, Mail, Calendar, ChevronRight, ScanSearch,
   Filter, Tag, ArrowUpDown, ChevronsUpDown,
   History, Clock, Trash2, ChevronDown, User, Loader2, FolderOpen, Edit3,
-  MessageSquare, Sparkles,
+  MessageSquare, Sparkles, Layers,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
@@ -3919,14 +3919,223 @@ const ClientSelector = ({ clients, selectedId, onSelect }) => {
 };
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   EDIT SESSION MODAL — edit metadata of a saved reconciliation
+   Fields: Client link, Company Details (name, GSTIN, PAN, address, phone,
+           email, FY), Tax Period, file names.
+═══════════════════════════════════════════════════════════════════════════ */
+const EMPTY_CO = { name:'', gstin:'', pan:'', address:'', phone:'', email:'', fy:'' };
+
+const EditSessionModal = ({ session, clients, onSave, onClose }) => {
+  const [saving,  setSaving]  = useState(false);
+  const [period,  setPeriod]  = useState(session.period || '');
+  const [portalFn, setPortalFn] = useState(session.portal_filename || '');
+  const [booksFn,  setBooksFn]  = useState(session.books_filename  || '');
+  const [co, setCo] = useState({
+    ...EMPTY_CO,
+    ...(session.company || {}),
+    name:  (session.company?.name  || session.client_name  || ''),
+    gstin: (session.company?.gstin || session.client_gstin || ''),
+  });
+  const [selectedClient, setSelectedClient] = useState(() =>
+    clients.find(c => c.id === session.client_id) || null
+  );
+
+  const setCoField = (k, v) => setCo(p => ({ ...p, [k]: v }));
+
+  const handleClientSelect = (client) => {
+    setSelectedClient(client);
+    if (!client) return;
+    const address = [client.address, client.city, client.state].filter(Boolean).join(', ');
+    setCo(p => ({
+      ...p,
+      name:    client.company_name || p.name,
+      gstin:   client.gstin        || p.gstin,
+      pan:     client.pan          || p.pan,
+      address: address             || p.address,
+      phone:   client.phone || client.contact_persons?.[0]?.phone || p.phone,
+      email:   client.email || client.contact_persons?.[0]?.email || p.email,
+    }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const r = await api.patch(`/gst-reconciliation/history/${session.id}`, {
+        period,
+        client_id:       selectedClient?.id    || null,
+        client_name:     co.name               || null,
+        client_gstin:    co.gstin              || null,
+        company:         co,
+        portal_filename: portalFn              || null,
+        books_filename:  booksFn               || null,
+      });
+      onSave?.({
+        ...session,
+        period,
+        client_id:       selectedClient?.id || session.client_id,
+        client_name:     r.data?.client_name  || co.name,
+        client_gstin:    r.data?.client_gstin || co.gstin,
+        company:         co,
+        portal_filename: portalFn,
+        books_filename:  booksFn,
+      });
+      toast.success('Session details updated');
+      onClose();
+    } catch (e) {
+      toast.error(`Failed to save: ${e?.response?.data?.detail || e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const FIELDS = [
+    { k:'name',    label:'Company / Trade Name', icon:Building2, ph:'e.g. MED 7 PHARMACY' },
+    { k:'gstin',   label:'GSTIN',                icon:Hash,      ph:'e.g. 24ARQPP3237M1Z9' },
+    { k:'pan',     label:'PAN',                  icon:Hash,      ph:'e.g. ARQPP3237M' },
+    { k:'address', label:'Address',              icon:MapPin,    ph:'Street, Area, City' },
+    { k:'phone',   label:'Phone',                icon:Phone,     ph:'e.g. +91 98765 43210' },
+    { k:'email',   label:'Email',                icon:Mail,      ph:'e.g. accounts@company.com' },
+    { k:'fy',      label:'Financial Year',       icon:Calendar,  ph:'e.g. 2025-26' },
+  ];
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[70] flex items-center justify-center p-4"
+    >
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}/>
+      <motion.div
+        initial={{ scale: 0.96, opacity: 0, y: 8 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.96, opacity: 0, y: 8 }}
+        className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+          <div className="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900/40">
+            <Edit3 className="h-4 w-4 text-indigo-600 dark:text-indigo-400"/>
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold text-slate-800 dark:text-slate-100 text-sm">Edit Reconciliation Details</h3>
+            <p className="text-[11px] text-slate-400 truncate">{session.client_name || 'Unknown'}{session.period ? ` · ${session.period}` : ''}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 transition-colors">
+            <X className="h-4 w-4"/>
+          </button>
+        </div>
+
+        {/* Scrollable body */}
+        <div className="overflow-y-auto flex-1 p-5 space-y-5">
+
+          {/* ── Link to Client ── */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+              <User className="h-3.5 w-3.5"/> Link to Client
+            </label>
+            <ClientSelector
+              clients={clients}
+              selectedId={selectedClient?.id}
+              onSelect={handleClientSelect}
+            />
+          </div>
+
+          {/* ── Company Details ── */}
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Building2 className="h-4 w-4 text-indigo-600 dark:text-indigo-400"/>
+              <span className="font-semibold text-sm text-slate-700 dark:text-slate-200">Company Details</span>
+              <span className="text-xs text-slate-400">(for report header)</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700">
+              {FIELDS.map(f => (
+                <div key={f.k} className={f.k === 'address' ? 'sm:col-span-2' : ''}>
+                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">{f.label}</label>
+                  <div className="relative">
+                    <f.icon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400"/>
+                    <input
+                      value={co[f.k] || ''}
+                      onChange={e => setCoField(f.k, e.target.value)}
+                      placeholder={f.ph}
+                      className="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Tax Period ── */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+              <Calendar className="h-3.5 w-3.5"/> Tax Period
+            </label>
+            <input
+              value={period}
+              onChange={e => setPeriod(e.target.value)}
+              placeholder="e.g. March 2026"
+              className="w-full sm:w-56 px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          {/* ── File Names ── */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+              <FileText className="h-3.5 w-3.5"/> File References
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">Portal File Name</label>
+                <div className="relative">
+                  <Globe className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-blue-400"/>
+                  <input value={portalFn} onChange={e => setPortalFn(e.target.value)}
+                    placeholder="e.g. GSTR2B_Apr2026.xlsx"
+                    className="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">Books File Name</label>
+                <div className="relative">
+                  <BookOpen className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-violet-400"/>
+                  <input value={booksFn} onChange={e => setBooksFn(e.target.value)}
+                    placeholder="e.g. PurchaseRegister.xlsx"
+                    className="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 flex-shrink-0">
+          <button onClick={onClose} disabled={saving}
+            className="px-4 py-2 text-sm font-medium rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
+            Cancel
+          </button>
+          <button onClick={handleSave} disabled={saving}
+            className="flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white transition-colors shadow-sm">
+            {saving
+              ? <><Loader2 className="h-3.5 w-3.5 animate-spin"/> Saving…</>
+              : <><CheckCircle2 className="h-3.5 w-3.5"/> Save Changes</>}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
    HISTORY VIEW — past reconciliation sessions
 ═══════════════════════════════════════════════════════════════════════════ */
-const HistoryView = ({ onOpenSession }) => {
+const HistoryView = ({ onOpenSession, clients = [] }) => {
   const [sessions,  setSessions]  = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [deleting,  setDeleting]  = useState(null);
   const [opening,   setOpening]   = useState(null);
   const [expanded,  setExpanded]  = useState(null);
+  const [editing,   setEditing]   = useState(null);  // { session } | null
 
   const handleOpen = async (id) => {
     setOpening(id);
@@ -4068,6 +4277,14 @@ const HistoryView = ({ onOpenSession }) => {
                     Open
                   </button>
                   <button
+                    onClick={e => { e.stopPropagation(); setEditing({ session: s }); }}
+                    title="Edit company details, period, client link"
+                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 transition-colors border border-transparent hover:border-amber-200 dark:hover:border-amber-800"
+                  >
+                    <Edit3 className="h-3.5 w-3.5" />
+                    <span className="text-xs font-medium hidden sm:inline">Edit</span>
+                  </button>
+                  <button
                     onClick={e => { e.stopPropagation(); handleDelete(s.id); }}
                     disabled={deleting === s.id}
                     className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20 text-slate-300 hover:text-rose-500 transition-colors"
@@ -4116,6 +4333,20 @@ const HistoryView = ({ onOpenSession }) => {
       </div>
 
     </div>
+
+    {/* ── Edit Session Modal ── */}
+    <AnimatePresence>
+      {editing && (
+        <EditSessionModal
+          session={editing.session}
+          clients={clients}
+          onSave={(updated) => {
+            setSessions(prev => prev.map(s => s.id === updated.id ? { ...s, ...updated } : s));
+          }}
+          onClose={() => setEditing(null)}
+        />
+      )}
+    </AnimatePresence>
   );
 };
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -4595,12 +4826,383 @@ const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) =
   );
 };
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   CLIENT DETAIL VIEW — month-wise session history for one client
+═══════════════════════════════════════════════════════════════════════════ */
+const ClientDetailView = ({ clientKey, clientName, clientGstin, onOpenSession, onBack, clients }) => {
+  const [sessions,  setSessions]  = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [opening,   setOpening]   = useState(null);
+  const [deleting,  setDeleting]  = useState(null);
+  const [editing,   setEditing]   = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const key = encodeURIComponent(clientKey);
+      const r   = await api.get(`/gst-reconciliation/client-sessions/${key}`);
+      setSessions(r.data.sessions || []);
+    } catch { toast.error('Failed to load client sessions'); }
+    finally { setLoading(false); }
+  }, [clientKey]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleOpen = async (id) => {
+    setOpening(id);
+    try {
+      const r    = await api.get(`/gst-reconciliation/history/${id}`);
+      const sess = r.data || {};
+      const full = sess.full_result || sess.fullResult;
+      if (!full || (!full.matched && !full.mismatch && !full.portalOnly && !full.booksOnly)) {
+        toast.error('This older session was saved without full data — re-run the reconciliation.');
+        return;
+      }
+      onOpenSession?.({ result: full, company: sess.company || {}, period: sess.period || '',
+        portalFilename: sess.portal_filename || '', booksFilename: sess.books_filename || '',
+        sessionId: sess.id, clientName: sess.client_name || '', clientGstin: sess.client_gstin || '' });
+    } catch { toast.error('Failed to open session'); }
+    finally { setOpening(null); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this reconciliation session?')) return;
+    setDeleting(id);
+    try {
+      await api.delete(`/gst-reconciliation/history/${id}`);
+      setSessions(prev => prev.filter(s => s.id !== id));
+      toast.success('Deleted');
+    } catch { toast.error('Could not delete session'); }
+    finally { setDeleting(null); }
+  };
+
+  const fmtD = (d) => {
+    if (!d) return '—';
+    try { return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }); }
+    catch { return d; }
+  };
+
+  const sm_val = (sm, key) => sm?.[key] ?? 0;
+
+  return (
+    <div>
+      {/* Back header */}
+      <div className="flex items-center gap-3 mb-5">
+        <button onClick={onBack}
+          className="flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 transition-colors">
+          <ChevronRight className="h-4 w-4 rotate-180"/>
+          All Clients
+        </button>
+        <span className="text-slate-300 dark:text-slate-600">/</span>
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-7 h-7 rounded-lg bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
+            <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">
+              {(clientName||'?')[0].toUpperCase()}
+            </span>
+          </div>
+          <div className="min-w-0">
+            <p className="font-semibold text-slate-800 dark:text-slate-100 text-sm truncate">{clientName}</p>
+            {clientGstin && <p className="font-mono text-[10px] text-slate-400">{clientGstin}</p>}
+          </div>
+        </div>
+        <button onClick={load} className="ml-auto flex items-center gap-1 text-xs text-slate-400 hover:text-indigo-600 transition-colors">
+          <RefreshCw className="h-3.5 w-3.5"/> Refresh
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex flex-col items-center py-16 text-slate-400">
+          <Loader2 className="h-7 w-7 animate-spin mb-2 text-indigo-400"/>
+          <p className="text-sm">Loading sessions…</p>
+        </div>
+      ) : sessions.length === 0 ? (
+        <div className="flex flex-col items-center py-16 text-slate-400">
+          <History className="h-12 w-12 mb-3 text-slate-200 dark:text-slate-700"/>
+          <p className="text-sm font-medium text-slate-500">No sessions found for this client.</p>
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          <p className="text-xs text-slate-400 mb-3">{sessions.length} reconciliation{sessions.length !== 1 ? 's' : ''} · newest first</p>
+          {sessions.map(s => {
+            const sm = s.summary || {};
+            return (
+              <motion.div key={s.id} layout
+                className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 flex flex-col sm:flex-row sm:items-center gap-3 shadow-sm hover:shadow-md transition-shadow">
+                {/* Month/Period badge */}
+                <div className="flex-shrink-0">
+                  <div className="px-3 py-2 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-center min-w-[72px]">
+                    <p className="text-[10px] font-semibold text-indigo-500 dark:text-indigo-400 uppercase tracking-wide">Period</p>
+                    <p className="text-sm font-bold text-indigo-700 dark:text-indigo-300 leading-tight mt-0.5">{s.period || '—'}</p>
+                  </div>
+                </div>
+                {/* Stats */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap gap-2 mb-1.5">
+                    {[
+                      { label:'✓ Matched',     val: sm_val(sm,'matched_count'),     bg:'bg-emerald-100 dark:bg-emerald-900/30', text:'text-emerald-700 dark:text-emerald-300' },
+                      { label:'⚠ Mismatch',    val: sm_val(sm,'mismatch_count'),    bg:'bg-amber-100 dark:bg-amber-900/30',    text:'text-amber-700 dark:text-amber-300' },
+                      { label:'🌐 Portal Only', val: sm_val(sm,'portal_only_count'), bg:'bg-blue-100 dark:bg-blue-900/30',      text:'text-blue-700 dark:text-blue-300' },
+                      { label:'📒 Books Only',  val: sm_val(sm,'books_only_count'),  bg:'bg-rose-100 dark:bg-rose-900/30',      text:'text-rose-700 dark:text-rose-300' },
+                    ].map(p => (
+                      <span key={p.label} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${p.bg} ${p.text}`}>
+                        {p.label}: {p.val}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-slate-400">
+                    {sm.matched_value != null && <span>Matched: <strong className="text-slate-600 dark:text-slate-300">₹{fmt(sm.matched_value)}</strong></span>}
+                    {sm.books_only_value != null && sm.books_only_value > 0 && <span>ITC Risk: <strong className="text-rose-600">₹{fmt(sm.books_only_value)}</strong></span>}
+                    <span className="flex items-center gap-1"><Clock className="h-3 w-3"/> {fmtD(s.created_at)}</span>
+                    {s.created_by_name && <span>by {s.created_by_name}</span>}
+                  </div>
+                  {(s.portal_filename || s.books_filename) && (
+                    <div className="flex flex-wrap gap-3 mt-1 text-[10px] text-slate-400">
+                      {s.portal_filename && <span>🌐 {s.portal_filename}</span>}
+                      {s.books_filename  && <span>📒 {s.books_filename}</span>}
+                    </div>
+                  )}
+                </div>
+                {/* Actions */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    onClick={() => handleOpen(s.id)} disabled={opening === s.id}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 text-xs font-semibold border border-indigo-200 dark:border-indigo-800 transition-colors">
+                    {opening === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin"/> : <FolderOpen className="h-3.5 w-3.5"/>}
+                    Open
+                  </button>
+                  <button
+                    onClick={() => setEditing({ session: s })}
+                    title="Edit details"
+                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20 text-slate-400 hover:text-amber-600 transition-colors border border-transparent hover:border-amber-200">
+                    <Edit3 className="h-3.5 w-3.5"/>
+                  </button>
+                  <button
+                    onClick={() => handleDelete(s.id)} disabled={deleting === s.id}
+                    className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20 text-slate-300 hover:text-rose-500 transition-colors">
+                    {deleting === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin"/> : <Trash2 className="h-3.5 w-3.5"/>}
+                  </button>
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Edit modal */}
+      <AnimatePresence>
+        {editing && (
+          <EditSessionModal
+            session={editing.session}
+            clients={clients}
+            onSave={(updated) => {
+              setSessions(prev => prev.map(s => s.id === updated.id ? { ...s, ...updated } : s));
+            }}
+            onClose={() => setEditing(null)}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CLIENTS VIEW — all clients with GST reconciliation sessions
+   Toggle between Card and List layouts; click a client to drill in.
+═══════════════════════════════════════════════════════════════════════════ */
+const ClientsView = ({ onOpenSession, clients = [], onDrillIn }) => {
+  const [clientSummaries, setClientSummaries] = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [viewMode, setViewMode] = useState('card');  // 'card' | 'list'
+  const [search,   setSearch]   = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await api.get('/gst-reconciliation/clients-summary');
+      setClientSummaries(r.data.clients || []);
+    } catch { toast.error('Failed to load client summaries'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = clientSummaries.filter(c => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (c.client_name||'').toLowerCase().includes(q) ||
+           (c.client_gstin||'').toLowerCase().includes(q);
+  });
+
+  const fmtD = (d) => {
+    if (!d) return '—';
+    try { return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }); }
+    catch { return d; }
+  };
+
+  // The "drill-in key" is client_id if available, otherwise normalised name
+  const drillKey = (c) => c.client_id || (c.client_name||'unknown').toLowerCase();
+
+  if (loading) return (
+    <div className="flex flex-col items-center py-20 text-slate-400">
+      <Loader2 className="h-8 w-8 animate-spin mb-3 text-indigo-400"/>
+      <p className="text-sm">Loading clients…</p>
+    </div>
+  );
+
+  if (clientSummaries.length === 0) return (
+    <div className="flex flex-col items-center py-20 text-slate-400">
+      <Building2 className="h-14 w-14 mb-3 text-slate-200 dark:text-slate-700"/>
+      <p className="font-medium text-slate-500 text-base">No clients yet</p>
+      <p className="text-sm mt-1">Run a reconciliation and link it to a client — they'll appear here.</p>
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400"/>
+          <input
+            value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search clients…"
+            className="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+        <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg">
+          <button onClick={() => setViewMode('card')}
+            title="Card view"
+            className={`p-1.5 rounded-md transition-colors ${viewMode === 'card' ? 'bg-white dark:bg-slate-700 shadow-sm text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}>
+            <Layers className="h-3.5 w-3.5"/>
+          </button>
+          <button onClick={() => setViewMode('list')}
+            title="List view"
+            className={`p-1.5 rounded-md transition-colors ${viewMode === 'list' ? 'bg-white dark:bg-slate-700 shadow-sm text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}>
+            <Filter className="h-3.5 w-3.5"/>
+          </button>
+        </div>
+        <button onClick={load} className="flex items-center gap-1 text-xs text-slate-400 hover:text-indigo-600 transition-colors">
+          <RefreshCw className="h-3.5 w-3.5"/> Refresh
+        </button>
+        <p className="text-xs text-slate-400">{filtered.length} client{filtered.length !== 1 ? 's' : ''}</p>
+      </div>
+
+      {/* ── CARD VIEW ── */}
+      {viewMode === 'card' && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filtered.map(c => (
+            <motion.button
+              key={drillKey(c)}
+              layout
+              whileHover={{ y: -2 }}
+              onClick={() => onDrillIn(c)}
+              className="text-left bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md hover:border-indigo-300 dark:hover:border-indigo-700 transition-all group"
+            >
+              {/* Avatar + name */}
+              <div className="flex items-start gap-3 mb-3">
+                <div className="w-9 h-9 rounded-xl bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
+                  <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">
+                    {(c.client_name||'?')[0].toUpperCase()}
+                  </span>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-sm text-slate-800 dark:text-slate-100 truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                    {c.client_name || 'Unknown Client'}
+                  </p>
+                  {c.client_gstin && (
+                    <p className="font-mono text-[10px] text-slate-400 truncate">{c.client_gstin}</p>
+                  )}
+                </div>
+                <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-indigo-400 transition-colors flex-shrink-0 mt-0.5"/>
+              </div>
+
+              {/* Session count + last period */}
+              <div className="flex items-center gap-2 mb-3">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
+                  <History className="h-3 w-3"/> {c.session_count} session{c.session_count !== 1 ? 's' : ''}
+                </span>
+                {c.last_period && (
+                  <span className="text-[10px] text-slate-400">Last: <strong className="text-slate-600 dark:text-slate-300">{c.last_period}</strong></span>
+                )}
+              </div>
+
+              {/* Mini stat row */}
+              <div className="grid grid-cols-2 gap-1.5">
+                {[
+                  { label:'Matched',    val: c.total_matched,    color:'text-emerald-600 dark:text-emerald-400', bg:'bg-emerald-50 dark:bg-emerald-900/20' },
+                  { label:'Mismatch',   val: c.total_mismatch,   color:'text-amber-600 dark:text-amber-400',    bg:'bg-amber-50 dark:bg-amber-900/20' },
+                  { label:'Portal Only',val: c.total_portal_only,color:'text-blue-600 dark:text-blue-400',      bg:'bg-blue-50 dark:bg-blue-900/20' },
+                  { label:'Books Only', val: c.total_books_only, color:'text-rose-600 dark:text-rose-400',      bg:'bg-rose-50 dark:bg-rose-900/20' },
+                ].map(s => (
+                  <div key={s.label} className={`${s.bg} rounded-lg px-2 py-1`}>
+                    <p className="text-[9px] font-medium text-slate-400 uppercase tracking-wide">{s.label}</p>
+                    <p className={`text-sm font-bold ${s.color}`}>{s.val}</p>
+                  </div>
+                ))}
+              </div>
+
+              <p className="text-[10px] text-slate-300 dark:text-slate-600 mt-2.5">
+                Last updated: {fmtD(c.last_date)}
+              </p>
+            </motion.button>
+          ))}
+        </div>
+      )}
+
+      {/* ── LIST VIEW ── */}
+      {viewMode === 'list' && (
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+          {/* List header */}
+          <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-700 text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
+            <div className="col-span-4">Client</div>
+            <div className="col-span-2 text-center">Sessions</div>
+            <div className="col-span-2 text-center">Matched</div>
+            <div className="col-span-2 text-center">Books Only</div>
+            <div className="col-span-2 text-right">Last Period</div>
+          </div>
+          {filtered.map((c, i) => (
+            <button
+              key={drillKey(c)}
+              onClick={() => onDrillIn(c)}
+              className={`w-full grid grid-cols-12 gap-2 px-4 py-3 text-left hover:bg-indigo-50 dark:hover:bg-indigo-900/10 transition-colors group ${i < filtered.length - 1 ? 'border-b border-slate-100 dark:border-slate-700/50' : ''}`}
+            >
+              <div className="col-span-4 flex items-center gap-2.5 min-w-0">
+                <div className="w-7 h-7 rounded-lg bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
+                  <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">{(c.client_name||'?')[0].toUpperCase()}</span>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 truncate group-hover:text-indigo-600 transition-colors">{c.client_name || 'Unknown'}</p>
+                  {c.client_gstin && <p className="font-mono text-[10px] text-slate-400 truncate">{c.client_gstin}</p>}
+                </div>
+              </div>
+              <div className="col-span-2 flex items-center justify-center">
+                <span className="text-sm font-bold text-slate-700 dark:text-slate-200">{c.session_count}</span>
+              </div>
+              <div className="col-span-2 flex items-center justify-center">
+                <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">{c.total_matched}</span>
+              </div>
+              <div className="col-span-2 flex items-center justify-center">
+                <span className={`text-sm font-semibold ${c.total_books_only > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400'}`}>{c.total_books_only}</span>
+              </div>
+              <div className="col-span-2 flex items-center justify-end gap-1">
+                <span className="text-xs text-slate-500 dark:text-slate-400">{c.last_period || '—'}</span>
+                <ChevronRight className="h-3.5 w-3.5 text-slate-300 group-hover:text-indigo-400 transition-colors"/>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const EMPTY_COMPANY = {
   name: '', gstin: '', pan: '', address: '', phone: '', email: '', fy: '',
 };
 
 export default function GSTReconciliation() {
-  const [pageView,        setPageView]        = useState('new');   // 'new' | 'history'
+  const [pageView,        setPageView]        = useState('new');   // 'new' | 'history' | 'clients'
+  const [clientDetail,    setClientDetail]    = useState(null);   // null | {client_id,client_name,client_gstin,...}
   const [portalFile,      setPortalFile]       = useState(null);
   const [booksFile,       setBooksFile]        = useState(null);
   const [period,          setPeriod]           = useState('');
@@ -5064,11 +5666,12 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
           <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl mb-5 w-fit p-1">
             {[
               { id: 'new',     label: 'New Reconciliation', icon: ArrowLeftRight },
+              { id: 'clients', label: 'Clients',            icon: Building2 },
               { id: 'history', label: 'History',            icon: History },
             ].map(v => (
               <button
                 key={v.id}
-                onClick={() => setPageView(v.id)}
+                onClick={() => { setPageView(v.id); setClientDetail(null); }}
                 className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
                   pageView === v.id
                     ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
@@ -5082,6 +5685,68 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
           </div>
         )}
 
+        {/* ── Clients View ── */}
+        {pageView === 'clients' && !results && !clientDetail && (
+          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+            <div className="flex items-center gap-3 mb-5">
+              <Building2 className="h-5 w-5 text-indigo-500" />
+              <h2 className="font-semibold text-slate-800 dark:text-slate-100">Clients</h2>
+              <span className="ml-auto text-[11px] text-slate-400">Click any client to view their month-wise reconciliation history.</span>
+            </div>
+            <ClientsView
+              onOpenSession={null}
+              clients={clients}
+              onDrillIn={(c) => setClientDetail(c)}
+            />
+          </div>
+        )}
+
+        {/* ── Client Detail View (drill-in) ── */}
+        {pageView === 'clients' && !results && clientDetail && (
+          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+            <ClientDetailView
+              clientKey={clientDetail.client_id || (clientDetail.client_name||'unknown').toLowerCase()}
+              clientName={clientDetail.client_name}
+              clientGstin={clientDetail.client_gstin}
+              clients={clients}
+              onBack={() => setClientDetail(null)}
+              onOpenSession={(payload) => {
+                setResults(payload.result);
+                setActiveTab('matched');
+                setPeriod(payload.period || '');
+                if (payload.company && Object.keys(payload.company).length) {
+                  setCompany(prev => ({ ...prev, ...payload.company }));
+                } else if (payload.clientName || payload.clientGstin) {
+                  setCompany(prev => ({ ...prev, name: payload.clientName || prev.name, gstin: payload.clientGstin || prev.gstin }));
+                }
+                setLoadedSessionId(payload.sessionId || null);
+                setBaselineSnapshot({
+                  result:         JSON.parse(JSON.stringify(payload.result)),
+                  company:        payload.company || {},
+                  period:         payload.period || '',
+                  portalFilename: payload.portalFilename || '',
+                  booksFilename:  payload.booksFilename  || '',
+                  sessionId:      payload.sessionId || null,
+                  clientName:     payload.clientName || '',
+                  clientGstin:    payload.clientGstin || '',
+                  openedAt:       new Date().toISOString(),
+                });
+                setSnapshotSaved(false);
+                setClientDetail(null);
+                setPageView('new');
+                api.get('/gst-reconciliation/trade-names')
+                  .then(r => {
+                    const backendNames = r.data?.names || {};
+                    if (!Object.keys(backendNames).length) return;
+                    setManualTradeNames(prev => ({ ...backendNames, ...prev }));
+                  })
+                  .catch(() => {});
+                toast.success('Reconciliation loaded — fully editable.');
+              }}
+            />
+          </div>
+        )}
+
         {/* ── History View ── */}
         {pageView === 'history' && !results && (
           <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
@@ -5090,7 +5755,7 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
               <h2 className="font-semibold text-slate-800 dark:text-slate-100">Reconciliation History</h2>
               <span className="ml-auto text-[11px] text-slate-400">Click <strong className="text-indigo-500">Open</strong> on any entry to reload the full reconciliation, edit it, and re-generate reports.</span>
             </div>
-            <HistoryView onOpenSession={(payload) => {
+            <HistoryView clients={clients} onOpenSession={(payload) => {
               // Restore full reconciliation into the active workspace
               setResults(payload.result);
               setActiveTab('matched');
