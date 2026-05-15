@@ -65,21 +65,28 @@ function normaliseInvoice(val) {
   if (!s) return '';
   if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
 
-  const parts = s.split(/[\/\-]/).filter(Boolean);
+  // Handle common prefixes like "INV-", "PO-", "BILL-", "TAX-" etc.
+  const cleanedS = s.replace(/^(INV|INVOICE|BILL|PO|TAX|GST|B2B|PURCHASE|PUR|RCV|RCPT|RECEIPT|VCH|VOUCHER|DR|CR|DN|CN)[/\-#]*/i, '');
+  if (/^\d+$/.test(cleanedS)) return cleanedS.replace(/^0+/, '') || '0';
+
+  const parts = s.split(/[\/\-\.#]/).filter(Boolean);
   const numericParts = parts
     .filter(p => /^\d+$/.test(p))
     .map(p => ({ raw: p, stripped: p.replace(/^0+/, '') || '0', len: p.length }));
 
   if (numericParts.length === 0) {
-    const m = s.match(/^[A-Z]+(\d+)/);
-    return m ? m[1].replace(/^0+/, '') || '0' : s;
+    // Try to extract trailing digits from alphanumeric strings like "INV1234", "T1326"
+    const m = s.match(/([A-Z][A-Z0-9]*[-/#]?)*(\d{3,})$/);
+    if (m && m[2]) return m[2].replace(/^0+/, '') || '0';
+    const m2 = s.match(/^[A-Z]+(\d+)/);
+    return m2 ? m2[1].replace(/^0+/, '') || '0' : s;
   }
   if (numericParts.length === 1) return numericParts[0].stripped;
 
   const isNoise = ({ stripped, len }) => {
     const v = parseInt(stripped, 10);
-    if (len <= 2 && v >= 1 && v <= 12) return true;   // month (1-12)
-    if (len <= 2 && v >= 19 && v <= 35) return true;   // 2-digit FY code (FY19-FY35)
+    if (len <= 2 && v >= 1 && v <= 12) return true;   // month (01-12)
+    if (len <= 2 && v >= 13 && v <= 35) return true;  // 2-digit FY (FY13-FY35)
     if (len === 4 && v >= 2000 && v <= 2035) return true; // 4-digit calendar year
     return false;
   };
@@ -87,9 +94,9 @@ function normaliseInvoice(val) {
   const serials = numericParts.filter(p => !isNoise(p));
   const pool    = serials.length > 0 ? serials : numericParts;
 
+  // Among candidates, prefer: (1) longest, (2) rightmost when tied
   return pool.reduce((best, cur) =>
-    cur.stripped.length > best.stripped.length ? cur :
-    cur.stripped.length === best.stripped.length ? cur : best
+    cur.stripped.length > best.stripped.length ? cur : best
   ).stripped;
 }
 function normaliseGSTIN(val) {
@@ -97,8 +104,13 @@ function normaliseGSTIN(val) {
 }
 function toNum(val) {
   if (val === null || val === undefined || val === '') return 0;
-  const n = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
-  return isNaN(n) ? 0 : n;
+  // Handle Indian number formatting: remove ₹ and commas, treat (x) as negative
+  let s = String(val).trim();
+  const isNeg = s.startsWith('(') && s.endsWith(')');
+  if (isNeg) s = s.slice(1, -1);
+  const n = parseFloat(s.replace(/[₹,\s]/g, '').replace(/[^0-9.-]/g, ''));
+  if (isNaN(n)) return 0;
+  return isNeg ? -n : n;
 }
 function fmtDate(val) {
   if (!val) return '';
@@ -108,7 +120,17 @@ function fmtDate(val) {
       if (d) return `${String(d.d).padStart(2,'0')}/${String(d.m).padStart(2,'0')}/${d.y}`;
     } catch (_) {}
   }
-  return String(val).trim();
+  const s = String(val).trim();
+  // Normalise YYYY-MM-DD → DD/MM/YYYY
+  const m1 = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (m1) return `${m1[3].padStart(2,'0')}/${m1[2].padStart(2,'0')}/${m1[1]}`;
+  // Normalise DD-MM-YYYY → DD/MM/YYYY
+  const m2 = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (m2) return `${m2[1].padStart(2,'0')}/${m2[2].padStart(2,'0')}/${m2[3]}`;
+  // Normalise DD-MM-YY → DD/MM/20YY
+  const m3 = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2})$/);
+  if (m3) return `${m3[1].padStart(2,'0')}/${m3[2].padStart(2,'0')}/20${m3[3]}`;
+  return s;
 }
 function findHeaderRow(rows) {
   for (let i = 0; i < Math.min(rows.length, 15); i++) {
@@ -4692,12 +4714,16 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
   }, []);
 
   const onSaveTradeName = useCallback((gstin, name) => {
+    const upperGstin = gstin.toUpperCase();
     setManualTradeNames(prev => {
-      const updated = { ...prev, [gstin.toUpperCase()]: name };
+      const updated = { ...prev, [upperGstin]: name };
       try { localStorage.setItem('gst_manual_trade_names', JSON.stringify(updated)); } catch (_) {}
       return updated;
     });
-    toast.success(`Party name saved for ${gstin}`, { duration: 2500 });
+    // Save to backend so ALL users immediately see this party name (shared across users)
+    api.post('/gst-reconciliation/trade-names', { gstin: upperGstin, name })
+      .catch(() => {}); // silent — localStorage copy is the fallback
+    toast.success(`Party name saved — visible to all users`, { duration: 2500 });
   }, []);
 
   // Auto-fetch trade names for all Books Only GSTINs after reconciliation
@@ -4866,6 +4892,23 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
     toast.success(`GSTIN Conflict Resolved: ${pInv?.invoiceNoRaw} ↔ ${bInv?.invoiceNoRaw}`);
   }, [guardEdit]);
 
+  // Load shared trade names from backend on mount — merges with any localStorage cache
+  // This ensures names saved by ANY user are visible to the current user.
+  useEffect(() => {
+    api.get('/gst-reconciliation/trade-names')
+      .then(r => {
+        const backendNames = r.data?.names || {};
+        if (!Object.keys(backendNames).length) return;
+        setManualTradeNames(prev => {
+          // Backend is authoritative; local overrides only apply for names not yet synced
+          const merged = { ...backendNames, ...prev };
+          try { localStorage.setItem('gst_manual_trade_names', JSON.stringify(merged)); } catch (_) {}
+          return merged;
+        });
+      })
+      .catch(() => {}); // silent — works offline with localStorage
+  }, []);
+
   // Fetch clients on mount
   useEffect(() => {
     setClientsLoading(true);
@@ -4988,29 +5031,29 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
       <div className="max-w-7xl mx-auto">
 
         {/* ── Header ── */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-          <div>
-            <div className="flex items-center gap-3 mb-1">
-              <div className="p-2 rounded-xl bg-indigo-100 dark:bg-indigo-900/40">
-                <ArrowLeftRight className="h-5 w-5 text-indigo-600 dark:text-indigo-400"/>
-              </div>
-              <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">GST Reconciliation</h1>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-indigo-600 shadow-sm">
+              <ArrowLeftRight className="h-5 w-5 text-white"/>
             </div>
-            <p className="text-sm text-slate-500 dark:text-slate-400 ml-12">Reconcile GSTR-2B (GST Portal) with Purchase Register (Books of Account)</p>
+            <div>
+              <h1 className="text-lg font-bold text-slate-800 dark:text-slate-100 leading-tight">GST Reconciliation</h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Reconcile GSTR-2B (GST Portal) with Purchase Register (Books of Account)</p>
+            </div>
           </div>
           {results && (
             <div className="flex flex-wrap items-center gap-2">
-              <button onClick={()=>exportPDF(results, company, period)} className="flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-medium rounded-xl shadow-sm transition-colors">
-                <FileText className="h-4 w-4"/> PDF Report
+              <button onClick={()=>exportPDF(results, company, period, manualTradeNames, invoiceComments)} className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium rounded-lg shadow-sm transition-colors">
+                <FileText className="h-3.5 w-3.5"/> PDF
               </button>
-              <button onClick={()=>exportWord(results, company, period)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-xl shadow-sm transition-colors">
-                <FileText className="h-4 w-4"/> Word Report
+              <button onClick={()=>exportWord(results, company, period, manualTradeNames, invoiceComments)} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg shadow-sm transition-colors">
+                <FileText className="h-3.5 w-3.5"/> Word
               </button>
-              <button onClick={()=>exportExcel(results, company, period)} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-xl shadow-sm transition-colors">
-                <FileSpreadsheet className="h-4 w-4"/> Excel
+              <button onClick={()=>exportExcel(results, company, period, manualTradeNames, invoiceComments)} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg shadow-sm transition-colors">
+                <FileSpreadsheet className="h-3.5 w-3.5"/> Excel
               </button>
-              <button onClick={handleReset} className="flex items-center gap-2 px-3 py-2 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm font-medium rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                <RefreshCw className="h-4 w-4"/> Reset
+              <button onClick={handleReset} className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                <RefreshCw className="h-3.5 w-3.5"/> Reset
               </button>
             </div>
           )}
@@ -5018,7 +5061,7 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
 
         {/* ── Page View Switcher ── */}
         {!results && (
-          <div className="flex gap-1 p-1 bg-slate-200 dark:bg-slate-700 rounded-xl mb-5 w-fit">
+          <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl mb-5 w-fit p-1">
             {[
               { id: 'new',     label: 'New Reconciliation', icon: ArrowLeftRight },
               { id: 'history', label: 'History',            icon: History },
@@ -5026,13 +5069,13 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
               <button
                 key={v.id}
                 onClick={() => setPageView(v.id)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
                   pageView === v.id
-                    ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                    ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
                 }`}
               >
-                <v.icon className="h-4 w-4" />
+                <v.icon className="h-3.5 w-3.5" />
                 {v.label}
               </button>
             ))}
@@ -5072,6 +5115,15 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
               });
               setSnapshotSaved(false);
               setPageView('new');
+              // Re-fetch latest shared trade names from backend so history view always shows
+              // the most current party names (even if another user updated them since this session was saved)
+              api.get('/gst-reconciliation/trade-names')
+                .then(r => {
+                  const backendNames = r.data?.names || {};
+                  if (!Object.keys(backendNames).length) return;
+                  setManualTradeNames(prev => ({ ...backendNames, ...prev }));
+                })
+                .catch(() => {});
               toast.success('Reconciliation loaded — fully editable. Your first edit will be confirmed before changes apply.');
             }} />
           </div>
@@ -5079,7 +5131,7 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
 
         {/* ── Upload + Company Details Section ── */}
         {pageView === 'new' && !results && (
-          <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 mb-6 shadow-sm">
+          <motion.div initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 mb-5 shadow-sm">
 
             {/* Client Selector */}
             <div className="mb-5">
@@ -5149,25 +5201,24 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
             </div>
 
             {/* Period */}
-            <div className="mb-5">
-              <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
-                Tax Period *
+            <div className="mb-4">
+              <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                <Calendar className="h-3.5 w-3.5"/> Tax Period
                 {portalFile && period && (
-                  <span className="ml-2 text-emerald-600 dark:text-emerald-400 font-normal normal-case">
-                    ✓ auto-detected from file
+                  <span className="ml-1 text-emerald-600 dark:text-emerald-400 font-medium normal-case text-[10px] lowercase tracking-normal">
+                    ✓ auto-detected
                   </span>
                 )}
               </label>
-              <div className="relative w-full sm:w-64">
-                <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400"/>
+              <div className="relative w-full sm:w-56">
                 <input value={period} onChange={e=>setPeriod(e.target.value)} placeholder="e.g. March 2026"
-                  className="w-full pl-8 pr-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
               </div>
             </div>
 
             {/* File Upload */}
-            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3 flex items-center gap-2">
-              <Upload className="h-4 w-4 text-indigo-600 dark:text-indigo-400"/> Upload Files
+            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+              <Upload className="h-3.5 w-3.5"/> Upload Files
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
               <DropZone label="GSTR-2B (GST Portal)" icon={Globe}   hint="Download GSTR-2B Excel from GST portal (.xlsx/.xls)"        file={portalFile} onFile={handlePortalFile} onClear={()=>{ setPortalFile(null); }} colors={{ done:'bg-blue-50 dark:bg-blue-900/20 border-blue-400', drag:'bg-blue-50 dark:bg-blue-900/10 border-blue-400', iconBg:'bg-blue-100 dark:bg-blue-900/40', iconColor:'text-blue-600 dark:text-blue-300', btn:'bg-blue-600 hover:bg-blue-700 text-white' }}/>
@@ -5200,7 +5251,7 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
             </div>
 
             <button onClick={handleReconcile} disabled={!portalFile||!booksFile||loading}
-              className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-sm font-medium rounded-xl shadow-sm transition-colors">
+              className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:bg-slate-200 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white disabled:text-slate-400 text-sm font-semibold rounded-xl shadow-sm transition-all">
               {loading ? <><div className="h-4 w-4 border-2 border-white/40 border-t-white rounded-full animate-spin"/>Processing…</> : <><ArrowLeftRight className="h-4 w-4"/>Reconcile Now</>}
             </button>
           </motion.div>
@@ -5213,14 +5264,14 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
 
               {/* Company info bar */}
               {company.name && (
-                <div className="flex flex-wrap items-center gap-3 p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl border border-indigo-200 dark:border-indigo-800 mb-4 text-xs text-indigo-700 dark:text-indigo-300">
-                  <Building2 className="h-4 w-4 flex-shrink-0"/>
-                  <span className="font-bold">{company.name}</span>
-                  {company.gstin && <span>GSTIN: {company.gstin}</span>}
-                  {period        && <span>Period: {period}</span>}
-                  {company.fy    && <span>FY: {company.fy}</span>}
-                  <span className="ml-auto flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                    <CheckCircle2 className="h-3.5 w-3.5" /> Saved to history
+                <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 mb-4 text-xs shadow-sm">
+                  <Building2 className="h-3.5 w-3.5 text-indigo-500 flex-shrink-0"/>
+                  <span className="font-semibold text-slate-800 dark:text-slate-100">{company.name}</span>
+                  {company.gstin && <span className="font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded">{company.gstin}</span>}
+                  {period        && <span className="text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded-full">{period}</span>}
+                  {company.fy    && <span className="text-slate-500">FY {company.fy}</span>}
+                  <span className="ml-auto flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+                    <CheckCircle2 className="h-3 w-3" /> Saved to history
                   </span>
                 </div>
               )}
