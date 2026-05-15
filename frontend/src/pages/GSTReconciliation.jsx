@@ -4258,8 +4258,8 @@ const HistoryView = ({ onOpenSession, clients = [] }) => {
                     <StatPill label="📒" val={sm.books_only_count ?? 0}  bg="bg-rose-100 dark:bg-rose-900/30"      text="text-rose-700 dark:text-rose-300" />
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <div className="text-right hidden sm:block">
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <div className="text-right hidden sm:block mr-1">
                     <p className="text-[11px] text-slate-400 flex items-center gap-1 justify-end">
                       <Clock className="h-3 w-3" /> {fmtDate(s.created_at)}
                     </p>
@@ -4267,31 +4267,44 @@ const HistoryView = ({ onOpenSession, clients = [] }) => {
                       <p className="text-[10px] text-slate-400 mt-0.5">by {s.created_by_name}</p>
                     )}
                   </div>
+                  {/* Open */}
                   <button
                     onClick={e => { e.stopPropagation(); handleOpen(s.id); }}
                     disabled={opening === s.id}
-                    title="Open full reconciliation — view, edit & generate reports"
+                    title="Open full reconciliation"
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 text-xs font-semibold border border-indigo-200 dark:border-indigo-800 transition-colors"
                   >
                     {opening === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FolderOpen className="h-3.5 w-3.5" />}
-                    Open
+                    <span className="hidden sm:inline">Open</span>
                   </button>
+                  {/* New Session */}
+                  <button
+                    onClick={e => { e.stopPropagation(); handleNewSession(); }}
+                    title="Save this session and start a new reconciliation"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:hover:bg-emerald-900/50 text-emerald-600 dark:text-emerald-300 text-xs font-semibold border border-emerald-200 dark:border-emerald-800 transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">New Session</span>
+                  </button>
+                  {/* Edit */}
                   <button
                     onClick={e => { e.stopPropagation(); setEditing({ session: s }); }}
                     title="Edit company details, period, client link"
-                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 transition-colors border border-transparent hover:border-amber-200 dark:hover:border-amber-800"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-amber-900/30 dark:hover:bg-amber-900/50 text-amber-600 dark:text-amber-300 text-xs font-semibold border border-amber-200 dark:border-amber-800 transition-colors"
                   >
                     <Edit3 className="h-3.5 w-3.5" />
-                    <span className="text-xs font-medium hidden sm:inline">Edit</span>
+                    <span className="hidden sm:inline">Edit</span>
                   </button>
+                  {/* Delete */}
                   <button
                     onClick={e => { e.stopPropagation(); handleDelete(s.id); }}
                     disabled={deleting === s.id}
-                    className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20 text-slate-300 hover:text-rose-500 transition-colors"
+                    title="Delete this session"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-900/30 dark:hover:bg-rose-900/50 text-rose-500 dark:text-rose-400 text-xs font-semibold border border-rose-200 dark:border-rose-800 transition-colors"
                   >
-                    {deleting === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                    {deleting === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                   </button>
-                  <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isExp ? 'rotate-180' : ''}`} />
+                  <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform flex-shrink-0 ${isExp ? 'rotate-180' : ''}`} />
                 </div>
               </div>
 
@@ -5692,23 +5705,7 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
                   </div>
                 ))}
               </div>
-            ) : (
-              <div className="flex flex-wrap gap-3">
-                {[
-                  { label: 'Total Sessions', value: sessions.length, icon: BarChart3, color: 'text-blue-200', bg: 'bg-white/10' },
-                  { label: 'Quick Start', value: '+ New', icon: Plus, color: 'text-green-200', bg: 'bg-white/10', onClick: () => setPageView('new') },
-                ].map(m => (
-                  <div key={m.label} onClick={m.onClick}
-                    className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl ${m.bg} border border-white/10 ${m.onClick ? 'cursor-pointer hover:bg-white/20 transition-colors' : ''}`}>
-                    <m.icon className={`h-4 w-4 ${m.color} flex-shrink-0`} />
-                    <div>
-                      <p className="text-white font-bold text-lg leading-none">{m.value}</p>
-                      <p className={`text-[10px] font-medium mt-0.5 ${m.color}`}>{m.label}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            ) : null}
           </div>
           {/* Export buttons strip when results exist */}
           {results && (
@@ -5739,27 +5736,18 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
               { id: 'new',     label: 'New Reconciliation', icon: ArrowLeftRight },
               { id: 'clients', label: 'Clients',            icon: Building2 },
               { id: 'history', label: 'History',            icon: History },
-              { id: 'session', label: 'New Session',        icon: Plus },
             ].map(v => (
               <button
                 key={v.id}
-                onClick={() => {
-                  if (v.id === 'session') { handleNewSession(); return; }
-                  setPageView(v.id); setClientDetail(null);
-                }}
+                onClick={() => { setPageView(v.id); setClientDetail(null); }}
                 className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                  v.id === 'session'
-                    ? 'bg-indigo-600 text-white shadow-sm hover:bg-indigo-700'
-                    : pageView === v.id
+                  pageView === v.id
                     ? 'bg-indigo-50 dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm border border-indigo-100 dark:border-slate-600'
                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
                 }`}
               >
                 <v.icon className="h-3.5 w-3.5" />
                 {v.label}
-                {v.id === 'session' && sessions.length > 0 && (
-                  <span className="ml-1 bg-white/20 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{sessions.length}</span>
-                )}
               </button>
             ))}
           </div>
