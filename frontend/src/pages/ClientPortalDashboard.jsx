@@ -66,33 +66,30 @@ const fmtSize = (bytes) => {
   return `${(n / 1048576).toFixed(1)} MB`;
 };
 
-// ── Google Drive download helper ──────────────────────────────────────────
-const EXPORT_MIME = {
-  "application/vnd.google-apps.document":     "application/pdf",
-  "application/vnd.google-apps.spreadsheet":  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.google-apps.presentation": "application/pdf",
-  "application/vnd.google-apps.form":         "application/pdf",
-};
-
-function getDownloadUrl(file) {
-  const exportMime = EXPORT_MIME[file.mimeType];
-  if (exportMime) {
-    return `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=${encodeURIComponent(exportMime)}`;
-  }
-  return `https://drive.google.com/uc?export=download&id=${file.id}`;
+// ── Backend-proxied URL builder ───────────────────────────────────────────
+// All file access goes through our backend's authenticated Drive proxy so that
+// clients never need their own Google account. Direct Drive links return 403
+// ("Request access") for any non-owner Google account.
+function getProxyDownloadUrl(file) {
+  const token = sessionStorage.getItem("client_portal_token");
+  return `${API_BASE}/client-portal/drive/download?file_id=${encodeURIComponent(file.id)}&token=${encodeURIComponent(token)}`;
 }
 
 // ── Share Link Button ─────────────────────────────────────────────────────
+// Copies the backend proxy URL (authenticated download link) to clipboard.
+// For folders: copies a deep-link URL back into the portal itself (no Google login needed).
+// For files: copies the backend proxy download URL so anyone with the portal token can access it.
 function ShareBtn({ file }) {
   const [copied, setCopied] = useState(false);
 
-  // Build a shareable link: for folders use Drive folder URL, for files use webViewLink or direct link
   const getShareUrl = () => {
     if (file.mimeType === "application/vnd.google-apps.folder") {
-      return `https://drive.google.com/drive/folders/${file.id}`;
+      // Share a portal deep-link — routes through the portal, no Google login needed
+      const base = window.location.origin + window.location.pathname.replace(/\/dash.*/, "/dashboard");
+      return `${base}?folder=${file.id}`;
     }
-    if (file.webViewLink) return file.webViewLink;
-    return `https://drive.google.com/file/d/${file.id}/view`;
+    // Share the backend proxy download URL — works without a Google account
+    return getProxyDownloadUrl(file);
   };
 
   const handleShare = async (e) => {
@@ -104,7 +101,7 @@ function ShareBtn({ file }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Fallback: open in new tab if clipboard fails
+      // Fallback: open the file directly if clipboard fails
       window.open(url, "_blank", "noopener,noreferrer");
     }
   };
@@ -141,7 +138,8 @@ function DownloadBtn({ file }) {
   const handleDownload = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    window.open(getDownloadUrl(file), "_blank", "noopener,noreferrer");
+    // Use backend proxy — direct Drive URLs return 403 for non-owner Google accounts
+    window.open(getProxyDownloadUrl(file), "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -360,13 +358,13 @@ function DriveTab({ user }) {
                         {/* Download */}
                         <DownloadBtn file={f} />
 
-                        {/* Open in Drive */}
+                        {/* Open / View file via backend proxy */}
                         <a
-                          href={f.webViewLink}
+                          href={getProxyDownloadUrl(f)}
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          title="Open in Google Drive"
+                          title="Open / View file"
                           className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-100 transition opacity-0 group-hover:opacity-100"
                         >
                           <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
