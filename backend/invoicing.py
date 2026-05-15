@@ -864,129 +864,417 @@ def _parse_vyp_file(file_path: str) -> dict:
 
 
 def _parse_excel_file(file_path: str, filename: str) -> dict:
+    """
+    Multi-format Excel/CSV parser.  Auto-detects and handles:
+      1. Vyapar / KhataBook / Billing-software Sale Report  (Generated On header)
+      2. Tally DayBook Export  (Date | Particulars | Voucher Type | Debit | Credit)
+      3. GSTR B2B Invoice Report / B2BInvoices CSV  (Supplier GSTIN, Party Name, Inv. No.)
+      4. Invoices Excel List  (Party Name, Invoice Number, GSTIN, CGST, SGST, IGST …)
+      5. Marg / Busy / Zoho-style sales reports  (flexible column mapping)
+      6. Taskosphere / standard invoice template  (Client Name, Rate, GST Rate …)
+    """
     result = {"source": "excel", "source_label": f"Excel/CSV ({filename})",
               "firms": [], "clients": [], "items": [], "invoices": [], "payments": [], "stats": {}}
+
+    fn_lower = filename.lower()
+
+    # ── helpers ──────────────────────────────────────────────────────────────
+    def _sf(v, default=0.0):
+        return _safe_float(str(v).replace(",", "") if v is not None else "", default)
+
+    def _col_idx(headers_list, *keys):
+        """Return first header index matching any key (case-insensitive, partial)."""
+        hl = [str(h or "").lower().strip() for h in headers_list]
+        for key in keys:
+            kl = key.lower()
+            for i, h in enumerate(hl):
+                if kl in h:
+                    return i
+        return -1
+
+    def _get_dict(row_dict, *keys, default=""):
+        """Fuzzy-match key in a dict row."""
+        for k in keys:
+            for rk in row_dict.keys():
+                if k.lower().replace(" ", "") in rk.lower().replace(" ", ""):
+                    v = row_dict[rk]
+                    if v is not None and str(v).strip():
+                        return str(v).strip()
+        return default
+
+    def _build_invoice(client_name, inv_no, inv_date, taxable, cgst, sgst, igst,
+                       gst_rate=18, client_gstin="", client_phone="", client_email="",
+                       client_addr="", client_state="", reference_no="", notes="",
+                       payment_terms="Due on receipt", inv_type="tax_invoice",
+                       amount_paid=0.0, status="draft"):
+        gst_total = round(cgst + sgst + igst, 2)
+        grand     = round(taxable + gst_total, 2)
+        due_amt   = round(grand - amount_paid, 2)
+        is_inter  = igst > 0
+        half      = gst_rate / 2
+        due_dt    = (_safe_date(None, (date.today() + timedelta(days=30)).isoformat()))
+        try:
+            due_dt = (datetime.strptime(inv_date, "%Y-%m-%d") + timedelta(days=30)).strftime("%Y-%m-%d")
+        except Exception:
+            pass
+        return {
+            "invoice_type": inv_type, "invoice_no": inv_no, "invoice_date": inv_date,
+            "due_date": due_dt, "client_name": client_name,
+            "client_email": client_email, "client_phone": client_phone,
+            "client_gstin": client_gstin, "client_address": client_addr,
+            "client_state": client_state, "is_interstate": is_inter,
+            "reference_no": reference_no, "notes": notes, "payment_terms": payment_terms,
+            "items": [{
+                "description": notes or f"Sale - {inv_no}",
+                "hsn_sac": "", "quantity": 1, "unit": "service",
+                "unit_price": taxable, "discount_pct": 0, "gst_rate": gst_rate,
+                "taxable_value": round(taxable, 2),
+                "cgst_rate": 0 if is_inter else half,
+                "sgst_rate": 0 if is_inter else half,
+                "igst_rate": gst_rate if is_inter else 0,
+                "cgst_amount": 0 if is_inter else cgst,
+                "sgst_amount": 0 if is_inter else sgst,
+                "igst_amount": igst if is_inter else 0,
+                "total_amount": grand,
+            }],
+            "subtotal": round(taxable, 2), "total_taxable": round(taxable, 2),
+            "total_cgst": round(0 if is_inter else cgst, 2),
+            "total_sgst": round(0 if is_inter else sgst, 2),
+            "total_igst": round(igst if is_inter else 0, 2),
+            "total_gst": gst_total, "grand_total": grand,
+            "amount_paid": round(amount_paid, 2), "amount_due": due_amt, "status": status,
+        }
+
+    # ── load raw rows as a list-of-lists ────────────────────────────────────
     try:
-        if filename.lower().endswith(".csv"):
-            with open(file_path, "r", encoding="utf-8-sig") as f:
-                rows = list(csv.DictReader(f))
+        if fn_lower.endswith(".csv"):
+            with open(file_path, "r", encoding="utf-8-sig", errors="replace") as f:
+                raw_text = f.read()
+            import io as _io
+            reader = csv.reader(_io.StringIO(raw_text))
+            all_rows = [r for r in reader]
         else:
-            wb = openpyxl.load_workbook(file_path, data_only=True)
-            ws = wb.active
-            headers = [str(c.value or "").strip() for c in ws[1]]
-            rows = []
-            for row_cells in ws.iter_rows(min_row=2, values_only=True):
-                rd = {}
-                for i, val in enumerate(row_cells):
-                    if i < len(headers) and headers[i]: rd[headers[i]] = val
-                if any(v for v in rd.values() if v): rows.append(rd)
+            engine = "xlrd" if fn_lower.endswith(".xls") else "openpyxl"
+            try:
+                import pandas as pd
+                xl = pd.ExcelFile(file_path, engine=engine)
+                # Use first sheet that looks relevant
+                sheet = next(
+                    (s for s in xl.sheet_names if any(
+                        kw in str(s).lower()
+                        for kw in ["b2b", "invoice", "sale", "purchase", "daybook", "day book", "ledger"]
+                    )),
+                    xl.sheet_names[0],
+                )
+                df = pd.read_excel(xl, sheet_name=sheet, header=None, dtype=str)
+                df = df.fillna("")
+                all_rows = df.values.tolist()
+            except Exception:
+                wb = openpyxl.load_workbook(file_path, data_only=True)
+                ws = wb.active
+                all_rows = [[str(c if c is not None else "") for c in row] for row in ws.iter_rows(values_only=True)]
+    except Exception as e:
+        raise HTTPException(400, f"Cannot open file '{filename}': {e}")
 
-        is_sale_report = any(
-            'generated on' in str(r[0]).lower()
-            for r in rows[:3] if r and r[0]
-        )
+    # Flatten to clean strings
+    def _cell(row, idx, default=""):
+        if idx < 0 or idx >= len(row): return default
+        v = row[idx]
+        return str(v).strip() if v is not None else default
 
-        if is_sale_report:
-            header_idx = next((i for i, r in enumerate(rows) if r and str(r[0]).strip().lower() == 'date'), 2)
-            data_rows = [r for r in rows[header_idx + 1:] if r and r[0] and str(r[0]).strip()]
-            for row in data_rows:
-                def _col(idx, default=''):
-                    try: return str(row[idx]).strip() if row[idx] is not None else default
-                    except: return default
-                raw_date = _col(0); order_no = _col(1); inv_no_raw = _col(2)
-                party_name = _col(3) or 'Unknown'; gstin_val = _col(4); phone_val = _col(5)
-                txn_type = _col(6).lower(); total_amt = _safe_float(_col(7))
-                pay_type = _col(8); received = _safe_float(_col(9)); balance = _safe_float(_col(10))
-                pay_status = _col(11).lower(); desc_val = _col(12)
-                inv_date = date.today().isoformat()
-                if raw_date and '/' in raw_date:
-                    parts = raw_date.split('/')
-                    if len(parts) == 3:
-                        try:
-                            yr = parts[2] if len(parts[2]) == 4 else '20' + parts[2]
-                            inv_date = f"{yr}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
-                        except: pass
-                due_date_val = (datetime.strptime(inv_date, '%Y-%m-%d') + timedelta(days=30)).strftime('%Y-%m-%d')
-                status = 'draft'
-                if pay_status == 'paid': status = 'paid'
-                elif received > 0 and balance > 0: status = 'partially_paid'
-                elif balance > 0: status = 'sent'
-                inv_type = 'credit_note' if 'credit' in txn_type else 'tax_invoice'
-                taxable = round(total_amt / 1.18, 2)
-                gst_amt = round(total_amt - taxable, 2)
-                cgst = round(gst_amt / 2, 2); sgst = round(gst_amt / 2, 2)
-                if total_amt <= 0: continue
-                result['invoices'].append({
-                    'invoice_type': inv_type,
-                    'invoice_no': f"SR-{inv_no_raw}" if inv_no_raw else f"SR-{len(result['invoices'])+1:04d}",
-                    'invoice_date': inv_date, 'due_date': due_date_val,
-                    'client_name': party_name, 'client_email': '', 'client_phone': phone_val,
-                    'client_gstin': gstin_val, 'client_address': '', 'client_state': '',
-                    'is_interstate': False, 'reference_no': order_no,
-                    'notes': desc_val or pay_type, 'payment_terms': pay_type or 'Due on receipt',
-                    'items': [{'description': desc_val or f'Sale - {inv_no_raw}', 'hsn_sac': '',
-                        'quantity': 1, 'unit': 'service', 'unit_price': taxable, 'discount_pct': 0,
-                        'gst_rate': 18.0, 'taxable_value': taxable,
-                        'cgst_rate': 9.0, 'sgst_rate': 9.0, 'igst_rate': 0.0,
-                        'cgst_amount': cgst, 'sgst_amount': sgst, 'igst_amount': 0.0, 'total_amount': total_amt}],
-                    'subtotal': taxable, 'total_taxable': taxable, 'total_cgst': cgst,
-                    'total_sgst': sgst, 'total_igst': 0.0, 'total_gst': gst_amt,
-                    'grand_total': total_amt, 'amount_paid': received, 'amount_due': balance, 'status': status,
-                })
-            result['stats'] = {'firms': 0, 'clients': len(set(i['client_name'] for i in result['invoices'])),
-                               'items': 0, 'invoices': len(result['invoices']), 'payments': 0}
+    # ── FORMAT 1: Vyapar / KhataBook / Billing Sale Report ──────────────────
+    # Signature: one of first 3 rows contains "Generated On" or "Sale Report"
+    is_sale_report = any(
+        ("generated on" in str(r[0]).lower() or "sale report" in " ".join(str(c) for c in r[:3]).lower())
+        for r in all_rows[:5] if r and r[0]
+    )
+    if is_sale_report:
+        hi = next((i for i, r in enumerate(all_rows) if r and str(r[0]).strip().lower() in ("date", "voucher date")), 2)
+        for r in all_rows[hi + 1:]:
+            if not r or not str(r[0]).strip(): continue
+            raw_date = _cell(r, 0); order_no = _cell(r, 1); inv_no_raw = _cell(r, 2)
+            party   = _cell(r, 3) or "Unknown"; gstin_v = _cell(r, 4); phone_v = _cell(r, 5)
+            txn_type= _cell(r, 6).lower(); total = _sf(r[7] if len(r) > 7 else "")
+            pay_type= _cell(r, 8); received = _sf(r[9] if len(r) > 9 else ""); balance = _sf(r[10] if len(r) > 10 else "")
+            pay_sts = _cell(r, 11).lower(); desc_v = _cell(r, 12)
+            if total <= 0: continue
+            inv_date = date.today().isoformat()
+            for sep in ("/", "-"):
+                if sep in raw_date:
+                    pts = raw_date.split(sep)
+                    try:
+                        yr = pts[2] if len(pts[2]) == 4 else "20" + pts[2]
+                        inv_date = f"{yr}-{pts[1].zfill(2)}-{pts[0].zfill(2)}"
+                        break
+                    except Exception:
+                        pass
+            status = "paid" if pay_sts == "paid" else ("partially_paid" if received > 0 and balance > 0 else ("sent" if balance > 0 else "draft"))
+            inv_type = "credit_note" if "credit" in txn_type else "tax_invoice"
+            taxable  = round(total / 1.18, 2); gst_amt = round(total - taxable, 2)
+            result["invoices"].append(_build_invoice(
+                party, f"SR-{inv_no_raw or len(result['invoices'])+1:04d}",
+                inv_date, taxable, round(gst_amt/2,2), round(gst_amt/2,2), 0,
+                18, gstin_v, phone_v, "", "", "", order_no, desc_v or pay_type,
+                pay_type or "Due on receipt", inv_type, received, status,
+            ))
+        result["stats"] = {"firms": 0, "clients": len({i["client_name"] for i in result["invoices"]}),
+                           "items": 0, "invoices": len(result["invoices"]), "payments": 0}
+        return result
+
+    # ── Locate header row (first row with ≥3 non-empty cells) ────────────────
+    def _find_header(rows, keywords=None):
+        kw = keywords or ["gstin", "invoice", "party", "date", "amount", "debit", "credit", "particulars"]
+        for i, r in enumerate(rows[:20]):
+            rstr = " ".join(str(c) for c in (r or [])).lower()
+            if sum(1 for k in kw if k in rstr) >= 2:
+                return i
+        # Fallback: first row with ≥ 3 filled cells
+        for i, r in enumerate(rows[:15]):
+            if sum(1 for c in (r or []) if str(c).strip()) >= 3:
+                return i
+        return 0
+
+    # ── FORMAT 2: Tally DayBook Export ──────────────────────────────────────
+    # Signature: header contains "Particulars" + "Debit"/"Credit" + "Voucher"
+    hi = _find_header(all_rows, ["particulars", "narration", "debit", "credit", "voucher"])
+    header_row = all_rows[hi] if hi < len(all_rows) else []
+    header_str = " ".join(str(c) for c in header_row).lower()
+    GSTIN_RE   = re.compile(r'\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]\b')
+
+    if ("particulars" in header_str or "narration" in header_str) and ("debit" in header_str or "credit" in header_str):
+        date_idx  = _col_idx(header_row, "date")
+        part_idx  = _col_idx(header_row, "particulars", "narration")
+        vno_idx   = _col_idx(header_row, "voucher no", "vch no", "no.", "vno")
+        vtype_idx = _col_idx(header_row, "voucher type", "vch type", "type")
+        debit_idx = _col_idx(header_row, "debit", "dr")
+        cred_idx  = _col_idx(header_row, "credit", "cr")
+        last_date = date.today().isoformat()
+        for r in all_rows[hi + 1:]:
+            dval = _cell(r, date_idx)
+            if dval and re.search(r'\d{1,2}[-/]\d{1,2}[-/]\d{2,4}', dval):
+                last_date = _safe_date(dval.replace("-", "/"), last_date)
+            vtype = _cell(r, vtype_idx).lower()
+            if not vtype or "purchase" not in vtype:
+                continue
+            particulars = _cell(r, part_idx)
+            vno   = _cell(r, vno_idx)
+            debit = _sf(r[debit_idx] if debit_idx >= 0 and debit_idx < len(r) else "")
+            cred  = _sf(r[cred_idx]  if cred_idx  >= 0 and cred_idx  < len(r) else "")
+            amount = debit if debit > 0 else cred
+            if not particulars or amount <= 0 or not vno:
+                continue
+            gm = GSTIN_RE.search(particulars.upper())
+            if not gm:
+                continue
+            gstin   = gm.group(0)
+            taxable = round(amount / 1.05, 2)
+            gst     = round(amount - taxable, 2)
+            result["invoices"].append(_build_invoice(
+                particulars.split(chr(10))[0][:50],
+                vno, last_date, taxable, round(gst/2,2), round(gst/2,2), 0,
+                5, gstin, "", "", "", "", "", particulars[:80],
+            ))
+        if result["invoices"]:
+            result["source"]       = "tally_daybook"
+            result["source_label"] = f"Tally DayBook ({filename})"
+            result["stats"]        = {"firms": 0, "clients": len({i["client_name"] for i in result["invoices"]}),
+                                      "items": 0, "invoices": len(result["invoices"]), "payments": 0}
             return result
 
-        def _get(row, *keys, default=""):
-            for k in keys:
-                for rk in row.keys():
-                    if rk.lower().replace(" ", "_") == k.lower().replace(" ", "_"):
-                        val = row[rk]
-                        if val is not None and str(val).strip(): return str(val).strip()
-            return default
+    # ── FORMAT 3: GSTR B2B Invoice Report / B2BInvoices CSV ─────────────────
+    # Signature: header has "Supplier GSTIN" or "GSTIN of Supplier" + "Inv. No."
+    is_gstr_b2b = (
+        "supplier gstin" in header_str or
+        "gstin of supplier" in header_str or
+        ("inv. no." in header_str and "party name" in header_str) or
+        "b2binvoices" in fn_lower or "as_per_books" in fn_lower
+    )
+    if is_gstr_b2b:
+        # Re-find header: scan for the GSTIN row (may be preceded by company name rows)
+        for i, r in enumerate(all_rows[:20]):
+            rs = " ".join(str(c) for c in (r or [])).lower()
+            if ("supplier gstin" in rs or "gstin of supplier" in rs) and ("inv" in rs or "party" in rs):
+                hi = i; header_row = r; break
 
-        for row in rows:
-            client_name = _get(row, "Client Name", "client_name", "Customer Name", "party_name", "Name")
+        gstin_i  = _col_idx(header_row, "supplier gstin", "gstin of supplier", "gstin")
+        name_i   = _col_idx(header_row, "party name", "trade/legal", "supplier name")
+        invno_i  = _col_idx(header_row, "inv. no.", "invoice number", "invoice no")
+        date_i   = _col_idx(header_row, "inv. date", "invoice date", "date")
+        val_i    = _col_idx(header_row, "inv. value", "invoice value", "total invoice value")
+        tax_i    = _col_idx(header_row, "total taxable value", "taxable value")
+        igst_i   = _col_idx(header_row, "integrated tax", "igst")
+        cgst_i   = _col_idx(header_row, "central tax", "cgst")
+        sgst_i   = _col_idx(header_row, "state / ut tax", "state/ut tax", "sgst")
+        cess_i   = _col_idx(header_row, "cess")
+        stype_i  = _col_idx(header_row, "supply type")
+        rate_i   = _col_idx(header_row, "rate")
+
+        for r in all_rows[hi + 1:]:
+            gstin = _cell(r, gstin_i).upper().strip()
+            inv_no= _cell(r, invno_i)
+            if not gstin or len(gstin) != 15 or not re.match(r'^\d{2}[A-Z]', gstin) or not inv_no:
+                continue
+            stype   = _cell(r, stype_i).lower()
+            is_inter= "inter" in stype and "intra" not in stype
+            igst    = _sf(_cell(r, igst_i))
+            cgst    = _sf(_cell(r, cgst_i))
+            sgst    = _sf(_cell(r, sgst_i))
+            cess    = _sf(_cell(r, cess_i))
+            inv_val = _sf(_cell(r, val_i))
+            tax_val = _sf(_cell(r, tax_i)) or round(inv_val / 1.05, 2)
+            rate_raw= re.sub(r"[^0-9.]", "", _cell(r, rate_i) or "5")
+            rate_v  = _safe_float(rate_raw, 5)
+
+            # Parse date (DD-MM-YYYY or DD/MM/YYYY)
+            raw_dt = _cell(r, date_i)
+            inv_date = date.today().isoformat()
+            for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%d-%m-%y", "%d/%m/%y"):
+                try: inv_date = datetime.strptime(raw_dt, fmt).strftime("%Y-%m-%d"); break
+                except Exception: pass
+
+            result["invoices"].append(_build_invoice(
+                _cell(r, name_i) or gstin,
+                inv_no, inv_date, tax_val,
+                0 if is_inter else cgst, 0 if is_inter else sgst, igst if is_inter else 0,
+                rate_v, gstin,
+            ))
+        if result["invoices"]:
+            result["source"]       = "gstr_b2b"
+            result["source_label"] = f"GSTR B2B Invoice Report ({filename})"
+            result["stats"]        = {"firms": 0, "clients": len({i["client_name"] for i in result["invoices"]}),
+                                      "items": 0, "invoices": len(result["invoices"]), "payments": 0}
+            return result
+
+    # ── FORMAT 4: Invoices Excel List (Party, Invoice No, Date, GST columns) ──
+    # Signature: has "party name" or "invoice no" + tax columns
+    is_invoice_list = (
+        ("party name" in header_str or "invoice no" in header_str) and
+        ("cgst" in header_str or "igst" in header_str or "gst" in header_str or "tax" in header_str)
+    )
+    if is_invoice_list:
+        gstin_i  = _col_idx(header_row, "gstin", "gst no", "gst number")
+        name_i   = _col_idx(header_row, "party name", "customer name", "client name", "vendor name")
+        invno_i  = _col_idx(header_row, "invoice no", "invoice number", "bill no", "inv no", "voucher no")
+        date_i   = _col_idx(header_row, "invoice date", "bill date", "date")
+        val_i    = _col_idx(header_row, "invoice value", "invoice amount", "total amount", "net amount", "grand total")
+        tax_i    = _col_idx(header_row, "taxable value", "taxable amount", "basic amount")
+        igst_i   = _col_idx(header_row, "igst", "integrated tax")
+        cgst_i   = _col_idx(header_row, "cgst", "central tax")
+        sgst_i   = _col_idx(header_row, "sgst", "state tax")
+        phone_i  = _col_idx(header_row, "phone", "mobile", "contact")
+        addr_i   = _col_idx(header_row, "address", "billing address")
+        state_i  = _col_idx(header_row, "state", "place of supply")
+        hsn_i    = _col_idx(header_row, "hsn", "hsn/sac", "sac")
+        notes_i  = _col_idx(header_row, "notes", "remarks", "narration", "description")
+
+        for r in all_rows[hi + 1:]:
+            client_name = _cell(r, name_i)
             if not client_name: continue
-            desc = _get(row, "Description", "Item Description", "Particulars", "Item Name", default="Service")
-            qty = _safe_float(_get(row, "Quantity", "Qty", default="1"), 1)
-            rate = _safe_float(_get(row, "Rate", "Unit Price", "Price", "Amount", default="0"))
-            gst_rate = _safe_float(_get(row, "GST Rate", "GST%", "Tax Rate", default="18"), 18)
-            discount_pct = _safe_float(_get(row, "Discount%", "Discount", default="0"))
-            inv_date = _safe_date(_get(row, "Invoice Date", "Date", "Bill Date"))
-            due_date = _safe_date(_get(row, "Due Date", "Payment Due"),
-                (datetime.strptime(inv_date, "%Y-%m-%d") + timedelta(days=30)).strftime("%Y-%m-%d"))
-            taxable = qty * rate * (1 - discount_pct / 100)
-            half = gst_rate / 2
-            cgst = round(taxable * half / 100, 2)
-            sgst = round(taxable * half / 100, 2)
-            total = round(taxable + cgst + sgst, 2)
-            result["invoices"].append({
-                "invoice_type": "tax_invoice", "client_name": client_name,
-                "client_email": _get(row, "Email", "client_email"),
-                "client_phone": _get(row, "Phone", "Mobile"),
-                "client_gstin": _get(row, "GSTIN", "GST No"),
-                "client_address": _get(row, "Address", "Billing Address"),
-                "client_state": _get(row, "State", "Place of Supply"),
-                "invoice_date": inv_date, "due_date": due_date,
-                "reference_no": _get(row, "Reference No", "Ref No", "Invoice No"),
-                "notes": _get(row, "Notes", "Remarks"), "is_interstate": False,
-                "items": [{"description": desc,
-                    "hsn_sac": _get(row, "HSN/SAC", "HSN", "SAC"),
-                    "quantity": qty, "unit": _get(row, "Unit", "UOM", default="service"),
-                    "unit_price": rate, "discount_pct": discount_pct, "gst_rate": gst_rate,
-                    "taxable_value": round(taxable, 2),
-                    "cgst_rate": half, "sgst_rate": half, "igst_rate": 0,
-                    "cgst_amount": cgst, "sgst_amount": sgst, "igst_amount": 0, "total_amount": total}],
-                "subtotal": round(qty * rate, 2), "total_taxable": round(taxable, 2),
-                "total_cgst": cgst, "total_sgst": sgst, "total_igst": 0,
-                "total_gst": round(cgst + sgst, 2), "grand_total": total,
-                "amount_paid": 0, "amount_due": total, "status": "draft",
-                "payment_terms": "Due on receipt",
-            })
-    except Exception as e:
-        raise HTTPException(400, f"Failed to parse file: {e}")
-    result["stats"] = {"firms": 0, "clients": len(set(i["client_name"] for i in result["invoices"])),
+            gstin_v = _cell(r, gstin_i)
+            if gstin_v and (len(gstin_v) != 15 or not re.match(r'^\d{2}', gstin_v)):
+                gstin_v = ""
+            inv_no  = _cell(r, invno_i) or f"IMP-{len(result['invoices'])+1:04d}"
+            inv_date= _safe_date(_cell(r, date_i))
+            inv_val = _sf(_cell(r, val_i))
+            tax_val = _sf(_cell(r, tax_i))
+            igst    = _sf(_cell(r, igst_i))
+            cgst    = _sf(_cell(r, cgst_i))
+            sgst    = _sf(_cell(r, sgst_i))
+            is_inter= igst > 0
+            if not tax_val:
+                tax_val = round(inv_val / (1 + (igst+cgst+sgst)/max(inv_val,1)), 2) if inv_val else 0
+            if inv_val <= 0 and tax_val <= 0: continue
+            gst_total = igst + cgst + sgst
+            gst_rate  = round(gst_total / tax_val * 100, 0) if tax_val > 0 else 18
+            result["invoices"].append(_build_invoice(
+                client_name, inv_no, inv_date, tax_val,
+                cgst, sgst, igst, gst_rate,
+                gstin_v, _cell(r, phone_i), "", _cell(r, addr_i), _cell(r, state_i),
+                "", _cell(r, notes_i), "Due on receipt", "tax_invoice", 0,
+            ))
+        if result["invoices"]:
+            result["source"]       = "invoice_list"
+            result["source_label"] = f"Invoice List ({filename})"
+            result["stats"]        = {"firms": 0, "clients": len({i["client_name"] for i in result["invoices"]}),
+                                      "items": 0, "invoices": len(result["invoices"]), "payments": 0}
+            return result
+
+    # ── FORMAT 5 & 6: Marg / Busy / Zoho / Taskosphere flexible parser ───────
+    # Convert rows to dict using best-guess header row
+    hi2 = _find_header(all_rows)
+    raw_headers = all_rows[hi2] if hi2 < len(all_rows) else []
+    dict_rows: list[dict] = []
+    for r in all_rows[hi2 + 1:]:
+        rd: dict = {}
+        for i, h in enumerate(raw_headers):
+            if i < len(r) and h and str(h).strip():
+                rd[str(h).strip()] = r[i] if i < len(r) else ""
+        if any(str(v).strip() for v in rd.values()):
+            dict_rows.append(rd)
+
+    for row in dict_rows:
+        client_name = _get_dict(row, "Client Name", "customer name", "party name", "party_name", "Name", "Buyer")
+        if not client_name:
+            continue
+        desc       = _get_dict(row, "Description", "Item Description", "Particulars", "Item Name", default="Service")
+        qty        = _sf(_get_dict(row, "Quantity", "Qty", "Units", default="1"), 1)
+        rate       = _sf(_get_dict(row, "Rate", "Unit Price", "Price", "MRP", "Sale Rate", default="0"))
+        gst_rate   = _sf(_get_dict(row, "GST Rate", "GST%", "Tax Rate", "GST", default="18"), 18)
+        discount   = _sf(_get_dict(row, "Discount%", "Discount", "Disc%", default="0"))
+        inv_date   = _safe_date(_get_dict(row, "Invoice Date", "Date", "Bill Date", "Inv Date"))
+        due_date   = _safe_date(_get_dict(row, "Due Date", "Payment Due"),
+                                (datetime.strptime(inv_date, "%Y-%m-%d") + timedelta(days=30)).strftime("%Y-%m-%d"))
+        gstin_v    = _get_dict(row, "GSTIN", "GST No", "GST Number", "Supplier GSTIN")
+        state_v    = _get_dict(row, "State", "Place of Supply")
+        taxable    = round(qty * rate * (1 - discount / 100), 2)
+        half       = gst_rate / 2
+        cgst_v     = round(taxable * half / 100, 2)
+        sgst_v     = round(taxable * half / 100, 2)
+        igst_v     = _sf(_get_dict(row, "IGST", "Integrated Tax"))
+        is_inter   = igst_v > 0 or ("inter" in state_v.lower() and "intra" not in state_v.lower())
+        if is_inter:
+            igst_v = igst_v or round(taxable * gst_rate / 100, 2)
+            cgst_v = sgst_v = 0
+        total = round(taxable + cgst_v + sgst_v + igst_v, 2)
+        if total <= 0:
+            continue
+        result["invoices"].append({
+            "invoice_type": "tax_invoice",
+            "invoice_no": _get_dict(row, "Invoice No", "Invoice Number", "Bill No", "Ref No",
+                                    default=f"IMP-{len(result['invoices'])+1:04d}"),
+            "invoice_date": inv_date, "due_date": due_date,
+            "client_name": client_name, "client_email": _get_dict(row, "Email", "E-Mail"),
+            "client_phone": _get_dict(row, "Phone", "Mobile", "Contact"),
+            "client_gstin": gstin_v,
+            "client_address": _get_dict(row, "Address", "Billing Address"),
+            "client_state": state_v, "is_interstate": is_inter,
+            "reference_no": _get_dict(row, "Reference No", "Ref No", "Order No"),
+            "notes": _get_dict(row, "Notes", "Remarks", "Narration"),
+            "payment_terms": "Due on receipt",
+            "items": [{
+                "description": desc,
+                "hsn_sac": _get_dict(row, "HSN/SAC", "HSN", "SAC"),
+                "quantity": qty, "unit": _get_dict(row, "Unit", "UOM", default="nos"),
+                "unit_price": rate, "discount_pct": discount, "gst_rate": gst_rate,
+                "taxable_value": round(taxable, 2),
+                "cgst_rate": 0 if is_inter else half,
+                "sgst_rate": 0 if is_inter else half,
+                "igst_rate": gst_rate if is_inter else 0,
+                "cgst_amount": 0 if is_inter else cgst_v,
+                "sgst_amount": 0 if is_inter else sgst_v,
+                "igst_amount": igst_v if is_inter else 0,
+                "total_amount": total,
+            }],
+            "subtotal": round(qty * rate, 2), "total_taxable": round(taxable, 2),
+            "total_cgst": 0 if is_inter else round(cgst_v, 2),
+            "total_sgst": 0 if is_inter else round(sgst_v, 2),
+            "total_igst": round(igst_v, 2) if is_inter else 0,
+            "total_gst": round(cgst_v + sgst_v + igst_v, 2),
+            "grand_total": total, "amount_paid": 0, "amount_due": total,
+            "status": "draft",
+        })
+
+    result["stats"] = {"firms": 0, "clients": len({i["client_name"] for i in result["invoices"]}),
                        "items": 0, "invoices": len(result["invoices"]), "payments": 0}
     return result
 
