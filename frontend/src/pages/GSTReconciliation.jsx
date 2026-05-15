@@ -36,26 +36,61 @@ import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
  *   "T1326"      → "1326"   ← alpha directly attached
  *   "INV1234"    → "1234"
  */
+/**
+ * normaliseInvoice v2 — Smart multi-segment serial extraction.
+ *
+ * Handles real-world Indian GST invoice formats:
+ *   "4930"              → "4930"    (pure numeric)
+ *   "DB-T/4930"         → "4930"    (alpha prefix + numeric)
+ *   "T/0004930/26"      → "4930"    (FY suffix /26 discarded)
+ *   "GST/24-25/4930"    → "4930"    (FY range /24-25/ discarded)
+ *   "INV-2024-001234"   → "1234"    (year /2024/ discarded, serial wins)
+ *   "12/0033902"        → "33902"   (month prefix /12/ discarded)
+ *   "001/2026"          → "1"       (year /2026/ discarded)
+ *   "T1326"             → "1326"    (alpha directly attached)
+ *   "INV/1234"          → "1234"    (simple prefix/serial)
+ *   "GST-24-25-0047"    → "47"      (serial > month/FY)
+ *
+ * Strategy:
+ *   1. Split by / and - into parts.
+ *   2. Keep only purely-numeric parts.
+ *   3. Remove "noise" parts: 2-digit FY codes (19–35) and 4-digit years (2000–2035).
+ *   4. Among remaining candidates, pick the LONGEST (most digits = most specific serial).
+ *   5. Ties → last wins (rightmost in Indian invoice numbering).
+ *   6. If all parts are noise, fall back to the longest of all parts.
+ */
 function normaliseInvoice(val) {
   if (val === null || val === undefined) return '';
   const s = String(val).trim().toUpperCase().replace(/\s+/g, '');
   if (!s) return '';
-  // Purely numeric
   if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
-  // Last separator strategy: find last / or - and check if trailing part is numeric
-  const lastSlash = s.lastIndexOf('/');
-  const lastDash  = s.lastIndexOf('-');
-  const lastSepIdx = Math.max(lastSlash, lastDash);
-  if (lastSepIdx >= 0) {
-    const afterSep = s.substring(lastSepIdx + 1);
-    if (afterSep && /^\d+$/.test(afterSep)) {
-      return afterSep.replace(/^0+/, '') || '0';
-    }
+
+  const parts = s.split(/[\/\-]/).filter(Boolean);
+  const numericParts = parts
+    .filter(p => /^\d+$/.test(p))
+    .map(p => ({ raw: p, stripped: p.replace(/^0+/, '') || '0', len: p.length }));
+
+  if (numericParts.length === 0) {
+    const m = s.match(/^[A-Z]+(\d+)/);
+    return m ? m[1].replace(/^0+/, '') || '0' : s;
   }
-  // Alpha prefix directly attached without separator: "T1326" → "1326"
-  const m = s.match(/^[A-Z]+(\d+)$/);
-  if (m) return m[1].replace(/^0+/, '') || '0';
-  return s;
+  if (numericParts.length === 1) return numericParts[0].stripped;
+
+  const isNoise = ({ stripped, len }) => {
+    const v = parseInt(stripped, 10);
+    if (len <= 2 && v >= 1 && v <= 12) return true;   // month (1-12)
+    if (len <= 2 && v >= 19 && v <= 35) return true;   // 2-digit FY code (FY19-FY35)
+    if (len === 4 && v >= 2000 && v <= 2035) return true; // 4-digit calendar year
+    return false;
+  };
+
+  const serials = numericParts.filter(p => !isNoise(p));
+  const pool    = serials.length > 0 ? serials : numericParts;
+
+  return pool.reduce((best, cur) =>
+    cur.stripped.length > best.stripped.length ? cur :
+    cur.stripped.length === best.stripped.length ? cur : best
+  ).stripped;
 }
 function normaliseGSTIN(val) {
   return val ? String(val).trim().toUpperCase() : '';
@@ -798,12 +833,14 @@ function normaliseDateStr(raw) {
 }
 
 /**
- * Smart tolerance: ₹1.01 floor, OR 0.1% of the larger invoice value.
- * Prevents false mismatches on large invoices due to rounding in ERP exports.
+ * Smart tolerance v2 — ₹1.01 floor, 0.1% of value, but CAPPED at ₹50.
+ * The cap prevents false matches on large invoices (e.g., ₹10L invoice:
+ * old = ₹1000 tolerance which is too loose; new = ₹50 max).
+ * For small invoices (< ₹500): floor kicks in at ₹1.01.
  */
 function smartTolerance(v1, v2 = 0) {
   const larger = Math.max(Math.abs(v1), Math.abs(v2), 1);
-  return Math.max(TOLERANCE, larger * 0.001);
+  return Math.max(TOLERANCE, Math.min(50, larger * 0.001));
 }
 
 /**
@@ -826,48 +863,245 @@ function levenshtein(a, b) {
   return dp[b.length];
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   MISMATCH INTELLIGENCE ENGINE
+   Classifies every mismatch into one of 15+ root-cause categories with a
+   specific, actionable suggestion — like a senior CA would diagnose.
+═══════════════════════════════════════════════════════════════════════════ */
+
+/** Standard GST slabs for rate-validation. */
+const VALID_GST_RATES = [0, 0.1, 0.25, 1, 1.5, 3, 5, 6, 7.5, 9, 12, 14, 18, 28];
+
+function _impliedRate(inv) {
+  const tax = (inv.igst||0) + (inv.cgst||0) + (inv.sgst||0);
+  const base = inv.taxableValue > 0 ? inv.taxableValue : inv.invoiceValue;
+  return base > 0 ? (tax / base) * 100 : 0;
+}
+
 /**
- * Detect the primary human-readable reason for a mismatch + suggested action.
- * Returns { reason, suggestion, severity }
+ * detectMismatchReason v2 — 15+ root-cause categories.
+ * Returns { reason, suggestion, severity, tag }
  */
 function detectMismatchReason(p, b) {
-  const valDiff   = p.invoiceValue  - b.invoiceValue;
-  const taxDiff   = (p.igst+p.cgst+p.sgst) - (b.igst+b.cgst+b.sgst);
-  const taxPct    = p.invoiceValue > 0 ? Math.abs(taxDiff) / p.invoiceValue * 100 : 0;
-  const pRate     = p.invoiceValue > 0 ? (p.igst+p.cgst+p.sgst) / p.invoiceValue * 100 : 0;
-  const bRate     = b.invoiceValue > 0 ? (b.igst+b.cgst+b.sgst) / b.invoiceValue * 100 : 0;
-  const rateDiff  = Math.abs(pRate - bRate);
+  const tol      = smartTolerance(p.invoiceValue, b.invoiceValue);
+  const valDiff  = p.invoiceValue - b.invoiceValue;
+  const pTax     = (p.igst||0) + (p.cgst||0) + (p.sgst||0);
+  const bTax     = (b.igst||0) + (b.cgst||0) + (b.sgst||0);
+  const taxDiff  = pTax - bTax;
+  const valOk    = Math.abs(valDiff) <= tol;
+  const taxOk    = Math.abs(taxDiff) <= tol;
 
-  // Date mismatch only
-  const pDate = normaliseDateStr(p.invoiceDate);
-  const bDate = normaliseDateStr(b.invoiceDate);
+  const pDate    = normaliseDateStr(p.invoiceDate);
+  const bDate    = normaliseDateStr(b.invoiceDate);
   const dateDiff = pDate && bDate && pDate !== bDate;
 
-  if (Math.abs(valDiff) < smartTolerance(p.invoiceValue, b.invoiceValue) &&
-      Math.abs(taxDiff) < smartTolerance(p.invoiceValue, b.invoiceValue)) {
-    if (dateDiff)
-      return { reason: `Date mismatch: portal ${pDate} vs books ${bDate}`,
-               suggestion: 'Verify invoice date in books against original invoice', severity: 'low' };
-    return { reason: 'Minor rounding difference only', suggestion: 'Likely safe to accept', severity: 'low' };
+  const pRate    = _impliedRate(p);
+  const bRate    = _impliedRate(b);
+  const rateDiff = Math.abs(pRate - bRate);
+
+  // ── 1. Only rounding / negligible ─────────────────────────────────────────
+  if (valOk && taxOk) {
+    if (dateDiff) {
+      const pMo = pDate.slice(0, 7), bMo = bDate.slice(0, 7);
+      if (pMo !== bMo)
+        return { reason: `Cross-month date: Portal ${pDate} vs Books ${bDate}`,
+                 suggestion: 'Ensure the invoice is booked in the correct GSTR-3B return period. Cross-month dates affect ITC period.',
+                 severity: 'medium', tag: 'DATE' };
+      return { reason: `Date differs: Portal ${pDate} vs Books ${bDate}`,
+               suggestion: 'Verify invoice date against original. Same-month variance is low-risk but correct for audit trail.',
+               severity: 'low', tag: 'DATE' };
+    }
+    return { reason: 'Minor rounding (within ₹1)', suggestion: 'Safe to accept — ERP rounding artifact.', severity: 'low', tag: 'ROUND' };
   }
 
-  if (rateDiff > 1.5)
-    return { reason: `GST rate differs: portal ~${pRate.toFixed(0)}% vs books ~${bRate.toFixed(0)}%`,
-             suggestion: 'Check if correct HSN/SAC and tax rate applied in books', severity: 'high' };
+  // ── 2. Credit note / debit note (negative value) ─────────────────────────
+  if (p.invoiceValue < 0 || b.invoiceValue < 0) {
+    const bigDiff = Math.abs(valDiff) > 1000;
+    return { reason: 'Credit/Debit note — values signed differently',
+             suggestion: 'Link credit note to original invoice. Verify sign convention (portal uses positive for CN amount). ITC reversal required.',
+             severity: bigDiff ? 'high' : 'medium', tag: 'CN' };
+  }
 
-  if (Math.abs(valDiff) > smartTolerance(p.invoiceValue, b.invoiceValue) &&
-      Math.abs(taxDiff) < smartTolerance(p.invoiceValue, b.invoiceValue))
-    return { reason: `Invoice value differs by ₹${Math.abs(valDiff).toFixed(2)} (tax matches)`,
-             suggestion: 'Possible GST-exclusive vs GST-inclusive entry. Check original invoice', severity: 'medium' };
+  // ── 3. Reverse Charge mismatch ───────────────────────────────────────────
+  if (p.reverseCharge && b.reverseCharge) {
+    const pRC = p.reverseCharge.trim().toUpperCase().charAt(0);
+    const bRC = b.reverseCharge.trim().toUpperCase().charAt(0);
+    if (pRC !== bRC && (pRC === 'Y' || bRC === 'Y'))
+      return { reason: `RCM flag mismatch: Portal="${p.reverseCharge}" Books="${b.reverseCharge}"`,
+               suggestion: 'Reverse charge applicability determines whether buyer or seller pays GST. Incorrect flag causes wrong liability + wrong ITC claim.',
+               severity: 'high', tag: 'RCM' };
+  }
 
-  if (valDiff > 0)
-    return { reason: `Portal value ₹${Math.abs(valDiff).toFixed(2)} higher than books`,
-             suggestion: 'Supplier may have filed amended/higher invoice. Request GSTR-1 amendment or update books', severity: 'high' };
-  if (valDiff < 0)
-    return { reason: `Books value ₹${Math.abs(valDiff).toFixed(2)} higher than portal`,
-             suggestion: 'Vendor may have understated. Request credit note or amendment from supplier', severity: 'high' };
+  // ── 4. Inter vs Intra state conflict (IGST vs CGST+SGST) ─────────────────
+  const pIsInter = (p.igst||0) > 0.5 && (p.cgst||0) < 0.5;
+  const bIsInter = (b.igst||0) > 0.5 && (b.cgst||0) < 0.5;
+  if (!valOk || !taxOk) {
+    if (pIsInter !== bIsInter)
+      return { reason: `Supply type conflict: Portal is ${pIsInter?'Inter':'Intra'}-state, Books is ${bIsInter?'Inter':'Intra'}-state`,
+               suggestion: 'Wrong Place of Supply in one record. IGST vs CGST+SGST classification is critical for ITC. Correct books to match portal.',
+               severity: 'high', tag: 'SUPPLY_TYPE' };
+  }
 
-  return { reason: 'Multiple field mismatches', suggestion: 'Review invoice with vendor', severity: 'medium' };
+  // ── 5. Non-standard / invalid GST rate ───────────────────────────────────
+  if (pRate > 0 || bRate > 0) {
+    const pRateValid = pRate === 0 || VALID_GST_RATES.some(r => Math.abs(pRate - r) < 0.6);
+    const bRateValid = bRate === 0 || VALID_GST_RATES.some(r => Math.abs(bRate - r) < 0.6);
+    if (!pRateValid || !bRateValid) {
+      const badSide = !pRateValid ? `Portal rate ~${pRate.toFixed(1)}%` : `Books rate ~${bRate.toFixed(1)}%`;
+      return { reason: `Non-standard GST rate: ${badSide} is not a valid GST slab`,
+               suggestion: 'Invalid rate indicates wrong HSN/SAC mapping. Verify HSN code, applicable rate notification, and re-book.',
+               severity: 'high', tag: 'RATE_INVALID' };
+    }
+    if (rateDiff > 1.5)
+      return { reason: `GST rate slab differs: Portal ~${pRate.toFixed(0)}% vs Books ~${bRate.toFixed(0)}%`,
+               suggestion: 'Different tax slabs applied. Confirm correct rate with supplier's GSTIN/HSN. ITC claim must match portal tax.',
+               severity: 'high', tag: 'RATE' };
+  }
+
+  // ── 6. GST-inclusive vs GST-exclusive entry ───────────────────────────────
+  if (!valOk && taxOk && pRate > 0) {
+    const excl = b.invoiceValue * (1 + pRate / 100);
+    const incl = p.invoiceValue / (1 + pRate / 100);
+    if (Math.abs(excl - p.invoiceValue) < tol * 5 || Math.abs(incl - b.invoiceValue) < tol * 5) {
+      return { reason: `GST-inclusive vs GST-exclusive: value diff ₹${Math.abs(valDiff).toFixed(2)}`,
+               suggestion: 'One entry has GST included in invoice value, the other excludes it. GSTR-2B value is always GST-inclusive. Update books to match.',
+               severity: 'medium', tag: 'GST_INCLUSIVE' };
+    }
+  }
+
+  // ── 7. Value differs, tax matches ─────────────────────────────────────────
+  if (!valOk && taxOk) {
+    const absDiff = Math.abs(valDiff);
+    return { reason: `Invoice value differs by ₹${absDiff.toFixed(2)} — tax amount matches`,
+             suggestion: 'Possible freight/discount/round-off included in one but not other. Verify original invoice. Low ITC risk if tax matches.',
+             severity: absDiff > 5000 ? 'high' : 'medium', tag: 'VAL_ONLY' };
+  }
+
+  // ── 8. Tax differs, value matches ─────────────────────────────────────────
+  if (valOk && !taxOk) {
+    const absTaxDiff = Math.abs(taxDiff);
+    return { reason: `Tax differs by ₹${absTaxDiff.toFixed(2)} — invoice value matches`,
+             suggestion: 'Tax computation error in books. Re-check tax rate applied on taxable base. May be wrong HSN or manual override.',
+             severity: absTaxDiff > 500 ? 'high' : 'medium', tag: 'TAX_ONLY' };
+  }
+
+  // ── 9. Portal significantly higher (GSTR-1 amendment by supplier) ─────────
+  if (valDiff > tol) {
+    const absDiff = Math.abs(valDiff);
+    const pct     = p.invoiceValue > 0 ? absDiff / p.invoiceValue * 100 : 0;
+    if (pct > 15)
+      return { reason: `Portal value ₹${absDiff.toFixed(2)} (${pct.toFixed(1)}%) higher — likely GSTR-1 amendment`,
+               suggestion: 'Supplier has probably amended the invoice in GSTR-1. Request revised invoice. Raise debit note in books for the difference.',
+               severity: 'high', tag: 'PORTAL_HIGHER_AMEND' };
+    return { reason: `Portal value ₹${absDiff.toFixed(2)} higher than books`,
+             suggestion: 'Short-booked in accounts. Verify with vendor\'s original invoice and book the difference to avail full ITC.',
+             severity: 'medium', tag: 'PORTAL_HIGHER' };
+  }
+
+  // ── 10. Books significantly higher (possible over-booking) ────────────────
+  if (valDiff < -tol) {
+    const absDiff = Math.abs(valDiff);
+    const pct     = b.invoiceValue > 0 ? absDiff / b.invoiceValue * 100 : 0;
+    if (pct > 15)
+      return { reason: `Books value ₹${absDiff.toFixed(2)} (${pct.toFixed(1)}%) higher than portal — possible duplicate/over-booking`,
+               suggestion: 'Check for duplicate entry in books. If unique, vendor understated in GSTR-1 — request GSTR-1 amendment or credit note.',
+               severity: 'high', tag: 'BOOKS_HIGHER_DUPE' };
+    return { reason: `Books show ₹${absDiff.toFixed(2)} more than portal`,
+             suggestion: 'Vendor may have understated invoice in GSTR-1. Request credit note or amendment. Excess ITC claim is a risk.',
+             severity: 'medium', tag: 'BOOKS_HIGHER' };
+  }
+
+  return { reason: 'Multiple field mismatches — needs manual review',
+           suggestion: 'Compare original invoice documents. Raise with vendor if discrepancy persists.',
+           severity: 'medium', tag: 'MULTI' };
+}
+
+/**
+ * checkSection16_4 — CGST Act Section 16(4) ITC deadline guard.
+ * ITC for invoices of FY N can be claimed up to due date of GSTR-3B
+ * for November of FY N+1 (typically 30 Nov of the following year).
+ * Returns { timedOut: bool, warning: string }
+ */
+function checkSection16_4(invoiceDate) {
+  if (!invoiceDate) return { timedOut: false, warning: '' };
+  const iso = normaliseDateStr(String(invoiceDate));
+  if (!iso || iso.length < 7) return { timedOut: false, warning: '' };
+  const y   = parseInt(iso.slice(0, 4), 10);
+  const mo  = parseInt(iso.slice(5, 7), 10);
+  const invFY   = mo >= 4 ? y : y - 1;       // FY starts April
+  const deadline = `${invFY + 1}-11-30`;
+  const today    = new Date().toISOString().slice(0, 10);
+  if (today > deadline)
+    return { timedOut: true, warning: `Sec 16(4): ITC claim deadline passed (was ${deadline} for FY ${invFY}-${String(invFY+1).slice(2)})` };
+  const daysLeft = Math.ceil((new Date(deadline) - new Date(today)) / 86400000);
+  if (daysLeft <= 45)
+    return { timedOut: false, warning: `Sec 16(4): ${daysLeft}d left to claim ITC (deadline ${deadline})` };
+  return { timedOut: false, warning: '' };
+}
+
+/**
+ * detectDuplicates — find invoice keys that appear more than once in a dataset.
+ * A duplicate inside portal data inflates ITC claims; in books it doubles expenses.
+ * Returns Map of "gstin__invoiceNo" → count (only entries with count > 1).
+ */
+function detectDuplicates(data) {
+  const cnt = new Map();
+  for (const inv of data) {
+    const k = `${inv.gstin}__${inv.invoiceNo}`;
+    cnt.set(k, (cnt.get(k) || 0) + 1);
+  }
+  const dupes = new Map();
+  for (const [k, c] of cnt) if (c > 1) dupes.set(k, c);
+  return dupes;
+}
+
+/**
+ * computeMatchStats — derives KPIs from reconciliation results.
+ * Returns counts, amount-weighted match rate, ITC breakdown, vendor heat map.
+ */
+function computeMatchStats(results, manualTradeNames = {}) {
+  const { matched, mismatch, portalOnly, booksOnly } = results;
+  const totalPortal = matched.length + mismatch.length + portalOnly.length;
+  const totalBooks  = matched.length + mismatch.length + booksOnly.length;
+  const matchPct    = totalPortal > 0 ? (matched.length / totalPortal * 100).toFixed(1) : '0.0';
+
+  const sum = (arr, fn) => arr.reduce((s, r) => s + (fn(r) || 0), 0);
+  const pVal = r => r.portal?.invoiceValue || 0;
+  const bVal = r => r.books?.invoiceValue  || 0;
+  const pTax = r => (r.portal?.igst||0) + (r.portal?.cgst||0) + (r.portal?.sgst||0);
+  const bTax = r => (r.books?.igst||0)  + (r.books?.cgst||0)  + (r.books?.sgst||0);
+
+  const portalTotalAmt  = sum(matched, pVal) + sum(mismatch, pVal) + sum(portalOnly, pVal);
+  const matchedAmt      = sum(matched, pVal);
+  const amtMatchPct     = portalTotalAmt > 0 ? (matchedAmt / portalTotalAmt * 100).toFixed(1) : '0.0';
+
+  const itcClaimable = sum(matched,    pTax);
+  const itcPending   = sum(portalOnly, pTax);
+  const itcAtRisk    = sum(booksOnly,  bTax);
+  const itcMismatch  = sum(mismatch, r => Math.abs(pTax(r) - bTax(r)));
+  const highSeverity = mismatch.filter(r => r.severity === 'high').length;
+
+  // Vendor heat map: group all problem records by GSTIN
+  const vmap = new Map();
+  const addToMap = (r, category) => {
+    const inv = r.portal || r.books;
+    const g   = inv?.gstin || ''; if (!g) return;
+    const nm  = inv?.tradeOrLegalName || manualTradeNames?.[g] || '';
+    const existing = vmap.get(g) || { gstin: g, name: nm, count: 0, amt: 0, tax: 0 };
+    existing.count++;
+    existing.amt += inv?.invoiceValue || 0;
+    existing.tax += (category === 'mismatch') ? Math.abs(pTax(r) - bTax(r)) : (pTax(r) || bTax(r));
+    vmap.set(g, existing);
+  };
+  mismatch.forEach(r => addToMap(r, 'mismatch'));
+  portalOnly.forEach(r => addToMap(r, 'portal'));
+  booksOnly.forEach(r => addToMap(r, 'books'));
+
+  const topVendors = [...vmap.values()].sort((a, b) => b.amt - a.amt).slice(0, 6);
+
+  return { totalPortal, totalBooks, matchPct, amtMatchPct,
+           itcClaimable, itcPending, itcAtRisk, itcMismatch,
+           highSeverity, topVendors };
 }
 
 /**
@@ -934,6 +1168,10 @@ function countMismatchFields(p, b) {
 }
 
 function reconcile(portalData, booksData) {
+  // Detect duplicates BEFORE deduplication so we can surface them in the UI
+  const portalDupes = detectDuplicates(portalData);
+  const booksDupes  = detectDuplicates(booksData);
+
   const pm = new Map(), bm = new Map();
   portalData.forEach(inv => { const k = `${inv.gstin}__${inv.invoiceNo}`; if (!pm.has(k)) pm.set(k, inv); });
   booksData.forEach(inv  => { const k = `${inv.gstin}__${inv.invoiceNo}`; if (!bm.has(k)) bm.set(k, inv); });
@@ -1231,7 +1469,9 @@ function reconcile(portalData, booksData) {
     mismatch:   mismatchFinal,
     portalOnly: portalOnlyFinal,
     booksOnly:  booksOnlyFinal,
-    crossGstin: crossGstinPairs,   // ← NEW: cross-GSTIN conflict pairs
+    crossGstin: crossGstinPairs,
+    portalDupes,   // Map of key → count for duplicate invoices in portal data
+    booksDupes,    // Map of key → count for duplicate invoices in books data
   };
 }
 
@@ -1884,8 +2124,75 @@ function exportExcel(results, company, period, manualTradeNames = {}, invoiceCom
       return [i+1,r.books.gstin,nm,r.books.invoiceNoRaw,r.books.invoiceDate,r.books.invoiceValue,r.books.taxableValue,r.books.igst,r.books.cgst,r.books.sgst,r.books.cess,r.books.placeOfSupply,r.books.invoiceType,r.books.rate,invoiceComments?.[rk]||''];
     })
   ]), 'In Books Only');
+
+  /* ── Mismatch Detail Sheet (with root-cause & action) ─────────────────── */
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['#','GSTIN','Party Name','Invoice No','Date','Portal Value','Books Value','Value Diff','Portal Tax','Books Tax','Tax Diff','Severity','Root Cause','Recommended Action'],
+    ...results.mismatch.map((r,i)=>{
+      const nm=r.portal?.tradeOrLegalName||manualTradeNames?.[r.portal?.gstin]||r.books?.tradeOrLegalName||manualTradeNames?.[r.books?.gstin]||'';
+      const pTaxAmt=(r.portal?.igst||0)+(r.portal?.cgst||0)+(r.portal?.sgst||0);
+      const bTaxAmt=(r.books?.igst||0)+(r.books?.cgst||0)+(r.books?.sgst||0);
+      return [i+1,r.portal?.gstin||r.books?.gstin,nm,
+        r.portal?.invoiceNoRaw||r.books?.invoiceNoRaw,
+        r.portal?.invoiceDate||r.books?.invoiceDate,
+        r.portal?.invoiceValue||0, r.books?.invoiceValue||0,
+        ((r.portal?.invoiceValue||0)-(r.books?.invoiceValue||0)).toFixed(2),
+        pTaxAmt.toFixed(2), bTaxAmt.toFixed(2), (pTaxAmt-bTaxAmt).toFixed(2),
+        (r.severity||'').toUpperCase(),
+        r.mismatchReason||'', r.suggestedAction||''];
+    })
+  ]), 'Mismatch Detail');
+
+  /* ── Vendor Action Required Sheet ──────────────────────────────────────── */
+  const vendorMap = new Map();
+  const addVendorIssue = (r, category) => {
+    const inv = r.portal || r.books;
+    const g   = inv?.gstin || ''; if (!g) return;
+    const nm  = inv?.tradeOrLegalName || manualTradeNames?.[g] || '';
+    const e   = vendorMap.get(g) || { gstin: g, name: nm, issues: [], totalAmt: 0 };
+    const pTx = (r.portal?.igst||0)+(r.portal?.cgst||0)+(r.portal?.sgst||0);
+    const bTx = (r.books?.igst||0)+(r.books?.cgst||0)+(r.books?.sgst||0);
+    e.issues.push({
+      invNo:    r.portal?.invoiceNoRaw || r.books?.invoiceNoRaw || '',
+      invDate:  r.portal?.invoiceDate  || r.books?.invoiceDate  || '',
+      invVal:   inv?.invoiceValue || 0,
+      taxDiff:  category === 'mismatch' ? Math.abs(pTx - bTx) : pTx || bTx,
+      category,
+      severity: (r.severity || 'medium').toUpperCase(),
+      reason:   r.mismatchReason || (category === 'mismatch' ? 'Amount mismatch' : category === 'portal' ? 'Not in books' : 'Not in portal'),
+      action:   r.suggestedAction || (category === 'portal' ? 'Book this invoice to avail ITC' : category === 'books' ? 'Confirm if booked incorrectly or vendor omitted in portal' : 'Review with vendor'),
+    });
+    e.totalAmt += inv?.invoiceValue || 0;
+    vendorMap.set(g, e);
+  };
+  results.mismatch.forEach(r => addVendorIssue(r, 'mismatch'));
+  results.portalOnly.forEach(r => addVendorIssue(r, 'portal'));
+  results.booksOnly.forEach(r => addVendorIssue(r, 'books'));
+
+  const vendorsSorted = [...vendorMap.values()].sort((a,b) => b.totalAmt - a.totalAmt);
+  const actionRows = [
+    [`VENDOR ACTION REQUIRED LIST — ${company.name || ''} | Period: ${period || ''}`],
+    [`Generated: ${new Date().toLocaleDateString('en-IN')}`],
+    [],
+    ['GSTIN','Vendor Name','Invoice No','Invoice Date','Invoice Value (₹)','ITC Impact (₹)','Issue Category','Severity','Root Cause','Recommended Action','Follow-Up Status'],
+    ...vendorsSorted.flatMap(v =>
+      v.issues.map(iss => [
+        v.gstin,
+        v.name || manualTradeNames?.[v.gstin] || '',
+        iss.invNo, iss.invDate, iss.invVal, iss.taxDiff.toFixed(2),
+        iss.category === 'mismatch' ? 'Amount Mismatch' : iss.category === 'portal' ? 'Portal Only (Not in Books)' : 'Books Only (Not in Portal)',
+        iss.severity, iss.reason, iss.action, 'Pending',
+      ])
+    ),
+    [],
+    ['VENDOR SUMMARY'],
+    ['GSTIN','Vendor Name','Total Invoices with Issues','Total Amount (₹)'],
+    ...vendorsSorted.map(v => [v.gstin, v.name || manualTradeNames?.[v.gstin] || '', v.issues.length, v.totalAmt.toFixed(2)]),
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(actionRows), 'Vendor Action List');
+
   XLSX.writeFile(wb, `GST_Recon_${(company.name||'Report').replace(/\s+/g,'_')}_${period?period.replace(/\s+/g,'_'):'Export'}.xlsx`);
-  toast.success('Excel report downloaded successfully!');
+  toast.success('Excel report downloaded — includes Vendor Action List and Mismatch Detail sheets!');
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -3590,8 +3897,6 @@ const ClientSelector = ({ clients, selectedId, onSelect }) => {
 const HistoryView = ({ onOpenSession }) => {
   const [sessions,  setSessions]  = useState([]);
   const [loading,   setLoading]   = useState(true);
-  const [aiInsights,     setAiInsights]     = useState('');
-  const [aiInsightState, setAiInsightState] = useState('idle'); // idle | loading | done | error
   const [deleting,  setDeleting]  = useState(null);
   const [opening,   setOpening]   = useState(null);
   const [expanded,  setExpanded]  = useState(null);
@@ -4307,6 +4612,67 @@ export default function GSTReconciliation() {
     } catch (_) { return {}; }
   });
 
+  // AI Insights state
+  const [aiInsights,     setAiInsights]     = useState('');
+  const [aiInsightState, setAiInsightState] = useState('idle'); // idle | loading | done | error
+
+  const handleAiInsights = useCallback(async () => {
+    if (!results) return;
+    setAiInsightState('loading');
+    setAiInsights('');
+    try {
+      const geminiKey = process.env.REACT_APP_GEMINI_API_KEY || '';
+      if (!geminiKey) {
+        setAiInsights('AI Insights require a REACT_APP_GEMINI_API_KEY environment variable. Add it to your .env file and restart.');
+        setAiInsightState('error');
+        return;
+      }
+      const summary = {
+        matched:    results.matched?.length   || 0,
+        mismatch:   results.mismatch?.length  || 0,
+        portalOnly: results.portalOnly?.length || 0,
+        booksOnly:  results.booksOnly?.length  || 0,
+        matchedValue:   sumVal(results.matched   || [], 'portal'),
+        mismatchValue:  sumVal(results.mismatch  || [], 'portal'),
+        portalOnlyValue:sumVal(results.portalOnly|| [], 'portal'),
+        booksOnlyValue: sumVal(results.booksOnly || [], 'books'),
+        topMismatches: (results.mismatch || []).slice(0, 5).map(r => ({
+          gstin: r.portal?.gstin, invNo: r.portal?.invoiceNoRaw,
+          valueDiff: r.valueDiff, taxDiff: r.taxDiff,
+          reason: r.mismatchReason, severity: r.severity,
+        })),
+        company: company.name || '', period, gstin: company.gstin || '',
+      };
+      const prompt = `You are a senior Indian GST consultant. Analyse this GSTR-2B reconciliation result and provide a concise, professional summary in 4-6 bullet points covering:
+1. Overall reconciliation health and match rate
+2. Key ITC risk areas and amounts
+3. Specific issues driving mismatches (with reasons if available)
+4. Recommended immediate actions (prioritised by financial impact)
+5. Any compliance risks to flag
+
+Data: ${JSON.stringify(summary, null, 2)}
+
+Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
+
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        }
+      );
+      if (!res.ok) throw new Error(`Gemini API error: ${res.status}`);
+      const data = await res.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No insights generated.';
+      setAiInsights(text);
+      setAiInsightState('done');
+    } catch (e) {
+      setAiInsights(`Failed to generate insights: ${e.message}`);
+      setAiInsightState('error');
+    }
+  }, [results, company, period]);
+
   const onSaveComment = useCallback((key, comment) => {
     setInvoiceComments(prev => {
       const updated = { ...prev };
@@ -4854,50 +5220,124 @@ export default function GSTReconciliation() {
                 </div>
               )}
 
-              {/* ITC Summary Banner */}
+              {/* ── Match Intelligence Dashboard ─────────────────────────────── */}
               {results && (() => {
-                const itcEligible = results.matched.reduce((s,r) => {
-                  const inv = r.portal;
-                  if (!inv) return s;
-                  return s + (inv.igst||0) + (inv.cgst||0) + (inv.sgst||0);
-                }, 0);
-                const itcAtRisk = results.booksOnly.reduce((s,r) => {
-                  const inv = r.books;
-                  if (!inv) return s;
-                  return s + (inv.igst||0) + (inv.cgst||0) + (inv.sgst||0);
-                }, 0);
-                const itcPending = results.portalOnly.reduce((s,r) => {
-                  const inv = r.portal;
-                  if (!inv) return s;
-                  return s + (inv.igst||0) + (inv.cgst||0) + (inv.sgst||0);
-                }, 0);
+                const stats = computeMatchStats(results, manualTradeNames);
+                const hasDupes = (results.portalDupes?.size || 0) + (results.booksDupes?.size || 0) > 0;
+                const matchRateNum = parseFloat(stats.matchPct);
+                const matchBarColor = matchRateNum >= 90 ? 'bg-emerald-500' : matchRateNum >= 70 ? 'bg-amber-500' : 'bg-rose-500';
+                const matchTextColor = matchRateNum >= 90 ? 'text-emerald-600 dark:text-emerald-400' : matchRateNum >= 70 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400';
+
                 return (
-                  <div className="grid grid-cols-3 gap-3 mb-4">
-                    <button
-                      onClick={() => setItcModal('claimable')}
-                      className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl border border-emerald-200 dark:border-emerald-800 p-3 text-left hover:shadow-md hover:border-emerald-400 dark:hover:border-emerald-600 transition-all group cursor-pointer"
-                    >
-                      <p className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide flex items-center gap-1">ITC Claimable <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity"/></p>
-                      <p className="text-lg font-bold text-emerald-700 dark:text-emerald-300 mt-0.5">₹{fmt(itcEligible)}</p>
-                      <p className="text-[10px] text-emerald-600 dark:text-emerald-400">From {results.matched.length} matched invoices</p>
-                    </button>
-                    <button
-                      onClick={() => setItcModal('toBook')}
-                      className="bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800 p-3 text-left hover:shadow-md hover:border-blue-400 dark:hover:border-blue-600 transition-all group cursor-pointer"
-                    >
-                      <p className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide flex items-center gap-1">ITC to Book <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity"/></p>
-                      <p className="text-lg font-bold text-blue-700 dark:text-blue-300 mt-0.5">₹{fmt(itcPending)}</p>
-                      <p className="text-[10px] text-blue-600 dark:text-blue-400">From {results.portalOnly.length} portal-only invoices</p>
-                    </button>
-                    <button
-                      onClick={() => setItcModal('atRisk')}
-                      className="bg-rose-50 dark:bg-rose-900/20 rounded-xl border border-rose-200 dark:border-rose-800 p-3 text-left hover:shadow-md hover:border-rose-400 dark:hover:border-rose-600 transition-all group cursor-pointer"
-                    >
-                      <p className="text-[10px] font-semibold text-rose-600 dark:text-rose-400 uppercase tracking-wide flex items-center gap-1">ITC at Risk <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity"/></p>
-                      <p className="text-lg font-bold text-rose-700 dark:text-rose-300 mt-0.5">₹{fmt(itcAtRisk)}</p>
-                      <p className="text-[10px] text-rose-600 dark:text-rose-400">From {results.booksOnly.length} books-only invoices</p>
-                    </button>
-                  </div>
+                  <>
+                    {/* Duplicate Warning Banner */}
+                    {hasDupes && (
+                      <div className="flex items-start gap-3 p-3 mb-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-xl text-sm">
+                        <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5"/>
+                        <div>
+                          <span className="font-semibold text-amber-700 dark:text-amber-300">Duplicate Invoices Detected!</span>
+                          <span className="text-amber-600 dark:text-amber-400 ml-1">
+                            {results.portalDupes?.size > 0 && `${results.portalDupes.size} duplicate invoice(s) in Portal data`}
+                            {results.portalDupes?.size > 0 && results.booksDupes?.size > 0 && ' · '}
+                            {results.booksDupes?.size > 0 && `${results.booksDupes.size} duplicate invoice(s) in Books data`}
+                            {' — Duplicates inflate ITC claims and can trigger GST scrutiny. Remove them before filing.'}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* High-Severity Alert */}
+                    {stats.highSeverity > 0 && (
+                      <div className="flex items-center gap-3 p-3 mb-3 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-700 rounded-xl text-sm">
+                        <AlertTriangle className="h-4 w-4 text-rose-600 flex-shrink-0"/>
+                        <span className="text-rose-700 dark:text-rose-300">
+                          <span className="font-semibold">{stats.highSeverity} high-severity mismatch{stats.highSeverity > 1 ? 'es' : ''}</span>
+                          {' require urgent attention — these directly affect ITC eligibility.'}
+                        </span>
+                        <button onClick={() => setActiveTab('mismatch')} className="ml-auto text-xs font-semibold text-rose-600 hover:text-rose-800 dark:text-rose-400 underline whitespace-nowrap">View Mismatches →</button>
+                      </div>
+                    )}
+
+                    {/* Match Rate Row */}
+                    <div className="flex items-center gap-4 p-3 mb-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl">
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Invoice Match Rate</span>
+                          <span className={`text-sm font-bold ${matchTextColor}`}>{stats.matchPct}%</span>
+                        </div>
+                        <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                          <div className={`h-full ${matchBarColor} rounded-full transition-all`} style={{ width: `${stats.matchPct}%` }}/>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">{stats.matched?.length || results.matched.length} of {stats.totalPortal} portal invoices matched</p>
+                      </div>
+                      <div className="border-l border-slate-200 dark:border-slate-700 pl-4 flex-1">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Amount Match Rate</span>
+                          <span className={`text-sm font-bold ${parseFloat(stats.amtMatchPct) >= 90 ? 'text-emerald-600 dark:text-emerald-400' : parseFloat(stats.amtMatchPct) >= 70 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`}>{stats.amtMatchPct}%</span>
+                        </div>
+                        <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                          <div className={`h-full ${parseFloat(stats.amtMatchPct) >= 90 ? 'bg-emerald-500' : parseFloat(stats.amtMatchPct) >= 70 ? 'bg-amber-500' : 'bg-rose-500'} rounded-full transition-all`} style={{ width: `${stats.amtMatchPct}%` }}/>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">By invoice value (weighted)</p>
+                      </div>
+                    </div>
+
+                    {/* ITC Summary — 4 cards */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+                      <button onClick={() => setItcModal('claimable')}
+                        className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl border border-emerald-200 dark:border-emerald-800 p-3 text-left hover:shadow-md hover:border-emerald-400 dark:hover:border-emerald-600 transition-all group cursor-pointer">
+                        <p className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide flex items-center gap-1">ITC Claimable <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity"/></p>
+                        <p className="text-lg font-bold text-emerald-700 dark:text-emerald-300 mt-0.5">₹{fmt(stats.itcClaimable)}</p>
+                        <p className="text-[10px] text-emerald-600 dark:text-emerald-400">From {results.matched.length} matched invoices</p>
+                      </button>
+                      <button onClick={() => setItcModal('toBook')}
+                        className="bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800 p-3 text-left hover:shadow-md hover:border-blue-400 dark:hover:border-blue-600 transition-all group cursor-pointer">
+                        <p className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide flex items-center gap-1">ITC to Book <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity"/></p>
+                        <p className="text-lg font-bold text-blue-700 dark:text-blue-300 mt-0.5">₹{fmt(stats.itcPending)}</p>
+                        <p className="text-[10px] text-blue-600 dark:text-blue-400">From {results.portalOnly.length} portal-only invoices</p>
+                      </button>
+                      <button onClick={() => setItcModal('atRisk')}
+                        className="bg-rose-50 dark:bg-rose-900/20 rounded-xl border border-rose-200 dark:border-rose-800 p-3 text-left hover:shadow-md hover:border-rose-400 dark:hover:border-rose-600 transition-all group cursor-pointer">
+                        <p className="text-[10px] font-semibold text-rose-600 dark:text-rose-400 uppercase tracking-wide flex items-center gap-1">ITC at Risk <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity"/></p>
+                        <p className="text-lg font-bold text-rose-700 dark:text-rose-300 mt-0.5">₹{fmt(stats.itcAtRisk)}</p>
+                        <p className="text-[10px] text-rose-600 dark:text-rose-400">From {results.booksOnly.length} books-only invoices</p>
+                      </button>
+                      <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800 p-3">
+                        <p className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wide">ITC in Dispute</p>
+                        <p className="text-lg font-bold text-amber-700 dark:text-amber-300 mt-0.5">₹{fmt(stats.itcMismatch)}</p>
+                        <p className="text-[10px] text-amber-600 dark:text-amber-400">Tax diff on {results.mismatch.length} mismatch invoices</p>
+                      </div>
+                    </div>
+
+                    {/* Top Vendors with Issues */}
+                    {stats.topVendors.length > 0 && (
+                      <div className="mb-3 p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl">
+                        <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2 flex items-center gap-1.5">
+                          <AlertTriangle className="h-3.5 w-3.5 text-amber-500"/>
+                          Top Vendors Requiring Attention
+                        </p>
+                        <div className="space-y-1.5">
+                          {stats.topVendors.map((v, i) => {
+                            const barPct = stats.topVendors[0]?.amt > 0 ? Math.round(v.amt / stats.topVendors[0].amt * 100) : 0;
+                            return (
+                              <div key={v.gstin} className="flex items-center gap-2 text-xs">
+                                <span className="text-slate-400 w-3 text-right">{i+1}</span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-medium text-slate-700 dark:text-slate-300 truncate">{v.name || v.gstin}</span>
+                                    <span className="text-slate-500 dark:text-slate-400 ml-2 whitespace-nowrap">{v.count} issue{v.count > 1 ? 's' : ''} · ₹{fmt(v.amt)}</span>
+                                  </div>
+                                  <div className="h-1 bg-slate-100 dark:bg-slate-700 rounded-full mt-0.5">
+                                    <div className="h-full bg-amber-400 rounded-full" style={{ width: `${barPct}%` }}/>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 );
               })()}
 
