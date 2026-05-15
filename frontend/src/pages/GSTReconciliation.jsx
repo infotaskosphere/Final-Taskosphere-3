@@ -954,7 +954,7 @@ function detectMismatchReason(p, b) {
     }
     if (rateDiff > 1.5)
       return { reason: `GST rate slab differs: Portal ~${pRate.toFixed(0)}% vs Books ~${bRate.toFixed(0)}%`,
-               suggestion: 'Different tax slabs applied. Confirm correct rate with supplier's GSTIN/HSN. ITC claim must match portal tax.',
+               suggestion: "Different tax slabs applied. Confirm correct rate with supplier's GSTIN/HSN. ITC claim must match portal tax.",
                severity: 'high', tag: 'RATE' };
   }
 
