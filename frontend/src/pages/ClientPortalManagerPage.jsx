@@ -496,6 +496,133 @@ function AllClientsTab({ isDark, isAdmin }) {
 
 
 /* ── Folder Architect Tab ───────────────────────────────────────────────────── */
+/* ── Individual Folder Panel ─────────────────────────────────────────────── */
+function IndividualFolderPanel({ clients, loadingClients, subfolders, parentId, isDark, onRefresh }) {
+  const [search, setSearch] = useState('');
+  const [customNames, setCustomNames] = useState({});   // clientId → custom name
+  const [editingId, setEditingId] = useState(null);    // which client is being name-edited
+  const [applyingSingle, setApplyingSingle] = useState(null);
+
+  const filtered = clients.filter(c => {
+    const name = (c.company_name || c.name || '').toLowerCase();
+    return name.includes(search.toLowerCase());
+  });
+
+  const applyToClient = async (clientId, defaultName) => {
+    const customName = customNames[clientId]?.trim() || defaultName;
+    setApplyingSingle(clientId);
+    try {
+      const res = await api.post('/client-portal/drive/create-individual-folder', {
+        client_id: clientId,
+        client_name: defaultName,
+        custom_folder_name: customName !== defaultName ? customName : undefined,
+        parent_folder_id: parentId || null,
+        subfolders: subfolders.length > 0 ? subfolders : undefined,
+      });
+      if (res.data.folder_link) {
+        toast.success(`Folder "${customName}" created!`, {
+          action: { label: 'Open', onClick: () => window.open(res.data.folder_link, '_blank') },
+        });
+      } else {
+        toast.success(`Folder created for ${customName}!`);
+      }
+      onRefresh && onRefresh();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || `Failed to create folder for ${defaultName}`);
+    } finally {
+      setApplyingSingle(null);
+    }
+  };
+
+  if (loadingClients) {
+    return <div className="flex items-center gap-2 py-6 text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-xs">Loading clients…</span></div>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search companies…"
+          className={`w-full pl-8 pr-3 py-2 rounded-xl border text-xs focus:outline-none focus:ring-2 focus:ring-blue-400 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-slate-50 border-slate-200'}`}
+        />
+      </div>
+
+      {/* Client list */}
+      <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+        {filtered.length === 0 && <p className="text-xs text-slate-400 text-center py-4">No clients found.</p>}
+        {filtered.map(c => {
+          const defaultName = c.company_name || c.name || '—';
+          const customName = customNames[c.id] ?? defaultName;
+          const isEditing = editingId === c.id;
+          return (
+            <div key={c.id} className={`rounded-xl border p-3 ${isDark ? 'border-slate-700 bg-slate-700/30' : 'border-slate-100 bg-slate-50'}`}>
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0" style={{ background: GRADIENT }}>
+                  {defaultName[0]?.toUpperCase() || '?'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{defaultName}</p>
+                  {c.has_drive && (
+                    <p className="text-[10px] text-emerald-600 flex items-center gap-1"><FolderCheck className="h-3 w-3" /> Drive folder exists</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Custom folder name input */}
+              <div className="flex items-center gap-2">
+                {isEditing ? (
+                  <>
+                    <input
+                      autoFocus
+                      value={customName}
+                      onChange={e => setCustomNames(prev => ({ ...prev, [c.id]: e.target.value }))}
+                      placeholder={`Folder name (default: ${defaultName})`}
+                      className={`flex-1 px-2 py-1.5 rounded-lg border text-xs focus:outline-none focus:ring-2 focus:ring-blue-400 ${isDark ? 'bg-slate-700 border-slate-500 text-slate-200' : 'bg-white border-slate-300'}`}
+                      onKeyDown={e => { if (e.key === 'Enter') { setEditingId(null); } if (e.key === 'Escape') { setEditingId(null); setCustomNames(p => ({ ...p, [c.id]: defaultName })); } }}
+                    />
+                    <button onClick={() => setEditingId(null)} className="text-emerald-500 hover:text-emerald-700 p-1" title="Done"><Check className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => { setEditingId(null); setCustomNames(p => ({ ...p, [c.id]: defaultName })); }} className="text-slate-400 hover:text-slate-600 p-1" title="Reset"><X className="h-3.5 w-3.5" /></button>
+                  </>
+                ) : (
+                  <>
+                    <div className={`flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs truncate ${isDark ? 'bg-slate-600/40' : 'bg-white border border-slate-200'}`}>
+                      <Folder className="h-3 w-3 text-yellow-500 flex-shrink-0" />
+                      <span className="truncate text-slate-600 dark:text-slate-300">{customName || defaultName}</span>
+                      {customName !== defaultName && customName && (
+                        <span className="ml-1 text-[10px] text-blue-500 font-medium flex-shrink-0">(custom)</span>
+                      )}
+                    </div>
+                    <button onClick={() => setEditingId(c.id)} className={`p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition text-[10px] border ${isDark ? 'border-slate-600' : 'border-slate-200'}`} title="Edit folder name">
+                      ✏️
+                    </button>
+                  </>
+                )}
+                <Button
+                  size="sm"
+                  disabled={applyingSingle === c.id || (subfolders.length === 0)}
+                  onClick={() => applyToClient(c.id, defaultName)}
+                  className="text-[10px] h-7 px-2.5 flex-shrink-0 text-white"
+                  style={{ background: c.has_drive ? '#059669' : GRADIENT }}
+                  title={c.has_drive ? 'Re-create / update folder' : 'Create Drive folder'}
+                >
+                  {applyingSingle === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FolderPlus className="h-3 w-3 mr-0.5" />}
+                  {c.has_drive ? 'Re-apply' : 'Create'}
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {subfolders.length === 0 && (
+        <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          ⚠️ Define subfolders in the Folder Architecture panel on the left before creating.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function FolderArchitectTab({ isDark, isAdmin }) {
   const [subfolders, setSubfolders] = useState([]);
   const [parentId, setParentId] = useState('');
@@ -720,48 +847,20 @@ function FolderArchitectTab({ isDark, isAdmin }) {
 
         {/* Right: Apply to Clients */}
         <div className="space-y-4">
-          {/* Individual Apply */}
+          {/* Individual Apply — with custom folder name */}
           <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
             <div className={`flex items-center gap-2.5 px-5 py-4 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
               <div className="p-1.5 rounded-lg" style={{ background: '#3B82F612' }}>
                 <Folder className="h-4 w-4 text-blue-600" />
               </div>
               <div>
-                <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Apply to Individual Client</h3>
-                <p className="text-xs text-slate-400">Create a Drive folder for one client using the template above</p>
+                <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Add Folder to Company</h3>
+                <p className="text-xs text-slate-400">Create a Drive folder for any client — optionally with a custom folder name</p>
               </div>
             </div>
-            <div className="p-5">
-              {loadingClients ? (
-                <div className="flex items-center gap-2 py-4 text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-xs">Loading clients…</span></div>
-              ) : (
-                <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
-                  {clients.map(c => {
-                    const name = c.company_name || c.name || '—';
-                    return (
-                      <div key={c.id} className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border ${isDark ? 'border-slate-700 bg-slate-700/30' : 'border-slate-100 bg-slate-50'}`}>
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" style={{ background: GRADIENT }}>
-                            {name[0]?.toUpperCase() || '?'}
-                          </div>
-                          <span className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate">{name}</span>
-                          {c.has_drive && <FolderCheck className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />}
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={applyingSingle === c.id || subfolders.length === 0}
-                          onClick={() => applyToClient(c.id, name)}
-                          className="text-[10px] h-6 px-2 flex-shrink-0"
-                        >
-                          {applyingSingle === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FolderPlus className="h-3 w-3 mr-0.5" />}
-                          {c.has_drive ? 'Re-apply' : 'Create'}
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+            <div className="p-5 space-y-3">
+              {/* Quick-add a single folder for any company */}
+              <IndividualFolderPanel clients={clients} loadingClients={loadingClients} subfolders={subfolders} parentId={parentId} isDark={isDark} onRefresh={loadClients} />
             </div>
           </div>
 
@@ -1068,12 +1167,68 @@ function DocumentsTab({ portalUsers, loading, isDark }) {
 }
 
 /* ── Messages Tab ───────────────────────────────────────────────────────────── */
+const MSG_TEMPLATES = [
+  {
+    type: "dsc_expiry",
+    label: "🔐 DSC Expiry Alert",
+    subject: "Your DSC is expiring soon",
+    body: "Dear {client},
+
+We would like to inform you that your Digital Signature Certificate (DSC) is due to expire soon. Please arrange for its renewal at the earliest to avoid any disruptions in your compliance filings and digital transactions.
+
+Kindly contact us or our team to initiate the renewal process.
+
+Regards,
+Your CA / CS Team",
+  },
+  {
+    type: "compliance_due",
+    label: "📋 Compliance Due Date",
+    subject: "Upcoming compliance due dates",
+    body: "Dear {client},
+
+This is a reminder that the following compliance filing(s) are due soon. Please ensure that all required documents and data are shared with us at the earliest so that filings can be completed on time and penalties are avoided.
+
+Please reach out to us if you have any queries.
+
+Regards,
+Your CA / CS Team",
+  },
+  {
+    type: "invoice_reminder",
+    label: "🧾 Invoice Reminder",
+    subject: "Professional fee invoice pending",
+    body: "Dear {client},
+
+This is a gentle reminder that you have an outstanding professional fee invoice. Request you to kindly arrange the payment at the earliest.
+
+Please feel free to contact us for any queries regarding the invoice.
+
+Regards,
+Your CA / CS Team",
+  },
+  {
+    type: "general",
+    label: "💬 General Message",
+    subject: "",
+    body: "",
+  },
+  {
+    type: "custom",
+    label: "📢 Custom Notice",
+    subject: "",
+    body: "",
+  },
+];
+
 function MessagesTab({ portalUsers, isDark }) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [compose, setCompose] = useState(false);
-  const [form, setForm] = useState({ to_portal_user_id: '', subject: '', body: '' });
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [form, setForm] = useState({ to_portal_user_id: '', subject: '', body: '', message_type: 'general' });
   const [sending, setSending] = useState(false);
+  const [filterType, setFilterType] = useState('all');
 
   useEffect(() => {
     const load = async () => {
@@ -1085,17 +1240,57 @@ function MessagesTab({ portalUsers, isDark }) {
     load();
   }, []);
 
+  const applyTemplate = (tpl) => {
+    setSelectedTemplate(tpl.type);
+    const clientName = portalUsers.find(u => u.id === form.to_portal_user_id)?.display_name || "Client";
+    setForm(f => ({
+      ...f,
+      subject: tpl.subject,
+      body: tpl.body.replace("{client}", clientName),
+      message_type: tpl.type,
+    }));
+  };
+
   const send = async () => {
     if (!form.to_portal_user_id || !form.body) { toast.error('Please select a client and enter a message.'); return; }
     setSending(true);
     try {
-      await api.post('/client-portal/messages', form);
-      toast.success('Message sent!');
+      const res = await api.post('/client-portal/messages', form);
+      toast.success('Message sent to client portal!');
+      // add to local list
+      setMessages(prev => [{
+        id: res.data.id,
+        subject: form.subject,
+        body: form.body,
+        message_type: form.message_type,
+        to_display_name: portalUsers.find(u => u.id === form.to_portal_user_id)?.display_name || '?',
+        created_at: new Date().toISOString(),
+        is_read: false,
+      }, ...prev]);
       setCompose(false);
-      setForm({ to_portal_user_id: '', subject: '', body: '' });
+      setForm({ to_portal_user_id: '', subject: '', body: '', message_type: 'general' });
+      setSelectedTemplate(null);
     } catch { toast.error('Failed to send message'); }
     finally { setSending(false); }
   };
+
+  const deleteMsg = async (id) => {
+    try {
+      await api.delete(`/client-portal/messages/${id}`);
+      setMessages(prev => prev.filter(m => m.id !== id));
+      toast.success('Message deleted');
+    } catch { toast.error('Failed to delete'); }
+  };
+
+  const MSG_TYPE_COLORS = {
+    dsc_expiry:       { badge: 'bg-red-100 text-red-700',    icon: '🔐' },
+    compliance_due:   { badge: 'bg-orange-100 text-orange-700', icon: '📋' },
+    invoice_reminder: { badge: 'bg-blue-100 text-blue-700',  icon: '🧾' },
+    general:          { badge: 'bg-gray-100 text-gray-600',  icon: '💬' },
+    custom:           { badge: 'bg-purple-100 text-purple-700', icon: '📢' },
+  };
+
+  const filtered = filterType === 'all' ? messages : messages.filter(m => m.message_type === filterType);
 
   return (
     <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -1105,8 +1300,8 @@ function MessagesTab({ portalUsers, isDark }) {
             <MessageSquare className="h-4 w-4" style={{ color: COLORS.deepBlue }} />
           </div>
           <div>
-            <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Messages</h3>
-            <p className="text-xs text-slate-400">Communicate with your portal clients</p>
+            <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Portal Messages</h3>
+            <p className="text-xs text-slate-400">Send DSC alerts, compliance reminders & communications to clients</p>
           </div>
         </div>
         <Button size="sm" className="text-xs text-white" style={{ background: GRADIENT }} onClick={() => setCompose(true)}>
@@ -1115,57 +1310,133 @@ function MessagesTab({ portalUsers, isDark }) {
       </div>
       <div className="p-5 space-y-4">
         {compose && (
-          <div className={`rounded-xl border p-4 space-y-3 ${isDark ? 'border-slate-600 bg-slate-700/40' : 'border-indigo-100 bg-indigo-50'}`}>
-            <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">New Message</p>
+          <div className={`rounded-xl border p-4 space-y-4 ${isDark ? 'border-slate-600 bg-slate-700/40' : 'border-indigo-100 bg-indigo-50'}`}>
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">New Message</p>
+              <button onClick={() => { setCompose(false); setSelectedTemplate(null); }} className="text-slate-400 hover:text-slate-600 text-xs">✕ Close</button>
+            </div>
+
+            {/* Quick Templates */}
             <div>
-              <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block mb-1">To</label>
-              <select value={form.to_portal_user_id} onChange={(e) => setForm(f => ({ ...f, to_portal_user_id: e.target.value }))}
+              <p className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">Quick Templates</p>
+              <div className="flex flex-wrap gap-2">
+                {MSG_TEMPLATES.map(tpl => (
+                  <button
+                    key={tpl.type}
+                    onClick={() => applyTemplate(tpl)}
+                    className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold border transition-all ${
+                      selectedTemplate === tpl.type
+                        ? 'text-white border-transparent shadow-sm'
+                        : isDark ? 'border-slate-600 text-slate-300 hover:border-blue-500' : 'border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600'
+                    }`}
+                    style={selectedTemplate === tpl.type ? { background: GRADIENT } : {}}
+                  >{tpl.label}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* To */}
+            <div>
+              <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block mb-1">To (Client)</label>
+              <select value={form.to_portal_user_id}
+                onChange={(e) => {
+                  const uid = e.target.value;
+                  setForm(f => ({ ...f, to_portal_user_id: uid }));
+                  // re-apply template with correct client name if one was selected
+                  if (selectedTemplate) {
+                    const tpl = MSG_TEMPLATES.find(t => t.type === selectedTemplate);
+                    const clientName = portalUsers.find(u => u.id === uid)?.display_name || "Client";
+                    if (tpl) setForm(f => ({ ...f, to_portal_user_id: uid, body: tpl.body.replace("{client}", clientName) }));
+                  }
+                }}
                 className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-white border-slate-200'}`}
               >
-                <option value="">— Select client —</option>
-                {portalUsers.map((u) => <option key={u.id} value={u.id}>{u.display_name || u.portal_username}</option>)}
+                <option value="">— Select client portal user —</option>
+                {portalUsers.filter(u => u.is_active).map((u) =>
+                  <option key={u.id} value={u.id}>{u.display_name || u.portal_username} {u.client_name ? `(${u.client_name})` : ''}</option>
+                )}
               </select>
             </div>
+
+            {/* Subject */}
             <div>
-              <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block mb-1">Subject (optional)</label>
-              <Input value={form.subject} onChange={(e) => setForm(f => ({ ...f, subject: e.target.value }))} placeholder="Optional subject…" className="text-sm" />
+              <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block mb-1">Subject</label>
+              <Input value={form.subject} onChange={(e) => setForm(f => ({ ...f, subject: e.target.value }))} placeholder="Optional subject line…" className="text-sm" />
             </div>
+
+            {/* Message Body */}
             <div>
               <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block mb-1">Message</label>
-              <textarea value={form.body} onChange={(e) => setForm(f => ({ ...f, body: e.target.value }))} rows={4} placeholder="Write your message…"
+              <textarea
+                value={form.body}
+                onChange={(e) => setForm(f => ({ ...f, body: e.target.value }))}
+                rows={6}
+                placeholder="Write your message here…"
                 className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-white border-slate-200'}`}
               />
             </div>
+
             <div className="flex gap-2">
               <Button size="sm" disabled={sending} onClick={send} className="text-xs text-white" style={{ background: GRADIENT }}>
                 {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Mail className="h-3.5 w-3.5 mr-1" />}
-                {sending ? 'Sending…' : 'Send'}
+                {sending ? 'Sending…' : 'Send to Portal'}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setCompose(false)} className="text-xs">Cancel</Button>
+              <Button size="sm" variant="ghost" onClick={() => { setCompose(false); setSelectedTemplate(null); }} className="text-xs">Cancel</Button>
             </div>
           </div>
         )}
+
+        {/* Filter tabs */}
+        {messages.length > 0 && (
+          <div className="flex gap-2 flex-wrap">
+            {[['all','All'],['dsc_expiry','🔐 DSC'],['compliance_due','📋 Compliance'],['invoice_reminder','🧾 Invoice'],['general','💬 General']].map(([k,l]) => (
+              <button key={k} onClick={() => setFilterType(k)}
+                className={`px-3 py-1 rounded-full text-[11px] font-semibold border transition-all ${
+                  filterType === k ? 'text-white border-transparent' : isDark ? 'border-slate-600 text-slate-400' : 'border-slate-200 text-slate-500'
+                }`}
+                style={filterType === k ? { background: GRADIENT } : {}}
+              >{l}</button>
+            ))}
+          </div>
+        )}
+
         {loading ? (
           <div className="flex items-center justify-center py-16 gap-2 text-slate-400"><Loader2 className="h-5 w-5 animate-spin" /><span className="text-sm">Loading messages…</span></div>
-        ) : messages.length === 0 ? (
+        ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4" style={{ background: `${COLORS.deepBlue}10` }}>
               <MessageSquare className="h-6 w-6" style={{ color: COLORS.deepBlue }} />
             </div>
             <h3 className="font-semibold text-slate-700 dark:text-slate-300 text-sm mb-1">No messages yet</h3>
-            <p className="text-xs text-slate-400 max-w-xs">Use the Compose button to send a message to a portal client.</p>
+            <p className="text-xs text-slate-400 max-w-xs">Use the Compose button to send a message or alert to a portal client.</p>
           </div>
         ) : (
           <div className="space-y-2">
-            {messages.map((msg) => (
-              <div key={msg.id} className={`rounded-xl border p-4 ${isDark ? 'border-slate-700 bg-slate-700/30' : 'border-slate-100 bg-slate-50'}`}>
-                <div className="flex items-center justify-between mb-1">
-                  <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">{msg.subject || '(no subject)'}</p>
-                  <span className="text-[10px] text-slate-400">{msg.created_at ? new Date(msg.created_at).toLocaleDateString() : ''}</span>
+            {filtered.map((msg) => {
+              const typeKey = msg.message_type || 'general';
+              const meta = MSG_TYPE_COLORS[typeKey] || MSG_TYPE_COLORS.general;
+              return (
+                <div key={msg.id} className={`rounded-xl border p-4 ${isDark ? 'border-slate-700 bg-slate-700/30' : 'border-slate-100 bg-slate-50'}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-2 min-w-0 flex-1">
+                      <span className="text-base mt-0.5 flex-shrink-0">{meta.icon}</span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${meta.badge}`}>{typeKey.replace('_',' ')}</span>
+                          <span className="text-[10px] text-slate-400">→ {msg.to_display_name || '?'}</span>
+                          <span className="text-[10px] text-slate-400">{msg.created_at ? new Date(msg.created_at).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : ''}</span>
+                        </div>
+                        <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">{msg.subject || '(no subject)'}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5">{msg.body}</p>
+                      </div>
+                    </div>
+                    <button onClick={() => deleteMsg(msg.id)} className="text-slate-300 hover:text-red-500 flex-shrink-0 p-1" title="Delete">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400">{msg.body}</p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
