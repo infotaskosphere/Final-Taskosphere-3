@@ -4,9 +4,9 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 /* ============================= */
-/* TAILWIND BASE                 */
+/* TAILWIND BASE (v4)            */
 /* ============================= */
-@tailwind base;
+@import "tailwindcss";
 
 /* ============================= */
 /* BRAND COLORS                  */
@@ -123,9 +123,8 @@ svg {
 }
 
 /* ============================= */
-/* TAILWIND COMPONENTS           */
+/* TAILWIND COMPONENTS (v4)      */
 /* ============================= */
-@tailwind components;
 
 /* ============================= */
 /* DESIGN SYSTEM COMPONENTS      */
@@ -206,9 +205,8 @@ svg {
 }
 
 /* ============================= */
-/* TAILWIND UTILITIES            */
+/* TAILWIND UTILITIES (v4)       */
 /* ============================= */
-@tailwind utilities;
 
 /* ============================= */
 /* THEME TOKENS                  */
@@ -242,8 +240,8 @@ svg {
     --chart-5:             210 60% 50%;
   }
 
-  * { @apply border-border; }
-  body { @apply bg-background text-foreground; }
+  * { border-color: hsl(var(--border)); }
+  body { background-color: hsl(var(--background)); color: hsl(var(--foreground)); }
 }
 
 /* ============================= */
